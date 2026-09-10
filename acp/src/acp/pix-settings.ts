@@ -19,30 +19,33 @@ export type PixThinkingLevel = typeof PIX_THINKING_LEVELS[number];
 export interface PixCommandSettings {
 	readonly defaultModel?: PixDefaultModel;
 	readonly autocompleteModelRef: string;
+	readonly autocompleteFallbackModels: readonly string[];
 }
 
 const formattingOptions = { insertSpaces: true, tabSize: 2 };
 
 export function loadPixCommandSettings(homeDir = homedir()): PixCommandSettings {
 	const path = pixConfigPath(homeDir);
-	if (!existsSync(path)) return { autocompleteModelRef: "zai/glm-5-turbo" };
+	if (!existsSync(path)) return { autocompleteModelRef: "zai/glm-5-turbo", autocompleteFallbackModels: [] };
 	try {
 		const parsed = parseJsonc(readFileSync(path, "utf8")) as unknown;
 		const configured = defaultModelFromParsed(parsed);
 		const defaultModel = configured ? parseModelRef(configured.modelRef) : undefined;
-		const autocompleteModelRef = autocompleteModelFromParsed(parsed) ?? "zai/glm-5-turbo";
+		const autocomplete = autocompleteConfigFromParsed(parsed) ?? { modelRef: "zai/glm-5-turbo", fallbackModels: [] };
 		return {
 			...(configured && defaultModel ? {
 				defaultModel: {
 					provider: defaultModel.provider,
 					modelId: defaultModel.modelId,
+					fallbackModels: [...configured.fallbackModels],
 					...(configured.thinking === undefined ? {} : { thinkingLevel: configured.thinking }),
 				},
 			} : {}),
-			autocompleteModelRef,
+			autocompleteModelRef: autocomplete.modelRef,
+			autocompleteFallbackModels: autocomplete.fallbackModels,
 		};
 	} catch {
-		return { autocompleteModelRef: "zai/glm-5-turbo" };
+		return { autocompleteModelRef: "zai/glm-5-turbo", autocompleteFallbackModels: [] };
 	}
 }
 
@@ -54,6 +57,7 @@ export function savePixDefaultModel(modelRef: string, homeDir = homedir()): stri
 	const current = defaultModelFromParsed(parseJsonc(source) as unknown);
 	const next = {
 		modelRef: `${parsed.provider}/${parsed.modelId}`,
+		fallbackModels: current?.fallbackModels ?? [],
 		...(parsed.thinkingLevel ?? current?.thinking
 			? { thinking: parsed.thinkingLevel ?? current?.thinking }
 			: {}),
@@ -77,7 +81,11 @@ export function savePixDefaultThinking(
 		throw new Error("Set /default-model first or select a session model before setting default thinking");
 	}
 	const normalizedModel = parseModelRef(modelRef)!;
-	const next = { modelRef: `${normalizedModel.provider}/${normalizedModel.modelId}`, thinking: level };
+	const next = {
+		modelRef: `${normalizedModel.provider}/${normalizedModel.modelId}`,
+		fallbackModels: current?.fallbackModels ?? [],
+		thinking: level,
+	};
 	source = applyEdits(source, modify(source, ["defaultModel"], next, { formattingOptions, getInsertionIndex: () => 0 }));
 	writeConfig(path, source);
 	return `${next.modelRef}:${level}`;
@@ -90,7 +98,9 @@ export function savePixAutocompleteModel(modelRef: string, homeDir = homedir()):
 	}
 	const path = pixConfigPath(homeDir);
 	let source = readConfigSource(path);
+	const current = autocompleteConfigFromParsed(parseJsonc(source) as unknown);
 	source = applyEdits(source, modify(source, ["autocomplete", "modelRef"], trimmed, { formattingOptions }));
+	source = applyEdits(source, modify(source, ["autocomplete", "fallbackModels"], current?.fallbackModels ?? [], { formattingOptions }));
 	writeConfig(path, source);
 	return trimmed;
 }
@@ -136,13 +146,23 @@ export function isThinkingLevel(value: string): value is PixThinkingLevel {
 	return (PIX_THINKING_LEVELS as readonly string[]).includes(value);
 }
 
-function autocompleteModelFromParsed(raw: unknown): string | undefined {
+function autocompleteConfigFromParsed(raw: unknown): { modelRef: string; fallbackModels: string[] } | undefined {
 	if (!isRecord(raw)) return undefined;
 	const autocomplete = raw.autocomplete ?? raw.autoComplete;
-	if (typeof autocomplete === "string") return autocomplete.trim();
+	if (typeof autocomplete === "string") return { modelRef: autocomplete.trim(), fallbackModels: [] };
 	if (!isRecord(autocomplete)) return undefined;
 	const value = autocomplete.modelRef ?? autocomplete.model;
-	return typeof value === "string" ? value.trim() : undefined;
+	return typeof value === "string"
+		? { modelRef: value.trim(), fallbackModels: modelFallbackList(autocomplete.fallbackModels) }
+		: undefined;
+}
+
+function modelFallbackList(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return [...new Set(value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter(Boolean))];
 }
 
 function readIgnoreContextFiles(path: string): boolean | undefined {

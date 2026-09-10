@@ -40,11 +40,14 @@ export type OutputFiltersConfig = {
 
 export type PromptEnhancerConfig = {
 	modelRef: string;
+	fallbackModels: string[];
 };
 
 export type AutocompleteConfig = {
 	/** Empty string disables inline LLM autocomplete. */
 	modelRef: string;
+	/** Ordered model fallbacks tried after modelRef. */
+	fallbackModels: string[];
 	/** Delay after typing before asking the model. */
 	debounceMs: number;
 	/** Hard timeout for a best-effort completion request. */
@@ -59,6 +62,7 @@ export type AutocompleteConfig = {
 
 export type DefaultModelConfig = {
 	modelRef: string;
+	fallbackModels: string[];
 	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 };
 
@@ -154,10 +158,12 @@ type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
 	modelRef: "openai-codex/gpt-5.6-luna",
+	fallbackModels: [],
 };
 
 const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
 	modelRef: "zai/glm-5-turbo",
+	fallbackModels: [],
 	debounceMs: 350,
 	timeoutMs: 3000,
 	maxTokens: 48,
@@ -239,19 +245,20 @@ function extractPromptEnhancerConfig(raw: unknown): PromptEnhancerConfig | undef
 
 	const modelRef = nonEmptyString(enhancer.modelRef) ?? nonEmptyString(enhancer.model);
 
-	return modelRef ? { modelRef } : undefined;
+	return modelRef ? { modelRef, fallbackModels: modelFallbackList(enhancer.fallbackModels) } : undefined;
 }
 
 function extractAutocompleteConfig(raw: unknown): AutocompleteConfig | undefined {
 	if (!isPlainObject(raw)) return undefined;
 	const autocomplete = raw.autocomplete ?? raw.autoComplete;
-	if (typeof autocomplete === "string") return { ...DEFAULT_AUTOCOMPLETE, modelRef: autocomplete.trim() };
+	if (typeof autocomplete === "string") return { ...DEFAULT_AUTOCOMPLETE, fallbackModels: [], modelRef: autocomplete.trim() };
 	if (!isPlainObject(autocomplete)) return undefined;
 
 	const modelRef = autocompleteModelRef(autocomplete);
 	return {
 		...DEFAULT_AUTOCOMPLETE,
 		...(modelRef === undefined ? {} : { modelRef }),
+		fallbackModels: modelFallbackList(autocomplete.fallbackModels),
 		debounceMs: numberInRange(autocomplete.debounceMs, DEFAULT_AUTOCOMPLETE.debounceMs, 100, 2_000),
 		timeoutMs: numberInRange(autocomplete.timeoutMs, DEFAULT_AUTOCOMPLETE.timeoutMs, 250, 10_000),
 		maxTokens: numberInRange(autocomplete.maxTokens, DEFAULT_AUTOCOMPLETE.maxTokens, 8, 256),
@@ -291,6 +298,7 @@ function extractDefaultModelConfig(raw: unknown): DefaultModelConfig | undefined
 		?? normalizedModel.thinking;
 	return {
 		modelRef: normalizedModel.modelRef,
+		fallbackModels: modelFallbackList(configured.fallbackModels),
 		...(thinking === undefined ? {} : { thinking }),
 	};
 }
@@ -393,6 +401,14 @@ function nonEmptyString(value: unknown): string | undefined {
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function modelFallbackList(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return [...new Set(value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter(Boolean))];
+}
+
 function numberInRange(value: unknown, fallback: number, min: number, max: number): number {
 	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
 	const rounded = Math.round(value);
@@ -403,8 +419,8 @@ export function defaultPixConfig(): PixConfig {
 	return {
 		toolRenderer: cloneToolRendererConfig(DEFAULT_TOOL_RENDERER),
 		outputFilters: { patterns: [...DEFAULT_OUTPUT_FILTERS.patterns] },
-		promptEnhancer: { ...DEFAULT_PROMPT_ENHANCER },
-		autocomplete: { ...DEFAULT_AUTOCOMPLETE },
+		promptEnhancer: { ...DEFAULT_PROMPT_ENHANCER, fallbackModels: [...DEFAULT_PROMPT_ENHANCER.fallbackModels] },
+		autocomplete: { ...DEFAULT_AUTOCOMPLETE, fallbackModels: [...DEFAULT_AUTOCOMPLETE.fallbackModels] },
 		modelColors: { rules: { ...DEFAULT_MODEL_COLORS.rules } },
 		iconTheme: { name: resolveAppIconThemeNameFromEnv() },
 		dictation: cloneDictationConfig(DEFAULT_DICTATION),
@@ -514,6 +530,7 @@ export function upsertPixDefaultModelInJsonc(source: string, modelRef: string): 
 	const thinking = normalized.thinking ?? current?.thinking;
 	const next: DefaultModelConfig = {
 		modelRef: normalized.modelRef,
+		fallbackModels: current?.fallbackModels ?? [],
 		...(thinking === undefined ? {} : { thinking }),
 	};
 	return upsertPixDefaultModelObjectInJsonc(source, parsed, next);
@@ -531,6 +548,7 @@ export function upsertPixDefaultThinkingInJsonc(source: string, thinking: string
 
 	const next: DefaultModelConfig = {
 		modelRef: stripThinkingSuffix(modelRef),
+		fallbackModels: current?.fallbackModels ?? fallback?.fallbackModels ?? [],
 		thinking: normalizedThinking,
 	};
 	return upsertPixDefaultModelObjectInJsonc(source, parsed, next);
@@ -543,6 +561,7 @@ function upsertPixDefaultModelObjectInJsonc(source: string, parsed: unknown, con
 	}
 
 	let updated = applyEdits(source, modify(source, ["defaultModel", "modelRef"], config.modelRef, { formattingOptions }));
+	updated = applyEdits(updated, modify(updated, ["defaultModel", "fallbackModels"], config.fallbackModels, { formattingOptions }));
 	if (config.thinking !== undefined) {
 		updated = applyEdits(updated, modify(updated, ["defaultModel", "thinking"], config.thinking, { formattingOptions }));
 	}
@@ -551,7 +570,11 @@ function upsertPixDefaultModelObjectInJsonc(source: string, parsed: unknown, con
 
 export function upsertPixAutocompleteModelInJsonc(source: string, modelRef: string): string {
 	const formattingOptions = { insertSpaces: true, tabSize: 2 };
-	return applyEdits(source, modify(source, ["autocomplete", "modelRef"], modelRef.trim(), { formattingOptions }));
+	const parsed = parseJsonc(source);
+	const current = extractAutocompleteConfig(parsed);
+	let updated = applyEdits(source, modify(source, ["autocomplete", "modelRef"], modelRef.trim(), { formattingOptions }));
+	updated = applyEdits(updated, modify(updated, ["autocomplete", "fallbackModels"], current?.fallbackModels ?? [], { formattingOptions }));
+	return updated;
 }
 
 function normalizeDefaultModelRef(modelRef: string): DefaultModelConfig | undefined {
@@ -559,11 +582,13 @@ function normalizeDefaultModelRef(modelRef: string): DefaultModelConfig | undefi
 	if (!trimmed) return undefined;
 
 	const colonIndex = trimmed.lastIndexOf(":");
-	if (colonIndex <= 0) return { modelRef: trimmed };
+	if (colonIndex <= 0) return { modelRef: trimmed, fallbackModels: [] };
 
 	const suffix = trimmed.slice(colonIndex + 1);
 	const thinking = normalizeDefaultThinking(suffix);
-	return thinking ? { modelRef: trimmed.slice(0, colonIndex), thinking } : { modelRef: trimmed };
+	return thinking
+		? { modelRef: trimmed.slice(0, colonIndex), fallbackModels: [], thinking }
+		: { modelRef: trimmed, fallbackModels: [] };
 }
 
 function stripThinkingSuffix(modelRef: string): string {

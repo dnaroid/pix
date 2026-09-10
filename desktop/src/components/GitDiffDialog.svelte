@@ -13,6 +13,10 @@
     resolveLoading,
     canReview,
     canResolve,
+    onValidateProjectFile,
+    onValidateLocalFile,
+    onOpenProjectFile,
+    onOpenLocalFile,
     onReview,
     onResolve,
     onClose,
@@ -23,6 +27,10 @@
     resolveLoading: boolean;
     canReview: boolean;
     canResolve: boolean;
+    onValidateProjectFile?: (path: string) => Promise<boolean>;
+    onValidateLocalFile?: (path: string) => Promise<boolean>;
+    onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onOpenLocalFile?: (path: string) => void | Promise<void>;
     onReview: () => void;
     onResolve: () => void;
     onClose: () => void;
@@ -102,7 +110,7 @@
               </button>
             </div>
           {/if}
-          <MarkdownText text={review} />
+          <MarkdownText text={review} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onOpenLocalFile} />
         {/if}
       </section>
     {/if}

@@ -12,6 +12,8 @@ export interface PiToolsSuiteConfig {
 	todoThinkingOverrides: Record<string, TodoThinkingLevel>;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
 	lookupModel?: string;
+	/** Ordered lookup fallbacks tried after lookupModel. Always present, even when empty. */
+	lookupFallbackModels: string[];
 	resourceRegistry: ResourceRegistryConfig;
 }
 
@@ -30,6 +32,7 @@ type MutableConfig = {
 	todoThinking: boolean;
 	todoThinkingOverrides: Map<string, TodoThinkingLevel>;
 	lookupModel: string | undefined;
+	lookupFallbackModels: string[];
 	resourceRegistry: ResourceRegistryConfig;
 };
 
@@ -78,6 +81,14 @@ function normalizeLookupModel(raw: unknown): string | undefined {
 	if (typeof raw !== "string") return undefined;
 	const trimmed = raw.trim();
 	return trimmed ? trimmed : undefined;
+}
+
+function normalizeModelList(raw: unknown): string[] {
+	if (!Array.isArray(raw)) return [];
+	return [...new Set(raw
+		.filter((value): value is string => typeof value === "string")
+		.map((value) => value.trim())
+		.filter(Boolean))];
 }
 
 function normalizeNonEmptyString(raw: unknown): string | undefined {
@@ -175,6 +186,7 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
 	mergeTodoThinkingOverrides(config, raw.todoThinkingOverrides);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
+	if (Object.prototype.hasOwnProperty.call(raw, "lookupFallbackModels")) config.lookupFallbackModels = normalizeModelList(raw.lookupFallbackModels);
 	mergeResourceRegistry(config, raw.resourceRegistry);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
@@ -241,6 +253,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinking: false,
 		todoThinkingOverrides: new Map(DEFAULT_TODO_THINKING_OVERRIDES),
 		lookupModel: undefined,
+		lookupFallbackModels: [],
 		resourceRegistry: { branch: DEFAULT_RESOURCE_REGISTRY_BRANCH },
 	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
@@ -262,6 +275,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinking: config.todoThinking,
 		todoThinkingOverrides: Object.fromEntries(config.todoThinkingOverrides),
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
+		lookupFallbackModels: [...config.lookupFallbackModels],
 		resourceRegistry: { ...config.resourceRegistry },
 	};
 }

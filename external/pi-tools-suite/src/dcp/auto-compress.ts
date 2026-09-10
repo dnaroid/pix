@@ -16,7 +16,7 @@ import { createHash } from "node:crypto"
 import type { Model, Api, ProviderHeaders } from "@earendil-works/pi-ai"
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../model-completion.js"
 import type { DcpState } from "./state.js"
-import type { DcpConfig } from "./config.js"
+import { summarizerModelRefs, type DcpConfig } from "./config.js"
 import type { CompressionCandidate } from "./pruner-types.js"
 import { estimateMessageTokens, estimateTokens, stripStaleDcpMetadataLines } from "./pruner-metadata.js"
 import {
@@ -919,8 +919,9 @@ function createAutoCompressionWorkingState(state: DcpState): DcpState {
 
 /**
  * Create the auto-compression block. Selects the summary source based on
- * `config.compress.autoCompress.summarizerModel`: empty → programmatic digest;
- * non-empty → model summary with programmatic fallback. Then delegates block
+ * `config.compress.autoCompress.summarizerModel` plus explicit
+ * `summarizerFallbackModels`: empty → programmatic digest; non-empty → model
+ * summary with ordered model fallbacks, then programmatic fallback. Delegates block
  * creation to the shared `createRangeCompressionBlock` path so protected
  * content (user messages, tool outputs, prompt info) is handled identically to
  * a model-initiated compress.
@@ -991,7 +992,7 @@ export async function createAutoCompressionBlock(
 		topic,
 		messages: messagesInRange,
 		candidate: effectiveCandidate,
-		modelRefs: settings.summarizerModel,
+		modelRefs: summarizerModelRefs(settings),
 		timeoutMs: settings.timeoutMs,
 		modelRegistry,
 		signal,

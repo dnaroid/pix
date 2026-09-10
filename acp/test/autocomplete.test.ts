@@ -27,6 +27,7 @@ test("parseAutocompleteRequest rejects malformed params", () => {
 test("autocomplete settings expose only client scheduling details", () => {
 	assert.deepEqual(autocompleteSettings({
 		modelRef: "zai/glm-5-turbo",
+		fallbackModels: [],
 		debounceMs: 410,
 		timeoutMs: 3_000,
 		maxTokens: 48,
@@ -41,6 +42,7 @@ test("autocomplete settings expose only client scheduling details", () => {
 test("desktop config parsing matches canonical autocomplete aliases and defaults", () => {
 	const fallback = {
 		modelRef: "global/custom",
+		fallbackModels: [],
 		debounceMs: 900,
 		timeoutMs: 8_000,
 		maxTokens: 128,
@@ -49,6 +51,7 @@ test("desktop config parsing matches canonical autocomplete aliases and defaults
 	};
 	assert.deepEqual(autocompleteConfigFromParsed({ autoComplete: " provider/model " }, fallback), {
 		modelRef: "provider/model",
+		fallbackModels: [],
 		debounceMs: 350,
 		timeoutMs: 3_000,
 		maxTokens: 48,
@@ -59,6 +62,7 @@ test("desktop config parsing matches canonical autocomplete aliases and defaults
 		autocomplete: { model: "", debounceMs: 0, recentMessages: 3 },
 	}, fallback), {
 		modelRef: "",
+		fallbackModels: [],
 		debounceMs: 100,
 		timeoutMs: 3_000,
 		maxTokens: 48,
@@ -88,6 +92,7 @@ test("the production completer streams a non-session suffix with TUI limits", as
 		logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
 		loadConfig: () => ({
 			modelRef: "zai/glm-5-turbo:low",
+			fallbackModels: [],
 			debounceMs: 350,
 			timeoutMs: 1_250,
 			maxTokens: 48,
@@ -138,6 +143,7 @@ test("the production completer turns the explicit empty sentinel into no suggest
 		logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
 		loadConfig: () => ({
 			modelRef: "zai/glm-5-turbo",
+			fallbackModels: [],
 			debounceMs: 350,
 			timeoutMs: 1_250,
 			maxTokens: 48,

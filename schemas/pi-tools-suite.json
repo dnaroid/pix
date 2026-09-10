@@ -88,6 +88,13 @@
       ],
       "description": "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup."
     },
+    "lookupFallbackModels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ordered lookup model fallbacks tried after lookupModel."
+    },
     "terminalBell": {
       "type": "object",
       "properties": {
@@ -418,6 +425,13 @@
                     "type": "string"
                   },
                   "description": "Ordered model refs used by auto-compress and explicit compress when summary is omitted; empty uses the deterministic extractive summary."
+                },
+                "summarizerFallbackModels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Ordered fallback model refs tried after summarizerModel."
                 },
                 "timeoutMs": {
                   "type": "number",
@@ -781,6 +795,13 @@
                             "type": "string"
                           },
                           "description": "Ordered model refs used by auto-compress and explicit compress when summary is omitted; empty uses the deterministic extractive summary."
+                        },
+                        "summarizerFallbackModels": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Ordered fallback model refs tried after summarizerModel."
                         },
                         "timeoutMs": {
                           "type": "number",

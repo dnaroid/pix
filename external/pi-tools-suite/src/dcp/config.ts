@@ -65,8 +65,12 @@ export interface DcpConfig {
        * Failed calls and insufficient commits do not reset patience. */
       patience: number
       /** Models to try, in order, for auto-compress and explicit generated summaries.
+       * The first entry is the primary summarizer. Additional entries remain
+       * supported for backward compatibility with the old inline fallback list.
        * Empty array → deterministic programmatic digest (no model call). */
       summarizerModel: string[]
+      /** Explicit fallback summarizers tried after `summarizerModel`, in order. */
+      summarizerFallbackModels: string[]
       /** Hard ceiling in ms for a summarizer model call on either path. */
       timeoutMs: number
     }
@@ -144,6 +148,7 @@ const DEFAULT_CONFIG: DcpConfig = {
       enabled: false,
       patience: 2,
       summarizerModel: [],
+      summarizerFallbackModels: [],
       timeoutMs: 20000,
     },
   },
@@ -312,6 +317,55 @@ function normalizeModelKey(key: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined
 }
 
+export function summarizerModelRefs(
+  settings: DcpConfig["compress"]["autoCompress"],
+): string[] {
+  const refs = [
+    ...(Array.isArray(settings.summarizerModel) ? settings.summarizerModel : []),
+    ...(Array.isArray(settings.summarizerFallbackModels) ? settings.summarizerFallbackModels : []),
+  ]
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const ref of refs) {
+    if (typeof ref !== "string") continue
+    const normalized = ref.trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+  }
+  return result
+}
+
+function normalizeModelRefArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const ref of value) {
+    if (typeof ref !== "string") continue
+    const normalized = ref.trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+  }
+  return result
+}
+
+function normalizeResolvedModelArrays(config: DcpConfig): DcpConfig {
+  const autoCompress = config.compress?.autoCompress
+  if (!autoCompress || typeof autoCompress !== "object") return config
+  return {
+    ...config,
+    compress: {
+      ...config.compress,
+      autoCompress: {
+        ...autoCompress,
+        summarizerModel: normalizeModelRefArray(autoCompress.summarizerModel),
+        summarizerFallbackModels: normalizeModelRefArray(autoCompress.summarizerFallbackModels),
+      },
+    },
+  }
+}
+
 function escapeRegExp(text: string): string {
   return text.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
 }
@@ -415,17 +469,17 @@ export function resolveModelConfig(
   modelKeys: Array<string | undefined> = [],
 ): DcpConfig {
   const overrides = config.modelOverrides
-  if (!overrides || Object.keys(overrides).length === 0) return config
+  if (!overrides || Object.keys(overrides).length === 0) return normalizeResolvedModelArrays(config)
 
   const matches = matchingModelEntries(overrides, modelKeys)
-  if (matches.length === 0) return config
+  if (matches.length === 0) return normalizeResolvedModelArrays(config)
 
   let resolved = deepMerge(config, {})
   for (const [, override] of matches) {
     resolved = deepMerge(resolved, override as Partial<DcpConfig>)
   }
 
-  return resolved
+  return normalizeResolvedModelArrays(resolved)
 }
 
 // ---------------------------------------------------------------------------
@@ -454,5 +508,5 @@ export function loadConfig(options: LoadConfigOptions = {}): DcpConfig {
   )
   config.issues = issues
 
-  return config
+  return normalizeResolvedModelArrays(config)
 }

@@ -44,8 +44,8 @@ test("default-model writes JSONC and preserves the configured thinking level whe
 	}`);
 
 	assert.equal(savePixDefaultModel("openai/gpt-5", home), "openai/gpt-5:medium");
-	const parsed = parseJsonc(readFileSync(path, "utf8")) as { defaultModel?: { modelRef?: string; thinking?: string } };
-	assert.deepEqual(parsed.defaultModel, { modelRef: "openai/gpt-5", thinking: "medium" });
+	const parsed = parseJsonc(readFileSync(path, "utf8")) as { defaultModel?: { modelRef?: string; fallbackModels?: string[]; thinking?: string } };
+	assert.deepEqual(parsed.defaultModel, { modelRef: "openai/gpt-5", fallbackModels: [], thinking: "medium" });
 });
 
 test("default-thinking uses the selected session model when no default exists", () => {
@@ -56,6 +56,7 @@ test("default-thinking uses the selected session model when no default exists", 
 	assert.deepEqual(loadPixCommandSettings(home).defaultModel, {
 		provider: "openai",
 		modelId: "gpt-5",
+		fallbackModels: [],
 		thinkingLevel: "xhigh",
 	});
 });

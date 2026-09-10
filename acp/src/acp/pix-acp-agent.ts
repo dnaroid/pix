@@ -1036,7 +1036,17 @@ export class PixAcpAgent {
 		} catch (error) {
 			throw new RequestError(ERROR_SERVER, `failed to resolve Pix default model: ${stringifyUnknown(error)}`);
 		}
-		const session = await this.spawnSession(acpSessionId, cwd, client, defaultModel);
+		let session: AgentSessionState | undefined;
+		let lastError: unknown;
+		for (const candidate of defaultModelCandidates(defaultModel)) {
+			try {
+				session = await this.spawnSession(acpSessionId, cwd, client, candidate);
+				break;
+			} catch (error) {
+				lastError = error;
+			}
+		}
+		if (!session) throw lastError ?? new RequestError(ERROR_SERVER, "failed to start Pix session with configured models");
 		this.options.logger.info(`session/new: ${acpSessionId} (cwd: ${cwd})`);
 		await this.registerSessionRecord(acpSessionId, cwd, session.pi);
 		const configOptions = await this.safeConfigOptions(session.pi);
@@ -2192,6 +2202,28 @@ export class PixAcpAgent {
 		}
 	}
 
+}
+
+function defaultModelCandidates(defaultModel: PixDefaultModel | undefined): Array<PixDefaultModel | undefined> {
+	if (!defaultModel) return [undefined];
+	const candidates: PixDefaultModel[] = [defaultModel];
+	const seen = new Set([`${defaultModel.provider}/${defaultModel.modelId}`]);
+	for (const ref of defaultModel.fallbackModels ?? []) {
+		const parsed = parsePixModelRef(ref);
+		if (!parsed) continue;
+		const key = `${parsed.provider}/${parsed.modelId}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		candidates.push({
+			provider: parsed.provider,
+			modelId: parsed.modelId,
+			fallbackModels: [],
+			...((parsed.thinkingLevel ?? defaultModel.thinkingLevel) === undefined
+				? {}
+				: { thinkingLevel: parsed.thinkingLevel ?? defaultModel.thinkingLevel }),
+		});
+	}
+	return candidates;
 }
 
 function piClientOptions(

@@ -141,12 +141,12 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain("data-project-file");
   });
 
-  it("renders relative Markdown destinations as project-file preview links", () => {
+  it("renders relative Markdown destinations as project-file validation candidates", () => {
     const html = renderMarkdown("Open [the app](./src/App.svelte) or [the guide](docs/guide%20one.md#intro).");
 
-    expect(html).toContain('data-project-file="src/App.svelte"');
-    expect(html).toContain('title="Preview src/App.svelte"');
-    expect(html).toContain('data-project-file="docs/guide one.md"');
+    expect(html).toContain('data-project-file-candidate="src/App.svelte"');
+    expect(html).toContain('data-project-file-candidate="docs/guide one.md"');
+    expect(html).not.toContain('href="#" data-project-file=');
     expect(html.match(/data-external-link/g)).toBeNull();
   });
 
@@ -208,7 +208,7 @@ describe("renderMarkdown", () => {
     expect(renderMarkdown(markdown)).not.toContain("data-markdown-anchor");
   });
 
-  it("renders file URL images and videos as local previews with clickable captions", () => {
+  it("renders file URL images and videos as lazy local previews", () => {
     const html = renderMarkdown([
       "[Light initial](file:///tmp/qa-shots/01-light-initial.png)",
       "[Demo](file:///tmp/qa-shots/demo%20run.webm)",
@@ -220,12 +220,13 @@ describe("renderMarkdown", () => {
     expect(html).toContain('data-local-media="video"');
     expect(html).toContain('data-local-file="/tmp/qa-shots/demo run.webm"');
     expect(html).toContain('class="markdown-media-caption"');
+    expect(html).not.toContain('class="markdown-media-frame" data-local-file=');
   });
 
-  it("keeps non-media file URLs clickable without weakening project path rules", () => {
+  it("keeps non-media file URLs as validation candidates without weakening project path rules", () => {
     const html = renderMarkdown("[Trace](file:///tmp/qa-shots/run.trace.zip)");
 
-    expect(html).toContain('data-local-file="/tmp/qa-shots/run.trace.zip"');
+    expect(html).toContain('data-local-file-candidate="/tmp/qa-shots/run.trace.zip"');
     expect(html).not.toContain("data-local-media");
     expect(normalizeLocalFileDestination("file:///tmp/result.png")).toBe("/tmp/result.png");
     expect(normalizeLocalFileDestination("file:///tmp/result%20one.png#preview")).toBe("/tmp/result one.png");
@@ -241,28 +242,28 @@ describe("renderMarkdown", () => {
 
     expect(media).toContain('data-project-media-label="A &amp; &quot;B&quot;"');
     expect(binary).not.toContain("data-project-media");
-    expect(binary).toContain('data-project-file="artifacts/result.zip"');
+    expect(binary).toContain('data-project-file-candidate="artifacts/result.zip"');
   });
 
-  it("turns inline-code project file paths into preview links", () => {
+  it("turns inline-code project file paths into validation candidates", () => {
     const html = renderMarkdown(
       "Changed `desktop/src/components/TranscriptPane.svelte` and `src/App.svelte:42`.",
     );
 
     expect(html).toContain(
-      '<a href="#" data-project-file="desktop/src/components/TranscriptPane.svelte"',
+      'data-project-file-candidate="desktop/src/components/TranscriptPane.svelte"',
     );
-    expect(html).toContain("<code>desktop/src/components/TranscriptPane.svelte</code></a>");
-    expect(html).toContain('data-project-file="src/App.svelte"');
+    expect(html).toContain("<code>desktop/src/components/TranscriptPane.svelte</code></span>");
+    expect(html).toContain('data-project-file-candidate="src/App.svelte"');
   });
 
-  it("turns home-relative file paths into local preview links", () => {
+  it("turns home-relative file paths into local validation candidates", () => {
     const html = renderMarkdown(
       "Open `~/.config/pi/pix.jsonc` or [the config](~/.config/pi/pix.jsonc).",
     );
 
-    expect(html.match(/data-local-file="~\/.config\/pi\/pix.jsonc"/g)).toHaveLength(2);
-    expect(html).toContain("title=\"Preview ~/.config/pi/pix.jsonc\"");
+    expect(html.match(/data-local-file-candidate="~\/.config\/pi\/pix.jsonc"/g)).toHaveLength(2);
+    expect(html).not.toContain('href="#" data-local-file=');
     expect(html).not.toContain('data-project-file="~/.config/pi/pix.jsonc"');
   });
 

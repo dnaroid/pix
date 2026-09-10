@@ -22,6 +22,11 @@ type LookupDetails = {
 	contextChars: number;
 	stopReason?: string;
 	error?: string;
+	attempts?: Array<{
+		ref: string;
+		outcome: "ok" | "unavailable" | "error" | "empty";
+		error?: string;
+	}>;
 };
 
 type ResolvedLookupModel = {
@@ -473,8 +478,9 @@ function createLookupTool() {
 		executionMode: "sequential" as const,
 		async execute(_toolCallId: string, params: LookupParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown) {
 			const cwd = contextCwd(ctx) ?? process.cwd();
-			const lookupModelRef = lookupModelFromConfig(cwd);
-			if (!lookupModelRef) {
+			const lookupModelRefs = lookupModelRefsFromConfig(cwd);
+			const primaryLookupModelRef = lookupModelRefs[0];
+			if (!primaryLookupModelRef) {
 				return lookupToolTextResult("lookupModel is not configured in pi-tools-suite config; lookup is disabled.", {
 					model: "",
 					imageCount: 0,
@@ -484,69 +490,86 @@ function createLookupTool() {
 				});
 			}
 
-			const resolved = await resolveLookupModel(ctx, lookupModelRef);
-			if (!resolved) {
-				return lookupToolTextResult(`Lookup model is unavailable or unauthenticated: ${lookupModelRef}`, {
-					model: lookupModelRef,
-					imageCount: 0,
-					imagePathCount: params.imagePaths?.length ?? 0,
-					contextChars: 0,
-					error: "lookup model unavailable",
-				});
-			}
-
 			const recentContext = buildRecentSessionContext(ctx, DEFAULT_LOOKUP_MAX_CONTEXT_CHARS);
 			const sessionImages = extractRecentSessionImages(ctx, DEFAULT_LOOKUP_MAX_IMAGES);
 			const pathImages = readImagePathContents(cwd, params.imagePaths ?? [], Math.max(0, DEFAULT_LOOKUP_MAX_IMAGES - sessionImages.length));
 			const images = [...sessionImages, ...pathImages.images].slice(0, DEFAULT_LOOKUP_MAX_IMAGES);
 			const promptText = buildLookupPrompt(params, recentContext, images.length, pathImages.warnings);
+			const attempts: NonNullable<LookupDetails["attempts"]> = [];
 
-			try {
-				const response = await completeWithModelRegistry(
-					resolved.modelRegistry,
-					resolved.model,
-					{
-						systemPrompt: LOOKUP_SYSTEM_PROMPT,
-						messages: [
-							{
-								role: "user" as const,
-								content: [{ type: "text" as const, text: promptText }, ...images],
-								timestamp: Date.now(),
-							},
-						],
-					},
-					{
-						apiKey: resolved.apiKey,
-						headers: resolved.headers,
-						env: resolved.env,
-						cacheRetention: "none",
-						maxRetries: 1,
-						maxTokens: DEFAULT_LOOKUP_MAX_TOKENS,
-						signal,
-						timeoutMs: DEFAULT_LOOKUP_TIMEOUT_MS,
-					},
-				);
-				const text = responseText(response).trim() || "Lookup returned no text.";
-				const suffix = response.stopReason === "error" && response.errorMessage ? `\n\nLookup error: ${response.errorMessage}` : "";
-				return lookupToolTextResult(`${text}${suffix}`, {
-					model: lookupModelRef,
-					imageCount: images.length,
-					imagePathCount: pathImages.images.length,
-					contextChars: recentContext.length,
-					stopReason: response.stopReason,
-					...(response.stopReason === "error" && response.errorMessage ? { error: response.errorMessage } : {}),
-				});
-			} catch (error) {
-				if (signal?.aborted || isAbortError(error)) throw error;
-				const message = error instanceof Error ? error.message : String(error);
-				return lookupToolTextResult(`Lookup failed: ${message}`, {
-					model: lookupModelRef,
-					imageCount: images.length,
-					imagePathCount: pathImages.images.length,
-					contextChars: recentContext.length,
-					error: message,
-				});
+			for (const lookupModelRef of lookupModelRefs) {
+				if (signal?.aborted) throw signal.reason ?? new Error("Lookup aborted");
+				let resolved: ResolvedLookupModel | undefined;
+				try {
+					resolved = await resolveLookupModel(ctx, lookupModelRef);
+				} catch (error) {
+					if (signal?.aborted || isAbortError(error)) throw error;
+					attempts.push({ ref: lookupModelRef, outcome: "error", error: error instanceof Error ? error.message : String(error) });
+					continue;
+				}
+				if (!resolved) {
+					attempts.push({ ref: lookupModelRef, outcome: "unavailable" });
+					continue;
+				}
+
+				try {
+					const response = await completeWithModelRegistry(
+						resolved.modelRegistry,
+						resolved.model,
+						{
+							systemPrompt: LOOKUP_SYSTEM_PROMPT,
+							messages: [
+								{
+									role: "user" as const,
+									content: [{ type: "text" as const, text: promptText }, ...images],
+									timestamp: Date.now(),
+								},
+							],
+						},
+						{
+							apiKey: resolved.apiKey,
+							headers: resolved.headers,
+							env: resolved.env,
+							cacheRetention: "none",
+							maxRetries: 1,
+							maxTokens: DEFAULT_LOOKUP_MAX_TOKENS,
+							signal,
+							timeoutMs: DEFAULT_LOOKUP_TIMEOUT_MS,
+						},
+					);
+					if (signal?.aborted || response.stopReason === "aborted") throw signal?.reason ?? new Error("Lookup aborted");
+					if (response.stopReason === "error") {
+						attempts.push({ ref: lookupModelRef, outcome: "error", ...(response.errorMessage ? { error: response.errorMessage } : {}) });
+						continue;
+					}
+					const text = responseText(response).trim();
+					if (!text) {
+						attempts.push({ ref: lookupModelRef, outcome: "empty" });
+						continue;
+					}
+					attempts.push({ ref: lookupModelRef, outcome: "ok" });
+					return lookupToolTextResult(text, {
+						model: lookupModelRef,
+						imageCount: images.length,
+						imagePathCount: pathImages.images.length,
+						contextChars: recentContext.length,
+						stopReason: response.stopReason,
+						attempts,
+					});
+				} catch (error) {
+					if (signal?.aborted || isAbortError(error)) throw error;
+					attempts.push({ ref: lookupModelRef, outcome: "error", error: error instanceof Error ? error.message : String(error) });
+				}
 			}
+
+			return lookupToolTextResult("Lookup failed across configured models.", {
+				model: primaryLookupModelRef,
+				imageCount: images.length,
+				imagePathCount: pathImages.images.length,
+				contextChars: recentContext.length,
+				error: "all lookup models failed",
+				attempts,
+			});
 		},
 	};
 }
@@ -585,7 +608,15 @@ function isInstructionMessage(message: unknown): boolean {
 }
 
 function lookupModelFromConfig(cwd?: string): string | undefined {
-	return loadPiToolsSuiteConfig(["coding-discipline"], { cwd: cwd ?? process.cwd() }).lookupModel;
+	return lookupModelRefsFromConfig(cwd)[0];
+}
+
+function lookupModelRefsFromConfig(cwd?: string): string[] {
+	const config = loadPiToolsSuiteConfig(["coding-discipline"], { cwd: cwd ?? process.cwd() });
+	if (!config.lookupModel) return [];
+	return [...new Set([config.lookupModel, ...config.lookupFallbackModels]
+		.map((modelRef) => modelRef.trim())
+		.filter(Boolean))];
 }
 
 function buildLookupPrompt(params: LookupParams, recentContext: string, imageCount: number, warnings: string[]): string {

@@ -16,7 +16,7 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 
 ## Scope
 
-- Reuse the Pix `autocomplete` configuration and configured provider credentials.
+- Reuse the Pix `autocomplete` configuration, including its ordered `fallbackModels`, and configured provider credentials.
 - Request completions through a private ACP extension method backed by `ModelRuntime`, not `session/prompt`.
 - Debounce eligible drafts, cancel superseded requests, and ignore stale responses.
 - Render the returned suffix as muted inline ghost text in the composer.
@@ -28,14 +28,14 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 - Exposing autocomplete settings in the desktop status bar.
 - Completing slash commands, shell commands, selections, or drafts whose caret is not at the end.
 - Surfacing transient model, authentication, timeout, or transport errors while the user types.
-- Changing TUI autocomplete behavior or configuration defaults.
+- Changing autocomplete eligibility, ghost-text UI behavior, or the default primary autocomplete model.
 
 ## Behavior
 
 - Autocomplete is disabled when `autocomplete.modelRef` is empty.
 - A request starts after the configured debounce only for an active session, no attachments, a collapsed selection at the end, at least three non-whitespace characters, and a draft not starting with `/` or `!`.
 - The ACP request carries the active session id and exact draft. The agent may read recent active-session user/assistant messages according to `includeRecentMessages`, but never sends a normal session prompt.
-- The completion uses the configured model, timeout, output-token limit, prompt budget, and optional thinking suffix.
+- The completion tries `autocomplete.modelRef` and then `autocomplete.fallbackModels` in order, de-duplicating refs. Each candidate uses the configured timeout, output-token limit, prompt budget, and its optional thinking suffix; cancellation is terminal and does not advance the chain.
 - Changing the session, draft, selection, attachment state, or eligibility cancels pending work and clears the ghost suffix.
 - Late or failed requests cannot replace the current suggestion and do not show an application error.
 - Tab appends the visible suffix, keeps focus in the textarea, and does not move focus. Escape clears it. Enter continues to submit normally.

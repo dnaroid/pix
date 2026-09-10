@@ -8,11 +8,13 @@ export type PixThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "
 export interface PixDefaultModel {
 	readonly provider: string;
 	readonly modelId: string;
+	readonly fallbackModels: readonly string[];
 	readonly thinkingLevel?: PixThinkingLevel;
 }
 
 interface DefaultModelConfig {
 	readonly modelRef: string;
+	readonly fallbackModels: readonly string[];
 	readonly thinking?: PixThinkingLevel;
 }
 
@@ -29,6 +31,7 @@ const THINKING_LEVELS = new Set<PixThinkingLevel>([
 // Mirrors the defaultModel written by src/default-pix-config.ts on a first TUI launch.
 const FIRST_LAUNCH_DEFAULT: DefaultModelConfig = {
 	modelRef: "openai-codex/gpt-5.6-sol",
+	fallbackModels: [],
 	thinking: "medium",
 };
 
@@ -74,6 +77,7 @@ export function defaultModelFromParsed(raw: unknown): DefaultModelConfig | undef
 		?? normalized.thinking;
 	return {
 		modelRef: normalized.modelRef,
+		fallbackModels: modelFallbackList(configured.fallbackModels),
 		...(thinking === undefined ? {} : { thinking }),
 	};
 }
@@ -82,12 +86,12 @@ function normalizeModelRef(value: string): DefaultModelConfig | undefined {
 	const modelRef = value.trim();
 	if (!modelRef) return undefined;
 	const colonIndex = modelRef.lastIndexOf(":");
-	if (colonIndex <= 0) return { modelRef };
+	if (colonIndex <= 0) return { modelRef, fallbackModels: [] };
 
 	const thinking = normalizeThinking(modelRef.slice(colonIndex + 1));
 	return thinking
-		? { modelRef: modelRef.slice(0, colonIndex), thinking }
-		: { modelRef };
+		? { modelRef: modelRef.slice(0, colonIndex), fallbackModels: [], thinking }
+		: { modelRef, fallbackModels: [] };
 }
 
 function parseDefaultModel(config: DefaultModelConfig): PixDefaultModel {
@@ -101,8 +105,17 @@ function parseDefaultModel(config: DefaultModelConfig): PixDefaultModel {
 	return {
 		provider: modelRef.slice(0, slashIndex),
 		modelId: modelRef.slice(slashIndex + 1),
+		fallbackModels: [...config.fallbackModels],
 		...(config.thinking === undefined ? {} : { thinkingLevel: config.thinking }),
 	};
+}
+
+function modelFallbackList(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return [...new Set(value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter(Boolean))];
 }
 
 function normalizeThinking(value: unknown): PixThinkingLevel | undefined {

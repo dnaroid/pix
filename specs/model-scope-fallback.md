@@ -25,7 +25,8 @@ model behavior when the user has not configured `enabledModels`.
 ## Non-goals
 
 - Changing a user's existing `enabledModels` setting.
-- Changing model authentication, catalog refresh, or default-model selection.
+- Changing model authentication or catalog refresh. Default-model fallback is a
+  separate contract in `specs/model-selector-fallbacks.md`.
 - Changing how configured scoped-model references and thinking levels resolve.
 
 ## Behavior

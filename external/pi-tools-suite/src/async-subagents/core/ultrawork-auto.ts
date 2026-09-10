@@ -59,40 +59,58 @@ export async function decideUltraworkAuto(
 	if (!routing.enabled) return "none";
 	if (signal?.aborted) throw new Error("Aborted");
 
-	try {
-		const resolved = await resolveClassifierModel(ctx, routing.model);
-		if (!resolved) return "none";
+	const refs = [routing.model, ...routing.fallbackModels];
+	const parentModel = currentModelRef(ctx.model);
+	if (parentModel) refs.push(parentModel);
+	const seen = new Set<string>();
 
-		const response = await completeWithModelRegistry(
-			ctx.modelRegistry,
-			resolved.model,
-			{
-				systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
-				messages: [
-					{
-						role: "user" as const,
-						content: [{ type: "text" as const, text: buildClassifierPrompt(userText) }],
-						timestamp: Date.now(),
-					},
-				],
-			},
-			{
-				apiKey: resolved.apiKey,
-				headers: resolved.headers,
-				env: resolved.env,
-				cacheRetention: "none",
-				maxRetries: routing.maxRetries,
-				maxTokens: Math.min(routing.maxTokens, 32),
-				signal,
-				timeoutMs: routing.timeoutMs,
-			},
-		);
+	for (const ref of refs) {
+		const modelRef = ref?.trim();
+		if (!modelRef || seen.has(modelRef)) continue;
+		seen.add(modelRef);
 
-		return parseUltraworkAutoDecision(responseText(response));
-	} catch (error) {
-		if (signal?.aborted || isAbortError(error)) throw error;
-		return "none";
+		let resolved: Awaited<ReturnType<typeof resolveModelRef>>;
+		try {
+			resolved = await resolveModelRef(ctx, modelRef);
+		} catch (error) {
+			if (signal?.aborted || isAbortError(error)) throw error;
+			continue;
+		}
+		if (!resolved) continue;
+
+		try {
+			const response = await completeWithModelRegistry(
+				ctx.modelRegistry,
+				resolved.model,
+				{
+					systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
+					messages: [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: buildClassifierPrompt(userText) }],
+							timestamp: Date.now(),
+						},
+					],
+				},
+				{
+					apiKey: resolved.apiKey,
+					headers: resolved.headers,
+					env: resolved.env,
+					cacheRetention: "none",
+					maxRetries: routing.maxRetries,
+					maxTokens: Math.min(routing.maxTokens, 32),
+					signal,
+					timeoutMs: routing.timeoutMs,
+				},
+			);
+			if (signal?.aborted || response.stopReason === "aborted") throw new Error("Aborted");
+			if (response.stopReason === "error") continue;
+			return parseUltraworkAutoDecision(responseText(response));
+		} catch (error) {
+			if (signal?.aborted || isAbortError(error)) throw error;
+		}
 	}
+	return "none";
 }
 
 export function parseUltraworkAutoDecision(raw: string): UltraworkAutoDecision {
@@ -126,18 +144,6 @@ function buildClassifierPrompt(userText: string): string {
 		`<<<${truncate(userText, 4000)}>>>`,
 		"Answer with exactly one word: ultrawork, hint, or none.",
 	].join("\n");
-}
-
-async function resolveClassifierModel(ctx: UltraworkAutoContext, modelRef: string): Promise<{
-	model: Model<Api>;
-	apiKey?: string;
-	headers?: ProviderHeaders;
-	env?: Record<string, string>;
-} | undefined> {
-	const configured = await resolveModelRef(ctx, modelRef);
-	if (configured) return configured;
-	const parentModel = currentModelRef(ctx.model);
-	return parentModel && parentModel !== modelRef ? resolveModelRef(ctx, parentModel) : undefined;
 }
 
 async function resolveModelRef(ctx: UltraworkAutoContext, modelRef: string): Promise<{

@@ -26,6 +26,8 @@
     externalEditorLabel,
     onBack,
     onForward,
+    onValidateProjectFile,
+    onValidateLocalFile,
     onOpenProjectFile,
     onResolveProjectMedia,
     onOpenLocalFile,
@@ -45,6 +47,8 @@
     externalEditorLabel?: string;
     onBack?: () => void;
     onForward?: () => void;
+    onValidateProjectFile?: (path: string) => Promise<boolean>;
+    onValidateLocalFile?: (path: string) => Promise<boolean>;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
@@ -173,6 +177,10 @@
   function openProjectFromMarkdown(path: string): void | Promise<void> {
     rememberScroll();
     return onOpenProjectFile?.(projectLinkPath(path));
+  }
+
+  function validateProjectFromMarkdown(path: string): Promise<boolean> {
+    return onValidateProjectFile?.(projectLinkPath(path)) ?? Promise.resolve(false);
   }
 
   function openLocalFromMarkdown(path: string): void | Promise<void> {
@@ -393,6 +401,8 @@
                 fitTables
                 remoteImages
                 headingAnchors
+                onValidateProjectFile={validateProjectFromMarkdown}
+                {onValidateLocalFile}
                 onOpenProjectFile={openProjectFromMarkdown}
                 onResolveProjectMedia={(path) => onResolveProjectMedia?.(projectLinkPath(path)) ?? Promise.resolve(undefined)}
                 onOpenLocalFile={openLocalFromMarkdown}

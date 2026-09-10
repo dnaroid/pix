@@ -361,6 +361,7 @@ Both support the published schema:
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   "defaultModel": {
     "modelRef": "openai-codex/gpt-5.6-sol",
+    "fallbackModels": [],
     "thinking": "medium"
   },
   "toolRenderer": {
@@ -371,9 +372,10 @@ Both support the published schema:
       "apply_patch": { "defaultExpanded": true }
     }
   },
-  "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna" },
+  "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": [] },
   "autocomplete": {
     "modelRef": "zai/glm-5-turbo",
+    "fallbackModels": [],
     "debounceMs": 350,
     "timeoutMs": 3000
   },
@@ -386,6 +388,12 @@ Both support the published schema:
   "maxProjectSessions": 0
 }
 ```
+
+Singular model selectors resolve with an explicit ordered fallback array, even
+when it is empty. Existing configs that omit the array remain compatible and
+normalize to `[]`. Pix uses `fallbackModels` for object selectors; Desktop Git
+uses `reviewFallbackModels` and `commitMessageFallbackModels` beside the
+corresponding primary model refs.
 
 Configurable areas include:
 

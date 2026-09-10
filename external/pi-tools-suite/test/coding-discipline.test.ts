@@ -129,6 +129,33 @@ describe("coding discipline", () => {
 		expect(pi.tools.has("lookup")).toBe(false);
 	});
 
+	test("lookup falls through to configured fallback models", async () => {
+		setPiConfigDirConfig(`{
+			"lookupModel": "fixture/primary",
+			"lookupFallbackModels": ["fixture/fallback"]
+		}`);
+
+		const { default: register } = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+		const lookup = pi.tools.get("lookup");
+		const fallback = { provider: "fixture", id: "fallback", maxTokens: 1024, contextWindow: 8192 };
+		const result = await lookup.execute("lookup-test", { query: "inspect this" }, undefined, undefined, {
+			cwd: "/tmp/project",
+			modelRegistry: {
+				find: (provider: string, id: string) => provider === "fixture" && id === "fallback" ? fallback : undefined,
+				getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "test-key" }),
+				complete: async () => ({ role: "assistant", content: [{ type: "text", text: "fallback ok" }], timestamp: Date.now(), stopReason: "stop" }),
+			},
+		});
+
+		expect(result.details.model).toBe("fixture/fallback");
+		expect(result.details.attempts).toEqual([
+			{ ref: "fixture/primary", outcome: "unavailable" },
+			{ ref: "fixture/fallback", outcome: "ok" },
+		]);
+	});
+
 	test("does not inject discipline into non-GLM main-agent requests", async () => {
 		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
 

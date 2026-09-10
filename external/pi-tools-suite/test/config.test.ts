@@ -58,9 +58,11 @@ describe("pi-tools-suite config", () => {
 		const cwd = tempDir();
 		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
 		mkdirSync(join(cwd, ".pi"), { recursive: true });
-		writeFileSync(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"), `{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+		writeFileSync(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"), `{ "lookupModel": "openai-codex/gpt-5.4-mini", "lookupFallbackModels": ["zai/glm-5.3-flash"] }`);
 
-		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).lookupModel).toBe("openai-codex/gpt-5.4-mini");
+		const configured = loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} });
+		expect(configured.lookupModel).toBe("openai-codex/gpt-5.4-mini");
+		expect(configured.lookupFallbackModels).toEqual(["zai/glm-5.3-flash"]);
 
 		writeFileSync(join(cwd, ".pi", "pi-tools-suite.jsonc"), `{ "lookupModel": null }`);
 
@@ -171,7 +173,9 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"todoThinkingOverrides"');
 		expect(content).toContain('"zai/glm-5.3": "max"');
 		expect(content).toContain('"lookupModel": "zai/glm-5.3-flash"');
-		expect(content).toContain('"summarizerModel": ["zai/glm-5-turbo", "openai-codex/gpt-5.6-luna"]');
+		expect(content).toContain('"lookupFallbackModels": []');
+		expect(content).toContain('"summarizerModel": ["zai/glm-5-turbo"]');
+		expect(content).toContain('"summarizerFallbackModels": ["openai-codex/gpt-5.6-luna"]');
 		expect(content).toContain('"credential-firewall": false');
 		expect(content).toContain('"truncation-metadata-normalizer": false');
 		expect(content).toContain('"secretFirewall"');

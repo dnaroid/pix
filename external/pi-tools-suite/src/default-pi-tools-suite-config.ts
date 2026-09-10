@@ -57,6 +57,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Vision-capable model used by the coding-discipline lookup tool for blind-model
   // screenshot/image questions. Remove or set to null to disable lookup.
   "lookupModel": "zai/glm-5.3-flash",
+  "lookupFallbackModels": [],
   "terminalBell": { "sound": true },
   // comment-checker: nudges the agent to remove AI-slop code comments it just
   // added via write/edit/apply_patch. Net-new comments are classified and a
@@ -168,7 +169,8 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "autoCompress": {
         "enabled": false,
         "patience": 2,
-        "summarizerModel": ["zai/glm-5-turbo", "openai-codex/gpt-5.6-luna"],
+        "summarizerModel": ["zai/glm-5-turbo"],
+        "summarizerFallbackModels": ["openai-codex/gpt-5.6-luna"],
         "timeoutMs": 20000
       }
     }

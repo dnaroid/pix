@@ -198,7 +198,6 @@ async function enhancePromptWithPi(
 	draft: string,
 	config: PromptEnhancerConfig,
 ): Promise<string> {
-	const parsedModel = parseModelRef(config.modelRef);
 	const services = await promptEnhancerPiDeps.createAgentSessionServices({
 		cwd: runtime.cwd,
 		agentDir: runtime.services.agentDir,
@@ -215,42 +214,60 @@ async function enhancePromptWithPi(
 	});
 
 	await services.modelRuntime.refresh();
-	const model = services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
-	if (!model) {
-		throw new Error(modelNotFoundMessage(
-			parsedModel.provider,
-			parsedModel.modelId,
-			services.modelRuntime.getModels() as SessionModel[],
-		));
+	let lastError: unknown;
+	for (const modelRef of modelRefChain(config.modelRef, config.fallbackModels)) {
+		let parsedModel: ReturnType<typeof parseModelRef>;
+		try {
+			parsedModel = parseModelRef(modelRef);
+		} catch (error) {
+			lastError = error;
+			continue;
+		}
+		const model = services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
+		if (!model) {
+			lastError = new Error(modelNotFoundMessage(
+				parsedModel.provider,
+				parsedModel.modelId,
+				services.modelRuntime.getModels() as SessionModel[],
+			));
+			continue;
+		}
+
+		const { session } = await promptEnhancerPiDeps.createAgentSessionFromServices({
+			services,
+			sessionManager: promptEnhancerPiDeps.sessionManagerInMemory(runtime.cwd),
+			model,
+			thinkingLevel: parsedModel.thinkingLevel ?? "minimal",
+			noTools: "all",
+		});
+
+		let output = "";
+		let streamError: string | undefined;
+		const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+			if (event.type !== "message_update") return;
+			const assistantEvent = event.assistantMessageEvent;
+			if (assistantEvent.type === "text_delta") output += assistantEvent.delta;
+			else if (assistantEvent.type === "error") streamError = assistantEvent.error.errorMessage ?? assistantEvent.reason;
+		});
+
+		try {
+			await session.prompt(buildEnhancerPrompt(draft), { expandPromptTemplates: false });
+			if (streamError) throw new Error(streamError);
+			const cleaned = cleanupEnhancedPrompt(output);
+			if (cleaned.length === 0) throw new Error("model returned an empty prompt");
+			return cleaned;
+		} catch (error) {
+			lastError = error;
+		} finally {
+			unsubscribe();
+			session.dispose();
+		}
 	}
+	throw lastError ?? new Error("No prompt enhancer models are configured");
+}
 
-	const { session } = await promptEnhancerPiDeps.createAgentSessionFromServices({
-		services,
-		sessionManager: promptEnhancerPiDeps.sessionManagerInMemory(runtime.cwd),
-		model,
-		thinkingLevel: parsedModel.thinkingLevel ?? "minimal",
-		noTools: "all",
-	});
-
-	let output = "";
-	let streamError: string | undefined;
-	const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-		if (event.type !== "message_update") return;
-		const assistantEvent = event.assistantMessageEvent;
-		if (assistantEvent.type === "text_delta") output += assistantEvent.delta;
-		else if (assistantEvent.type === "error") streamError = assistantEvent.error.errorMessage ?? assistantEvent.reason;
-	});
-
-	try {
-		await session.prompt(buildEnhancerPrompt(draft), { expandPromptTemplates: false });
-		if (streamError) throw new Error(streamError);
-		const cleaned = cleanupEnhancedPrompt(output);
-		if (cleaned.length === 0) throw new Error("model returned an empty prompt");
-		return cleaned;
-	} finally {
-		unsubscribe();
-		session.dispose();
-	}
+function modelRefChain(primary: string, fallbacks: readonly string[] | undefined): string[] {
+	return [...new Set([primary, ...(fallbacks ?? [])].map((ref) => ref.trim()).filter(Boolean))];
 }
 
 function buildEnhancerPrompt(draft: string): string {

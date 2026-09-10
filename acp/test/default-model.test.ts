@@ -21,6 +21,7 @@ test("uses the same first-launch default as the Pix TUI", () => {
 	assert.deepEqual(loadPixDefaultModel(cwd, home), {
 		provider: "openai-codex",
 		modelId: "gpt-5.6-sol",
+		fallbackModels: [],
 		thinkingLevel: "medium",
 	});
 });
@@ -36,6 +37,7 @@ test("project Pix config overrides the global default model", () => {
 	assert.deepEqual(loadPixDefaultModel(cwd, home), {
 		provider: "zai",
 		modelId: "glm-5-turbo",
+		fallbackModels: [],
 		thinkingLevel: "low",
 	});
 });
@@ -51,6 +53,7 @@ test("object thinking overrides a model-reference suffix", () => {
 		defaultModel: { model: "zai/glm-5-turbo:low", thinkingLevel: "xhigh" },
 	}), {
 		modelRef: "zai/glm-5-turbo",
+		fallbackModels: [],
 		thinking: "xhigh",
 	});
 });

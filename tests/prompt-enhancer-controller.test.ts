@@ -249,6 +249,45 @@ describe("AppPromptEnhancerController", () => {
 		}
 	});
 
+	it("falls through to the configured prompt-enhancer model fallback", async () => {
+		const editor = new InputEditor();
+		editor.setText("make this clearer");
+		const messages = emptyMessages();
+		const selectedModels: string[] = [];
+
+		setPromptEnhancerPiTestDeps({
+			createAgentSessionServices: async () => fakeServices([{ provider: "test", id: "fallback", name: "Fallback Model" }]),
+			createAgentSessionFromServices: async ({ model }) => {
+				assert.ok(model);
+				selectedModels.push(`${model.provider}/${model.id}`);
+				return {
+					session: {
+						subscribe: (listener: (event: unknown) => void) => {
+							listener(textDelta("Improved by fallback"));
+							return () => {};
+						},
+						prompt: async () => {},
+						dispose: () => {},
+					},
+				} as never;
+			},
+			sessionManagerInMemory: () => ({ kind: "memory" }) as never,
+		});
+		try {
+			const host = createHost(editor, messages);
+			host.promptEnhancerConfig = () => ({
+				modelRef: "missing/primary",
+				fallbackModels: ["test/fallback"],
+			});
+			await new AppPromptEnhancerController(host).enhancePrompt();
+
+			assert.equal(editor.text, "Improved by fallback");
+			assert.deepEqual(selectedModels, ["test/fallback"]);
+		} finally {
+			setPromptEnhancerPiTestDeps();
+		}
+	});
+
 	it("reports mocked Pi enhancer model, stream, and empty-output failures", async () => {
 		const editor = new InputEditor();
 		editor.setText("make this clearer");
@@ -336,7 +375,7 @@ function createHost(
 			if (messages.setInputStateForTab) messages.setInputStateForTab(tabId, state);
 			else editor.setDraftState(state);
 		},
-		promptEnhancerConfig: () => ({ modelRef: "test/model" }),
+		promptEnhancerConfig: () => ({ modelRef: "test/model", fallbackModels: [] }),
 		resetInputAfterProgrammaticEdit: () => {},
 		setStatus: () => {},
 		setSessionStatus: (sessionArg) => messages.setSessionStatus?.(sessionArg),

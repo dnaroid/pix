@@ -9,7 +9,7 @@ export interface ModelByParentEntry {
 	/** Model ref to use when the parent model matches the entry's pattern. */
 	model: string;
 	/** Ordered fallbacks used when this entry's model hits quota/rate limits; replaces the normal fallback chain. */
-	fallbackModels?: string[];
+	fallbackModels: string[];
 }
 
 export interface SubagentTypeConfig {
@@ -29,7 +29,8 @@ export interface SubagentTypeConfig {
 	/**
 	 * Parent-model-aware model selection. Keys are glob model refs (e.g. "zai/*")
 	 * matched against the current parent model; the first matching key wins.
-	 * Values may be a model ref string or { model, fallbackModels? }.
+	 * Raw values may be a model ref string or { model, fallbackModels? };
+	 * normalized entries always carry an explicit fallbackModels array.
 	 * Ordinary roles: explicit task/forced model and preset models take priority.
 	 * Oracle alone keeps parent-aware selection ahead of presets.
 	 */
@@ -467,13 +468,15 @@ export function normalizeSubagentTypeProfile(
 	file: string,
 ): SubagentTypeConfig {
 	const models = normalizeModels(rawProfile.models, `type "${name}"`, file);
+	const model = models === undefined ? trimString(rawProfile.model) : undefined;
+	const fallbackModels = models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined;
 	return {
 		description: trimString(rawProfile.description),
 		icon: trimString(rawProfile.icon),
 		models,
-		model: models === undefined ? trimString(rawProfile.model) : undefined,
-		fallbackModels: models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined,
-		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file) : undefined,
+		model,
+		fallbackModels: models === undefined && (model || fallbackModels !== undefined) ? fallbackModels ?? [] : undefined,
+		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file, fallbackModels ?? []) : undefined,
 		forParentModels: normalizeParentModelPatterns(rawProfile.forParentModels, "forParentModels", name, file),
 		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
 		thinking: trimString(rawProfile.thinking),
@@ -589,7 +592,12 @@ function normalizeParentModelPatterns(
 	return [...new Set(value.map((pattern: string) => pattern.trim()))];
 }
 
-function normalizeModelByParent(value: unknown, typeName: string, file: string): Record<string, ModelByParentEntry> | undefined {
+function normalizeModelByParent(
+	value: unknown,
+	typeName: string,
+	file: string,
+	defaultFallbackModels: string[] = [],
+): Record<string, ModelByParentEntry> | undefined {
 	if (value === undefined || value === null) return undefined;
 	if (!isRecord(value)) throw new Error(`Subagent type "${typeName}" modelByParent must be an object: ${file}`);
 	const out: Record<string, ModelByParentEntry> = {};
@@ -598,13 +606,20 @@ function normalizeModelByParent(value: unknown, typeName: string, file: string):
 		if (!pat) continue;
 		if (typeof raw === "string") {
 			const model = trimString(raw);
-			if (model) out[pat] = { model };
+			if (model) out[pat] = { model, fallbackModels: [...defaultFallbackModels] };
 			continue;
 		}
 		if (isRecord(raw)) {
 			const model = trimString(raw.model);
 			if (!model) throw new Error(`Subagent type "${typeName}" modelByParent["${pat}"].model must be a non-empty string: ${file}`);
-			out[pat] = { model, fallbackModels: modelList(raw.fallbackModels, raw.fallbackModel) };
+			const hasFallbackOverride = Object.prototype.hasOwnProperty.call(raw, "fallbackModels")
+				|| Object.prototype.hasOwnProperty.call(raw, "fallbackModel");
+			out[pat] = {
+				model,
+				fallbackModels: hasFallbackOverride
+					? modelList(raw.fallbackModels, raw.fallbackModel) ?? []
+					: [...defaultFallbackModels],
+			};
 			continue;
 		}
 		throw new Error(`Subagent type "${typeName}" modelByParent["${pat}"] must be a string or object: ${file}`);

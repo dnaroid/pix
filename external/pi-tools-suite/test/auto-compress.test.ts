@@ -49,7 +49,7 @@ function makeRegistry(opts: {
 	};
 }
 
-function makeConfig(modelRefs: string[]) {
+function makeConfig(modelRefs: string[], fallbackRefs: string[] = []) {
 	return {
 		enabled: true,
 		debug: false,
@@ -60,6 +60,7 @@ function makeConfig(modelRefs: string[]) {
 				enabled: true,
 				patience: 2,
 				summarizerModel: modelRefs,
+				summarizerFallbackModels: fallbackRefs,
 				timeoutMs: 1000,
 			},
 		},
@@ -488,6 +489,29 @@ describe("createAutoCompressionBlock summaryMode + debug fields", () => {
 		expect(result.summarizerModelRef).toBe("zai/glm-5.2");
 		expect(result.summarizerAttempts).toEqual([{ ref: "zai/glm-5.2", outcome: "ok" }]);
 		expect(state.compressionBlocks[0]?.summary).toBe("llm digest");
+	});
+
+	test("uses explicit summarizerFallbackModels after the primary model fails", async () => {
+		const { createAutoCompressionBlock } = await loadModule();
+		const state = await loadState();
+		seedState(state);
+		nextResults = [
+			{ error: new Error("primary unavailable") },
+			{ content: [{ type: "text", text: "fallback digest" }] },
+		];
+		const result = await createAutoCompressionBlock({
+			candidate, topic: "Earlier work", state,
+			config: makeConfig(["zai/primary"], ["openai-codex/fallback"]),
+			messages: [textMessage("user", "a".repeat(4_000), 1000), textMessage("assistant", "b".repeat(4_000), 2000)],
+			modelRegistry: makeRegistry(),
+		});
+
+		expect(result.summaryMode).toBe("model");
+		expect(result.summarizerModelRef).toBe("openai-codex/fallback");
+		expect(result.summarizerAttempts).toEqual([
+			{ ref: "zai/primary", outcome: "error", error: "primary unavailable" },
+			{ ref: "openai-codex/fallback", outcome: "ok" },
+		]);
 	});
 
 	test("programmatic_fallback mode with attempts when every model fails", async () => {

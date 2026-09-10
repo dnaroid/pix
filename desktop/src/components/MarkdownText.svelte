@@ -13,6 +13,8 @@
     fitTables = false,
     remoteImages = false,
     headingAnchors = false,
+    onValidateProjectFile,
+    onValidateLocalFile,
     onOpenProjectFile,
     onResolveProjectMedia,
     onOpenLocalFile,
@@ -24,6 +26,8 @@
     fitTables?: boolean;
     remoteImages?: boolean;
     headingAnchors?: boolean;
+    onValidateProjectFile?: (path: string) => Promise<boolean>;
+    onValidateLocalFile?: (path: string) => Promise<boolean>;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
@@ -51,6 +55,7 @@
     let generation = 0;
     let mediaObserver: IntersectionObserver | undefined;
     let diagramObserver: IntersectionObserver | undefined;
+    let fileLinkObserver: IntersectionObserver | undefined;
     const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
 
     function scheduleRender() {
@@ -59,9 +64,70 @@
       queueMicrotask(() => {
         if (scheduledGeneration !== generation) return;
         decorateExternalLinks(node);
+        observeFileLinks(scheduledGeneration);
         observeDiagrams(scheduledGeneration);
         observeMedia(scheduledGeneration);
       });
+    }
+
+    function observeFileLinks(scheduledGeneration: number): void {
+      if (scheduledGeneration !== generation) return;
+      fileLinkObserver?.disconnect();
+      const candidates = Array.from(node.querySelectorAll<HTMLElement>(
+        "[data-project-file-candidate], [data-local-file-candidate]",
+      ));
+      const validate = (candidate: HTMLElement) => {
+        if (candidate.dataset.fileValidationState) return;
+        void validateFileLink(candidate);
+      };
+      if (typeof IntersectionObserver === "undefined") {
+        for (const candidate of candidates) validate(candidate);
+        return;
+      }
+      fileLinkObserver = new IntersectionObserver((entries, observer) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || !(entry.target instanceof HTMLElement)) continue;
+          observer.unobserve(entry.target);
+          validate(entry.target);
+        }
+      }, { rootMargin: "320px 0px" });
+      for (const candidate of candidates) fileLinkObserver.observe(candidate);
+    }
+
+    async function validateFileLink(candidate: HTMLElement): Promise<void> {
+      const projectPath = candidate.dataset.projectFileCandidate;
+      const localPath = candidate.dataset.localFileCandidate;
+      const path = projectPath ?? localPath;
+      const validator = projectPath ? onValidateProjectFile : onValidateLocalFile;
+      if (!path || !validator) {
+        candidate.dataset.fileValidationState = "invalid";
+        delete candidate.dataset.projectFileCandidate;
+        delete candidate.dataset.localFileCandidate;
+        return;
+      }
+
+      candidate.dataset.fileValidationState = "loading";
+      let exists = false;
+      try {
+        exists = await validator(path);
+      } catch {
+        exists = false;
+      }
+      if (!node.contains(candidate)) return;
+      if (!exists) {
+        candidate.dataset.fileValidationState = "invalid";
+        delete candidate.dataset.projectFileCandidate;
+        delete candidate.dataset.localFileCandidate;
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = "#";
+      link.title = `${projectPath ? "Preview" : "Open"} ${path}`;
+      if (projectPath) link.dataset.projectFile = path;
+      else link.dataset.localFile = path;
+      while (candidate.firstChild) link.append(candidate.firstChild);
+      candidate.replaceWith(link);
     }
 
     function observeMedia(scheduledGeneration: number): void {
@@ -137,12 +203,25 @@
         media.addEventListener(
           "error",
           () => {
-            if (node.contains(preview)) showMediaError(frame, preview);
+            const currentFrame = preview.querySelector<HTMLElement>(".markdown-media-frame");
+            if (node.contains(preview) && currentFrame) showMediaError(currentFrame, preview);
           },
           { once: true },
         );
-        frame.replaceChildren(media);
-        frame.removeAttribute("aria-busy");
+        if (kind === "image") {
+          const link = document.createElement("a");
+          link.href = "#";
+          link.className = frame.className;
+          link.title = `Preview ${path}`;
+          link.setAttribute("aria-label", `Preview ${label}`);
+          if (projectPath) link.dataset.projectFile = path;
+          else link.dataset.localFile = path;
+          link.append(media);
+          frame.replaceWith(link);
+        } else {
+          frame.replaceChildren(media);
+          frame.removeAttribute("aria-busy");
+        }
         preview.dataset.mediaState = "ready";
       } catch (error: unknown) {
         if (scheduledGeneration !== generation || !node.contains(preview)) return;
@@ -215,6 +294,7 @@
       },
       destroy() {
         generation += 1;
+        fileLinkObserver?.disconnect();
         mediaObserver?.disconnect();
         diagramObserver?.disconnect();
         colorScheme.removeEventListener("change", handleColorSchemeChange);
@@ -407,6 +487,9 @@
     background: transparent;
     padding: 0;
     font-size: inherit;
+  }
+  .markdown-text :global(.markdown-file-candidate > code) {
+    color: var(--foreground);
   }
   .markdown-text :global(a:focus-visible) {
     border-radius: var(--radius-sm);

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { loadConfig, modelKeysFromContext, resolveModelConfig } from "../src/dcp/config.js";
+import { loadConfig, modelKeysFromContext, resolveModelConfig, summarizerModelRefs } from "../src/dcp/config.js";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-tools-suite-dcp-config-"));
@@ -26,6 +26,7 @@ describe("DCP config", () => {
 			enabled: false,
 			patience: 2,
 			summarizerModel: [],
+			summarizerFallbackModels: [],
 			timeoutMs: 20000,
 		});
 		expect(config.strategies.emergencyCurrentTurnPruning).toEqual({
@@ -39,6 +40,59 @@ describe("DCP config", () => {
 			protectedTools: [],
 		});
 		expect(config.issues).toEqual([]);
+	});
+
+	test("appends explicit summarizer fallbacks after legacy primary refs and deduplicates", () => {
+		const config = loadConfig({ homeDir: tempDir() });
+		config.compress.autoCompress.summarizerModel = ["fixture/primary", "fixture/legacy-fallback"];
+		config.compress.autoCompress.summarizerFallbackModels = [
+			"fixture/legacy-fallback",
+			"fixture/fallback-a",
+			"fixture/fallback-b",
+		];
+
+		expect(summarizerModelRefs(config.compress.autoCompress)).toEqual([
+			"fixture/primary",
+			"fixture/legacy-fallback",
+			"fixture/fallback-a",
+			"fixture/fallback-b",
+		]);
+	});
+
+	test("normalizes malformed summarizer model fields to resolved arrays", () => {
+		const homeDir = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{
+				"dcp": {
+					"compress": {
+						"autoCompress": {
+							"summarizerModel": "not-an-array",
+							"summarizerFallbackModels": null
+						}
+					},
+					"modelOverrides": {
+						"zai/*": {
+							"compress": {
+								"autoCompress": {
+									"summarizerModel": null,
+									"summarizerFallbackModels": "also-not-an-array"
+								}
+							}
+						}
+					}
+				}
+			}`,
+		);
+
+		const config = loadConfig({ homeDir });
+		expect(config.compress.autoCompress.summarizerModel).toEqual([]);
+		expect(config.compress.autoCompress.summarizerFallbackModels).toEqual([]);
+
+		const resolved = resolveModelConfig(config, ["zai/glm-5.3"]);
+		expect(resolved.compress.autoCompress.summarizerModel).toEqual([]);
+		expect(resolved.compress.autoCompress.summarizerFallbackModels).toEqual([]);
 	});
 
 	test("reads DCP settings from the user pi-tools-suite config", () => {

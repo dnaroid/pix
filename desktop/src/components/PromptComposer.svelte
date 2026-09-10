@@ -31,9 +31,10 @@
     type PromptAutocompleteState,
   } from "../lib/autocomplete";
   import {
-    insertProjectTreePromptPath,
-    parseProjectTreeDrag,
-    PROJECT_TREE_DRAG_MIME,
+    insertPromptPaths,
+    projectTreeDragPayloadFromUnknown,
+    PROJECT_TREE_DRAG_STATE_EVENT,
+    PROJECT_TREE_DROP_EVENT,
   } from "../lib/project-tree";
   import {
     matchSlashCommands,
@@ -90,7 +91,7 @@
     onOpenAttachment: (attachment: Attachment) => void;
   } = $props();
 
-  let composerForm: HTMLFormElement | undefined;
+  let composerForm = $state<HTMLFormElement | undefined>();
   let textarea = $state<HTMLTextAreaElement | undefined>();
   let ghostLayer = $state<HTMLDivElement | undefined>();
   let slashListbox = $state<HTMLDivElement | undefined>();
@@ -99,7 +100,6 @@
   let selectionStart = $state(promptText.length);
   let selectionEnd = $state(promptText.length);
   let projectPathDragActive = $state(false);
-  let projectPathDragDepth = 0;
   let selectedSlashCommand = $state(0);
   let dismissedSlashDraft = $state<string | null>(null);
   let slashMenuKey = "";
@@ -217,6 +217,25 @@
     observeAutocomplete(textarea);
   }
 
+  /** Insert one or more filesystem paths as plain quoted text in the prompt. */
+  export async function insertPaths(paths: readonly string[]): Promise<void> {
+    if (questionMode || editorMode || !ready || !activeSessionId || paths.length === 0) return;
+    const start = textarea?.selectionStart ?? selectionStart;
+    const end = textarea?.selectionEnd ?? selectionEnd;
+    const insertion = insertPromptPaths(promptText, start, end, paths);
+    if (insertion.text === promptText) return;
+    promptText = insertion.text;
+    dismissedSlashDraft = null;
+    autocompleteController.dismiss();
+    await tick();
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(insertion.cursor, insertion.cursor);
+    updateSelection(textarea);
+    resizeComposer();
+    observeAutocomplete(textarea);
+  }
+
   $effect(() => {
     promptText;
     promptRunning;
@@ -264,6 +283,17 @@
   });
 
   $effect(() => () => autocompleteController.dispose());
+
+  $effect(() => {
+    const form = composerForm;
+    if (!form) return;
+    form.addEventListener(PROJECT_TREE_DRAG_STATE_EVENT, handleProjectTreeDragStateEvent);
+    form.addEventListener(PROJECT_TREE_DROP_EVENT, handleProjectTreeDropEvent);
+    return () => {
+      form.removeEventListener(PROJECT_TREE_DRAG_STATE_EVENT, handleProjectTreeDragStateEvent);
+      form.removeEventListener(PROJECT_TREE_DROP_EVENT, handleProjectTreeDropEvent);
+    };
+  });
 
   $effect(() => {
     const active = !!questionMode;
@@ -438,57 +468,29 @@
     }
   }
 
-  function canAcceptProjectTreeDrop(transfer: DataTransfer | null): boolean {
+  function canAcceptProjectTreeDrop(): boolean {
     return !editorMode
       && !questionMode
       && ready
-      && !!activeSessionId
-      && !!transfer
-      && Array.from(transfer.types).includes(PROJECT_TREE_DRAG_MIME);
+      && !!activeSessionId;
   }
 
-  function handleProjectTreeDragEnter(event: DragEvent): void {
-    if (!canAcceptProjectTreeDrop(event.dataTransfer)) return;
-    event.preventDefault();
-    projectPathDragDepth += 1;
-    projectPathDragActive = true;
-    autocompleteController.dismiss();
+  function handleProjectTreeDragStateEvent(event: Event): void {
+    const detail = (event as CustomEvent<unknown>).detail;
+    const active = !!detail
+      && typeof detail === "object"
+      && !Array.isArray(detail)
+      && (detail as Record<string, unknown>).active === true;
+    projectPathDragActive = active && canAcceptProjectTreeDrop();
+    if (projectPathDragActive) autocompleteController.dismiss();
   }
 
-  function handleProjectTreeDragOver(event: DragEvent): void {
-    if (!canAcceptProjectTreeDrop(event.dataTransfer)) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-  }
-
-  function handleProjectTreeDragLeave(): void {
-    if (!projectPathDragActive) return;
-    projectPathDragDepth = Math.max(0, projectPathDragDepth - 1);
-    if (projectPathDragDepth === 0) projectPathDragActive = false;
-  }
-
-  function handleProjectTreeDrop(event: DragEvent): void {
-    const transfer = event.dataTransfer;
-    if (!canAcceptProjectTreeDrop(transfer) || !transfer) return;
-    event.preventDefault();
-    event.stopPropagation();
-    projectPathDragDepth = 0;
+  function handleProjectTreeDropEvent(event: Event): void {
     projectPathDragActive = false;
-
-    const entry = parseProjectTreeDrag(transfer.getData(PROJECT_TREE_DRAG_MIME));
+    if (!canAcceptProjectTreeDrop()) return;
+    const entry = projectTreeDragPayloadFromUnknown((event as CustomEvent<unknown>).detail);
     if (!entry) return;
-    const insertion = insertProjectTreePromptPath(promptText, selectionStart, selectionEnd, entry);
-    promptText = insertion.text;
-    dismissedSlashDraft = null;
-    autocompleteController.dismiss();
-    void tick().then(() => {
-      if (!textarea) return;
-      textarea.focus();
-      textarea.setSelectionRange(insertion.cursor, insertion.cursor);
-      updateSelection(textarea);
-      resizeComposer();
-      observeAutocomplete(textarea);
-    });
+    void insertPaths([entry.path]);
   }
 
   function chooseChoice(choiceValue: string): void {
@@ -700,11 +702,8 @@
     dragActive || projectPathDragActive ? "border-ring ring-2 ring-ring/30" : "border-input",
   ]}
   bind:this={composerForm}
+  data-pix-project-path-drop-target="true"
   onsubmit={handleSubmit}
-  ondragenter={handleProjectTreeDragEnter}
-  ondragover={handleProjectTreeDragOver}
-  ondragleave={handleProjectTreeDragLeave}
-  ondrop={handleProjectTreeDrop}
 >
   {#if questionMode}
     <div class="border-b border-border bg-panel px-3 pt-2.5">

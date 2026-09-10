@@ -54,6 +54,7 @@ const OutputFiltersConfig = Type.Object(
 const DefaultModelConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Provider/model identifier, e.g. 'openai-codex/gpt-5.4'." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String({ description: "Fallback provider/model identifier." }), { description: "Ordered default-model fallbacks tried after modelRef." })),
 		thinking: Type.Optional(DefaultThinkingSelection),
 	},
 	{ description: "Default model selection for new sessions." },
@@ -62,6 +63,7 @@ const DefaultModelConfig = Type.Object(
 const PromptEnhancerConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Model used for prompt enhancement." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String({ description: "Fallback provider/model identifier." }), { description: "Ordered prompt-enhancer fallbacks tried after modelRef." })),
 	},
 	{ description: "Prompt enhancer configuration." },
 );
@@ -77,6 +79,7 @@ const SessionTitleConfig = Type.Object(
 const AutocompleteConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Model for inline autocomplete. Empty string disables LLM autocomplete." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String({ description: "Fallback provider/model identifier." }), { description: "Ordered autocomplete fallbacks tried after modelRef." })),
 		debounceMs: Type.Optional(Type.Number({ description: "Delay after typing before requesting completion.", minimum: 100, maximum: 2000 })),
 		timeoutMs: Type.Optional(Type.Number({ description: "Hard timeout for completion request.", minimum: 250, maximum: 10000 })),
 		maxTokens: Type.Optional(Type.Number({ description: "Maximum output tokens.", minimum: 8, maximum: 256 })),
@@ -139,8 +142,14 @@ const DesktopConfig = Type.Object(
 				reviewModelRef: Type.Optional(Type.String({
 					description: "Model reference used by Pix Desktop for LLM review of Git diffs, optionally with a :thinking suffix.",
 				})),
+				reviewFallbackModels: Type.Optional(Type.Array(Type.String(), {
+					description: "Ordered fallback model references used for Git diff review.",
+				})),
 				commitMessageModelRef: Type.Optional(Type.String({
 					description: "Model reference used by Pix Desktop to generate Git commit messages, optionally with a :thinking suffix.",
+				})),
+				commitMessageFallbackModels: Type.Optional(Type.Array(Type.String(), {
+					description: "Ordered fallback model references used for Git commit-message generation.",
 				})),
 			},
 			{ description: "Pix Desktop Git/Source Control LLM preferences." },

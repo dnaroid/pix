@@ -297,10 +297,33 @@ export function resolvePixRuntimeModelRef(
 	sessionManager: RuntimeSessionManagerModelState,
 	config: PixConfig = loadPixConfig(),
 ): string | undefined {
-	if (options.modelRef) return options.modelRef;
+	return resolvePixRuntimeModelRefs(options, sessionManager, config)[0];
+}
+
+export function resolvePixRuntimeModelRefs(
+	options: Pick<AppOptions, "modelRef">,
+	sessionManager: RuntimeSessionManagerModelState,
+	config: PixConfig = loadPixConfig(),
+): string[] {
+	if (options.modelRef) return [options.modelRef];
 	const existingEntryCount = sessionManager.getEntries().length;
-	if (existingEntryCount > 0) return resolveSessionModelRefFromTail(sessionManager.getBranch());
-	return resolveDefaultModelRef(config);
+	if (existingEntryCount > 0) {
+		const sessionRef = resolveSessionModelRefFromTail(sessionManager.getBranch());
+		return sessionRef ? [sessionRef] : [];
+	}
+	const primary = resolveDefaultModelRef(config);
+	if (!primary) return [];
+	const defaultThinking = config.defaultModel?.thinking;
+	const fallbacks = (config.defaultModel?.fallbackModels ?? []).map((modelRef) => {
+		const trimmed = modelRef.trim();
+		if (!trimmed || !defaultThinking) return trimmed;
+		try {
+			return parseModelRef(trimmed).thinkingLevel === undefined ? `${trimmed}:${defaultThinking}` : trimmed;
+		} catch {
+			return trimmed;
+		}
+	});
+	return [...new Set([primary, ...fallbacks].map((ref) => ref.trim()).filter(Boolean))];
 }
 
 export function resolvePixRuntimeInitialThinkingLevel(
@@ -346,9 +369,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 	const reusableServices = reusableRuntimeServices(runtimeOptions.reuseServicesFrom, options.cwd, agentDir);
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const config = runtimeOptions.config ?? loadPixConfig(cwd);
-		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
-		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
-		const initialThinkingLevel = resolvePixRuntimeInitialThinkingLevel(options, sessionManager, config);
+		const modelRefs = resolvePixRuntimeModelRefs(options, sessionManager, config);
 		// Only reuse services for the initial session. Session replacements
 		// (switchSession/newSession/fork) must get fresh services so extensions
 		// are re-loaded with a fresh pi — otherwise handlers capture the old,
@@ -363,10 +384,33 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
 			});
 		await refreshPixModelRuntimeForStartup(services.modelRuntime);
-		const model = parsedModel ? services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) : undefined;
-		if (parsedModel && !model) {
-			throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
+		let model: SessionModel | undefined;
+		let selectedRef: string | undefined;
+		let selectedThinkingLevel: ThinkingLevel | undefined;
+		let primaryError: Error | undefined;
+		for (let index = 0; index < modelRefs.length; index++) {
+			const modelRef = modelRefs[index]!;
+			let parsedModel: ReturnType<typeof parseModelRef>;
+			try {
+				parsedModel = parseModelRef(modelRef);
+			} catch (error) {
+				if (index === 0) throw error;
+				continue;
+			}
+			const candidate = services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
+			if (!candidate) {
+				if (index === 0) primaryError = new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
+				continue;
+			}
+			model = candidate;
+			selectedRef = modelRef;
+			selectedThinkingLevel = parsedModel.thinkingLevel;
+			break;
 		}
+		if (modelRefs.length > 0 && !model) {
+			throw primaryError ?? new Error(`No configured model is available: ${modelRefs.join(", ")}`);
+		}
+		const initialThinkingLevel = selectedThinkingLevel;
 		const enabledModelRefs = services.settingsManager.getEnabledModels();
 		const scopedModels = (enabledModelRefs ?? []).flatMap((modelRef): ScopedSessionModel[] => {
 			const scoped = parseScopedModelRef(modelRef);
@@ -391,9 +435,13 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				...(initialThinkingLevel === undefined ? {} : { thinkingLevel: initialThinkingLevel }),
 				...(scopedModels.length === 0 ? {} : { scopedModels }),
 		});
+		const modelFallbackMessage = selectedRef && selectedRef !== modelRefs[0]
+			? `Default model ${modelRefs[0]} is unavailable; using fallback ${selectedRef}.`
+			: undefined;
 		return {
 			...created,
 			services,
+			...(modelFallbackMessage ? { modelFallbackMessage } : {}),
 			// Snapshot diagnostics per-runtime. When services are reused across
 			// tabs (reuseServicesFrom), services.diagnostics is a shared array —
 			// giving each runtime its own copy prevents one tab's creation

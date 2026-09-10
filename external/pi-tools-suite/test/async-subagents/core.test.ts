@@ -767,7 +767,7 @@ Advise only.
 			const config = loadSubagentConfig(cwd, {});
 			const profile = config.types["local-oracle"];
 			expect(profile?.modelByParent).toEqual({
-				"zai/*": { model: "zai/glm-5.3" },
+				"zai/*": { model: "zai/glm-5.3", fallbackModels: [] },
 				"openai-codex/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
 			});
 			expect(profile?.forParentModels).toEqual(["openai-codex/*", "zai/*"]);

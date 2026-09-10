@@ -26,6 +26,8 @@
     onChooseWorkspace,
     onOpenAttachment,
     onPrepareAttachment,
+    onValidateProjectFile,
+    onValidateLocalFile,
     onOpenProjectFile,
     onResolveProjectMedia,
     onOpenLocalFile,
@@ -46,6 +48,8 @@
     onChooseWorkspace: () => void;
     onOpenAttachment: (attachment: Attachment) => void;
     onPrepareAttachment: (attachment: Attachment) => Promise<void>;
+    onValidateProjectFile: (path: string) => Promise<boolean>;
+    onValidateLocalFile: (path: string) => Promise<boolean>;
     onOpenProjectFile: (path: string) => void | Promise<void>;
     onResolveProjectMedia: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile: (path: string) => void | Promise<void>;
@@ -111,25 +115,25 @@
                 <span>thinking</span>
               </summary>
               <div class="ml-[7px] border-l border-code-border pl-2.5 text-muted-foreground">
-                <MarkdownText text={item.text} compact dense fitTables {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
+                <MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             </details>
           {:else if item.role === "user"}
             <div class="transcript-entry mb-6" data-transcript-entry-id={item.id}>
               <article class="w-full rounded-lg border border-chat-user-border bg-chat-user px-3.5 pt-3 pb-2 text-foreground">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-                {#if item.text}<MarkdownText text={item.text} dense fitTables {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+                {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
           {:else if item.role === "system"}
             <article class="transcript-entry mb-5 w-full min-w-0 font-mono text-xs text-muted-foreground" data-transcript-entry-id={item.id}>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-              {#if item.text}<MarkdownText text={item.text} compact dense fitTables {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              {#if item.text}<MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {:else}
             <article class="transcript-entry mb-6 w-full min-w-0 text-foreground" data-transcript-entry-id={item.id}>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-              {#if item.text}<MarkdownText text={item.text} dense fitTables {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
         {:else}
@@ -167,7 +171,7 @@
                       {/if}
                       <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                       {#if !tool.resultLoading && (tool.content || tool.diffs.length > 0)}
-                        <ToolResult {tool} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
+                        <ToolResult {tool} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
                       {/if}
                     </details>
                   {:else}

@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createGitAssistant, loadGitAssistantModelRef } from "../src/acp/git-assistant.js";
+import { createGitAssistant, loadGitAssistantModelRef, loadGitAssistantModelRefs } from "../src/acp/git-assistant.js";
 
 test("Git assistant model config has independent review/commit values with project overrides", async () => {
 	const root = mkdtempSync(join(tmpdir(), "pix-git-assistant-config-"));
@@ -30,6 +30,52 @@ test("Git assistant model config has independent review/commit values with proje
 
 	assert.equal(loadGitAssistantModelRef(cwd, "review", home), "provider/project-review:medium");
 	assert.equal(loadGitAssistantModelRef(cwd, "commit-message", home), "provider/global-commit:minimal");
+});
+
+test("Git assistant keeps and executes the configured fallback chain", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pix-git-assistant-fallback-"));
+	const cwd = join(root, "project");
+	await mkdir(join(cwd, ".pi"), { recursive: true });
+	await writeFile(join(cwd, ".pi", "pix.jsonc"), `{
+		"desktop": {
+			"git": {
+				"reviewModelRef": "missing/primary:medium",
+				"reviewFallbackModels": ["provider/fallback:low"]
+			}
+		}
+	}\n`, "utf8");
+
+	assert.deepEqual(loadGitAssistantModelRefs(cwd, "review"), [
+		"missing/primary:medium",
+		"provider/fallback:low",
+	]);
+
+	const streamed: string[] = [];
+	const assistant = createGitAssistant({
+		createModelRuntime: async () => ({
+			getModel: (provider: string, modelId: string) => provider === "provider" && modelId === "fallback"
+				? { provider, id: modelId, maxTokens: 4_096 }
+				: undefined,
+			refresh: async () => {},
+			streamSimple: (model: { provider: string; id: string }) => {
+				streamed.push(`${model.provider}/${model.id}`);
+				return (async function* () {
+					yield { type: "text_delta", delta: "No significant findings." };
+				})();
+			},
+		}) as never,
+		timeoutMs: 1_000,
+	});
+
+	const result = await assistant({
+		cwd,
+		kind: "review",
+		diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
+		signal: new AbortController().signal,
+	});
+
+	assert.equal(result, "No significant findings.");
+	assert.deepEqual(streamed, ["provider/fallback"]);
 });
 
 test("Git assistant timeout includes ModelRuntime initialization", async () => {

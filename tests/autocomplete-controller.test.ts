@@ -104,6 +104,7 @@ describe("autocomplete controller helpers", () => {
 
 		const completion = await completeInputWithPi(runtime, "hello", {
 			modelRef: "provider/model",
+			fallbackModels: [],
 			debounceMs: 0,
 			timeoutMs: 1_000,
 			maxTokens: 32,
@@ -116,6 +117,40 @@ describe("autocomplete controller helpers", () => {
 		assert.equal((streamModel as { maxTokens?: number }).maxTokens, 32);
 	});
 
+	it("falls through to the configured autocomplete model fallback", async () => {
+		const fallbackModel = { provider: "fallback", id: "model", maxTokens: 4_096 };
+		const streamedModels: string[] = [];
+		const runtime = {
+			session: { messages: [] },
+			cwd: "/tmp/project",
+			services: {
+				modelRuntime: {
+					getModel: (provider: string, modelId: string) => provider === "fallback" && modelId === "model" ? fallbackModel : undefined,
+					refresh: async () => {},
+					streamSimple: (model: { provider: string; id: string }) => {
+						streamedModels.push(`${model.provider}/${model.id}`);
+						return (async function* () {
+							yield { type: "text_delta", delta: " fallback" };
+						})();
+					},
+				},
+			},
+		} as never;
+
+		const completion = await completeInputWithPi(runtime, "hello", {
+			modelRef: "missing/primary",
+			fallbackModels: ["fallback/model"],
+			debounceMs: 0,
+			timeoutMs: 1_000,
+			maxTokens: 32,
+			maxPromptTokens: 1_200,
+			includeRecentMessages: 0,
+		});
+
+		assert.equal(completion, " fallback");
+		assert.deepEqual(streamedModels, ["fallback/model"]);
+	});
+
 	it("runs inline autocomplete for eligible drafts and accepts the suggestion", async () => {
 		const inputEditor = new InputEditor();
 		inputEditor.setText("hello");
@@ -125,7 +160,7 @@ describe("autocomplete controller helpers", () => {
 			{
 				runtime: () => ({}) as never,
 				inputEditor: () => inputEditor,
-				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
+				autocompleteConfig: () => ({ modelRef: "provider/model", fallbackModels: [], debounceMs: 0, timeoutMs: 3_000, maxTokens: 48, maxPromptTokens: 1_200, includeRecentMessages: 0 }),
 				isRunning: () => true,
 				render: () => {
 					renders += 1;
@@ -134,7 +169,7 @@ describe("autocomplete controller helpers", () => {
 			{
 				debounceMs: 0,
 				completeInputWithPi: async (_runtime, draft, config, signal) => {
-					requests.push({ draft, configModelRef: config.modelRef, aborted: signal.aborted });
+					requests.push({ draft, configModelRef: config.modelRef, aborted: signal?.aborted ?? false });
 					return " world";
 				},
 			},
@@ -158,17 +193,17 @@ describe("autocomplete controller helpers", () => {
 			{
 				runtime: () => ({}) as never,
 				inputEditor: () => inputEditor,
-				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
+				autocompleteConfig: () => ({ modelRef: "provider/model", fallbackModels: [], debounceMs: 0, timeoutMs: 3_000, maxTokens: 48, maxPromptTokens: 1_200, includeRecentMessages: 0 }),
 				isRunning: () => true,
 				render: () => {},
 			},
 			{
 				debounceMs: 0,
 				completeInputWithPi: async (_runtime, draft, _config, signal) => {
-					requests.push({ draft, abortedAtStart: signal.aborted });
+					requests.push({ draft, abortedAtStart: signal?.aborted ?? false });
 					if (draft === "hello") {
 						await new Promise<void>((resolve, reject) => {
-							signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+							signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
 							setTimeout(resolve, 50);
 						});
 					}
@@ -198,7 +233,7 @@ describe("autocomplete controller helpers", () => {
 			{
 				runtime: () => ({}) as never,
 				inputEditor: () => inputEditor,
-				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
+				autocompleteConfig: () => ({ modelRef: "provider/model", fallbackModels: [], debounceMs: 0, timeoutMs: 3_000, maxTokens: 48, maxPromptTokens: 1_200, includeRecentMessages: 0 }),
 				isRunning: () => true,
 				render: () => {},
 			},
@@ -243,7 +278,7 @@ describe("autocomplete controller helpers", () => {
 			{
 				runtime: () => ({}) as never,
 				inputEditor: () => inputEditor,
-				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
+				autocompleteConfig: () => ({ modelRef: "provider/model", fallbackModels: [], debounceMs: 0, timeoutMs: 3_000, maxTokens: 48, maxPromptTokens: 1_200, includeRecentMessages: 0 }),
 				isRunning: () => true,
 				render: () => {
 					called += 1;
@@ -272,7 +307,7 @@ describe("autocomplete controller helpers", () => {
 			{
 				runtime: () => ({}) as never,
 				inputEditor: () => inputEditor,
-				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
+				autocompleteConfig: () => ({ modelRef: "provider/model", fallbackModels: [], debounceMs: 0, timeoutMs: 3_000, maxTokens: 48, maxPromptTokens: 1_200, includeRecentMessages: 0 }),
 				isRunning: () => true,
 				render: () => {
 					renders += 1;
@@ -304,7 +339,7 @@ describe("autocomplete controller helpers", () => {
 			{
 				runtime: () => ({}) as never,
 				inputEditor: () => inputEditor,
-				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
+				autocompleteConfig: () => ({ modelRef: "provider/model", fallbackModels: [], debounceMs: 0, timeoutMs: 3_000, maxTokens: 48, maxPromptTokens: 1_200, includeRecentMessages: 0 }),
 				isRunning: () => true,
 				render: () => {},
 			},

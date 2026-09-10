@@ -105,6 +105,12 @@ legacy selection fields. Empty `models` means no candidates, not permission to
 inherit the parent model. Model-less project specialists must declare candidates
 or receive an explicit model override.
 
+Legacy singular selectors are normalized with an explicit fallback array:
+`model` without `fallbackModels` resolves to `fallbackModels: []`, and every
+normalized `modelByParent` entry carries its own `fallbackModels` array. Modern
+`models` profiles already encode the complete ordered candidate/fallback chain
+in one array and are not wrapped in an additional fallback field.
+
 The removed `asyncSubagents` section is no longer part of the public config
 schema and is not read at runtime. Existing legacy files are left untouched but
 have no effect. Migrate role definitions to `.pi/agents/*.md` and custom pools to

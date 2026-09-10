@@ -1,7 +1,7 @@
 export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   // pix renderer configuration
-  "defaultModel": { "modelRef": "openai-codex/gpt-5.6-sol", "thinking": "medium" },
+  "defaultModel": { "modelRef": "openai-codex/gpt-5.6-sol", "fallbackModels": [], "thinking": "medium" },
   // Disable AGENTS.md / CLAUDE.md discovery for this project when set in <cwd>/.pi/pix.jsonc.
   "ignoreContextFiles": false,
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.
@@ -12,8 +12,10 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
     "git": {
       // LLM used for Source Control code review.
       "reviewModelRef": "openai-codex/gpt-5.6-luna:medium",
+      "reviewFallbackModels": [],
       // LLM used to generate commit messages from staged changes.
-      "commitMessageModelRef": "openai-codex/gpt-5.6-luna:minimal"
+      "commitMessageModelRef": "openai-codex/gpt-5.6-luna:minimal",
+      "commitMessageFallbackModels": []
     }
   },
 
@@ -62,8 +64,8 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
     "antigravity/antigravity-claude-*": "error"
   },
 
-  "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna" },
-  "autocomplete": { "modelRef": "zai/glm-5-turbo", "debounceMs": 350, "timeoutMs": 3000, "maxTokens": 48, "maxPromptTokens": 1200, "includeRecentMessages": 0 },
+  "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": [] },
+  "autocomplete": { "modelRef": "zai/glm-5-turbo", "fallbackModels": [], "debounceMs": 350, "timeoutMs": 3000, "maxTokens": 48, "maxPromptTokens": 1200, "includeRecentMessages": 0 },
   "sessionTitle": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"] },
   "dictation": {
     "language": "en",

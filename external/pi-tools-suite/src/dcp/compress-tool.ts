@@ -5,7 +5,7 @@
 import { Type } from "typebox"
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import type { CompressionMember, DcpState } from "./state.js"
-import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
+import { modelKeysFromContext, resolveModelConfig, summarizerModelRefs, type DcpConfig } from "./config.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
 import { createHash } from "node:crypto"
 import { clearDcpNudgeAnchors } from "./pruner.js"
@@ -534,7 +534,7 @@ export function registerCompressTool(
             includedBlockIds: [],
             reason: "manual delegated summary",
           },
-          modelRefs: effectiveConfig.compress.autoCompress.summarizerModel,
+          modelRefs: summarizerModelRefs(effectiveConfig.compress.autoCompress),
           timeoutMs: effectiveConfig.compress.autoCompress.timeoutMs,
           modelRegistry: (ctx as any).modelRegistry,
           signal: _signal,

@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::DateTime;
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{
     de::{IgnoredAny, MapAccess, Visitor},
     Deserialize, Serialize,
@@ -37,7 +38,17 @@ const MAX_GIT_DIFF_BYTES: usize = 512 * 1024;
 const MAX_GIT_COMMIT_MESSAGE_BYTES: usize = 20 * 1024;
 const MAX_GIT_UNTRACKED_STAT_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_USER_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PACKAGE_JSON_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PACKAGE_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
+const MAX_PACKAGE_TERMINAL_INPUT_BYTES: usize = 64 * 1024;
+const MAX_PACKAGE_TERMINALS_PER_WINDOW: usize = 12;
+const MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW: usize = 6;
+const PACKAGE_TERMINAL_STOP_GRACE: Duration = Duration::from_millis(900);
+const PACKAGE_TERMINAL_STOP_TIMEOUT: Duration = Duration::from_secs(4);
 const PROJECT_TASKS_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
+const PIX_CONFIG_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/pix.json";
+const PI_TOOLS_SUITE_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json";
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -48,6 +59,35 @@ struct AcpProcessState {
     slots: Mutex<HashMap<String, ProcessSlot>>,
     next_generation: AtomicU64,
     exiting: AtomicBool,
+}
+
+#[derive(Default)]
+struct PackageTerminalState {
+    sessions: Mutex<HashMap<String, PackageTerminalSession>>,
+    next_id: AtomicU64,
+}
+
+struct PackageTerminalSession {
+    window_label: String,
+    workspace: PathBuf,
+    kind: PackageTerminalKind,
+    script: String,
+    command: String,
+    started_at_ms: u64,
+    status: PackageTerminalStatus,
+    exit_code: Option<u32>,
+    signal: Option<String>,
+    stop_requested: bool,
+    output: Vec<u8>,
+    running: Option<PackageTerminalRunning>,
+}
+
+struct PackageTerminalRunning {
+    master: Box<dyn MasterPty>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    exited: ExitSignal,
+    process_id: Option<u32>,
 }
 
 #[derive(Default)]
@@ -171,6 +211,115 @@ struct GitFileChange {
 struct GitLineStats {
     additions: Option<u64>,
     deletions: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum UserConfigKind {
+    Pix,
+    PiToolsSuite,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserConfigDocument {
+    path: String,
+    content: String,
+    exists: bool,
+    schema: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PackageManagerKind {
+    Npm,
+    Pnpm,
+    Yarn,
+    Bun,
+}
+
+impl PackageManagerKind {
+    fn executable(self) -> &'static str {
+        match self {
+            Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
+            Self::Yarn => "yarn",
+            Self::Bun => "bun",
+        }
+    }
+}
+
+struct PackageManagerLauncher {
+    executable: PathBuf,
+    prefix_args: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageScript {
+    name: String,
+    command: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageScriptsSnapshot {
+    package_path: String,
+    exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_name: Option<String>,
+    package_manager: PackageManagerKind,
+    scripts: Vec<PackageScript>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PackageTerminalStatus {
+    Running,
+    Exited,
+    Stopped,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PackageTerminalKind {
+    Script,
+    Shell,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageTerminalSnapshot {
+    id: String,
+    kind: PackageTerminalKind,
+    script: String,
+    command: String,
+    status: PackageTerminalStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signal: Option<String>,
+    output_base64: String,
+    started_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageTerminalOutputEvent {
+    terminal_id: String,
+    data_base64: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageTerminalExitEvent {
+    terminal_id: String,
+    status: PackageTerminalStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signal: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -608,6 +757,17 @@ async fn read_project_file(workspace: String, path: String) -> Result<ProjectFil
 }
 
 #[tauri::command]
+async fn project_file_exists(workspace: String, path: String) -> Result<bool, String> {
+    run_blocking(move || {
+        Ok(project_file_exists_from(
+            Path::new(&workspace),
+            Path::new(&path),
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
 async fn list_project_directory(
     workspace: String,
     path: Option<String>,
@@ -703,6 +863,156 @@ async fn read_home_file(app: AppHandle, path: String) -> Result<ProjectFilePrevi
         read_home_file_from(&home, Path::new(&path), MAX_PROJECT_FILE_PREVIEW_BYTES)
     })
     .await
+}
+
+#[tauri::command]
+async fn home_file_exists(app: AppHandle, path: String) -> Result<bool, String> {
+    run_blocking(move || {
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+        Ok(home_file_exists_from(&home, Path::new(&path)))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_user_config(app: AppHandle, kind: UserConfigKind) -> Result<UserConfigDocument, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    run_blocking(move || read_user_config_from(&home, kind)).await
+}
+
+#[tauri::command]
+async fn write_user_config(
+    app: AppHandle,
+    kind: UserConfigKind,
+    content: String,
+) -> Result<UserConfigDocument, String> {
+    if content.len() as u64 > MAX_USER_CONFIG_BYTES {
+        return Err(format!(
+            "config is too large to save (maximum {} MB)",
+            MAX_USER_CONFIG_BYTES / (1024 * 1024)
+        ));
+    }
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    run_blocking(move || write_user_config_from(&home, kind, &content)).await
+}
+
+#[tauri::command]
+async fn package_scripts(workspace: String) -> Result<PackageScriptsSnapshot, String> {
+    run_blocking(move || package_scripts_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn package_terminal_list(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+) -> Result<Vec<PackageTerminalSnapshot>, String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&workspace))?;
+        package_terminal_snapshots(&app, &window_label, &root)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn package_terminal_start(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+    script: String,
+    cols: u16,
+    rows: u16,
+) -> Result<PackageTerminalSnapshot, String> {
+    run_blocking(move || {
+        start_package_terminal(app, window_label, PathBuf::from(workspace), script, cols, rows)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn package_terminal_start_shell(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+    cols: u16,
+    rows: u16,
+) -> Result<PackageTerminalSnapshot, String> {
+    run_blocking(move || {
+        start_shell_terminal(app, window_label, PathBuf::from(workspace), cols, rows)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn package_terminal_write(
+    app: AppHandle,
+    window_label: String,
+    terminal_id: String,
+    data: String,
+) -> Result<(), String> {
+    if data.len() > MAX_PACKAGE_TERMINAL_INPUT_BYTES {
+        return Err(format!(
+            "terminal input is too large (maximum {} KB per write)",
+            MAX_PACKAGE_TERMINAL_INPUT_BYTES / 1024
+        ));
+    }
+    run_blocking(move || write_package_terminal(&app, &window_label, &terminal_id, data.as_bytes())).await
+}
+
+#[tauri::command]
+async fn package_terminal_resize(
+    app: AppHandle,
+    window_label: String,
+    terminal_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    run_blocking(move || resize_package_terminal(&app, &window_label, &terminal_id, cols, rows)).await
+}
+
+#[tauri::command]
+async fn package_terminal_stop(
+    app: AppHandle,
+    window_label: String,
+    terminal_id: String,
+) -> Result<(), String> {
+    run_blocking(move || stop_package_terminal(&app, &window_label, &terminal_id, false)).await
+}
+
+#[tauri::command]
+async fn package_terminal_forget(
+    app: AppHandle,
+    window_label: String,
+    terminal_id: String,
+) -> Result<(), String> {
+    run_blocking(move || forget_package_terminal(&app, &window_label, &terminal_id)).await
+}
+
+#[tauri::command]
+async fn package_terminal_stop_workspace(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+) -> Result<(), String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&workspace))?;
+        stop_package_terminals_for_workspace(&app, &window_label, &root, true)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn local_file_exists(path: String) -> Result<bool, String> {
+    run_blocking(move || Ok(resolve_local_file_path(Path::new(&path)).is_ok())).await
 }
 
 #[tauri::command]
@@ -1942,6 +2252,993 @@ fn resolve_home_file_path(home: &Path, home_path: &Path) -> Result<(PathBuf, Pat
     Ok((root, file_path))
 }
 
+fn home_file_exists_from(home: &Path, home_path: &Path) -> bool {
+    resolve_home_file_path(home, home_path).is_ok()
+}
+
+fn user_config_path(home: &Path, kind: UserConfigKind) -> PathBuf {
+    let file_name = match kind {
+        UserConfigKind::Pix => "pix.jsonc",
+        UserConfigKind::PiToolsSuite => "pi-tools-suite.jsonc",
+    };
+    home.join(".config").join("pi").join(file_name)
+}
+
+fn user_config_schema(kind: UserConfigKind) -> &'static str {
+    match kind {
+        UserConfigKind::Pix => include_str!("../../../schemas/pix.json"),
+        UserConfigKind::PiToolsSuite => include_str!("../../../schemas/pi-tools-suite.json"),
+    }
+}
+
+fn user_config_schema_url(kind: UserConfigKind) -> &'static str {
+    match kind {
+        UserConfigKind::Pix => PIX_CONFIG_SCHEMA_URL,
+        UserConfigKind::PiToolsSuite => PI_TOOLS_SUITE_SCHEMA_URL,
+    }
+}
+
+fn empty_user_config(kind: UserConfigKind) -> String {
+    format!("{{\n  \"$schema\": \"{}\"\n}}\n", user_config_schema_url(kind))
+}
+
+fn read_user_config_from(home: &Path, kind: UserConfigKind) -> Result<UserConfigDocument, String> {
+    let path = user_config_path(home, kind);
+    let exists = path.exists();
+    let content = if exists {
+        let metadata = fs::metadata(&path)
+            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+        if !metadata.is_file() {
+            return Err(format!("{} is not a file", path.display()));
+        }
+        if metadata.len() > MAX_USER_CONFIG_BYTES {
+            return Err(format!(
+                "{} is too large to edit (maximum {} MB)",
+                path.display(),
+                MAX_USER_CONFIG_BYTES / (1024 * 1024)
+            ));
+        }
+        fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+    } else {
+        empty_user_config(kind)
+    };
+
+    Ok(UserConfigDocument {
+        path: path.to_string_lossy().into_owned(),
+        content,
+        exists,
+        schema: user_config_schema(kind).to_owned(),
+    })
+}
+
+fn write_user_config_from(
+    home: &Path,
+    kind: UserConfigKind,
+    content: &str,
+) -> Result<UserConfigDocument, String> {
+    if content.len() as u64 > MAX_USER_CONFIG_BYTES {
+        return Err(format!(
+            "config is too large to save (maximum {} MB)",
+            MAX_USER_CONFIG_BYTES / (1024 * 1024)
+        ));
+    }
+    let path = user_config_path(home, kind);
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    if path.exists() {
+        let metadata = fs::metadata(&path)
+            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+        if !metadata.is_file() {
+            return Err(format!("{} is not a file", path.display()));
+        }
+    }
+    let normalized = if content.ends_with('\n') {
+        content.to_owned()
+    } else {
+        format!("{content}\n")
+    };
+    fs::write(&path, normalized)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    read_user_config_from(home, kind)
+}
+
+fn package_scripts_from(workspace: &Path) -> Result<PackageScriptsSnapshot, String> {
+    let root = canonical_workspace(workspace)?;
+    let requested = root.join("package.json");
+    if !requested.exists() {
+        return Ok(PackageScriptsSnapshot {
+            package_path: requested.to_string_lossy().into_owned(),
+            exists: false,
+            package_name: None,
+            package_manager: detect_package_manager(&root, None),
+            scripts: Vec::new(),
+        });
+    }
+    let package_path = fs::canonicalize(&requested)
+        .map_err(|error| format!("failed to resolve {}: {error}", requested.display()))?;
+    if !package_path.starts_with(&root) {
+        return Err("package.json resolves outside the workspace".to_owned());
+    }
+    let metadata = fs::metadata(&package_path)
+        .map_err(|error| format!("failed to inspect {}: {error}", package_path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", package_path.display()));
+    }
+    if metadata.len() > MAX_PACKAGE_JSON_BYTES {
+        return Err(format!(
+            "package.json is too large to inspect (maximum {} MB)",
+            MAX_PACKAGE_JSON_BYTES / (1024 * 1024)
+        ));
+    }
+    let source = fs::read_to_string(&package_path)
+        .map_err(|error| format!("failed to read {}: {error}", package_path.display()))?;
+    let parsed: serde_json::Value = serde_json::from_str(&source)
+        .map_err(|error| format!("package.json is invalid JSON: {error}"))?;
+    let root_object = parsed
+        .as_object()
+        .ok_or_else(|| "package.json root must be an object".to_owned())?;
+    let package_name = root_object
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let mut scripts = root_object
+        .get("scripts")
+        .and_then(serde_json::Value::as_object)
+        .map(|scripts| {
+            scripts
+                .iter()
+                .filter_map(|(name, value)| {
+                    value.as_str().map(|command| PackageScript {
+                        name: name.clone(),
+                        command: command.to_owned(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    scripts.sort_by(|left, right| left.name.cmp(&right.name));
+    let package_manager = detect_package_manager(&root, root_object.get("packageManager"));
+    Ok(PackageScriptsSnapshot {
+        package_path: package_path.to_string_lossy().into_owned(),
+        exists: true,
+        package_name,
+        package_manager,
+        scripts,
+    })
+}
+
+fn detect_package_manager(root: &Path, configured: Option<&serde_json::Value>) -> PackageManagerKind {
+    if let Some(value) = configured.and_then(serde_json::Value::as_str) {
+        let normalized = value.trim().to_ascii_lowercase();
+        if normalized == "pnpm" || normalized.starts_with("pnpm@") {
+            return PackageManagerKind::Pnpm;
+        }
+        if normalized == "yarn" || normalized.starts_with("yarn@") {
+            return PackageManagerKind::Yarn;
+        }
+        if normalized == "bun" || normalized.starts_with("bun@") {
+            return PackageManagerKind::Bun;
+        }
+        if normalized == "npm" || normalized.starts_with("npm@") {
+            return PackageManagerKind::Npm;
+        }
+    }
+    if root.join("pnpm-lock.yaml").is_file() {
+        PackageManagerKind::Pnpm
+    } else if root.join("yarn.lock").is_file() {
+        PackageManagerKind::Yarn
+    } else if root.join("bun.lock").is_file() || root.join("bun.lockb").is_file() {
+        PackageManagerKind::Bun
+    } else {
+        PackageManagerKind::Npm
+    }
+}
+
+fn package_terminal_snapshots(
+    app: &AppHandle,
+    window_label: &str,
+    workspace: &Path,
+) -> Result<Vec<PackageTerminalSnapshot>, String> {
+    let state = app.state::<PackageTerminalState>();
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "package terminal state is poisoned".to_owned())?;
+    let mut snapshots = sessions
+        .iter()
+        .filter(|(_, session)| session.window_label == window_label && session.workspace == workspace)
+        .map(|(id, session)| package_terminal_snapshot(id, session))
+        .collect::<Vec<_>>();
+    snapshots.sort_by_key(|snapshot| snapshot.started_at_ms);
+    Ok(snapshots)
+}
+
+fn package_terminal_snapshot(id: &str, session: &PackageTerminalSession) -> PackageTerminalSnapshot {
+    PackageTerminalSnapshot {
+        id: id.to_owned(),
+        kind: session.kind,
+        script: session.script.clone(),
+        command: session.command.clone(),
+        status: session.status,
+        exit_code: session.exit_code,
+        signal: session.signal.clone(),
+        output_base64: BASE64.encode(&session.output),
+        started_at_ms: session.started_at_ms,
+    }
+}
+
+fn start_package_terminal(
+    app: AppHandle,
+    window_label: String,
+    workspace: PathBuf,
+    script: String,
+    cols: u16,
+    rows: u16,
+) -> Result<PackageTerminalSnapshot, String> {
+    let root = canonical_workspace(&workspace)?;
+    let package = package_scripts_from(&root)?;
+    package
+        .scripts
+        .iter()
+        .find(|candidate| candidate.name == script)
+        .ok_or_else(|| format!("package.json has no script named {script:?}"))?;
+    let launcher = resolve_package_manager_launcher(package.package_manager)?;
+    let mut command = package_command_builder(&launcher, package.package_manager, &script)?;
+    if let Some(path) = package_process_path(&launcher.executable) {
+        command.env("PATH", path);
+    }
+    let command_label = package_manager_command_label(package.package_manager, &script);
+    spawn_package_terminal(
+        app,
+        window_label,
+        root,
+        PackageTerminalKind::Script,
+        script,
+        command_label,
+        command,
+        cols,
+        rows,
+    )
+}
+
+fn start_shell_terminal(
+    app: AppHandle,
+    window_label: String,
+    workspace: PathBuf,
+    cols: u16,
+    rows: u16,
+) -> Result<PackageTerminalSnapshot, String> {
+    let root = canonical_workspace(&workspace)?;
+    let (mut command, label, command_label) = shell_terminal_command()?;
+    if let Some(path) = login_shell_path().or_else(|| env::var_os("PATH")) {
+        command.env("PATH", path);
+    }
+    spawn_package_terminal(
+        app,
+        window_label,
+        root,
+        PackageTerminalKind::Shell,
+        label,
+        command_label,
+        command,
+        cols,
+        rows,
+    )
+}
+
+fn spawn_package_terminal(
+    app: AppHandle,
+    window_label: String,
+    root: PathBuf,
+    kind: PackageTerminalKind,
+    label: String,
+    command_label: String,
+    mut command: CommandBuilder,
+    cols: u16,
+    rows: u16,
+) -> Result<PackageTerminalSnapshot, String> {
+    let size = validated_terminal_size(cols, rows)?;
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(size)
+        .map_err(|error| format!("failed to create terminal: {error}"))?;
+    command.cwd(&root);
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("TERM_PROGRAM", "Pix");
+    let child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| format!("failed to start {command_label}: {error}"))?;
+    let process_id = child.process_id();
+    let killer = Arc::new(Mutex::new(child.clone_killer()));
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| format!("failed to read package terminal: {error}"))?;
+    let writer = Arc::new(Mutex::new(
+        pair.master
+            .take_writer()
+            .map_err(|error| format!("failed to open package terminal input: {error}"))?,
+    ));
+    let exited = Arc::new((Mutex::new(false), Condvar::new()));
+    let started_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64;
+    let state = app.state::<PackageTerminalState>();
+    let id = format!(
+        "pkg-terminal-{}",
+        state.next_id.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
+    );
+    {
+        let mut sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "package terminal state is poisoned".to_owned())?;
+        prune_package_terminal_history(&mut sessions, &window_label);
+        let running_count = sessions
+            .values()
+            .filter(|session| session.window_label == window_label && session.running.is_some())
+            .count();
+        if running_count >= MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW {
+            let mut child = child;
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "at most {MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW} package terminals may run at once"
+            ));
+        }
+        sessions.insert(
+            id.clone(),
+            PackageTerminalSession {
+                window_label: window_label.clone(),
+                workspace: root.clone(),
+                kind,
+                script: label,
+                command: command_label.clone(),
+                started_at_ms,
+                status: PackageTerminalStatus::Running,
+                exit_code: None,
+                signal: None,
+                stop_requested: false,
+                output: Vec::new(),
+                running: Some(PackageTerminalRunning {
+                    master: pair.master,
+                    writer: writer.clone(),
+                    killer: killer.clone(),
+                    exited: exited.clone(),
+                    process_id,
+                }),
+            },
+        );
+    }
+
+    let output_app = app.clone();
+    let output_id = id.clone();
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => append_package_terminal_output(&output_app, &output_id, &buffer[..read]),
+                Err(_) => break,
+            }
+        }
+    });
+
+    let supervisor_app = app.clone();
+    let supervisor_id = id.clone();
+    thread::spawn(move || supervise_package_terminal(supervisor_app, supervisor_id, child, exited));
+
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "package terminal state is poisoned".to_owned())?;
+    sessions
+        .get(&id)
+        .map(|session| package_terminal_snapshot(&id, session))
+        .ok_or_else(|| "package terminal disappeared during startup".to_owned())
+}
+
+#[cfg(unix)]
+fn shell_terminal_command() -> Result<(CommandBuilder, String, String), String> {
+    let executable = env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_file())
+        .unwrap_or_else(|| PathBuf::from("/bin/sh"));
+    let label = executable
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("shell")
+        .to_owned();
+    let command_label = executable.to_string_lossy().into_owned();
+    Ok((CommandBuilder::new(executable), label, command_label))
+}
+
+#[cfg(windows)]
+fn shell_terminal_command() -> Result<(CommandBuilder, String, String), String> {
+    let executable = env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into());
+    let path = PathBuf::from(&executable);
+    let label = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("cmd")
+        .to_owned();
+    let command_label = path.to_string_lossy().into_owned();
+    Ok((CommandBuilder::new(executable), label, command_label))
+}
+
+fn package_manager_command_label(manager: PackageManagerKind, script: &str) -> String {
+    format!("{} run {}", manager.executable(), script)
+}
+
+#[cfg(not(windows))]
+fn package_command_builder(
+    launcher: &PackageManagerLauncher,
+    _manager: PackageManagerKind,
+    script: &str,
+) -> Result<CommandBuilder, String> {
+    let mut command = CommandBuilder::new(&launcher.executable);
+    command.args(&launcher.prefix_args);
+    command.arg("run");
+    command.arg(script);
+    Ok(command)
+}
+
+#[cfg(windows)]
+fn package_command_builder(
+    launcher: &PackageManagerLauncher,
+    _manager: PackageManagerKind,
+    script: &str,
+) -> Result<CommandBuilder, String> {
+    if !script
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "-_.:@/".contains(character))
+    {
+        return Err("this package script name contains characters that cannot be launched safely on Windows".to_owned());
+    }
+    let executable = launcher.executable.to_string_lossy();
+    if executable.contains('"') || executable.contains('%') {
+        return Err("package manager path cannot be launched safely by cmd.exe".to_owned());
+    }
+    let prefix = if launcher.prefix_args.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", launcher.prefix_args.join(" "))
+    };
+    let command_line = format!("\"{}\"{} run {}", executable, prefix, script);
+    let shell = env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into());
+    let mut command = CommandBuilder::new(shell);
+    command.arg("/D");
+    command.arg("/S");
+    command.arg("/C");
+    command.arg(command_line);
+    Ok(command)
+}
+
+fn validated_terminal_size(cols: u16, rows: u16) -> Result<PtySize, String> {
+    if !(2..=500).contains(&cols) || !(1..=300).contains(&rows) {
+        return Err("terminal size is outside the supported range".to_owned());
+    }
+    Ok(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    })
+}
+
+fn resolve_package_manager_launcher(manager: PackageManagerKind) -> Result<PackageManagerLauncher, String> {
+    let name = manager.executable();
+    if let Some(executable) = resolve_named_executable(name) {
+        return Ok(PackageManagerLauncher {
+            executable,
+            prefix_args: Vec::new(),
+        });
+    }
+
+    if matches!(manager, PackageManagerKind::Pnpm | PackageManagerKind::Yarn) {
+        if let Some(executable) = resolve_named_executable("corepack") {
+            return Ok(PackageManagerLauncher {
+                executable,
+                prefix_args: vec![name.to_owned()],
+            });
+        }
+    }
+
+    Err(format!(
+        "could not find {name} in the Desktop environment; install it or make it available in your login shell PATH"
+    ))
+}
+
+fn resolve_named_executable(name: &str) -> Option<PathBuf> {
+    if let Some(path) = executable_in_current_path(name) {
+        return Some(path);
+    }
+
+    #[cfg(unix)]
+    {
+        let shell = env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+        let lookup = format!("command -v {name}");
+        if let Ok(output) = Command::new(shell).args(["-lc", &lookup]).output() {
+            if output.status.success() {
+                if let Some(line) = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                {
+                    let path = PathBuf::from(line);
+                    if path.is_absolute() && path.is_file() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        for candidate in [format!("{name}.cmd"), format!("{name}.exe"), name.to_owned()] {
+            if let Ok(output) = Command::new("where.exe").arg(&candidate).output() {
+                if !output.status.success() {
+                    continue;
+                }
+                if let Some(line) = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                {
+                    let path = PathBuf::from(line);
+                    if path.is_file() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn executable_in_current_path(name: &str) -> Option<PathBuf> {
+    let paths = env::var_os("PATH")?;
+    for directory in env::split_paths(&paths) {
+        #[cfg(windows)]
+        let candidates = [
+            directory.join(format!("{name}.cmd")),
+            directory.join(format!("{name}.exe")),
+            directory.join(name),
+        ];
+        #[cfg(not(windows))]
+        let candidates = [directory.join(name)];
+        for candidate in candidates {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn package_process_path(executable: &Path) -> Option<std::ffi::OsString> {
+    let parent = executable.parent()?;
+    let mut paths = vec![parent.to_path_buf()];
+    let inherited_path = login_shell_path().or_else(|| env::var_os("PATH"));
+    if let Some(existing) = inherited_path {
+        paths.extend(env::split_paths(&existing));
+    }
+    env::join_paths(paths).ok()
+}
+
+#[cfg(unix)]
+fn login_shell_path() -> Option<std::ffi::OsString> {
+    let shell = env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+    let output = Command::new(shell)
+        .args(["-lc", "printf '%s\\n' \"$PATH\""])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .rev()
+        .find(|line| !line.is_empty())
+        .map(std::ffi::OsString::from)
+}
+
+#[cfg(not(unix))]
+fn login_shell_path() -> Option<std::ffi::OsString> {
+    None
+}
+
+fn prune_package_terminal_history(
+    sessions: &mut HashMap<String, PackageTerminalSession>,
+    window_label: &str,
+) {
+    let count = sessions
+        .values()
+        .filter(|session| session.window_label == window_label)
+        .count();
+    if count < MAX_PACKAGE_TERMINALS_PER_WINDOW {
+        return;
+    }
+    let mut completed = sessions
+        .iter()
+        .filter(|(_, session)| session.window_label == window_label && session.running.is_none())
+        .map(|(id, session)| (id.clone(), session.started_at_ms))
+        .collect::<Vec<_>>();
+    completed.sort_by_key(|(_, started_at_ms)| *started_at_ms);
+    let remove_count = count - MAX_PACKAGE_TERMINALS_PER_WINDOW + 1;
+    for (id, _) in completed.into_iter().take(remove_count) {
+        sessions.remove(&id);
+    }
+}
+
+fn append_package_terminal_output(app: &AppHandle, terminal_id: &str, data: &[u8]) {
+    let state = app.state::<PackageTerminalState>();
+    let window_label = {
+        let Ok(mut sessions) = state.sessions.lock() else {
+            return;
+        };
+        let Some(session) = sessions.get_mut(terminal_id) else {
+            return;
+        };
+        if data.len() >= MAX_PACKAGE_TERMINAL_OUTPUT_BYTES {
+            session.output.clear();
+            session.output.extend_from_slice(&data[data.len() - MAX_PACKAGE_TERMINAL_OUTPUT_BYTES..]);
+        } else {
+            let overflow = session
+                .output
+                .len()
+                .saturating_add(data.len())
+                .saturating_sub(MAX_PACKAGE_TERMINAL_OUTPUT_BYTES);
+            if overflow > 0 {
+                session.output.drain(..overflow.min(session.output.len()));
+            }
+            session.output.extend_from_slice(data);
+        }
+        session.window_label.clone()
+    };
+    let _ = app.emit_to(
+        &window_label,
+        "package-terminal://output",
+        PackageTerminalOutputEvent {
+            terminal_id: terminal_id.to_owned(),
+            data_base64: BASE64.encode(data),
+        },
+    );
+}
+
+fn supervise_package_terminal(
+    app: AppHandle,
+    terminal_id: String,
+    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    exited: ExitSignal,
+) {
+    let result = child.wait();
+    let (window_label, status, exit_code, signal) = {
+        let state = app.state::<PackageTerminalState>();
+        let Ok(mut sessions) = state.sessions.lock() else {
+            signal_exit(&exited);
+            return;
+        };
+        let Some(session) = sessions.get_mut(&terminal_id) else {
+            signal_exit(&exited);
+            return;
+        };
+        let (status, exit_code, signal) = match result {
+            Ok(exit) => (
+                if session.stop_requested {
+                    PackageTerminalStatus::Stopped
+                } else {
+                    PackageTerminalStatus::Exited
+                },
+                Some(exit.exit_code()),
+                exit.signal().map(str::to_owned),
+            ),
+            Err(error) => {
+                append_terminal_error_line(&mut session.output, &format!("terminal wait failed: {error}"));
+                (PackageTerminalStatus::Failed, None, None)
+            }
+        };
+        session.status = status;
+        session.exit_code = exit_code;
+        session.signal = signal.clone();
+        session.running = None;
+        (session.window_label.clone(), status, exit_code, signal)
+    };
+    let _ = app.emit_to(
+        &window_label,
+        "package-terminal://exit",
+        PackageTerminalExitEvent {
+            terminal_id,
+            status,
+            exit_code,
+            signal,
+        },
+    );
+    signal_exit(&exited);
+}
+
+fn signal_exit(exited: &ExitSignal) {
+    let (lock, wake) = &**exited;
+    if let Ok(mut done) = lock.lock() {
+        *done = true;
+        wake.notify_all();
+    }
+}
+
+fn append_terminal_error_line(output: &mut Vec<u8>, message: &str) {
+    let line = format!("\r\n[pix] {message}\r\n");
+    let overflow = output
+        .len()
+        .saturating_add(line.len())
+        .saturating_sub(MAX_PACKAGE_TERMINAL_OUTPUT_BYTES);
+    if overflow > 0 {
+        output.drain(..overflow.min(output.len()));
+    }
+    output.extend_from_slice(line.as_bytes());
+}
+
+fn write_package_terminal(
+    app: &AppHandle,
+    window_label: &str,
+    terminal_id: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    let writer = {
+        let state = app.state::<PackageTerminalState>();
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "package terminal state is poisoned".to_owned())?;
+        let session = package_terminal_for_window(&sessions, window_label, terminal_id)?;
+        let running = session
+            .running
+            .as_ref()
+            .ok_or_else(|| "package terminal is not running".to_owned())?;
+        running.writer.clone()
+    };
+    let mut writer = writer
+        .lock()
+        .map_err(|_| "package terminal input is poisoned".to_owned())?;
+    writer
+        .write_all(data)
+        .and_then(|()| writer.flush())
+        .map_err(|error| format!("failed to write package terminal input: {error}"))
+}
+
+fn resize_package_terminal(
+    app: &AppHandle,
+    window_label: &str,
+    terminal_id: &str,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let size = validated_terminal_size(cols, rows)?;
+    let state = app.state::<PackageTerminalState>();
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "package terminal state is poisoned".to_owned())?;
+    let session = package_terminal_for_window(&sessions, window_label, terminal_id)?;
+    let running = session
+        .running
+        .as_ref()
+        .ok_or_else(|| "package terminal is not running".to_owned())?;
+    running
+        .master
+        .resize(size)
+        .map_err(|error| format!("failed to resize package terminal: {error}"))
+}
+
+fn package_terminal_for_window<'a>(
+    sessions: &'a HashMap<String, PackageTerminalSession>,
+    window_label: &str,
+    terminal_id: &str,
+) -> Result<&'a PackageTerminalSession, String> {
+    let session = sessions
+        .get(terminal_id)
+        .ok_or_else(|| "package terminal no longer exists".to_owned())?;
+    if session.window_label != window_label {
+        return Err("package terminal belongs to another window".to_owned());
+    }
+    Ok(session)
+}
+
+fn stop_package_terminal(
+    app: &AppHandle,
+    window_label: &str,
+    terminal_id: &str,
+    force: bool,
+) -> Result<(), String> {
+    let (writer, killer, exited, process_id, process_group_leader) = {
+        let state = app.state::<PackageTerminalState>();
+        let mut sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "package terminal state is poisoned".to_owned())?;
+        let session = sessions
+            .get_mut(terminal_id)
+            .ok_or_else(|| "package terminal no longer exists".to_owned())?;
+        if session.window_label != window_label {
+            return Err("package terminal belongs to another window".to_owned());
+        }
+        let Some(running) = session.running.as_ref() else {
+            return Ok(());
+        };
+        session.stop_requested = true;
+        #[cfg(unix)]
+        let process_group_leader = running.master.process_group_leader();
+        #[cfg(not(unix))]
+        let process_group_leader: Option<i32> = None;
+        (
+            running.writer.clone(),
+            running.killer.clone(),
+            running.exited.clone(),
+            running.process_id,
+            process_group_leader,
+        )
+    };
+
+    if !force {
+        if let Ok(mut writer) = writer.lock() {
+            let _ = writer.write_all(b"\x03");
+            let _ = writer.flush();
+        }
+        if wait_for_exit(&exited, PACKAGE_TERMINAL_STOP_GRACE)? {
+            return Ok(());
+        }
+    }
+    force_kill_package_terminal(process_group_leader, process_id, &killer);
+    if wait_for_exit(&exited, PACKAGE_TERMINAL_STOP_TIMEOUT)? {
+        Ok(())
+    } else {
+        Err("timed out waiting for package terminal to stop".to_owned())
+    }
+}
+
+fn force_kill_package_terminal(
+    process_group_leader: Option<i32>,
+    process_id: Option<u32>,
+    killer: &Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+) {
+    #[cfg(unix)]
+    if let Some(process_group_leader) = process_group_leader.filter(|pid| *pid > 0) {
+        // The package manager and its normal descendants share the PTY's
+        // foreground process group. Kill the whole group after Ctrl+C grace so
+        // a dev server child cannot survive a Stop/workspace/window teardown.
+        unsafe {
+            libc::kill(-process_group_leader, libc::SIGKILL);
+        }
+    }
+
+    #[cfg(windows)]
+    if let Some(process_id) = process_id {
+        // portable-pty terminates only the immediate process on Windows.
+        // taskkill /T covers the script's process tree before the handle-level
+        // fallback below.
+        let _ = Command::new("taskkill.exe")
+            .args(["/PID", &process_id.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    #[cfg(not(windows))]
+    let _ = process_id;
+    #[cfg(not(unix))]
+    let _ = process_group_leader;
+
+    if let Ok(mut killer) = killer.lock() {
+        let _ = killer.kill();
+    }
+}
+
+fn wait_for_exit(exited: &ExitSignal, timeout: Duration) -> Result<bool, String> {
+    let (lock, wake) = &**exited;
+    let done = lock
+        .lock()
+        .map_err(|_| "package terminal exit signal is poisoned".to_owned())?;
+    if *done {
+        return Ok(true);
+    }
+    let (done, timeout) = wake
+        .wait_timeout_while(done, timeout, |done| !*done)
+        .map_err(|_| "package terminal exit signal is poisoned".to_owned())?;
+    Ok(*done || !timeout.timed_out())
+}
+
+fn forget_package_terminal(app: &AppHandle, window_label: &str, terminal_id: &str) -> Result<(), String> {
+    let state = app.state::<PackageTerminalState>();
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "package terminal state is poisoned".to_owned())?;
+    let session = package_terminal_for_window(&sessions, window_label, terminal_id)?;
+    if session.running.is_some() {
+        return Err("stop the package terminal before closing it".to_owned());
+    }
+    sessions.remove(terminal_id);
+    Ok(())
+}
+
+fn stop_package_terminals_for_workspace(
+    app: &AppHandle,
+    window_label: &str,
+    workspace: &Path,
+    force: bool,
+) -> Result<(), String> {
+    let ids = {
+        let state = app.state::<PackageTerminalState>();
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "package terminal state is poisoned".to_owned())?;
+        sessions
+            .iter()
+            .filter(|(_, session)| {
+                session.window_label == window_label && session.workspace == workspace && session.running.is_some()
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    };
+    for id in ids {
+        stop_package_terminal(app, window_label, &id, force)?;
+    }
+    Ok(())
+}
+
+fn stop_package_terminals_for_window(app: &AppHandle, window_label: &str) {
+    let ids = {
+        let state = app.state::<PackageTerminalState>();
+        let Ok(sessions) = state.sessions.lock() else {
+            return;
+        };
+        sessions
+            .iter()
+            .filter(|(_, session)| session.window_label == window_label && session.running.is_some())
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    };
+    for id in ids {
+        let _ = stop_package_terminal(app, window_label, &id, true);
+    }
+    if let Ok(mut sessions) = app.state::<PackageTerminalState>().sessions.lock() {
+        sessions.retain(|_, session| session.window_label != window_label);
+    }
+}
+
+fn stop_all_package_terminals(app: &AppHandle) {
+    let window_labels = {
+        let state = app.state::<PackageTerminalState>();
+        let Ok(sessions) = state.sessions.lock() else {
+            return;
+        };
+        sessions
+            .values()
+            .map(|session| session.window_label.clone())
+            .collect::<HashSet<_>>()
+    };
+    for window_label in window_labels {
+        stop_package_terminals_for_window(app, &window_label);
+    }
+}
+
 fn resolve_project_file_path(
     workspace: &Path,
     relative_path: &Path,
@@ -1984,6 +3281,10 @@ fn resolve_project_file_path(
         return Err(format!("{} is not a file", relative_path.display()));
     }
     Ok((root, file_path))
+}
+
+fn project_file_exists_from(workspace: &Path, relative_path: &Path) -> bool {
+    resolve_project_file_path(workspace, relative_path).is_ok()
 }
 
 fn is_supported_project_media(path: &Path) -> bool {
@@ -2864,6 +4165,7 @@ fn exit_payload(
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(AcpProcessState::default())
+        .manage(PackageTerminalState::default())
         .setup(|app| {
             app.manage(AttachmentPathState::new(app.handle()));
             Ok(())
@@ -2886,6 +4188,7 @@ pub fn run() {
             open_attachment,
             open_local_file,
             read_project_file,
+            project_file_exists,
             list_project_directory,
             open_in_external_editor,
             git_status,
@@ -2899,6 +4202,19 @@ pub fn run() {
             list_project_documents,
             write_project_markdown,
             read_home_file,
+            home_file_exists,
+            read_user_config,
+            write_user_config,
+            package_scripts,
+            package_terminal_list,
+            package_terminal_start,
+            package_terminal_start_shell,
+            package_terminal_write,
+            package_terminal_resize,
+            package_terminal_stop,
+            package_terminal_forget,
+            package_terminal_stop_workspace,
+            local_file_exists,
             resolve_project_media,
             resolve_home_media,
             resolve_local_media,
@@ -2922,6 +4238,7 @@ pub fn run() {
                     eprintln!("failed to stop pix-acp for closed window {window_label}: {error}");
                 }
                 remove_process_slot(&state, &window_label);
+                stop_package_terminals_for_window(&handle, &window_label);
             });
         }
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
@@ -2942,7 +4259,9 @@ pub fn run() {
                                 "failed to stop pix-acp for window {window_label} during exit: {error}"
                             );
                         }
+                        stop_package_terminals_for_window(&handle, &window_label);
                     }
+                    stop_all_package_terminals(&handle);
                     handle.exit(code.unwrap_or(0));
                 });
             }
@@ -3004,6 +4323,85 @@ mod tests {
 
         assert_eq!(preview.path, "src/main.ts");
         assert_eq!(preview.content, "const ready = true;\n");
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn discovers_root_package_scripts_and_package_manager() {
+        let workspace = temporary_workspace("package-scripts");
+        fs::write(
+            workspace.join("package.json"),
+            r#"{
+  "name": "demo-package",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "vite"
+  }
+}
+"#,
+        )
+        .expect("write package.json");
+
+        let snapshot = package_scripts_from(&workspace).expect("discover package scripts");
+        assert!(snapshot.exists);
+        assert_eq!(snapshot.package_name.as_deref(), Some("demo-package"));
+        assert_eq!(snapshot.package_manager, PackageManagerKind::Pnpm);
+        assert_eq!(
+            snapshot.scripts,
+            vec![
+                PackageScript {
+                    name: "dev".to_owned(),
+                    command: "vite".to_owned(),
+                },
+                PackageScript {
+                    name: "test".to_owned(),
+                    command: "vitest run".to_owned(),
+                },
+            ]
+        );
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn package_script_discovery_handles_missing_package_and_lockfile_manager() {
+        let workspace = temporary_workspace("package-scripts-missing");
+        fs::write(workspace.join("yarn.lock"), "# lock\n").expect("write yarn lockfile");
+
+        let missing = package_scripts_from(&workspace).expect("discover missing package.json");
+        assert!(!missing.exists);
+        assert_eq!(missing.package_manager, PackageManagerKind::Yarn);
+        assert!(missing.scripts.is_empty());
+
+        fs::write(workspace.join("package.json"), "[]\n").expect("write invalid package root");
+        assert!(package_scripts_from(&workspace).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn validates_package_terminal_dimensions() {
+        assert_eq!(validated_terminal_size(120, 30).expect("valid terminal").cols, 120);
+        assert!(validated_terminal_size(1, 30).is_err());
+        assert!(validated_terminal_size(120, 0).is_err());
+    }
+
+    #[test]
+    fn builds_interactive_shell_terminal_command() {
+        let (command, label, command_label) = shell_terminal_command().expect("build shell terminal");
+        assert!(!label.trim().is_empty());
+        assert!(!command_label.trim().is_empty());
+        assert_eq!(command.get_argv().len(), 1);
+    }
+
+    #[test]
+    fn validates_project_file_links_without_reading_file_contents() {
+        let workspace = temporary_workspace("project-link-validation");
+        fs::create_dir(workspace.join("docs")).expect("create docs directory");
+        fs::write(workspace.join("docs/guide.md"), [0xff, 0xfe]).expect("write binary contents");
+
+        assert!(project_file_exists_from(&workspace, Path::new("docs/guide.md")));
+        assert!(!project_file_exists_from(&workspace, Path::new("evals.md")));
+        assert!(!project_file_exists_from(&workspace, Path::new("../guide.md")));
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
@@ -3322,6 +4720,50 @@ mod tests {
         assert_eq!(preview.content, "{\n  // Pix config\n}\n");
         assert!(read_home_file_from(&home, Path::new("~/../secret.txt"), 1024).is_err());
         assert!(read_home_file_from(&home, Path::new(".config/pi/pix.jsonc"), 1024).is_err());
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn user_settings_configs_resolve_under_the_platform_home_and_round_trip() {
+        let home = temporary_workspace("user-settings-config");
+        let pix_path = user_config_path(&home, UserConfigKind::Pix);
+        let tools_path = user_config_path(&home, UserConfigKind::PiToolsSuite);
+        assert_eq!(pix_path, home.join(".config/pi/pix.jsonc"));
+        assert_eq!(tools_path, home.join(".config/pi/pi-tools-suite.jsonc"));
+
+        let missing = read_user_config_from(&home, UserConfigKind::Pix).expect("read missing config");
+        assert!(!missing.exists);
+        assert!(missing.content.contains(PIX_CONFIG_SCHEMA_URL));
+        assert!(missing.schema.contains("ignoreContextFiles"));
+        assert!(serde_json::from_str::<serde_json::Value>(user_config_schema(UserConfigKind::Pix)).is_ok());
+        assert!(serde_json::from_str::<serde_json::Value>(user_config_schema(UserConfigKind::PiToolsSuite)).is_ok());
+
+        let saved = write_user_config_from(
+            &home,
+            UserConfigKind::Pix,
+            "{\n  // preserve JSONC\n  \"ignoreContextFiles\": true\n}",
+        )
+        .expect("write user config");
+        assert!(saved.exists);
+        assert!(saved.content.contains("// preserve JSONC"));
+        assert!(saved.content.ends_with('\n'));
+        assert_eq!(
+            fs::read_to_string(&pix_path).expect("read saved config"),
+            saved.content
+        );
+
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn validates_home_file_links_without_opening_them() {
+        let home = temporary_workspace("home-link-validation");
+        fs::create_dir_all(home.join(".config/pi")).expect("create config directory");
+        fs::write(home.join(".config/pi/pix.jsonc"), "{}\n").expect("write config");
+
+        assert!(home_file_exists_from(&home, Path::new("~/.config/pi/pix.jsonc")));
+        assert!(!home_file_exists_from(&home, Path::new("~/missing.jsonc")));
+        assert!(!home_file_exists_from(&home, Path::new("~/../secret.txt")));
         fs::remove_dir_all(home).expect("remove temporary home");
     }
 

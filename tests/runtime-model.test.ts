@@ -3,11 +3,15 @@ import { describe, it } from "node:test";
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
-import { resolvePixRuntimeInitialThinkingLevel, resolvePixRuntimeModelRef, resolveSessionModelRefFromTail } from "../src/app/runtime.js";
+import { resolvePixRuntimeInitialThinkingLevel, resolvePixRuntimeModelRef, resolvePixRuntimeModelRefs, resolveSessionModelRefFromTail } from "../src/app/runtime.js";
 import type { PixConfig } from "../src/config.js";
 
 const configWithDefault = {
-	defaultModel: { modelRef: "openai-codex/gpt-5.5", thinking: "medium" },
+	defaultModel: {
+		modelRef: "openai-codex/gpt-5.5",
+		fallbackModels: ["zai/glm-5-turbo", "antigravity/gemini-3-flash:low"],
+		thinking: "medium",
+	},
 } as PixConfig;
 
 describe("runtime model defaults", () => {
@@ -18,6 +22,16 @@ describe("runtime model defaults", () => {
 
 	it("keeps an explicit runtime model override even when resuming a session", () => {
 		assert.equal(resolvePixRuntimeModelRef({ modelRef: "zai/glm-5-turbo:low" }, fakeSessionManager(1), configWithDefault), "zai/glm-5-turbo:low");
+	});
+
+	it("builds default fallback candidates only for brand-new sessions", () => {
+		assert.deepEqual(resolvePixRuntimeModelRefs({}, fakeSessionManager(0), configWithDefault), [
+			"openai-codex/gpt-5.5:medium",
+			"zai/glm-5-turbo:medium",
+			"antigravity/gemini-3-flash:low",
+		]);
+		assert.deepEqual(resolvePixRuntimeModelRefs({}, fakeSessionManager(1), configWithDefault), ["zai/glm-5-turbo:low"]);
+		assert.deepEqual(resolvePixRuntimeModelRefs({ modelRef: "openai/gpt-5:high" }, fakeSessionManager(0), configWithDefault), ["openai/gpt-5:high"]);
 	});
 
 	it("resolves initial thinking only from explicit or resumed model refs", () => {

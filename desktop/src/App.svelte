@@ -270,7 +270,10 @@
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let transcriptContent = $state<HTMLDivElement | null>(null);
   let transcriptFollowsLatest = $state(true);
-  let promptComposer = $state<{ focus: () => Promise<void> } | null>(null);
+  let promptComposer = $state<{
+    focus: () => Promise<void>;
+    insertPaths: (paths: readonly string[]) => Promise<void>;
+  } | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
   let sessionRefreshRequest: { client: AcpClient; workspace: string; promise: Promise<void> } | null = null;
@@ -428,7 +431,7 @@
         if (questionId) {
           void addQuestionImagePaths(questionId, payload.paths);
         } else if (activeSessionId && !operationRunning && pendingElicitation?.kind !== "question") {
-          void addAttachmentPaths(payload.paths);
+          void promptComposer?.insertPaths(payload.paths);
         }
       }
     }).then((unlisten) => {
@@ -1132,6 +1135,12 @@
     errorMessage = null;
     sessionRefreshGeneration += 1;
     try {
+      if (workspace) {
+        await invoke("package_terminal_stop_workspace", {
+          windowLabel: getCurrentWindow().label,
+          workspace,
+        }).catch(reportError);
+      }
       await closeWorkspaceSessions();
       workspace = selected;
       sessions = [];
@@ -2649,6 +2658,38 @@
     }
   }
 
+  const fileValidationRequests = new Map<string, Promise<boolean>>();
+
+  function sharedFileValidation(
+    key: string,
+    request: () => Promise<boolean>,
+  ): Promise<boolean> {
+    const existing = fileValidationRequests.get(key);
+    if (existing) return existing;
+    const promise = request()
+      .catch(() => false)
+      .finally(() => {
+        if (fileValidationRequests.get(key) === promise) fileValidationRequests.delete(key);
+      });
+    fileValidationRequests.set(key, promise);
+    return promise;
+  }
+
+  async function validateProjectFile(path: string): Promise<boolean> {
+    const requestWorkspace = workspace;
+    if (!requestWorkspace) return false;
+    const exists = await sharedFileValidation(
+      `project\0${requestWorkspace}\0${path}`,
+      () => invoke<boolean>("project_file_exists", { workspace: requestWorkspace, path }),
+    );
+    return workspace === requestWorkspace && exists;
+  }
+
+  async function validateLocalFile(path: string): Promise<boolean> {
+    const command = path.startsWith("~/") ? "home_file_exists" : "local_file_exists";
+    return sharedFileValidation(`${command}\0${path}`, () => invoke<boolean>(command, { path }));
+  }
+
   async function openProjectFile(path: string, navigation: PreviewNavigation = "replace"): Promise<void> {
     if (!workspace) {
       errorMessage = "Open a workspace before previewing project files.";
@@ -3633,7 +3674,7 @@
 
 <div class="grid h-full grid-rows-[36px_minmax(0,1fr)_36px] bg-background text-foreground max-[760px]:grid-rows-[36px_minmax(0,1fr)_32px]">
   <header
-    class="flex min-w-0 select-none items-stretch border-b border-border bg-chrome text-chrome-foreground"
+    class="flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground"
     data-tauri-drag-region
   >
     <ProjectTitlebar
@@ -3757,6 +3798,8 @@
         onChooseWorkspace={() => void chooseWorkspace()}
         onOpenAttachment={(attachment) => void activateAttachment(attachment)}
         onPrepareAttachment={prepareTranscriptAttachment}
+        onValidateProjectFile={validateProjectFile}
+        onValidateLocalFile={validateLocalFile}
         onOpenProjectFile={openProjectFile}
         onResolveProjectMedia={resolveProjectMedia}
         onOpenLocalFile={openLocalFile}
@@ -3838,6 +3881,8 @@
     onBack={() => movePreview(-1)}
     onForward={() => movePreview(1)}
     onOpenProjectFile={(path) => openProjectFile(path, "push")}
+    onValidateProjectFile={validateProjectFile}
+    onValidateLocalFile={validateLocalFile}
     onResolveProjectMedia={resolveProjectMedia}
     onOpenLocalFile={(path) => openLocalFile(path, "push")}
     onResolveLocalMedia={resolveLocalMedia}
@@ -3858,6 +3903,10 @@
     resolveLoading={gitResolveRunning}
     canReview={Boolean(client && activeSessionId && activeSessionRuntimeReady)}
     canResolve={Boolean(client && workspace && status === "ready" && !operationRunning)}
+    onValidateProjectFile={validateProjectFile}
+    onValidateLocalFile={validateLocalFile}
+    onOpenProjectFile={(path) => void openProjectFile(path)}
+    onOpenLocalFile={(path) => void openLocalFile(path)}
     onReview={() => void reviewGitDiff(gitDiffPreview?.path, gitDiffPreview?.scope ?? "all")}
     onResolve={() => void resolveGitReviewInNewSession()}
     onClose={() => {

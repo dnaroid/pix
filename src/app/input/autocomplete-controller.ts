@@ -179,54 +179,77 @@ export async function completeInputWithPi(
 	config: AutocompleteConfig,
 	signal?: AbortSignal,
 ): Promise<string> {
-	const parsedModel = parseModelRef(config.modelRef);
 	const modelRuntime = runtime.services.modelRuntime;
-	let model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
-	if (!model) {
-		await modelRuntime.refresh();
-		model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
-	}
-	if (!model) throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
-
 	const timeoutMs = numberInRange(config.timeoutMs, AUTOCOMPLETE_TIMEOUT_MS, 250, 10_000);
 	const maxTokens = numberInRange(config.maxTokens, AUTOCOMPLETE_MAX_TOKENS, 8, 256);
 	const maxPromptTokens = numberInRange(config.maxPromptTokens, AUTOCOMPLETE_MAX_PROMPT_TOKENS, 256, 16_000);
 	const requestSignal = createTimeoutSignal(signal, timeoutMs);
-	const requestMaxTokens = model.maxTokens > 0 ? Math.min(model.maxTokens, maxTokens) : maxTokens;
-	const requestModel = { ...model, maxTokens: requestMaxTokens } satisfies SessionModel;
 	const includeRecentMessages = numberInRange(config.includeRecentMessages, AUTOCOMPLETE_INCLUDE_RECENT_MESSAGES, 0, 20);
 	const history = includeRecentMessages > 0 ? autocompleteHistoryFromMessages(runtime.session.messages, includeRecentMessages) : [];
 	const prompt = buildAutocompletePrompt({ cwd: runtime.cwd, draft, history, maxPromptTokens });
 	if (!prompt) return "";
 
-	let output = "";
-	let streamError: string | undefined;
-
 	try {
-		const stream = modelRuntime.streamSimple(requestModel, {
-			systemPrompt: AUTOCOMPLETE_SYSTEM_PROMPT,
-			messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-		}, {
-			cacheRetention: "none",
-			maxRetryDelayMs: 0,
-			maxRetries: 0,
-			maxTokens: requestModel.maxTokens,
-			...(parsedModel.thinkingLevel && parsedModel.thinkingLevel !== "off" ? { reasoning: parsedModel.thinkingLevel } : {}),
-			signal: requestSignal.signal,
-			timeoutMs,
-		});
+		let refreshed = false;
+		let lastError: unknown;
+		for (const modelRef of modelRefChain(config.modelRef, config.fallbackModels)) {
+			if (requestSignal.signal.aborted) throw requestSignal.signal.reason ?? new Error("Autocomplete request aborted");
+			let parsedModel: ReturnType<typeof parseModelRef>;
+			try {
+				parsedModel = parseModelRef(modelRef);
+			} catch (error) {
+				lastError = error;
+				continue;
+			}
+			let model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
+			if (!model && !refreshed) {
+				await modelRuntime.refresh();
+				refreshed = true;
+				model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
+			}
+			if (!model) {
+				lastError = new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
+				continue;
+			}
 
-		for await (const event of stream) {
-			if (event.type === "text_delta") output += event.delta;
-			else if (event.type === "done" && !output) output = assistantMessageText(event.message);
-			else if (event.type === "error") streamError = event.error.errorMessage ?? event.reason;
+			try {
+				const requestMaxTokens = model.maxTokens > 0 ? Math.min(model.maxTokens, maxTokens) : maxTokens;
+				const requestModel = { ...model, maxTokens: requestMaxTokens } satisfies SessionModel;
+				let output = "";
+				let streamError: string | undefined;
+				const stream = modelRuntime.streamSimple(requestModel, {
+					systemPrompt: AUTOCOMPLETE_SYSTEM_PROMPT,
+					messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+				}, {
+					cacheRetention: "none",
+					maxRetryDelayMs: 0,
+					maxRetries: 0,
+					maxTokens: requestModel.maxTokens,
+					...(parsedModel.thinkingLevel && parsedModel.thinkingLevel !== "off" ? { reasoning: parsedModel.thinkingLevel } : {}),
+					signal: requestSignal.signal,
+					timeoutMs,
+				});
+
+				for await (const event of stream) {
+					if (event.type === "text_delta") output += event.delta;
+					else if (event.type === "done" && !output) output = assistantMessageText(event.message);
+					else if (event.type === "error") streamError = event.error.errorMessage ?? event.reason;
+				}
+				if (streamError) throw new Error(streamError);
+				return output;
+			} catch (error) {
+				if (requestSignal.signal.aborted) throw requestSignal.signal.reason ?? error;
+				lastError = error;
+			}
 		}
-
-		if (streamError) throw new Error(streamError);
-		return output;
+		throw lastError ?? new Error("No autocomplete models are configured");
 	} finally {
 		requestSignal.dispose();
 	}
+}
+
+function modelRefChain(primary: string, fallbacks: readonly string[] | undefined): string[] {
+	return [...new Set([primary, ...(fallbacks ?? [])].map((ref) => ref.trim()).filter(Boolean))];
 }
 
 export function autocompleteHistoryFromMessages(messages: readonly unknown[], includeRecentMessages: number): AutocompleteHistoryMessage[] {

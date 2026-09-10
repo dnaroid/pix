@@ -185,7 +185,9 @@ continuation-relevant text and non-secret tool metadata. Credential/header-like
 fields and provider signatures are excluded/redacted. Tool groups are not split
 merely to fit the summarizer input budget.
 
-Configured summarizer models share a bounded deadline and fall back to the
+`summarizerModel` and `summarizerFallbackModels` are resolved as explicit
+ordered arrays (empty arrays are valid); configured refs are de-duplicated and
+tried in that order under one bounded deadline before falling back to the
 deterministic extractive continuity representation. A replacement with
 non-positive gain is rejected. Protected user/tag/tool fragments and bounded
 subagent artifacts are carried through a deduplicated ledger so repeated

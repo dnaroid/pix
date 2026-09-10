@@ -16,12 +16,16 @@
 
   let {
     tool,
+    onValidateProjectFile,
+    onValidateLocalFile,
     onOpenProjectFile,
     onResolveProjectMedia,
     onOpenLocalFile,
     onResolveLocalMedia,
   }: {
     tool: ToolItem;
+    onValidateProjectFile?: (path: string) => Promise<boolean>;
+    onValidateLocalFile?: (path: string) => Promise<boolean>;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
@@ -44,7 +48,7 @@
   <DiffView model={shellDiff} label="git diff" />
 {:else if tool.content}
   {#if renderAsMarkdown}
-    <div class="tool-result markdown-result"><MarkdownText text={tool.content} dense fitTables {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
+    <div class="tool-result markdown-result"><MarkdownText text={tool.content} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
   {:else if highlighted}
     <pre class="tool-result"><code class="highlighted-code" data-language={highlighted.language}>{@html highlighted.html}</code></pre>
   {:else if mutationLines}

@@ -19,6 +19,7 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Search from "@lucide/svelte/icons/search";
   import Settings from "@lucide/svelte/icons/settings";
+  import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
   import { onMount, tick } from "svelte";
@@ -56,6 +57,8 @@
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import PromptComposer from "./PromptComposer.svelte";
+  import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
+  import SettingsPanel from "./SettingsPanel.svelte";
   import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
   type TaskDraft = {
@@ -64,7 +67,7 @@
     type: ProjectTaskType;
   };
 
-  type SidebarTab = "tasks" | "project" | "git" | "registry" | "session";
+  type SidebarTab = "tasks" | "project" | "git" | "registry" | "scripts" | "session" | "settings";
   type TaskDropPosition = "before" | "after";
   type TaskDropTarget = {
     type: ProjectTaskType;
@@ -83,7 +86,9 @@
     project: "Project",
     git: "Source Control",
     registry: "Registry",
+    scripts: "Package Scripts",
     session: "Session",
+    settings: "Settings",
   };
 
   let {
@@ -193,7 +198,10 @@
   const DEFAULT_WIDTH = 296;
   const MIN_WIDTH = 236;
   const REGISTRY_MIN_WIDTH = 344;
-  const MAX_WIDTH = 420;
+  const SETTINGS_MIN_WIDTH = 360;
+  const SCRIPTS_MIN_WIDTH = 400;
+  const DEFAULT_MAX_WIDTH = 420;
+  const SCRIPTS_MAX_WIDTH = 720;
   const WIDTH_KEY = "pix.desktop.taskSidebarWidth";
   const COLLAPSED_KEY = "pix.desktop.taskSidebarCollapsed";
   const ACTIVE_TAB_KEY = "pix.desktop.workspaceSidebarTab";
@@ -239,7 +247,8 @@
   const registryAttention = $derived(registryHasAttention(registrySnapshot));
   const gitChangeCount = $derived(gitSnapshot?.changes.length ?? 0);
   const activeMinWidth = $derived(sidebarMinWidth(activeTab));
-  const expandedSidebarWidth = $derived(Math.max(sidebarWidth, activeMinWidth));
+  const activeMaxWidth = $derived(sidebarMaxWidth(activeTab));
+  const expandedSidebarWidth = $derived(clampWidth(sidebarWidth, activeMinWidth, activeMaxWidth));
   const renderedSidebarWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : expandedSidebarWidth));
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(draggedTaskId ? tasks.find((task) => task.id === draggedTaskId) : undefined);
@@ -288,7 +297,7 @@
       const savedWidth = localStorage.getItem(WIDTH_KEY);
       if (savedWidth !== null) {
         const parsedWidth = Number(savedWidth);
-        if (Number.isFinite(parsedWidth)) sidebarWidth = clampWidth(parsedWidth);
+        if (Number.isFinite(parsedWidth)) sidebarWidth = clampWidth(parsedWidth, activeMinWidth, activeMaxWidth);
       }
     } catch {
       // Keep the defaults when webview storage is unavailable.
@@ -310,7 +319,7 @@
   }
 
   function isSidebarTab(value: string | null): value is SidebarTab {
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "session";
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "session" || value === "settings";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -355,7 +364,7 @@
     if (event.pointerId !== resizePointerId) return;
     const candidate = resizeStartWidth + event.clientX - resizeStartX;
     if (candidate <= activeMinWidth && sidebarWidth < activeMinWidth) return;
-    sidebarWidth = clampWidth(candidate, activeMinWidth);
+    sidebarWidth = clampWidth(candidate, activeMinWidth, activeMaxWidth);
   }
 
   function finishResize(event: PointerEvent): void {
@@ -398,7 +407,7 @@
       return;
     } else {
       const baseWidth = Math.max(sidebarWidth, activeMinWidth);
-      sidebarWidth = clampWidth(baseWidth + (event.key === "ArrowLeft" ? -12 : 12), activeMinWidth);
+      sidebarWidth = clampWidth(baseWidth + (event.key === "ArrowLeft" ? -12 : 12), activeMinWidth, activeMaxWidth);
     }
     try {
       localStorage.setItem(WIDTH_KEY, String(sidebarWidth));
@@ -408,11 +417,18 @@
   }
 
   function sidebarMinWidth(tab: SidebarTab): number {
-    return tab === "registry" ? REGISTRY_MIN_WIDTH : MIN_WIDTH;
+    if (tab === "registry") return REGISTRY_MIN_WIDTH;
+    if (tab === "settings") return SETTINGS_MIN_WIDTH;
+    if (tab === "scripts") return SCRIPTS_MIN_WIDTH;
+    return MIN_WIDTH;
   }
 
-  function clampWidth(width: number, minimum = MIN_WIDTH): number {
-    return Math.min(MAX_WIDTH, Math.max(minimum, width));
+  function sidebarMaxWidth(tab: SidebarTab): number {
+    return tab === "scripts" ? SCRIPTS_MAX_WIDTH : DEFAULT_MAX_WIDTH;
+  }
+
+  function clampWidth(width: number, minimum = MIN_WIDTH, maximum = DEFAULT_MAX_WIDTH): number {
+    return Math.min(maximum, Math.max(minimum, width));
   }
 
   function openCreate(): void {
@@ -664,6 +680,15 @@
       {#if registryAttention}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
     </button>
     <button
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "scripts" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      type="button"
+      title={activeTab === "scripts" && !collapsed ? "Hide Package Scripts" : "Package Scripts"}
+      aria-label="Package scripts and terminals"
+      aria-controls="workspace-scripts-panel"
+      aria-pressed={activeTab === "scripts" && !collapsed}
+      onclick={() => selectTab("scripts")}
+    ><SquareTerminal class="h-5 w-5" aria-hidden="true" /></button>
+    <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activeTab === "session" && !collapsed ? "Hide Session" : "Session"}
@@ -675,6 +700,15 @@
       <Activity class="h-5 w-5" aria-hidden="true" />
       {#if openTodoCount > 0 || activeSubagentCount > 0}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
     </button>
+    <button
+      class={["relative mt-auto grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "settings" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      type="button"
+      title={activeTab === "settings" && !collapsed ? "Hide Settings" : "Settings"}
+      aria-label="Settings"
+      aria-controls="workspace-settings-panel"
+      aria-pressed={activeTab === "settings" && !collapsed}
+      onclick={() => selectTab("settings")}
+    ><Settings class="h-5 w-5" aria-hidden="true" /></button>
   </nav>
 
   {#if !collapsed}
@@ -945,9 +979,17 @@
             onOpenProjectArtifact={openRegistryProjectArtifact}
           />
         </div>
-      {:else}
+      {:else if activeTab === "scripts"}
+        <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Package Scripts">
+          <PackageScriptsPanel {workspace} />
+        </div>
+      {:else if activeTab === "session"}
         <div id="workspace-session-panel" class="grid min-h-0" aria-label="Session">
           <SessionActivityPanel {activeSessionId} {todoSnapshot} {subagentSnapshot} />
+        </div>
+      {:else}
+        <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">
+          <SettingsPanel />
         </div>
       {/if}
     </div>
@@ -1015,7 +1057,7 @@
       aria-label="Resize workspace sidebar"
       aria-orientation="vertical"
       aria-valuemin={activeMinWidth}
-      aria-valuemax={MAX_WIDTH}
+      aria-valuemax={activeMaxWidth}
       aria-valuenow={expandedSidebarWidth}
       tabindex="0"
       onpointerdown={startResize}

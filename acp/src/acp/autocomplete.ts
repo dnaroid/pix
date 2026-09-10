@@ -17,6 +17,7 @@ const AUTOCOMPLETE_TOKEN_CHARS = 4;
 const AUTOCOMPLETE_EMPTY_SENTINEL = "<EMPTY>";
 const DEFAULT_AUTOCOMPLETE_CONFIG: AutocompleteConfig = {
 	modelRef: "zai/glm-5-turbo",
+	fallbackModels: [],
 	debounceMs: 350,
 	timeoutMs: 3_000,
 	maxTokens: 48,
@@ -64,6 +65,7 @@ export interface AutocompleteSettingsResponse {
 
 export interface AutocompleteConfig {
 	readonly modelRef: string;
+	readonly fallbackModels: readonly string[];
 	readonly debounceMs: number;
 	readonly timeoutMs: number;
 	readonly maxTokens: number;
@@ -121,15 +123,7 @@ export function createAutocompleteCompleter(options: CreateAutocompleteCompleter
 		if (!isEligibleDraft(draft) || !config.modelRef.trim()) return "";
 		const requestSignal = createTimeoutSignal(signal, config.timeoutMs);
 		try {
-			const parsedModel = parseModelRef(config.modelRef);
 			const runtime = await raceWithSignal(getRuntime(), requestSignal.signal);
-			let model = runtime.getModel(parsedModel.provider, parsedModel.modelId);
-			if (!model) {
-				await runtime.refresh({ signal: requestSignal.signal });
-				model = runtime.getModel(parsedModel.provider, parsedModel.modelId);
-			}
-			if (!model) throw new Error(`Autocomplete model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
-
 			const history = config.includeRecentMessages > 0
 				? await raceWithSignal(getMessages(), requestSignal.signal).catch((error: unknown) => {
 					if (requestSignal.signal.aborted) throw error;
@@ -139,36 +133,65 @@ export function createAutocompleteCompleter(options: CreateAutocompleteCompleter
 				: [];
 			const prompt = buildAutocompletePrompt(cwd, draft, history, config);
 			if (!prompt) return "";
-			const requestMaxTokens = model.maxTokens > 0 ? Math.min(model.maxTokens, config.maxTokens) : config.maxTokens;
-			const requestModel = { ...model, maxTokens: requestMaxTokens };
-			let output = "";
-			let streamError: string | undefined;
-			const stream = runtime.streamSimple(
-				requestModel,
-				{
-					systemPrompt: AUTOCOMPLETE_SYSTEM_PROMPT,
-					messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-				},
-				{
-					signal: requestSignal.signal,
-					...(parsedModel.thinkingLevel && parsedModel.thinkingLevel !== "off"
-						? { reasoning: parsedModel.thinkingLevel }
-						: {}),
-					cacheRetention: "none",
-					maxRetryDelayMs: 0,
-					maxRetries: 0,
-					maxTokens: requestMaxTokens,
-					timeoutMs: config.timeoutMs,
-				},
-			);
+			let refreshed = false;
+			let lastError: unknown;
+			for (const modelRef of configuredModelRefs(config.modelRef, config.fallbackModels)) {
+				if (requestSignal.signal.aborted) throw requestSignal.signal.reason ?? new Error("Autocomplete request aborted");
+				let parsedModel: ReturnType<typeof parseModelRef>;
+				try {
+					parsedModel = parseModelRef(modelRef);
+				} catch (error) {
+					lastError = error;
+					continue;
+				}
+				let model = runtime.getModel(parsedModel.provider, parsedModel.modelId);
+				if (!model && !refreshed) {
+					await runtime.refresh({ signal: requestSignal.signal });
+					refreshed = true;
+					model = runtime.getModel(parsedModel.provider, parsedModel.modelId);
+				}
+				if (!model) {
+					lastError = new Error(`Autocomplete model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
+					continue;
+				}
 
-			for await (const event of stream) {
-				if (event.type === "text_delta") output += event.delta;
-				else if (event.type === "done" && !output) output = extractAssistantText(event.message);
-				else if (event.type === "error") streamError = event.error.errorMessage ?? event.reason;
+				try {
+					const requestMaxTokens = model.maxTokens > 0 ? Math.min(model.maxTokens, config.maxTokens) : config.maxTokens;
+					const requestModel = { ...model, maxTokens: requestMaxTokens };
+					let output = "";
+					let streamError: string | undefined;
+					const stream = runtime.streamSimple(
+						requestModel,
+						{
+							systemPrompt: AUTOCOMPLETE_SYSTEM_PROMPT,
+							messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+						},
+						{
+							signal: requestSignal.signal,
+							...(parsedModel.thinkingLevel && parsedModel.thinkingLevel !== "off"
+								? { reasoning: parsedModel.thinkingLevel }
+								: {}),
+							cacheRetention: "none",
+							maxRetryDelayMs: 0,
+							maxRetries: 0,
+							maxTokens: requestMaxTokens,
+							timeoutMs: config.timeoutMs,
+						},
+					);
+
+					for await (const event of stream) {
+						if (event.type === "text_delta") output += event.delta;
+						else if (event.type === "done" && !output) output = extractAssistantText(event.message);
+						else if (event.type === "error") streamError = event.error.errorMessage ?? event.reason;
+					}
+					if (streamError) throw new Error(streamError);
+					return cleanCompletion(output, draft, config.maxTokens);
+				} catch (error) {
+					if (requestSignal.signal.aborted) throw requestSignal.signal.reason ?? error;
+					lastError = error;
+				}
 			}
-			if (streamError) throw new Error(streamError);
-			return cleanCompletion(output, draft, config.maxTokens);
+			throw lastError ?? new Error("No autocomplete models are configured");
 		} finally {
 			requestSignal.dispose();
 		}
@@ -196,7 +219,7 @@ export function autocompleteConfigFromParsed(raw: unknown, fallback: Autocomplet
 	if (!isRecord(raw)) return fallback;
 	const autocomplete = raw.autocomplete ?? raw.autoComplete;
 	if (typeof autocomplete === "string") {
-		return { ...DEFAULT_AUTOCOMPLETE_CONFIG, modelRef: autocomplete.trim() };
+		return { ...DEFAULT_AUTOCOMPLETE_CONFIG, fallbackModels: [], modelRef: autocomplete.trim() };
 	}
 	if (!isRecord(autocomplete)) return fallback;
 	const modelRef = typeof autocomplete.modelRef === "string"
@@ -206,6 +229,7 @@ export function autocompleteConfigFromParsed(raw: unknown, fallback: Autocomplet
 			: DEFAULT_AUTOCOMPLETE_CONFIG.modelRef;
 	return {
 		modelRef,
+		fallbackModels: modelFallbackList(autocomplete.fallbackModels),
 		debounceMs: numberInRange(autocomplete.debounceMs, DEFAULT_AUTOCOMPLETE_CONFIG.debounceMs, 100, 2_000),
 		timeoutMs: numberInRange(autocomplete.timeoutMs, DEFAULT_AUTOCOMPLETE_CONFIG.timeoutMs, 250, 10_000),
 		maxTokens: numberInRange(autocomplete.maxTokens, DEFAULT_AUTOCOMPLETE_CONFIG.maxTokens, 8, 256),
@@ -222,6 +246,18 @@ export function autocompleteConfigFromParsed(raw: unknown, fallback: Autocomplet
 			20,
 		),
 	};
+}
+
+function configuredModelRefs(primary: string, fallbacks: readonly string[] | undefined): string[] {
+	return [...new Set([primary, ...(fallbacks ?? [])].map((ref) => ref.trim()).filter(Boolean))];
+}
+
+function modelFallbackList(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return [...new Set(value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter(Boolean))];
 }
 
 function buildAutocompletePrompt(

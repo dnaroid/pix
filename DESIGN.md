@@ -87,6 +87,8 @@ bg-chat-user
 border-chat-user-border
 bg-code
 border-code-border
+bg-selection
+text-selection-foreground
 text-tool-success
 text-tool-warning
 text-tool-error
@@ -142,6 +144,10 @@ sustained technical reading surfaces.
 
 Use `chat-user` plus `chat-user-border` for the user prompt block. It should
 remain distinct from assistant prose without reading like a messenger bubble.
+
+Use `selection` plus `selection-foreground` for native text selection. Selection
+must remain clearly visible without becoming a saturated primary block; in dark
+mode prefer a restrained blue-tinted layer while keeping normal readable text.
 
 Use `muted` for generic subdued content only when none of the more specific
 workbench roles above applies.
@@ -322,6 +328,12 @@ The transcript MUST NOT use top/bottom gradient fading or CSS masking to obscure
 content near the scroll edges. Content should remain fully opaque up to the pane
 boundaries; separation from surrounding chrome should come from layout,
 spacing, and borders instead.
+
+Automatically detected file-like Markdown text MUST remain non-interactive until
+the target is validated as an existing file. Perform that validation lazily near
+the viewport and asynchronously; transcript rendering and scrolling must never
+wait for filesystem validation. Missing, stale, or unresolvable paths remain
+ordinary text/code rather than clickable file links.
 
 ## 15. States
 

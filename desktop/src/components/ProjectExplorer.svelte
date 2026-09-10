@@ -9,8 +9,10 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import {
     flattenProjectTree,
-    PROJECT_TREE_DRAG_MIME,
-    serializeProjectTreeDrag,
+    PROJECT_TREE_DRAG_STATE_EVENT,
+    PROJECT_TREE_DROP_EVENT,
+    PROJECT_TREE_DROP_TARGET_SELECTOR,
+    projectTreeDragPayload,
     type ProjectTreeEntry,
   } from "../lib/project-tree";
 
@@ -35,7 +37,20 @@
   let loadingDirectories = $state<string[]>([]);
   let errorByDirectory = $state<Record<string, string>>({});
   let selectedPath = $state<string | null>(null);
+  let draggedEntry = $state<ProjectTreeEntry | null>(null);
+  let projectEntryDragging = $state(false);
+  let dragClientX = $state(0);
+  let dragClientY = $state(0);
   let generation = 0;
+  let dragPointerId: number | null = null;
+  let dragSource: HTMLButtonElement | null = null;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let projectDropTarget: HTMLElement | null = null;
+  let suppressEntryClick = false;
+  let previousDragUserSelect: string | null = null;
+  let previousDragCursor: string | null = null;
+  const dragThreshold = 4;
 
   const rootEntries = $derived(entriesByDirectory[""] ?? []);
   const rows = $derived(flattenProjectTree(
@@ -56,6 +71,7 @@
     loadingDirectories = [];
     errorByDirectory = {};
     selectedPath = null;
+    clearProjectEntryDrag();
     // Do not call loadDirectory synchronously from the reactive effect: its
     // reads of loading/error state would become effect dependencies and could
     // retrigger the whole explorer reset while a directory request is in
@@ -124,15 +140,122 @@
     onOpenExternal(path);
   }
 
-  function startProjectEntryDrag(event: DragEvent, entry: ProjectTreeEntry): void {
-    const transfer = event.dataTransfer;
-    if (!transfer) return;
-    transfer.effectAllowed = "copy";
-    transfer.setData(PROJECT_TREE_DRAG_MIME, serializeProjectTreeDrag(entry));
-    transfer.setData(
-      "text/plain",
-      entry.kind === "directory" ? `${entry.path.replace(/\/+$/u, "")}/` : entry.path,
-    );
+  function activateProjectEntry(event: MouseEvent, entry: ProjectTreeEntry): void {
+    if (suppressEntryClick) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (entry.kind === "directory") toggleDirectory(entry.path);
+    else openFile(entry.path);
+  }
+
+  function startProjectEntryPointerDrag(event: PointerEvent, entry: ProjectTreeEntry): void {
+    if (event.button !== 0) return;
+    clearProjectEntryDrag();
+    dragPointerId = event.pointerId;
+    dragSource = event.currentTarget as HTMLButtonElement;
+    dragStartX = event.clientX;
+    dragStartY = event.clientY;
+    dragClientX = event.clientX;
+    dragClientY = event.clientY;
+    draggedEntry = entry;
+    try {
+      dragSource.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is a convenience; window hit-testing still handles the drop.
+    }
+  }
+
+  function moveProjectEntryPointerDrag(event: PointerEvent): void {
+    if (event.pointerId !== dragPointerId || !draggedEntry) return;
+    dragClientX = event.clientX;
+    dragClientY = event.clientY;
+    const started = document.documentElement.dataset.pixProjectPathDragging === "true";
+    if (!started) {
+      if (Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) < dragThreshold) return;
+      setDocumentProjectDragState(true);
+    }
+    event.preventDefault();
+    setProjectDropTarget(projectDropTargetAt(event.clientX, event.clientY));
+  }
+
+  function finishProjectEntryPointerDrag(event: PointerEvent): void {
+    if (event.pointerId !== dragPointerId) return;
+    const started = document.documentElement.dataset.pixProjectPathDragging === "true";
+    const entry = draggedEntry;
+    if (started && entry) {
+      event.preventDefault();
+      const target = projectDropTargetAt(event.clientX, event.clientY);
+      target?.dispatchEvent(new CustomEvent(PROJECT_TREE_DROP_EVENT, {
+        detail: projectTreeDragPayload(entry),
+      }));
+      suppressEntryClick = true;
+      window.setTimeout(() => {
+        suppressEntryClick = false;
+      }, 0);
+    }
+    clearProjectEntryDrag();
+  }
+
+  function cancelProjectEntryPointerDrag(event: PointerEvent): void {
+    if (event.pointerId !== dragPointerId) return;
+    clearProjectEntryDrag();
+  }
+
+  function projectDropTargetAt(clientX: number, clientY: number): HTMLElement | null {
+    return (document.elementFromPoint(clientX, clientY) as HTMLElement | null)
+      ?.closest<HTMLElement>(PROJECT_TREE_DROP_TARGET_SELECTOR) ?? null;
+  }
+
+  function setProjectDropTarget(target: HTMLElement | null): void {
+    if (projectDropTarget === target) return;
+    projectDropTarget?.dispatchEvent(new CustomEvent(PROJECT_TREE_DRAG_STATE_EVENT, {
+      detail: { active: false },
+    }));
+    projectDropTarget = target;
+    projectDropTarget?.dispatchEvent(new CustomEvent(PROJECT_TREE_DRAG_STATE_EVENT, {
+      detail: { active: true },
+    }));
+  }
+
+  function clearProjectEntryDrag(): void {
+    setProjectDropTarget(null);
+    if (dragSource && dragPointerId !== null) {
+      try {
+        if (dragSource.hasPointerCapture(dragPointerId)) dragSource.releasePointerCapture(dragPointerId);
+      } catch {
+        // Ignore stale pointer-capture state during teardown.
+      }
+    }
+    dragPointerId = null;
+    dragSource = null;
+    draggedEntry = null;
+    setDocumentProjectDragState(false);
+  }
+
+  function setDocumentProjectDragState(active: boolean): void {
+    const root = document.documentElement;
+    if (active) {
+      if (root.dataset.pixProjectPathDragging === "true") return;
+      projectEntryDragging = true;
+      previousDragUserSelect = root.style.userSelect;
+      previousDragCursor = root.style.cursor;
+      root.dataset.pixProjectPathDragging = "true";
+      root.style.userSelect = "none";
+      root.style.cursor = "grabbing";
+      return;
+    }
+    projectEntryDragging = false;
+    delete root.dataset.pixProjectPathDragging;
+    if (previousDragUserSelect !== null) {
+      root.style.userSelect = previousDragUserSelect;
+      previousDragUserSelect = null;
+    }
+    if (previousDragCursor !== null) {
+      root.style.cursor = previousDragCursor;
+      previousDragCursor = null;
+    }
   }
 </script>
 
@@ -165,9 +288,11 @@
             type="button"
             title={entry.path}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
-            draggable="true"
-            onclick={() => entry.kind === "directory" ? toggleDirectory(entry.path) : openFile(entry.path)}
-            ondragstart={(event) => startProjectEntryDrag(event, entry)}
+            onclick={(event) => activateProjectEntry(event, entry)}
+            onpointerdown={(event) => startProjectEntryPointerDrag(event, entry)}
+            onpointermove={moveProjectEntryPointerDrag}
+            onpointerup={finishProjectEntryPointerDrag}
+            onpointercancel={cancelProjectEntryPointerDrag}
           >
             {#if entry.kind === "directory"}
               <span class="grid h-4 w-4 shrink-0 place-items-center text-muted-foreground">
@@ -208,4 +333,19 @@
       {/each}
     {/if}
   </div>
+
+  {#if draggedEntry && projectEntryDragging}
+    <div
+      class="pointer-events-none fixed z-50 flex max-w-80 items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 font-mono text-[11px] text-popover-foreground shadow-md"
+      style:left={`${dragClientX + 12}px`}
+      style:top={`${dragClientY + 12}px`}
+    >
+      {#if draggedEntry.kind === "directory"}
+        <Folder class="h-3.5 w-3.5 shrink-0 text-primary/75" aria-hidden="true" />
+      {:else}
+        <File class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      {/if}
+      <span class="block truncate">{draggedEntry.kind === "directory" ? `${draggedEntry.path}/` : draggedEntry.path}</span>
+    </div>
+  {/if}
 </section>

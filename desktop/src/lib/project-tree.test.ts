@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   flattenProjectTree,
+  insertPromptPaths,
   insertProjectTreePromptPath,
   parseProjectTreeDrag,
+  projectTreeDragPayloadFromUnknown,
   projectTreePromptPath,
   serializeProjectTreeDrag,
   type ProjectTreeEntry,
@@ -36,9 +38,17 @@ describe("project tree", () => {
     expect(parseProjectTreeDrag(JSON.stringify({ version: 1, path: "/tmp/secret", kind: "file" }))).toBeUndefined();
   });
 
-  it("inserts file and folder references as relative prompt paths", () => {
-    expect(projectTreePromptPath({ path: "desktop/src", kind: "directory" })).toBe("`desktop/src/`");
-    expect(projectTreePromptPath({ path: "desktop/src/App.svelte", kind: "file" })).toBe("`desktop/src/App.svelte`");
+  it("validates custom pointer-drag payloads", () => {
+    expect(projectTreeDragPayloadFromUnknown({ path: "desktop/src", kind: "directory" })).toEqual({
+      path: "desktop/src",
+      kind: "directory",
+    });
+    expect(projectTreeDragPayloadFromUnknown({ path: "../secret", kind: "file" })).toBeUndefined();
+  });
+
+  it("inserts file and folder references as quoted paths", () => {
+    expect(projectTreePromptPath({ path: "desktop/src", kind: "directory" })).toBe('"desktop/src"');
+    expect(projectTreePromptPath({ path: "desktop/src/App.svelte", kind: "file" })).toBe('"desktop/src/App.svelte"');
 
     expect(insertProjectTreePromptPath(
       "review this please",
@@ -46,7 +56,7 @@ describe("project tree", () => {
       7,
       { path: "desktop/src/App.svelte", kind: "file" },
     )).toEqual({
-      text: "review `desktop/src/App.svelte` this please",
+      text: 'review "desktop/src/App.svelte" this please',
       cursor: 32,
     });
 
@@ -56,8 +66,13 @@ describe("project tree", () => {
       5,
       { path: "desktop/src", kind: "directory" },
     )).toEqual({
-      text: "check `desktop/src/`",
-      cursor: 20,
+      text: 'check "desktop/src"',
+      cursor: 19,
+    });
+
+    expect(insertPromptPaths("check", 5, 5, ["/Users/me/A file.ts", "/Users/me/folder"])).toEqual({
+      text: 'check "/Users/me/A file.ts" "/Users/me/folder"',
+      cursor: 46,
     });
   });
 });

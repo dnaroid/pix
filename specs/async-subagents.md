@@ -40,11 +40,20 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    and session fallback skips models/providers already exhausted by quota
    failures. Per-role environment model overrides are applied while loading the
    effective role catalog. `[confirmed by code, config.ts/model-selection.ts]`
-8. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
-9. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
-10. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
-11. **RPC prompt failure** (`success=false`): writes result.md with error, `notifyComplete(1)`, SIGTERM. `[confirmed by code]`
-12. **Exit handling**: waits 10ms for stdio flush, then finalizes. Exit-code resolution: timed_out→124, completedFromAgentEnd→0, lastAgentEndError→1, numeric→code, signal→128, else→1. `[confirmed by code]`
+   Legacy singular role selectors normalize with an explicit `fallbackModels`
+   array (including `[]`), and every normalized `modelByParent` entry carries
+   its own fallback array. Modern `models` profiles already encode the complete
+   ordered candidate chain. `[confirmed by code, config.ts]`
+8. **Role router / auto-ultrawork classifier**: the role router and the
+   `ULTRAWORK_AUTO` classifier both try `routing.model`, then
+   `routing.fallbackModels`, then the current parent model, de-duplicating refs
+   and continuing past unavailable/provider-error candidates. Abort remains
+   terminal. `[confirmed by code, routing.ts/ultrawork-auto.ts]`
+9. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
+10. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
+11. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
+12. **RPC prompt failure** (`success=false`): writes result.md with error, `notifyComplete(1)`, SIGTERM. `[confirmed by code]`
+13. **Exit handling**: waits 10ms for stdio flush, then finalizes. Exit-code resolution: timed_out→124, completedFromAgentEnd→0, lastAgentEndError→1, numeric→code, signal→128, else→1. `[confirmed by code]`
 
 ### Concurrency (`core/concurrency.ts`)
 - `createSemaphore(limit)`: `limit ≤ 0` = unlimited. `acquire(signal?)` queues when full, rejects on abort. `[confirmed by code]`
@@ -136,6 +145,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
 - `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
 - `external/pi-tools-suite/src/async-subagents/core/routing.ts`
+- `external/pi-tools-suite/src/async-subagents/core/ultrawork-auto.ts`
 - `external/pi-tools-suite/src/async-subagents/core/model-selection.ts`
 - `external/pi-tools-suite/src/async-subagents/core/model-fallback.ts`
 - `external/pi-tools-suite/src/async-subagents/core/retry.ts`

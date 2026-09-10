@@ -21,6 +21,14 @@
           "type": "string",
           "description": "Provider/model identifier, e.g. 'openai-codex/gpt-5.4'."
         },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Fallback provider/model identifier."
+          },
+          "description": "Ordered default-model fallbacks tried after modelRef."
+        },
         "thinking": {
           "anyOf": [
             {
@@ -168,6 +176,14 @@
         "modelRef": {
           "type": "string",
           "description": "Model used for prompt enhancement."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Fallback provider/model identifier."
+          },
+          "description": "Ordered prompt-enhancer fallbacks tried after modelRef."
         }
       },
       "description": "Prompt enhancer configuration."
@@ -178,6 +194,14 @@
         "modelRef": {
           "type": "string",
           "description": "Model for inline autocomplete. Empty string disables LLM autocomplete."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Fallback provider/model identifier."
+          },
+          "description": "Ordered autocomplete fallbacks tried after modelRef."
         },
         "debounceMs": {
           "type": "number",
@@ -323,9 +347,23 @@
               "type": "string",
               "description": "Model reference used by Pix Desktop for LLM review of Git diffs, optionally with a :thinking suffix."
             },
+            "reviewFallbackModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered fallback model references used for Git diff review."
+            },
             "commitMessageModelRef": {
               "type": "string",
               "description": "Model reference used by Pix Desktop to generate Git commit messages, optionally with a :thinking suffix."
+            },
+            "commitMessageFallbackModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered fallback model references used for Git commit-message generation."
             }
           },
           "description": "Pix Desktop Git/Source Control LLM preferences."

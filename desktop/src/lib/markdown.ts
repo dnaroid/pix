@@ -527,17 +527,17 @@ function linkForDestination(
 
 function projectFileLink(path: string, label: string): string {
   const escapedPath = escapeAttribute(path);
-  return `<a href="#" data-project-file="${escapedPath}" title="Preview ${escapedPath}">${label}</a>`;
+  return `<span class="markdown-file-candidate" data-project-file-candidate="${escapedPath}">${label}</span>`;
 }
 
 function localFileLink(path: string, label: string): string {
   const escapedPath = escapeAttribute(path);
-  return `<a href="#" data-local-file="${escapedPath}" title="Open ${escapedPath}">${label}</a>`;
+  return `<span class="markdown-file-candidate" data-local-file-candidate="${escapedPath}">${label}</span>`;
 }
 
 function homeFileLink(path: string, label: string): string {
   const escapedPath = escapeAttribute(path);
-  return `<a href="#" data-local-file="${escapedPath}" title="Preview ${escapedPath}">${label}</a>`;
+  return `<span class="markdown-file-candidate" data-local-file-candidate="${escapedPath}">${label}</span>`;
 }
 
 function mediaKindForPath(path: string): Exclude<AttachmentKind, "file"> | undefined {
@@ -554,9 +554,7 @@ function projectMedia(
   const escapedPath = escapeAttribute(path);
   const escapedLabel = escapeAttribute(accessibleLabel);
   const loading = '<span class="markdown-media-status">Loading preview…</span>';
-  const frame = kind === "image"
-    ? `<a href="#" class="markdown-media-frame" data-project-file="${escapedPath}" title="Preview ${escapedPath}" aria-label="Preview ${escapedLabel}">${loading}</a>`
-    : `<span class="markdown-media-frame">${loading}</span>`;
+  const frame = `<span class="markdown-media-frame" aria-label="Preview ${escapedLabel}">${loading}</span>`;
   return `<span class="markdown-media" data-project-media="${kind}" data-project-file="${escapedPath}" data-project-media-label="${escapedLabel}">`
     + frame
     + `<span class="markdown-media-caption">${projectFileLink(path, label)}</span>`
@@ -572,9 +570,7 @@ function localMedia(
   const escapedPath = escapeAttribute(path);
   const escapedLabel = escapeAttribute(accessibleLabel);
   const loading = '<span class="markdown-media-status">Loading preview…</span>';
-  const frame = kind === "image"
-    ? `<a href="#" class="markdown-media-frame" data-local-file="${escapedPath}" title="Preview ${escapedPath}" aria-label="Preview ${escapedLabel}">${loading}</a>`
-    : `<span class="markdown-media-frame">${loading}</span>`;
+  const frame = `<span class="markdown-media-frame" aria-label="Preview ${escapedLabel}">${loading}</span>`;
   return `<span class="markdown-media" data-local-media="${kind}" data-local-file="${escapedPath}" data-local-media-label="${escapedLabel}">`
     + frame
     + `<span class="markdown-media-caption">${localFileLink(path, label)}</span>`

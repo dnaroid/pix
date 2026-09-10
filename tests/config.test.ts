@@ -50,18 +50,38 @@ describe("config helpers", () => {
 		const created = readFileSync(testConfigPath, "utf8");
 		const parsedCreated = parse(created) as {
 			$schema?: string;
+			defaultModel?: { modelRef?: string; fallbackModels?: string[]; thinking?: string };
+			promptEnhancer?: { modelRef?: string; fallbackModels?: string[] };
+			autocomplete?: { modelRef?: string; fallbackModels?: string[] };
 			desktop?: {
 				externalEditor?: string;
-				git?: { reviewModelRef?: string; commitMessageModelRef?: string };
+				git?: {
+					reviewModelRef?: string;
+					reviewFallbackModels?: string[];
+					commitMessageModelRef?: string;
+					commitMessageFallbackModels?: string[];
+				};
 			};
 			sessionTitle?: { modelRef?: string; fallbackModels?: string[] };
 		};
 		assert.equal(parsedCreated.$schema, PIX_SCHEMA_URL);
+		assert.deepEqual(parsedCreated.defaultModel, {
+			modelRef: "openai-codex/gpt-5.6-sol",
+			fallbackModels: [],
+			thinking: "medium",
+		});
+		assert.deepEqual(parsedCreated.promptEnhancer, {
+			modelRef: "openai-codex/gpt-5.6-luna",
+			fallbackModels: [],
+		});
+		assert.deepEqual(parsedCreated.autocomplete?.fallbackModels, []);
 		assert.deepEqual(parsedCreated.desktop, {
 			externalEditor: "zed",
 			git: {
 				reviewModelRef: "openai-codex/gpt-5.6-luna:medium",
+				reviewFallbackModels: [],
 				commitMessageModelRef: "openai-codex/gpt-5.6-luna:minimal",
+				commitMessageFallbackModels: [],
 			},
 		});
 		assert.deepEqual(parsedCreated.sessionTitle, {
@@ -83,7 +103,9 @@ describe("config helpers", () => {
 			{ previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
 		]);
 		assert.equal(config.promptEnhancer.modelRef, "openai-codex/gpt-5.6-luna");
+		assert.deepEqual(config.promptEnhancer.fallbackModels, []);
 		assert.equal(config.autocomplete.modelRef, "zai/glm-5-turbo");
+		assert.deepEqual(config.autocomplete.fallbackModels, []);
 		assert.equal(config.autocomplete.debounceMs, 350);
 		assert.equal(config.autocomplete.timeoutMs, 3000);
 		assert.equal(config.autocomplete.maxTokens, 48);
@@ -126,10 +148,12 @@ describe("config helpers", () => {
 		assert.deepEqual(resolveToolRule("x", loaded.toolRenderer), { previewLines: 9, direction: "head", color: "muted", defaultExpanded: true, hidden: true });
 		assert.deepEqual(resolveToolRule("y", loaded.toolRenderer), { previewLines: 9, direction: "head", color: "muted", defaultExpanded: false });
 		assert.deepEqual(loaded.outputFilters.patterns, ["drop*"]);
-		assert.deepEqual(loaded.defaultModel, { modelRef: "openai-codex/gpt-5.5", thinking: "medium" });
+		assert.deepEqual(loaded.defaultModel, { modelRef: "openai-codex/gpt-5.5", fallbackModels: [], thinking: "medium" });
 		assert.equal(resolveDefaultModelRef(loaded), "openai-codex/gpt-5.5:medium");
 		assert.equal(loaded.promptEnhancer.modelRef, "zai/custom-enhancer");
+		assert.deepEqual(loaded.promptEnhancer.fallbackModels, []);
 		assert.equal(loaded.autocomplete.modelRef, "zai/custom-autocomplete");
+		assert.deepEqual(loaded.autocomplete.fallbackModels, []);
 		assert.equal(loaded.autocomplete.debounceMs, 125);
 		assert.equal(loaded.autocomplete.timeoutMs, 2600);
 		assert.equal(loaded.autocomplete.maxTokens, 64);
@@ -224,6 +248,7 @@ describe("config helpers", () => {
 
 		assert.deepEqual(savePixAutocompleteModel("zai/custom-complete"), {
 			modelRef: "zai/custom-complete",
+			fallbackModels: [],
 			debounceMs: 350,
 			timeoutMs: 3000,
 			maxTokens: 48,
@@ -248,7 +273,7 @@ describe("config helpers", () => {
 
 		writeFileSync(testConfigPath, `{ "defaultModel": { "modelRef": "zai/glm-5-turbo", "thinking": "invalid" } }`);
 		const invalidThinkingConfig = loadPixConfig();
-		assert.deepEqual(invalidThinkingConfig.defaultModel, { modelRef: "zai/glm-5-turbo" });
+		assert.deepEqual(invalidThinkingConfig.defaultModel, { modelRef: "zai/glm-5-turbo", fallbackModels: [] });
 		assert.equal(resolveDefaultModelRef(invalidThinkingConfig), "zai/glm-5-turbo");
 	});
 
@@ -259,14 +284,14 @@ describe("config helpers", () => {
 			"defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" }
 		}`);
 
-		assert.deepEqual(savePixDefaultModel("zai/glm-5-turbo"), { modelRef: "zai/glm-5-turbo", thinking: "medium" });
+		assert.deepEqual(savePixDefaultModel("zai/glm-5-turbo"), { modelRef: "zai/glm-5-turbo", fallbackModels: [], thinking: "medium" });
 		assert.match(readFileSync(testConfigPath, "utf8"), /keep comments/u);
 		assert.equal(resolveDefaultModelRef(loadPixConfig()), "zai/glm-5-turbo:medium");
 
-		assert.deepEqual(savePixDefaultModel("openai-codex/gpt-5.5:high"), { modelRef: "openai-codex/gpt-5.5", thinking: "high" });
+		assert.deepEqual(savePixDefaultModel("openai-codex/gpt-5.5:high"), { modelRef: "openai-codex/gpt-5.5", fallbackModels: [], thinking: "high" });
 		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5:high");
 
-		assert.deepEqual(savePixDefaultThinking("low"), { modelRef: "openai-codex/gpt-5.5", thinking: "low" });
+		assert.deepEqual(savePixDefaultThinking("low"), { modelRef: "openai-codex/gpt-5.5", fallbackModels: [], thinking: "low" });
 		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5:low");
 
 		assert.equal(savePixDefaultThinking("invalid"), undefined);

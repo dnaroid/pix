@@ -11,7 +11,9 @@ export interface ProjectTreeRow {
   readonly depth: number;
 }
 
-export const PROJECT_TREE_DRAG_MIME = "application/x-pix-project-entry";
+export const PROJECT_TREE_DROP_TARGET_SELECTOR = "[data-pix-project-path-drop-target]";
+export const PROJECT_TREE_DRAG_STATE_EVENT = "pix-project-path-drag-state";
+export const PROJECT_TREE_DROP_EVENT = "pix-project-path-drop";
 
 export interface ProjectTreeDragPayload {
   readonly path: string;
@@ -37,6 +39,10 @@ export function serializeProjectTreeDrag(entry: ProjectTreeEntry): string {
   return JSON.stringify({ version: 1, path: entry.path, kind: entry.kind });
 }
 
+export function projectTreeDragPayload(entry: ProjectTreeEntry): ProjectTreeDragPayload {
+  return { path: entry.path, kind: entry.kind };
+}
+
 export function parseProjectTreeDrag(value: string): ProjectTreeDragPayload | undefined {
   if (!value) return undefined;
   try {
@@ -44,17 +50,22 @@ export function parseProjectTreeDrag(value: string): ProjectTreeDragPayload | un
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
     const candidate = parsed as Record<string, unknown>;
     if (candidate.version !== 1) return undefined;
-    if (candidate.kind !== "file" && candidate.kind !== "directory") return undefined;
-    if (typeof candidate.path !== "string" || !isProjectRelativePath(candidate.path)) return undefined;
-    return { path: candidate.path, kind: candidate.kind };
+    return projectTreeDragPayloadFromUnknown(candidate);
   } catch {
     return undefined;
   }
 }
 
+export function projectTreeDragPayloadFromUnknown(value: unknown): ProjectTreeDragPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind !== "file" && candidate.kind !== "directory") return undefined;
+  if (typeof candidate.path !== "string" || !isProjectRelativePath(candidate.path)) return undefined;
+  return { path: candidate.path, kind: candidate.kind };
+}
+
 export function projectTreePromptPath(entry: ProjectTreeDragPayload): string {
-  const path = entry.kind === "directory" ? `${entry.path.replace(/\/+$/u, "")}/` : entry.path;
-  return path.includes("`") ? JSON.stringify(path) : `\`${path}\``;
+  return quotedPromptPath(entry.path);
 }
 
 export function insertProjectTreePromptPath(
@@ -63,11 +74,21 @@ export function insertProjectTreePromptPath(
   selectionEnd: number,
   entry: ProjectTreeDragPayload,
 ): ProjectPathInsertion {
+  return insertPromptPaths(text, selectionStart, selectionEnd, [entry.path]);
+}
+
+export function insertPromptPaths(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  paths: readonly string[],
+): ProjectPathInsertion {
   const start = Math.max(0, Math.min(selectionStart, text.length));
   const end = Math.max(start, Math.min(selectionEnd, text.length));
   const before = text.slice(0, start);
   const after = text.slice(end);
-  const reference = projectTreePromptPath(entry);
+  const reference = paths.filter((path) => path.length > 0).map(quotedPromptPath).join(" ");
+  if (!reference) return { text, cursor: start };
   const prefix = before && !/\s$/u.test(before) ? " " : "";
   const suffix = after && !/^\s/u.test(after) ? " " : "";
   const inserted = `${prefix}${reference}${suffix}`;
@@ -75,6 +96,10 @@ export function insertProjectTreePromptPath(
     text: `${before}${inserted}${after}`,
     cursor: before.length + inserted.length,
   };
+}
+
+function quotedPromptPath(path: string): string {
+  return JSON.stringify(path);
 }
 
 function isProjectRelativePath(path: string): boolean {
