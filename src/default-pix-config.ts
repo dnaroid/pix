@@ -69,9 +69,10 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "sessionTitle": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"] },
   "dictation": {
     "language": "en",
+	"model": "nova-3",
     "languages": {
-      "en": { "dirName": "vosk-model-small-en-us-0.15", "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip", "label": "English" },
-      "ru": { "dirName": "vosk-model-small-ru-0.22", "url": "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip", "label": "Russian" }
+	  "en": { "deepgramLanguage": "en", "label": "English" },
+	  "ru": { "deepgramLanguage": "ru", "label": "Russian" }
     }
   }
 }

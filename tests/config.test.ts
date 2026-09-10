@@ -116,6 +116,7 @@ describe("config helpers", () => {
 		assert.equal(config.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);
 		assert.equal(config.dictation.language, "en");
+		assert.equal(config.dictation.model, "nova-3");
 		assert.equal(config.ignoreContextFiles, false);
 		assert.equal(config.maxProjectSessions, 0);
 		assert.equal(config.dictation.languages.en?.label, "English");
@@ -139,7 +140,7 @@ describe("config helpers", () => {
 				"languages": {
 					"en": { "dirName": "vosk-model-small-en-us-0.15", "url": "https://example.test/en.zip", "label": "English" },
 					"ru": { "model": "vosk-model-small-ru-0.22", "url": "https://example.test/ru.zip", "label": "Russian" },
-					"bad": { "label": "Bad" }
+					"bad": null
 				}
 			}
 		}`);
@@ -165,10 +166,12 @@ describe("config helpers", () => {
 		assert.equal(resolveModelColor("unknown/model", loaded.modelColors), undefined);
 		assert.equal(loaded.iconTheme.name, "fallback");
 		assert.equal(loaded.dictation.language, "ru");
+		assert.equal(loaded.dictation.model, undefined);
 		assert.equal(loaded.ignoreContextFiles, false);
 		assert.equal(loaded.maxProjectSessions, 50);
 		assert.deepEqual(Object.keys(loaded.dictation.languages), ["en", "ru"]);
 		assert.equal(loaded.dictation.languages.ru?.dirName, "vosk-model-small-ru-0.22");
+		assert.equal(loaded.dictation.languages.ru?.deepgramLanguage, "ru");
 
 		writeFileSync(testConfigPath, `{
 			"toolRenderer": { "tools": { "empty": {}, "valid": { "direction": "tail" } } },
@@ -186,6 +189,7 @@ describe("config helpers", () => {
 		assert.equal(partial.modelColors.rules["zai/*"], "success");
 		assert.equal(partial.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(partial.dictation.languages), ["en", "ru"]);
+		assert.equal(partial.dictation.model, "nova-3");
 		assert.equal(partial.ignoreContextFiles, false);
 		assert.equal(partial.maxProjectSessions, 0);
 

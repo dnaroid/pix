@@ -301,37 +301,43 @@
           "type": "string",
           "description": "Selected language code, e.g. 'en' or 'ru'."
         },
+        "model": {
+          "type": "string",
+          "description": "Deepgram speech-to-text model. Defaults to 'nova-3'."
+        },
         "languages": {
           "type": "object",
           "patternProperties": {
             "^.*$": {
               "type": "object",
               "required": [
-                "dirName",
-                "url",
                 "label"
               ],
               "properties": {
-                "dirName": {
-                  "type": "string",
-                  "description": "Vosk model directory name."
-                },
-                "url": {
-                  "type": "string",
-                  "description": "Download URL for the Vosk model zip."
-                },
                 "label": {
                   "type": "string",
                   "description": "Human-readable language label."
+                },
+                "deepgramLanguage": {
+                  "type": "string",
+                  "description": "Deepgram language code. Defaults to the language map key."
+                },
+                "dirName": {
+                  "type": "string",
+                  "description": "Deprecated legacy Vosk model directory name; ignored by Deepgram dictation."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Deprecated legacy Vosk model URL; ignored by Deepgram dictation."
                 }
               },
-              "description": "Vosk voice dictation model definition."
+              "description": "Deepgram voice dictation language definition."
             }
           },
-          "description": "Available language models keyed by language code."
+          "description": "Available dictation languages keyed by local language code."
         }
       },
-      "description": "Voice dictation (Vosk) configuration."
+      "description": "Voice dictation (Deepgram) configuration. Requires DEEPGRAM_API_KEY in the process environment."
     },
     "desktop": {
       "type": "object",

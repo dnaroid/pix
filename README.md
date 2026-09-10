@@ -136,8 +136,8 @@ Recommended:
 
 Optional:
 
-- the `vosk` optional dependency for local voice input
-- an audio recorder for dictation: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux
+- `DEEPGRAM_API_KEY` for voice input in the terminal UI and Pix Desktop
+- an audio recorder for terminal dictation: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux
 - `tmux` and `rsvg-convert` only if you want to regenerate README screenshots
 - Ollama with web search enabled for the bundled `web_search` and `web_fetch` tools
 - language servers for the LSP module (see [LSP setup](external/pi-tools-suite/README.md#lsp-setup) for install commands and ready-to-paste configs for popular servers, including Svelte, Vue, Go, clangd, Lua, and bash)
@@ -274,14 +274,13 @@ Pix can provide inline, model-backed autocomplete with configurable debounce, ti
 - `/copy` copies the last assistant message.
 - Pix integrates with the native clipboard on macOS and Windows and common Wayland/X11 helpers on Linux.
 
-### Local voice input
+### Voice input
 
-Press `Ctrl+G` or click the microphone in the status area to start/stop dictation. Pix supports configurable local Vosk models and ships defaults for:
+Set `DEEPGRAM_API_KEY`, then press `Ctrl+G` or click the microphone in the terminal status area to start/stop dictation. Pix streams microphone audio to Deepgram Nova-3 and inserts finalized text into the editor so you can review it before sending. The default dictation languages are English and Russian and can be changed with the existing language control.
 
-- English: `vosk-model-small-en-us-0.15`
-- Russian: `vosk-model-small-ru-0.22`
+Pix Desktop exposes the same voice-input action directly in the message composer. The desktop client uses Nova-3 multilingual recognition and requests a short-lived Deepgram token from the local Tauri backend; the permanent `DEEPGRAM_API_KEY` is never exposed to the WebView.
 
-The selected model is downloaded on first use. Recognition is local; the resulting text is inserted into the editor so you can review it before sending.
+Voice audio is sent to Deepgram while recording. Pix no longer downloads or installs local speech-recognition models.
 
 ### Workspace undo
 
@@ -457,7 +456,7 @@ Install `wl-clipboard` on Wayland or `xclip`/`xsel` on X11, then run `pix instal
 
 ### Voice input is unavailable
 
-Ensure the optional `vosk` dependency installed successfully, the configured model URL is reachable for its first download, and an audio recorder is available: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux. Voice support can be omitted without affecting the rest of Pix.
+Ensure `DEEPGRAM_API_KEY` is set in the environment that launches Pix. Terminal voice input also needs an audio recorder: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux. Pix Desktop additionally needs microphone permission from the operating system. Voice support can be omitted without affecting the rest of Pix.
 
 ### A provider login dialog is missing
 

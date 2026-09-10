@@ -2,11 +2,14 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Eye from "@lucide/svelte/icons/eye";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Mic from "@lucide/svelte/icons/mic";
   import Paperclip from "@lucide/svelte/icons/paperclip";
   import Pause from "@lucide/svelte/icons/pause";
   import Square from "@lucide/svelte/icons/square";
   import X from "@lucide/svelte/icons/x";
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
   import type { Attachment } from "../lib/attachments";
   import {
@@ -44,6 +47,12 @@
     type SlashCommandMatch,
   } from "../lib/slash-commands";
   import AttachmentGrid from "./AttachmentGrid.svelte";
+  import {
+    browserDeepgramSupported,
+    DeepgramDictationController,
+    type DeepgramDictationState,
+    type DeepgramToken,
+  } from "../lib/deepgram";
 
   let {
     promptText = $bindable(""),
@@ -105,6 +114,12 @@
   let slashMenuKey = "";
   let questionModeActive = false;
   let restoreFocusElement: HTMLElement | null = null;
+  let voiceController: DeepgramDictationController | undefined;
+  let voiceState = $state<DeepgramDictationState>("idle");
+  let voiceInterim = $state<string | undefined>();
+  let voiceError = $state("");
+  let voiceSupported = $state(false);
+  let voiceSessionId = $state<string | undefined>();
   const autocompleteController = new PromptAutocompleteController({
     request: (draft, signal) => onAutocomplete(draft, signal),
     onSuggestion: (suggestion) => {
@@ -133,6 +148,9 @@
   const displayedAttachments = $derived(questionMode ? questionAttachments : attachments);
   const textareaValue = $derived(composerText());
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
+  const voiceCanStart = $derived(
+    !editorMode && !questionMode && voiceSupported && ready && !!activeSessionId,
+  );
   const slashQuery = $derived.by(() => {
     if (editorMode || !ready || !activeSessionId || promptRunning || questionMode || composing || attachments.length > 0) {
       return undefined;
@@ -284,6 +302,38 @@
 
   $effect(() => () => autocompleteController.dispose());
 
+  onMount(() => {
+    voiceSupported = browserDeepgramSupported();
+    if (!voiceSupported) return;
+    voiceController = new DeepgramDictationController(
+      {
+        onState: (state) => { voiceState = state; },
+        onFinal: (text) => { void insertVoiceTranscript(text, voiceSessionId); },
+        onInterim: (text) => {
+          voiceInterim = voiceSessionId === activeSessionId ? text : undefined;
+        },
+        onError: (message) => { voiceError = message; },
+      },
+      async () => await invoke<DeepgramToken>("deepgram_token"),
+    );
+    return () => {
+      const controller = voiceController;
+      voiceSessionId = undefined;
+      voiceInterim = undefined;
+      voiceController = undefined;
+      if (controller) void controller.dispose();
+    };
+  });
+
+  $effect(() => {
+    if (voiceState === "idle") return;
+    if (!activeSessionId || voiceSessionId !== activeSessionId || !ready || editorMode || questionMode) {
+      voiceSessionId = undefined;
+      voiceInterim = undefined;
+      void stopVoiceInput();
+    }
+  });
+
   $effect(() => {
     const form = composerForm;
     if (!form) return;
@@ -318,10 +368,11 @@
     questionMode?.onStateChange(state);
   }
 
-  function handleSubmit(event: SubmitEvent): void {
+  async function handleSubmit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (!questionMode) {
-      void onSubmit();
+      await stopVoiceInput();
+      await onSubmit();
       return;
     }
     if (questionMode.addingImages) return;
@@ -334,6 +385,60 @@
       updateQuestionState(next);
       focusQuestionContent(next.activeTab);
     }
+  }
+
+  async function toggleVoiceInput(): Promise<void> {
+    if (!voiceController) return;
+    const starting = voiceController.currentState() === "idle";
+    if (starting) {
+      if (!voiceCanStart || !activeSessionId) return;
+      voiceSessionId = activeSessionId;
+    }
+    voiceError = "";
+    autocompleteController.dismiss();
+    await voiceController.toggle();
+    if (voiceController.currentState() === "idle") {
+      voiceSessionId = undefined;
+      voiceInterim = undefined;
+    }
+  }
+
+  async function stopVoiceInput(): Promise<void> {
+    const controller = voiceController;
+    if (!controller) return;
+    if (controller.currentState() !== "idle") await controller.stop();
+    voiceSessionId = undefined;
+    voiceInterim = undefined;
+    await tick();
+  }
+
+  async function deferWithVoiceStop(): Promise<void> {
+    await stopVoiceInput();
+    await onDefer();
+  }
+
+  async function insertVoiceTranscript(rawText: string, sessionId: string | undefined): Promise<void> {
+    if (editorMode || questionMode || !sessionId || sessionId !== activeSessionId) return;
+    const transcript = rawText.trim().replace(/\s+/gu, " ");
+    if (!transcript) return;
+    const start = textarea?.selectionStart ?? selectionStart;
+    const end = textarea?.selectionEnd ?? selectionEnd;
+    const before = promptText.slice(0, start);
+    const after = promptText.slice(end);
+    const prefix = before.length > 0 && !/\s$/u.test(before) ? " " : "";
+    const suffix = after.length > 0 && !/^\s/u.test(after) ? " " : "";
+    const insertion = `${prefix}${transcript}${suffix}`;
+    promptText = `${before}${insertion}${after}`;
+    const cursor = before.length + insertion.length;
+    dismissedSlashDraft = null;
+    autocompleteController.dismiss();
+    await tick();
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(cursor, cursor);
+    updateSelection(textarea);
+    resizeComposer();
+    observeAutocomplete(textarea);
   }
 
   function handleKeydown(event: KeyboardEvent): void {
@@ -939,12 +1044,33 @@
         </button>
         {#if !editorMode && !questionMode}
           <button
+            class={[
+              "grid h-6 w-6 shrink-0 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+              voiceState === "listening"
+                ? "text-destructive hover:bg-destructive/10"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+            ]}
+            type="button"
+            aria-label={voiceState === "listening" ? "Stop voice input" : voiceState === "starting" ? "Connecting voice input" : "Start voice input"}
+            title={voiceState === "listening" ? "Stop voice input" : voiceState === "starting" ? "Connecting to Deepgram…" : voiceSupported ? "Voice input" : "Voice input is unavailable in this WebView"}
+            disabled={voiceState === "idle" && !voiceCanStart}
+            onclick={() => void toggleVoiceInput()}
+          >
+            {#if voiceState === "starting"}
+              <LoaderCircle class="h-4 w-4 animate-spin" aria-hidden="true" />
+            {:else}
+              <Mic class="h-4 w-4" aria-hidden="true" />
+            {/if}
+          </button>
+        {/if}
+        {#if !editorMode && !questionMode}
+          <button
             class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
             aria-label="Pause message for later"
             title="Pause message for later"
             disabled={!activeSessionId || !ready || !hasQueueableDraft}
-            onclick={onDefer}
+            onclick={() => void deferWithVoiceStop()}
           >
             <Pause class="h-4 w-4" aria-hidden="true" />
           </button>
@@ -961,6 +1087,15 @@
           </button>
         {/if}
       </div>
+      {#if !editorMode && !questionMode && (voiceInterim || voiceError)}
+        <p
+          class={[
+            "mt-1.5 truncate text-[11px]",
+            voiceError ? "text-destructive" : "text-muted-foreground",
+          ]}
+          aria-live="polite"
+        >{voiceError || `Listening: ${voiceInterim}`}</p>
+      {/if}
     {/if}
 
     {#if questionMode}

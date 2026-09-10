@@ -3,12 +3,19 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 
 import { APP_ICONS } from "../src/app/icons.js";
-import { AppVoiceController, setVoiceControllerTestDeps, type AppVoiceControllerHost, type VoiceInputState } from "../src/app/input/voice-controller.js";
+import {
+	AppVoiceController,
+	buildDeepgramUrl,
+	parseDeepgramTranscript,
+	setVoiceControllerTestDeps,
+	type AppVoiceControllerHost,
+	type VoiceInputState,
+} from "../src/app/input/voice-controller.js";
 import type { DictationConfig } from "../src/config.js";
 
 describe("AppVoiceController", () => {
-	it("falls back to English or first configured language and hides the switcher for one language", () => {
-		const oneLanguage = new AppVoiceController(fakeHost(), { languages: { de: { dirName: "de", url: "https://example.test/de.zip", label: "German" } } });
+	it("falls back to English or the first configured language and hides a single-language switcher", () => {
+		const oneLanguage = new AppVoiceController(fakeHost(), { languages: { de: { label: "German", deepgramLanguage: "de" } } });
 		const englishFallback = new AppVoiceController(fakeHost(), dictationConfig({ language: "missing" }));
 
 		assert.equal(oneLanguage.showLanguageSwitcher(), false);
@@ -16,24 +23,21 @@ describe("AppVoiceController", () => {
 		assert.equal(englishFallback.statusWidgetText(), `${APP_ICONS.microphone} EN`);
 	});
 
-	it("formats every voice widget state and progress overlay", () => {
+	it("formats connecting/listening status and progress", () => {
 		const controller = new AppVoiceController(fakeHost(), dictationConfig({ language: "ru" }));
 		const internals = controller as unknown as { state: VoiceInputState; progressMessage?: string; progressFrame: number };
 
-		internals.state = "installing";
+		internals.state = "connecting";
 		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} RU ${APP_ICONS.timerSand}`);
-		internals.state = "loading";
-		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} RU ${APP_ICONS.timerSand}`);
+		internals.progressMessage = "Connecting to Deepgram";
+		internals.progressFrame = 1000;
+		assert.match(controller.progressOverlayText() ?? "", /Connecting to Deepgram/u);
 		internals.state = "listening";
 		assert.equal(controller.statusWidgetActive(), true);
-		internals.progressMessage = "Downloading model";
-		internals.progressFrame = 1000;
-		assert.match(controller.progressOverlayText() ?? "", /Downloading model/u);
-		internals.progressMessage = undefined;
-		assert.equal(controller.progressOverlayText(), undefined);
+		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} RU`);
 	});
 
-	it("cycles languages, saves selection errors as warnings, and restarts active recording", async () => {
+	it("cycles languages, saves the choice, and restarts active recording", async () => {
 		const host = fakeHost();
 		const controller = new AppVoiceController(host, dictationConfig({ language: "en" }));
 		const internals = controller as unknown as {
@@ -51,295 +55,173 @@ describe("AppVoiceController", () => {
 
 		assert.equal(internals.nextLanguage(), "en");
 		assert.equal(starts, 1);
-		assert.ok(host.toasts.some((toast) => toast === "saved:ru"));
+		assert.ok(host.toasts.includes("saved:ru"));
 		assert.ok(host.toasts.some((toast) => toast.includes("Voice language: Russian")));
 	});
 
-	it("emits final and partial transcripts defensively", async () => {
-		const host = fakeHost();
-		const controller = new AppVoiceController(host, dictationConfig());
-		const internals = controller as unknown as {
-			emitTranscript(result: unknown): void;
-			emitPartialTranscript(result: unknown): void;
-			clearPartialTranscript(): void;
-		};
+	it("builds the Deepgram live URL for raw 16 kHz mono PCM", () => {
+		const url = new URL(buildDeepgramUrl("nova-3", "ru", true));
 
-		internals.emitTranscript('{"text":" hello   world "}');
-		internals.emitTranscript({ text: " object  result " });
-		internals.emitTranscript("not json");
-		internals.emitPartialTranscript('{"partial":" partial   text "}');
-		internals.emitPartialTranscript({ partial: "partial text" });
-		await new Promise((resolve) => setTimeout(resolve, 130));
-		internals.clearPartialTranscript();
-
-		assert.deepEqual(host.transcripts, ["hello world", "object result"]);
-		assert.deepEqual(host.partials, ["partial text", undefined]);
+		assert.equal(url.origin, "wss://api.deepgram.com");
+		assert.equal(url.pathname, "/v1/listen");
+		assert.equal(url.searchParams.get("model"), "nova-3");
+		assert.equal(url.searchParams.get("language"), "ru");
+		assert.equal(url.searchParams.get("encoding"), "linear16");
+		assert.equal(url.searchParams.get("sample_rate"), "16000");
+		assert.equal(url.searchParams.get("channels"), "1");
+		assert.equal(url.searchParams.get("interim_results"), "true");
 	});
 
-	it("stops recording, frees cached models, and ignores duplicate progress messages", async () => {
-		const host = fakeHost();
-		const controller = new AppVoiceController(host, dictationConfig());
-		const freed: string[] = [];
-		const internals = controller as unknown as {
-			state: VoiceInputState;
-			audioProcess?: { killed: boolean; kill(signal: string): void };
-			recognizer?: { finalResult(): unknown; free(): void };
-			modelCache: Map<string, { free(): void }>;
-			addProgressSystemMessage(message: string): void;
-		};
-		internals.state = "listening";
-		internals.audioProcess = { killed: false, kill: (signal) => { freed.push(signal); } };
-		internals.recognizer = { finalResult: () => ({ text: "final words" }), free: () => { freed.push("recognizer"); } };
-		internals.modelCache.set("en", { free: () => { freed.push("model"); } });
-
-		internals.addProgressSystemMessage("same");
-		internals.addProgressSystemMessage("same");
-		await controller.dispose();
-
-		assert.deepEqual(host.systemMessages, ["Voice input: same"]);
-		assert.deepEqual(host.transcripts, ["final words"]);
-		assert.deepEqual(freed, ["SIGTERM", "recognizer", "model"]);
-		assert.equal(controller.statusWidgetActive(), false);
+	it("parses Deepgram final and interim Results defensively", () => {
+		assert.deepEqual(parseDeepgramTranscript(JSON.stringify({
+			type: "Results",
+			is_final: false,
+			channel: { alternatives: [{ transcript: " partial   words " }] },
+		})), { text: "partial words", isFinal: false });
+		assert.deepEqual(parseDeepgramTranscript(Buffer.from(JSON.stringify({
+			type: "Results",
+			is_final: true,
+			channel: { alternatives: [{ transcript: " final words " }] },
+		}))), { text: "final words", isFinal: true });
+		assert.equal(parseDeepgramTranscript("not json"), undefined);
+		assert.equal(parseDeepgramTranscript(JSON.stringify({ type: "Metadata" })), undefined);
+		assert.equal(parseDeepgramTranscript(JSON.stringify({
+			type: "Results",
+			channel: { alternatives: [{ transcript: "   " }] },
+		})), undefined);
 	});
 
-	it("binds recorder data and partial results without touching audio hardware", async () => {
-		const host = fakeHost();
-		const controller = new AppVoiceController(host, dictationConfig());
-		const audioProcess = fakeAudioProcess();
-		const recognizer = {
-			acceptWaveform: (() => {
-				let calls = 0;
-				return (_buffer: Buffer) => {
-					calls += 1;
-					return calls > 1;
-				};
-			})(),
-			partialResult: () => ({ partial: " partial draft " }),
-			result: () => ({ text: "final transcript" }),
-			finalResult: () => ({ text: "close transcript" }),
-			free: () => { host.toasts.push("recognizer-freed"); },
-		};
-		const internals = controller as unknown as {
-			state: VoiceInputState;
-			audioProcess?: typeof audioProcess;
-			recognizer?: typeof recognizer;
-			startGeneration: number;
-			bindAudioProcess(process: typeof audioProcess, recognizerArg: typeof recognizer, generation: number): void;
-		};
-		internals.state = "listening";
-		internals.audioProcess = audioProcess;
-		internals.recognizer = recognizer;
-		internals.startGeneration = 1;
-		internals.bindAudioProcess(audioProcess, recognizer, 1);
-
-		audioProcess.stdout.emit("data", Buffer.from("pcm-1"));
-		await new Promise((resolve) => setTimeout(resolve, 130));
-		audioProcess.stdout.emit("data", Buffer.from("pcm-2"));
-
-		assert.deepEqual(host.partials, ["partial draft", undefined]);
-		assert.deepEqual(host.transcripts, ["final transcript"]);
-
-	});
-
-	it("reports recorder errors by surfacing a toast and stopping the current session", () => {
-		const host = fakeHost();
-		const controller = new AppVoiceController(host, dictationConfig());
-		const audioProcess = fakeAudioProcess();
-		const recognizer = {
-			acceptWaveform: () => { throw new Error("decoder boom"); },
-			result: () => ({ text: "ignored" }),
-			finalResult: () => ({ text: "ignored" }),
-		};
-		let stopCalls = 0;
-		const internals = controller as unknown as {
-			state: VoiceInputState;
-			audioProcess?: typeof audioProcess;
-			recognizer?: typeof recognizer;
-			startGeneration: number;
-			bindAudioProcess(process: typeof audioProcess, recognizerArg: typeof recognizer, generation: number): void;
-			stopRecording(): Promise<void>;
-		};
-		internals.state = "listening";
-		internals.audioProcess = audioProcess;
-		internals.recognizer = recognizer;
-		internals.startGeneration = 1;
-		internals.stopRecording = async () => { stopCalls += 1; };
-		internals.bindAudioProcess(audioProcess, recognizer, 1);
-
-		audioProcess.stdout.emit("data", Buffer.from("pcm"));
-
-		assert.equal(stopCalls, 1);
-		assert.ok(host.toasts.some((toast) => toast.includes("Voice recognition failed: decoder boom")));
-	});
-
-	it("handles recorder process errors by clearing the active recognizer and returning to idle", () => {
-		const host = fakeHost();
-		const controller = new AppVoiceController(host, dictationConfig());
-		const audioProcess = fakeAudioProcess();
-		const recognizer = {
-			acceptWaveform: () => false,
-			finalResult: () => ({ text: "final" }),
-			free: () => { host.toasts.push("recognizer-freed"); },
-		};
-		const internals = controller as unknown as {
-			state: VoiceInputState;
-			audioProcess?: typeof audioProcess;
-			recognizer?: typeof recognizer;
-			startGeneration: number;
-			bindAudioProcess(process: typeof audioProcess, recognizerArg: typeof recognizer, generation: number): void;
-		};
-		internals.state = "listening";
-		internals.audioProcess = audioProcess;
-		internals.recognizer = recognizer;
-		internals.startGeneration = 1;
-		internals.bindAudioProcess(audioProcess, recognizer, 1);
-
-		audioProcess.emit("error", new Error("device lost"));
-
-		assert.equal(internals.state, "idle");
-		assert.equal(internals.audioProcess, undefined);
-		assert.equal(internals.recognizer, undefined);
-		assert.ok(host.toasts.some((toast) => toast.includes("Voice recorder failed: device lost")));
-	});
-
-	it("toggles recording by delegating to the matching start or stop path", async () => {
-		const controller = new AppVoiceController(fakeHost(), dictationConfig());
-		const internals = controller as unknown as {
-			state: VoiceInputState;
-			startRecording(): Promise<void>;
-			stopRecording(): Promise<void>;
-		};
-		let starts = 0;
-		let stops = 0;
-		internals.startRecording = async () => { starts += 1; };
-		internals.stopRecording = async () => { stops += 1; };
-
-		internals.state = "idle";
-		await controller.toggleRecording();
-		internals.state = "listening";
-		await controller.toggleRecording();
-
-		assert.equal(starts, 1);
-		assert.equal(stops, 1);
-	});
-
-	it("keeps the microphone icon with a busy spinner while downloading a model", () => {
-		const controller = new AppVoiceController(fakeHost(), dictationConfig({ language: "ru" }));
-		(controller as unknown as { state: VoiceInputState }).state = "downloading";
-
-		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} RU ${APP_ICONS.timerSand}`);
-		assert.ok(!controller.statusWidgetText().includes(APP_ICONS.down));
-	});
-
-	it("initializes from the saved dictation language when it is enabled", () => {
-		const controller = new AppVoiceController(fakeHost(), dictationConfig({ language: "ru" }));
-
-		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} RU`);
-	});
-
-	it("starts recording with mocked Vosk, model, recorder, and spawn dependencies", async () => {
+	it("streams recorder PCM, emits interim/final text, finalizes, and commits the last interim on stop", async () => {
 		const host = fakeHost();
 		const audioProcess = fakeAudioProcess();
-		const modelPaths: string[] = [];
+		const socket = new FakeSocket();
+		const sockets: Array<{ url: string; protocols: string[] }> = [];
 		const spawned: Array<{ command: string; args: string[] }> = [];
-		const freed: string[] = [];
-		const controller = new AppVoiceController(host, dictationConfig({ language: "en" }));
-		const vosk = {
-			setLogLevel: (level: number) => { host.toasts.push(`log:${level}`); },
-			Model: class {
-				constructor(modelPath: string) { modelPaths.push(modelPath); }
-				free(): void { freed.push("model"); }
-			},
-			Recognizer: class {
-				acceptWaveform(): boolean { return true; }
-				result(): unknown { return { text: "started transcript" }; }
-				finalResult(): unknown { return { text: "closed transcript" }; }
-				free(): void { freed.push("recognizer"); }
-			},
-		};
+		const controller = new AppVoiceController(host, dictationConfig({ language: "ru", model: "nova-3" }));
 
 		setVoiceControllerTestDeps({
-			tryLoadVosk: () => ({ ok: true, module: vosk }) as never,
-			ensureModel: async (language, definition) => {
-				assert.equal(language, "en");
-				assert.equal(definition.label, "English");
-				return "/mock/en-model";
-			},
+			deepgramApiKey: () => "dg-test-key",
 			selectRecorderCommand: async () => ({ command: "rec", args: ["--mock"], description: "mock recorder" }),
+			createDeepgramSocket: ((url: string, protocols: string[]) => {
+				sockets.push({ url, protocols });
+				return socket;
+			}) as never,
+			waitForSocketOpen: async () => {},
 			spawn: ((command: string, args: string[]) => {
 				spawned.push({ command, args });
 				return audioProcess;
 			}) as never,
+			delay: async () => {},
 		});
 		try {
 			await controller.toggleRecording();
 
 			assert.equal(controller.statusWidgetActive(), true);
-			assert.deepEqual(modelPaths, ["/mock/en-model"]);
 			assert.deepEqual(spawned, [{ command: "rec", args: ["--mock"] }]);
-			assert.ok(host.toasts.includes("log:-1"));
-			assert.ok(host.toasts.some((toast) => toast.includes("Voice input on (English, mock recorder)")));
+			assert.deepEqual(sockets[0]?.protocols, ["token", "dg-test-key"]);
+			const socketUrl = new URL(sockets[0]?.url ?? "");
+			assert.equal(socketUrl.searchParams.get("language"), "ru");
+			assert.equal(socketUrl.searchParams.get("model"), "nova-3");
 
 			audioProcess.stdout.emit("data", Buffer.from("pcm"));
-			audioProcess.emit("close", 0, null);
+			assert.ok(Buffer.isBuffer(socket.sent[0]));
+			socket.emitMessage(deepgramResult("interim draft", false));
+			await new Promise((resolve) => setTimeout(resolve, 130));
+			assert.deepEqual(host.partials, ["interim draft"]);
 
-			assert.deepEqual(host.transcripts, ["started transcript", "closed transcript"]);
-			assert.deepEqual(freed, ["recognizer"]);
+			socket.emitMessage(deepgramResult("final transcript", true));
+			assert.deepEqual(host.partials, ["interim draft", undefined]);
+			assert.deepEqual(host.transcripts, ["final transcript"]);
+
+			socket.emitMessage(deepgramResult("tail words", false));
+			await controller.stopRecording();
+
+			assert.equal(audioProcess.killed, true);
+			assert.ok(socket.sent.some((value) => value === JSON.stringify({ type: "Finalize" })));
+			assert.deepEqual(host.transcripts, ["final transcript", "tail words"]);
+			assert.equal(socket.closed, true);
 			assert.equal(controller.statusWidgetActive(), false);
 		} finally {
 			setVoiceControllerTestDeps();
 		}
 	});
 
-	it("surfaces mocked start-recording failures without touching audio hardware", async () => {
+	it("surfaces a missing Deepgram key without touching audio hardware", async () => {
 		const host = fakeHost();
 		const controller = new AppVoiceController(host, dictationConfig());
-
-		setVoiceControllerTestDeps({
-			tryLoadVosk: () => ({ ok: true, module: {
-				Model: class {},
-				Recognizer: class {},
-			} }) as never,
-			ensureModel: async () => { throw new Error("model unavailable"); },
-			spawn: (() => { throw new Error("spawn should not run"); }) as never,
-		});
-		try {
-			await controller.toggleRecording();
-
-			assert.equal(controller.statusWidgetActive(), false);
-			assert.ok(host.systemMessages.some((message) => message.includes("Voice input: Unavailable: model unavailable")));
-			assert.ok(host.toasts.some((toast) => toast.includes("Voice input unavailable: model unavailable")));
-		} finally {
-			setVoiceControllerTestDeps();
-		}
-	});
-
-	it("discards an async recording start after the originating tab changes", async () => {
-		const host = fakeHost();
-		host.activeScope.value = "tab-a";
-		const controller = new AppVoiceController(host, dictationConfig());
-		let resolveModel!: (path: string) => void;
 		let recorderSelections = 0;
+
 		setVoiceControllerTestDeps({
-			tryLoadVosk: () => ({ ok: true, module: {
-				Model: class {},
-				Recognizer: class {},
-			} }) as never,
-			ensureModel: async () => await new Promise((resolve) => { resolveModel = resolve; }),
+			deepgramApiKey: () => undefined,
 			selectRecorderCommand: async () => {
 				recorderSelections += 1;
 				return { command: "rec", args: [], description: "mock" };
 			},
 		});
 		try {
+			await controller.toggleRecording();
+
+			assert.equal(recorderSelections, 0);
+			assert.equal(controller.statusWidgetActive(), false);
+			assert.ok(host.systemMessages.some((message) => message.includes("Voice input: Unavailable: DEEPGRAM_API_KEY is not set")));
+			assert.ok(host.toasts.some((toast) => toast.includes("Voice input unavailable: DEEPGRAM_API_KEY is not set")));
+		} finally {
+			setVoiceControllerTestDeps();
+		}
+	});
+
+	it("reports recorder send errors and stops the active session", async () => {
+		const host = fakeHost();
+		const audioProcess = fakeAudioProcess();
+		const socket = new FakeSocket();
+		socket.sendError = new Error("socket send boom");
+		const controller = new AppVoiceController(host, dictationConfig());
+
+		setVoiceControllerTestDeps({
+			deepgramApiKey: () => "dg-test-key",
+			selectRecorderCommand: async () => ({ command: "rec", args: [], description: "mock" }),
+			createDeepgramSocket: (() => socket) as never,
+			waitForSocketOpen: async () => {},
+			spawn: (() => audioProcess) as never,
+			delay: async () => {},
+		});
+		try {
+			await controller.toggleRecording();
+			audioProcess.stdout.emit("data", Buffer.from("pcm"));
+			await Promise.resolve();
+
+			assert.ok(host.toasts.some((toast) => toast.includes("Voice recognition failed: socket send boom")));
+			await controller.stopRecording();
+			assert.equal(controller.statusWidgetActive(), false);
+		} finally {
+			setVoiceControllerTestDeps();
+		}
+	});
+
+	it("discards an async Deepgram start after the originating tab changes", async () => {
+		const host = fakeHost();
+		host.activeScope.value = "tab-a";
+		const controller = new AppVoiceController(host, dictationConfig());
+		let resolveRecorder!: (recorder: { command: string; args: string[]; description: string }) => void;
+		let sockets = 0;
+
+		setVoiceControllerTestDeps({
+			deepgramApiKey: () => "dg-test-key",
+			selectRecorderCommand: async () => await new Promise((resolve) => { resolveRecorder = resolve; }),
+			createDeepgramSocket: (() => {
+				sockets += 1;
+				return new FakeSocket();
+			}) as never,
+		});
+		try {
 			const starting = controller.toggleRecording();
 			await Promise.resolve();
 			host.activeScope.value = "tab-b";
-			resolveModel("/mock/model");
+			resolveRecorder({ command: "rec", args: [], description: "mock" });
 			await starting;
 
+			assert.equal(sockets, 0);
 			assert.equal(controller.statusWidgetActive(), false);
-			assert.equal(recorderSelections, 0);
 			assert.deepEqual(host.transcripts, []);
 			assert.deepEqual(host.partials, []);
 		} finally {
@@ -347,61 +229,258 @@ describe("AppVoiceController", () => {
 		}
 	});
 
-	it("does not emit stop results or throttled partials into a newer tab", async () => {
+	it("does not emit a pending interim or final result into a newer tab", async () => {
 		const host = fakeHost();
 		host.activeScope.value = "tab-a";
-		const controller = new AppVoiceController(host, dictationConfig());
 		const audioProcess = fakeAudioProcess();
-		const recognizer = {
-			acceptWaveform: () => false,
-			partialResult: () => ({ partial: "old tab partial" }),
-			result: () => ({ text: "unused" }),
-			finalResult: () => ({ text: "old tab final" }),
-		};
+		const socket = new FakeSocket();
+		const controller = new AppVoiceController(host, dictationConfig());
+
+		setVoiceControllerTestDeps({
+			deepgramApiKey: () => "dg-test-key",
+			selectRecorderCommand: async () => ({ command: "rec", args: [], description: "mock" }),
+			createDeepgramSocket: (() => socket) as never,
+			waitForSocketOpen: async () => {},
+			spawn: (() => audioProcess) as never,
+			delay: async () => {},
+		});
+		try {
+			await controller.toggleRecording();
+			socket.emitMessage(deepgramResult("old tab partial", false));
+			host.activeScope.value = "tab-b";
+			await controller.stopRecording();
+			socket.emitMessage(deepgramResult("old tab final", true));
+			await new Promise((resolve) => setTimeout(resolve, 130));
+
+			assert.deepEqual(host.transcripts, []);
+			assert.deepEqual(host.partials, []);
+		} finally {
+			setVoiceControllerTestDeps();
+		}
+	});
+
+	it("deduplicates progress system messages", () => {
+		const host = fakeHost();
+		const controller = new AppVoiceController(host, dictationConfig());
+		const internals = controller as unknown as { addProgressSystemMessage(message: string): void };
+
+		internals.addProgressSystemMessage("same");
+		internals.addProgressSystemMessage("same");
+
+		assert.deepEqual(host.systemMessages, ["Voice input: same"]);
+	});
+
+	it("does not restart recording when toggle is pressed while a stop is already in progress", async () => {
+		const controller = new AppVoiceController(fakeHost(), dictationConfig());
+		let releaseStop!: () => void;
 		const internals = controller as unknown as {
 			state: VoiceInputState;
-			audioProcess?: typeof audioProcess;
-			recognizer?: typeof recognizer;
-			recordingScope?: string;
-			startGeneration: number;
-			bindAudioProcess(process: typeof audioProcess, recognizerArg: typeof recognizer, generation: number, scope: string): void;
+			stopPromise?: Promise<void>;
+			startRecording(): Promise<void>;
 		};
-		internals.state = "listening";
-		internals.audioProcess = audioProcess;
-		internals.recognizer = recognizer;
-		internals.recordingScope = "tab-a";
-		internals.startGeneration = 1;
-		internals.bindAudioProcess(audioProcess, recognizer, 1, "tab-a");
-		audioProcess.stdout.emit("data", Buffer.from("pcm"));
+		let starts = 0;
+		internals.state = "idle";
+		internals.startRecording = async () => { starts += 1; };
+		internals.stopPromise = new Promise<void>((resolve) => { releaseStop = resolve; });
 
-		host.activeScope.value = "tab-b";
-		await controller.stopRecording();
-		await new Promise((resolve) => setTimeout(resolve, 130));
-		audioProcess.emit("close", 0, null);
+		const toggling = controller.toggleRecording();
+		releaseStop();
+		await toggling;
 
-		assert.deepEqual(host.transcripts, []);
-		assert.deepEqual(host.partials, []);
+		assert.equal(starts, 0);
+	});
+
+	it("does not restart recording when language changes during an already-running stop", async () => {
+		const host = fakeHost();
+		const controller = new AppVoiceController(host, dictationConfig({ language: "en" }));
+		let releaseStop!: () => void;
+		const internals = controller as unknown as {
+			state: VoiceInputState;
+			stopPromise?: Promise<void>;
+			startRecording(): Promise<void>;
+		};
+		let starts = 0;
+		internals.state = "idle";
+		internals.startRecording = async () => { starts += 1; };
+		internals.stopPromise = new Promise<void>((resolve) => { releaseStop = resolve; });
+
+		const switching = controller.toggleLanguage();
+		releaseStop();
+		await switching;
+
+		assert.equal(starts, 0);
+		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} EN`);
+	});
+
+	it("does not restart voice after dispose while a language transition is waiting on stop", async () => {
+		const host = fakeHost();
+		const controller = new AppVoiceController(host, dictationConfig({ language: "en" }));
+		let releaseStop!: () => void;
+		const internals = controller as unknown as {
+			state: VoiceInputState;
+			stopPromise?: Promise<void>;
+			startRecording(): Promise<void>;
+		};
+		let starts = 0;
+		internals.state = "idle";
+		internals.startRecording = async () => { starts += 1; };
+		internals.stopPromise = new Promise<void>((resolve) => { releaseStop = resolve; });
+
+		const switching = controller.toggleLanguage();
+		await controller.dispose();
+		releaseStop();
+		await switching;
+
+		assert.equal(starts, 0);
+		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} EN`);
+	});
+
+	it("waits for recorder close so buffered PCM after SIGTERM is sent before Finalize", async () => {
+		const host = fakeHost();
+		const audioProcess = fakeAudioProcess();
+		const socket = new FakeSocket();
+		const controller = new AppVoiceController(host, dictationConfig());
+		audioProcess.kill = function kill(_signal: string): boolean {
+			this.killed = true;
+			setTimeout(() => {
+				this.stdout.emit("data", Buffer.from("tail-pcm"));
+				this.exitCode = 0;
+				this.emit("close", 0, null);
+			}, 80);
+			return true;
+		};
+
+		setVoiceControllerTestDeps({
+			deepgramApiKey: () => "dg-test-key",
+			selectRecorderCommand: async () => ({ command: "rec", args: [], description: "mock" }),
+			createDeepgramSocket: (() => socket) as never,
+			waitForSocketOpen: async () => {},
+			spawn: (() => audioProcess) as never,
+		});
+		try {
+			await controller.toggleRecording();
+			await controller.stopRecording();
+
+			const tailIndex = socket.sent.findIndex((value) => Buffer.isBuffer(value) && value.toString("utf8") === "tail-pcm");
+			const finalizeIndex = socket.sent.findIndex((value) => value === JSON.stringify({ type: "Finalize" }));
+			assert.ok(tailIndex >= 0);
+			assert.ok(finalizeIndex > tailIndex);
+		} finally {
+			setVoiceControllerTestDeps();
+		}
+	});
+
+	it("dispose does not wait for Deepgram finalization during application shutdown", async () => {
+		const host = fakeHost();
+		const audioProcess = fakeAudioProcess();
+		const socket = new FakeSocket();
+		const controller = new AppVoiceController(host, dictationConfig());
+		const signals: string[] = [];
+		audioProcess.kill = function kill(signal: string): boolean {
+			signals.push(signal);
+			this.killed = true;
+			return true;
+		};
+
+		setVoiceControllerTestDeps({
+			deepgramApiKey: () => "dg-test-key",
+			selectRecorderCommand: async () => ({ command: "rec", args: [], description: "mock" }),
+			createDeepgramSocket: (() => socket) as never,
+			waitForSocketOpen: async () => {},
+			spawn: (() => audioProcess) as never,
+			delay: async () => await new Promise<void>(() => {}),
+		});
+		try {
+			await controller.toggleRecording();
+			const result = await Promise.race([
+				controller.dispose().then(() => "disposed" as const),
+				new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 40)),
+			]);
+
+			assert.equal(result, "disposed");
+			assert.ok(signals.includes("SIGKILL"));
+			assert.equal(socket.closed, true);
+		} finally {
+			setVoiceControllerTestDeps();
+		}
 	});
 });
 
+class FakeSocket {
+	readyState = 1;
+	closed = false;
+	sent: unknown[] = [];
+	sendError: Error | undefined;
+	private readonly listeners = new Map<string, Set<(event: { data?: unknown; code?: number; reason?: string }) => void>>();
 
-function fakeAudioProcess(): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; killed: boolean; kill(signal: string): void } {
-	const audioProcess = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; killed: boolean; kill(signal: string): void };
+	send(data: unknown): void {
+		if (this.sendError) throw this.sendError;
+		this.sent.push(data);
+	}
+
+	close(_code?: number, _reason?: string): void {
+		this.closed = true;
+		this.readyState = 3;
+	}
+
+	addEventListener(type: string, listener: (event: { data?: unknown; code?: number; reason?: string }) => void): void {
+		const listeners = this.listeners.get(type) ?? new Set();
+		listeners.add(listener);
+		this.listeners.set(type, listeners);
+	}
+
+	removeEventListener(type: string, listener: (event: { data?: unknown; code?: number; reason?: string }) => void): void {
+		this.listeners.get(type)?.delete(listener);
+	}
+
+	emitMessage(data: string): void {
+		this.emit("message", { data });
+	}
+
+	private emit(type: string, event: { data?: unknown; code?: number; reason?: string }): void {
+		for (const listener of this.listeners.get(type) ?? []) listener(event);
+	}
+}
+
+function fakeAudioProcess(): EventEmitter & {
+	stdout: EventEmitter;
+	stderr: EventEmitter;
+	killed: boolean;
+	exitCode: number | null;
+	kill(signal: string): boolean;
+} {
+	const audioProcess = new EventEmitter() as EventEmitter & {
+		stdout: EventEmitter;
+		stderr: EventEmitter;
+		killed: boolean;
+		exitCode: number | null;
+		kill(signal: string): boolean;
+	};
 	audioProcess.stdout = new EventEmitter();
 	audioProcess.stderr = new EventEmitter();
 	audioProcess.killed = false;
-	audioProcess.kill = function kill(_signal: string): void {
+	audioProcess.exitCode = null;
+	audioProcess.kill = function kill(_signal: string): boolean {
 		this.killed = true;
+		return true;
 	};
 	return audioProcess;
 }
 
-function dictationConfig(overrides: { language?: string } = {}): DictationConfig {
+function deepgramResult(text: string, isFinal: boolean): string {
+	return JSON.stringify({
+		type: "Results",
+		is_final: isFinal,
+		channel: { alternatives: [{ transcript: text }] },
+	});
+}
+
+function dictationConfig(overrides: { language?: string; model?: string } = {}): DictationConfig {
 	return {
 		...overrides,
 		languages: {
-			en: { dirName: "en-model", url: "https://example.test/en.zip", label: "English" },
-			ru: { dirName: "ru-model", url: "https://example.test/ru.zip", label: "Russian" },
+			en: { deepgramLanguage: "en", label: "English" },
+			ru: { deepgramLanguage: "ru", label: "Russian" },
 		},
 	};
 }

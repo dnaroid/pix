@@ -117,19 +117,21 @@ const IconThemeConfig = Type.Object(
 
 const DictationLanguageModelConfig = Type.Object(
 	{
-		dirName: Type.String({ description: "Vosk model directory name." }),
-		url: Type.String({ description: "Download URL for the Vosk model zip." }),
 		label: Type.String({ description: "Human-readable language label." }),
+		deepgramLanguage: Type.Optional(Type.String({ description: "Deepgram language code. Defaults to the language map key." })),
+		dirName: Type.Optional(Type.String({ description: "Deprecated legacy Vosk model directory name; ignored by Deepgram dictation." })),
+		url: Type.Optional(Type.String({ description: "Deprecated legacy Vosk model URL; ignored by Deepgram dictation." })),
 	},
-	{ description: "Vosk voice dictation model definition." },
+	{ description: "Deepgram voice dictation language definition." },
 );
 
 const DictationConfig = Type.Object(
 	{
 		language: Type.Optional(Type.String({ description: "Selected language code, e.g. 'en' or 'ru'." })),
-		languages: Type.Optional(Type.Record(Type.String(), DictationLanguageModelConfig, { description: "Available language models keyed by language code." })),
+		model: Type.Optional(Type.String({ description: "Deepgram speech-to-text model. Defaults to 'nova-3'." })),
+		languages: Type.Optional(Type.Record(Type.String(), DictationLanguageModelConfig, { description: "Available dictation languages keyed by local language code." })),
 	},
-	{ description: "Voice dictation (Vosk) configuration." },
+	{ description: "Voice dictation (Deepgram) configuration. Requires DEEPGRAM_API_KEY in the process environment." },
 );
 
 const DesktopConfig = Type.Object(

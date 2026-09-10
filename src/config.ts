@@ -75,14 +75,18 @@ export type IconThemeConfig = {
 };
 
 export type DictationLanguageModelConfig = {
-	dirName: string;
-	url: string;
 	label: string;
+	/** Deepgram language code. Defaults to the language map key. */
+	deepgramLanguage?: string;
+	/** Deprecated Vosk model fields kept only for config compatibility. */
+	dirName?: string;
+	url?: string;
 };
 
 export type DictationConfig = {
 	languages: Record<string, DictationLanguageModelConfig>;
 	language?: string;
+	model?: string;
 };
 
 export type PixConfig = {
@@ -182,16 +186,15 @@ const DEFAULT_MODEL_COLORS: ModelColorsConfig = {
 
 const DEFAULT_DICTATION: DictationConfig = {
 	language: "en",
+	model: "nova-3",
 	languages: {
 		en: {
-			dirName: "vosk-model-small-en-us-0.15",
-			url: "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
 			label: "English",
+			deepgramLanguage: "en",
 		},
 		ru: {
-			dirName: "vosk-model-small-ru-0.22",
-			url: "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip",
 			label: "Russian",
+			deepgramLanguage: "ru",
 		},
 	},
 };
@@ -349,21 +352,30 @@ function extractDictationConfig(raw: unknown): DictationConfig | undefined {
 		const key = rawKey.trim().toLowerCase();
 		if (!key || !isPlainObject(value)) continue;
 
+		const label = nonEmptyString(value.label) ?? key.toUpperCase();
+		const deepgramLanguage = nonEmptyString(value.deepgramLanguage)
+			?? nonEmptyString(value.language)
+			?? key;
 		const dirName = nonEmptyString(value.dirName) ?? nonEmptyString(value.model) ?? nonEmptyString(value.modelDir);
 		const url = nonEmptyString(value.url);
-		const label = nonEmptyString(value.label) ?? key.toUpperCase();
-		if (!dirName || !url) continue;
 
-		languages[key] = { dirName, url, label };
+		languages[key] = {
+			label,
+			deepgramLanguage,
+			...(dirName ? { dirName } : {}),
+			...(url ? { url } : {}),
+		};
 	}
 
 	const language = normalizeDictationLanguage(dictation.language)
 		?? normalizeDictationLanguage(dictation.selectedLanguage)
 		?? normalizeDictationLanguage(dictation.currentLanguage);
 	const selectedLanguage = language && languages[language] ? language : undefined;
+	const model = nonEmptyString(dictation.model) ?? nonEmptyString(dictation.deepgramModel);
 
 	return Object.keys(languages).length > 0 ? {
 		...(selectedLanguage ? { language: selectedLanguage } : {}),
+		...(model ? { model } : {}),
 		languages,
 	} : undefined;
 }
@@ -440,6 +452,7 @@ function cloneDictationConfig(config: DictationConfig): DictationConfig {
 	return {
 		languages: Object.fromEntries(Object.entries(config.languages).map(([language, model]) => [language, { ...model }])),
 		...(config.language === undefined ? {} : { language: config.language }),
+		...(config.model === undefined ? {} : { model: config.model }),
 	};
 }
 

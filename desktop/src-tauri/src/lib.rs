@@ -64,6 +64,19 @@ static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeepgramTokenResponse {
+    access_token: String,
+    expires_in: f64,
+}
+
+#[derive(Deserialize)]
+struct DeepgramGrantResponse {
+    access_token: String,
+    expires_in: f64,
+}
+
 #[derive(Default)]
 struct AcpProcessState {
     slots: Mutex<HashMap<String, ProcessSlot>>,
@@ -370,6 +383,47 @@ where
     tauri::async_runtime::spawn_blocking(operation)
         .await
         .map_err(|error| format!("background task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn deepgram_token() -> Result<DeepgramTokenResponse, String> {
+    run_blocking(|| {
+        let api_key = env::var("DEEPGRAM_API_KEY")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "DEEPGRAM_API_KEY is not set".to_owned())?;
+
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|error| format!("failed to create the Deepgram HTTP client: {error}"))?;
+        let response = client
+            .post("https://api.deepgram.com/v1/auth/grant")
+            .header("Authorization", format!("Token {api_key}"))
+            .json(&serde_json::json!({ "ttl_seconds": 60 }))
+            .send()
+            .map_err(|error| format!("failed to request a Deepgram token: {error}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!(
+                "Deepgram token request failed with HTTP {}",
+                status.as_u16()
+            ));
+        }
+        let grant = response
+            .json::<DeepgramGrantResponse>()
+            .map_err(|error| format!("failed to decode the Deepgram token response: {error}"))?;
+        if grant.access_token.trim().is_empty() {
+            return Err("Deepgram returned an empty access token".to_owned());
+        }
+        Ok(DeepgramTokenResponse {
+            access_token: grant.access_token,
+            expires_in: grant.expires_in,
+        })
+    })
+    .await
 }
 
 #[derive(Clone, Serialize)]
@@ -5989,6 +6043,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            deepgram_token,
             acp_start,
             acp_send,
             acp_stop,

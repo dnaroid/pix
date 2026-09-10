@@ -73,7 +73,9 @@ the state that started it, without blocking normal terminal interaction.
 ## Risks / unknowns
 
 - SDK session hydration and append APIs are synchronous; eliminating those stalls may require an upstream SDK API or worker/process boundary.
-- Voice model inference may require a dedicated worker to become fully non-blocking.
+- Deepgram voice finalization must stay bounded, and shutdown must use the
+  immediate voice-dispose path rather than spend the global cleanup deadline
+  waiting for speech-to-text final results.
 
 ## Evidence
 
