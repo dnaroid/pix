@@ -73,6 +73,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [fenced-code-block-rendering](./fenced-code-block-rendering.md) | Fenced code blocks in chat Markdown |
 | [model-scope-fallback](./model-scope-fallback.md) | Model scope fallback to the available snapshot |
 | [file-link-opening](./file-link-opening.md) | File link opening (Zed / web / media routing) |
+| [tui-git-slash-commands](./tui-git-slash-commands.md) | TUI Git code-review and confirmed commit-message commands |
 
 **Desktop (`desktop/`, `acp/`)**
 

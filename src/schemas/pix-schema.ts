@@ -143,22 +143,22 @@ const DesktopConfig = Type.Object(
 		git: Type.Optional(Type.Object(
 			{
 				reviewModelRef: Type.Optional(Type.String({
-					description: "Model reference used by Pix Desktop for LLM review of Git diffs, optionally with a :thinking suffix.",
+					description: "Model reference used by Pix Desktop and TUI for LLM review of Git diffs, optionally with a :thinking suffix.",
 				})),
 				reviewFallbackModels: Type.Optional(Type.Array(Type.String(), {
 					description: "Ordered fallback model references used for Git diff review.",
 				})),
 				commitMessageModelRef: Type.Optional(Type.String({
-					description: "Model reference used by Pix Desktop to generate Git commit messages, optionally with a :thinking suffix.",
+					description: "Model reference used by Pix Desktop and TUI to generate Git commit messages, optionally with a :thinking suffix.",
 				})),
 				commitMessageFallbackModels: Type.Optional(Type.Array(Type.String(), {
 					description: "Ordered fallback model references used for Git commit-message generation.",
 				})),
 			},
-			{ description: "Pix Desktop Git/Source Control LLM preferences." },
+			{ description: "Pix Git/Source Control LLM preferences shared by Desktop and TUI." },
 		)),
 	},
-	{ description: "Pix Desktop-specific preferences." },
+	{ description: "Pix Desktop preferences; the nested git model settings are also consumed by TUI Git helpers for compatibility." },
 );
 
 // ---------------------------------------------------------------------------

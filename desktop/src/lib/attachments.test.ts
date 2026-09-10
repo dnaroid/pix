@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   attachmentKind,
+  attachmentDataUrlBytes,
   attachmentMarker,
   extractAttachmentMarkers,
   filePathFromUri,
@@ -59,5 +60,11 @@ describe("attachments", () => {
     expect(parsed.attachments).toEqual([
       expect.objectContaining({ name: "spec.png", path: "/tmp/spec.png", kind: "image" }),
     ]);
+  });
+
+  it("decodes base64 data URLs for task attachment persistence", () => {
+    expect([...attachmentDataUrlBytes("data:image/png;base64,aGk=") ?? []]).toEqual([104, 105]);
+    expect(attachmentDataUrlBytes("data:image/png,not-base64")).toBeUndefined();
+    expect(attachmentDataUrlBytes("data:image/png;base64,%%%" )).toBeUndefined();
   });
 });

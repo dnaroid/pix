@@ -1,4 +1,5 @@
 import type { CommandControllerHost } from "./command-host.js";
+import { GitCommandActions } from "./command-git-actions.js";
 import { ModelCommandActions } from "./command-model-actions.js";
 import { NavigationCommandActions } from "./command-navigation-actions.js";
 import { createSlashCommands, type CommandRegistryActions } from "./command-registry.js";
@@ -9,11 +10,13 @@ export class AppCommandController {
 	readonly slashCommands: readonly SlashCommand[];
 
 	private readonly modelActions: ModelCommandActions;
+	private readonly gitActions: GitCommandActions;
 	private readonly sessionActions: SessionCommandActions;
 	private readonly navigationActions: NavigationCommandActions;
 
 	constructor(private readonly host: CommandControllerHost) {
 		this.modelActions = new ModelCommandActions(host);
+		this.gitActions = new GitCommandActions(host);
 		this.sessionActions = new SessionCommandActions(host);
 		this.navigationActions = new NavigationCommandActions(host);
 		this.slashCommands = createSlashCommands(this.registryActions(), host);
@@ -42,6 +45,8 @@ export class AppCommandController {
 			runThinkingSlashCommand: (argumentsText) => this.modelActions.runThinkingSlashCommand(argumentsText),
 			runDefaultThinkingSlashCommand: (argumentsText) => this.modelActions.runDefaultThinkingSlashCommand(argumentsText),
 			runEnhanceCommand: () => this.host.enhancePrompt(),
+			runCodeReviewCommand: () => this.gitActions.runCodeReviewCommand(),
+			runCommitMessageCommand: () => this.gitActions.runCommitMessageCommand(),
 			runExportCommand: (argumentsText) => this.sessionActions.runExportCommand(argumentsText),
 			runImportCommand: (argumentsText) => this.sessionActions.runImportCommand(argumentsText),
 			runShareCommand: () => this.sessionActions.runShareCommand(),

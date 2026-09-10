@@ -122,6 +122,19 @@ export function attachmentMarker(path: string): string {
   return `${PIX_ATTACHMENT_MARKER_PREFIX}${fileUriFromPath(path)}]`;
 }
 
+export function attachmentDataUrlBytes(dataUrl: string): Uint8Array | undefined {
+  const separator = dataUrl.indexOf(",");
+  if (separator < 0 || !/;base64$/iu.test(dataUrl.slice(0, separator))) return undefined;
+  try {
+    const binary = atob(dataUrl.slice(separator + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  } catch {
+    return undefined;
+  }
+}
+
 export function textWithAttachmentMarkers(
   text: string,
   attachments: readonly Attachment[],

@@ -43,6 +43,9 @@ const EXPLICITLY_DEFERRED_COMMANDS = new Set<string>();
 /** Commands deliberately unsupported in Pix Desktop by product decision. */
 const INTENTIONALLY_UNSUPPORTED_COMMANDS = new Set(["trust", "login", "logout"]);
 
+/** TUI slash commands whose workflow already exists as first-class Desktop UI rather than a Desktop slash command. */
+const TUI_COMMANDS_WITH_DESKTOP_UI_EQUIVALENTS = new Set(["code-review", "commit-message"]);
+
 function desktopCommandNames(): string[] {
 	return DESKTOP_SLASH_COMMANDS.flatMap((command) => {
 		const aliases = command._meta?.["pix.aliases"];
@@ -77,6 +80,7 @@ describe("slash command parity", () => {
 		]);
 		const unaccounted = [...expected].filter(
 			(name) => !implemented.has(name)
+				&& !TUI_COMMANDS_WITH_DESKTOP_UI_EQUIVALENTS.has(name)
 				&& !EXPLICITLY_DEFERRED_COMMANDS.has(name)
 				&& !INTENTIONALLY_UNSUPPORTED_COMMANDS.has(name),
 		);

@@ -6,14 +6,14 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "ignoreContextFiles": false,
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.
   "maxProjectSessions": 0,
-  "desktop": {
+	"desktop": {
     // External editor used by Pix Desktop's Project explorer: zed, code/vscode, cursor, subl, idea, webstorm, or an executable path/name.
     "externalEditor": "zed",
-    "git": {
-      // LLM used for Source Control code review.
+		"git": {
+			// LLM used for Source Control and /code-review.
       "reviewModelRef": "openai-codex/gpt-5.6-luna:medium",
       "reviewFallbackModels": [],
-      // LLM used to generate commit messages from staged changes.
+			// LLM used to generate commit messages in Desktop and /commit-message.
       "commitMessageModelRef": "openai-codex/gpt-5.6-luna:minimal",
       "commitMessageFallbackModels": []
     }

@@ -4,10 +4,12 @@ import {
   filterProjectTasks,
   moveProjectTask,
   parseTaskDocument,
+  projectTaskDisplayLabel,
+  projectTaskFromComposerDraft,
   projectTaskPromptDraft,
   type ProjectTask,
 } from "./project-tasks";
-import { attachmentMarker } from "./attachments";
+import { attachmentFromFile, attachmentMarker } from "./attachments";
 
 const task: ProjectTask = {
   id: "task-1",
@@ -23,6 +25,13 @@ const task: ProjectTask = {
 describe("project task documents", () => {
   it("accepts a valid versioned document", () => {
     expect(parseTaskDocument({ version: 1, tasks: [task] })).toEqual({ version: 1, tasks: [task] });
+  });
+
+  it("accepts an untitled task with content and rejects a completely empty task", () => {
+    const untitled = { ...task, title: "", description: "Captured from the composer." };
+    expect(parseTaskDocument({ version: 1, tasks: [untitled] })).toEqual({ version: 1, tasks: [untitled] });
+    expect(() => parseTaskDocument({ version: 1, tasks: [{ ...task, title: "", description: "   " }] }))
+      .toThrow("Expected a title or description");
   });
 
   it("rejects unsupported versions, invalid enums, and duplicate ids", () => {
@@ -50,6 +59,34 @@ describe("task list helpers", () => {
     expect(draft.text).not.toContain("Pix attachment");
     expect(draft.attachments).toEqual([
       expect.objectContaining({ name: "task-shot.png", kind: "image", path: "/tmp/task-shot.png" }),
+    ]);
+  });
+
+  it("creates an untitled feature task from composer text and attachments", () => {
+    const attachment = attachmentFromFile(
+      { path: "/tmp/composer-shot.png", name: "composer-shot.png", size: 12 },
+      "attachment-1",
+    );
+    const created = projectTaskFromComposerDraft(
+      "Investigate this behavior",
+      [attachment],
+      "task-from-composer",
+      "2026-09-10T18:00:00.000Z",
+    );
+
+    expect(created).toEqual(expect.objectContaining({
+      id: "task-from-composer",
+      title: "",
+      type: "feature",
+      status: "todo",
+      priority: "medium",
+    }));
+    expect(created?.description).toContain("Investigate this behavior");
+    expect(created?.description).toContain(attachmentMarker("/tmp/composer-shot.png"));
+    expect(projectTaskDisplayLabel(created!)).toBe("Investigate this behavior");
+    expect(projectTaskPromptDraft(created!).text).not.toContain("Task:");
+    expect(projectTaskPromptDraft(created!).attachments).toEqual([
+      expect.objectContaining({ path: "/tmp/composer-shot.png" }),
     ]);
   });
 

@@ -33,6 +33,7 @@
   import {
     TASK_STATUSES,
     TASK_TYPES,
+    projectTaskDisplayLabel,
     taskStatusLabel,
     taskTypeLabel,
     type ProjectTask,
@@ -431,6 +432,17 @@
     if (collapsed) setCollapsed(false);
   }
 
+  /** Open the project Tasks view for actions initiated outside the sidebar. */
+  export function openTasksPanel(): void {
+    statusMenuTaskId = null;
+    planSelectorOpen = false;
+    planSelectorQuery = "";
+    editorOpen = false;
+    deleteTaskId = null;
+    setActiveTab("tasks");
+    if (collapsed) setCollapsed(false);
+  }
+
   function startResize(event: PointerEvent): void {
     if (collapsed || event.button !== 0) return;
     event.preventDefault();
@@ -545,8 +557,8 @@
 
   function submitEditor(): void {
     const trimmedTitle = title.trim();
-    if (!trimmedTitle || busy) return;
     const storedDescription = textWithAttachmentMarkers(description, editorAttachments);
+    if ((!trimmedTitle && !storedDescription) || busy) return;
     const draft: TaskDraft = {
       title: trimmedTitle,
       ...(storedDescription ? { description: storedDescription } : {}),
@@ -915,6 +927,7 @@
                       {/if}
 
                       {#each groupTasks as task (task.id)}
+                        {@const taskLabel = projectTaskDisplayLabel(task)}
                         {#if isDropPlaceholder(group.type, task.id, "before")}
                           <div
                             data-task-drop-placeholder
@@ -931,14 +944,14 @@
                             "group relative rounded-md bg-panel-hover/65 px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-panel-hover",
                             draggedTaskId === task.id ? "border border-dashed border-primary/35 bg-primary/5 opacity-25" : "",
                           ]}
-                          aria-label={task.title}
+                          aria-label={taskLabel}
                         >
                           <div class="flex min-w-0 items-start gap-1">
                             <button
                               class="mt-px grid h-6 w-5 shrink-0 touch-none cursor-grab place-items-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-30"
                               type="button"
                               title="Drag to reorder or move between groups"
-                              aria-label={`Drag ${task.title} to reorder or change type`}
+                              aria-label={`Drag ${taskLabel} to reorder or change type`}
                               disabled={busy}
                               onpointerdown={(event) => startTaskDrag(event, task.id)}
                               onpointermove={moveTaskDrag}
@@ -949,14 +962,14 @@
 
                             <div class="min-w-0 flex-1">
                               <div class="flex min-w-0 items-start gap-1">
-                                <h3 class="min-w-0 flex-1 break-words pt-1 text-[11px] font-medium leading-4 text-foreground">{task.title}</h3>
+                                <h3 class="min-w-0 flex-1 break-words pt-1 text-[11px] font-medium leading-4 text-foreground">{taskLabel}</h3>
                                 <div class="flex shrink-0 items-center opacity-65 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                                   <div class="relative" data-task-status-control>
                                     <button
                                       class={["grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35", statusTone(task.status)]}
                                       type="button"
                                       title={`Status: ${taskStatusLabel(task.status)}`}
-                                      aria-label={`Change status for ${task.title}. Current status: ${taskStatusLabel(task.status)}`}
+                                      aria-label={`Change status for ${taskLabel}. Current status: ${taskStatusLabel(task.status)}`}
                                       aria-haspopup="menu"
                                       aria-expanded={statusMenuTaskId === task.id}
                                       onclick={() => statusMenuTaskId = statusMenuTaskId === task.id ? null : task.id}
@@ -969,7 +982,7 @@
                                     </button>
 
                                     {#if statusMenuTaskId === task.id}
-                                      <div class="absolute top-7 right-0 z-40 w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md" role="menu" aria-label={`Status for ${task.title}`}>
+                                      <div class="absolute top-7 right-0 z-40 w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md" role="menu" aria-label={`Status for ${taskLabel}`}>
                                         {#each TASK_STATUSES as status}
                                           <button
                                             class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[11px] leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
@@ -994,7 +1007,7 @@
                                     class="grid h-6 w-6 place-items-center rounded-md text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35"
                                     type="button"
                                     title={task.sessionId ? "Open session" : "Run task"}
-                                    aria-label={`${task.sessionId ? "Open session for" : "Run"} ${task.title}`}
+                                    aria-label={`${task.sessionId ? "Open session for" : "Run"} ${taskLabel}`}
                                     onclick={() => task.sessionId ? onOpenSession(task) : onRun(task)}
                                     disabled={!sessionReady || busy}
                                   >
@@ -1002,8 +1015,8 @@
                                     {:else if task.sessionId}<Folder class="h-3 w-3" aria-hidden="true" />
                                     {:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}
                                   </button>
-                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Edit task" aria-label={`Edit ${task.title}`} onclick={() => openEdit(task)} disabled={busy}><Pencil class="h-3 w-3" aria-hidden="true" /></button>
-                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Delete task" aria-label={`Delete ${task.title}`} onclick={() => deleteTaskId = task.id} disabled={busy}><Trash2 class="h-3 w-3" aria-hidden="true" /></button>
+                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Edit task" aria-label={`Edit ${taskLabel}`} onclick={() => openEdit(task)} disabled={busy}><Pencil class="h-3 w-3" aria-hidden="true" /></button>
+                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Delete task" aria-label={`Delete ${taskLabel}`} onclick={() => deleteTaskId = task.id} disabled={busy}><Trash2 class="h-3 w-3" aria-hidden="true" /></button>
                                 </div>
                               </div>
 
@@ -1204,7 +1217,7 @@
           <GripVertical class="h-3.5 w-3.5" aria-hidden="true" />
         </div>
         <div class="min-w-0 flex-1">
-          <h3 class="break-words pt-1 text-[11px] font-medium leading-4">{draggedTask.title}</h3>
+          <h3 class="break-words pt-1 text-[11px] font-medium leading-4">{projectTaskDisplayLabel(draggedTask)}</h3>
         </div>
       </div>
     </div>
@@ -1222,7 +1235,7 @@
         <button class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" aria-label="Close task editor" onclick={() => editorOpen = false}><X class="h-4 w-4" aria-hidden="true" /></button>
       </div>
       <div class="min-h-0 space-y-3 overflow-y-auto p-3">
-        <label class="block text-xs font-medium text-muted-foreground">Title<input class="mt-1 h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring" bind:this={titleInput} bind:value={title} maxlength="200" required /></label>
+        <label class="block text-xs font-medium text-muted-foreground">Title<input class="mt-1 h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring" bind:this={titleInput} bind:value={title} maxlength="200" placeholder="Optional" /></label>
         <div class="space-y-1">
           <span class="block text-xs font-medium text-muted-foreground">Description</span>
           <PromptComposer
@@ -1250,7 +1263,7 @@
         <label class="block text-xs font-medium text-muted-foreground">Type<span class="relative mt-1 block"><select class="h-9 w-full appearance-none rounded-md border border-input bg-background py-0 pr-8 pl-2.5 text-sm text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" bind:value={taskType}>{#each TASK_TYPES as type}<option value={type}>{taskTypeLabel(type)}</option>{/each}</select><ChevronDown class="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></span></label>
         <div class="flex justify-end gap-2 pt-1">
           <button class="h-9 rounded-md px-3 text-sm text-muted-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => editorOpen = false}>Cancel</button>
-          <button class="h-9 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={submitEditor} disabled={!title.trim() || busy}>{editingTaskId ? "Save" : "Add task"}</button>
+          <button class="h-9 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={submitEditor} disabled={(!title.trim() && !description.trim() && editorAttachments.length === 0) || busy}>{editingTaskId ? "Save" : "Add task"}</button>
         </div>
       </div>
     </div>
@@ -1266,7 +1279,7 @@
     >
       <div class="w-full rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md">
         <strong class="text-xs font-semibold">Delete task?</strong>
-        <p class="mt-1.5 break-words text-[11px] leading-4 text-muted-foreground">“{deleteTask?.title ?? "This task"}” will be removed from the project task file.</p>
+        <p class="mt-1.5 break-words text-[11px] leading-4 text-muted-foreground">“{deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}” will be removed from the project task file.</p>
         <div class="mt-3 flex justify-end gap-2">
           <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => deleteTaskId = null}>Cancel</button>
           <button class="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={confirmDelete} disabled={busy}>Delete</button>

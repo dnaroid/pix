@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { extractAttachmentMarkers, type Attachment } from "./attachments";
+import { extractAttachmentMarkers, textWithAttachmentMarkers, type Attachment } from "./attachments";
 
 export const TASK_DOCUMENT_VERSION = 1 as const;
 export const TASK_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
@@ -43,7 +43,7 @@ const timestampSchema = z.string().refine(
 
 const projectTaskSchema = z.object({
   id: z.string().min(1).max(128),
-  title: z.string().min(1).max(200),
+  title: z.string().max(200),
   description: z.string().max(10_000).optional(),
   type: z.enum(TASK_TYPES),
   status: z.enum(TASK_STATUSES),
@@ -51,7 +51,14 @@ const projectTaskSchema = z.object({
   sessionId: z.string().min(1).max(512).optional(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
-}).strict();
+}).strict().superRefine((task, context) => {
+  if (task.title.trim() || task.description?.trim()) return;
+  context.addIssue({
+    code: "custom",
+    message: "Expected a title or description",
+    path: ["description"],
+  });
+});
 
 const taskDocumentSchema = z.object({
   $schema: z.string().min(1).max(2_048).optional(),
@@ -95,12 +102,41 @@ export function projectTaskPromptDraft(task: ProjectTask): {
     "Work on this project task.",
     "",
     `Type: ${taskTypeLabel(task.type)}`,
-    `Task: ${task.title}`,
   ];
+  const title = task.title.trim();
+  if (title) lines.push(`Task: ${title}`);
   const description = parsedDescription.text.trim();
   if (description) lines.push("", "Description:", description);
   lines.push("", "Inspect the existing implementation, make the changes, and verify the result.");
   return { text: lines.join("\n"), attachments: parsedDescription.attachments };
+}
+
+export function projectTaskFromComposerDraft(
+  text: string,
+  attachments: readonly Attachment[],
+  id: string,
+  timestamp: string,
+): ProjectTask | undefined {
+  const description = textWithAttachmentMarkers(text, attachments);
+  if (!description) return undefined;
+  return {
+    id,
+    title: "",
+    description,
+    type: "feature",
+    status: "todo",
+    priority: "medium",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export function projectTaskDisplayLabel(task: ProjectTask): string {
+  const title = task.title.trim();
+  if (title) return title;
+  const description = extractAttachmentMarkers(task.description ?? "", `task-label:${task.id}`).text;
+  const firstLine = description.split(/\r?\n/u).map((line: string) => line.trim()).find(Boolean);
+  return firstLine ? firstLine.slice(0, 120) : "Untitled task";
 }
 
 export function buildTaskPrompt(task: ProjectTask): string {

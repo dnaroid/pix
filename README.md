@@ -267,6 +267,12 @@ Pix can provide inline, model-backed autocomplete with configurable debounce, ti
 - While it runs, submit editor text to its stdin; use `Ctrl-C` to interrupt.
 - `!!command` opens a raw interactive terminal for REPLs, TUIs, debuggers, and development servers. Exit it to return to Pix.
 
+### Git helpers
+
+- `/code-review` reviews staged, unstaged, and untracked Git changes with the configured review model and prints the findings locally in the TUI.
+- `/commit-message` generates a message from staged changes, shows the full message, and asks for confirmation before running `git commit`. If the staged diff changes before confirmation completes, Pix refuses the commit and asks you to regenerate the message.
+- These helpers use the existing `desktop.git.reviewModelRef` / `reviewFallbackModels` and `desktop.git.commitMessageModelRef` / `commitMessageFallbackModels` settings for compatibility. `/commit-message` never stages changes or bypasses Git hooks.
+
 ### Images, clipboard, and files
 
 - Paste an image from the clipboard with `Ctrl+V`/`Cmd+V` in supported terminals.
@@ -323,6 +329,7 @@ Type `/` for the live, searchable list. Extensions can add more commands than th
 | Models | `/model`, `/default-model`, `/scoped-models`, `/thinking`, `/default-thinking`, `/autocomplete` |
 | Project context | `/no-context-files`, `/compact` |
 | Prompt workflow | `/enhance`, `/queue`, `/copy` |
+| Git | `/code-review`, `/commit-message` |
 | Sessions | `/new`, `/new_tab`, `/resume`, `/name`, `/session`, `/search`, `/history`, `/jump`, `/tree` |
 | Branching and files | `/fork`, `/clone`, `/delete`, `/export`, `/import`, `/share` |
 | Status | `/usage` |

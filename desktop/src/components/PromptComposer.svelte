@@ -1,7 +1,9 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
   import Eye from "@lucide/svelte/icons/eye";
+  import ListTodo from "@lucide/svelte/icons/list-todo";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Mic from "@lucide/svelte/icons/mic";
   import Paperclip from "@lucide/svelte/icons/paperclip";
@@ -71,6 +73,7 @@
     onAutocomplete,
     onSubmit,
     onDefer,
+    onCreateTask,
     onCancel,
     onChooseAttachments,
     onPasteAttachments,
@@ -93,6 +96,7 @@
     onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
+    onCreateTask?: () => void | Promise<void>;
     onCancel: () => void | Promise<void>;
     onChooseAttachments: () => void | Promise<void>;
     onPasteAttachments: (files: readonly File[]) => void | Promise<void>;
@@ -120,6 +124,7 @@
   let voiceError = $state("");
   let voiceSupported = $state(false);
   let voiceSessionId = $state<string | undefined>();
+  let composerMenuOpen = $state(false);
   const autocompleteController = new PromptAutocompleteController({
     request: (draft, signal) => onAutocomplete(draft, signal),
     onSuggestion: (suggestion) => {
@@ -148,6 +153,14 @@
   const displayedAttachments = $derived(questionMode ? questionAttachments : attachments);
   const textareaValue = $derived(composerText());
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
+  const canCreateTask = $derived(
+    !editorMode
+      && !questionMode
+      && !!onCreateTask
+      && !!activeSessionId
+      && ready
+      && (hasQueueableDraft || voiceState !== "idle"),
+  );
   const voiceCanStart = $derived(
     !editorMode && !questionMode && voiceSupported && ready && !!activeSessionId,
   );
@@ -286,7 +299,10 @@
     } else if (selectedSlashCommand >= slashMatches.length) {
       selectedSlashCommand = Math.max(0, slashMatches.length - 1);
     }
-    if (slashMenuOpen) autocompleteController.dismiss();
+    if (slashMenuOpen) {
+      autocompleteController.dismiss();
+      composerMenuOpen = false;
+    }
   });
 
   $effect(() => {
@@ -323,6 +339,20 @@
       voiceController = undefined;
       if (controller) void controller.dispose();
     };
+  });
+
+  onMount(() => {
+    const closeComposerMenuOutside = (event: PointerEvent) => {
+      if (!composerMenuOpen) return;
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest("[data-composer-menu]")) composerMenuOpen = false;
+    };
+    document.addEventListener("pointerdown", closeComposerMenuOutside);
+    return () => document.removeEventListener("pointerdown", closeComposerMenuOutside);
+  });
+
+  $effect(() => {
+    if (editorMode || questionMode || !activeSessionId || !ready) composerMenuOpen = false;
   });
 
   $effect(() => {
@@ -415,6 +445,20 @@
   async function deferWithVoiceStop(): Promise<void> {
     await stopVoiceInput();
     await onDefer();
+  }
+
+  async function createTaskWithVoiceStop(): Promise<void> {
+    composerMenuOpen = false;
+    if (!canCreateTask || !onCreateTask) return;
+    await stopVoiceInput();
+    await onCreateTask();
+  }
+
+  function toggleComposerMenu(): void {
+    composerMenuOpen = !composerMenuOpen;
+    if (!composerMenuOpen) return;
+    dismissedSlashDraft = promptText;
+    autocompleteController.dismiss();
   }
 
   async function insertVoiceTranscript(rawText: string, sessionId: string | undefined): Promise<void> {
@@ -801,6 +845,26 @@
   </div>
 {/if}
 
+{#if composerMenuOpen && !editorMode && !questionMode}
+  <div
+    class="absolute right-3 bottom-[calc(100%+0.375rem)] z-40 w-44 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+    data-composer-menu
+    role="menu"
+    aria-label="Composer actions"
+  >
+    <button
+      class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+      type="button"
+      role="menuitem"
+      disabled={!canCreateTask}
+      onclick={() => void createTaskWithVoiceStop()}
+    >
+      <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>Create task</span>
+    </button>
+  </div>
+{/if}
+
 <form
   class={[
     "overflow-hidden rounded-lg border bg-panel-strong shadow-none focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20",
@@ -996,6 +1060,19 @@
         onRemove={removeDisplayedAttachment}
       />
       <div class="flex items-end gap-1 text-sm">
+        <button
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          type="button"
+          aria-label={questionMode ? "Attach images" : "Attach files"}
+          title={questionMode ? "Attach images" : "Attach files"}
+          disabled={questionMode ? questionMode.addingImages : editorMode ? !ready : !activeSessionId || !ready}
+          onclick={() => {
+            if (questionMode && currentQuestion) void questionMode.onChooseImages(currentQuestion.id);
+            else void onChooseAttachments();
+          }}
+        >
+          <Paperclip class="h-4 w-4" aria-hidden="true" />
+        </button>
         <div class="relative min-w-0 flex-1">
           {#if autocompleteSuggestion && !editorMode && !questionMode}
             <div
@@ -1029,20 +1106,20 @@
             rows="1"
           ></textarea>
         </div>
-        <button
-          class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-          type="button"
-          aria-label={questionMode ? "Attach images" : "Attach files"}
-          title={questionMode ? "Attach images" : "Attach files"}
-          disabled={questionMode ? questionMode.addingImages : editorMode ? !ready : !activeSessionId || !ready}
-          onclick={() => {
-            if (questionMode && currentQuestion) void questionMode.onChooseImages(currentQuestion.id);
-            else void onChooseAttachments();
-          }}
-        >
-          <Paperclip class="h-4 w-4" aria-hidden="true" />
-        </button>
         {#if !editorMode && !questionMode}
+          <div class="relative shrink-0" data-composer-menu>
+            <button
+              class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              type="button"
+              aria-label="More composer actions"
+              title="More actions"
+              aria-haspopup="menu"
+              aria-expanded={composerMenuOpen}
+              onclick={toggleComposerMenu}
+            >
+              <EllipsisVertical class="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
           <button
             class={[
               "grid h-6 w-6 shrink-0 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",

@@ -5729,8 +5729,16 @@ fn validate_task_document(document: &ProjectTaskDocument) -> Result<(), String> 
         if !ids.insert(task.id.as_str()) {
             return Err(format!("duplicate task id: {}", task.id));
         }
-        if task.title.trim().is_empty() || task.title.chars().count() > 200 {
+        if task.title.chars().count() > 200 {
             return Err(format!("task {} has an invalid title", task.id));
+        }
+        if task.title.trim().is_empty()
+            && task
+                .description
+                .as_ref()
+                .map_or(true, |value| value.trim().is_empty())
+        {
+            return Err(format!("task {} needs a title or description", task.id));
         }
         if task
             .description
@@ -7332,6 +7340,18 @@ mod tests {
         let actual = read_project_tasks_from(&workspace, 1024 * 1024).expect("read tasks");
         assert_eq!(actual, expected);
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn allows_untitled_tasks_with_description_but_rejects_empty_tasks() {
+        let mut untitled = sample_task_document();
+        untitled.tasks[0].title.clear();
+        validate_task_document(&untitled).expect("untitled task with description should be valid");
+
+        untitled.tasks[0].description = Some("   ".to_owned());
+        assert!(validate_task_document(&untitled)
+            .expect_err("empty task should fail")
+            .contains("needs a title or description"));
     }
 
     #[test]

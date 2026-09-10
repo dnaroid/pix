@@ -12,6 +12,8 @@ export type CommandRegistryActions = {
 	runThinkingSlashCommand(argumentsText: string): Promise<void>;
 	runDefaultThinkingSlashCommand(argumentsText: string): Promise<void>;
 	runEnhanceCommand(): Promise<void>;
+	runCodeReviewCommand(): Promise<void>;
+	runCommitMessageCommand(): Promise<void>;
 	runExportCommand(argumentsText: string): Promise<void>;
 	runImportCommand(argumentsText: string): Promise<void>;
 	runShareCommand(): Promise<void>;
@@ -110,6 +112,20 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			kind: "builtin",
 			keywords: ["prompt", "rewrite", "improve", "kilocode"],
 			run: () => actions.runEnhanceCommand(),
+		},
+		{
+			name: "code-review",
+			description: "Review staged, unstaged, and untracked Git changes",
+			kind: "builtin",
+			keywords: ["git", "review", "diff", "changes"],
+			run: () => actions.runCodeReviewCommand(),
+		},
+		{
+			name: "commit-message",
+			description: "Generate a message for staged changes and commit after confirmation",
+			kind: "builtin",
+			keywords: ["git", "commit", "message", "staged"],
+			run: () => actions.runCommitMessageCommand(),
 		},
 		{
 			name: "export",

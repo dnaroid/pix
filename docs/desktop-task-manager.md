@@ -20,6 +20,9 @@ agent's session-local todo list.
   include `Tasks` and `Project` alongside other workspace views.
 - Create, edit, delete, manual status changes, drag reordering, and moving tasks
   between type groups.
+- Create an untitled task directly from the normal message composer through its
+  overflow menu, carrying the current draft text and attachments without
+  sending a prompt.
 - Task type (`bug`, `feature`, `improvement`) and status (`backlog`, `todo`,
   `in-progress`, `done`).
 - Persisted priority (`low`, `medium`, `high`, `urgent`). New tasks currently
@@ -47,10 +50,14 @@ agent's session-local todo list.
    a compact activity rail available while collapsed.
 2. Tasks are grouped by type. Dragging a task reorders it; dropping it into a
    different group also changes its type and updates `updatedAt`.
-3. Task rows show title, status, session/run action, edit, and delete controls.
-   Status uses icon, text, and color rather than color alone.
-4. Creating a task requires a non-empty title, starts with status `todo` and
-   priority `medium`, and may include description text and attachments.
+3. Task rows show the title when present. Untitled tasks use the first line of
+   description as their display label, or `Untitled task` when they contain only
+   attachments. Rows also show status, session/run action, edit, and delete
+   controls. Status uses icon, text, and color rather than color alone.
+4. Creating a task requires content in either title or description. Tasks start
+   with status `todo` and priority `medium`, and may include description text
+   and attachments. The task editor therefore permits an empty title when the
+   description or attachments are non-empty.
 5. Editing changes title, description, and type. Status is changed separately.
    Existing persisted priority is preserved.
 6. `.pi/tasks.jsonc` is authoritative. Missing `.pi`/task storage produces an
@@ -63,16 +70,28 @@ agent's session-local todo list.
 9. Starting a linked task opens that session. A stale/missing linked session is
    a recoverable error and does not silently create another session.
 10. Task completion remains manual.
+11. The normal message composer's vertical-ellipsis menu exposes `Create task`
+    whenever the current draft has text, attachments, or active voice input.
+    Voice input is finalized first. The resulting task has an empty persisted
+    title, type `feature`, status `todo`, priority `medium`, and stores the
+    composer text plus attachment markers in its description. The prompt is not
+    sent to the agent. Pathless composer images are materialized into
+    `.pi/task-attachments` before those markers are written.
+12. After composer task persistence succeeds, Pix expands/selects the Tasks
+    sidebar view and clears the composer only if the draft is still the exact
+    draft that was captured for task creation. A failed save or edits made while
+    the save is in flight preserve the composer.
 
 ## Contracts
 
 - Project file: `.pi/tasks.jsonc`.
 - Document shape: optional `$schema`, `version: 1`, and `tasks`.
-- Each task has a unique id, title, type, status, priority, `createdAt`, and
-  `updatedAt`; description and `sessionId` are optional.
-- Unknown fields, duplicate ids, unsupported enum values, empty titles,
-  malformed timestamps, unsupported versions, and oversized documents are
-  rejected.
+- Each task has a unique id, string title, type, status, priority, `createdAt`,
+  and `updatedAt`; description and `sessionId` are optional. The title may be an
+  empty string only when description content is present.
+- Unknown fields, duplicate ids, unsupported enum values, completely empty task
+  content, malformed timestamps, unsupported versions, and oversized documents
+  are rejected.
 - The Tauri backend confines task paths to the active workspace, rejects escape
   through `.pi` symlinks, and caps the document at 1 MB.
 - Writes validate the complete document, write a same-directory temporary file,
@@ -82,6 +101,10 @@ agent's session-local todo list.
 
 - Failed validation never replaces the task file.
 - Failed persistence restores the previous in-memory task document.
+- Composer task creation never clears a newer draft that changed while task
+  persistence was in flight.
+- Composer attachments are persisted through the same task-description marker
+  format used by the task editor, so running the task restores those attachments.
 - A task is linked to at most one session.
 - Running/reordering/editing is disabled while conflicting task/session work is
   active.

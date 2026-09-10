@@ -79,6 +79,7 @@
     MAX_ATTACHMENTS,
     MAX_EMBEDDED_ATTACHMENT_BYTES,
     MAX_EMBEDDED_PROMPT_BYTES,
+    attachmentDataUrlBytes,
     attachmentFromFile,
     attachmentFromImage,
     attachmentKind,
@@ -164,6 +165,7 @@
     EMPTY_TASK_DOCUMENT,
     moveProjectTask,
     parseTaskDocument,
+    projectTaskFromComposerDraft,
     projectTaskPromptDraft,
     type ProjectTask,
     type ProjectTaskDocument,
@@ -275,6 +277,9 @@
   let promptComposer = $state<{
     focus: () => Promise<void>;
     insertPaths: (paths: readonly string[]) => Promise<void>;
+  } | null>(null);
+  let workspaceSidebar = $state<{
+    openTasksPanel: () => void;
   } | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
@@ -1638,13 +1643,11 @@
 
   function createProjectTask(draft: ProjectTaskDraft): void {
     const title = draft.title.trim();
-    if (!title) return;
-    const timestamp = new Date().toISOString();
     const description = draft.description?.trim();
+    if (!title && !description) return;
+    const timestamp = new Date().toISOString();
     const task: ProjectTask = {
-      id: typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      id: newProjectTaskId(),
       title,
       ...(description ? { description } : {}),
       type: draft.type,
@@ -1658,8 +1661,8 @@
 
   function updateProjectTask(taskId: string, draft: ProjectTaskDraft): void {
     const title = draft.title.trim();
-    if (!title) return;
     const description = draft.description?.trim();
+    if (!title && !description) return;
     const timestamp = new Date().toISOString();
     void saveProjectTasks({
       ...taskDocument,
@@ -1673,6 +1676,57 @@
           }
         : task),
     });
+  }
+
+  async function createProjectTaskFromComposer(): Promise<void> {
+    if (!workspace || tasksSaving || taskLoadFailed) return;
+    const initialDraftKey = attachmentDraftKey;
+    await attachmentAddQueue;
+    if (initialDraftKey !== attachmentDraftKey || !workspace || tasksSaving || taskLoadFailed) return;
+
+    const requestWorkspace = workspace;
+    const requestClient = client;
+    const requestSessionId = activeSessionId;
+    const draftKey = attachmentDraftKey;
+    const draftGeneration = attachmentDraftGeneration;
+    const text = promptText;
+    const attachments = promptAttachments;
+    let storedAttachments: Attachment[];
+    try {
+      storedAttachments = await materializeComposerTaskAttachments(
+        attachments,
+        requestWorkspace,
+        requestClient,
+        requestSessionId,
+      );
+    } catch (error) {
+      reportError(error);
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    const task = projectTaskFromComposerDraft(text, storedAttachments, newProjectTaskId(), timestamp);
+    if (!task) return;
+
+    const saved = await saveProjectTasks({ ...taskDocument, tasks: [task, ...taskDocument.tasks] });
+    if (!saved || workspace !== requestWorkspace) return;
+    workspaceSidebar?.openTasksPanel();
+
+    if (
+      activeSessionId === requestSessionId
+      && attachmentDraftKey === draftKey
+      && attachmentDraftGeneration === draftGeneration
+      && promptText === text
+      && promptAttachments === attachments
+    ) {
+      promptText = "";
+      invalidateAttachmentDraft();
+    }
+  }
+
+  function newProjectTaskId(): string {
+    return typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
   function updateProjectTaskStatus(taskId: string, status: ProjectTaskStatus): void {
@@ -2986,12 +3040,46 @@
     requestWorkspace: string,
   ): Promise<AttachmentFile> {
     const bytes = new Uint8Array(await file.arrayBuffer());
+    return cacheTaskAttachmentBytes(file.name, bytes, requestWorkspace);
+  }
+
+  async function cacheTaskAttachmentBytes(
+    name: string,
+    bytes: Uint8Array,
+    requestWorkspace: string,
+  ): Promise<AttachmentFile> {
     return invoke<AttachmentFile>("cache_task_attachment", bytes, {
       headers: {
-        "x-pix-attachment-name": utf8Base64(file.name),
+        "x-pix-attachment-name": utf8Base64(name),
         "x-pix-workspace": utf8Base64(requestWorkspace),
       },
     });
+  }
+
+  async function materializeComposerTaskAttachments(
+    attachments: readonly Attachment[],
+    requestWorkspace: string,
+    requestClient: AcpClient | null,
+    requestSessionId: string | null,
+  ): Promise<Attachment[]> {
+    const stored: Attachment[] = [];
+    for (const attachment of attachments) {
+      if (attachment.path) {
+        stored.push(attachment);
+        continue;
+      }
+
+      let dataUrl = attachment.dataUrl;
+      if (!dataUrl && attachment.deferredImageId && requestClient && requestSessionId) {
+        const image = await requestClient.sessionImage(requestSessionId, attachment.deferredImageId);
+        dataUrl = `data:${image.mimeType};base64,${image.data}`;
+      }
+      const bytes = dataUrl ? attachmentDataUrlBytes(dataUrl) : undefined;
+      if (!bytes) throw new Error(`Cannot persist attachment ${attachment.name} in a project task.`);
+      const cached = await cacheTaskAttachmentBytes(attachment.name, bytes, requestWorkspace);
+      stored.push({ ...attachment, path: cached.path, size: cached.size });
+    }
+    return stored;
   }
 
   function utf8Base64(value: string): string {
@@ -3841,6 +3929,7 @@
 
   <div class="flex min-h-0 min-w-0">
     <WorkspaceSidebar
+      bind:this={workspaceSidebar}
       {workspace}
       tasks={taskDocument.tasks}
       loading={tasksLoading}
@@ -3949,6 +4038,7 @@
           onAutocomplete={autocompletePrompt}
           onSubmit={submitPrompt}
           onDefer={deferCurrentDraft}
+          onCreateTask={createProjectTaskFromComposer}
           onCancel={cancelPrompt}
           onChooseAttachments={chooseAttachments}
           onPasteAttachments={addPastedAttachments}

@@ -97,6 +97,26 @@ describe("command registry", () => {
 		assert.equal(queued, "send later");
 	});
 
+	it("registers local Git assistant commands", async () => {
+		const calls: string[] = [];
+		const commands = createSlashCommands({
+			...noopActions(),
+			runCodeReviewCommand: async () => { calls.push("review"); },
+			runCommitMessageCommand: async () => { calls.push("commit-message"); },
+		}, host());
+
+		const review = commands.find((command) => command.name === "code-review");
+		const commitMessage = commands.find((command) => command.name === "commit-message");
+		assert.equal(review?.kind, "builtin");
+		assert.equal(review?.allowArguments, undefined);
+		assert.equal(commitMessage?.kind, "builtin");
+		assert.equal(commitMessage?.allowArguments, undefined);
+
+		await review?.run?.("");
+		await commitMessage?.run?.("");
+		assert.deepEqual(calls, ["review", "commit-message"]);
+	});
+
 	it("registers /update as an argument-taking local command", async () => {
 		let argumentsSeen = "";
 		const commands = createSlashCommands({
@@ -259,6 +279,8 @@ describe("command registry", () => {
 		assert.ok(calls.includes("runThinkingSlashCommand: args "));
 		assert.ok(calls.includes("runDefaultThinkingSlashCommand: args "));
 		assert.ok(calls.includes("runEnhanceCommand"));
+		assert.ok(calls.includes("runCodeReviewCommand"));
+		assert.ok(calls.includes("runCommitMessageCommand"));
 		assert.ok(calls.includes("runExportCommand: args "));
 		assert.ok(calls.includes("runImportCommand: args "));
 		assert.ok(calls.includes("runShareCommand"));
@@ -303,6 +325,8 @@ function noopActions(): CommandRegistryActions {
 		runThinkingSlashCommand: noop,
 		runDefaultThinkingSlashCommand: noop,
 		runEnhanceCommand: noop,
+		runCodeReviewCommand: noop,
+		runCommitMessageCommand: noop,
 		runExportCommand: noop,
 		runImportCommand: noop,
 		runShareCommand: noop,
@@ -345,6 +369,8 @@ function recordingActions(calls: string[]): CommandRegistryActions {
 		runThinkingSlashCommand: record("runThinkingSlashCommand"),
 		runDefaultThinkingSlashCommand: record("runDefaultThinkingSlashCommand"),
 		runEnhanceCommand: record("runEnhanceCommand"),
+		runCodeReviewCommand: record("runCodeReviewCommand"),
+		runCommitMessageCommand: record("runCommitMessageCommand"),
 		runExportCommand: record("runExportCommand"),
 		runImportCommand: record("runImportCommand"),
 		runShareCommand: record("runShareCommand"),

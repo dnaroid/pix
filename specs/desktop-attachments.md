@@ -23,12 +23,15 @@ Show image and video attachments in the desktop composer and transcript, while k
   request body.
 - Send video and other files as local resource links so the agent receives their paths.
 - Render image/video previews in the composer, user messages, and supported ACP content.
+- Preserve the current composer attachments when the draft is captured as a
+  project task from the composer overflow menu.
 
 ## Non-goals
 
 - Sending video bytes directly to the model.
 - Editing, transcoding, or downloading attachments.
-- Persisting copied files outside the application cache.
+- Persisting chat-only copied files outside the application cache unless the
+  user explicitly captures that draft as a project task.
 
 ## Behavior
 
@@ -42,6 +45,10 @@ Show image and video attachments in the desktop composer and transcript, while k
   when image prompting is supported.
 - Pasted images use their clipboard bytes. Other pasted files are copied to the Pix cache first so the agent receives a usable local path.
 - A prompt may contain text, attachments, or both.
+- Creating a project task from the composer persists path-backed attachments as
+  task description markers. A pathless image is first materialized into the
+  project's `.pi/task-attachments` storage, then persisted through the same
+  marker format, so task creation never silently drops an attachment.
 - Loaded sessions replay persisted images as previews. Persisted resource-link markers are restored as file/video attachments when their local paths remain available.
 - Attachment failures leave the composer contents intact and surface the existing error banner.
 
@@ -53,6 +60,9 @@ Show image and video attachments in the desktop composer and transcript, while k
   ACP adapter can materialize image content for Pi while retaining the resource
   link in the persisted prompt surface.
 - Resource links are persisted in Pi text as Pix attachment markers containing a file URI.
+- Project-task capture uses the same marker encoding. The Tauri
+  `cache_task_attachment` command provides a workspace-confined path for any
+  pathless composer image before the task document is written.
 - The Tauri shell exposes bounded attachment inspection/read/cache commands and an approved-path opener command.
 - Dialog and drop selections are admitted through Tauri's dynamic asset scope, then persisted in Pix's approved attachment registry for session replay.
 
