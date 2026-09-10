@@ -1732,7 +1732,7 @@ export class PixAcpAgent {
 						));
 					return;
 				}
-				this.finishActiveRun(session, run);
+				void this.finishActiveRun(session, run);
 				return;
 			default:
 				return;
@@ -1833,30 +1833,44 @@ export class PixAcpAgent {
 		preferred?: "paused" | "continuable",
 	): Promise<DesktopAgentControlState> {
 		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun) return session.agentControlState;
-		const [messages, piState] = await Promise.all([session.pi.getMessages(), session.pi.getState()]);
+		const next = await this.deriveAgentControlState(session, preferred);
 		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun) return session.agentControlState;
-		const lastMessage = messages[messages.length - 1];
-		const canContinue = Boolean(lastMessage && lastMessage.role !== "assistant")
-			|| (piState.pendingMessageCount ?? 0) > 0;
-		const next = canContinue
-			? (preferred ?? (session.agentControlState === "paused" ? "paused" : "continuable"))
-			: "idle";
 		await this.setAgentControlState(session, next);
 		return next;
 	}
 
-	private finishActiveRun(session: AgentSessionState, run: ActiveRun): void {
+	private async deriveAgentControlState(
+		session: AgentSessionState,
+		preferred?: "paused" | "continuable",
+	): Promise<DesktopAgentControlState> {
+		const [messages, piState] = await Promise.all([session.pi.getMessages(), session.pi.getState()]);
+		const lastMessage = messages[messages.length - 1];
+		const canContinue = Boolean(lastMessage && lastMessage.role !== "assistant")
+			|| (piState.pendingMessageCount ?? 0) > 0;
+		return canContinue
+			? (preferred ?? (session.agentControlState === "paused" ? "paused" : "continuable"))
+			: "idle";
+	}
+
+	private async finishActiveRun(session: AgentSessionState, run: ActiveRun): Promise<void> {
 		if (session.activeRun !== run) return;
 		const pauseRequested = session.agentControlState === "pause-requested";
 		const cancelled = run.cancelled;
-		this.resolveActiveRun(session, cancelled ? "cancelled" : (run.stopReason ?? "end_turn"));
 		if (cancelled) {
-			void this.setAgentControlState(session, "idle");
+			await this.setAgentControlState(session, "idle");
+			if (session.activeRun === run) this.resolveActiveRun(session, "cancelled");
 			return;
 		}
-		void this.refreshAgentControlState(session, pauseRequested ? "paused" : undefined).catch((error: unknown) => {
+		let next: DesktopAgentControlState;
+		try {
+			next = await this.deriveAgentControlState(session, pauseRequested ? "paused" : undefined);
+		} catch (error) {
 			this.options.logger.warn(`agent control state refresh failed: ${stringifyUnknown(error)}`);
-		});
+			next = pauseRequested ? "paused" : "idle";
+		}
+		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun !== run) return;
+		await this.setAgentControlState(session, next);
+		if (session.activeRun === run) this.resolveActiveRun(session, run.stopReason ?? "end_turn");
 	}
 
 	private async prompt(params: PromptRequest): Promise<PromptResponse> {

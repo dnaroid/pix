@@ -118,6 +118,7 @@
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
   import type { SessionStateNotification } from "./lib/session-state";
   import {
+    agentControlAllowsAutoQueue,
     agentControlStateFromSessionState,
     type AgentControlState,
   } from "./lib/agent-control";
@@ -877,6 +878,7 @@
       || runningSessionIds.has(sessionId)
       || promptRunsBySessionId.has(sessionId)
       || autoFlushInProgress.has(sessionId)
+      || !agentControlAllowsAutoQueue(agentControlStates.get(sessionId))
     ) return;
 
     autoFlushInProgress.add(sessionId);
@@ -885,6 +887,7 @@
         requestClient === client
         && runtimeReadySessionIds.has(sessionId)
         && !runningSessionIds.has(sessionId)
+        && agentControlAllowsAutoQueue(agentControlStates.get(sessionId))
       ) {
         const message = await requestClient.takeAutoMessage(sessionId);
         if (!message) return;

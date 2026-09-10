@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 // @ts-nocheck
 
-import { AgentSession } from "@earendil-works/pi-coding-agent";
+process.env.PI_CODING_AGENT = "true";
+process.env.AI_AGENT = "pi";
+process.emitWarning = () => {};
+
+const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
+const { AgentSession } = await import("@earendil-works/pi-coding-agent");
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
@@ -173,10 +178,5 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 	return originalPrompt.call(this, text, options);
 };
 
-process.env.PI_CODING_AGENT = "true";
-process.env.AI_AGENT = "pi";
-process.emitWarning = () => {};
-
-const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
 const { main } = await import(new URL("./main.js", codingAgentIndex).href);
 await main(["--mode", "rpc", ...process.argv.slice(2)]);

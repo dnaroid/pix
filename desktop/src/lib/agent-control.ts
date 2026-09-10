@@ -20,6 +20,10 @@ export function agentControlStateFromSessionState(
   return isAgentControlState(notification.data.state) ? notification.data.state : undefined;
 }
 
+export function agentControlAllowsAutoQueue(state: AgentControlState | undefined): boolean {
+  return (state ?? "idle") === "idle";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
