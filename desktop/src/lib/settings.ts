@@ -48,6 +48,24 @@ export function updateSettingsEditorCache(next: SettingsEditorCache): void {
   editorCache = next;
 }
 
+/**
+ * Reconcile a completed save with the latest in-memory draft. A user can keep
+ * typing while the IPC write is in flight; the returned document becomes the
+ * new disk baseline without clobbering those newer edits.
+ */
+export function reconcileSavedSettingsDraft(
+  latest: SettingsDraftDocument,
+  submittedSource: string,
+  saved: SettingsConfigDocument,
+): SettingsDraftDocument {
+  return {
+    ...latest,
+    ...saved,
+    source: latest.source === submittedSource ? saved.content : latest.source,
+    savedSource: saved.content,
+  };
+}
+
 export type SettingsFieldKind = "boolean" | "number" | "string" | "select" | "string-list" | "json";
 
 export interface SettingsSelectOption {

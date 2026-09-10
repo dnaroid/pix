@@ -74,7 +74,9 @@
     errorByDirectory = {};
     selectedPath = null;
     clearProjectEntryDrag();
-    queueMicrotask(() => onHealthChange?.(null));
+    queueMicrotask(() => {
+      if (!cancelled && nextGeneration === generation) onHealthChange?.(null);
+    });
     // Do not call loadDirectory synchronously from the reactive effect: its
     // reads of loading/error state would become effect dependencies and could
     // retrigger the whole explorer reset while a directory request is in
@@ -87,6 +89,8 @@
     }
     return () => {
       cancelled = true;
+      if (generation === nextGeneration) generation += 1;
+      onHealthChange?.(null);
     };
   });
 

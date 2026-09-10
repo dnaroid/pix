@@ -4,7 +4,6 @@ import {
   formatSessionSubagentActivity,
   formatSessionSubagentElapsed,
   sessionSubagentCount,
-  sessionSubagentFailureKeys,
   sessionSubagentModelLabel,
   sessionSubagentRunName,
   sessionSubagentSnapshot,
@@ -84,28 +83,6 @@ describe("desktop session subagents", () => {
     expect(sessionSubagentModelLabel(preview)).toBe("model-a");
   });
 
-  it("returns stable failure keys independently from active agent counts", () => {
-    const state = snapshot([
-      {
-        runDir: "/work/run-a",
-        agents: [
-          { id: "failed", status: "failed" },
-          { id: "running", status: "running" },
-        ],
-      },
-      {
-        runDir: "/work/run-b",
-        agents: [{ id: "failed", status: "failed" }],
-      },
-    ]);
-
-    expect(sessionSubagentFailureKeys(state)).toEqual([
-      "/work/run-a\0failed",
-      "/work/run-b\0failed",
-    ]);
-    expect(sessionSubagentCount(state)).toBe(1);
-  });
-
   it("accepts the icon field on task previews and rejects non-string icons", () => {
     const valid = snapshot([{
       runDir: "/run",
@@ -147,4 +124,5 @@ describe("desktop session subagents", () => {
     expect(states.get("acp-1")?.runs[0]?.runDir).toBe("/new");
     expect(states.get("acp-2")?.runs[0]?.runDir).toBe("/old");
   });
+
 });

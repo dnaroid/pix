@@ -60,7 +60,7 @@
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     sessionReady: boolean;
     onRefreshKnowledge: () => void;
-    onOverviewChange?: (overview: IdxOverview | undefined) => void;
+    onOverviewChange?: (workspace: string, overview: IdxOverview | undefined) => void;
   } = $props();
 
   type PanelTab = "overview" | "knowledge" | "query";
@@ -77,6 +77,10 @@
   let operations = $state<IdxOperationSnapshot[]>([]);
   let loading = $state(false);
   let loadGeneration = 0;
+  let disposed = false;
+  let overviewRefreshRunning = $state(false);
+  let overviewRefreshQueued = false;
+  let overviewRefreshGeneration = 0;
   let error = $state<string | null>(null);
 
   let queryKind = $state<IdxQueryKind>("code");
@@ -138,15 +142,16 @@
     const requestWorkspace = workspace;
     const generation = ++loadGeneration;
     queueMicrotask(() => {
-      if (generation === loadGeneration) void loadWorkspace(requestWorkspace, generation);
+      if (!disposed && generation === loadGeneration) void loadWorkspace(requestWorkspace, generation);
     });
   });
 
   onMount(() => {
-    let disposed = false;
     const unlisteners: Array<() => void> = [];
     const refreshTimer = window.setInterval(() => {
-      if (!loading && !queryRunning && !inspectRunning && !runningOperation) void refreshOverview();
+      if (!loading && !overviewRefreshRunning && !queryRunning && !inspectRunning && !runningOperation) {
+        void refreshOverview();
+      }
     }, 30_000);
     void listen<IdxOperationOutputEvent>(IDX_OPERATION_OUTPUT_EVENT, ({ payload }) => {
       if (disposed) return;
@@ -163,15 +168,19 @@
     }).then((unlisten) => disposed ? unlisten() : unlisteners.push(unlisten));
     return () => {
       disposed = true;
+      loadGeneration += 1;
+      overviewRefreshGeneration += 1;
+      overviewRefreshQueued = false;
       window.clearInterval(refreshTimer);
       for (const unlisten of unlisteners) unlisten();
     };
   });
 
   async function loadWorkspace(requestWorkspace: string, generation: number): Promise<void> {
+    if (disposed) return;
     if (!requestWorkspace) {
       overview = undefined;
-      onOverviewChange?.(undefined);
+      onOverviewChange?.(requestWorkspace, undefined);
       operations = [];
       loading = false;
       return;
@@ -183,33 +192,54 @@
         invoke<IdxOverview>("idx_overview", { workspace: requestWorkspace }),
         invoke<IdxOperationSnapshot[]>("idx_operation_list", { windowLabel, workspace: requestWorkspace }),
       ]);
-      if (generation !== loadGeneration || workspace !== requestWorkspace) return;
+      if (disposed || generation !== loadGeneration || workspace !== requestWorkspace) return;
       overview = nextOverview;
-      onOverviewChange?.(nextOverview);
+      onOverviewChange?.(requestWorkspace, nextOverview);
       operations = nextOperations;
     } catch (caught) {
-      if (generation !== loadGeneration || workspace !== requestWorkspace) return;
+      if (disposed || generation !== loadGeneration || workspace !== requestWorkspace) return;
       error = errorMessage(caught);
     } finally {
-      if (generation === loadGeneration) loading = false;
+      if (!disposed && generation === loadGeneration) {
+        loading = false;
+        if (overviewRefreshQueued) {
+          overviewRefreshQueued = false;
+          queueMicrotask(() => void refreshOverview());
+        }
+      }
     }
   }
 
   async function refreshOverview(): Promise<void> {
     const requestWorkspace = workspace;
-    if (!requestWorkspace) return;
+    if (disposed || !requestWorkspace) return;
+    if (loading || overviewRefreshRunning) {
+      overviewRefreshQueued = true;
+      return;
+    }
+    overviewRefreshRunning = true;
+    const generation = ++overviewRefreshGeneration;
     try {
       const next = await invoke<IdxOverview>("idx_overview", { workspace: requestWorkspace });
-      if (workspace === requestWorkspace) {
+      if (!disposed && generation === overviewRefreshGeneration && workspace === requestWorkspace) {
         overview = next;
-        onOverviewChange?.(next);
+        onOverviewChange?.(requestWorkspace, next);
       }
     } catch (caught) {
-      if (workspace === requestWorkspace) error = errorMessage(caught);
+      if (!disposed && generation === overviewRefreshGeneration && workspace === requestWorkspace) {
+        error = errorMessage(caught);
+      }
+    } finally {
+      overviewRefreshRunning = false;
+      if (overviewRefreshQueued && !disposed) {
+        overviewRefreshQueued = false;
+        queueMicrotask(() => void refreshOverview());
+      }
     }
   }
 
   function refresh(): void {
+    if (loading || overviewRefreshRunning || disposed) return;
     const generation = ++loadGeneration;
     void loadWorkspace(workspace, generation);
   }
@@ -440,8 +470,8 @@
       title="Refresh IDX state"
       aria-label="Refresh IDX state"
       onclick={refresh}
-      disabled={loading}
-    ><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
+      disabled={loading || overviewRefreshRunning}
+    ><RefreshCw class={["h-3.5 w-3.5", loading || overviewRefreshRunning ? "animate-spin" : ""]} aria-hidden="true" /></button>
   </div>
 
   <div class="flex h-8 items-stretch border-b border-sidebar-border bg-chrome px-1.5" role="tablist" aria-label="IDX views">

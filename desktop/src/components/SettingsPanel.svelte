@@ -8,7 +8,7 @@
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { invoke } from "@tauri-apps/api/core";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import {
     formatSettingJson,
     formatSettingValueForList,
@@ -17,6 +17,7 @@
     parseSettingStringList,
     parseSettingsSchema,
     parseSettingsSource,
+    reconcileSavedSettingsDraft,
     removeSettingsValue,
     settingsDefaultValue,
     settingsHasValue,
@@ -46,6 +47,9 @@
   let error = $state<string | null>(null);
   let query = $state("");
   let rawMode = $state(false);
+  let indicatorDisposed = false;
+  const loadGenerations: Record<SettingsConfigKind, number> = { pix: 0, "pi-tools-suite": 0 };
+  let saveGeneration = 0;
 
   const active = $derived(drafts[activeKind]);
   const parsed = $derived(active ? parseSettingsSource(active.source) : { value: {}, errors: [] });
@@ -71,11 +75,21 @@
 
   $effect(() => {
     const indicatorError = error ?? issues[0] ?? null;
-    queueMicrotask(() => onIndicatorChange?.(indicatorError));
+    queueMicrotask(() => {
+      if (!indicatorDisposed) onIndicatorChange?.(indicatorError);
+    });
   });
 
   onMount(() => {
     void loadConfig(activeKind);
+  });
+
+  onDestroy(() => {
+    indicatorDisposed = true;
+    loadGenerations.pix += 1;
+    loadGenerations["pi-tools-suite"] += 1;
+    saveGeneration += 1;
+    onIndicatorChange?.(null);
   });
 
   function setDrafts(next: Partial<Record<SettingsConfigKind, SettingsDraftDocument>>): void {
@@ -85,19 +99,25 @@
 
   async function loadConfig(kind: SettingsConfigKind, force = false): Promise<void> {
     if (!force && drafts[kind]) return;
+    const generation = ++loadGenerations[kind];
     loadingKind = kind;
-    error = null;
+    if (activeKind === kind) error = null;
     try {
       const document = await invoke<SettingsConfigDocument>("read_user_config", { kind });
+      if (indicatorDisposed || generation !== loadGenerations[kind]) return;
       const schemaObject = parseSettingsSchema(document.schema);
       setDrafts({
         ...drafts,
         [kind]: { ...document, source: document.content, savedSource: document.content, schemaObject },
       });
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : String(caught);
+      if (!indicatorDisposed && generation === loadGenerations[kind] && activeKind === kind) {
+        error = caught instanceof Error ? caught.message : String(caught);
+      }
     } finally {
-      if (loadingKind === kind) loadingKind = null;
+      if (!indicatorDisposed && generation === loadGenerations[kind] && loadingKind === kind) {
+        loadingKind = null;
+      }
     }
   }
 
@@ -129,6 +149,7 @@
   }
 
   function reload(): void {
+    if (saving) return;
     if (dirty && !window.confirm("Discard unsaved settings changes and reload this config?")) return;
     void loadConfig(activeKind, true);
   }
@@ -137,26 +158,28 @@
     const kind = activeKind;
     const current = drafts[kind];
     if (!current || !dirty || issues.length > 0 || saving) return;
+    const savedSource = current.source;
+    const generation = ++saveGeneration;
     saving = true;
     error = null;
     try {
       const document = await invoke<SettingsConfigDocument>("write_user_config", {
         kind,
-        content: current.source,
+        content: savedSource,
       });
+      if (indicatorDisposed || generation !== saveGeneration) return;
+      const latest = drafts[kind];
+      if (!latest) return;
       setDrafts({
         ...drafts,
-        [kind]: {
-          ...current,
-          ...document,
-          source: document.content,
-          savedSource: document.content,
-        },
+        [kind]: reconcileSavedSettingsDraft(latest, savedSource, document),
       });
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : String(caught);
+      if (!indicatorDisposed && generation === saveGeneration) {
+        error = caught instanceof Error ? caught.message : String(caught);
+      }
     } finally {
-      saving = false;
+      if (!indicatorDisposed && generation === saveGeneration) saving = false;
     }
   }
 
@@ -207,7 +230,7 @@
         title="Reload config"
         aria-label="Reload config"
         onclick={reload}
-        disabled={loadingKind !== null}
+        disabled={loadingKind !== null || saving}
       ><RefreshCw class={["h-3.5 w-3.5", loadingKind === activeKind ? "animate-spin" : ""]} aria-hidden="true" /></button>
     </div>
   </div>

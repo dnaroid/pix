@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSettingsSource,
+  reconcileSavedSettingsDraft,
   removeSettingsValue,
   settingsDefaultValue,
   settingsSections,
@@ -8,6 +9,7 @@ import {
   settingsValue,
   updateSettingsSource,
   type SettingsSchema,
+  type SettingsDraftDocument,
 } from "./settings";
 
 const schema: SettingsSchema = {
@@ -89,5 +91,39 @@ describe("settings schema helpers", () => {
       type: "object",
       properties: { enabled: { type: "boolean" } },
     }, ["enabled"])).toEqual({ exists: true, value: true });
+  });
+
+  it("keeps edits typed while an older save is in flight", () => {
+    const latest: SettingsDraftDocument = {
+      path: "/home/user/.config/pi/pix.jsonc",
+      content: '{ "enabled": true }\n',
+      exists: true,
+      schema: "{}",
+      schemaObject: {},
+      source: '{ "enabled": false, "newer": true }\n',
+      savedSource: '{ "enabled": true }\n',
+    };
+    const saved = {
+      path: latest.path,
+      content: '{ "enabled": false }\n',
+      exists: true,
+      schema: latest.schema,
+    };
+
+    const reconciled = reconcileSavedSettingsDraft(
+      latest,
+      '{ "enabled": false }\n',
+      saved,
+    );
+    expect(reconciled.source).toBe(latest.source);
+    expect(reconciled.savedSource).toBe(saved.content);
+
+    const unchanged = reconcileSavedSettingsDraft(
+      { ...latest, source: '{ "enabled": false }\n' },
+      '{ "enabled": false }\n',
+      saved,
+    );
+    expect(unchanged.source).toBe(saved.content);
+    expect(unchanged.savedSource).toBe(saved.content);
   });
 });

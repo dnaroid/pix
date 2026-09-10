@@ -13,7 +13,7 @@ use std::{
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc, Condvar, Mutex,
+        mpsc, Arc, Condvar, Mutex, RwLock,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -38,6 +38,8 @@ const MAX_GIT_DIFF_BYTES: usize = 512 * 1024;
 const MAX_GIT_COMMIT_MESSAGE_BYTES: usize = 20 * 1024;
 const MAX_GIT_UNTRACKED_STAT_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_SIDEBAR_GIT_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const SIDEBAR_GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_USER_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_IDX_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_IDX_LOG_BYTES: usize = 256 * 1024;
@@ -69,12 +71,20 @@ type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 struct DeepgramTokenResponse {
     access_token: String,
     expires_in: f64,
+    model: String,
+    language: String,
 }
 
 #[derive(Deserialize)]
 struct DeepgramGrantResponse {
     access_token: String,
     expires_in: f64,
+}
+
+struct DeepgramRuntimeConfig {
+    api_key: String,
+    model: String,
+    language: String,
 }
 
 #[derive(Default)]
@@ -88,6 +98,11 @@ struct AcpProcessState {
 struct PackageTerminalState {
     sessions: Mutex<HashMap<String, PackageTerminalSession>>,
     next_id: AtomicU64,
+}
+
+#[derive(Default)]
+struct UserConfigState {
+    lock: RwLock<()>,
 }
 
 struct PackageTerminalSession {
@@ -106,11 +121,12 @@ struct PackageTerminalSession {
 }
 
 struct PackageTerminalRunning {
-    master: Box<dyn MasterPty>,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
     exited: ExitSignal,
     process_id: Option<u32>,
+    process_group_leader: Option<i32>,
 }
 
 #[derive(Default)]
@@ -386,13 +402,18 @@ where
 }
 
 #[tauri::command]
-async fn deepgram_token() -> Result<DeepgramTokenResponse, String> {
-    run_blocking(|| {
-        let api_key = env::var("DEEPGRAM_API_KEY")
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "DEEPGRAM_API_KEY is not set".to_owned())?;
+async fn deepgram_token(app: AppHandle) -> Result<DeepgramTokenResponse, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    let env_api_key = env::var("DEEPGRAM_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+
+    run_blocking(move || {
+        let config = resolve_deepgram_runtime_config(&home, env_api_key)?;
 
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(5))
@@ -401,7 +422,7 @@ async fn deepgram_token() -> Result<DeepgramTokenResponse, String> {
             .map_err(|error| format!("failed to create the Deepgram HTTP client: {error}"))?;
         let response = client
             .post("https://api.deepgram.com/v1/auth/grant")
-            .header("Authorization", format!("Token {api_key}"))
+            .header("Authorization", format!("Token {}", config.api_key))
             .json(&serde_json::json!({ "ttl_seconds": 60 }))
             .send()
             .map_err(|error| format!("failed to request a Deepgram token: {error}"))?;
@@ -421,9 +442,93 @@ async fn deepgram_token() -> Result<DeepgramTokenResponse, String> {
         Ok(DeepgramTokenResponse {
             access_token: grant.access_token,
             expires_in: grant.expires_in,
+            model: config.model,
+            language: config.language,
         })
     })
     .await
+}
+
+fn resolve_deepgram_api_key(home: &Path, env_api_key: Option<String>) -> Result<String, String> {
+    resolve_deepgram_runtime_config(home, env_api_key).map(|config| config.api_key)
+}
+
+fn resolve_deepgram_runtime_config(
+    home: &Path,
+    env_api_key: Option<String>,
+) -> Result<DeepgramRuntimeConfig, String> {
+    let parsed = match deepgram_user_pix_config(home) {
+        Ok(parsed) => parsed,
+        Err(error) if env_api_key.is_some() => None,
+        Err(error) => return Err(error),
+    };
+    let dictation = parsed
+        .as_ref()
+        .and_then(|config| config.get("dictation"))
+        .and_then(serde_json::Value::as_object);
+    let api_key = dictation
+        .and_then(|value| value.get("apiKey").or_else(|| value.get("deepgramApiKey")))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or(env_api_key)
+        .ok_or_else(|| {
+            "Deepgram API key is not configured; set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY"
+                .to_owned()
+        })?;
+    let model = dictation
+        .and_then(|value| value.get("model").or_else(|| value.get("deepgramModel")))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("nova-3")
+        .to_owned();
+    let selected_language = dictation
+        .and_then(|value| {
+            value
+                .get("language")
+                .or_else(|| value.get("selectedLanguage"))
+                .or_else(|| value.get("currentLanguage"))
+        })
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("en")
+        .to_lowercase();
+    let language = dictation
+        .and_then(|value| value.get("languages"))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|languages| languages.get(&selected_language))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|language| {
+            language
+                .get("deepgramLanguage")
+                .or_else(|| language.get("language"))
+        })
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&selected_language)
+        .to_owned();
+
+    Ok(DeepgramRuntimeConfig {
+        api_key,
+        model,
+        language,
+    })
+}
+
+fn deepgram_user_pix_config(home: &Path) -> Result<Option<serde_json::Value>, String> {
+    let document = read_user_config_from(home, UserConfigKind::Pix)?;
+    if !document.exists {
+        return Ok(None);
+    }
+    let normalized = normalize_jsonc(&document.content)
+        .map_err(|_| format!("failed to parse {} as JSONC", document.path))?;
+    let parsed: serde_json::Value = serde_json::from_str(&normalized)
+        .map_err(|error| format!("failed to parse {}: {error}", document.path))?;
+    Ok(Some(parsed))
 }
 
 #[derive(Clone, Serialize)]
@@ -1210,7 +1315,15 @@ async fn read_user_config(
         .path()
         .home_dir()
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
-    run_blocking(move || read_user_config_from(&home, kind)).await
+    run_blocking(move || {
+        let state = app.state::<UserConfigState>();
+        let _guard = state
+            .lock
+            .read()
+            .map_err(|_| "user config state is poisoned".to_owned())?;
+        read_user_config_from(&home, kind)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1229,7 +1342,15 @@ async fn write_user_config(
         .path()
         .home_dir()
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
-    run_blocking(move || write_user_config_from(&home, kind, &content)).await
+    run_blocking(move || {
+        let state = app.state::<UserConfigState>();
+        let _guard = state
+            .lock
+            .write()
+            .map_err(|_| "user config state is poisoned".to_owned())?;
+        write_user_config_from(&home, kind, &content)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2806,7 +2927,16 @@ fn workspace_sidebar_indicator_poll_from(
     workspace: &Path,
     home: &Path,
 ) -> Result<WorkspaceSidebarIndicatorPoll, String> {
-    let settings = sidebar_settings_indicator_state(home);
+    let settings = {
+        let state = app.state::<UserConfigState>();
+        let result = match state.lock.read() {
+            Ok(_guard) => sidebar_settings_indicator_state(home),
+            Err(_) => SidebarSettingsIndicatorState {
+                errors: vec!["user config state is unavailable".to_owned()],
+            },
+        };
+        result
+    };
     let root = match canonical_workspace(workspace) {
         Ok(root) => root,
         Err(error) => {
@@ -2845,26 +2975,7 @@ fn sidebar_git_indicator_state(root: &Path) -> SidebarGitIndicatorState {
         return SidebarGitIndicatorState::default();
     }
 
-    let repository = match git_repository_root(root) {
-        Ok(repository) => repository,
-        Err(error) => {
-            return SidebarGitIndicatorState {
-                available: true,
-                error: Some(error),
-                ..SidebarGitIndicatorState::default()
-            };
-        }
-    };
-    let output = match git_output(
-        &repository,
-        &[
-            "status",
-            "--porcelain=v2",
-            "-z",
-            "--branch",
-            "--untracked-files=normal",
-        ],
-    ) {
+    let output = match sidebar_git_status_output(root) {
         Ok(output) => output,
         Err(error) => {
             return SidebarGitIndicatorState {
@@ -2874,22 +2985,141 @@ fn sidebar_git_indicator_state(root: &Path) -> SidebarGitIndicatorState {
             };
         }
     };
-    match parse_git_status_porcelain(&output.stdout) {
-        Ok(snapshot) => SidebarGitIndicatorState {
+    if !output.status.success() {
+        return SidebarGitIndicatorState {
             available: true,
-            dirty: !snapshot.changes.is_empty(),
-            conflicted: snapshot.changes.iter().any(|change| change.conflicted),
-            detached: snapshot.detached,
-            ahead: snapshot.ahead,
-            behind: snapshot.behind,
-            error: None,
-        },
-        Err(error) => SidebarGitIndicatorState {
-            available: true,
-            error: Some(error),
+            error: Some(git_command_error("Git indicator status", &output)),
             ..SidebarGitIndicatorState::default()
-        },
+        };
     }
+    parse_sidebar_git_status(&output.stdout)
+}
+
+fn sidebar_git_status_output(root: &Path) -> Result<std::process::Output, String> {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .arg("--no-optional-locks")
+        .arg("-c")
+        .arg("color.ui=false")
+        .arg("-c")
+        .arg("core.quotepath=false")
+        .arg("-c")
+        .arg("core.pager=cat")
+        .arg("-c")
+        .arg("core.fsmonitor=false")
+        .args([
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+            "--untracked-files=normal",
+        ])
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "Never")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("failed to start Git indicator status: {error}"))?;
+    let process_id = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Git indicator stdout pipe is unavailable".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Git indicator stderr pipe is unavailable".to_owned())?;
+    let stdout_thread = thread::spawn(move || read_bounded_idx_stream(stdout, MAX_SIDEBAR_GIT_OUTPUT_BYTES));
+    let stderr_thread = thread::spawn(move || read_bounded_idx_stream(stderr, 256 * 1024));
+    let deadline = Instant::now() + SIDEBAR_GIT_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
+            Ok(None) => {
+                force_kill_idx_process(process_id, &mut child);
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err("Git indicator status timed out".to_owned());
+            }
+            Err(error) => {
+                force_kill_idx_process(process_id, &mut child);
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(format!("failed while waiting for Git indicator status: {error}"));
+            }
+        }
+    };
+    let (stdout, stdout_truncated) = stdout_thread
+        .join()
+        .map_err(|_| "Git indicator stdout reader panicked".to_owned())?;
+    let (stderr, stderr_truncated) = stderr_thread
+        .join()
+        .map_err(|_| "Git indicator stderr reader panicked".to_owned())?;
+    if stdout_truncated || stderr_truncated {
+        return Err("Git indicator status output exceeded its safety limit".to_owned());
+    }
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn parse_sidebar_git_status(bytes: &[u8]) -> SidebarGitIndicatorState {
+    let mut state = SidebarGitIndicatorState {
+        available: true,
+        ..SidebarGitIndicatorState::default()
+    };
+    let records = bytes.split(|byte| *byte == 0).collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < records.len() {
+        let record = records[index];
+        index += 1;
+        if record.is_empty() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(record);
+        if let Some(value) = text.strip_prefix("# branch.head ") {
+            state.detached = value == "(detached)";
+            continue;
+        }
+        if let Some(value) = text.strip_prefix("# branch.ab ") {
+            for part in value.split_whitespace() {
+                if let Some(value) = part.strip_prefix('+') {
+                    state.ahead = value.parse().unwrap_or(0);
+                } else if let Some(value) = part.strip_prefix('-') {
+                    state.behind = value.parse().unwrap_or(0);
+                }
+            }
+            continue;
+        }
+        if text.starts_with('#') {
+            continue;
+        }
+        state.dirty = true;
+        if text.starts_with("u ") {
+            state.conflicted = true;
+        } else if text.starts_with("2 ") {
+            // Porcelain v2 -z emits a rename/copy's original path as the next
+            // NUL record. It is path data, not another status record.
+            index = index.saturating_add(1);
+        }
+    }
+    state
 }
 
 fn sidebar_scripts_indicator_state(
@@ -3931,7 +4161,7 @@ fn start_idx_operation(app: AppHandle, request: IdxOperationRequest) -> Result<I
     );
     let (stop_tx, stop_rx) = mpsc::channel();
     let exited = Arc::new((Mutex::new(false), Condvar::new()));
-    {
+    let operation_conflict = {
         let mut operations = state
             .operations
             .lock()
@@ -3939,27 +4169,35 @@ fn start_idx_operation(app: AppHandle, request: IdxOperationRequest) -> Result<I
         if operations.values().any(|operation| {
             operation.workspace == root && operation.status == IdxOperationStatus::Running
         }) {
-            force_kill_idx_process(process_id, &mut child);
-            let _ = child.wait();
-            return Err("another IDX maintenance operation is already running for this project".to_owned());
+            true
+        } else {
+            prune_idx_operation_history(&mut operations, &request.window_label);
+            operations.insert(
+                id.clone(),
+                IdxOperationRecord {
+                    window_label: request.window_label.clone(),
+                    workspace: root.clone(),
+                    kind: request.kind,
+                    command: command_label,
+                    status: IdxOperationStatus::Running,
+                    output: String::new(),
+                    started_at_ms: idx_now_ms(),
+                    finished_at_ms: None,
+                    exit_code: None,
+                    stop_tx: Some(stop_tx),
+                    exited: exited.clone(),
+                },
+            );
+            false
         }
-        prune_idx_operation_history(&mut operations, &request.window_label);
-        operations.insert(
-            id.clone(),
-            IdxOperationRecord {
-                window_label: request.window_label.clone(),
-                workspace: root.clone(),
-                kind: request.kind,
-                command: command_label,
-                status: IdxOperationStatus::Running,
-                output: String::new(),
-                started_at_ms: idx_now_ms(),
-                finished_at_ms: None,
-                exit_code: None,
-                stop_tx: Some(stop_tx),
-                exited: exited.clone(),
-            },
-        );
+    };
+    if operation_conflict {
+        // Never reap a process while holding the operation registry lock: the
+        // running operation's output/supervisor and Activity Bar polling also
+        // need that mutex to make progress.
+        force_kill_idx_process(process_id, &mut child);
+        let _ = child.wait();
+        return Err("another IDX maintenance operation is already running for this project".to_owned());
     }
 
     let stdout_app = app.clone();
@@ -4421,6 +4659,10 @@ fn spawn_package_terminal(
         .spawn_command(command)
         .map_err(|error| format!("failed to start {command_label}: {error}"))?;
     let process_id = child.process_id();
+    #[cfg(unix)]
+    let process_group_leader = pair.master.process_group_leader();
+    #[cfg(not(unix))]
+    let process_group_leader: Option<i32> = None;
     let killer = Arc::new(Mutex::new(child.clone_killer()));
     let mut reader = pair
         .master
@@ -4430,6 +4672,7 @@ fn spawn_package_terminal(
         Arc::new(Mutex::new(pair.master.take_writer().map_err(|error| {
             format!("failed to open package terminal input: {error}")
         })?));
+    let master = Arc::new(Mutex::new(pair.master));
     let exited = Arc::new((Mutex::new(false), Condvar::new()));
     let started_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -4441,7 +4684,7 @@ fn spawn_package_terminal(
         "pkg-terminal-{}",
         state.next_id.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
     );
-    {
+    let terminal_limit_reached = {
         let mut sessions = state
             .sessions
             .lock()
@@ -4452,36 +4695,44 @@ fn spawn_package_terminal(
             .filter(|session| session.window_label == window_label && session.running.is_some())
             .count();
         if running_count >= MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW {
-            let mut child = child;
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "at most {MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW} package terminals may run at once"
-            ));
+            true
+        } else {
+            sessions.insert(
+                id.clone(),
+                PackageTerminalSession {
+                    window_label: window_label.clone(),
+                    workspace: root.clone(),
+                    kind,
+                    script: label,
+                    command: command_label.clone(),
+                    started_at_ms,
+                    status: PackageTerminalStatus::Running,
+                    exit_code: None,
+                    signal: None,
+                    stop_requested: false,
+                    output: Vec::new(),
+                    running: Some(PackageTerminalRunning {
+                        master: master.clone(),
+                        writer: writer.clone(),
+                        killer: killer.clone(),
+                        exited: exited.clone(),
+                        process_id,
+                        process_group_leader,
+                    }),
+                },
+            );
+            false
         }
-        sessions.insert(
-            id.clone(),
-            PackageTerminalSession {
-                window_label: window_label.clone(),
-                workspace: root.clone(),
-                kind,
-                script: label,
-                command: command_label.clone(),
-                started_at_ms,
-                status: PackageTerminalStatus::Running,
-                exit_code: None,
-                signal: None,
-                stop_requested: false,
-                output: Vec::new(),
-                running: Some(PackageTerminalRunning {
-                    master: pair.master,
-                    writer: writer.clone(),
-                    killer: killer.clone(),
-                    exited: exited.clone(),
-                    process_id,
-                }),
-            },
-        );
+    };
+    if terminal_limit_reached {
+        // Reaping a rejected process can block; release the shared terminal
+        // registry first so output/exit bookkeeping and sidebar polling remain live.
+        let mut child = child;
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!(
+            "at most {MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW} package terminals may run at once"
+        ));
     }
 
     let output_app = app.clone();
@@ -4905,20 +5156,25 @@ fn resize_package_terminal(
     rows: u16,
 ) -> Result<(), String> {
     let size = validated_terminal_size(cols, rows)?;
-    let state = app.state::<PackageTerminalState>();
-    let sessions = state
-        .sessions
+    let master = {
+        let state = app.state::<PackageTerminalState>();
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "package terminal state is poisoned".to_owned())?;
+        let session = package_terminal_for_window(&sessions, window_label, terminal_id)?;
+        let running = session
+            .running
+            .as_ref()
+            .ok_or_else(|| "package terminal is not running".to_owned())?;
+        running.master.clone()
+    };
+    let result = master
         .lock()
-        .map_err(|_| "package terminal state is poisoned".to_owned())?;
-    let session = package_terminal_for_window(&sessions, window_label, terminal_id)?;
-    let running = session
-        .running
-        .as_ref()
-        .ok_or_else(|| "package terminal is not running".to_owned())?;
-    running
-        .master
+        .map_err(|_| "package terminal PTY state is poisoned".to_owned())?
         .resize(size)
-        .map_err(|error| format!("failed to resize package terminal: {error}"))
+        .map_err(|error| format!("failed to resize package terminal: {error}"));
+    result
 }
 
 fn package_terminal_for_window<'a>(
@@ -4957,21 +5213,20 @@ fn stop_package_terminal(
             return Ok(());
         };
         session.stop_requested = true;
-        #[cfg(unix)]
-        let process_group_leader = running.master.process_group_leader();
-        #[cfg(not(unix))]
-        let process_group_leader: Option<i32> = None;
         (
             running.writer.clone(),
             running.killer.clone(),
             running.exited.clone(),
             running.process_id,
-            process_group_leader,
+            running.process_group_leader,
         )
     };
 
     if !force {
-        if let Ok(mut writer) = writer.lock() {
+        // Never wait behind a blocked stdin write just to deliver Ctrl+C. If
+        // the writer is busy, skip the polite interrupt and let the normal
+        // grace period advance to process-tree termination.
+        if let Ok(mut writer) = writer.try_lock() {
             let _ = writer.write_all(b"\x03");
             let _ = writer.flush();
         }
@@ -6030,6 +6285,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(AcpProcessState::default())
         .manage(PackageTerminalState::default())
+        .manage(UserConfigState::default())
         .manage(IdxOperationState::default())
         .setup(|app| {
             app.manage(AttachmentPathState::new(app.handle()));
@@ -6635,6 +6891,22 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_git_indicator_parser_skips_rename_path_records() {
+        let renamed = parse_sidebar_git_status(
+            b"# branch.head main\0# branch.ab +2 -1\02 R. renamed\0u looks-like-status.ts\0",
+        );
+        assert!(renamed.available);
+        assert!(renamed.dirty);
+        assert!(!renamed.conflicted);
+        assert_eq!(renamed.ahead, 2);
+        assert_eq!(renamed.behind, 1);
+
+        let conflicted = parse_sidebar_git_status(b"# branch.head main\0u UU conflict.ts\0");
+        assert!(conflicted.dirty);
+        assert!(conflicted.conflicted);
+    }
+
+    #[test]
     fn git_status_diff_stage_and_unstage_are_workspace_scoped() {
         let workspace = temporary_workspace("git-source-control");
         initialize_git_repository(&workspace);
@@ -6853,6 +7125,52 @@ mod tests {
             fs::read_to_string(&pix_path).expect("read saved config"),
             saved.content
         );
+
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn resolves_deepgram_runtime_config_from_user_pix_config_with_env_fallback() {
+        let home = temporary_workspace("deepgram-user-config");
+        let path = user_config_path(&home, UserConfigKind::Pix);
+        fs::create_dir_all(path.parent().expect("config parent")).expect("create config directory");
+        fs::write(
+            &path,
+            r#"{
+              // Secrets belong in the user config, not project config.
+              "dictation": {
+                "apiKey": " dg-config-key ",
+                "model": "nova-3",
+                "language": "ru",
+                "languages": {
+                  "ru": { "deepgramLanguage": "ru" },
+                },
+              },
+            }"#,
+        )
+        .expect("write pix config");
+
+        let config = resolve_deepgram_runtime_config(&home, Some("dg-env-key".to_owned()))
+            .expect("resolve config");
+        assert_eq!(config.api_key, "dg-config-key");
+        assert_eq!(config.model, "nova-3");
+        assert_eq!(config.language, "ru");
+
+        fs::write(&path, "{ \"dictation\": { \"apiKey\": \"\" } }\n")
+            .expect("clear config key");
+        let fallback = resolve_deepgram_runtime_config(&home, Some("dg-env-key".to_owned()))
+            .expect("resolve env fallback");
+        assert_eq!(fallback.api_key, "dg-env-key");
+        assert_eq!(fallback.model, "nova-3");
+        assert_eq!(fallback.language, "en");
+        assert_eq!(
+            resolve_deepgram_api_key(&home, Some("dg-env-key".to_owned()))
+                .expect("resolve env fallback"),
+            "dg-env-key"
+        );
+        assert!(resolve_deepgram_api_key(&home, None)
+            .expect_err("missing key should fail")
+            .contains("dictation.apiKey"));
 
         fs::remove_dir_all(home).expect("remove temporary home");
     }

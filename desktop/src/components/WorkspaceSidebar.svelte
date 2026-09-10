@@ -63,7 +63,6 @@
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
   import {
     sessionSubagentCount,
-    sessionSubagentFailureKeys,
     type SessionSubagentSnapshot,
   } from "../lib/session-subagents";
   import RegistryPanel from "./RegistryPanel.svelte";
@@ -273,18 +272,12 @@
   });
   let projectPanelError = $state<string | null>(null);
   let settingsPanelError = $state<string | null>(null);
-  let acknowledgedSessionFailures = $state<string[]>([]);
-  let sessionFailureScope = "";
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
   const todoCounts = $derived(sessionTodoCounts(todoSnapshot));
   const openTodoCount = $derived(todoCounts.pending + todoCounts.in_progress + todoCounts.deferred);
   const activeSubagentCount = $derived(sessionSubagentCount(subagentSnapshot));
-  const sessionFailureKeys = $derived(sessionSubagentFailureKeys(subagentSnapshot));
-  const sessionHasUnseenFailure = $derived(
-    sessionFailureKeys.some((key) => !acknowledgedSessionFailures.includes(key)),
-  );
   const indicators = $derived<SidebarIndicatorMap>(sidebarIndicators({
     service: indicatorServiceState,
     projectPanelError,
@@ -295,7 +288,6 @@
     sessionNeedsInput,
     openTodoCount,
     activeSubagentCount,
-    sessionHasUnseenFailure,
     settingsPanelError,
   }));
   const activeMinWidth = $derived(sidebarMinWidth(activeTab));
@@ -347,25 +339,12 @@
   $effect(() => {
     const requestWorkspace = workspace;
     projectPanelError = null;
-    queueMicrotask(() => indicatorService?.setWorkspace(requestWorkspace));
-  });
-
-  $effect(() => {
-    const nextScope = `${workspace}\0${activeSessionId ?? ""}`;
-    if (nextScope === sessionFailureScope) return;
-    sessionFailureScope = nextScope;
-    acknowledgedSessionFailures = [];
+    indicatorService?.setWorkspace(requestWorkspace);
   });
 
   $effect(() => {
     const viewedTab = collapsed ? undefined : activeTab;
-    const failures = sessionFailureKeys;
-    queueMicrotask(() => {
-      indicatorService?.setViewedTab(viewedTab);
-      if (viewedTab === "session" && failures.length > 0) {
-        acknowledgedSessionFailures = [...failures];
-      }
-    });
+    indicatorService?.setViewedTab(viewedTab);
   });
 
   $effect(() => {
@@ -383,12 +362,6 @@
     };
     updateViewportWidth();
     window.addEventListener("resize", updateViewportWidth);
-    indicatorService = new SidebarIndicatorService(
-      getCurrentWindow().label,
-      (state) => indicatorServiceState = state,
-    );
-    indicatorService.setViewedTab(collapsed ? undefined : activeTab);
-    indicatorService.start(workspace);
     try {
       collapsed = localStorage.getItem(COLLAPSED_KEY) === "true";
       const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
@@ -401,6 +374,12 @@
     } catch {
       // Keep the defaults when webview storage is unavailable.
     }
+    indicatorService = new SidebarIndicatorService(
+      getCurrentWindow().label,
+      (state) => indicatorServiceState = state,
+    );
+    indicatorService.setViewedTab(collapsed ? undefined : activeTab);
+    indicatorService.start(workspace);
 
     return () => {
       window.removeEventListener("resize", updateViewportWidth);
@@ -1120,7 +1099,7 @@
               {onOpenProjectFile}
               {sessionReady}
               {onRefreshKnowledge}
-              onOverviewChange={(next) => indicatorService?.setIdxOverview(next)}
+              onOverviewChange={(sourceWorkspace, next) => indicatorService?.setIdxOverview(sourceWorkspace, next)}
             />
           {/key}
         </div>

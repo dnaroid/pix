@@ -78,7 +78,6 @@ export interface SidebarIndicatorInputs {
   readonly sessionNeedsInput: boolean;
   readonly openTodoCount: number;
   readonly activeSubagentCount: number;
-  readonly sessionHasUnseenFailure: boolean;
   readonly settingsPanelError?: string | null;
 }
 
@@ -162,9 +161,6 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
   );
 
   indicators.session = strongestIndicator(
-    inputs.sessionHasUnseenFailure
-      ? { tone: "error", reason: "A session subagent failed" }
-      : undefined,
     inputs.sessionNeedsInput
       ? { tone: "warning", reason: "The active session is waiting for your input" }
       : undefined,
@@ -192,6 +188,14 @@ export function strongestIndicator(...candidates: Array<SidebarIndicator | undef
     if (!strongest || TONE_PRIORITY[candidate.tone] > TONE_PRIORITY[strongest.tone]) return candidate;
     return strongest;
   }, undefined);
+}
+
+/** Output chunks only need to invalidate runtime state until the new run is known. */
+export function runtimeOutputNeedsRefresh(
+  knownRunningIds: readonly string[] | undefined,
+  runtimeId: string,
+): boolean {
+  return !knownRunningIds?.includes(runtimeId);
 }
 
 function errorIndicator(reason: string | null | undefined): SidebarIndicator | undefined {
@@ -225,6 +229,9 @@ export class SidebarIndicatorService {
   private idxGeneration = 0;
   private fastRunning = false;
   private fastQueued = false;
+  private idxRunning = false;
+  private idxQueued = false;
+  private started = false;
   private destroyed = false;
   private unlisteners: UnlistenFn[] = [];
 
@@ -235,6 +242,11 @@ export class SidebarIndicatorService {
 
   start(workspace: string): void {
     if (this.destroyed) return;
+    if (this.started) {
+      this.setWorkspace(workspace);
+      return;
+    }
+    this.started = true;
     this.workspace = workspace;
     this.attachListeners();
     window.addEventListener("focus", this.handleForeground);
@@ -262,12 +274,17 @@ export class SidebarIndicatorService {
   setViewedTab(tab: SidebarIndicatorTab | undefined): void {
     const previous = this.viewedTab;
     this.viewedTab = tab;
+    if (tab === "idx" && previous !== "idx") this.idxGeneration += 1;
     this.acknowledgeVisibleFailures();
     this.publishRuntimeState();
     if (previous === "idx" && tab !== "idx") void this.refreshIdx();
   }
 
-  setIdxOverview(overview: IdxOverview | undefined): void {
+  setIdxOverview(workspace: string, overview: IdxOverview | undefined): void {
+    if (this.destroyed || workspace !== this.workspace) return;
+    // A mounted IDX panel is the fresher owner while visible. Invalidate any
+    // slower service request that was already in flight before the panel opened.
+    this.idxGeneration += 1;
     this.state = { ...this.state, idxOverview: overview, idxPollError: undefined };
     this.publish();
   }
@@ -297,17 +314,25 @@ export class SidebarIndicatorService {
   };
 
   private attachListeners(): void {
-    const register = <T>(event: string): void => {
-      void listen<T>(event, () => this.scheduleEventRefresh())
+    const register = <T>(event: string, handler: (payload: T) => void): void => {
+      void listen<T>(event, ({ payload }) => handler(payload))
         .then((unlisten) => this.destroyed ? unlisten() : this.unlisteners.push(unlisten))
         .catch(() => {
           // Polling remains authoritative if event subscription is unavailable.
         });
     };
-    register<PackageTerminalOutputEvent>(PACKAGE_TERMINAL_OUTPUT_EVENT);
-    register<PackageTerminalExitEvent>(PACKAGE_TERMINAL_EXIT_EVENT);
-    register<IdxOperationOutputEvent>(IDX_OPERATION_OUTPUT_EVENT);
-    register<IdxOperationExitEvent>(IDX_OPERATION_EXIT_EVENT);
+    register<PackageTerminalOutputEvent>(PACKAGE_TERMINAL_OUTPUT_EVENT, (payload) => {
+      if (runtimeOutputNeedsRefresh(this.state.poll?.scripts.runningIds, payload.terminalId)) {
+        this.scheduleEventRefresh();
+      }
+    });
+    register<PackageTerminalExitEvent>(PACKAGE_TERMINAL_EXIT_EVENT, () => this.scheduleEventRefresh());
+    register<IdxOperationOutputEvent>(IDX_OPERATION_OUTPUT_EVENT, (payload) => {
+      if (runtimeOutputNeedsRefresh(this.state.poll?.idx.runningIds, payload.operationId)) {
+        this.scheduleEventRefresh();
+      }
+    });
+    register<IdxOperationExitEvent>(IDX_OPERATION_EXIT_EVENT, () => this.scheduleEventRefresh());
   }
 
   private scheduleEventRefresh(): void {
@@ -343,16 +368,19 @@ export class SidebarIndicatorService {
     } catch (caught) {
       if (this.destroyed || workspace !== this.workspace || generation !== this.fastGeneration) return;
       const reason = caught instanceof Error ? caught.message : String(caught);
+      const previousPoll = this.state.poll;
       this.state = {
         ...this.state,
-        poll: {
-          project: { error: reason },
-          git: { available: false, dirty: false, conflicted: false, detached: false, ahead: 0, behind: 0 },
-          scripts: { runningIds: [], failedIds: [] },
-          idx: { runningIds: [], failedIds: [] },
-          settings: { errors: [] },
-          checkedAtMs: Date.now(),
-        },
+        poll: previousPoll
+          ? { ...previousPoll, project: { error: reason }, checkedAtMs: Date.now() }
+          : {
+              project: { error: reason },
+              git: { available: false, dirty: false, conflicted: false, detached: false, ahead: 0, behind: 0 },
+              scripts: { runningIds: [], failedIds: [] },
+              idx: { runningIds: [], failedIds: [] },
+              settings: { errors: [] },
+              checkedAtMs: Date.now(),
+            },
       };
       this.publishRuntimeState();
     } finally {
@@ -377,6 +405,11 @@ export class SidebarIndicatorService {
       this.scheduleIdx();
       return;
     }
+    if (this.idxRunning) {
+      this.idxQueued = true;
+      return;
+    }
+    this.idxRunning = true;
     const workspace = this.workspace;
     const generation = ++this.idxGeneration;
     try {
@@ -392,7 +425,13 @@ export class SidebarIndicatorService {
       };
       this.publish();
     } finally {
-      this.scheduleIdx();
+      this.idxRunning = false;
+      if (this.idxQueued) {
+        this.idxQueued = false;
+        void this.refreshIdx();
+      } else {
+        this.scheduleIdx();
+      }
     }
   }
 

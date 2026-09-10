@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  runtimeOutputNeedsRefresh,
   sidebarIndicators,
   strongestIndicator,
   type SidebarIndicatorInputs,
@@ -28,7 +29,6 @@ function inputs(service: SidebarIndicatorServiceState): SidebarIndicatorInputs {
     sessionNeedsInput: false,
     openTodoCount: 0,
     activeSubagentCount: 0,
-    sessionHasUnseenFailure: false,
   };
 }
 
@@ -151,4 +151,12 @@ describe("sidebar indicators", () => {
       { tone: "error", reason: "failed" },
     )).toEqual({ tone: "error", reason: "failed" });
   });
+
+  it("does not repoll on every output chunk after a runtime is already known", () => {
+    expect(runtimeOutputNeedsRefresh(undefined, "run-1")).toBe(true);
+    expect(runtimeOutputNeedsRefresh([], "run-1")).toBe(true);
+    expect(runtimeOutputNeedsRefresh(["run-1"], "run-1")).toBe(false);
+    expect(runtimeOutputNeedsRefresh(["run-2"], "run-1")).toBe(true);
+  });
+
 });

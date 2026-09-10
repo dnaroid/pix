@@ -89,17 +89,6 @@ export function sessionSubagentCount(snapshot: SessionSubagentSnapshot | undefin
   return visibleSessionSubagentRuns(snapshot).reduce((count, run) => count + run.agents.length, 0);
 }
 
-/** Stable keys for failed agents so Activity Bar errors can be acknowledged per failure. */
-export function sessionSubagentFailureKeys(snapshot: SessionSubagentSnapshot | undefined): string[] {
-  const failures: string[] = [];
-  for (const run of snapshot?.runs ?? []) {
-    for (const agent of run.agents) {
-      if (agent.status === "failed") failures.push(`${run.runDir}\0${agent.id}`);
-    }
-  }
-  return failures.sort();
-}
-
 export function sessionSubagentTaskPreview(
   run: SessionSubagentRun,
   agentId: string,
