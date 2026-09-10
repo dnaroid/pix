@@ -23,7 +23,7 @@
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
-  import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount, tick } from "svelte";
   import {
     extractAttachmentMarkers,
@@ -41,7 +41,6 @@
   } from "../lib/project-tasks";
   import { fuzzySearch } from "../lib/fuzzy";
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
-  import { idxKnowledgeNeedsAttention, type IdxOverview } from "../lib/idx";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
   import {
@@ -50,13 +49,23 @@
     type ProjectDocumentsSnapshot,
   } from "../lib/project-documents";
   import {
-    registryHasAttention,
     type RegistryActionRequest,
     type RegistryProjectArtifact,
     type RegistrySnapshot,
   } from "../lib/registry";
+  import {
+    SidebarIndicatorService,
+    sidebarIndicators,
+    type SidebarIndicatorMap,
+    type SidebarIndicatorServiceState,
+    type SidebarIndicatorTab,
+  } from "../lib/sidebar-indicators";
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
-  import { sessionSubagentCount, type SessionSubagentSnapshot } from "../lib/session-subagents";
+  import {
+    sessionSubagentCount,
+    sessionSubagentFailureKeys,
+    type SessionSubagentSnapshot,
+  } from "../lib/session-subagents";
   import RegistryPanel from "./RegistryPanel.svelte";
   import IdxPanel from "./IdxPanel.svelte";
   import GitPanel from "./GitPanel.svelte";
@@ -64,6 +73,7 @@
   import PromptComposer from "./PromptComposer.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
+  import SidebarIndicatorDot from "./SidebarIndicatorDot.svelte";
   import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
   type TaskDraft = {
@@ -72,7 +82,7 @@
     type: ProjectTaskType;
   };
 
-  type SidebarTab = "tasks" | "project" | "git" | "registry" | "scripts" | "idx" | "session" | "settings";
+  type SidebarTab = SidebarIndicatorTab;
   type TaskDropPosition = "before" | "after";
   type TaskDropTarget = {
     type: ProjectTaskType;
@@ -103,9 +113,11 @@
     loading,
     saving,
     storageError,
+    taskStorageIndicatorError,
     activeTaskId,
     sessionReady,
     activeSessionId,
+    sessionNeedsInput,
     todoSnapshot,
     subagentSnapshot,
     registrySnapshot,
@@ -153,9 +165,11 @@
     loading: boolean;
     saving: boolean;
     storageError: boolean;
+    taskStorageIndicatorError: string | null;
     activeTaskId: string | null;
     sessionReady: boolean;
     activeSessionId: string | null;
+    sessionNeedsInput: boolean;
     todoSnapshot: SessionTodoSnapshot | undefined;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
     registrySnapshot: RegistrySnapshot | undefined;
@@ -252,17 +266,38 @@
   let previousTaskDragUserSelect: string | null = null;
   let previousTaskDragCursor: string | null = null;
   let titleInput = $state<HTMLInputElement | null>(null);
-  let idxOverview = $state<IdxOverview | undefined>();
-  let idxOverviewGeneration = 0;
+  let indicatorService: SidebarIndicatorService | undefined;
+  let indicatorServiceState = $state<SidebarIndicatorServiceState>({
+    unseenScriptFailureIds: [],
+    unseenIdxFailureIds: [],
+  });
+  let projectPanelError = $state<string | null>(null);
+  let settingsPanelError = $state<string | null>(null);
+  let acknowledgedSessionFailures = $state<string[]>([]);
+  let sessionFailureScope = "";
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
   const todoCounts = $derived(sessionTodoCounts(todoSnapshot));
   const openTodoCount = $derived(todoCounts.pending + todoCounts.in_progress + todoCounts.deferred);
   const activeSubagentCount = $derived(sessionSubagentCount(subagentSnapshot));
-  const registryAttention = $derived(registryHasAttention(registrySnapshot));
-  const gitChangeCount = $derived(gitSnapshot?.changes.length ?? 0);
-  const idxAttention = $derived(idxKnowledgeNeedsAttention(idxOverview?.wikiStatus));
+  const sessionFailureKeys = $derived(sessionSubagentFailureKeys(subagentSnapshot));
+  const sessionHasUnseenFailure = $derived(
+    sessionFailureKeys.some((key) => !acknowledgedSessionFailures.includes(key)),
+  );
+  const indicators = $derived<SidebarIndicatorMap>(sidebarIndicators({
+    service: indicatorServiceState,
+    projectPanelError,
+    taskStorageError: storageError,
+    taskStorageSaveError: taskStorageIndicatorError,
+    activeTaskId,
+    registrySnapshot,
+    sessionNeedsInput,
+    openTodoCount,
+    activeSubagentCount,
+    sessionHasUnseenFailure,
+    settingsPanelError,
+  }));
   const activeMinWidth = $derived(sidebarMinWidth(activeTab));
   const activeMaxWidth = $derived(Math.min(
     sidebarMaxWidth(activeTab),
@@ -311,21 +346,36 @@
 
   $effect(() => {
     const requestWorkspace = workspace;
-    const generation = ++idxOverviewGeneration;
-    idxOverview = undefined;
-    queueMicrotask(() => void refreshIdxOverview(requestWorkspace, generation));
+    projectPanelError = null;
+    queueMicrotask(() => indicatorService?.setWorkspace(requestWorkspace));
   });
 
-  async function refreshIdxOverview(requestWorkspace: string, generation = idxOverviewGeneration): Promise<void> {
-    if (!requestWorkspace) return;
-    try {
-      const next = await invoke<IdxOverview>("idx_overview", { workspace: requestWorkspace });
-      if (generation !== idxOverviewGeneration || workspace !== requestWorkspace) return;
-      idxOverview = next;
-    } catch {
-      // Badge freshness is best-effort. Keep the last known state on transient failures.
-    }
-  }
+  $effect(() => {
+    const nextScope = `${workspace}\0${activeSessionId ?? ""}`;
+    if (nextScope === sessionFailureScope) return;
+    sessionFailureScope = nextScope;
+    acknowledgedSessionFailures = [];
+  });
+
+  $effect(() => {
+    const viewedTab = collapsed ? undefined : activeTab;
+    const failures = sessionFailureKeys;
+    queueMicrotask(() => {
+      indicatorService?.setViewedTab(viewedTab);
+      if (viewedTab === "session" && failures.length > 0) {
+        acknowledgedSessionFailures = [...failures];
+      }
+    });
+  });
+
+  $effect(() => {
+    // Full Git refreshes already happen after Pix-owned mutations. Use them as
+    // an invalidation signal so the cheap Activity Bar snapshot does not wait
+    // for its next timer tick.
+    gitSnapshot;
+    gitError;
+    queueMicrotask(() => indicatorService?.invalidateFast());
+  });
 
   onMount(() => {
     const updateViewportWidth = () => {
@@ -333,9 +383,12 @@
     };
     updateViewportWidth();
     window.addEventListener("resize", updateViewportWidth);
-    const idxRefreshTimer = window.setInterval(() => {
-      void refreshIdxOverview(workspace);
-    }, 60_000);
+    indicatorService = new SidebarIndicatorService(
+      getCurrentWindow().label,
+      (state) => indicatorServiceState = state,
+    );
+    indicatorService.setViewedTab(collapsed ? undefined : activeTab);
+    indicatorService.start(workspace);
     try {
       collapsed = localStorage.getItem(COLLAPSED_KEY) === "true";
       const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
@@ -351,7 +404,8 @@
 
     return () => {
       window.removeEventListener("resize", updateViewportWidth);
-      window.clearInterval(idxRefreshTimer);
+      indicatorService?.destroy();
+      indicatorService = undefined;
       setDocumentResizeState(false);
       setDocumentTaskDragState(false);
     };
@@ -675,6 +729,16 @@
       && taskDropTarget.position === position;
   }
 
+  function activityTitle(tab: SidebarTab, label: string): string {
+    const indicator = indicators[tab];
+    return indicator ? `${label} — ${indicator.reason}` : label;
+  }
+
+  function activityLabel(tab: SidebarTab, label: string): string {
+    const indicator = indicators[tab];
+    return indicator ? `${label}, ${indicator.reason}` : label;
+  }
+
 </script>
 
 <aside
@@ -688,90 +752,90 @@
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "project" && !collapsed ? "Hide Project" : "Project"}
-      aria-label="Project files"
+      title={activityTitle("project", activeTab === "project" && !collapsed ? "Hide Project" : "Project")}
+      aria-label={activityLabel("project", "Project files")}
       aria-controls="workspace-project-panel"
       aria-pressed={activeTab === "project" && !collapsed}
       onclick={() => selectTab("project")}
-    ><Folder class="h-5 w-5" aria-hidden="true" /></button>
+    ><Folder class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.project} /></button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "tasks" && !collapsed ? "Hide Tasks" : "Tasks"}
-      aria-label={`Tasks, ${tasks.length} total`}
+      title={activityTitle("tasks", activeTab === "tasks" && !collapsed ? "Hide Tasks" : "Tasks")}
+      aria-label={activityLabel("tasks", "Tasks")}
       aria-controls="workspace-tasks-panel"
       aria-pressed={activeTab === "tasks" && !collapsed}
       onclick={() => selectTab("tasks")}
     >
       <ListTodo class="h-5 w-5" aria-hidden="true" />
-      {#if tasks.length > 0}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true"></span>{/if}
+      <SidebarIndicatorDot indicator={indicators.tasks} />
     </button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "git" && !collapsed ? "Hide Source Control" : "Source Control"}
-      aria-label={`Source Control, ${gitChangeCount} changed ${gitChangeCount === 1 ? "file" : "files"}`}
+      title={activityTitle("git", activeTab === "git" && !collapsed ? "Hide Source Control" : "Source Control")}
+      aria-label={activityLabel("git", "Source Control")}
       aria-controls="workspace-git-panel"
       aria-pressed={activeTab === "git" && !collapsed}
       onclick={() => selectTab("git")}
     >
       <GitBranch class="h-5 w-5" aria-hidden="true" />
-      {#if gitChangeCount > 0}<span class="absolute top-1.5 right-1.5 min-w-3 rounded-full bg-primary px-0.5 text-center font-mono text-[7px] leading-3 text-primary-foreground" aria-hidden="true">{Math.min(gitChangeCount, 99)}</span>{/if}
+      <SidebarIndicatorDot indicator={indicators.git} />
     </button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "registry" && !collapsed ? "Hide Registry" : "Registry"}
-      aria-label={`Resource registry${registryAttention ? ", attention needed" : ""}`}
+      title={activityTitle("registry", activeTab === "registry" && !collapsed ? "Hide Registry" : "Registry")}
+      aria-label={activityLabel("registry", "Resource registry")}
       aria-controls="workspace-registry-panel"
       aria-pressed={activeTab === "registry" && !collapsed}
       onclick={() => selectTab("registry")}
     >
       <Database class="h-5 w-5" aria-hidden="true" />
-      {#if registryAttention}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
+      <SidebarIndicatorDot indicator={indicators.registry} />
     </button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "scripts" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "scripts" && !collapsed ? "Hide Package Scripts" : "Package Scripts"}
-      aria-label="Package scripts and terminals"
+      title={activityTitle("scripts", activeTab === "scripts" && !collapsed ? "Hide Package Scripts" : "Package Scripts")}
+      aria-label={activityLabel("scripts", "Package scripts and terminals")}
       aria-controls="workspace-scripts-panel"
       aria-pressed={activeTab === "scripts" && !collapsed}
       onclick={() => selectTab("scripts")}
-    ><SquareTerminal class="h-5 w-5" aria-hidden="true" /></button>
+    ><SquareTerminal class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.scripts} /></button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "idx" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "idx" && !collapsed ? "Hide IDX" : "IDX"}
-      aria-label={`IDX repository intelligence${idxAttention ? ", knowledge update needed" : ""}`}
+      title={activityTitle("idx", activeTab === "idx" && !collapsed ? "Hide IDX" : "IDX")}
+      aria-label={activityLabel("idx", "IDX repository intelligence")}
       aria-controls="workspace-idx-panel"
       aria-pressed={activeTab === "idx" && !collapsed}
       onclick={() => selectTab("idx")}
     >
       <ScanSearch class="h-5 w-5" aria-hidden="true" />
-      {#if idxAttention}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
+      <SidebarIndicatorDot indicator={indicators.idx} />
     </button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "session" && !collapsed ? "Hide Session" : "Session"}
-      aria-label={`Session activity, ${openTodoCount} open todos, ${activeSubagentCount} active subagents`}
+      title={activityTitle("session", activeTab === "session" && !collapsed ? "Hide Session" : "Session")}
+      aria-label={activityLabel("session", "Session activity")}
       aria-controls="workspace-session-panel"
       aria-pressed={activeTab === "session" && !collapsed}
       onclick={() => selectTab("session")}
     >
       <Activity class="h-5 w-5" aria-hidden="true" />
-      {#if openTodoCount > 0 || activeSubagentCount > 0}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
+      <SidebarIndicatorDot indicator={indicators.session} />
     </button>
     <button
       class={["relative mt-auto grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "settings" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "settings" && !collapsed ? "Hide Settings" : "Settings"}
-      aria-label="Settings"
+      title={activityTitle("settings", activeTab === "settings" && !collapsed ? "Hide Settings" : "Settings")}
+      aria-label={activityLabel("settings", "Settings")}
       aria-controls="workspace-settings-panel"
       aria-pressed={activeTab === "settings" && !collapsed}
       onclick={() => selectTab("settings")}
-    ><Settings class="h-5 w-5" aria-hidden="true" /></button>
+    ><Settings class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.settings} /></button>
   </nav>
 
   {#if !collapsed}
@@ -1005,6 +1069,7 @@
               onListDirectory={onListProjectDirectory}
               onOpenFile={onOpenProjectFile}
               onOpenExternal={(path) => onOpenExternalEditor(path)}
+              onHealthChange={(error) => projectPanelError = error}
             />
           {/if}
         </section>
@@ -1055,7 +1120,7 @@
               {onOpenProjectFile}
               {sessionReady}
               {onRefreshKnowledge}
-              onOverviewChange={(next) => idxOverview = next}
+              onOverviewChange={(next) => indicatorService?.setIdxOverview(next)}
             />
           {/key}
         </div>
@@ -1065,7 +1130,7 @@
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">
-          <SettingsPanel />
+          <SettingsPanel onIndicatorChange={(error) => settingsPanelError = error} />
         </div>
       {/if}
     </div>

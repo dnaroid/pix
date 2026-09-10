@@ -546,6 +546,52 @@ struct PackageTerminalExitEvent {
     signal: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SidebarProjectIndicatorState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SidebarGitIndicatorState {
+    available: bool,
+    dirty: bool,
+    conflicted: bool,
+    detached: bool,
+    ahead: u32,
+    behind: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SidebarRuntimeIndicatorState {
+    running_ids: Vec<String>,
+    failed_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SidebarSettingsIndicatorState {
+    errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSidebarIndicatorPoll {
+    project: SidebarProjectIndicatorState,
+    git: SidebarGitIndicatorState,
+    scripts: SidebarRuntimeIndicatorState,
+    idx: SidebarRuntimeIndicatorState,
+    settings: SidebarSettingsIndicatorState,
+    checked_at_ms: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitBranch {
@@ -1130,6 +1176,27 @@ async fn write_user_config(
         .home_dir()
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
     run_blocking(move || write_user_config_from(&home, kind, &content)).await
+}
+
+#[tauri::command]
+async fn workspace_sidebar_indicator_poll(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+) -> Result<WorkspaceSidebarIndicatorPoll, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    run_blocking(move || {
+        workspace_sidebar_indicator_poll_from(
+            &app,
+            &window_label,
+            Path::new(&workspace),
+            &home,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2677,6 +2744,331 @@ fn write_user_config_from(
     fs::write(&path, normalized)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
     read_user_config_from(home, kind)
+}
+
+fn workspace_sidebar_indicator_poll_from(
+    app: &AppHandle,
+    window_label: &str,
+    workspace: &Path,
+    home: &Path,
+) -> Result<WorkspaceSidebarIndicatorPoll, String> {
+    let settings = sidebar_settings_indicator_state(home);
+    let root = match canonical_workspace(workspace) {
+        Ok(root) => root,
+        Err(error) => {
+            return Ok(WorkspaceSidebarIndicatorPoll {
+                project: SidebarProjectIndicatorState { error: Some(error) },
+                git: SidebarGitIndicatorState::default(),
+                scripts: SidebarRuntimeIndicatorState::default(),
+                idx: SidebarRuntimeIndicatorState::default(),
+                settings,
+                checked_at_ms: idx_now_ms(),
+            });
+        }
+    };
+
+    let project = SidebarProjectIndicatorState {
+        error: fs::read_dir(&root)
+            .err()
+            .map(|error| format!("failed to read project directory: {error}")),
+    };
+
+    Ok(WorkspaceSidebarIndicatorPoll {
+        project,
+        git: sidebar_git_indicator_state(&root),
+        scripts: sidebar_scripts_indicator_state(app, window_label, &root),
+        idx: sidebar_idx_runtime_indicator_state(app, window_label, &root),
+        settings,
+        checked_at_ms: idx_now_ms(),
+    })
+}
+
+fn sidebar_git_indicator_state(root: &Path) -> SidebarGitIndicatorState {
+    // A project nested inside some unrelated parent repository should not make
+    // the Activity Bar look dirty. Source Control is intentionally scoped to a
+    // repository opened at its root, matching the full Git panel contract.
+    if !root.join(".git").exists() {
+        return SidebarGitIndicatorState::default();
+    }
+
+    let repository = match git_repository_root(root) {
+        Ok(repository) => repository,
+        Err(error) => {
+            return SidebarGitIndicatorState {
+                available: true,
+                error: Some(error),
+                ..SidebarGitIndicatorState::default()
+            };
+        }
+    };
+    let output = match git_output(
+        &repository,
+        &[
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+            "--untracked-files=normal",
+        ],
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            return SidebarGitIndicatorState {
+                available: true,
+                error: Some(error),
+                ..SidebarGitIndicatorState::default()
+            };
+        }
+    };
+    match parse_git_status_porcelain(&output.stdout) {
+        Ok(snapshot) => SidebarGitIndicatorState {
+            available: true,
+            dirty: !snapshot.changes.is_empty(),
+            conflicted: snapshot.changes.iter().any(|change| change.conflicted),
+            detached: snapshot.detached,
+            ahead: snapshot.ahead,
+            behind: snapshot.behind,
+            error: None,
+        },
+        Err(error) => SidebarGitIndicatorState {
+            available: true,
+            error: Some(error),
+            ..SidebarGitIndicatorState::default()
+        },
+    }
+}
+
+fn sidebar_scripts_indicator_state(
+    app: &AppHandle,
+    window_label: &str,
+    root: &Path,
+) -> SidebarRuntimeIndicatorState {
+    let package_error = package_scripts_from(root).err();
+    let state = app.state::<PackageTerminalState>();
+    let sessions = match state.sessions.lock() {
+        Ok(sessions) => sessions,
+        Err(_) => {
+            return SidebarRuntimeIndicatorState {
+                error: Some("package terminal state is poisoned".to_owned()),
+                ..SidebarRuntimeIndicatorState::default()
+            };
+        }
+    };
+    let mut running_ids = Vec::new();
+    let mut failed_ids = Vec::new();
+    for (id, session) in sessions.iter().filter(|(_, session)| {
+        session.window_label == window_label && session.workspace == root
+    }) {
+        if session.status == PackageTerminalStatus::Running {
+            running_ids.push(id.clone());
+        } else if session.status == PackageTerminalStatus::Failed
+            || (session.status == PackageTerminalStatus::Exited
+                && session.exit_code.is_some_and(|code| code != 0))
+        {
+            failed_ids.push(id.clone());
+        }
+    }
+    running_ids.sort();
+    failed_ids.sort();
+    SidebarRuntimeIndicatorState {
+        running_ids,
+        failed_ids,
+        error: package_error,
+    }
+}
+
+fn sidebar_idx_runtime_indicator_state(
+    app: &AppHandle,
+    window_label: &str,
+    root: &Path,
+) -> SidebarRuntimeIndicatorState {
+    let state = app.state::<IdxOperationState>();
+    let operations = match state.operations.lock() {
+        Ok(operations) => operations,
+        Err(_) => {
+            return SidebarRuntimeIndicatorState {
+                error: Some("IDX operation state is poisoned".to_owned()),
+                ..SidebarRuntimeIndicatorState::default()
+            };
+        }
+    };
+    let mut running_ids = Vec::new();
+    let mut failed_ids = Vec::new();
+    for (id, operation) in operations.iter().filter(|(_, operation)| {
+        operation.window_label == window_label && operation.workspace == root
+    }) {
+        if operation.status == IdxOperationStatus::Running {
+            running_ids.push(id.clone());
+        } else if matches!(
+            operation.status,
+            IdxOperationStatus::Failed | IdxOperationStatus::TimedOut
+        ) {
+            failed_ids.push(id.clone());
+        }
+    }
+    running_ids.sort();
+    failed_ids.sort();
+    SidebarRuntimeIndicatorState {
+        running_ids,
+        failed_ids,
+        error: None,
+    }
+}
+
+fn sidebar_settings_indicator_state(home: &Path) -> SidebarSettingsIndicatorState {
+    let mut errors = Vec::new();
+    for kind in [UserConfigKind::Pix, UserConfigKind::PiToolsSuite] {
+        let path = user_config_path(home, kind);
+        if !path.exists() {
+            continue;
+        }
+        let label = match kind {
+            UserConfigKind::Pix => "pix.jsonc",
+            UserConfigKind::PiToolsSuite => "pi-tools-suite.jsonc",
+        };
+        let content = match fs::metadata(&path) {
+            Ok(metadata) if !metadata.is_file() => {
+                errors.push(format!("{label} is not a file"));
+                continue;
+            }
+            Ok(metadata) if metadata.len() > MAX_USER_CONFIG_BYTES => {
+                errors.push(format!("{label} is too large to edit"));
+                continue;
+            }
+            Ok(_) => match fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(error) => {
+                    errors.push(format!("failed to read {label}: {error}"));
+                    continue;
+                }
+            },
+            Err(error) => {
+                errors.push(format!("failed to inspect {label}: {error}"));
+                continue;
+            }
+        };
+        let normalized = match normalize_jsonc(&content) {
+            Ok(normalized) => normalized,
+            Err(_) => {
+                errors.push(format!("{label} contains invalid JSONC"));
+                continue;
+            }
+        };
+        match serde_json::from_str::<serde_json::Value>(&normalized) {
+            Ok(value) if value.is_object() => {
+                if let Ok(schema) = serde_json::from_str::<serde_json::Value>(user_config_schema(kind)) {
+                    if let Some(issue) = sidebar_settings_schema_issue(&value, &schema, "$", 24) {
+                        errors.push(format!("{label}: {issue}"));
+                    }
+                }
+            }
+            Ok(_) => errors.push(format!("{label} must contain a JSON object")),
+            Err(error) => errors.push(format!("{label} contains invalid JSONC: {error}")),
+        }
+    }
+    SidebarSettingsIndicatorState { errors }
+}
+
+fn sidebar_settings_schema_issue(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    location: &str,
+    depth: usize,
+) -> Option<String> {
+    if depth == 0 {
+        return None;
+    }
+    let schema_object = schema.as_object()?;
+    if schema_object
+        .get("not")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|not| not.is_empty())
+    {
+        return Some(format!("{location} is a removed setting"));
+    }
+    if let Some(expected) = schema_object.get("const") {
+        if value != expected {
+            return Some(format!("{location} has an unsupported value"));
+        }
+    }
+    if let Some(branches) = schema_object.get("anyOf").and_then(serde_json::Value::as_array) {
+        if !branches.iter().any(|branch| {
+            sidebar_settings_schema_issue(value, branch, location, depth - 1).is_none()
+        }) {
+            return Some(format!("{location} does not match any allowed value or type"));
+        }
+        return None;
+    }
+
+    match schema_object.get("type").and_then(serde_json::Value::as_str) {
+        Some("object") if !value.is_object() => return Some(format!("{location} must be an object")),
+        Some("array") if !value.is_array() => return Some(format!("{location} must be an array")),
+        Some("string") if !value.is_string() => return Some(format!("{location} must be a string")),
+        Some("boolean") if !value.is_boolean() => return Some(format!("{location} must be a boolean")),
+        Some("number") if !value.is_number() => return Some(format!("{location} must be a number")),
+        Some("integer") if value.as_i64().is_none() && value.as_u64().is_none() => {
+            return Some(format!("{location} must be an integer"));
+        }
+        _ => {}
+    }
+
+    if let Some(number) = value.as_f64() {
+        if let Some(minimum) = schema_object.get("minimum").and_then(serde_json::Value::as_f64) {
+            if number < minimum {
+                return Some(format!("{location} must be >= {minimum}"));
+            }
+        }
+        if let Some(maximum) = schema_object.get("maximum").and_then(serde_json::Value::as_f64) {
+            if number > maximum {
+                return Some(format!("{location} must be <= {maximum}"));
+            }
+        }
+    }
+
+    if let Some(object) = value.as_object() {
+        if let Some(required) = schema_object.get("required").and_then(serde_json::Value::as_array) {
+            for key in required.iter().filter_map(serde_json::Value::as_str) {
+                if !object.contains_key(key) {
+                    return Some(format!("{location}.{key} is required"));
+                }
+            }
+        }
+        let properties = schema_object.get("properties").and_then(serde_json::Value::as_object);
+        let wildcard = schema_object
+            .get("patternProperties")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|patterns| patterns.get("^.*$"));
+        for (key, child_value) in object {
+            let child_schema = properties.and_then(|properties| properties.get(key)).or(wildcard);
+            let Some(child_schema) = child_schema else {
+                continue;
+            };
+            let child_location = format!("{location}.{key}");
+            if let Some(issue) = sidebar_settings_schema_issue(
+                child_value,
+                child_schema,
+                &child_location,
+                depth - 1,
+            ) {
+                return Some(issue);
+            }
+        }
+    } else if let Some(array) = value.as_array() {
+        if let Some(items) = schema_object.get("items") {
+            for (index, child) in array.iter().enumerate() {
+                let child_location = format!("{location}[{index}]");
+                if let Some(issue) = sidebar_settings_schema_issue(
+                    child,
+                    items,
+                    &child_location,
+                    depth - 1,
+                ) {
+                    return Some(issue);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn idx_now_ms() -> u64 {
@@ -5624,6 +6016,7 @@ pub fn run() {
             home_file_exists,
             read_user_config,
             write_user_config,
+            workspace_sidebar_indicator_poll,
             idx_overview,
             idx_query,
             idx_inspect,
@@ -6166,6 +6559,27 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_git_indicator_reports_dirty_repository_without_full_git_snapshot_work() {
+        let workspace = temporary_workspace("sidebar-git-indicator");
+        initialize_git_repository(&workspace);
+
+        let clean = sidebar_git_indicator_state(&workspace);
+        assert!(clean.available);
+        assert!(!clean.dirty);
+        assert!(!clean.conflicted);
+        assert!(clean.error.is_none());
+
+        fs::write(workspace.join("tracked.txt"), "changed\n").expect("modify tracked file");
+        let dirty = sidebar_git_indicator_state(&workspace);
+        assert!(dirty.available);
+        assert!(dirty.dirty);
+        assert!(!dirty.conflicted);
+        assert!(dirty.error.is_none());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
     fn git_status_diff_stage_and_unstage_are_workspace_scoped() {
         let workspace = temporary_workspace("git-source-control");
         initialize_git_repository(&workspace);
@@ -6384,6 +6798,30 @@ mod tests {
             fs::read_to_string(&pix_path).expect("read saved config"),
             saved.content
         );
+
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn sidebar_settings_indicator_detects_jsonc_and_schema_errors() {
+        let home = temporary_workspace("sidebar-settings-indicator");
+        let path = user_config_path(&home, UserConfigKind::Pix);
+        fs::create_dir_all(path.parent().expect("config parent")).expect("create config directory");
+
+        fs::write(&path, "{\n  // valid JSONC\n  \"ignoreContextFiles\": true,\n}\n")
+            .expect("write valid config");
+        assert!(sidebar_settings_indicator_state(&home).errors.is_empty());
+
+        fs::write(&path, "{ \"ignoreContextFiles\": \"yes\" }\n")
+            .expect("write schema-invalid config");
+        let schema_invalid = sidebar_settings_indicator_state(&home);
+        assert_eq!(schema_invalid.errors.len(), 1);
+        assert!(schema_invalid.errors[0].contains("ignoreContextFiles"));
+
+        fs::write(&path, "{\n").expect("write malformed config");
+        let malformed = sidebar_settings_indicator_state(&home);
+        assert_eq!(malformed.errors.len(), 1);
+        assert!(malformed.errors[0].contains("invalid JSONC"));
 
         fs::remove_dir_all(home).expect("remove temporary home");
     }

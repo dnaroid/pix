@@ -32,6 +32,12 @@
     type SettingsField,
   } from "../lib/settings";
 
+  let {
+    onIndicatorChange,
+  }: {
+    onIndicatorChange?: (error: string | null) => void;
+  } = $props();
+
   const initialCache = settingsEditorCache();
   let activeKind = $state<SettingsConfigKind>(initialCache.activeKind);
   let drafts = $state<Partial<Record<SettingsConfigKind, SettingsDraftDocument>>>(initialCache.drafts);
@@ -61,6 +67,11 @@
         ].some((part) => part.toLowerCase().includes(needle))),
       }))
       .filter((section) => section.fields.length > 0);
+  });
+
+  $effect(() => {
+    const indicatorError = error ?? issues[0] ?? null;
+    queueMicrotask(() => onIndicatorChange?.(indicatorError));
   });
 
   onMount(() => {

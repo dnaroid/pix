@@ -36,7 +36,7 @@ Expose repository intelligence and Spec Wiki maintenance from Pix Desktop withou
 ## Behavior
 
 - The Workspace activity rail contains an **IDX** view. Its wider content width is clamped so the main workspace keeps a usable minimum width.
-- The activity-rail IDX icon shows the same small warning dot used by other attention-bearing tabs when current/proposed knowledge is not fully fresh, or when review, unverified, newly discovered, or uncovered active-as-is work remains. `unresolved refs` alone do not trigger the warning dot.
+- The activity-rail IDX icon participates in the shared Desktop sidebar-indicator service. It shows info while maintenance is running, warning when current/proposed knowledge is not fully fresh or needs semantic maintenance, and error for unseen failed/timed-out maintenance or IDX health failures. `unresolved refs` alone do not trigger the warning dot. See `desktop-sidebar-indicators.md` for polling and acknowledgement semantics.
 - The overview resolves `idx` from the Desktop process environment and reports it as unavailable when the executable cannot be found. A project is initialized when its canonical workspace contains `.indexer-cli`.
 - Knowledge statistics show the parsed `current/proposed` primary count as **Current**, compare **Fresh** against that set, keep **Review** explicit, label path-like misses as **Unresolved refs** with neutral treatment, and report non-current primary entries separately as archived.
 - Maintenance actions are fixed to: initialize, update index, full reindex, dry run, doctor, knowledge audit, knowledge discovery, and knowledge catalog. Every command runs with the canonical workspace as its working directory.

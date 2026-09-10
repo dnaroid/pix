@@ -248,6 +248,7 @@
   let tasksLoading = $state(false);
   let tasksSaving = $state(false);
   let taskLoadFailed = $state(false);
+  let taskSaveError = $state<string | null>(null);
   let taskActionId = $state<string | null>(null);
   let projectDocuments = $state<ProjectDocumentsSnapshot>(EMPTY_PROJECT_DOCUMENTS);
   let projectDocumentsGeneration = 0;
@@ -1197,6 +1198,7 @@
       slashCommandsBySession = new Map();
       taskActionId = null;
       taskLoadFailed = false;
+      taskSaveError = null;
       restoredSessionTabs = null;
       locallyOpenedSessionTabs = [];
       closedSessionTabs = [];
@@ -1590,6 +1592,7 @@
     const generation = ++taskLoadGeneration;
     tasksLoading = true;
     taskLoadFailed = false;
+    taskSaveError = null;
     try {
       const value = await invoke<unknown>("read_project_tasks", { workspace: projectPath });
       if (generation !== taskLoadGeneration || workspace !== projectPath) return;
@@ -1617,11 +1620,15 @@
     }
     taskDocument = validated;
     tasksSaving = true;
+    taskSaveError = null;
     try {
       await invoke("write_project_tasks", { workspace: requestWorkspace, document: validated });
       return workspace === requestWorkspace;
     } catch (error) {
       if (workspace === requestWorkspace) taskDocument = previous;
+      if (workspace === requestWorkspace) {
+        taskSaveError = error instanceof Error ? error.message : String(error);
+      }
       reportError(error);
       return false;
     } finally {
@@ -3839,9 +3846,11 @@
       loading={tasksLoading}
       saving={tasksSaving}
       storageError={taskLoadFailed}
+      taskStorageIndicatorError={taskSaveError}
       activeTaskId={taskActionId}
       sessionReady={canUseSession}
       {activeSessionId}
+      sessionNeedsInput={pendingElicitation !== null}
       todoSnapshot={activeTodoSnapshot}
       subagentSnapshot={activeSubagentSnapshot}
       registrySnapshot={activeRegistrySnapshot}

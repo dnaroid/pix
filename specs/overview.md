@@ -93,6 +93,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [desktop-text-selection](./desktop-text-selection.md) | Desktop text-selection scopes |
 | [desktop-user-config-editing](./desktop-user-config-editing.md) | Desktop JSONC user-config editing |
 | [desktop-idx-panel](./desktop-idx-panel.md) | Desktop IDX repository intelligence and Spec Wiki maintenance |
+| [desktop-sidebar-indicators](./desktop-sidebar-indicators.md) | Live semantic Activity Bar health and attention indicators |
 
 **DCP family**
 

@@ -23,6 +23,7 @@
     onListDirectory,
     onOpenFile,
     onOpenExternal,
+    onHealthChange,
   }: {
     workspace: string;
     externalEditorLabel: string;
@@ -30,6 +31,7 @@
     onListDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
     onOpenFile: (path: string) => void;
     onOpenExternal: (path: string) => void;
+    onHealthChange?: (error: string | null) => void;
   } = $props();
 
   let entriesByDirectory = $state<Record<string, ProjectTreeEntry[]>>({});
@@ -72,6 +74,7 @@
     errorByDirectory = {};
     selectedPath = null;
     clearProjectEntryDrag();
+    queueMicrotask(() => onHealthChange?.(null));
     // Do not call loadDirectory synchronously from the reactive effect: its
     // reads of loading/error state would become effect dependencies and could
     // retrigger the whole explorer reset while a directory request is in
@@ -93,21 +96,28 @@
     const nextErrors = { ...errorByDirectory };
     delete nextErrors[path];
     errorByDirectory = nextErrors;
+    reportHealth();
     try {
       const entries = await onListDirectory(path);
       if (requestGeneration !== generation) return;
       entriesByDirectory = { ...entriesByDirectory, [path]: entries };
+      reportHealth();
     } catch (error) {
       if (requestGeneration !== generation) return;
       errorByDirectory = {
         ...errorByDirectory,
         [path]: error instanceof Error ? error.message : String(error),
       };
+      reportHealth();
     } finally {
       if (requestGeneration === generation) {
         loadingDirectories = loadingDirectories.filter((candidate) => candidate !== path);
       }
     }
+  }
+
+  function reportHealth(): void {
+    onHealthChange?.(Object.values(errorByDirectory).find((message) => message.trim()) ?? null);
   }
 
   function toggleDirectory(path: string): void {
