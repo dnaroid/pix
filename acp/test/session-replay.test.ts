@@ -167,3 +167,47 @@ test("desktop history preserves thinking blocks and assistant/tool ordering", ()
 		["replay-0:text:0", "replay-0:text:1"],
 	);
 });
+
+test("desktop replay carries persisted activity timing for one thinking block and tool execution", () => {
+	const messages = [
+		{
+			role: "assistant",
+			timestamp: 1_000,
+			persistedAtMs: 2_500,
+			content: [
+				{ type: "thinking", thinking: "plan" },
+				{ type: "toolCall", id: "todo-1", name: "todo", arguments: { action: "create" } },
+				{ type: "toolCall", id: "repo-1", name: "repo_knowledge", arguments: { action: "search" } },
+			],
+		},
+		{
+			role: "toolResult",
+			toolCallId: "todo-1",
+			isError: false,
+			content: [],
+			persistedAtMs: 4_000,
+		},
+		{
+			role: "toolResult",
+			toolCallId: "repo-1",
+			isError: false,
+			content: [],
+			persistedAtMs: 5_000,
+		},
+	] as unknown as PiAgentMessage[];
+
+	const history = deferredSessionHistoryFromMessages(messages, { sessionId: "session-timing", cwd: "/repo" });
+	const thought = history.updates.find((update) => update.sessionUpdate === "agent_thought_chunk");
+	const toolStarts = history.updates.filter((update) => update.sessionUpdate === "tool_call");
+	const toolEnds = history.updates.filter((update) => update.sessionUpdate === "tool_call_update");
+
+	assert.deepEqual(thought?._meta?.["pix.activityTiming"], { startedAtMs: 1_000, endedAtMs: 2_500 });
+	assert.deepEqual(toolStarts.map((update) => update._meta?.["pix.activityTiming"]), [
+		{ startedAtMs: 2_500 },
+		{ startedAtMs: 2_500 },
+	]);
+	assert.deepEqual(toolEnds.map((update) => update._meta?.["pix.activityTiming"]), [
+		{ endedAtMs: 4_000 },
+		{ endedAtMs: 5_000 },
+	]);
+});

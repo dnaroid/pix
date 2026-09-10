@@ -36,6 +36,9 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 ## Behavior
 
 - User, assistant, thought, and system text use the same Markdown renderer.
+- Complete DCP message-id control blocks are removed from rendered transcript
+  Markdown. Incomplete control markup remains visible while streaming so the
+  renderer fails open instead of hiding ordinary partial text.
 - Markdown `read` tool results use the same renderer in a dense tool-result
   presentation; other tool results keep their dedicated plain/code/diff views.
 - Raw HTML is always escaped; Markdown never injects executable markup.
@@ -45,12 +48,12 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
   fails, the escaped source remains readable.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
 - External Markdown links are marked with an external-link icon in both transcripts and preview popups.
-- Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Activating one reads the target only when its canonical path remains inside the active workspace, then opens its source in the preview dialog with syntax highlighting and line numbers.
+- Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then opens its source in the preview dialog with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
 - Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing preview dialog.
 - Trailing prose punctuation is not included in a bare URL; balanced URL parentheses remain part of it.
 - Activating a link delegates it to Tauri's opener plugin so the operating system opens it in the default browser or mail application.
 - Unsupported destinations render as plain labels and are never passed to the system opener.
-- In a Markdown file preview popup, relative project links and local `file://` links use the same trusted preview/open handlers as transcript links. Opening another preview replaces the current popup content.
+- In a Markdown file preview popup, project links and local `file://` links use the same trusted preview/open handlers as transcript links. For a project path, the preview first tries the workspace-root interpretation commonly emitted by agents, then falls back to the Markdown document-relative interpretation. Opening another preview replaces the current popup content.
 - In a Markdown file preview popup, supported project and local images resolve through the existing confined Tauri media commands instead of remaining in a loading state.
 - Supported project and absolute `file://` image/video links in transcript
   Markdown render bounded inline media previews with their label as a caption.
@@ -80,6 +83,7 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 - `desktop/src/lib/markdown.test.ts`
 - `desktop/src/lib/preview-history.ts`
 - `desktop/src/lib/preview-history.test.ts`
+- `desktop/src/lib/project-files.ts`
 - `desktop/src/lib/external-links.ts`
 - `desktop/src/lib/external-links.test.ts`
 - `desktop/src/components/MarkdownText.svelte`
@@ -95,8 +99,9 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 ## Verification
 
 - Unit tests cover supported blocks, inline formatting, bare URLs, relative
-  project-file links, remote-image opt-in/default behavior, linked images,
-  unsafe input, Mermaid fallback/security, and incomplete fences.
+  project-file links and inline-code line-range extraction, remote-image opt-in/default behavior, linked images,
+  unsafe input, DCP control-block stripping/fail-open streaming behavior,
+  Mermaid fallback/security, and incomplete fences.
 - Rust tests cover workspace/home confinement and preview size/UTF-8 validation.
 - Rust tests also cover project/absolute media confinement, traversal, unsupported
   local binary files, and allowed media resolution.

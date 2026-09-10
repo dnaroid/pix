@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toolPresentation, toolTone } from "./tool-presentation";
+import { toolGroupPresentationNames, toolPresentation, toolTone } from "./tool-presentation";
 
 describe("toolPresentation", () => {
   it("formats read paths and ranges like the TUI", () => {
@@ -39,6 +39,14 @@ describe("toolPresentation", () => {
       args: "src/legacy.ts",
       tone: "success",
     });
+  });
+
+  it("deduplicates grouped tool names while preserving first-seen order", () => {
+    expect(toolGroupPresentationNames([
+      { name: "Todo", kind: "other", title: "Todo" },
+      { name: "todo", kind: "other", title: "Todo again" },
+      { name: "repo_knowledge", kind: "other", title: "Repo knowledge" },
+    ])).toBe("todo, repo_knowledge");
   });
 });
 

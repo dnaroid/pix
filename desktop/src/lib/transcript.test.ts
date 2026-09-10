@@ -5,6 +5,8 @@ import {
   applySessionUpdate,
   applySessionUpdates,
   emptyTranscript,
+  finalizeTranscriptActivity,
+  formatTranscriptDuration,
   groupTranscriptItems,
   hydrateTranscriptAttachment,
   markDeferredToolResults,
@@ -280,6 +282,91 @@ describe("transcript reducer", () => {
       rawOutput: { changed: true },
       content: "updated",
     });
+  });
+
+  it("records thought and tool wall-clock timings from live update timestamps", () => {
+    const state = applySessionUpdates(emptyTranscript, [
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Considering" } },
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: " options" } },
+      { sessionUpdate: "tool_call", toolCallId: "read-1", name: "Read", title: "Read", status: "in_progress" },
+      { sessionUpdate: "tool_call", toolCallId: "grep-1", name: "Grep", title: "Grep", status: "in_progress" },
+      { sessionUpdate: "tool_call_update", toolCallId: "read-1", status: "completed" },
+      { sessionUpdate: "tool_call_update", toolCallId: "grep-1", status: "completed" },
+    ], [1_000, 1_300, 2_500, 2_700, 3_600, 4_100]);
+
+    expect(state.items[0]).toMatchObject({
+      type: "message",
+      role: "thought",
+      startedAtMs: 1_000,
+      endedAtMs: 2_500,
+    });
+    expect(state.items[1]).toMatchObject({ startedAtMs: 2_500, endedAtMs: 3_600 });
+    expect(state.items[2]).toMatchObject({ startedAtMs: 2_700, endedAtMs: 4_100 });
+
+    const group = groupTranscriptItems(state.items).find((item) => item.type === "tool-group");
+    expect(group).toMatchObject({ durationMs: 1_600, active: false });
+  });
+
+  it("restores persisted thought and tool timings from replay metadata", () => {
+    const state = applySessionUpdates(emptyTranscript, [
+      {
+        sessionUpdate: "agent_thought_chunk",
+        messageId: "replay-thought",
+        content: { type: "text", text: "Considering" },
+        _meta: { "pix.activityTiming": { startedAtMs: 1_000, endedAtMs: 2_500 } },
+      },
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "todo-1",
+        name: "todo",
+        title: "Todo",
+        status: "in_progress",
+        _meta: { "pix.activityTiming": { startedAtMs: 2_500 } },
+      },
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "repo-1",
+        name: "repo_knowledge",
+        title: "Repo knowledge",
+        status: "in_progress",
+        _meta: { "pix.activityTiming": { startedAtMs: 2_500 } },
+      },
+      {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "todo-1",
+        status: "completed",
+        _meta: { "pix.activityTiming": { endedAtMs: 4_000 } },
+      },
+      {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "repo-1",
+        status: "completed",
+        _meta: { "pix.activityTiming": { endedAtMs: 5_000 } },
+      },
+    ]);
+
+    expect(state.items[0]).toMatchObject({ startedAtMs: 1_000, endedAtMs: 2_500 });
+    const group = groupTranscriptItems(state.items).find((item) => item.type === "tool-group");
+    expect(group).toMatchObject({ durationMs: 2_500, active: false });
+  });
+
+  it("finalizes a trailing thought when a prompt ends without another visible update", () => {
+    const state = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "Final thought" },
+    }, 10_000);
+
+    expect(finalizeTranscriptActivity(state, 12_400).items[0]).toMatchObject({
+      startedAtMs: 10_000,
+      endedAtMs: 12_400,
+    });
+  });
+
+  it("formats compact transcript durations", () => {
+    expect(formatTranscriptDuration(42)).toBe("<0.1s");
+    expect(formatTranscriptDuration(3_840)).toBe("3.8s");
+    expect(formatTranscriptDuration(12_600)).toBe("13s");
+    expect(formatTranscriptDuration(65_000)).toBe("1m 5s");
   });
 });
 

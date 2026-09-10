@@ -115,10 +115,18 @@ export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>>;
  * extension-declared custom messages; anything we do not understand is
  * ignored by the replay translator.
  */
-export type PiAgentMessage =
+type PiAgentMessageTiming = {
+	/** Provider/message creation timestamp persisted by pi, when present. */
+	readonly timestamp?: number | undefined;
+	/** Internal replay annotation: when the enclosing session entry was persisted. */
+	readonly persistedAtMs?: number | undefined;
+};
+
+export type PiAgentMessage = (
 	| { readonly role: "user"; readonly content: string | readonly PiMessagePart[] }
 	| { readonly role: "assistant"; readonly content: readonly PiMessagePart[] }
-	| { readonly role: string; readonly content?: unknown };
+	| { readonly role: string; readonly content?: unknown }
+) & PiAgentMessageTiming;
 
 /** One content part of a pi message used for session-history replay. */
 export interface PiMessagePart {

@@ -3,9 +3,11 @@
   import Brain from "@lucide/svelte/icons/brain";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import type { Attachment } from "../lib/attachments";
-  import { toolPresentation } from "../lib/tool-presentation";
+  import type { ProjectFileLineRange } from "../lib/project-files";
+  import { toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
   import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
   import {
+    formatTranscriptDuration,
     groupTranscriptItems,
     type ToolItem,
     type TranscriptDisplayItem,
@@ -55,7 +57,7 @@
     onPrepareAttachment: (attachment: Attachment) => Promise<void>;
     onValidateProjectFile: (path: string) => Promise<boolean>;
     onValidateLocalFile: (path: string) => Promise<boolean>;
-    onOpenProjectFile: (path: string) => void | Promise<void>;
+    onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onResolveProjectMedia: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile: (path: string) => void | Promise<void>;
     onResolveLocalMedia: (path: string) => Promise<Attachment | undefined>;
@@ -88,6 +90,15 @@
   ): string {
     if (isServiceItem(item) && isServiceItem(next)) return "mb-1";
     return isServiceItem(item) || isServiceItem(next) ? "mb-2" : "mb-6";
+  }
+
+  function durationLabel(startedAtMs: number | undefined, endedAtMs: number | undefined): string | undefined {
+    if (startedAtMs === undefined || endedAtMs === undefined) return undefined;
+    return formatTranscriptDuration(Math.max(0, endedAtMs - startedAtMs));
+  }
+
+  function toolGroupNames(tools: readonly ToolItem[]): string {
+    return toolGroupPresentationNames(tools);
   }
 </script>
 
@@ -127,11 +138,15 @@
         {@const gapClass = transcriptGapClass(item, displayItems[index + 1])}
         {#if item.type === "message"}
           {#if item.role === "thought"}
+            {@const thoughtDuration = durationLabel(item.startedAtMs, item.endedAtMs)}
             <details class={["transcript-entry group w-full min-w-0 text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
               <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 leading-tight text-muted-foreground/80 transition-colors select-none hover:text-foreground group-open:mb-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                 <Brain class="h-3 w-3 shrink-0 text-primary/65" aria-hidden="true" />
-                <span>thinking</span>
+                <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden">
+                  <span class="truncate">thinking</span>
+                  {#if thoughtDuration}<span class="shrink-0 text-muted-foreground/45">{thoughtDuration}</span>{/if}
+                </span>
               </summary>
               <div class="ml-[7px] border-l border-code-border pl-2.5 text-muted-foreground">
                 <MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
@@ -157,6 +172,8 @@
           {/if}
         {:else}
           {@const groupAttention = toolGroupAttention(item.tools)}
+          {@const groupNames = toolGroupNames(item.tools)}
+          {@const groupDuration = item.durationMs === undefined ? undefined : formatTranscriptDuration(item.durationMs)}
           <details class={[
             "transcript-entry group w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80",
             gapClass,
@@ -165,9 +182,10 @@
             <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
               <ToolStatusIcon status={item.status} attention={groupAttention} class="h-3 w-3 opacity-75" />
-              <strong class="min-w-0 truncate text-xs font-normal text-muted-foreground/85">
-                {item.tools.length} tool {item.tools.length === 1 ? "call" : "calls"}
-              </strong>
+              <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
+                <strong class="min-w-0 truncate font-normal text-muted-foreground/85">{groupNames}</strong>
+                {#if groupDuration}<span class="shrink-0 text-muted-foreground/45">{groupDuration}</span>{/if}
+              </span>
             </summary>
             <div class="mt-1 ml-[7px] space-y-0.5 border-l border-code-border pl-2.5">
               {#each item.tools as tool (tool.id)}

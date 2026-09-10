@@ -29,6 +29,7 @@ export interface PersistedHistoryTail {
 interface ParsedTailEntry {
 	readonly offset: number;
 	readonly byteLength: number;
+	readonly persistedAtMs?: number;
 	readonly message?: PiAgentMessage;
 	readonly imageRefs?: ReadonlyMap<string, PersistedImageRef>;
 	readonly toolResult?: {
@@ -72,6 +73,7 @@ export async function readPersistedHistoryTail(
 				toolCallId: entry.toolResult.toolCallId,
 				isError: entry.toolResult.isError,
 				content: [],
+				...(entry.persistedAtMs !== undefined ? { persistedAtMs: entry.persistedAtMs } : {}),
 			} as unknown as PiAgentMessage);
 			toolResultRefs.set(entry.toolResult.toolCallId, {
 				sessionPath,
@@ -79,7 +81,9 @@ export async function readPersistedHistoryTail(
 				byteLength: entry.byteLength,
 			});
 		} else if (entry.message) {
-			messages.push(entry.message);
+			messages.push(entry.persistedAtMs === undefined
+				? entry.message
+				: { ...entry.message, persistedAtMs: entry.persistedAtMs });
 			for (const [imageId, imageRef] of entry.imageRefs ?? []) {
 				imageRefs.set(imageId, { ...imageRef, sessionPath });
 			}
@@ -183,6 +187,7 @@ function parseEntryLine(lineBuffer: Buffer, offset: number, byteLength: number):
 		return {
 			offset,
 			byteLength,
+			...persistedAtFromJsonLine(line),
 			toolResult: { toolCallId, isError: /"isError"\s*:\s*true/u.test(line) },
 		};
 	}
@@ -190,7 +195,12 @@ function parseEntryLine(lineBuffer: Buffer, offset: number, byteLength: number):
 	try {
 		const parsed = JSON.parse(line) as unknown;
 		if (!isRecord(parsed) || parsed.type !== "message" || !isRecord(parsed.message)) return undefined;
-		return { offset, byteLength, message: parsed.message as unknown as PiAgentMessage };
+		return {
+			offset,
+			byteLength,
+			...persistedAtFromValue(parsed.timestamp),
+			message: parsed.message as unknown as PiAgentMessage,
+		};
 	} catch {
 		return undefined;
 	}
@@ -236,7 +246,13 @@ function compactUserMessageWithoutImageBodies(
 	try {
 		const parsed = JSON.parse(compact.join("")) as unknown;
 		if (!isRecord(parsed) || parsed.type !== "message" || !isRecord(parsed.message)) return undefined;
-		return { offset, byteLength, message: parsed.message as unknown as PiAgentMessage, imageRefs };
+		return {
+			offset,
+			byteLength,
+			...persistedAtFromValue(parsed.timestamp),
+			message: parsed.message as unknown as PiAgentMessage,
+			imageRefs,
+		};
 	} catch {
 		return undefined;
 	}
@@ -290,6 +306,16 @@ function jsonStringField(line: string, key: string): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+function persistedAtFromJsonLine(line: string): { persistedAtMs?: number } {
+	return persistedAtFromValue(jsonStringField(line, "timestamp"));
+}
+
+function persistedAtFromValue(value: unknown): { persistedAtMs?: number } {
+	if (typeof value !== "string") return {};
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) ? { persistedAtMs: parsed } : {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

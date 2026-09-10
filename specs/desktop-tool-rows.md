@@ -39,6 +39,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.
 - Mutation, search, warning, success, info, accent, muted, and default tool-name roles use the TUI default palette.
 - Legacy ACP updates without a programmatic name or raw input fall back to splitting the existing title.
+- Collapsed multi-call group headers list normalized presentation names once in first-call order (for example `todo, repo_knowledge` even when `todo` ran more than once); expanding the group still shows every individual call.
 - A completed edit result patch is preferred because it carries full context. Otherwise explicit ACP diff content is used; when both are absent (notably session replay), edit and write diffs are reconstructed from recorded raw input.
 - Apply-patch input is rendered as one diff surface for both `*** Begin Patch` and unified-diff forms.
 - Failed mutations do not present their requested patch as an applied diff.

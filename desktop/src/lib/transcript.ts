@@ -11,6 +11,12 @@ import {
 import type { ToolDiff } from "./diff";
 
 export type MessageRole = "user" | "assistant" | "thought" | "system";
+const PIX_ACTIVITY_TIMING_META_KEY = "pix.activityTiming";
+
+interface ActivityTimingMeta {
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
+}
 
 export interface MessageItem {
   readonly type: "message";
@@ -19,6 +25,8 @@ export interface MessageItem {
   readonly role: MessageRole;
   readonly text: string;
   readonly attachments: readonly Attachment[];
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
 }
 
 export interface ToolItem {
@@ -38,6 +46,8 @@ export interface ToolItem {
   readonly deferredResult?: boolean;
   readonly resultLoading?: boolean;
   readonly resultError?: string;
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
 }
 
 export type TranscriptItem = MessageItem | ToolItem;
@@ -48,6 +58,7 @@ export interface ToolGroupItem {
   readonly tools: readonly [ToolItem, ...ToolItem[]];
   readonly status: ToolCallStatus;
   readonly active: boolean;
+  readonly durationMs?: number;
 }
 
 export type TranscriptDisplayItem = MessageItem | ToolGroupItem;
@@ -128,14 +139,30 @@ export function appendLocalSystemMessage(state: TranscriptState, text: string, i
   };
 }
 
-export function applySessionUpdate(state: TranscriptState, update: SessionUpdate): TranscriptState {
+export function applySessionUpdate(
+  state: TranscriptState,
+  update: SessionUpdate,
+  occurredAtMs?: number,
+): TranscriptState {
+  const timing = activityTimingFromUpdate(update);
+  const boundaryAtMs = occurredAtMs ?? timing?.startedAtMs;
+  if (boundaryAtMs !== undefined && closesOpenThought(update)) {
+    state = closeOpenThought(state, boundaryAtMs);
+  }
   switch (update.sessionUpdate) {
     case "user_message_chunk":
       return appendContentChunk(state, "user", update.messageId ?? undefined, update.content);
     case "agent_message_chunk":
       return appendContentChunk(state, agentMessageRole(update.messageId ?? undefined), update.messageId ?? undefined, update.content);
     case "agent_thought_chunk":
-      return appendContentChunk(state, "thought", update.messageId ?? undefined, update.content);
+      return appendContentChunk(
+        state,
+        "thought",
+        update.messageId ?? undefined,
+        update.content,
+        timing?.startedAtMs ?? occurredAtMs,
+        timing?.endedAtMs,
+      );
     case "tool_call": {
       const initialContent = toolContent(update.content, `tool:${update.toolCallId}`);
       return upsertTool(state, update.toolCallId, {
@@ -149,6 +176,9 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
         diffs: initialContent.diffs,
         attachments: initialContent.attachments,
         path: update.locations?.[0]?.path,
+        ...((timing?.startedAtMs ?? occurredAtMs) !== undefined
+          ? { startedAtMs: timing?.startedAtMs ?? occurredAtMs }
+          : {}),
       });
     }
     case "tool_call_update": {
@@ -168,6 +198,9 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
           attachments: nextContent.attachments,
         } : {}),
         ...(update.locations != null ? { path: update.locations[0]?.path } : {}),
+        ...((timing?.endedAtMs ?? (isTerminalToolStatus(update.status) ? occurredAtMs : undefined)) !== undefined
+          ? { endedAtMs: timing?.endedAtMs ?? occurredAtMs }
+          : {}),
       });
     }
     default:
@@ -175,9 +208,13 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
   }
 }
 
-export function applySessionUpdates(state: TranscriptState, updates: readonly SessionUpdate[]): TranscriptState {
+export function applySessionUpdates(
+  state: TranscriptState,
+  updates: readonly SessionUpdate[],
+  occurredAtMs?: readonly (number | undefined)[],
+): TranscriptState {
   if (updates.length === 0) return state;
-  if (state.items.length === 0) return transcriptFromSessionUpdates(updates);
+  if (state.items.length === 0 && occurredAtMs === undefined) return transcriptFromSessionUpdates(updates);
 
   const items: TranscriptItem[] = [...state.items];
   const messageIndexes = new Map<string, number>();
@@ -190,7 +227,13 @@ export function applySessionUpdates(state: TranscriptState, updates: readonly Se
     }
   }
 
-  for (const update of updates) {
+  for (const [updateIndex, update] of updates.entries()) {
+    const timing = activityTimingFromUpdate(update);
+    const timestamp = occurredAtMs?.[updateIndex];
+    const boundaryAtMs = timestamp ?? timing?.startedAtMs;
+    if (boundaryAtMs !== undefined && closesOpenThought(update)) {
+      closeOpenThoughtItems(items, boundaryAtMs);
+    }
     switch (update.sessionUpdate) {
       case "user_message_chunk":
         appendHistoryContentChunk(items, messageIndexes, "user", update.messageId ?? undefined, update.content);
@@ -205,7 +248,15 @@ export function applySessionUpdates(state: TranscriptState, updates: readonly Se
         );
         break;
       case "agent_thought_chunk":
-        appendHistoryContentChunk(items, messageIndexes, "thought", update.messageId ?? undefined, update.content);
+        appendHistoryContentChunk(
+          items,
+          messageIndexes,
+          "thought",
+          update.messageId ?? undefined,
+          update.content,
+          timing?.startedAtMs ?? timestamp,
+          timing?.endedAtMs,
+        );
         break;
       case "tool_call": {
         const initialContent = toolContent(update.content, `tool:${update.toolCallId}`);
@@ -220,6 +271,9 @@ export function applySessionUpdates(state: TranscriptState, updates: readonly Se
           diffs: initialContent.diffs,
           attachments: initialContent.attachments,
           path: update.locations?.[0]?.path,
+          ...((timing?.startedAtMs ?? timestamp) !== undefined
+            ? { startedAtMs: timing?.startedAtMs ?? timestamp }
+            : {}),
         });
         break;
       }
@@ -234,6 +288,9 @@ export function applySessionUpdates(state: TranscriptState, updates: readonly Se
           ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
           ...(nextContent ? { content: nextContent.text, diffs: nextContent.diffs, attachments: nextContent.attachments } : {}),
           ...(update.locations != null ? { path: update.locations[0]?.path } : {}),
+          ...((timing?.endedAtMs ?? (isTerminalToolStatus(update.status) ? timestamp : undefined)) !== undefined
+            ? { endedAtMs: timing?.endedAtMs ?? timestamp }
+            : {}),
         });
         break;
       }
@@ -251,6 +308,11 @@ export function transcriptFromSessionUpdates(updates: readonly SessionUpdate[]):
   const toolIndexes = new Map<string, number>();
 
   for (const update of updates) {
+    const timing = activityTimingFromUpdate(update);
+    const boundaryAtMs = timing?.startedAtMs;
+    if (boundaryAtMs !== undefined && closesOpenThought(update)) {
+      closeOpenThoughtItems(items, boundaryAtMs);
+    }
     switch (update.sessionUpdate) {
       case "user_message_chunk":
         appendHistoryContentChunk(items, messageIndexes, "user", update.messageId ?? undefined, update.content);
@@ -265,7 +327,15 @@ export function transcriptFromSessionUpdates(updates: readonly SessionUpdate[]):
         );
         break;
       case "agent_thought_chunk":
-        appendHistoryContentChunk(items, messageIndexes, "thought", update.messageId ?? undefined, update.content);
+        appendHistoryContentChunk(
+          items,
+          messageIndexes,
+          "thought",
+          update.messageId ?? undefined,
+          update.content,
+          timing?.startedAtMs,
+          timing?.endedAtMs,
+        );
         break;
       case "tool_call": {
         const initialContent = toolContent(update.content, `tool:${update.toolCallId}`);
@@ -280,6 +350,7 @@ export function transcriptFromSessionUpdates(updates: readonly SessionUpdate[]):
           diffs: initialContent.diffs,
           attachments: initialContent.attachments,
           path: update.locations?.[0]?.path,
+          ...(timing?.startedAtMs !== undefined ? { startedAtMs: timing.startedAtMs } : {}),
         });
         break;
       }
@@ -294,6 +365,9 @@ export function transcriptFromSessionUpdates(updates: readonly SessionUpdate[]):
           ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
           ...(nextContent ? { content: nextContent.text, diffs: nextContent.diffs, attachments: nextContent.attachments } : {}),
           ...(update.locations != null ? { path: update.locations[0]?.path } : {}),
+          ...(timing?.endedAtMs !== undefined && isTerminalToolStatus(update.status)
+            ? { endedAtMs: timing.endedAtMs }
+            : {}),
         });
         break;
       }
@@ -348,6 +422,8 @@ function appendContentChunk(
   role: MessageRole,
   messageId: string | undefined,
   content: ContentBlock,
+  startedAtMs?: number,
+  endedAtMs?: number,
 ): TranscriptState {
   const items = [...state.items];
   const existingIndex = messageId
@@ -367,8 +443,10 @@ function appendContentChunk(
       ...existing,
       text: existing.text + chunk.text,
       attachments: [...existing.attachments, ...chunk.attachments],
+      ...(role === "thought" && endedAtMs !== undefined ? { endedAtMs } : {}),
     };
   } else {
+    if (role === "thought" && startedAtMs !== undefined) closeOpenThoughtItems(items, startedAtMs);
     items.push({
       type: "message",
       id,
@@ -376,6 +454,8 @@ function appendContentChunk(
       role,
       text: chunk.text,
       attachments: chunk.attachments,
+      ...(role === "thought" && startedAtMs !== undefined ? { startedAtMs } : {}),
+      ...(role === "thought" && endedAtMs !== undefined ? { endedAtMs } : {}),
     });
   }
   return { items };
@@ -391,6 +471,8 @@ function appendHistoryContentChunk(
   role: MessageRole,
   messageId: string | undefined,
   content: ContentBlock,
+  startedAtMs?: number,
+  endedAtMs?: number,
 ): void {
   const key = messageId ? `${role}\0${messageId}` : undefined;
   const mappedIndex = key ? messageIndexes.get(key) : undefined;
@@ -409,11 +491,13 @@ function appendHistoryContentChunk(
       ...existing,
       text: existing.text + chunk.text,
       attachments: [...existing.attachments, ...chunk.attachments],
+      ...(role === "thought" && endedAtMs !== undefined ? { endedAtMs } : {}),
     };
     return;
   }
 
   const index = items.length;
+  if (role === "thought" && startedAtMs !== undefined) closeOpenThoughtItems(items, startedAtMs);
   items.push({
     type: "message",
     id,
@@ -421,6 +505,8 @@ function appendHistoryContentChunk(
     role,
     text: chunk.text,
     attachments: chunk.attachments,
+    ...(role === "thought" && startedAtMs !== undefined ? { startedAtMs } : {}),
+    ...(role === "thought" && endedAtMs !== undefined ? { endedAtMs } : {}),
   });
   if (key) messageIndexes.set(key, index);
 }
@@ -428,13 +514,19 @@ function appendHistoryContentChunk(
 function upsertTool(
   state: TranscriptState,
   toolCallId: string,
-  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path" | "deferredResult" | "resultLoading" | "resultError">>,
+  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path" | "deferredResult" | "resultLoading" | "resultError" | "startedAtMs" | "endedAtMs">>,
 ): TranscriptState {
   const items = [...state.items];
   const index = items.findIndex((item) => item.type === "tool" && item.toolCallId === toolCallId);
   if (index >= 0) {
     const existing = items[index] as ToolItem;
-    items[index] = { ...existing, ...patch };
+    items[index] = {
+      ...existing,
+      ...patch,
+      ...(existing.startedAtMs !== undefined && patch.startedAtMs !== undefined
+        ? { startedAtMs: existing.startedAtMs }
+        : {}),
+    };
   } else {
     items.push({
       type: "tool",
@@ -450,6 +542,8 @@ function upsertTool(
       diffs: patch.diffs ?? [],
       attachments: patch.attachments ?? [],
       ...(patch.path ? { path: patch.path } : {}),
+      ...(patch.startedAtMs !== undefined ? { startedAtMs: patch.startedAtMs } : {}),
+      ...(patch.endedAtMs !== undefined ? { endedAtMs: patch.endedAtMs } : {}),
     });
   }
   return { items };
@@ -459,11 +553,18 @@ function upsertHistoryTool(
   items: TranscriptItem[],
   toolIndexes: Map<string, number>,
   toolCallId: string,
-  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path">>,
+  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path" | "startedAtMs" | "endedAtMs">>,
 ): void {
   const index = toolIndexes.get(toolCallId);
   if (index !== undefined) {
-    items[index] = { ...(items[index] as ToolItem), ...patch };
+    const existing = items[index] as ToolItem;
+    items[index] = {
+      ...existing,
+      ...patch,
+      ...(existing.startedAtMs !== undefined && patch.startedAtMs !== undefined
+        ? { startedAtMs: existing.startedAtMs }
+        : {}),
+    };
     return;
   }
   toolIndexes.set(toolCallId, items.length);
@@ -481,6 +582,8 @@ function upsertHistoryTool(
     diffs: patch.diffs ?? [],
     attachments: patch.attachments ?? [],
     ...(patch.path ? { path: patch.path } : {}),
+    ...(patch.startedAtMs !== undefined ? { startedAtMs: patch.startedAtMs } : {}),
+    ...(patch.endedAtMs !== undefined ? { endedAtMs: patch.endedAtMs } : {}),
   });
 }
 
@@ -506,6 +609,19 @@ function buildToolGroup(tools: readonly [ToolItem, ...ToolItem[]]): ToolGroupIte
   } else if (tools.some((tool) => tool.status === "pending")) {
     status = "pending";
   }
+  let earliestStart: number | undefined;
+  let latestEnd: number | undefined;
+  for (const tool of tools) {
+    if (tool.startedAtMs !== undefined) {
+      earliestStart = earliestStart === undefined ? tool.startedAtMs : Math.min(earliestStart, tool.startedAtMs);
+    }
+    if (tool.endedAtMs !== undefined) {
+      latestEnd = latestEnd === undefined ? tool.endedAtMs : Math.max(latestEnd, tool.endedAtMs);
+    }
+  }
+  const durationMs = !active && earliestStart !== undefined && latestEnd !== undefined
+    ? Math.max(0, latestEnd - earliestStart)
+    : undefined;
 
   return {
     type: "tool-group",
@@ -513,7 +629,69 @@ function buildToolGroup(tools: readonly [ToolItem, ...ToolItem[]]): ToolGroupIte
     tools,
     status,
     active,
+    ...(durationMs !== undefined ? { durationMs } : {}),
   };
+}
+
+export function finalizeTranscriptActivity(state: TranscriptState, endedAtMs: number): TranscriptState {
+  return closeOpenThought(state, endedAtMs);
+}
+
+export function formatTranscriptDuration(durationMs: number): string {
+  const milliseconds = Math.max(0, durationMs);
+  if (milliseconds < 100) return "<0.1s";
+  if (milliseconds < 10_000) return `${(milliseconds / 1000).toFixed(1)}s`;
+  if (milliseconds < 60_000) return `${Math.round(milliseconds / 1000)}s`;
+  const totalSeconds = Math.round(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+}
+
+function closesOpenThought(update: SessionUpdate): boolean {
+  return update.sessionUpdate === "user_message_chunk"
+    || update.sessionUpdate === "agent_message_chunk"
+    || update.sessionUpdate === "tool_call";
+}
+
+function closeOpenThought(state: TranscriptState, endedAtMs: number): TranscriptState {
+  const items = [...state.items];
+  return closeOpenThoughtItems(items, endedAtMs) ? { items } : state;
+}
+
+function closeOpenThoughtItems(items: TranscriptItem[], endedAtMs: number): boolean {
+  const index = items.length - 1;
+  const item = items[index];
+  if (item?.type !== "message" || item.role !== "thought") return false;
+  if (item.startedAtMs === undefined || item.endedAtMs !== undefined) return false;
+  items[index] = { ...item, endedAtMs: Math.max(item.startedAtMs, endedAtMs) };
+  return true;
+}
+
+function isTerminalToolStatus(status: ToolCallStatus | null | undefined): boolean {
+  return status === "completed" || status === "failed";
+}
+
+function activityTimingFromUpdate(update: SessionUpdate): ActivityTimingMeta | undefined {
+  const meta = update._meta;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+  const value = meta[PIX_ACTIVITY_TIMING_META_KEY];
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const startedAtMs = finiteActivityTimestamp(record.startedAtMs);
+  const endedAtMs = finiteActivityTimestamp(record.endedAtMs);
+  if (startedAtMs === undefined && endedAtMs === undefined) return undefined;
+  return {
+    ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+    ...(endedAtMs !== undefined ? { endedAtMs } : {}),
+  };
+}
+
+function finiteActivityTimestamp(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function messageContent(

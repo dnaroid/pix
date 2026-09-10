@@ -25,6 +25,7 @@ test("persisted history tail defers large tool-result JSON until requested", asy
 			timestamp: "2026-09-06T00:00:02.000Z",
 			message: {
 				role: "assistant",
+				timestamp: Date.parse("2026-09-06T00:00:01.250Z"),
 				content: [{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "/repo/big.log" } }],
 			},
 		},
@@ -47,8 +48,15 @@ test("persisted history tail defers large tool-result JSON until requested", asy
 	const tail = await readPersistedHistoryTail(sessionPath);
 	assert.ok(tail);
 	assert.equal(tail.messages.length, 3);
-	assert.deepEqual(tail.messages[0], { role: "user", content: "inspect" });
+	assert.deepEqual(tail.messages[0], {
+		role: "user",
+		content: "inspect",
+		persistedAtMs: Date.parse("2026-09-06T00:00:01.000Z"),
+	});
+	assert.equal(tail.messages[1]?.timestamp, Date.parse("2026-09-06T00:00:01.250Z"));
+	assert.equal(tail.messages[1]?.persistedAtMs, Date.parse("2026-09-06T00:00:02.000Z"));
 	assert.deepEqual((tail.messages[2] as { content?: unknown }).content, [], "tool body stays unmaterialized in the initial tail");
+	assert.equal((tail.messages[2] as { persistedAtMs?: number }).persistedAtMs, Date.parse("2026-09-06T00:00:03.000Z"));
 
 	const ref = tail.toolResultRefs.get("tool-1");
 	assert.ok(ref);

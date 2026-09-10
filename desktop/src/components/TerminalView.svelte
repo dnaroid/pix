@@ -2,20 +2,40 @@
   import "@xterm/xterm/css/xterm.css";
   import { onMount } from "svelte";
   import type { FitAddon } from "@xterm/addon-fit";
-  import type { Terminal } from "@xterm/xterm";
+  import type { ILink, Terminal } from "@xterm/xterm";
+
+  type TerminalTextLink = {
+    startIndex: number;
+    endIndex: number;
+    text: string;
+    activate: () => void | Promise<void>;
+  };
 
   let {
     initialContent = "",
+    content,
     running,
     ariaLabel = "Package script terminal",
-    onInput,
-    onResize,
+    focusWhenRunning = true,
+    convertEol = false,
+    onInput = () => {},
+    onResize = () => {},
+    resolveLinks,
   }: {
     initialContent?: string;
+    /**
+     * Optional controlled output mode. When provided, appended content is
+     * streamed into xterm and non-prefix replacements reset the buffer.
+     */
+    content?: string;
     running: boolean;
     ariaLabel?: string;
-    onInput: (data: string) => void | Promise<void>;
-    onResize: (cols: number, rows: number) => void | Promise<void>;
+    focusWhenRunning?: boolean;
+    /** Convert bare LF output to CRLF. Useful for pipe/log output; PTYs already emit terminal cursor control. */
+    convertEol?: boolean;
+    onInput?: (data: string) => void | Promise<void>;
+    onResize?: (cols: number, rows: number) => void | Promise<void>;
+    resolveLinks?: (line: string) => readonly TerminalTextLink[] | Promise<readonly TerminalTextLink[]>;
   } = $props();
 
   let container: HTMLDivElement | undefined;
@@ -24,6 +44,7 @@
   let inputBuffer = "";
   let inputTimer: number | null = null;
   let resizeTimer: number | null = null;
+  let renderedControlledContent = "";
   // Backend limits each IPC write to 64 KiB. 16K UTF-16 code units stays
   // comfortably below that even for multi-byte UTF-8 input/pastes.
   const MAX_INPUT_CHUNK_CHARS = 16 * 1024;
@@ -45,7 +66,26 @@
   }
 
   $effect(() => {
-    if (terminal) terminal.options.disableStdin = !running;
+    if (!terminal) return;
+    terminal.options.disableStdin = !running;
+    terminal.options.cursorInactiveStyle = running ? "outline" : "none";
+    terminal.options.convertEol = convertEol;
+  });
+
+  $effect(() => {
+    const nextContent = content;
+    const currentTerminal = terminal;
+    if (nextContent === undefined || !currentTerminal) return;
+
+    if (nextContent.startsWith(renderedControlledContent)) {
+      const appended = nextContent.slice(renderedControlledContent.length);
+      if (appended) currentTerminal.write(appended);
+    } else {
+      currentTerminal.reset();
+      if (nextContent) currentTerminal.write(nextContent);
+    }
+    renderedControlledContent = nextContent;
+    currentTerminal.scrollToBottom();
   });
 
   onMount(() => {
@@ -72,8 +112,9 @@
     if (!container?.isConnected) return undefined;
     const next = new TerminalConstructor({
       allowTransparency: false,
-      convertEol: false,
+      convertEol,
       cursorBlink: true,
+      cursorInactiveStyle: running ? "outline" : "none",
       cursorStyle: "block",
       disableStdin: !running,
       fontFamily: '"Geist Mono", ui-monospace, monospace',
@@ -88,6 +129,34 @@
     next.open(container);
     terminal = next;
     fitAddon = fit;
+
+    if (content !== undefined) {
+      renderedControlledContent = content;
+      if (content) next.write(content);
+    }
+
+    const linkDisposable = resolveLinks
+      ? next.registerLinkProvider({
+          provideLinks(bufferLineNumber, callback): void {
+            const line = next.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) ?? "";
+            void Promise.resolve(resolveLinks(line))
+              .then((links) => {
+                const resolved = links
+                  .filter((link) => link.startIndex >= 0 && link.endIndex > link.startIndex)
+                  .map<ILink>((link) => ({
+                    range: {
+                      start: { x: link.startIndex + 1, y: bufferLineNumber },
+                      end: { x: link.endIndex, y: bufferLineNumber },
+                    },
+                    text: link.text,
+                    activate: () => void link.activate(),
+                  }));
+                callback(resolved.length > 0 ? resolved : undefined);
+              })
+              .catch(() => callback(undefined));
+          },
+        })
+      : undefined;
 
     const dataDisposable = next.onData((data) => {
       if (!running) return;
@@ -122,9 +191,11 @@
 
     requestAnimationFrame(() => {
       fitTerminal();
-      if (initialContent) next.write(initialContent);
+      if (content === undefined && initialContent) {
+        next.write(initialContent);
+      }
       next.scrollToBottom();
-      if (running) next.focus();
+      if (running && focusWhenRunning) next.focus();
     });
 
     return () => {
@@ -135,9 +206,11 @@
       colorScheme.removeEventListener("change", fitTerminal);
       dataDisposable.dispose();
       resizeDisposable.dispose();
+      linkDisposable?.dispose();
       next.dispose();
       terminal = undefined;
       fitAddon = undefined;
+      renderedControlledContent = "";
     };
   }
 

@@ -4,6 +4,7 @@
   import Wrench from "@lucide/svelte/icons/wrench";
   import X from "@lucide/svelte/icons/x";
   import { gitReviewHasFindings, type GitDiff } from "../lib/git";
+  import type { ProjectFileLineRange } from "../lib/project-files";
   import MarkdownText from "./MarkdownText.svelte";
 
   let {
@@ -29,7 +30,7 @@
     canResolve: boolean;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
-    onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onReview: () => void;
     onResolve: () => void;

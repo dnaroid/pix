@@ -18,10 +18,12 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Search from "@lucide/svelte/icons/search";
+  import ScanSearch from "@lucide/svelte/icons/scan-search";
   import Settings from "@lucide/svelte/icons/settings";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
+  import { invoke } from "@tauri-apps/api/core";
   import { onMount, tick } from "svelte";
   import {
     extractAttachmentMarkers,
@@ -39,6 +41,8 @@
   } from "../lib/project-tasks";
   import { fuzzySearch } from "../lib/fuzzy";
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
+  import { idxKnowledgeNeedsAttention, type IdxOverview } from "../lib/idx";
+  import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
   import {
     PROJECT_TODO_PATH,
@@ -54,6 +58,7 @@
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
   import { sessionSubagentCount, type SessionSubagentSnapshot } from "../lib/session-subagents";
   import RegistryPanel from "./RegistryPanel.svelte";
+  import IdxPanel from "./IdxPanel.svelte";
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import PromptComposer from "./PromptComposer.svelte";
@@ -67,7 +72,7 @@
     type: ProjectTaskType;
   };
 
-  type SidebarTab = "tasks" | "project" | "git" | "registry" | "scripts" | "session" | "settings";
+  type SidebarTab = "tasks" | "project" | "git" | "registry" | "scripts" | "idx" | "session" | "settings";
   type TaskDropPosition = "before" | "after";
   type TaskDropTarget = {
     type: ProjectTaskType;
@@ -87,6 +92,7 @@
     git: "Source Control",
     registry: "Registry",
     scripts: "Package Scripts",
+    idx: "IDX",
     session: "Session",
     settings: "Settings",
   };
@@ -124,6 +130,7 @@
     onOpenSession,
     onOpenProjectDocument,
     onListProjectDirectory,
+    onValidateProjectFile,
     onOpenProjectFile,
     onOpenExternalEditor,
     onReload,
@@ -139,6 +146,7 @@
     onGitCreateBranch,
     onGitGenerateCommitMessage,
     onGitReview,
+    onRefreshKnowledge,
   }: {
     workspace: string;
     tasks: ProjectTask[];
@@ -177,7 +185,8 @@
     onOpenSession: (task: ProjectTask) => void;
     onOpenProjectDocument: (path: string, exists?: boolean) => void;
     onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
-    onOpenProjectFile: (path: string) => void;
+    onValidateProjectFile: (path: string) => Promise<boolean>;
+    onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
     onOpenExternalEditor: (path?: string) => void;
     onReload: () => void;
     onRegistryRefresh: () => void;
@@ -192,6 +201,7 @@
     onGitCreateBranch: (branch: string) => void;
     onGitGenerateCommitMessage: () => Promise<string | undefined>;
     onGitReview: (path: string | undefined, scope: GitDiffScope) => void;
+    onRefreshKnowledge: () => void;
   } = $props();
 
   const ACTIVITY_BAR_WIDTH = 48;
@@ -200,8 +210,11 @@
   const REGISTRY_MIN_WIDTH = 344;
   const SETTINGS_MIN_WIDTH = 360;
   const SCRIPTS_MIN_WIDTH = 400;
+  const IDX_MIN_WIDTH = 420;
   const DEFAULT_MAX_WIDTH = 420;
   const SCRIPTS_MAX_WIDTH = 720;
+  const IDX_MAX_WIDTH = 760;
+  const MIN_MAIN_WORKSPACE_WIDTH = 280;
   const WIDTH_KEY = "pix.desktop.taskSidebarWidth";
   const COLLAPSED_KEY = "pix.desktop.taskSidebarCollapsed";
   const ACTIVE_TAB_KEY = "pix.desktop.workspaceSidebarTab";
@@ -209,6 +222,7 @@
   let collapsed = $state(false);
   let sidebarWidth = $state(DEFAULT_WIDTH);
   let activeTab = $state<SidebarTab>("tasks");
+  let viewportWidth = $state(1240);
   let editorOpen = $state(false);
   let editingTaskId = $state<string | null>(null);
   let deleteTaskId = $state<string | null>(null);
@@ -238,6 +252,8 @@
   let previousTaskDragUserSelect: string | null = null;
   let previousTaskDragCursor: string | null = null;
   let titleInput = $state<HTMLInputElement | null>(null);
+  let idxOverview = $state<IdxOverview | undefined>();
+  let idxOverviewGeneration = 0;
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
@@ -246,8 +262,12 @@
   const activeSubagentCount = $derived(sessionSubagentCount(subagentSnapshot));
   const registryAttention = $derived(registryHasAttention(registrySnapshot));
   const gitChangeCount = $derived(gitSnapshot?.changes.length ?? 0);
+  const idxAttention = $derived(idxKnowledgeNeedsAttention(idxOverview?.wikiStatus));
   const activeMinWidth = $derived(sidebarMinWidth(activeTab));
-  const activeMaxWidth = $derived(sidebarMaxWidth(activeTab));
+  const activeMaxWidth = $derived(Math.min(
+    sidebarMaxWidth(activeTab),
+    Math.max(activeMinWidth, viewportWidth - ACTIVITY_BAR_WIDTH - MIN_MAIN_WORKSPACE_WIDTH),
+  ));
   const expandedSidebarWidth = $derived(clampWidth(sidebarWidth, activeMinWidth, activeMaxWidth));
   const renderedSidebarWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : expandedSidebarWidth));
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
@@ -289,7 +309,33 @@
     onOpenProjectDocument(plan);
   }
 
+  $effect(() => {
+    const requestWorkspace = workspace;
+    const generation = ++idxOverviewGeneration;
+    idxOverview = undefined;
+    queueMicrotask(() => void refreshIdxOverview(requestWorkspace, generation));
+  });
+
+  async function refreshIdxOverview(requestWorkspace: string, generation = idxOverviewGeneration): Promise<void> {
+    if (!requestWorkspace) return;
+    try {
+      const next = await invoke<IdxOverview>("idx_overview", { workspace: requestWorkspace });
+      if (generation !== idxOverviewGeneration || workspace !== requestWorkspace) return;
+      idxOverview = next;
+    } catch {
+      // Badge freshness is best-effort. Keep the last known state on transient failures.
+    }
+  }
+
   onMount(() => {
+    const updateViewportWidth = () => {
+      viewportWidth = window.innerWidth;
+    };
+    updateViewportWidth();
+    window.addEventListener("resize", updateViewportWidth);
+    const idxRefreshTimer = window.setInterval(() => {
+      void refreshIdxOverview(workspace);
+    }, 60_000);
     try {
       collapsed = localStorage.getItem(COLLAPSED_KEY) === "true";
       const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
@@ -304,6 +350,8 @@
     }
 
     return () => {
+      window.removeEventListener("resize", updateViewportWidth);
+      window.clearInterval(idxRefreshTimer);
       setDocumentResizeState(false);
       setDocumentTaskDragState(false);
     };
@@ -319,7 +367,7 @@
   }
 
   function isSidebarTab(value: string | null): value is SidebarTab {
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "session" || value === "settings";
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "idx" || value === "session" || value === "settings";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -420,11 +468,14 @@
     if (tab === "registry") return REGISTRY_MIN_WIDTH;
     if (tab === "settings") return SETTINGS_MIN_WIDTH;
     if (tab === "scripts") return SCRIPTS_MIN_WIDTH;
+    if (tab === "idx") return IDX_MIN_WIDTH;
     return MIN_WIDTH;
   }
 
   function sidebarMaxWidth(tab: SidebarTab): number {
-    return tab === "scripts" ? SCRIPTS_MAX_WIDTH : DEFAULT_MAX_WIDTH;
+    if (tab === "scripts") return SCRIPTS_MAX_WIDTH;
+    if (tab === "idx") return IDX_MAX_WIDTH;
+    return DEFAULT_MAX_WIDTH;
   }
 
   function clampWidth(width: number, minimum = MIN_WIDTH, maximum = DEFAULT_MAX_WIDTH): number {
@@ -688,6 +739,18 @@
       aria-pressed={activeTab === "scripts" && !collapsed}
       onclick={() => selectTab("scripts")}
     ><SquareTerminal class="h-5 w-5" aria-hidden="true" /></button>
+    <button
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "idx" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      type="button"
+      title={activeTab === "idx" && !collapsed ? "Hide IDX" : "IDX"}
+      aria-label={`IDX repository intelligence${idxAttention ? ", knowledge update needed" : ""}`}
+      aria-controls="workspace-idx-panel"
+      aria-pressed={activeTab === "idx" && !collapsed}
+      onclick={() => selectTab("idx")}
+    >
+      <ScanSearch class="h-5 w-5" aria-hidden="true" />
+      {#if idxAttention}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
+    </button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
@@ -982,6 +1045,19 @@
       {:else if activeTab === "scripts"}
         <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Package Scripts">
           <PackageScriptsPanel {workspace} />
+        </div>
+      {:else if activeTab === "idx"}
+        <div id="workspace-idx-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="IDX">
+          {#key workspace}
+            <IdxPanel
+              {workspace}
+              {onValidateProjectFile}
+              {onOpenProjectFile}
+              {sessionReady}
+              {onRefreshKnowledge}
+              onOverviewChange={(next) => idxOverview = next}
+            />
+          {/key}
         </div>
       {:else if activeTab === "session"}
         <div id="workspace-session-panel" class="grid min-h-0" aria-label="Session">

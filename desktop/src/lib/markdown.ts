@@ -5,6 +5,7 @@ import {
   mimeTypeForName,
   type AttachmentKind,
 } from "./attachments";
+import type { ProjectFileLineRange } from "./project-files";
 
 const MAX_BLOCK_DEPTH = 4;
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
@@ -376,11 +377,11 @@ function renderInline(
         const code = text.slice(index + markerLength, end).replace(/\n/g, " ");
         const codeLabel = `<code>${escapeHtml(code)}</code>`;
         const homePath = allowLinks ? normalizeInlineHomeFilePath(code) : undefined;
-        const projectPath = allowLinks && !homePath ? normalizeInlineProjectFilePath(code) : undefined;
+        const projectReference = allowLinks && !homePath ? normalizeInlineProjectFileReference(code) : undefined;
         if (homePath) {
           output += homeFileLink(homePath, codeLabel);
-        } else if (projectPath) {
-          output += projectFileLink(projectPath, codeLabel);
+        } else if (projectReference) {
+          output += projectFileLink(projectReference.path, codeLabel, projectReference.range);
         } else {
           output += codeLabel;
         }
@@ -525,9 +526,12 @@ function linkForDestination(
   return label;
 }
 
-function projectFileLink(path: string, label: string): string {
+function projectFileLink(path: string, label: string, range?: ProjectFileLineRange): string {
   const escapedPath = escapeAttribute(path);
-  return `<span class="markdown-file-candidate" data-project-file-candidate="${escapedPath}">${label}</span>`;
+  const rangeAttributes = range
+    ? ` data-project-file-start-line="${range.startLine}" data-project-file-end-line="${range.endLine}"`
+    : "";
+  return `<span class="markdown-file-candidate" data-project-file-candidate="${escapedPath}"${rangeAttributes}>${label}</span>`;
 }
 
 function localFileLink(path: string, label: string): string {
@@ -577,8 +581,12 @@ function localMedia(
     + "</span>";
 }
 
-function normalizeInlineProjectFilePath(code: string): string | undefined {
-  const candidate = code.trim().replace(/:\d+(?::\d+)?$/, "");
+function normalizeInlineProjectFileReference(
+  code: string,
+): { path: string; range?: ProjectFileLineRange } | undefined {
+  const trimmed = code.trim();
+  const suffix = /^(.*?):([1-9]\d*)(?:(?:-([1-9]\d*))|(?::([1-9]\d*)))?$/u.exec(trimmed);
+  const candidate = suffix?.[1] ?? trimmed;
   const path = normalizeProjectFileDestination(candidate);
   if (!path) return undefined;
 
@@ -586,7 +594,17 @@ function normalizeInlineProjectFilePath(code: string): string | undefined {
   const hasFileExtension = /\.[A-Za-z\d_-]{1,16}$/.test(fileName);
   const hasExplicitRelativePrefix = candidate.startsWith("./") || candidate.startsWith(".\\");
   const isConventionalFileName = /^(?:Dockerfile|Makefile|README|LICENSE|CHANGELOG|Gemfile|Rakefile)$/i.test(fileName);
-  return hasFileExtension || hasExplicitRelativePrefix || isConventionalFileName ? path : undefined;
+  if (!hasFileExtension && !hasExplicitRelativePrefix && !isConventionalFileName) return undefined;
+
+  const startLine = suffix?.[2] ? Number(suffix[2]) : undefined;
+  const explicitEnd = suffix?.[3] ? Number(suffix[3]) : undefined;
+  const range = startLine
+    ? {
+        startLine: Math.min(startLine, explicitEnd ?? startLine),
+        endLine: Math.max(startLine, explicitEnd ?? startLine),
+      }
+    : undefined;
+  return { path, ...(range ? { range } : {}) };
 }
 
 function normalizeInlineHomeFilePath(code: string): string | undefined {

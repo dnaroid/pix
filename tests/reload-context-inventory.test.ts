@@ -9,7 +9,7 @@ import {
 import { parseSubagentCatalogState } from "../src/app/extensions/subagent-catalog-state.js";
 
 describe("reload context inventory", () => {
-	it("reports only skills that can actually be injected plus active tools and model-gated agents", () => {
+	it("reports skills with lowercase file access tools plus active tools and model-gated agents", () => {
 		const runtime = fakeRuntime({
 			tools: ["repo_search", "read", "subagents", "read"],
 			skills: ["project-agent-creator", "frontier-model-rollover", "project-agent-creator"],
@@ -25,6 +25,31 @@ describe("reload context inventory", () => {
 		assert.equal(inventory.model, "openai-codex/gpt-5.6-luna:high");
 		assert.match(formatReloadContextInventory(inventory), /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
 		assert.match(formatReloadContextInventory(inventory), /Agents \(available\): frontier-review, research/);
+	});
+
+	it("treats model-tool aliases as valid skill file access after reload", () => {
+		const inventory = createReloadContextInventory(fakeRuntime({
+			tools: ["repo_search", "Read", "Bash", "subagents"],
+			skills: ["project-agent-creator", "frontier-model-rollover"],
+			model: { provider: "zai", id: "glm-5-turbo" },
+			thinkingLevel: "max",
+		}), ["research"]);
+
+		assert.equal(inventory.skillsReadable, true);
+		assert.deepEqual(inventory.skills, ["frontier-model-rollover", "project-agent-creator"]);
+		assert.match(formatReloadContextInventory(inventory), /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
+	});
+
+	it("treats shell aliases as valid skill file access", () => {
+		const inventory = createReloadContextInventory(fakeRuntime({
+			tools: ["shell", "apply_patch"],
+			skills: ["frontier-model-rollover"],
+			model: { provider: "openai-codex", id: "gpt-5.6-sol" },
+			thinkingLevel: "medium",
+		}), []);
+
+		assert.equal(inventory.skillsReadable, true);
+		assert.deepEqual(inventory.skills, ["frontier-model-rollover"]);
 	});
 
 	it("does not claim skills or agents are in context when their access tools are inactive", () => {

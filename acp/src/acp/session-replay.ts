@@ -15,6 +15,12 @@ import type { PiAgentMessage, PiClient, PiMessagePart } from "../pi/pi-rpc-clien
 import { DEFERRED_PERSISTED_IMAGE_PREFIX } from "./session-history-file.js";
 
 export const DEFERRED_IMAGE_URI_PREFIX = "pix-deferred-image:";
+const PIX_ACTIVITY_TIMING_META_KEY = "pix.activityTiming";
+
+interface ActivityTimingMeta {
+	readonly startedAtMs?: number;
+	readonly endedAtMs?: number;
+}
 
 export interface DeferredSessionHistory {
 	readonly updates: readonly SessionUpdate[];
@@ -63,7 +69,13 @@ export async function replaySessionHistory(
 				}
 			}
 		} else if (message.role === "assistant") {
-			for (const notification of assistantPartNotifications(context, index, content as readonly PiMessagePart[] | undefined)) {
+			for (const notification of assistantPartNotifications(
+				context,
+				index,
+				content as readonly PiMessagePart[] | undefined,
+				true,
+				assistantPersistedTiming(message),
+			)) {
 				await notify(notification);
 			}
 		} else if (message.role === "toolResult") {
@@ -122,7 +134,13 @@ export function deferredSessionHistoryFromMessages(
 				}
 			}
 		} else if (message.role === "assistant") {
-			for (const notification of assistantPartNotifications(context, index, content as readonly PiMessagePart[] | undefined, false)) {
+			for (const notification of assistantPartNotifications(
+				context,
+				index,
+				content as readonly PiMessagePart[] | undefined,
+				false,
+				assistantPersistedTiming(message),
+			)) {
 				const update = notification.update;
 				updates.push(update);
 				if (update.sessionUpdate === "tool_call" && update.toolCallId) {
@@ -139,11 +157,11 @@ export function deferredSessionHistoryFromMessages(
 			const record = message as { toolCallId?: unknown; isError?: unknown };
 			if (typeof record.toolCallId !== "string") continue;
 			const toolCallId = record.toolCallId;
-			updates.push({
+			updates.push(withActivityTiming({
 				sessionUpdate: "tool_call_update",
 				toolCallId,
 				status: record.isError === true ? "failed" : "completed",
-			});
+			} as SessionUpdate, toolResultPersistedTiming(message)));
 			toolResults.set(toolCallId, {
 				message,
 				...(toolInputs.has(toolCallId) ? { rawInput: toolInputs.get(toolCallId) } : {}),
@@ -182,9 +200,19 @@ function assistantPartNotifications(
 	index: number,
 	content: readonly PiMessagePart[] | undefined,
 	includeRawInput = true,
+	persistedTiming?: ActivityTimingMeta,
 ): SessionNotification[] {
 	const notifications: SessionNotification[] = [];
 	if (!content) return notifications;
+	const thinkingPartCount = content.filter((part) => part.type === "thinking").length;
+	const thinkingTiming = thinkingPartCount === 1
+		&& persistedTiming?.startedAtMs !== undefined
+		&& persistedTiming.endedAtMs !== undefined
+		? persistedTiming
+		: undefined;
+	const toolTiming = persistedTiming?.endedAtMs === undefined
+		? undefined
+		: { startedAtMs: persistedTiming.endedAtMs };
 	let text: string[] = [];
 	let textRun = 0;
 	const flushText = () => {
@@ -213,21 +241,27 @@ function assistantPartNotifications(
 				`replay-${index}:thinking:${partIndex}`,
 				"agent_thought_chunk",
 				{ type: "text", text: thinking || "\u200B" },
+				thinkingTiming,
 			));
 		} else if (part.type === "toolCall" && typeof part.id === "string") {
 			flushText();
-			notifications.push(toolCallNotification(context, part, includeRawInput));
+			notifications.push(toolCallNotification(context, part, includeRawInput, toolTiming));
 		}
 	}
 	flushText();
 	return notifications;
 }
 
-function toolCallNotification(context: TranslateContext, part: PiMessagePart, includeRawInput = true): SessionNotification {
+function toolCallNotification(
+	context: TranslateContext,
+	part: PiMessagePart,
+	includeRawInput = true,
+	timing?: ActivityTimingMeta,
+): SessionNotification {
 	const originalName = typeof part.name === "string" ? part.name : "";
 	const name = originalName.toLowerCase();
 	const args = (part.arguments ?? undefined) as Record<string, unknown> | undefined;
-	const update = {
+	const update = withActivityTiming({
 		sessionUpdate: "tool_call",
 		toolCallId: part.id,
 		...(originalName ? { name: originalName } : {}),
@@ -236,7 +270,7 @@ function toolCallNotification(context: TranslateContext, part: PiMessagePart, in
 		status: "in_progress",
 		...(includeRawInput ? { rawInput: args } : {}),
 		locations: toolLocations(context, name, args),
-	} as SessionUpdate;
+	} as SessionUpdate, timing);
 	return { sessionId: context.sessionId, update };
 }
 
@@ -258,14 +292,16 @@ function toolResultNotification(context: TranslateContext, message: PiAgentMessa
 			content.push({ type: "content", content: { type: "image", data: part.data, mimeType: part.mimeType } });
 		}
 	}
-	const update: Record<string, unknown> = {
+	let update = {
 		sessionUpdate: "tool_call_update",
 		toolCallId: record.toolCallId,
 		status: record.isError === true ? "failed" : "completed",
-	};
-	if (content.length > 0) update.content = content;
-	if (record.details !== undefined) update.rawOutput = record.details;
-	return { sessionId: context.sessionId, update: update as SessionUpdate };
+	} as SessionUpdate;
+	update = withActivityTiming(update, toolResultPersistedTiming(message));
+	const updateRecord = update as unknown as Record<string, unknown>;
+	if (content.length > 0) updateRecord.content = content;
+	if (record.details !== undefined) updateRecord.rawOutput = record.details;
+	return { sessionId: context.sessionId, update };
 }
 
 function chunk(
@@ -273,13 +309,43 @@ function chunk(
 	messageId: string,
 	sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk",
 	content: import("@agentclientprotocol/sdk").ContentBlock,
+	timing?: ActivityTimingMeta,
 ): SessionNotification {
-	const update: SessionUpdate = {
+	const update = withActivityTiming({
 		sessionUpdate,
 		messageId,
 		content,
-	};
+	} as SessionUpdate, timing);
 	return { sessionId, update };
+}
+
+function assistantPersistedTiming(message: PiAgentMessage): ActivityTimingMeta | undefined {
+	const startedAtMs = finiteTimestamp(message.timestamp);
+	const endedAtMs = finiteTimestamp(message.persistedAtMs);
+	if (startedAtMs === undefined || endedAtMs === undefined || endedAtMs < startedAtMs) {
+		return endedAtMs === undefined ? undefined : { endedAtMs };
+	}
+	return { startedAtMs, endedAtMs };
+}
+
+function toolResultPersistedTiming(message: PiAgentMessage): ActivityTimingMeta | undefined {
+	const endedAtMs = finiteTimestamp(message.persistedAtMs) ?? finiteTimestamp(message.timestamp);
+	return endedAtMs === undefined ? undefined : { endedAtMs };
+}
+
+function finiteTimestamp(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function withActivityTiming(update: SessionUpdate, timing: ActivityTimingMeta | undefined): SessionUpdate {
+	if (!timing || (timing.startedAtMs === undefined && timing.endedAtMs === undefined)) return update;
+	return {
+		...update,
+		_meta: {
+			...(update._meta ?? {}),
+			[PIX_ACTIVITY_TIMING_META_KEY]: timing,
+		},
+	} as SessionUpdate;
 }
 
 /** Exposed for tests. */

@@ -15,7 +15,7 @@ export function createReloadContextInventory(
 ): ReloadContextInventory {
 	const session = runtime.session;
 	const tools = unique(session.getActiveToolNames());
-	const skillsReadable = tools.includes("read") || tools.includes("bash");
+	const skillsReadable = tools.some(isSkillFileAccessTool);
 	const subagentsActive = tools.includes("subagents");
 	const skills = skillsReadable
 		? unique(session.resourceLoader.getSkills().skills.map((skill) => skill.name)).sort(compareText)
@@ -33,6 +33,18 @@ export function createReloadContextInventory(
 		skillsReadable,
 		subagentsActive,
 	};
+}
+
+function isSkillFileAccessTool(toolName: string): boolean {
+	switch (toolName.trim().toLowerCase()) {
+		case "read":
+		case "bash":
+		case "shell":
+		case "shell_command":
+			return true;
+		default:
+			return false;
+	}
 }
 
 export function formatReloadContextInventory(

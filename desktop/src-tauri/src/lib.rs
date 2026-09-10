@@ -6,7 +6,7 @@ use serde::{
     Deserialize, Serialize,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     env, fmt, fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
@@ -39,6 +39,15 @@ const MAX_GIT_COMMIT_MESSAGE_BYTES: usize = 20 * 1024;
 const MAX_GIT_UNTRACKED_STAT_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_USER_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_IDX_OUTPUT_BYTES: usize = 512 * 1024;
+const MAX_IDX_LOG_BYTES: usize = 256 * 1024;
+const IDX_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const IDX_QUERY_TIMEOUT: Duration = Duration::from_secs(180);
+const IDX_OPERATION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const IDX_STOP_GRACE: Duration = Duration::from_secs(2);
+const MAX_IDX_MAX_FILES: u32 = 1_000;
+const MAX_IDX_LIMIT: u32 = 1_000;
+const MAX_IDX_OPERATIONS_PER_WINDOW: usize = 12;
 const MAX_PACKAGE_JSON_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PACKAGE_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_PACKAGE_TERMINAL_INPUT_BYTES: usize = 64 * 1024;
@@ -101,6 +110,220 @@ struct RunningProcess {
     stdin_tx: Option<mpsc::Sender<StdinCommand>>,
     stop_tx: mpsc::Sender<()>,
     exited: ExitSignal,
+}
+
+#[derive(Default)]
+struct IdxOperationState {
+    operations: Mutex<HashMap<String, IdxOperationRecord>>,
+    next_id: AtomicU64,
+}
+
+struct IdxOperationRecord {
+    window_label: String,
+    workspace: PathBuf,
+    kind: IdxMaintenanceKind,
+    command: String,
+    status: IdxOperationStatus,
+    output: String,
+    started_at_ms: u64,
+    finished_at_ms: Option<u64>,
+    exit_code: Option<i32>,
+    stop_tx: Option<mpsc::Sender<()>>,
+    exited: ExitSignal,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum IdxMaintenanceKind {
+    Init,
+    Index,
+    FullIndex,
+    DryRun,
+    Doctor,
+    WikiAudit,
+    WikiDiscover,
+    WikiCatalog,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum IdxOperationStatus {
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+    TimedOut,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxOperationSnapshot {
+    id: String,
+    window_label: String,
+    workspace: String,
+    kind: IdxMaintenanceKind,
+    command: String,
+    status: IdxOperationStatus,
+    output: String,
+    started_at_ms: u64,
+    finished_at_ms: Option<u64>,
+    exit_code: Option<i32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxOperationOutputEvent {
+    operation_id: String,
+    stream: String,
+    chunk: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxOperationExitEvent {
+    operation_id: String,
+    status: IdxOperationStatus,
+    exit_code: Option<i32>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxQueryRequest {
+    workspace: String,
+    query: IdxQuery,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+enum IdxQuery {
+    Code {
+        query: String,
+        mode: IdxSearchMode,
+        max_files: u32,
+        path_prefix: Option<String>,
+        #[serde(default)]
+        include_content: bool,
+    },
+    Knowledge {
+        query: String,
+        limit: u32,
+        include_secondary: bool,
+        path_prefix: Option<String>,
+    },
+    Context {
+        query: String,
+        budget: u32,
+        max_specs: u32,
+        max_code: u32,
+        max_tests: u32,
+        include_secondary: bool,
+        path_prefix: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum IdxSearchMode {
+    Hybrid,
+    Semantic,
+    Lexical,
+    Symbol,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxInspectRequest {
+    workspace: String,
+    command: IdxInspectCommand,
+    target: Option<String>,
+    path_prefix: Option<String>,
+    depth: Option<u32>,
+    max_files: Option<u32>,
+    include_body: Option<bool>,
+    show_edges: Option<bool>,
+    tests: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum IdxInspectCommand {
+    Architecture,
+    Structure,
+    Ast,
+    Explain,
+    Deps,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxCommandResult {
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+    truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxParsedStatus {
+    state: Option<String>,
+    fields: BTreeMap<String, String>,
+    raw: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxOverview {
+    available: bool,
+    executable: Option<String>,
+    version: Option<String>,
+    initialized: bool,
+    index_status: Option<IdxParsedStatus>,
+    wiki_status: Option<IdxParsedStatus>,
+    raw_status: String,
+    errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxOperationRequest {
+    window_label: String,
+    workspace: String,
+    kind: IdxMaintenanceKind,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IdxKnowledgeRequest {
+    workspace: String,
+    action: IdxKnowledgeAction,
+    path: Option<String>,
+    classification: Option<String>,
+    behavior_type: Option<String>,
+    lifecycle: Option<String>,
+    confidence: Option<String>,
+    summary: Option<String>,
+    topics: Option<Vec<String>>,
+    target_paths: Option<Vec<String>>,
+    relation_kind: Option<String>,
+    relation_action: Option<String>,
+    source_reviewed: Option<bool>,
+    evidence_reviewed: Option<bool>,
+    metadata_only_confirmed: Option<bool>,
+    paths: Option<Vec<String>>,
+    base: Option<String>,
+    semantic: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum IdxKnowledgeAction {
+    Show,
+    Record,
+    Verify,
+    Relate,
+    Remove,
+    Impact,
 }
 
 impl Drop for RunningProcess {
@@ -907,6 +1130,93 @@ async fn write_user_config(
         .home_dir()
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
     run_blocking(move || write_user_config_from(&home, kind, &content)).await
+}
+
+#[tauri::command]
+async fn idx_overview(workspace: String) -> Result<IdxOverview, String> {
+    run_blocking(move || idx_overview_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn idx_query(request: IdxQueryRequest) -> Result<IdxCommandResult, String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&request.workspace))?;
+        let executable = idx_executable()?;
+        let args = idx_query_args(&request.query)?;
+        run_idx_command(&executable, &root, &args, IDX_QUERY_TIMEOUT, MAX_IDX_OUTPUT_BYTES)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn idx_inspect(request: IdxInspectRequest) -> Result<IdxCommandResult, String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&request.workspace))?;
+        if !root.join(".indexer-cli").is_dir() {
+            return Err("this project is not indexed yet; initialize IDX first".to_owned());
+        }
+        let executable = idx_executable()?;
+        let args = idx_inspect_args(&request)?;
+        run_idx_command(&executable, &root, &args, IDX_QUERY_TIMEOUT, MAX_IDX_OUTPUT_BYTES)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn idx_knowledge(request: IdxKnowledgeRequest) -> Result<IdxCommandResult, String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&request.workspace))?;
+        if !root.join(".indexer-cli").is_dir() {
+            return Err("this project is not indexed yet; initialize IDX first".to_owned());
+        }
+        let executable = idx_executable()?;
+        let args = idx_knowledge_args(&request)?;
+        run_idx_command(&executable, &root, &args, IDX_QUERY_TIMEOUT, MAX_IDX_OUTPUT_BYTES)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn idx_operation_list(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+) -> Result<Vec<IdxOperationSnapshot>, String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&workspace))?;
+        idx_operation_snapshots(&app, &window_label, &root)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn idx_operation_start(
+    app: AppHandle,
+    request: IdxOperationRequest,
+) -> Result<IdxOperationSnapshot, String> {
+    run_blocking(move || start_idx_operation(app, request)).await
+}
+
+#[tauri::command]
+async fn idx_operation_stop(
+    app: AppHandle,
+    window_label: String,
+    operation_id: String,
+) -> Result<(), String> {
+    run_blocking(move || stop_idx_operation(&app, &window_label, &operation_id)).await
+}
+
+#[tauri::command]
+async fn idx_operation_stop_workspace(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+) -> Result<(), String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&workspace))?;
+        stop_idx_operations_for_workspace(&app, &window_label, &root)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2369,6 +2679,1083 @@ fn write_user_config_from(
     read_user_config_from(home, kind)
 }
 
+fn idx_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
+}
+
+fn idx_executable() -> Result<PathBuf, String> {
+    resolve_named_executable("idx").ok_or_else(|| {
+        "idx is not available in the Desktop environment; install indexer-cli or expose idx in your login-shell PATH"
+            .to_owned()
+    })
+}
+
+fn idx_process_command(executable: &Path, root: &Path, args: &[String]) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .args(args)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("NO_COLOR", "1");
+    if let Some(path) = package_process_path(executable) {
+        command.env("PATH", path);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+}
+
+fn read_bounded_idx_stream<R: Read>(mut reader: R, max_bytes: usize) -> (Vec<u8>, bool) {
+    let mut retained = Vec::with_capacity(max_bytes.min(16 * 1024));
+    let mut truncated = false;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                let remaining = max_bytes.saturating_sub(retained.len());
+                if remaining > 0 {
+                    retained.extend_from_slice(&buffer[..read.min(remaining)]);
+                }
+                if read > remaining {
+                    truncated = true;
+                }
+            }
+        }
+    }
+    (retained, truncated)
+}
+
+fn run_idx_command(
+    executable: &Path,
+    root: &Path,
+    args: &[String],
+    timeout: Duration,
+    max_bytes: usize,
+) -> Result<IdxCommandResult, String> {
+    let mut command = idx_process_command(executable, root, args);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("failed to start idx {}: {error}", args.join(" ")))?;
+    let process_id = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "idx stdout pipe is unavailable".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "idx stderr pipe is unavailable".to_owned())?;
+    let stdout_thread = thread::spawn(move || read_bounded_idx_stream(stdout, max_bytes));
+    let stderr_thread = thread::spawn(move || read_bounded_idx_stream(stderr, max_bytes));
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
+            Ok(None) => {
+                force_kill_idx_process(process_id, &mut child);
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(format!("idx {} timed out", args.join(" ")));
+            }
+            Err(error) => {
+                force_kill_idx_process(process_id, &mut child);
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(format!("failed while waiting for idx {}: {error}", args.join(" ")));
+            }
+        }
+    };
+    let (stdout, stdout_truncated) = stdout_thread
+        .join()
+        .map_err(|_| "idx stdout reader panicked".to_owned())?;
+    let (stderr, stderr_truncated) = stderr_thread
+        .join()
+        .map_err(|_| "idx stderr reader panicked".to_owned())?;
+    Ok(IdxCommandResult {
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        exit_code: status.code(),
+        truncated: stdout_truncated || stderr_truncated,
+    })
+}
+
+fn force_kill_idx_process(process_id: u32, child: &mut Child) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(process_id as i32), libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill.exe")
+            .args(["/PID", &process_id.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
+
+fn interrupt_idx_process(process_id: u32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(process_id as i32), libc::SIGINT);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill.exe")
+            .args(["/PID", &process_id.to_string(), "/T"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+fn idx_overview_from(workspace: &Path) -> Result<IdxOverview, String> {
+    let root = canonical_workspace(workspace)?;
+    let initialized = root.join(".indexer-cli").is_dir();
+    let executable = match idx_executable() {
+        Ok(executable) => executable,
+        Err(error) => {
+            return Ok(IdxOverview {
+                available: false,
+                executable: None,
+                version: None,
+                initialized,
+                index_status: None,
+                wiki_status: None,
+                raw_status: String::new(),
+                errors: vec![error],
+            });
+        }
+    };
+    let mut errors = Vec::new();
+    let version = match run_idx_command(
+        &executable,
+        &root,
+        &["--version".to_owned()],
+        IDX_COMMAND_TIMEOUT,
+        32 * 1024,
+    ) {
+        Ok(result) if result.exit_code == Some(0) => result
+            .stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(str::to_owned),
+        Ok(result) => {
+            errors.push(non_empty_idx_error("idx --version failed", &result));
+            None
+        }
+        Err(error) => {
+            errors.push(error);
+            None
+        }
+    };
+
+    if !initialized {
+        return Ok(IdxOverview {
+            available: true,
+            executable: Some(executable.to_string_lossy().into_owned()),
+            version,
+            initialized: false,
+            index_status: None,
+            wiki_status: None,
+            raw_status: String::new(),
+            errors,
+        });
+    }
+
+    let index_result = run_idx_command(
+        &executable,
+        &root,
+        &["index".to_owned(), "--status".to_owned()],
+        IDX_COMMAND_TIMEOUT,
+        128 * 1024,
+    );
+    let wiki_result = run_idx_command(
+        &executable,
+        &root,
+        &["wiki".to_owned(), "status".to_owned(), "--candidate-limit".to_owned(), "50".to_owned()],
+        IDX_COMMAND_TIMEOUT,
+        128 * 1024,
+    );
+    let mut raw_parts = Vec::new();
+    let index_status = match index_result {
+        Ok(result) => {
+            let text = idx_result_text(&result);
+            if result.exit_code != Some(0) {
+                errors.push(non_empty_idx_error("idx index --status failed", &result));
+            }
+            if !text.trim().is_empty() {
+                raw_parts.push(text.clone());
+                Some(parse_idx_index_status(&text))
+            } else {
+                None
+            }
+        }
+        Err(error) => {
+            errors.push(error);
+            None
+        }
+    };
+    let wiki_status = match wiki_result {
+        Ok(result) => {
+            let text = idx_result_text(&result);
+            if result.exit_code != Some(0) {
+                errors.push(non_empty_idx_error("idx wiki status failed", &result));
+            }
+            if !text.trim().is_empty() {
+                raw_parts.push(text.clone());
+                Some(parse_idx_wiki_status(&text))
+            } else {
+                None
+            }
+        }
+        Err(error) => {
+            errors.push(error);
+            None
+        }
+    };
+
+    Ok(IdxOverview {
+        available: true,
+        executable: Some(executable.to_string_lossy().into_owned()),
+        version,
+        initialized: true,
+        index_status,
+        wiki_status,
+        raw_status: raw_parts.join("\n\n"),
+        errors,
+    })
+}
+
+fn non_empty_idx_error(prefix: &str, result: &IdxCommandResult) -> String {
+    let detail = result.stderr.trim();
+    if detail.is_empty() {
+        format!("{prefix} with exit code {}", result.exit_code.unwrap_or(-1))
+    } else {
+        format!("{prefix}: {detail}")
+    }
+}
+
+fn idx_result_text(result: &IdxCommandResult) -> String {
+    match (result.stdout.trim(), result.stderr.trim()) {
+        ("", "") => String::new(),
+        (stdout, "") => stdout.to_owned(),
+        ("", stderr) => stderr.to_owned(),
+        (stdout, stderr) => format!("{stdout}\n{stderr}"),
+    }
+}
+
+fn parse_idx_index_status(raw: &str) -> IdxParsedStatus {
+    let mut fields = BTreeMap::new();
+    let mut state = None;
+    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if let Some(snapshot) = line.strip_prefix("Snapshot: ") {
+            if let Some((identifier, suffix)) = snapshot.rsplit_once(" (") {
+                fields.insert("snapshot".to_owned(), identifier.trim().to_owned());
+                state = Some(suffix.trim_end_matches(')').trim().to_owned());
+            } else {
+                fields.insert("snapshot".to_owned(), snapshot.to_owned());
+            }
+            continue;
+        }
+        for segment in line.split('|').map(str::trim) {
+            let Some((key, value)) = segment.split_once(':') else {
+                continue;
+            };
+            fields.insert(normalize_idx_field_key(key), value.trim().to_owned());
+        }
+    }
+    IdxParsedStatus {
+        state,
+        fields,
+        raw: raw.trim().to_owned(),
+    }
+}
+
+fn parse_idx_wiki_status(raw: &str) -> IdxParsedStatus {
+    let mut fields = BTreeMap::new();
+    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()).take(1) {
+        for segment in line.split('|').map(str::trim) {
+            let Some((key, value)) = segment.split_once(':') else {
+                continue;
+            };
+            fields.insert(normalize_idx_field_key(key), value.trim().to_owned());
+        }
+    }
+    IdxParsedStatus {
+        state: None,
+        fields,
+        raw: raw.trim().to_owned(),
+    }
+}
+
+fn normalize_idx_field_key(value: &str) -> String {
+    let mut result = String::new();
+    let mut uppercase_next = false;
+    for character in value.trim().chars() {
+        if character.is_ascii_alphanumeric() {
+            if result.is_empty() {
+                result.push(character.to_ascii_lowercase());
+            } else if uppercase_next {
+                result.push(character.to_ascii_uppercase());
+            } else {
+                result.push(character.to_ascii_lowercase());
+            }
+            uppercase_next = false;
+        } else if !result.is_empty() {
+            uppercase_next = true;
+        }
+    }
+    result
+}
+
+fn non_empty_idx_argument(value: &str, label: &str, max_chars: usize) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{label} cannot be empty"));
+    }
+    if trimmed.chars().count() > max_chars || trimmed.contains('\0') {
+        return Err(format!("{label} is too long or contains invalid characters"));
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn optional_idx_argument(value: &Option<String>, label: &str, max_chars: usize) -> Result<Option<String>, String> {
+    value
+        .as_deref()
+        .map(|value| non_empty_idx_argument(value, label, max_chars))
+        .transpose()
+}
+
+fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
+    match query {
+        IdxQuery::Code {
+            query,
+            mode,
+            max_files,
+            path_prefix,
+            include_content,
+        } => {
+            let query = non_empty_idx_argument(query, "query", 4_000)?;
+            let max_files = (*max_files).clamp(1, MAX_IDX_MAX_FILES.min(50));
+            let mode = match mode {
+                IdxSearchMode::Hybrid => "hybrid",
+                IdxSearchMode::Semantic => "semantic",
+                IdxSearchMode::Lexical => "lexical",
+                IdxSearchMode::Symbol => "symbol",
+            };
+            let mut args = vec![
+                "search".to_owned(),
+                query,
+                "--max-files".to_owned(),
+                max_files.to_string(),
+                "--mode".to_owned(),
+                mode.to_owned(),
+            ];
+            if let Some(prefix) = optional_idx_argument(path_prefix, "path prefix", 1_024)? {
+                args.extend(["--path-prefix".to_owned(), prefix]);
+            }
+            if *include_content {
+                args.push("--include-content".to_owned());
+            }
+            Ok(args)
+        }
+        IdxQuery::Knowledge {
+            query,
+            limit,
+            include_secondary,
+            path_prefix,
+        } => {
+            let query = non_empty_idx_argument(query, "query", 4_000)?;
+            let mut args = vec![
+                "wiki".to_owned(),
+                "search".to_owned(),
+                query,
+                "--limit".to_owned(),
+                (*limit).clamp(1, MAX_IDX_LIMIT.min(20)).to_string(),
+            ];
+            if *include_secondary {
+                args.push("--include-secondary".to_owned());
+            }
+            if let Some(prefix) = optional_idx_argument(path_prefix, "path prefix", 1_024)? {
+                args.extend(["--path-prefix".to_owned(), prefix]);
+            }
+            Ok(args)
+        }
+        IdxQuery::Context {
+            query,
+            budget,
+            max_specs,
+            max_code,
+            max_tests,
+            include_secondary,
+            path_prefix,
+        } => {
+            let query = non_empty_idx_argument(query, "query", 4_000)?;
+            let mut args = vec![
+                "context".to_owned(),
+                query,
+                "--budget".to_owned(),
+                (*budget).clamp(200, 8_000).to_string(),
+                "--max-specs".to_owned(),
+                (*max_specs).clamp(1, 20).to_string(),
+                "--max-code".to_owned(),
+                (*max_code).clamp(1, 30).to_string(),
+                "--max-tests".to_owned(),
+                (*max_tests).clamp(1, 20).to_string(),
+            ];
+            if *include_secondary {
+                args.push("--include-secondary".to_owned());
+            }
+            if let Some(prefix) = optional_idx_argument(path_prefix, "path prefix", 1_024)? {
+                args.extend(["--path-prefix".to_owned(), prefix]);
+            }
+            Ok(args)
+        }
+    }
+}
+
+fn idx_inspect_args(request: &IdxInspectRequest) -> Result<Vec<String>, String> {
+    let path_prefix = optional_idx_argument(&request.path_prefix, "path prefix", 1_024)?;
+    match request.command {
+        IdxInspectCommand::Architecture => {
+            let mut args = vec!["architecture".to_owned()];
+            if let Some(prefix) = path_prefix {
+                args.extend(["--path-prefix".to_owned(), prefix]);
+            }
+            Ok(args)
+        }
+        IdxInspectCommand::Structure => {
+            let mut args = vec![
+                "structure".to_owned(),
+                "--max-depth".to_owned(),
+                request.depth.unwrap_or(2).clamp(1, 8).to_string(),
+                "--max-files".to_owned(),
+                request.max_files.unwrap_or(40).clamp(1, 300).to_string(),
+            ];
+            if let Some(prefix) = path_prefix {
+                args.extend(["--path-prefix".to_owned(), prefix]);
+            }
+            Ok(args)
+        }
+        IdxInspectCommand::Ast => Ok(vec![
+            "ast".to_owned(),
+            non_empty_idx_argument(
+                request.target.as_deref().unwrap_or_default(),
+                "AST file path",
+                2_048,
+            )?,
+            "--max-depth".to_owned(),
+            request.depth.unwrap_or(4).clamp(1, 8).to_string(),
+            "--max-nodes".to_owned(),
+            request.max_files.unwrap_or(100).clamp(1, 500).to_string(),
+        ]),
+        IdxInspectCommand::Explain => {
+            let mut args = vec![
+                "explain".to_owned(),
+                non_empty_idx_argument(
+                    request.target.as_deref().unwrap_or_default(),
+                    "symbol",
+                    1_024,
+                )?,
+            ];
+            if request.include_body == Some(true) {
+                args.extend(["--include-body".to_owned(), "--body-lines".to_owned(), "80".to_owned()]);
+            } else {
+                args.push("--signature-only".to_owned());
+            }
+            if let Some(prefix) = path_prefix {
+                args.extend(["--path-prefix".to_owned(), prefix]);
+            }
+            Ok(args)
+        }
+        IdxInspectCommand::Deps => {
+            let mut args = vec![
+                "deps".to_owned(),
+                non_empty_idx_argument(
+                    request.target.as_deref().unwrap_or_default(),
+                    "dependency target",
+                    2_048,
+                )?,
+                "--depth".to_owned(),
+                request.depth.unwrap_or(1).clamp(1, 6).to_string(),
+                "--direction".to_owned(),
+                "both".to_owned(),
+            ];
+            if request.show_edges == Some(true) {
+                args.push("--show-edges".to_owned());
+            }
+            if request.tests == Some(true) {
+                args.push("--tests".to_owned());
+            }
+            Ok(args)
+        }
+    }
+}
+
+fn idx_knowledge_args(request: &IdxKnowledgeRequest) -> Result<Vec<String>, String> {
+    let path = || optional_idx_argument(&request.path, "knowledge path", 2_048);
+    match request.action {
+        IdxKnowledgeAction::Show => Ok(vec![
+            "wiki".to_owned(),
+            "show".to_owned(),
+            "--path".to_owned(),
+            path()?.ok_or_else(|| "show requires a knowledge path".to_owned())?,
+        ]),
+        IdxKnowledgeAction::Record => {
+            if request.source_reviewed != Some(true) {
+                return Err("record requires sourceReviewed=true after reading and classifying the source".to_owned());
+            }
+            let classification = validated_idx_choice(
+                request.classification.as_deref(),
+                "classification",
+                &["spec", "spec-like", "meta-index", "design-only", "guide", "other"],
+            )?;
+            let source_path = path()?.ok_or_else(|| "record requires a knowledge path".to_owned())?;
+            let mut args = vec![
+                "wiki".to_owned(),
+                "record".to_owned(),
+                "--path".to_owned(),
+                source_path,
+                "--classification".to_owned(),
+                classification.to_owned(),
+            ];
+            if classification == "spec" || classification == "spec-like" {
+                let behavior = validated_idx_choice(
+                    request.behavior_type.as_deref(),
+                    "behavior type",
+                    &["as-is", "change", "mixed", "unknown"],
+                )?;
+                let lifecycle = validated_idx_choice(
+                    request.lifecycle.as_deref(),
+                    "lifecycle",
+                    &["active", "proposed", "historical", "superseded", "unknown"],
+                )?;
+                args.extend(["--type".to_owned(), behavior.to_owned(), "--lifecycle".to_owned(), lifecycle.to_owned()]);
+            }
+            if let Some(confidence) = request.confidence.as_deref() {
+                let confidence = validated_idx_choice(
+                    Some(confidence),
+                    "confidence",
+                    &["high", "medium", "low", "unknown"],
+                )?;
+                args.extend(["--confidence".to_owned(), confidence.to_owned()]);
+            }
+            if let Some(summary) = optional_idx_argument(&request.summary, "summary", 4_000)? {
+                args.extend(["--summary".to_owned(), summary]);
+            }
+            for topic in normalized_idx_strings(request.topics.as_deref(), "topic", 256, 20)? {
+                args.extend(["--topic".to_owned(), topic]);
+            }
+            Ok(args)
+        }
+        IdxKnowledgeAction::Verify => {
+            if request.evidence_reviewed != Some(true) {
+                return Err("verify requires evidenceReviewed=true after reviewing the source and relevant code/tests".to_owned());
+            }
+            Ok(vec![
+                "wiki".to_owned(),
+                "verify".to_owned(),
+                "--path".to_owned(),
+                path()?.ok_or_else(|| "verify requires a knowledge path".to_owned())?,
+            ])
+        }
+        IdxKnowledgeAction::Relate => {
+            if request.evidence_reviewed != Some(true) {
+                return Err("relate requires evidenceReviewed=true after reviewing concrete evidence".to_owned());
+            }
+            let source_path = path()?.ok_or_else(|| "relate requires a knowledge path".to_owned())?;
+            let relation_kind = validated_idx_choice(
+                request.relation_kind.as_deref(),
+                "relation kind",
+                &["implements", "tests", "related", "supersedes", "superseded-by"],
+            )?;
+            let relation_action = validated_idx_choice(
+                request.relation_action.as_deref(),
+                "relation action",
+                &["add", "remove"],
+            )?;
+            let targets = normalized_idx_strings(request.target_paths.as_deref(), "target path", 2_048, 30)?;
+            if targets.is_empty() {
+                return Err("relate requires at least one target path".to_owned());
+            }
+            let flag = match (relation_kind, relation_action) {
+                ("implements", "add") => "--add-code",
+                ("implements", "remove") => "--remove-code",
+                ("tests", "add") => "--add-test",
+                ("tests", "remove") => "--remove-test",
+                ("related", "add") => "--add-related-spec",
+                ("related", "remove") => "--remove-related-spec",
+                ("supersedes", "add") => "--add-supersedes",
+                ("supersedes", "remove") => "--remove-supersedes",
+                ("superseded-by", "add") => "--add-superseded-by",
+                ("superseded-by", "remove") => "--remove-superseded-by",
+                _ => return Err("unsupported relation".to_owned()),
+            };
+            let mut args = vec![
+                "wiki".to_owned(),
+                "relate".to_owned(),
+                "--path".to_owned(),
+                source_path,
+            ];
+            for target in targets {
+                args.extend([flag.to_owned(), target]);
+            }
+            Ok(args)
+        }
+        IdxKnowledgeAction::Remove => {
+            if request.metadata_only_confirmed != Some(true) {
+                return Err("remove requires metadataOnlyConfirmed=true; the source document itself is not deleted".to_owned());
+            }
+            Ok(vec![
+                "wiki".to_owned(),
+                "remove".to_owned(),
+                "--path".to_owned(),
+                path()?.ok_or_else(|| "remove requires a knowledge path".to_owned())?,
+            ])
+        }
+        IdxKnowledgeAction::Impact => {
+            let paths = normalized_idx_strings(request.paths.as_deref(), "changed path", 2_048, 100)?;
+            let mut args = vec!["wiki".to_owned(), "impact".to_owned()];
+            args.extend(paths);
+            if let Some(base) = optional_idx_argument(&request.base, "git base", 256)? {
+                args.extend(["--base".to_owned(), base]);
+            }
+            args.extend(["--semantic-limit".to_owned(), "10".to_owned()]);
+            if request.semantic == Some(false) {
+                args.push("--no-semantic".to_owned());
+            }
+            Ok(args)
+        }
+    }
+}
+
+fn validated_idx_choice<'a>(
+    value: Option<&'a str>,
+    label: &str,
+    allowed: &[&str],
+) -> Result<&'a str, String> {
+    let value = value.ok_or_else(|| format!("{label} is required"))?;
+    if allowed.contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!("invalid {label}"))
+    }
+}
+
+fn normalized_idx_strings(
+    values: Option<&[String]>,
+    label: &str,
+    max_chars: usize,
+    max_items: usize,
+) -> Result<Vec<String>, String> {
+    let mut result = Vec::new();
+    let mut seen = HashSet::new();
+    for value in values.unwrap_or_default().iter().take(max_items + 1) {
+        if result.len() >= max_items {
+            return Err(format!("too many {label} values"));
+        }
+        let value = non_empty_idx_argument(value, label, max_chars)?;
+        if seen.insert(value.clone()) {
+            result.push(value);
+        }
+    }
+    Ok(result)
+}
+
+fn idx_operation_args(kind: IdxMaintenanceKind) -> Vec<String> {
+    match kind {
+        IdxMaintenanceKind::Init => vec!["init".to_owned()],
+        IdxMaintenanceKind::Index => vec!["index".to_owned()],
+        IdxMaintenanceKind::FullIndex => vec!["index".to_owned(), "--full".to_owned()],
+        IdxMaintenanceKind::DryRun => vec!["index".to_owned(), "--dry-run".to_owned()],
+        IdxMaintenanceKind::Doctor => vec!["doctor".to_owned(), "--force".to_owned(), ".".to_owned()],
+        IdxMaintenanceKind::WikiAudit => vec![
+            "wiki".to_owned(),
+            "audit".to_owned(),
+            "--candidate-limit".to_owned(),
+            "100".to_owned(),
+        ],
+        IdxMaintenanceKind::WikiDiscover => vec![
+            "wiki".to_owned(),
+            "discover".to_owned(),
+            "--limit".to_owned(),
+            "200".to_owned(),
+        ],
+        IdxMaintenanceKind::WikiCatalog => vec!["wiki".to_owned(), "catalog".to_owned()],
+    }
+}
+
+fn idx_operation_snapshot(id: &str, operation: &IdxOperationRecord) -> IdxOperationSnapshot {
+    IdxOperationSnapshot {
+        id: id.to_owned(),
+        window_label: operation.window_label.clone(),
+        workspace: operation.workspace.to_string_lossy().into_owned(),
+        kind: operation.kind,
+        command: operation.command.clone(),
+        status: operation.status,
+        output: operation.output.clone(),
+        started_at_ms: operation.started_at_ms,
+        finished_at_ms: operation.finished_at_ms,
+        exit_code: operation.exit_code,
+    }
+}
+
+fn idx_operation_snapshots(
+    app: &AppHandle,
+    window_label: &str,
+    workspace: &Path,
+) -> Result<Vec<IdxOperationSnapshot>, String> {
+    let state = app.state::<IdxOperationState>();
+    let operations = state
+        .operations
+        .lock()
+        .map_err(|_| "IDX operation state is poisoned".to_owned())?;
+    let mut snapshots = operations
+        .iter()
+        .filter(|(_, operation)| operation.window_label == window_label && operation.workspace == workspace)
+        .map(|(id, operation)| idx_operation_snapshot(id, operation))
+        .collect::<Vec<_>>();
+    snapshots.sort_by_key(|snapshot| snapshot.started_at_ms);
+    Ok(snapshots)
+}
+
+fn prune_idx_operation_history(operations: &mut HashMap<String, IdxOperationRecord>, window_label: &str) {
+    let count = operations
+        .values()
+        .filter(|operation| operation.window_label == window_label)
+        .count();
+    if count < MAX_IDX_OPERATIONS_PER_WINDOW {
+        return;
+    }
+    let mut completed = operations
+        .iter()
+        .filter(|(_, operation)| operation.window_label == window_label && operation.status != IdxOperationStatus::Running)
+        .map(|(id, operation)| (id.clone(), operation.started_at_ms))
+        .collect::<Vec<_>>();
+    completed.sort_by_key(|(_, started_at_ms)| *started_at_ms);
+    let remove_count = count - MAX_IDX_OPERATIONS_PER_WINDOW + 1;
+    for (id, _) in completed.into_iter().take(remove_count) {
+        operations.remove(&id);
+    }
+}
+
+fn start_idx_operation(app: AppHandle, request: IdxOperationRequest) -> Result<IdxOperationSnapshot, String> {
+    let root = canonical_workspace(Path::new(&request.workspace))?;
+    if request.kind != IdxMaintenanceKind::Init && !root.join(".indexer-cli").is_dir() {
+        return Err("this project is not indexed yet; initialize IDX first".to_owned());
+    }
+    let executable = idx_executable()?;
+    let args = idx_operation_args(request.kind);
+    let command_label = format!("idx {}", args.join(" "));
+    let mut command = idx_process_command(&executable, &root, &args);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("failed to start {command_label}: {error}"))?;
+    let process_id = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "IDX operation stdout pipe is unavailable".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "IDX operation stderr pipe is unavailable".to_owned())?;
+    let state = app.state::<IdxOperationState>();
+    let id = format!(
+        "idx-operation-{}",
+        state.next_id.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
+    );
+    let (stop_tx, stop_rx) = mpsc::channel();
+    let exited = Arc::new((Mutex::new(false), Condvar::new()));
+    {
+        let mut operations = state
+            .operations
+            .lock()
+            .map_err(|_| "IDX operation state is poisoned".to_owned())?;
+        if operations.values().any(|operation| {
+            operation.workspace == root && operation.status == IdxOperationStatus::Running
+        }) {
+            force_kill_idx_process(process_id, &mut child);
+            let _ = child.wait();
+            return Err("another IDX maintenance operation is already running for this project".to_owned());
+        }
+        prune_idx_operation_history(&mut operations, &request.window_label);
+        operations.insert(
+            id.clone(),
+            IdxOperationRecord {
+                window_label: request.window_label.clone(),
+                workspace: root.clone(),
+                kind: request.kind,
+                command: command_label,
+                status: IdxOperationStatus::Running,
+                output: String::new(),
+                started_at_ms: idx_now_ms(),
+                finished_at_ms: None,
+                exit_code: None,
+                stop_tx: Some(stop_tx),
+                exited: exited.clone(),
+            },
+        );
+    }
+
+    let stdout_app = app.clone();
+    let stdout_id = id.clone();
+    let stdout_window = request.window_label.clone();
+    thread::spawn(move || stream_idx_operation_output(stdout_app, stdout_window, stdout_id, "stdout", stdout));
+    let stderr_app = app.clone();
+    let stderr_id = id.clone();
+    let stderr_window = request.window_label.clone();
+    thread::spawn(move || stream_idx_operation_output(stderr_app, stderr_window, stderr_id, "stderr", stderr));
+    let supervisor_app = app.clone();
+    let supervisor_id = id.clone();
+    let supervisor_window = request.window_label.clone();
+    thread::spawn(move || {
+        supervise_idx_operation(
+            supervisor_app,
+            supervisor_window,
+            supervisor_id,
+            child,
+            process_id,
+            stop_rx,
+            exited,
+        )
+    });
+
+    let operations = state
+        .operations
+        .lock()
+        .map_err(|_| "IDX operation state is poisoned".to_owned())?;
+    operations
+        .get(&id)
+        .map(|operation| idx_operation_snapshot(&id, operation))
+        .ok_or_else(|| "IDX operation disappeared during startup".to_owned())
+}
+
+fn stream_idx_operation_output<R: Read + Send + 'static>(
+    app: AppHandle,
+    window_label: String,
+    operation_id: String,
+    stream: &'static str,
+    mut reader: R,
+) {
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        let chunk = String::from_utf8_lossy(&buffer[..read]).into_owned();
+        append_idx_operation_output(&app, &operation_id, &chunk);
+        let _ = app.emit_to(
+            &window_label,
+            "idx://operation-output",
+            IdxOperationOutputEvent {
+                operation_id: operation_id.clone(),
+                stream: stream.to_owned(),
+                chunk,
+            },
+        );
+    }
+}
+
+fn append_idx_operation_output(app: &AppHandle, operation_id: &str, chunk: &str) {
+    let state = app.state::<IdxOperationState>();
+    let Ok(mut operations) = state.operations.lock() else {
+        return;
+    };
+    let Some(operation) = operations.get_mut(operation_id) else {
+        return;
+    };
+    operation.output.push_str(chunk);
+    if operation.output.len() > MAX_IDX_LOG_BYTES {
+        let excess = operation.output.len() - MAX_IDX_LOG_BYTES;
+        let mut start = excess;
+        while start < operation.output.len() && !operation.output.is_char_boundary(start) {
+            start += 1;
+        }
+        operation.output.drain(..start);
+    }
+}
+
+fn supervise_idx_operation(
+    app: AppHandle,
+    window_label: String,
+    operation_id: String,
+    mut child: Child,
+    process_id: u32,
+    stop_rx: mpsc::Receiver<()>,
+    exited: ExitSignal,
+) {
+    let started = Instant::now();
+    let mut cancelled = false;
+    let mut timed_out = false;
+    let mut force_at = None;
+    let status = loop {
+        if !cancelled && stop_rx.try_recv().is_ok() {
+            cancelled = true;
+            interrupt_idx_process(process_id);
+            force_at = Some(Instant::now() + IDX_STOP_GRACE);
+        }
+        if !timed_out && started.elapsed() >= IDX_OPERATION_TIMEOUT {
+            timed_out = true;
+            force_kill_idx_process(process_id, &mut child);
+        } else if force_at.is_some_and(|deadline| Instant::now() >= deadline) {
+            force_at = None;
+            force_kill_idx_process(process_id, &mut child);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => thread::sleep(POLL_INTERVAL),
+            Err(_) => break None,
+        }
+    };
+    let exit_code = status.as_ref().and_then(ExitStatus::code);
+    let final_status = if timed_out {
+        IdxOperationStatus::TimedOut
+    } else if cancelled {
+        IdxOperationStatus::Cancelled
+    } else if status.as_ref().is_some_and(ExitStatus::success) {
+        IdxOperationStatus::Succeeded
+    } else {
+        IdxOperationStatus::Failed
+    };
+    let state = app.state::<IdxOperationState>();
+    if let Ok(mut operations) = state.operations.lock() {
+        if let Some(operation) = operations.get_mut(&operation_id) {
+            operation.status = final_status;
+            operation.finished_at_ms = Some(idx_now_ms());
+            operation.exit_code = exit_code;
+            operation.stop_tx = None;
+        }
+    }
+    let _ = app.emit_to(
+        &window_label,
+        "idx://operation-exit",
+        IdxOperationExitEvent {
+            operation_id,
+            status: final_status,
+            exit_code,
+        },
+    );
+    let (lock, wake) = &*exited;
+    if let Ok(mut done) = lock.lock() {
+        *done = true;
+        wake.notify_all();
+    }
+}
+
+fn stop_idx_operation(app: &AppHandle, window_label: &str, operation_id: &str) -> Result<(), String> {
+    let (stop_tx, exited) = {
+        let state = app.state::<IdxOperationState>();
+        let operations = state
+            .operations
+            .lock()
+            .map_err(|_| "IDX operation state is poisoned".to_owned())?;
+        let operation = operations
+            .get(operation_id)
+            .ok_or_else(|| "IDX operation no longer exists".to_owned())?;
+        if operation.window_label != window_label {
+            return Err("IDX operation belongs to another window".to_owned());
+        }
+        if operation.status != IdxOperationStatus::Running {
+            return Ok(());
+        }
+        (operation.stop_tx.clone(), operation.exited.clone())
+    };
+    if let Some(stop_tx) = stop_tx {
+        let _ = stop_tx.send(());
+    }
+    if wait_for_exit(&exited, IDX_STOP_GRACE + Duration::from_secs(5))? {
+        Ok(())
+    } else {
+        Err("timed out waiting for IDX operation to stop".to_owned())
+    }
+}
+
+fn stop_idx_operations_for_workspace(
+    app: &AppHandle,
+    window_label: &str,
+    workspace: &Path,
+) -> Result<(), String> {
+    let ids = {
+        let state = app.state::<IdxOperationState>();
+        let operations = state
+            .operations
+            .lock()
+            .map_err(|_| "IDX operation state is poisoned".to_owned())?;
+        operations
+            .iter()
+            .filter(|(_, operation)| {
+                operation.window_label == window_label
+                    && operation.workspace == workspace
+                    && operation.status == IdxOperationStatus::Running
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    };
+    for id in ids {
+        let _ = stop_idx_operation(app, window_label, &id);
+    }
+    Ok(())
+}
+
+fn stop_idx_operations_for_window(app: &AppHandle, window_label: &str) {
+    let operations = {
+        let state = app.state::<IdxOperationState>();
+        let Ok(operations) = state.operations.lock() else {
+            return;
+        };
+        operations
+            .iter()
+            .filter(|(_, operation)| {
+                operation.window_label == window_label && operation.status == IdxOperationStatus::Running
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    };
+    for id in operations {
+        let _ = stop_idx_operation(app, window_label, &id);
+    }
+    if let Ok(mut operations) = app.state::<IdxOperationState>().operations.lock() {
+        operations.retain(|_, operation| operation.window_label != window_label);
+    }
+}
+
+fn stop_all_idx_operations(app: &AppHandle) {
+    let targets = {
+        let state = app.state::<IdxOperationState>();
+        let Ok(operations) = state.operations.lock() else {
+            return;
+        };
+        operations
+            .iter()
+            .filter(|(_, operation)| operation.status == IdxOperationStatus::Running)
+            .map(|(id, operation)| (operation.window_label.clone(), id.clone()))
+            .collect::<Vec<_>>()
+    };
+    for (window_label, id) in targets {
+        let _ = stop_idx_operation(app, &window_label, &id);
+    }
+}
+
 fn package_scripts_from(workspace: &Path) -> Result<PackageScriptsSnapshot, String> {
     let root = canonical_workspace(workspace)?;
     let requested = root.join("package.json");
@@ -3386,18 +4773,7 @@ fn read_project_tasks_from(
     let directory = canonical_project_directory(&root, &directory)?;
     let path = directory.join("tasks.jsonc");
     if path.exists() {
-        return read_task_document_path(&root, &path, max_bytes, true);
-    }
-
-    // One-time migration from the original strict-JSON desktop task file.
-    let legacy = directory.join("tasks.json");
-    if legacy.exists() {
-        let mut document = read_task_document_path(&root, &legacy, max_bytes, false)?;
-        document.schema = Some(PROJECT_TASKS_SCHEMA_URL.to_owned());
-        write_project_tasks_to(workspace, &document)?;
-        fs::remove_file(&legacy)
-            .map_err(|error| format!("failed to remove migrated .pi/tasks.json: {error}"))?;
-        return Ok(document);
+        return read_task_document_path(&root, &path, max_bytes);
     }
 
     Ok(empty_task_document())
@@ -3407,62 +4783,39 @@ fn read_task_document_path(
     root: &Path,
     path: &Path,
     max_bytes: u64,
-    jsonc: bool,
 ) -> Result<ProjectTaskDocument, String> {
     let canonical = fs::canonicalize(&path)
         .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
     if !canonical.starts_with(&root) {
-        return Err(format!(
-            "{} resolves outside the workspace",
-            task_file_label(jsonc)
-        ));
+        return Err(".pi/tasks.jsonc resolves outside the workspace".to_owned());
     }
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?;
     if !metadata.is_file() {
-        return Err(format!("{} is not a file", task_file_label(jsonc)));
+        return Err(".pi/tasks.jsonc is not a file".to_owned());
     }
     if metadata.len() > max_bytes {
-        return Err(format!(
-            "{} is too large (maximum 1 MB)",
-            task_file_label(jsonc)
-        ));
+        return Err(".pi/tasks.jsonc is too large (maximum 1 MB)".to_owned());
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     fs::File::open(&canonical)
-        .map_err(|error| format!("failed to open {}: {error}", task_file_label(jsonc)))?
+        .map_err(|error| format!("failed to open .pi/tasks.jsonc: {error}"))?
         .take(max_bytes + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("failed to read {}: {error}", task_file_label(jsonc)))?;
+        .map_err(|error| format!("failed to read .pi/tasks.jsonc: {error}"))?;
     if bytes.len() as u64 > max_bytes {
-        return Err(format!(
-            "{} grew beyond the 1 MB limit",
-            task_file_label(jsonc)
-        ));
+        return Err(".pi/tasks.jsonc grew beyond the 1 MB limit".to_owned());
     }
-    let mut document: ProjectTaskDocument = if jsonc {
-        let source = std::str::from_utf8(&bytes)
-            .map_err(|error| format!("invalid .pi/tasks.jsonc UTF-8: {error}"))?;
-        let normalized = normalize_jsonc(source)?;
-        serde_json::from_str(&normalized)
-            .map_err(|error| format!("invalid .pi/tasks.jsonc: {error}"))?
-    } else {
-        serde_json::from_slice(&bytes)
-            .map_err(|error| format!("invalid .pi/tasks.json: {error}"))?
-    };
+    let source = std::str::from_utf8(&bytes)
+        .map_err(|error| format!("invalid .pi/tasks.jsonc UTF-8: {error}"))?;
+    let normalized = normalize_jsonc(source)?;
+    let mut document: ProjectTaskDocument = serde_json::from_str(&normalized)
+        .map_err(|error| format!("invalid .pi/tasks.jsonc: {error}"))?;
     if document.schema.is_none() {
         document.schema = Some(PROJECT_TASKS_SCHEMA_URL.to_owned());
     }
     validate_task_document(&document)?;
     Ok(document)
-}
-
-fn task_file_label(jsonc: bool) -> &'static str {
-    if jsonc {
-        ".pi/tasks.jsonc"
-    } else {
-        ".pi/tasks.json"
-    }
 }
 
 fn normalize_jsonc(source: &str) -> Result<String, String> {
@@ -4231,6 +5584,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(AcpProcessState::default())
         .manage(PackageTerminalState::default())
+        .manage(IdxOperationState::default())
         .setup(|app| {
             app.manage(AttachmentPathState::new(app.handle()));
             Ok(())
@@ -4270,6 +5624,14 @@ pub fn run() {
             home_file_exists,
             read_user_config,
             write_user_config,
+            idx_overview,
+            idx_query,
+            idx_inspect,
+            idx_knowledge,
+            idx_operation_list,
+            idx_operation_start,
+            idx_operation_stop,
+            idx_operation_stop_workspace,
             package_scripts,
             package_terminal_list,
             package_terminal_start,
@@ -4304,6 +5666,7 @@ pub fn run() {
                 }
                 remove_process_slot(&state, &window_label);
                 stop_package_terminals_for_window(&handle, &window_label);
+                stop_idx_operations_for_window(&handle, &window_label);
             });
         }
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
@@ -4325,8 +5688,10 @@ pub fn run() {
                             );
                         }
                         stop_package_terminals_for_window(&handle, &window_label);
+                        stop_idx_operations_for_window(&handle, &window_label);
                     }
                     stop_all_package_terminals(&handle);
+                    stop_all_idx_operations(&handle);
                     handle.exit(code.unwrap_or(0));
                 });
             }
@@ -4337,6 +5702,39 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serializes_idx_operation_events_for_frontend_payloads() {
+        let output = serde_json::to_value(IdxOperationOutputEvent {
+            operation_id: "idx-operation-1".to_owned(),
+            stream: "stdout".to_owned(),
+            chunk: "indexed\n".to_owned(),
+        })
+        .expect("serialize IDX output event");
+        assert_eq!(
+            output,
+            serde_json::json!({
+                "operationId": "idx-operation-1",
+                "stream": "stdout",
+                "chunk": "indexed\n",
+            })
+        );
+
+        let exit = serde_json::to_value(IdxOperationExitEvent {
+            operation_id: "idx-operation-1".to_owned(),
+            status: IdxOperationStatus::Succeeded,
+            exit_code: Some(0),
+        })
+        .expect("serialize IDX exit event");
+        assert_eq!(
+            exit,
+            serde_json::json!({
+                "operationId": "idx-operation-1",
+                "status": "succeeded",
+                "exitCode": 0,
+            })
+        );
+    }
 
     #[test]
     fn validates_acp_payloads_without_materializing_the_json_object() {
@@ -4453,6 +5851,152 @@ mod tests {
         );
         assert!(validated_terminal_size(1, 30).is_err());
         assert!(validated_terminal_size(120, 0).is_err());
+    }
+
+    #[test]
+    fn parses_idx_overview_status_fields() {
+        let index = parse_idx_index_status(
+            "Snapshot: abc-123 (completed)\nCreated: 1789035207186  |  Git ref: deadbeef\nFiles: 743  |  Symbols: 7949  |  Chunks: 451  |  Dependencies: 3512\nLanguages: typescript: 690, svelte: 29\n",
+        );
+        assert_eq!(index.state.as_deref(), Some("completed"));
+        assert_eq!(index.fields.get("snapshot").map(String::as_str), Some("abc-123"));
+        assert_eq!(index.fields.get("gitRef").map(String::as_str), Some("deadbeef"));
+        assert_eq!(index.fields.get("files").map(String::as_str), Some("743"));
+
+        let wiki = parse_idx_wiki_status(
+            "primary specs: 44 (43 current/proposed) | fresh: 36 | needs review: 7 | unresolved refs: 8\nRecommendation: review changed inputs.\n",
+        );
+        assert_eq!(
+            wiki.fields.get("primarySpecs").map(String::as_str),
+            Some("44 (43 current/proposed)")
+        );
+        assert_eq!(wiki.fields.get("needsReview").map(String::as_str), Some("7"));
+        assert_eq!(wiki.fields.get("unresolvedRefs").map(String::as_str), Some("8"));
+    }
+
+    #[test]
+    fn builds_typed_idx_query_arguments() {
+        let args = idx_query_args(&IdxQuery::Code {
+            query: "workspace sidebar".to_owned(),
+            mode: IdxSearchMode::Semantic,
+            max_files: 500,
+            path_prefix: Some("desktop/src".to_owned()),
+            include_content: false,
+        })
+        .expect("code query args");
+        assert_eq!(
+            args,
+            vec![
+                "search",
+                "workspace sidebar",
+                "--max-files",
+                "50",
+                "--mode",
+                "semantic",
+                "--path-prefix",
+                "desktop/src",
+            ]
+        );
+
+        let context = idx_query_args(&IdxQuery::Context {
+            query: "task lifecycle".to_owned(),
+            budget: 1400,
+            max_specs: 4,
+            max_code: 6,
+            max_tests: 4,
+            include_secondary: false,
+            path_prefix: None,
+        })
+        .expect("context args");
+        assert_eq!(context[0..2], ["context", "task lifecycle"]);
+
+        let decoded: IdxQueryRequest = serde_json::from_value(serde_json::json!({
+            "workspace": "/workspace",
+            "query": {
+                "kind": "code",
+                "query": "sidebar",
+                "mode": "hybrid",
+                "maxFiles": 5,
+                "pathPrefix": "desktop/src"
+            }
+        }))
+        .expect("camelCase query request");
+        assert!(matches!(decoded.query, IdxQuery::Code { max_files: 5, .. }));
+    }
+
+    #[test]
+    fn builds_typed_idx_inspection_arguments() {
+        let structure = idx_inspect_args(&IdxInspectRequest {
+            workspace: "/workspace".to_owned(),
+            command: IdxInspectCommand::Structure,
+            target: None,
+            path_prefix: Some("desktop/src".to_owned()),
+            depth: Some(3),
+            max_files: Some(80),
+            include_body: None,
+            show_edges: None,
+            tests: None,
+        })
+        .expect("structure args");
+        assert_eq!(
+            structure,
+            vec![
+                "structure",
+                "--max-depth",
+                "3",
+                "--max-files",
+                "80",
+                "--path-prefix",
+                "desktop/src",
+            ]
+        );
+
+        let explain = idx_inspect_args(&IdxInspectRequest {
+            workspace: "/workspace".to_owned(),
+            command: IdxInspectCommand::Explain,
+            target: Some("WorkspaceSidebar".to_owned()),
+            path_prefix: None,
+            depth: None,
+            max_files: None,
+            include_body: Some(false),
+            show_edges: None,
+            tests: None,
+        })
+        .expect("explain args");
+        assert!(explain.ends_with(&["--signature-only".to_owned()]));
+    }
+
+    #[test]
+    fn idx_knowledge_mutations_require_review_confirmations() {
+        let base = IdxKnowledgeRequest {
+            workspace: "/workspace".to_owned(),
+            action: IdxKnowledgeAction::Verify,
+            path: Some("specs/behavior.md".to_owned()),
+            classification: None,
+            behavior_type: None,
+            lifecycle: None,
+            confidence: None,
+            summary: None,
+            topics: None,
+            target_paths: None,
+            relation_kind: None,
+            relation_action: None,
+            source_reviewed: None,
+            evidence_reviewed: None,
+            metadata_only_confirmed: None,
+            paths: None,
+            base: None,
+            semantic: None,
+        };
+        assert!(idx_knowledge_args(&base).is_err());
+        let verified = IdxKnowledgeRequest {
+            evidence_reviewed: Some(true),
+            ..base
+        };
+        assert_eq!(
+            idx_knowledge_args(&verified).expect("verified args"),
+            vec!["wiki", "verify", "--path", "specs/behavior.md"]
+        );
     }
 
     #[test]
@@ -5019,25 +6563,19 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_tasks_json_to_jsonc_once() {
-        let workspace = temporary_workspace("legacy-task-migration");
+    fn ignores_unsupported_tasks_json() {
+        let workspace = temporary_workspace("unsupported-task-json");
         fs::create_dir(workspace.join(".pi")).expect("create .pi directory");
-        let mut legacy = sample_task_document();
-        legacy.schema = None;
         fs::write(
             workspace.join(".pi/tasks.json"),
-            serde_json::to_vec_pretty(&legacy).expect("encode legacy task document"),
+            serde_json::to_vec_pretty(&sample_task_document()).expect("encode unsupported task document"),
         )
-        .expect("write legacy task document");
+        .expect("write unsupported task document");
 
-        let document = read_project_tasks_from(&workspace, 1024 * 1024).expect("migrate tasks");
-        assert_eq!(document.tasks, legacy.tasks);
-        assert_eq!(document.schema.as_deref(), Some(PROJECT_TASKS_SCHEMA_URL));
-        assert!(!workspace.join(".pi/tasks.json").exists());
-        let migrated = workspace.join(".pi/tasks.jsonc");
-        assert!(migrated.is_file());
-        let migrated_text = fs::read_to_string(migrated).expect("read migrated task document");
-        assert!(migrated_text.contains(PROJECT_TASKS_SCHEMA_URL));
+        let document = read_project_tasks_from(&workspace, 1024 * 1024).expect("read tasks");
+        assert_eq!(document, empty_task_document());
+        assert!(workspace.join(".pi/tasks.json").is_file());
+        assert!(!workspace.join(".pi/tasks.jsonc").exists());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

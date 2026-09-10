@@ -5,6 +5,7 @@
   import { openExternalHref } from "../lib/external-links";
   import { renderMarkdown } from "../lib/markdown";
   import { renderMermaidDiagram } from "../lib/mermaid";
+  import type { ProjectFileLineRange } from "../lib/project-files";
 
   let {
     text,
@@ -28,7 +29,7 @@
     headingAnchors?: boolean;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
-    onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
@@ -124,7 +125,13 @@
       const link = document.createElement("a");
       link.href = "#";
       link.title = `${projectPath ? "Preview" : "Open"} ${path}`;
-      if (projectPath) link.dataset.projectFile = path;
+      if (projectPath) {
+        link.dataset.projectFile = path;
+        const startLine = candidate.dataset.projectFileStartLine;
+        const endLine = candidate.dataset.projectFileEndLine;
+        if (startLine) link.dataset.projectFileStartLine = startLine;
+        if (endLine) link.dataset.projectFileEndLine = endLine;
+      }
       else link.dataset.localFile = path;
       while (candidate.firstChild) link.append(candidate.firstChild);
       candidate.replaceWith(link);
@@ -329,7 +336,17 @@
       if (projectFileLink && node.contains(projectFileLink)) {
         event.preventDefault();
         const path = projectFileLink.getAttribute("data-project-file");
-        if (path) void onOpenProjectFile?.(path);
+        if (path) {
+          const startLine = Number(projectFileLink.getAttribute("data-project-file-start-line"));
+          const endLine = Number(projectFileLink.getAttribute("data-project-file-end-line"));
+          const range = Number.isSafeInteger(startLine) && startLine > 0
+            ? {
+                startLine,
+                endLine: Number.isSafeInteger(endLine) && endLine > 0 ? endLine : startLine,
+              }
+            : undefined;
+          void onOpenProjectFile?.(path, range);
+        }
         return;
       }
 

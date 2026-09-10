@@ -16,7 +16,7 @@ Add read-only, live views of the active session's Todos and Subagents to Pix Des
 
 ## Scope
 
-- Add a third left-sidebar tab named **Session**.
+- Add a left-sidebar activity view named **Session**.
 - Use the `Activity` icon for the Session tab and `ListChecks` for its Todos section.
 - Use `Workflow` for the Subagents section in the same tab.
 - Bridge versioned, session-scoped extension state from pi RPC through a private ACP notification.

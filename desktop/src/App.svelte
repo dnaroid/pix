@@ -30,6 +30,7 @@
     applyDeferredToolResult,
     applySessionUpdates,
     emptyTranscript,
+    finalizeTranscriptActivity,
     hydrateTranscriptAttachment,
     markDeferredToolResults,
     setToolResultLoading,
@@ -127,7 +128,7 @@
     updateSessionSubagentSnapshots,
     type SessionSubagentSnapshot,
   } from "./lib/session-subagents";
-  import type { ProjectFilePreview } from "./lib/project-files";
+  import type { ProjectFileLineRange, ProjectFilePreview } from "./lib/project-files";
   import {
     DEFAULT_EXTERNAL_EDITOR,
     externalEditorLabel,
@@ -193,7 +194,7 @@
     type: ProjectTaskType;
   };
   type PreviewTarget =
-    | { kind: "file"; file: ProjectFilePreview }
+    | { kind: "file"; file: ProjectFilePreview; lineRange?: ProjectFileLineRange }
     | { kind: "attachment"; attachment: Attachment };
   type PreviewEntry = PreviewTarget & {
     id: number;
@@ -284,7 +285,7 @@
   let previewSequence = 0;
   let attachmentDraftGeneration = 0;
   let attachmentAddQueue = Promise.resolve();
-  let pendingSessionUpdates: Array<{ sessionId: string; update: SessionUpdate }> = [];
+  let pendingSessionUpdates: Array<{ sessionId: string; update: SessionUpdate; occurredAtMs: number }> = [];
   let sessionUpdateFrame = 0;
   let transcriptScrollFrame = 0;
   let sessionHistoryGeneration = 0;
@@ -304,6 +305,7 @@
   const runtimeLoadsBySessionId = new Map<string, Promise<void>>();
   const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
   const promptRunsBySessionId = new Map<string, Promise<void>>();
+  const promptEndedAtBySessionId = new Map<string, number>();
   const autoFlushInProgress = new Set<string>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
@@ -538,6 +540,7 @@
     runtimeReadySessionIds.clear();
     runtimeLoadsBySessionId.clear();
     configOptionsBySessionId.clear();
+    promptEndedAtBySessionId.clear();
     transcriptBySessionId.clear();
     sessionPrewarmGeneration += 1;
     todoSnapshots = new Map();
@@ -579,7 +582,7 @@
         : session);
       return;
     }
-    pendingSessionUpdates.push({ sessionId: notification.sessionId, update });
+    pendingSessionUpdates.push({ sessionId: notification.sessionId, update, occurredAtMs: Date.now() });
     if (sessionUpdateFrame) return;
     sessionUpdateFrame = requestAnimationFrame(flushSessionUpdates);
   }
@@ -591,18 +594,27 @@
     if (queued.length === 0) return;
 
     const activeId = activeSessionId;
-    const updatesBySession = new Map<string, SessionUpdate[]>();
+    const updatesBySession = new Map<string, Array<{ update: SessionUpdate; occurredAtMs: number }>>();
     for (const entry of queued) {
       const updates = updatesBySession.get(entry.sessionId);
-      if (updates) updates.push(entry.update);
-      else updatesBySession.set(entry.sessionId, [entry.update]);
+      if (updates) updates.push({ update: entry.update, occurredAtMs: entry.occurredAtMs });
+      else updatesBySession.set(entry.sessionId, [{ update: entry.update, occurredAtMs: entry.occurredAtMs }]);
     }
 
-    for (const [sessionId, updates] of updatesBySession) {
+    for (const [sessionId, entries] of updatesBySession) {
       const current = sessionId === activeId
         ? transcript
         : transcriptBySessionId.get(sessionId) ?? emptyTranscript;
-      const nextTranscript = applySessionUpdates(current, updates);
+      let nextTranscript = applySessionUpdates(
+        current,
+        entries.map((entry) => entry.update),
+        entries.map((entry) => entry.occurredAtMs),
+      );
+      const promptEndedAtMs = promptEndedAtBySessionId.get(sessionId);
+      if (promptEndedAtMs !== undefined && !runningSessionIds.has(sessionId)) {
+        nextTranscript = finalizeTranscriptActivity(nextTranscript, promptEndedAtMs);
+        promptEndedAtBySessionId.delete(sessionId);
+      }
       transcriptBySessionId.set(sessionId, nextTranscript);
       if (sessionId === activeId) transcript = nextTranscript;
     }
@@ -733,6 +745,7 @@
     nextQueue.delete(sessionId);
     queueItemsBySession = nextQueue;
     promptRunsBySessionId.delete(sessionId);
+    promptEndedAtBySessionId.delete(sessionId);
     autoFlushInProgress.delete(sessionId);
   }
 
@@ -741,6 +754,17 @@
     if (running) next.add(sessionId);
     else next.delete(sessionId);
     runningSessionIds = next;
+  }
+
+  function finalizeSessionTranscriptActivity(sessionId: string, endedAtMs: number): void {
+    const current = sessionId === activeSessionId
+      ? transcript
+      : transcriptBySessionId.get(sessionId);
+    if (!current) return;
+    const next = finalizeTranscriptActivity(current, endedAtMs);
+    if (next === current) return;
+    transcriptBySessionId.set(sessionId, next);
+    if (sessionId === activeSessionId) transcript = next;
   }
 
   function runPromptRequest(
@@ -752,6 +776,7 @@
     if (promptRunsBySessionId.has(sessionId)) {
       return Promise.reject(new Error("A prompt is already running for this conversation."));
     }
+    promptEndedAtBySessionId.delete(sessionId);
     setSessionPromptRunning(sessionId, true);
     let tracked!: Promise<void>;
     tracked = requestClient.prompt(sessionId, blocks, fileImages)
@@ -759,7 +784,10 @@
       .finally(() => {
         if (promptRunsBySessionId.get(sessionId) !== tracked) return;
         promptRunsBySessionId.delete(sessionId);
+        const endedAtMs = Date.now();
+        promptEndedAtBySessionId.set(sessionId, endedAtMs);
         setSessionPromptRunning(sessionId, false);
+        finalizeSessionTranscriptActivity(sessionId, endedAtMs);
         queueMicrotask(() => void flushAutoQueue(sessionId));
       });
     promptRunsBySessionId.set(sessionId, tracked);
@@ -1136,10 +1164,15 @@
     sessionRefreshGeneration += 1;
     try {
       if (workspace) {
-        await invoke("package_terminal_stop_workspace", {
-          windowLabel: getCurrentWindow().label,
-          workspace,
-        }).catch(reportError);
+        const windowLabel = getCurrentWindow().label;
+        await Promise.allSettled([
+          invoke("package_terminal_stop_workspace", { windowLabel, workspace }),
+          invoke("idx_operation_stop_workspace", { windowLabel, workspace }),
+        ]).then((results) => {
+          for (const result of results) {
+            if (result.status === "rejected") reportError(result.reason);
+          }
+        });
       }
       await closeWorkspaceSessions();
       workspace = selected;
@@ -1831,6 +1864,79 @@
       reportError(error);
     } finally {
       operationRunning = false;
+    }
+  }
+
+  const KNOWLEDGE_REFRESH_PROMPT = [
+    "Update the project knowledge base to match the current repository.",
+    "Audit IDX knowledge status, discover new or changed knowledge documents, and review current working-tree impact.",
+    "For every stale, unverified, uncovered, or newly discovered current/proposed contract, read the primary source and verify it against relevant implementation and tests before changing knowledge metadata.",
+    "Update existing primary specs when behavior changed, or create a focused primary spec when no current contract exists. Record, relate, and verify metadata only after semantic evidence review.",
+    "Finish by re-running knowledge status/audit and aim for needs review = 0, unverified = 0, uncovered active as-is = 0, and new/changed candidates = 0 when the evidence supports it.",
+    "Do not add or preserve legacy compatibility unless current product requirements explicitly demand it. Treat legacy behavior found in active code/specs as a mismatch to investigate, not as automatically supported behavior.",
+    "Do not silence unresolved path references by deleting useful runtime or project-local contract paths; fix only genuinely invalid references and explain the rest.",
+  ].join("\n\n");
+
+  async function refreshKnowledgeBaseInNewSession(): Promise<void> {
+    if (!client || !canUseSession) return;
+    const requestClient = client;
+    const requestWorkspace = workspace;
+    closeProjectSelector();
+    closeSessionSelector();
+    operationRunning = true;
+    errorMessage = null;
+    let createdSessionId: string | undefined;
+    let activated = false;
+    try {
+      const response = await requestClient.newSession(requestWorkspace);
+      createdSessionId = response.sessionId;
+      if (requestClient !== client || requestWorkspace !== workspace) {
+        await requestClient.closeSession(response.sessionId).catch(() => undefined);
+        return;
+      }
+
+      await ensureSessionRuntime(requestClient, response.sessionId, requestWorkspace);
+      if (requestClient !== client || requestWorkspace !== workspace) {
+        await requestClient.closeSession(response.sessionId).catch(() => undefined);
+        forgetSessionRuntime(response.sessionId);
+        return;
+      }
+      if (!runtimeReadySessionIds.has(response.sessionId)) {
+        await requestClient.closeSession(response.sessionId).catch(() => undefined);
+        forgetSessionRuntime(response.sessionId);
+        errorMessage = "Could not start a new session for updating the knowledge base.";
+        return;
+      }
+
+      if (activeSessionId) transcriptBySessionId.set(activeSessionId, transcript);
+      ensureProvisionalSession(response.sessionId, requestWorkspace);
+      showSessionTab(response.sessionId);
+      activeSessionId = response.sessionId;
+      rememberActiveSession(requestWorkspace, response.sessionId);
+      transcript = emptyTranscript;
+      configOptions = configOptionsBySessionId.get(response.sessionId) ?? [];
+      activeSessionRuntimeReady = true;
+      activated = true;
+
+      operationRunning = false;
+      transcript = appendLocalUserMessage(
+        transcript,
+        KNOWLEDGE_REFRESH_PROMPT,
+        `local:${++localMessageId}`,
+        [],
+      );
+      transcriptBySessionId.set(response.sessionId, transcript);
+      await scrollToLatest();
+      await runPromptRequest(requestClient, response.sessionId, [{ type: "text", text: KNOWLEDGE_REFRESH_PROMPT }]);
+      void refreshSessions();
+    } catch (error) {
+      if (createdSessionId && !activated) {
+        await requestClient.closeSession(createdSessionId).catch(() => undefined);
+        forgetSessionRuntime(createdSessionId);
+      }
+      if (requestClient === client && requestWorkspace === workspace) reportError(error);
+    } finally {
+      if (requestClient === client && requestWorkspace === workspace) operationRunning = false;
     }
   }
 
@@ -2690,7 +2796,11 @@
     return sharedFileValidation(`${command}\0${path}`, () => invoke<boolean>(command, { path }));
   }
 
-  async function openProjectFile(path: string, navigation: PreviewNavigation = "replace"): Promise<void> {
+  async function openProjectFile(
+    path: string,
+    navigation: PreviewNavigation = "replace",
+    lineRange?: ProjectFileLineRange,
+  ): Promise<void> {
     if (!workspace) {
       errorMessage = "Open a workspace before previewing project files.";
       return;
@@ -2711,7 +2821,7 @@
         path,
       });
       if (generation !== projectFilePreviewGeneration || workspace !== requestWorkspace) return;
-      showPreview({ kind: "file", file: preview }, navigation);
+      showPreview({ kind: "file", file: preview, ...(lineRange ? { lineRange } : {}) }, navigation);
     } catch (error) {
       if (generation === projectFilePreviewGeneration) reportError(error);
     }
@@ -3756,7 +3866,8 @@
       onOpenSession={(task) => void openProjectTaskSession(task)}
       onOpenProjectDocument={openProjectDocument}
       onListProjectDirectory={listProjectDirectory}
-      onOpenProjectFile={(path) => void openProjectFile(path)}
+      onValidateProjectFile={validateProjectFile}
+      onOpenProjectFile={(path, range) => void openProjectFile(path, "replace", range)}
       onOpenExternalEditor={(path) => void openInExternalEditor(path)}
       onReload={() => void loadProjectTasks(workspace)}
       onRegistryRefresh={refreshRegistry}
@@ -3771,6 +3882,7 @@
       onGitCreateBranch={createGitBranch}
       onGitGenerateCommitMessage={generateGitCommitMessage}
       onGitReview={(path, scope) => void reviewGitDiff(path, scope)}
+      onRefreshKnowledge={() => void refreshKnowledgeBaseInNewSession()}
     />
 
     <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
@@ -3800,7 +3912,7 @@
         onPrepareAttachment={prepareTranscriptAttachment}
         onValidateProjectFile={validateProjectFile}
         onValidateLocalFile={validateLocalFile}
-        onOpenProjectFile={openProjectFile}
+        onOpenProjectFile={(path, range) => openProjectFile(path, "replace", range)}
         onResolveProjectMedia={resolveProjectMedia}
         onOpenLocalFile={openLocalFile}
         onResolveLocalMedia={resolveLocalMedia}
@@ -3871,6 +3983,7 @@
     previewId={activePreview.id}
     scrollPosition={activePreview.scrollPosition}
     file={activePreview.kind === "file" ? activePreview.file : undefined}
+    lineRange={activePreview.kind === "file" ? activePreview.lineRange : undefined}
     attachment={activePreview.kind === "attachment" ? activePreview.attachment : undefined}
     canGoBack={canGoBackInPreview}
     canGoForward={canGoForwardInPreview}
@@ -3880,7 +3993,7 @@
       : undefined}
     onBack={() => movePreview(-1)}
     onForward={() => movePreview(1)}
-    onOpenProjectFile={(path) => openProjectFile(path, "push")}
+    onOpenProjectFile={(path, range) => openProjectFile(path, "push", range)}
     onValidateProjectFile={validateProjectFile}
     onValidateLocalFile={validateLocalFile}
     onResolveProjectMedia={resolveProjectMedia}
@@ -3905,7 +4018,7 @@
     canResolve={Boolean(client && workspace && status === "ready" && !operationRunning)}
     onValidateProjectFile={validateProjectFile}
     onValidateLocalFile={validateLocalFile}
-    onOpenProjectFile={(path) => void openProjectFile(path)}
+    onOpenProjectFile={(path, range) => void openProjectFile(path, "replace", range)}
     onOpenLocalFile={(path) => void openLocalFile(path)}
     onReview={() => void reviewGitDiff(gitDiffPreview?.path, gitDiffPreview?.scope ?? "all")}
     onResolve={() => void resolveGitReviewInNewSession()}

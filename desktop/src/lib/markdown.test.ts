@@ -255,6 +255,21 @@ describe("renderMarkdown", () => {
     );
     expect(html).toContain("<code>desktop/src/components/TranscriptPane.svelte</code></span>");
     expect(html).toContain('data-project-file-candidate="src/App.svelte"');
+    expect(html).toContain('data-project-file-start-line="42"');
+    expect(html).toContain('data-project-file-end-line="42"');
+  });
+
+  it("preserves inline-code project line ranges for preview navigation", () => {
+    const html = renderMarkdown(
+      "Inspect `external/pi-tools-suite/src/dcp/index.ts:120-148` and `desktop/src/App.svelte:3309:17`.",
+    );
+
+    expect(html).toContain('data-project-file-candidate="external/pi-tools-suite/src/dcp/index.ts"');
+    expect(html).toContain('data-project-file-start-line="120"');
+    expect(html).toContain('data-project-file-end-line="148"');
+    expect(html).toContain('data-project-file-candidate="desktop/src/App.svelte"');
+    expect(html).toContain('data-project-file-start-line="3309"');
+    expect(html).toContain('data-project-file-end-line="3309"');
   });
 
   it("turns home-relative file paths into local validation candidates", () => {

@@ -7,10 +7,10 @@
 > tagged with its source: `[confirmed by code]`, `[confirmed by tests]`,
 > `[confirmed by docs]`, `[inferred]`, or `[unknown]`. Re-verify against
 > current code before relying on any claim. Last broad drift audit:
-> 2026-09-09. That pass re-verified the canonical `specs/` set, updated the
-> current async-subagent/project-agent/Desktop/DCP contracts, and consolidated
-> redundant Desktop Markdown and DCP emergency change documents into their
-> current canonical specs.
+> 2026-09-10. That pass refreshed the Desktop activity/Markdown/sidebar contracts,
+> added the Desktop IDX contract, indexed recent text-selection/user-config and
+> reload-context work, and re-verified changed knowledge inputs against current
+> implementation/tests.
 
 ## Project context
 
@@ -55,6 +55,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [project-agents-dir](./project-agents-dir.md) | Project-local sub-agent roles from `.pi/agents/*.md` |
 | [parent-first-subagent-routing](./parent-first-subagent-routing.md) | Parent-first sub-agent role selection |
 | [browser-qa-inline-agent](./browser-qa-inline-agent.md) | Self-contained browser QA agent |
+| [model-selector-fallbacks](./model-selector-fallbacks.md) | Ordered fallback arrays for singular model selectors |
 
 **TUI renderer (`src/`)**
 
@@ -64,6 +65,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [session-extension-bind-before-prompt](./session-extension-bind-before-prompt.md) | Bind session extensions before the first prompt |
 | [session-title-after-resource-command](./session-title-after-resource-command.md) | Session title after a leading resource command |
 | [idx-startup-update](./idx-startup-update.md) | Keep `idx` current at pix startup |
+| [reload-context-inventory](./reload-context-inventory.md) | Reload/resource context inventory and tool-alias capability checks |
 | [clickable-markdown-links](./clickable-markdown-links.md) | Clickable wrapped markdown links |
 | [markdown-soft-wrap-highlighting](./markdown-soft-wrap-highlighting.md) | Syntax highlighting across soft wraps |
 | [mermaid-markdown-rendering](./mermaid-markdown-rendering.md) | Mermaid diagrams in chat Markdown |
@@ -78,6 +80,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 |------|-------|
 | [desktop-session-parity](./desktop-session-parity.md) | Desktop and TUI session parity |
 | [desktop-project-titlebar](./desktop-project-titlebar.md) | Desktop project selector in the macOS overlay title bar |
+| [desktop-activity-row-timing](./desktop-activity-row-timing.md) | Desktop activity names and completed durations |
 | [desktop-markdown-rendering](./desktop-markdown-rendering.md) | Lightweight desktop Markdown rendering |
 | [desktop-attachments](./desktop-attachments.md) | Desktop chat attachments |
 | [desktop-diff-view](./desktop-diff-view.md) | Desktop diff view |
@@ -87,6 +90,9 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [desktop-session-sidebar](./desktop-session-sidebar.md) | Desktop session sidebar |
 | [desktop-slash-commands](./desktop-slash-commands.md) | Desktop slash commands and fuzzy search |
 | [desktop-question-tool](./desktop-question-tool.md) | Desktop Question tool |
+| [desktop-text-selection](./desktop-text-selection.md) | Desktop text-selection scopes |
+| [desktop-user-config-editing](./desktop-user-config-editing.md) | Desktop JSONC user-config editing |
+| [desktop-idx-panel](./desktop-idx-panel.md) | Desktop IDX repository intelligence and Spec Wiki maintenance |
 
 **DCP family**
 

@@ -38,6 +38,10 @@ export function toolPresentation(tool: ToolHeaderSource): ToolPresentation {
   };
 }
 
+export function toolGroupPresentationNames(tools: readonly ToolHeaderSource[]): string {
+  return [...new Set(tools.map((tool) => toolPresentation(tool).name))].join(", ");
+}
+
 export function toolTone(toolName: string): ToolTone {
   const name = normalizedName(toolName);
   if (["apply_patch", "edit", "multiedit", "write", "ast_apply"].includes(name)) return "mutation";

@@ -9,15 +9,17 @@
   import Pencil from "@lucide/svelte/icons/pencil";
   import WrapText from "@lucide/svelte/icons/wrap-text";
   import X from "@lucide/svelte/icons/x";
+  import { tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import type { PreviewScrollPosition } from "../lib/preview-history";
-  import type { ProjectFilePreview } from "../lib/project-files";
+  import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
   import { highlightCode, languageForFilePath } from "../lib/syntax-highlight";
   import MarkdownText from "./MarkdownText.svelte";
 
   let {
     attachment,
     file,
+    lineRange,
     previewId,
     scrollPosition,
     canGoBack = false,
@@ -39,6 +41,7 @@
   }: {
     attachment?: Attachment;
     file?: ProjectFilePreview;
+    lineRange?: ProjectFileLineRange;
     previewId: number;
     scrollPosition: PreviewScrollPosition;
     canGoBack?: boolean;
@@ -49,7 +52,7 @@
     onForward?: () => void;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
-    onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
@@ -67,6 +70,7 @@
   let editing = $state(false);
   let draft = $state("");
   let saving = $state(false);
+  const resolvedMarkdownProjectPaths = new Map<string, string>();
   let resizeStart: {
     pointerId: number;
     x: number;
@@ -80,7 +84,7 @@
     attachment?.dataUrl ?? (attachment?.path ? convertFileSrc(attachment.path) : ""),
   );
   const language = $derived(file ? languageForFilePath(file.path) : undefined);
-  const renderAsMarkdown = $derived(language === "markdown");
+  const renderAsMarkdown = $derived(language === "markdown" && !lineRange);
   const canEdit = $derived(Boolean(file && renderAsMarkdown && editable && onSaveProjectFile));
   const dirty = $derived(Boolean(file && draft !== file.content));
   const highlighted = $derived(
@@ -97,6 +101,7 @@
 
   $effect(() => {
     previewId;
+    resolvedMarkdownProjectPaths.clear();
     draft = file?.content ?? "";
     editing = false;
     saving = false;
@@ -174,13 +179,37 @@
     onForward?.();
   }
 
-  function openProjectFromMarkdown(path: string): void | Promise<void> {
-    rememberScroll();
-    return onOpenProjectFile?.(projectLinkPath(path));
+  async function resolveProjectFromMarkdown(path: string): Promise<string | undefined> {
+    const cached = resolvedMarkdownProjectPaths.get(path);
+    if (cached) return cached;
+    if (!onValidateProjectFile) return undefined;
+
+    // Agent-authored Markdown commonly cites workspace-root paths such as
+    // external/foo.ts even when the current Markdown file lives in specs/.
+    // Try that exact project path first, then preserve normal document-relative
+    // Markdown links as a fallback.
+    const relative = projectLinkPath(path);
+    const candidates = relative === path ? [path] : [path, relative];
+    for (const candidate of candidates) {
+      try {
+        if (!await onValidateProjectFile(candidate)) continue;
+        resolvedMarkdownProjectPaths.set(path, candidate);
+        return candidate;
+      } catch {
+        // Try the next interpretation; validation is intentionally best-effort.
+      }
+    }
+    return undefined;
   }
 
-  function validateProjectFromMarkdown(path: string): Promise<boolean> {
-    return onValidateProjectFile?.(projectLinkPath(path)) ?? Promise.resolve(false);
+  async function openProjectFromMarkdown(path: string, range?: ProjectFileLineRange): Promise<void> {
+    rememberScroll();
+    const resolved = await resolveProjectFromMarkdown(path);
+    if (resolved) await onOpenProjectFile?.(resolved, range);
+  }
+
+  async function validateProjectFromMarkdown(path: string): Promise<boolean> {
+    return Boolean(await resolveProjectFromMarkdown(path));
   }
 
   function openLocalFromMarkdown(path: string): void | Promise<void> {
@@ -215,6 +244,50 @@
       void saveEdit();
     }
   }
+
+  $effect(() => {
+    const requestedPreviewId = previewId;
+    const range = lineRange;
+    const scroll = contentScrollElement;
+    const reveal = Boolean(range && scrollPosition.left === 0 && scrollPosition.top === 0);
+    if (!scroll || !file || !highlighted) return;
+
+    let cancelled = false;
+    let frame = 0;
+    // The source body is injected with {@html}; wait for Svelte's DOM flush and
+    // then one frame so line boxes have final geometry before selecting/revealing.
+    void tick().then(() => {
+      if (cancelled || previewId !== requestedPreviewId) return;
+      frame = requestAnimationFrame(() => {
+        if (cancelled || previewId !== requestedPreviewId) return;
+        const lines = Array.from(scroll.querySelectorAll<HTMLElement>(".preview-code .sh__line"));
+        for (const line of lines) line.classList.remove("preview-range-highlight");
+        if (!range || lines.length === 0) return;
+
+        const startIndex = Math.max(0, Math.min(lines.length - 1, range.startLine - 1));
+        const endIndex = Math.max(startIndex, Math.min(lines.length - 1, range.endLine - 1));
+        for (let index = startIndex; index <= endIndex; index += 1) {
+          lines[index]?.classList.add("preview-range-highlight");
+        }
+
+        if (!reveal) return;
+        const first = lines[startIndex];
+        if (!first) return;
+        const scrollRect = scroll.getBoundingClientRect();
+        const firstRect = first.getBoundingClientRect();
+        const targetTop = scroll.scrollTop
+          + firstRect.top
+          - scrollRect.top
+          - Math.max(24, (scroll.clientHeight - firstRect.height) * 0.35);
+        scroll.scrollTo({ top: Math.max(0, targetTop), behavior: "auto" });
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  });
 
   function setPreviewSize(width: number, height: number): void {
     if (!previewElement) return;
@@ -303,6 +376,11 @@
         <FileCode class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       {/if}
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
+      {#if file && lineRange}
+        <span class="shrink-0 rounded border border-tool-warning/30 bg-tool-warning/10 px-1.5 py-0.5 font-mono text-[10px] text-tool-warning">
+          L{lineRange.startLine}{lineRange.endLine === lineRange.startLine ? "" : `–${lineRange.endLine}`}
+        </span>
+      {/if}
       {#if renderAsMarkdown}
         <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           Markdown
@@ -424,7 +502,10 @@
         >
           <pre class={wrapLines
             ? "m-0 min-h-full w-full min-w-0 py-3 font-mono text-xs leading-6 text-foreground"
-            : "m-0 min-h-full min-w-full w-max py-3 font-mono text-xs leading-6 text-foreground"}><code class:wrap-lines={wrapLines} class="preview-code">{@html highlighted.html}</code></pre>
+            : "m-0 min-h-full min-w-full w-max py-3 font-mono text-xs leading-6 text-foreground"}><code
+              class:wrap-lines={wrapLines}
+              class="preview-code"
+            >{@html highlighted.html}</code></pre>
         </div>
       {/if}
     {:else if attachment}
@@ -491,6 +572,15 @@
     padding-right: 0.75rem;
     text-indent: 0;
     user-select: none;
+  }
+
+  .preview-code :global(.sh__line.preview-range-highlight) {
+    background: color-mix(in srgb, var(--tool-warning) 18%, transparent);
+  }
+
+  .preview-code :global(.sh__line.preview-range-highlight)::before {
+    background: color-mix(in srgb, var(--tool-warning) 13%, var(--panel));
+    color: var(--foreground);
   }
 
   .preview-code.wrap-lines :global(.sh__line) {

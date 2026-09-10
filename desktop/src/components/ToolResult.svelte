@@ -10,6 +10,7 @@
     mutationOutputLines,
   } from "../lib/tool-output";
   import type { Attachment } from "../lib/attachments";
+  import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ToolItem } from "../lib/transcript";
   import DiffView from "./DiffView.svelte";
   import MarkdownText from "./MarkdownText.svelte";
@@ -26,7 +27,7 @@
     tool: ToolItem;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
-    onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
