@@ -127,11 +127,12 @@ const DictationLanguageModelConfig = Type.Object(
 
 const DictationConfig = Type.Object(
 	{
+		apiKey: Type.Optional(Type.String({ description: "Deepgram API key used by terminal and desktop voice input. Store it in the user config (~/.config/pi/pix.jsonc); project-level .pi/pix.jsonc does not override this secret." })),
 		language: Type.Optional(Type.String({ description: "Selected language code, e.g. 'en' or 'ru'." })),
 		model: Type.Optional(Type.String({ description: "Deepgram speech-to-text model. Defaults to 'nova-3'." })),
 		languages: Type.Optional(Type.Record(Type.String(), DictationLanguageModelConfig, { description: "Available dictation languages keyed by local language code." })),
 	},
-	{ description: "Voice dictation (Deepgram) configuration. Requires DEEPGRAM_API_KEY in the process environment." },
+	{ description: "Voice dictation (Deepgram) configuration. Uses dictation.apiKey from the user pix config, with DEEPGRAM_API_KEY as a compatibility fallback." },
 );
 
 const DesktopConfig = Type.Object(

@@ -97,10 +97,14 @@ describe("AppVoiceController", () => {
 		const socket = new FakeSocket();
 		const sockets: Array<{ url: string; protocols: string[] }> = [];
 		const spawned: Array<{ command: string; args: string[] }> = [];
-		const controller = new AppVoiceController(host, dictationConfig({ language: "ru", model: "nova-3" }));
+		const controller = new AppVoiceController(host, dictationConfig({
+			language: "ru",
+			model: "nova-3",
+			apiKey: "dg-config-key",
+		}));
 
 		setVoiceControllerTestDeps({
-			deepgramApiKey: () => "dg-test-key",
+			deepgramApiKey: () => "dg-env-fallback-key",
 			selectRecorderCommand: async () => ({ command: "rec", args: ["--mock"], description: "mock recorder" }),
 			createDeepgramSocket: ((url: string, protocols: string[]) => {
 				sockets.push({ url, protocols });
@@ -118,7 +122,7 @@ describe("AppVoiceController", () => {
 
 			assert.equal(controller.statusWidgetActive(), true);
 			assert.deepEqual(spawned, [{ command: "rec", args: ["--mock"] }]);
-			assert.deepEqual(sockets[0]?.protocols, ["token", "dg-test-key"]);
+			assert.deepEqual(sockets[0]?.protocols, ["token", "dg-config-key"]);
 			const socketUrl = new URL(sockets[0]?.url ?? "");
 			assert.equal(socketUrl.searchParams.get("language"), "ru");
 			assert.equal(socketUrl.searchParams.get("model"), "nova-3");
@@ -163,8 +167,8 @@ describe("AppVoiceController", () => {
 
 			assert.equal(recorderSelections, 0);
 			assert.equal(controller.statusWidgetActive(), false);
-			assert.ok(host.systemMessages.some((message) => message.includes("Voice input: Unavailable: DEEPGRAM_API_KEY is not set")));
-			assert.ok(host.toasts.some((toast) => toast.includes("Voice input unavailable: DEEPGRAM_API_KEY is not set")));
+			assert.ok(host.systemMessages.some((message) => message.includes("set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY")));
+			assert.ok(host.toasts.some((toast) => toast.includes("set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY")));
 		} finally {
 			setVoiceControllerTestDeps();
 		}
@@ -475,7 +479,7 @@ function deepgramResult(text: string, isFinal: boolean): string {
 	});
 }
 
-function dictationConfig(overrides: { language?: string; model?: string } = {}): DictationConfig {
+function dictationConfig(overrides: { language?: string; model?: string; apiKey?: string } = {}): DictationConfig {
 	return {
 		...overrides,
 		languages: {

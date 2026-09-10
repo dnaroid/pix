@@ -136,7 +136,7 @@ Recommended:
 
 Optional:
 
-- `DEEPGRAM_API_KEY` for voice input in the terminal UI and Pix Desktop
+- a Deepgram API key in `dictation.apiKey` inside `~/.config/pi/pix.jsonc` for voice input; `DEEPGRAM_API_KEY` remains supported as a fallback
 - an audio recorder for terminal dictation: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux
 - `tmux` and `rsvg-convert` only if you want to regenerate README screenshots
 - Ollama with web search enabled for the bundled `web_search` and `web_fetch` tools
@@ -276,9 +276,21 @@ Pix can provide inline, model-backed autocomplete with configurable debounce, ti
 
 ### Voice input
 
-Set `DEEPGRAM_API_KEY`, then press `Ctrl+G` or click the microphone in the terminal status area to start/stop dictation. Pix streams microphone audio to Deepgram Nova-3 and inserts finalized text into the editor so you can review it before sending. The default dictation languages are English and Russian and can be changed with the existing language control.
+Put the Deepgram key in the user Pix config:
 
-Pix Desktop exposes the same voice-input action directly in the message composer. The desktop client uses Nova-3 multilingual recognition and requests a short-lived Deepgram token from the local Tauri backend; the permanent `DEEPGRAM_API_KEY` is never exposed to the WebView.
+```jsonc
+{
+  "dictation": {
+    "apiKey": "your-deepgram-api-key"
+  }
+}
+```
+
+The file is `~/.config/pi/pix.jsonc`. Keep the key in this user config rather than a project `.pi/pix.jsonc`; project config is intentionally not allowed to override the secret. `DEEPGRAM_API_KEY` remains supported as a compatibility fallback when `dictation.apiKey` is not set.
+
+Then press `Ctrl+G` or click the microphone in the terminal status area to start/stop dictation. Pix streams microphone audio to Deepgram Nova-3 and inserts finalized text into the editor so you can review it before sending. The default dictation languages are English and Russian and can be changed with the existing language control.
+
+Pix Desktop exposes the same voice-input action directly in the message composer. The desktop client uses Nova-3 and respects `dictation.language` plus the selected language's `deepgramLanguage` value from the user Pix config. It requests a short-lived Deepgram token from the local Tauri backend; the permanent API key is read from the user Pix config (or the environment fallback) by Rust and is never exposed to the WebView. The Settings UI also exposes `Dictation · Api Key` as a sensitive field because it is generated from the Pix schema.
 
 Voice audio is sent to Deepgram while recording. Pix no longer downloads or installs local speech-recognition models.
 
@@ -456,7 +468,7 @@ Install `wl-clipboard` on Wayland or `xclip`/`xsel` on X11, then run `pix instal
 
 ### Voice input is unavailable
 
-Ensure `DEEPGRAM_API_KEY` is set in the environment that launches Pix. Terminal voice input also needs an audio recorder: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux. Pix Desktop additionally needs microphone permission from the operating system. Voice support can be omitted without affecting the rest of Pix.
+Ensure `dictation.apiKey` is set in `~/.config/pi/pix.jsonc`, or set the compatibility fallback `DEEPGRAM_API_KEY` in the environment that launches Pix. Terminal voice input also needs an audio recorder: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux. Pix Desktop additionally needs microphone permission from the operating system. Voice support can be omitted without affecting the rest of Pix.
 
 ### A provider login dialog is missing
 

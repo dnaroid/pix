@@ -91,6 +91,7 @@ export class AppVoiceController {
 	private languages: VoiceLanguage[];
 	private language: VoiceLanguage;
 	private deepgramModel: string;
+	private deepgramApiKey: string | undefined;
 	private state: VoiceInputState = "idle";
 	private audioProcess: ChildProcessByStdio<null, Readable, Readable> | undefined;
 	private socket: DeepgramSocket | undefined;
@@ -110,6 +111,7 @@ export class AppVoiceController {
 		this.languages = Object.keys(this.languageDefinitions);
 		this.language = this.initialLanguage(dictationConfig.language);
 		this.deepgramModel = dictationConfig.model?.trim() || DEFAULT_DEEPGRAM_MODEL;
+		this.deepgramApiKey = dictationConfig.apiKey?.trim() || undefined;
 	}
 
 	updateDictationConfig(dictationConfig: DictationConfig): void {
@@ -117,6 +119,7 @@ export class AppVoiceController {
 		this.languages = Object.keys(this.languageDefinitions);
 		this.language = this.initialLanguage(dictationConfig.language ?? this.language);
 		this.deepgramModel = dictationConfig.model?.trim() || DEFAULT_DEEPGRAM_MODEL;
+		this.deepgramApiKey = dictationConfig.apiKey?.trim() || undefined;
 	}
 
 	statusWidgetText(): string {
@@ -217,8 +220,10 @@ export class AppVoiceController {
 
 		let socket: DeepgramSocket | undefined;
 		try {
-			const apiKey = voiceControllerDeps.deepgramApiKey();
-			if (!apiKey) throw new Error("DEEPGRAM_API_KEY is not set");
+			const apiKey = this.deepgramApiKey ?? voiceControllerDeps.deepgramApiKey();
+			if (!apiKey) {
+				throw new Error("Deepgram API key is not configured; set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY");
+			}
 
 			const recorder = await voiceControllerDeps.selectRecorderCommand();
 			if (!this.continueStart(generation, scope)) return;

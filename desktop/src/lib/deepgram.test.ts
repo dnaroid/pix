@@ -15,19 +15,19 @@ describe("deepgram dictation helpers", () => {
     expect(chooseDeepgramRecorderMimeType(() => false)).toBeUndefined();
   });
 
-  it("builds a multilingual Nova-3 streaming URL", () => {
-    const url = new URL(buildDeepgramWebSocketUrl());
+  it("builds a Nova-3 streaming URL for the configured dictation language", () => {
+    const url = new URL(buildDeepgramWebSocketUrl("nova-3", "ru"));
     expect(url.origin).toBe("wss://api.deepgram.com");
     expect(url.pathname).toBe("/v1/listen");
     expect(url.searchParams.get("model")).toBe("nova-3");
-    expect(url.searchParams.get("language")).toBe("multi");
+    expect(url.searchParams.get("language")).toBe("ru");
     expect(url.searchParams.get("interim_results")).toBe("true");
     expect(url.searchParams.get("punctuate")).toBe("true");
     expect(url.searchParams.get("smart_format")).toBe("true");
     expect(url.searchParams.has("encoding")).toBe(false);
   });
 
-  it("parses final and interim Results and ignores other frames", () => {
+  it("parses Nova-3 interim and final Results frames and ignores other frames", () => {
     expect(parseDeepgramMessage(JSON.stringify({
       type: "Results",
       is_final: false,
@@ -60,12 +60,18 @@ describe("deepgram dictation helpers", () => {
       },
       async () => {
         requestedToken += 1;
-        return { accessToken: "temporary.jwt", expiresIn: 60 };
+        return {
+          accessToken: "temporary.jwt",
+          expiresIn: 60,
+          model: "nova-3",
+          language: "ru",
+        };
       },
       {
         getUserMedia: async () => stream,
         createSocket: ((url: string, protocols: string[]) => {
-          expect(new URL(url).searchParams.get("language")).toBe("multi");
+          expect(new URL(url).searchParams.get("model")).toBe("nova-3");
+          expect(new URL(url).searchParams.get("language")).toBe("ru");
           socketProtocols = protocols;
           return socket as unknown as WebSocket;
         }),

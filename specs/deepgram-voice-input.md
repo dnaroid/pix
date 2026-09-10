@@ -6,8 +6,10 @@ Active contract for terminal and desktop voice dictation.
 
 ## Contract
 
-Pix uses Deepgram live speech-to-text for voice input. `DEEPGRAM_API_KEY` is the
-only long-lived Deepgram credential and must stay outside UI/browser code.
+Pix uses Deepgram live speech-to-text for voice input. The long-lived credential
+is configured as `dictation.apiKey` in the user Pix config
+`~/.config/pi/pix.jsonc`; `DEEPGRAM_API_KEY` remains a compatibility fallback.
+The permanent key must stay outside UI/browser runtime code.
 
 ### Terminal UI
 
@@ -31,6 +33,9 @@ only long-lived Deepgram credential and must stay outside UI/browser code.
   matching `docs/concurrency.md`.
 - Once terminal voice input is disposed during application shutdown, in-flight
   language/toggle continuations cannot start another recorder or socket.
+- TUI credential resolution prefers `dictation.apiKey` from the loaded user Pix
+  config and falls back to `DEEPGRAM_API_KEY`. Project `.pi/pix.jsonc` files may
+  configure dictation behavior but cannot override the user-level API key.
 - Missing credentials, recorder failures, connection failures, and recognition
   failures return voice state to idle and surface an error without affecting
   non-voice input.
@@ -46,16 +51,22 @@ only long-lived Deepgram credential and must stay outside UI/browser code.
 - Starting voice input requests a short-lived Deepgram access token from the
   Tauri backend, then requests microphone access and opens the Deepgram
   WebSocket from the WebView.
-- The Tauri `deepgram_token` command reads `DEEPGRAM_API_KEY` locally and
+- The Tauri `deepgram_token` command reads `dictation.apiKey` directly from the
+  user Pix config on the Rust side, falling back to `DEEPGRAM_API_KEY`, and
   exchanges it through Deepgram `/v1/auth/grant` with a 60-second TTL. Its
   blocking HTTP work runs on Tauri's blocking pool with explicit connection and
   total request deadlines. The permanent API key is never returned to
   JavaScript.
+- The token response also carries the non-secret Deepgram model and language
+  resolved from the same user Pix config. `dictation.language` is mapped through
+  the selected entry's `deepgramLanguage` value when present; defaults are
+  `nova-3` and `en`.
 - The WebView authenticates the live socket with the temporary bearer token and
   records browser-supported Opus/container audio with `MediaRecorder`, emitting
   chunks every 250 ms.
-- Desktop recognition uses `nova-3` with `language=multi` so English/Russian
-  and mixed-language dictation do not require a composer language switcher.
+- Desktop recognition uses the `/v1/listen` Nova-3 transport, matching terminal
+  dictation defaults instead of maintaining a separate desktop-only multilingual
+  model selection.
 - Interim text is shown below the composer without mutating the draft. Final
   text is inserted at the current textarea selection/cursor using the same
   spacing rule as terminal voice input.
@@ -80,10 +91,12 @@ only long-lived Deepgram credential and must stay outside UI/browser code.
 
 ## Configuration compatibility
 
-`dictation.language`, `dictation.languages`, and persisted language selection
-remain supported. `dictation.model` selects the Deepgram speech model and
-defaults to `nova-3`; each language may set `deepgramLanguage`, defaulting to
-its map key.
+`dictation.apiKey` is the preferred Deepgram credential and is intended only for
+the user config `~/.config/pi/pix.jsonc`; the Settings form exposes it as a
+sensitive field. `dictation.language`, `dictation.languages`, and persisted
+language selection remain supported. `dictation.model` selects the Deepgram
+speech model and defaults to `nova-3`; each language may set
+`deepgramLanguage`, defaulting to its map key.
 
 Legacy Vosk `dirName`, `url`, and per-language `model` fields remain parseable
 for existing config files but are deprecated and ignored by the Deepgram
@@ -94,17 +107,17 @@ runtime. Pix does not download Vosk models or load/install Vosk bindings.
 - `tests/voice-controller.test.ts` covers terminal URL/auth transport, PCM
   forwarding, interim/final parsing, finalize/last-interim behavior, errors,
   and stale-scope rejection.
-- `tests/config.test.ts` covers Deepgram defaults plus legacy dictation config
-  compatibility.
+- `tests/config.test.ts` covers the user-config API key, project-secret rejection,
+  Deepgram defaults, and legacy dictation config compatibility.
 - `desktop/src/lib/deepgram.test.ts` covers desktop recorder format choice,
-  multilingual live URL, transport/finalization, and Deepgram result parsing.
+  configured Nova-3 language/model transport, finalization, and Results parsing.
 - `npm run check:desktop`/desktop tests cover Svelte integration and the composer
-  surface. Rust compilation additionally validates the Tauri token broker when
-  a Rust toolchain is available.
+  surface. Rust unit coverage includes user-config key resolution and environment
+  fallback; compilation validates it when a Rust toolchain is available.
 
 ## Non-goals
 
 - Offline/local speech recognition.
 - Persisting or replaying microphone audio.
-- Exposing `DEEPGRAM_API_KEY` to the desktop WebView.
+- Exposing the permanent Deepgram API key to the desktop WebView.
 - Voice input in the desktop editor or questionnaire modes.

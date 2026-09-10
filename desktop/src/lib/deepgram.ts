@@ -3,6 +3,8 @@ export type DeepgramDictationState = "idle" | "starting" | "listening";
 export type DeepgramToken = {
   accessToken: string;
   expiresIn: number;
+  model?: string;
+  language?: string;
 };
 
 export type DeepgramTranscript = {
@@ -31,7 +33,7 @@ const RECORDER_STOP_TIMEOUT_MS = 1_000;
 const SOCKET_OPEN_TIMEOUT_MS = 10_000;
 const SOCKET_OPEN = 1;
 const DEFAULT_MODEL = "nova-3";
-const DEFAULT_LANGUAGE = "multi";
+const DEFAULT_LANGUAGE = "en";
 
 export function browserDeepgramSupported(): boolean {
   return typeof navigator !== "undefined"
@@ -144,7 +146,7 @@ export class DeepgramDictationController {
       }
       this.stream = stream;
 
-      socket = this.deps.createSocket(buildDeepgramWebSocketUrl(), ["bearer", token.accessToken]);
+      socket = this.deps.createSocket(buildDeepgramWebSocketUrl(token.model, token.language), ["bearer", token.accessToken]);
       this.socket = socket;
       await waitForSocketOpen(socket);
       if (!this.isCurrent(generation)) {

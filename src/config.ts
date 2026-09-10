@@ -87,6 +87,8 @@ export type DictationConfig = {
 	languages: Record<string, DictationLanguageModelConfig>;
 	language?: string;
 	model?: string;
+	/** Long-lived Deepgram API key. Prefer the user config, not project config. */
+	apiKey?: string;
 };
 
 export type PixConfig = {
@@ -339,43 +341,59 @@ function extractIconThemeConfig(raw: unknown): IconThemeConfig | undefined {
 	return configuredTheme ? { name: configuredTheme } : undefined;
 }
 
-function extractDictationConfig(raw: unknown): DictationConfig | undefined {
+function extractDictationConfig(
+	raw: unknown,
+	fallback: DictationConfig,
+	options: { allowApiKey?: boolean } = {},
+): DictationConfig | undefined {
 	if (!isPlainObject(raw)) return undefined;
 	const dictation = raw.dictation ?? raw.voiceInput ?? raw.voice;
 	if (!isPlainObject(dictation)) return undefined;
 
 	const configuredLanguages = dictation.languages ?? dictation.models;
-	if (!isPlainObject(configuredLanguages)) return undefined;
+	const replacesLanguages = isPlainObject(configuredLanguages);
+	let languages = fallback.languages;
+	if (replacesLanguages) {
+		const parsedLanguages: Record<string, DictationLanguageModelConfig> = {};
+		for (const [rawKey, value] of Object.entries(configuredLanguages)) {
+			const key = rawKey.trim().toLowerCase();
+			if (!key || !isPlainObject(value)) continue;
 
-	const languages: Record<string, DictationLanguageModelConfig> = {};
-	for (const [rawKey, value] of Object.entries(configuredLanguages)) {
-		const key = rawKey.trim().toLowerCase();
-		if (!key || !isPlainObject(value)) continue;
+			const label = nonEmptyString(value.label) ?? key.toUpperCase();
+			const deepgramLanguage = nonEmptyString(value.deepgramLanguage)
+				?? nonEmptyString(value.language)
+				?? key;
+			const dirName = nonEmptyString(value.dirName) ?? nonEmptyString(value.model) ?? nonEmptyString(value.modelDir);
+			const url = nonEmptyString(value.url);
 
-		const label = nonEmptyString(value.label) ?? key.toUpperCase();
-		const deepgramLanguage = nonEmptyString(value.deepgramLanguage)
-			?? nonEmptyString(value.language)
-			?? key;
-		const dirName = nonEmptyString(value.dirName) ?? nonEmptyString(value.model) ?? nonEmptyString(value.modelDir);
-		const url = nonEmptyString(value.url);
-
-		languages[key] = {
-			label,
-			deepgramLanguage,
-			...(dirName ? { dirName } : {}),
-			...(url ? { url } : {}),
-		};
+			parsedLanguages[key] = {
+				label,
+				deepgramLanguage,
+				...(dirName ? { dirName } : {}),
+				...(url ? { url } : {}),
+			};
+		}
+		if (Object.keys(parsedLanguages).length > 0) languages = parsedLanguages;
 	}
 
-	const language = normalizeDictationLanguage(dictation.language)
+	const configuredLanguage = normalizeDictationLanguage(dictation.language)
 		?? normalizeDictationLanguage(dictation.selectedLanguage)
 		?? normalizeDictationLanguage(dictation.currentLanguage);
-	const selectedLanguage = language && languages[language] ? language : undefined;
-	const model = nonEmptyString(dictation.model) ?? nonEmptyString(dictation.deepgramModel);
+	const selectedLanguage = configuredLanguage && languages[configuredLanguage]
+		? configuredLanguage
+		: !replacesLanguages && fallback.language && languages[fallback.language]
+			? fallback.language
+			: undefined;
+	const configuredModel = nonEmptyString(dictation.model) ?? nonEmptyString(dictation.deepgramModel);
+	const model = configuredModel ?? (replacesLanguages ? undefined : fallback.model);
+	const apiKey = options.allowApiKey === false
+		? fallback.apiKey
+		: nonEmptyString(dictation.apiKey) ?? nonEmptyString(dictation.deepgramApiKey) ?? fallback.apiKey;
 
 	return Object.keys(languages).length > 0 ? {
-		...(selectedLanguage ? { language: selectedLanguage } : {}),
-		...(model ? { model } : {}),
+		...(selectedLanguage === undefined ? {} : { language: selectedLanguage }),
+		...(model === undefined ? {} : { model }),
+		...(apiKey === undefined ? {} : { apiKey }),
 		languages,
 	} : undefined;
 }
@@ -453,10 +471,15 @@ function cloneDictationConfig(config: DictationConfig): DictationConfig {
 		languages: Object.fromEntries(Object.entries(config.languages).map(([language, model]) => [language, { ...model }])),
 		...(config.language === undefined ? {} : { language: config.language }),
 		...(config.model === undefined ? {} : { model: config.model }),
+		...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
 	};
 }
 
-function pixConfigFromParsed(parsed: unknown, fallback: PixConfig = defaultPixConfig()): PixConfig {
+function pixConfigFromParsed(
+	parsed: unknown,
+	fallback: PixConfig = defaultPixConfig(),
+	options: { allowDictationApiKey?: boolean } = {},
+): PixConfig {
 	const toolRenderer = extractToolRendererConfig(parsed) ?? fallback.toolRenderer;
 	const outputFilters = extractOutputFiltersConfig(parsed) ?? fallback.outputFilters;
 	const defaultModel = extractDefaultModelConfig(parsed) ?? fallback.defaultModel;
@@ -465,7 +488,9 @@ function pixConfigFromParsed(parsed: unknown, fallback: PixConfig = defaultPixCo
 	const modelColors = extractModelColorsConfig(parsed) ?? fallback.modelColors;
 	const configuredIconTheme = extractIconThemeConfig(parsed) ?? fallback.iconTheme;
 	const iconTheme = { name: appIconThemeOverrideFromEnv() ?? configuredIconTheme.name } satisfies IconThemeConfig;
-	const dictation = extractDictationConfig(parsed) ?? fallback.dictation;
+	const dictation = extractDictationConfig(parsed, fallback.dictation, {
+		allowApiKey: options.allowDictationApiKey ?? true,
+	}) ?? fallback.dictation;
 	const ignoreContextFiles = extractIgnoreContextFiles(parsed) ?? fallback.ignoreContextFiles;
 	const maxProjectSessions = extractMaxProjectSessions(parsed) ?? fallback.maxProjectSessions;
 	return { toolRenderer, outputFilters, ...(defaultModel === undefined ? {} : { defaultModel }), promptEnhancer, autocomplete, modelColors, iconTheme, dictation, ignoreContextFiles, maxProjectSessions };
@@ -671,7 +696,7 @@ function loadProjectPixConfig(cwd: string | undefined, fallback: PixConfig): Pix
 
 	try {
 		const raw = readFileSync(configPath, "utf8");
-		return pixConfigFromParsed(parseJsonc(raw), fallback);
+		return pixConfigFromParsed(parseJsonc(raw), fallback, { allowDictationApiKey: false });
 	} catch (error) {
 		process.stderr.write(`[pix] Failed to load ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);
 		return fallback;

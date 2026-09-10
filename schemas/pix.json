@@ -297,6 +297,10 @@
     "dictation": {
       "type": "object",
       "properties": {
+        "apiKey": {
+          "type": "string",
+          "description": "Deepgram API key used by terminal and desktop voice input. Store it in the user config (~/.config/pi/pix.jsonc); project-level .pi/pix.jsonc does not override this secret."
+        },
         "language": {
           "type": "string",
           "description": "Selected language code, e.g. 'en' or 'ru'."
@@ -337,7 +341,7 @@
           "description": "Available dictation languages keyed by local language code."
         }
       },
-      "description": "Voice dictation (Deepgram) configuration. Requires DEEPGRAM_API_KEY in the process environment."
+      "description": "Voice dictation (Deepgram) configuration. Uses dictation.apiKey from the user pix config, with DEEPGRAM_API_KEY as a compatibility fallback."
     },
     "desktop": {
       "type": "object",

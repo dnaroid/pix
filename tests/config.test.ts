@@ -63,6 +63,7 @@ describe("config helpers", () => {
 				};
 			};
 			sessionTitle?: { modelRef?: string; fallbackModels?: string[] };
+			dictation?: { apiKey?: string; language?: string; model?: string };
 		};
 		assert.equal(parsedCreated.$schema, PIX_SCHEMA_URL);
 		assert.deepEqual(parsedCreated.defaultModel, {
@@ -88,6 +89,7 @@ describe("config helpers", () => {
 			modelRef: "openai-codex/gpt-5.6-luna",
 			fallbackModels: ["zai/glm-5-turbo"],
 		});
+		assert.equal(parsedCreated.dictation?.apiKey, "");
 		assert.match(created, /^\{\n  "\$schema":/u);
 		assert.match(created, /pix renderer configuration/u);
 		assert.match(created, /"sessionTitle"/u);
@@ -136,6 +138,7 @@ describe("config helpers", () => {
 			"maxProjectSessions": 50,
 			"autocomplete": { "modelRef": "zai/custom-autocomplete", "debounceMs": 125, "timeoutMs": 2600, "maxTokens": 64, "maxPromptTokens": 1800, "includeRecentMessages": 9 },
 			"dictation": {
+				"apiKey": "dg-user-config-key",
 				"language": "ru",
 				"languages": {
 					"en": { "dirName": "vosk-model-small-en-us-0.15", "url": "https://example.test/en.zip", "label": "English" },
@@ -167,6 +170,7 @@ describe("config helpers", () => {
 		assert.equal(loaded.iconTheme.name, "fallback");
 		assert.equal(loaded.dictation.language, "ru");
 		assert.equal(loaded.dictation.model, undefined);
+		assert.equal(loaded.dictation.apiKey, "dg-user-config-key");
 		assert.equal(loaded.ignoreContextFiles, false);
 		assert.equal(loaded.maxProjectSessions, 50);
 		assert.deepEqual(Object.keys(loaded.dictation.languages), ["en", "ru"]);
@@ -204,6 +208,7 @@ describe("config helpers", () => {
 		writeFileSync(testConfigPath, `{
 			"defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
 			"autocomplete": { "modelRef": "zai/global-complete" },
+			"dictation": { "apiKey": "dg-user-key" },
 			"maxProjectSessions": 50,
 			"ignoreContextFiles": false
 		}`);
@@ -211,7 +216,8 @@ describe("config helpers", () => {
 		mkdirSync(join(projectDir, ".pi"), { recursive: true });
 		writeFileSync(getProjectPixConfigPath(projectDir), `{
 			"ignoreContextFiles": true,
-			"autocomplete": { "modelRef": "zai/project-complete" }
+			"autocomplete": { "modelRef": "zai/project-complete" },
+			"dictation": { "apiKey": "dg-project-key", "model": "nova-3" }
 		}`);
 
 		const loaded = loadPixConfig(projectDir);
@@ -221,6 +227,7 @@ describe("config helpers", () => {
 		assert.equal(loaded.autocomplete.modelRef, "zai/project-complete");
 		assert.equal(loaded.ignoreContextFiles, true);
 		assert.equal(loaded.maxProjectSessions, 50);
+		assert.equal(loaded.dictation.apiKey, "dg-user-key");
 	});
 
 	it("persists project ignoreContextFiles in JSONC config", () => {

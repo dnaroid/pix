@@ -68,11 +68,14 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "autocomplete": { "modelRef": "zai/glm-5-turbo", "fallbackModels": [], "debounceMs": 350, "timeoutMs": 3000, "maxTokens": 48, "maxPromptTokens": 1200, "includeRecentMessages": 0 },
   "sessionTitle": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"] },
   "dictation": {
+    // Deepgram API key used by both terminal and desktop voice input.
+    // Keep secrets in this user config (~/.config/pi/pix.jsonc), not project .pi/pix.jsonc.
+    "apiKey": "",
     "language": "en",
-	"model": "nova-3",
+    "model": "nova-3",
     "languages": {
-	  "en": { "deepgramLanguage": "en", "label": "English" },
-	  "ru": { "deepgramLanguage": "ru", "label": "Russian" }
+      "en": { "deepgramLanguage": "en", "label": "English" },
+      "ru": { "deepgramLanguage": "ru", "label": "Russian" }
     }
   }
 }
