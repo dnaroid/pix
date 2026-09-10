@@ -175,6 +175,11 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 			throw error;
 		}
 	}
+	// Bind the turn-boundary hook before the normal prompt starts. Agent captures
+	// shouldStopAfterTurn when it builds the loop config, so installing the hook
+	// only when the Pause button is clicked is too late for the already-running
+	// turn and the pause request would never be observed.
+	bindPause(this);
 	return originalPrompt.call(this, text, options);
 };
 
