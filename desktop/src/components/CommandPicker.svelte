@@ -58,6 +58,21 @@
       onClose();
       return;
     }
+    if (event.key === "Tab" && panel) {
+      const focusable = [...panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"])',
+      )];
+      if (focusable.length === 0) return;
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      if (currentIndex < 0) return;
+      const nextIndex = event.shiftKey
+        ? (currentIndex - 1 + focusable.length) % focusable.length
+        : (currentIndex + 1) % focusable.length;
+      event.preventDefault();
+      focusable[nextIndex]?.focus();
+      return;
+    }
+    if (event.target !== search) return;
     if (filteredItems.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
@@ -75,6 +90,10 @@
       const item = filteredItems[selectedIndex];
       if (item) onSelect(item.value);
     }
+  }
+
+  function optionId(index: number): string {
+    return `command-picker-option-${index}`;
   }
 
   function handleBackdropClick(event: MouseEvent): void {
@@ -97,7 +116,9 @@
   >
     <header class="flex items-center justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
       <div>
-        <span class="font-mono text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">/{picker.command}</span>
+        <span class="font-mono text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">
+          {picker.command === "commands" ? "Commands" : `/${picker.command}`}
+        </span>
         <h2 id="command-picker-title" class="mt-1 text-sm font-medium text-foreground">{picker.title}</h2>
       </div>
       <button
@@ -115,8 +136,12 @@
         bind:this={search}
         bind:value={query}
         type="search"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded="true"
         placeholder={picker.placeholder}
         aria-controls="command-picker-options"
+        aria-activedescendant={filteredItems[selectedIndex] ? optionId(selectedIndex) : undefined}
       />
     </label>
 
@@ -124,12 +149,14 @@
       {#each filteredItems as item, index (item.id ?? `${index}:${item.value}`)}
         <button
           class={[
-            "grid w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+            "grid w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
             index === selectedIndex && "bg-accent text-accent-foreground",
           ]}
           type="button"
           role="option"
+          id={optionId(index)}
           aria-selected={index === selectedIndex}
+          tabindex="-1"
           data-command-value={item.id ?? item.value}
           onmouseenter={() => selectedIndex = index}
           onclick={() => onSelect(item.value)}
@@ -141,8 +168,13 @@
               picker.command === "model" && "font-mono",
               modelDisplayToneClass(item.tone),
             ]}>{item.label}</strong>
-            {#if item.description}<small class="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">{item.description}</small>{/if}
+            {#if item.description}<small class={["mt-0.5 block truncate text-[11px] text-muted-foreground", picker.command !== "commands" && "font-mono"]}>{item.description}</small>{/if}
           </span>
+          {#if item.shortcut}
+            <kbd class="rounded-sm border border-border/70 bg-panel px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">{item.shortcut}</kbd>
+          {:else}
+            <span aria-hidden="true"></span>
+          {/if}
         </button>
       {:else}
         <p class="px-3 py-6 text-center text-xs text-muted-foreground">{picker.emptyText}</p>

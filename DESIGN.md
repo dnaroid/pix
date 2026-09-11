@@ -384,6 +384,22 @@ For true composite widgets:
 
 Do not add ARIA composite roles without implementing their keyboard behavior.
 
+Tree/navigation specifics:
+
+- a file/project tree is one Tab stop, not one Tab stop per visible row;
+- Up/Down move between visible rows and Home/End move to the visible bounds;
+- Right expands a collapsed directory, then moves into its first visible child
+  when already expanded;
+- Left collapses an expanded directory, otherwise moves to its visible parent;
+- type-ahead moves focus by visible item label without changing selection;
+- file selection/open state stays distinct from keyboard focus;
+- secondary pointer actions on a tree row need a keyboard route that does not
+  create another Tab stop for every row.
+
+The Workspace Activity Bar is a vertical toolbar composite. Only its current
+roving item participates in the normal Tab order; Up/Down/Home/End move focus
+without activating a destination, while Enter/Space/click performs activation.
+
 ### 12.1 Commands and context actions
 
 Choose command surfaces intentionally:
@@ -397,6 +413,26 @@ Choose command surfaces intentionally:
 
 Hover-only UI must not be the only path to a critical command. Prefer one command
 definition that can feed toolbar, menu, context-menu, and shortcut surfaces.
+
+Menus use one keyboard contract across the application:
+
+- opening from the keyboard focuses an appropriate enabled item;
+- Up/Down wrap across enabled items and skip disabled commands;
+- Home/End jump to the first/last enabled item;
+- printable-key type-ahead searches visible command labels;
+- Escape dismisses and restores focus to the invoker;
+- Tab dismisses rather than trapping focus inside the menu.
+
+Command identity MUST be stable and independent of presentation copy. Prefer
+namespaced ids (`session.new`, `composer.focus`, `message.copy`) with centralized
+metadata for label, description, scope, search keywords, shortcut, and destructive
+semantics. Stateful components still own enablement and execution when they own
+the underlying state; centralizing command metadata does not justify moving all
+application state into a global store.
+
+The command palette, shortcut hints, and keyboard dispatcher SHOULD derive from
+the same command metadata. Do not maintain a second list of shortcut strings or
+palette labels by hand.
 
 ### 12.2 Resizable panes and spatial memory
 

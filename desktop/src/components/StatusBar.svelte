@@ -1,6 +1,7 @@
 <script lang="ts">
   import Activity from "@lucide/svelte/icons/activity";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Command from "@lucide/svelte/icons/command";
   import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down";
   import ListChecks from "@lucide/svelte/icons/list-checks";
   import Workflow from "@lucide/svelte/icons/workflow";
@@ -37,6 +38,8 @@
     sessionActivityOpen,
     canOpenSessionActivity,
     sessionNeedsInput,
+    commandPaletteOpen,
+    commandPaletteShortcut,
     onSetConfig,
     onOpenModelThinking,
     onRefreshModelUsage,
@@ -44,6 +47,7 @@
     onCompressDcpContext,
     onNavigateMessages,
     onToggleSessionActivity,
+    onOpenCommandPalette,
   }: {
     status: ConnectionStatus;
     configOptions: SessionConfigOption[];
@@ -63,6 +67,8 @@
     sessionActivityOpen: boolean;
     canOpenSessionActivity: boolean;
     sessionNeedsInput: boolean;
+    commandPaletteOpen: boolean;
+    commandPaletteShortcut?: string;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
     onRefreshModelUsage: () => void;
@@ -70,6 +76,7 @@
     onCompressDcpContext: () => void;
     onNavigateMessages: () => void;
     onToggleSessionActivity: () => void;
+    onOpenCommandPalette: () => void;
   } = $props();
 
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
@@ -192,6 +199,18 @@
 
   <span class="flex-1"></span>
   <div class="flex shrink-0 items-center gap-0.5" aria-label="Status bar actions">
+    <button
+      class={[
+        "grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        commandPaletteOpen && "bg-chrome-hover text-foreground",
+      ]}
+      type="button"
+      title={commandPaletteShortcut ? `Command palette · ${commandPaletteShortcut}` : "Command palette"}
+      aria-label="Open command palette"
+      aria-haspopup="dialog"
+      aria-expanded={commandPaletteOpen}
+      onclick={onOpenCommandPalette}
+    ><Command class="h-3.5 w-3.5" aria-hidden="true" /></button>
     <button
       class={[
         "flex h-6 min-w-6 cursor-pointer items-center gap-1.5 rounded-sm bg-transparent px-1.5 text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",

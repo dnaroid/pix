@@ -12,11 +12,18 @@
   import Square from "@lucide/svelte/icons/square";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
   import X from "@lucide/svelte/icons/x";
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
   import type { Attachment } from "../lib/attachments";
   import type { AgentControlState } from "../lib/agent-control";
+  import { desktopCommandDefinition } from "../lib/desktop-commands";
+  import {
+    isTypeaheadKey,
+    menuFocusIndex,
+    menuTypeaheadFocusIndex,
+    type MenuNavigationItem,
+  } from "../lib/keyboard-navigation";
   import {
     advanceQuestionnaire,
     chooseCustomAnswer,
@@ -115,6 +122,10 @@
     onOpenAttachment: (attachment: Attachment) => void;
   } = $props();
 
+  const enhanceCommand = desktopCommandDefinition("composer.enhance");
+  const createTaskCommand = desktopCommandDefinition("composer.createTask");
+  const deferCommand = desktopCommandDefinition("composer.defer");
+
   let composerForm = $state<HTMLFormElement | undefined>();
   let textarea = $state<HTMLTextAreaElement | undefined>();
   let ghostLayer = $state<HTMLDivElement | undefined>();
@@ -136,12 +147,20 @@
   let voiceSupported = $state(false);
   let voiceSessionId = $state<string | undefined>();
   let composerMenuOpen = $state(false);
+  let composerMenu = $state<HTMLDivElement | null>(null);
+  let composerMenuTrigger = $state<HTMLButtonElement | null>(null);
+  let composerMenuTypeaheadQuery = "";
+  let composerMenuTypeaheadTimer: number | null = null;
   const autocompleteController = new PromptAutocompleteController({
     request: (draft, signal) => onAutocomplete(draft, signal),
     onSuggestion: (suggestion) => {
       autocompleteSuggestion = suggestion;
       requestAnimationFrame(syncGhostLayer);
     },
+  });
+
+  onDestroy(() => {
+    if (composerMenuTypeaheadTimer !== null) window.clearTimeout(composerMenuTypeaheadTimer);
   });
 
   const previewing = $derived(!!questionMode && questionMode.state.activeTab === questionMode.questions.length);
@@ -486,10 +505,81 @@
   }
 
   function toggleComposerMenu(): void {
-    composerMenuOpen = !composerMenuOpen;
-    if (!composerMenuOpen) return;
+    if (composerMenuOpen) {
+      composerMenuOpen = false;
+      return;
+    }
+    composerMenuOpen = true;
     dismissedSlashDraft = promptText;
     autocompleteController.dismiss();
+    void tick().then(() => {
+      const items = composerMenuNavigationItems();
+      const firstIndex = menuFocusIndex(items, -1, "ArrowDown");
+      if (firstIndex !== null) focusComposerMenuItem(firstIndex);
+    });
+  }
+
+  function composerMenuNavigationItems(): MenuNavigationItem[] {
+    return [
+      { label: enhanceCommand.label, disabled: !canEnhancePrompt },
+      { label: createTaskCommand.label, disabled: !canCreateTask },
+      { label: deferCommand.label, disabled: !activeSessionId || !ready || !hasQueueableDraft },
+    ];
+  }
+
+  function composerMenuButtons(): HTMLButtonElement[] {
+    return [...(composerMenu?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? [])];
+  }
+
+  function focusComposerMenuItem(index: number): void {
+    composerMenuButtons()[index]?.focus();
+  }
+
+  function handleComposerMenuKeydown(event: KeyboardEvent): void {
+    const buttons = composerMenuButtons();
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLButtonElement>("[role='menuitem']")
+      : null;
+    const currentIndex = target ? buttons.indexOf(target) : -1;
+    const items = composerMenuNavigationItems();
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      composerMenuOpen = false;
+      composerMenuTrigger?.focus();
+      return;
+    }
+    if (event.key === "Tab") {
+      composerMenuOpen = false;
+      return;
+    }
+
+    const nextIndex = menuFocusIndex(items, currentIndex, event.key);
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusComposerMenuItem(nextIndex);
+      return;
+    }
+
+    if (!isTypeaheadKey(event)) return;
+    event.preventDefault();
+    const key = event.key.toLocaleLowerCase();
+    let query = composerMenuTypeaheadQuery.length === 1 && composerMenuTypeaheadQuery === key
+      ? key
+      : `${composerMenuTypeaheadQuery}${key}`;
+    let typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    if (typeaheadIndex === null && query.length > 1) {
+      query = key;
+      typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    }
+    composerMenuTypeaheadQuery = query;
+    if (composerMenuTypeaheadTimer !== null) window.clearTimeout(composerMenuTypeaheadTimer);
+    composerMenuTypeaheadTimer = window.setTimeout(() => {
+      composerMenuTypeaheadQuery = "";
+      composerMenuTypeaheadTimer = null;
+    }, 700);
+    if (typeaheadIndex !== null) focusComposerMenuItem(typeaheadIndex);
   }
 
   async function insertVoiceTranscript(rawText: string, sessionId: string | undefined): Promise<void> {
@@ -724,7 +814,7 @@
     if (composerMenuOpen && event.key === "Escape" && !event.isComposing) {
       event.preventDefault();
       composerMenuOpen = false;
-      textarea?.focus();
+      composerMenuTrigger?.focus();
       return;
     }
     handleQuestionEscape(event);
@@ -888,40 +978,46 @@
 
 {#if composerMenuOpen && !editorMode && !questionMode}
   <div
+    bind:this={composerMenu}
     class="absolute right-3 bottom-[calc(100%+0.375rem)] z-40 w-44 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
     data-composer-menu
     role="menu"
+    tabindex="-1"
     aria-label="Composer actions"
+    onkeydown={handleComposerMenuKeydown}
   >
     <button
       class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       type="button"
       role="menuitem"
+      tabindex="-1"
       disabled={!canEnhancePrompt}
       onclick={() => void enhanceWithVoiceStop()}
     >
       <WandSparkles class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>Enhance prompt</span>
+      <span>{enhanceCommand.label}</span>
     </button>
     <button
       class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       type="button"
       role="menuitem"
+      tabindex="-1"
       disabled={!canCreateTask}
       onclick={() => void createTaskWithVoiceStop()}
     >
       <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>Create task</span>
+      <span>{createTaskCommand.label}</span>
     </button>
     <button
       class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       type="button"
       role="menuitem"
+      tabindex="-1"
       disabled={!activeSessionId || !ready || !hasQueueableDraft}
       onclick={() => void deferWithVoiceStop()}
     >
       <Pause class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>Pause for later</span>
+      <span>{deferCommand.label}</span>
     </button>
   </div>
 {/if}
@@ -1170,6 +1266,7 @@
         {#if !editorMode && !questionMode}
           <div class="relative shrink-0" data-composer-menu>
             <button
+              bind:this={composerMenuTrigger}
               class="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               type="button"
               aria-label="More composer actions"

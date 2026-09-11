@@ -8,4 +8,17 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain('style:min-width={`${renderedSidebarMinWidth}px`}');
     expect(sidebarSource).toContain("onMinimumWidthChange={setProjectSwitcherMinimumWidth}");
   });
+
+  it("treats the Activity Bar as one vertical keyboard toolbar", () => {
+    expect(sidebarSource).toContain('role="toolbar"');
+    expect(sidebarSource).toContain('aria-orientation="vertical"');
+    expect(sidebarSource).toContain("data-sidebar-tab");
+    expect(sidebarSource).toContain('linearFocusIndex(currentIndex, event.key, SIDEBAR_TABS.length, "vertical", true)');
+  });
+
+  it("uses the shared menu navigation contract for task status", () => {
+    expect(sidebarSource).toContain("menuFocusIndex(items, currentIndex, event.key)");
+    expect(sidebarSource).toContain("menuTypeaheadFocusIndex(items, currentIndex, query)");
+    expect(sidebarSource).toContain('role="menuitemradio"');
+  });
 });

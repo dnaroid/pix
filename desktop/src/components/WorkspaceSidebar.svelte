@@ -24,7 +24,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import {
     extractAttachmentMarkers,
     textWithAttachmentMarkers,
@@ -44,6 +44,13 @@
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
+  import {
+    isTypeaheadKey,
+    linearFocusIndex,
+    menuFocusIndex,
+    menuTypeaheadFocusIndex,
+    type MenuNavigationItem,
+  } from "../lib/keyboard-navigation";
   import {
     PROJECT_TODO_PATH,
     projectDocumentLabel,
@@ -102,6 +109,15 @@
     idx: "IDX",
     settings: "Settings",
   };
+  const SIDEBAR_TABS: readonly SidebarTab[] = [
+    "project",
+    "tasks",
+    "git",
+    "registry",
+    "scripts",
+    "idx",
+    "settings",
+  ];
 
   let {
     workspace,
@@ -241,6 +257,7 @@
 
   let collapsed = $state(false);
   let sidebarElement = $state<HTMLElement | null>(null);
+  let activityBar = $state<HTMLElement | null>(null);
   let projectSwitcher = $state<{ close: () => void } | null>(null);
   let projectSwitcherMinimumWidth = $state(MIN_WIDTH);
   let projectSettingsOpen = $state(false);
@@ -257,6 +274,10 @@
   let editorAttachments = $state<Attachment[]>([]);
   let taskType = $state<ProjectTaskType>("feature");
   let statusMenuTaskId = $state<string | null>(null);
+  let statusMenu = $state<HTMLDivElement | null>(null);
+  let statusMenuTrigger: HTMLButtonElement | null = null;
+  let statusMenuTypeaheadQuery = "";
+  let statusMenuTypeaheadTimer: number | null = null;
   let revealedTaskId = $state<string | null>(null);
   let planSelectorOpen = $state(false);
   let planSelectorQuery = $state("");
@@ -319,6 +340,10 @@
       planSelectorQuery,
       { minScorePerCharacter: 4 },
     ).map((match) => match.value);
+  });
+
+  onDestroy(() => {
+    if (statusMenuTypeaheadTimer !== null) window.clearTimeout(statusMenuTypeaheadTimer);
   });
 
   function openRegistryProjectArtifact(artifact: RegistryProjectArtifact): void {
@@ -662,14 +687,92 @@
   }
 
   function setTaskStatus(taskId: string, status: ProjectTaskStatus): void {
+    const trigger = statusMenuTrigger;
     statusMenuTaskId = null;
+    statusMenuTrigger = null;
     onStatusChange(taskId, status);
+    void tick().then(() => trigger?.focus());
+  }
+
+  function taskStatusMenuItems(): MenuNavigationItem[] {
+    return TASK_STATUSES.map((status) => ({ label: taskStatusLabel(status) }));
+  }
+
+  function taskStatusMenuButtons(): HTMLButtonElement[] {
+    return [...(statusMenu?.querySelectorAll<HTMLButtonElement>("[role='menuitemradio']") ?? [])];
+  }
+
+  function focusTaskStatusMenuItem(index: number): void {
+    taskStatusMenuButtons()[index]?.focus();
+  }
+
+  function closeTaskStatusMenu(restoreFocus = false): void {
+    const trigger = statusMenuTrigger;
+    statusMenuTaskId = null;
+    statusMenuTrigger = null;
+    if (restoreFocus) void tick().then(() => trigger?.focus());
+  }
+
+  function toggleTaskStatusMenu(event: MouseEvent, task: ProjectTask): void {
+    const trigger = event.currentTarget as HTMLButtonElement;
+    if (statusMenuTaskId === task.id) {
+      closeTaskStatusMenu();
+      return;
+    }
+    statusMenuTrigger = trigger;
+    statusMenuTaskId = task.id;
+    const selectedIndex = Math.max(0, TASK_STATUSES.indexOf(task.status));
+    void tick().then(() => focusTaskStatusMenuItem(selectedIndex));
+  }
+
+  function handleTaskStatusMenuKeydown(event: KeyboardEvent): void {
+    const buttons = taskStatusMenuButtons();
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLButtonElement>("[role='menuitemradio']")
+      : null;
+    const currentIndex = target ? buttons.indexOf(target) : -1;
+    const items = taskStatusMenuItems();
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeTaskStatusMenu(true);
+      return;
+    }
+    if (event.key === "Tab") {
+      closeTaskStatusMenu();
+      return;
+    }
+    const nextIndex = menuFocusIndex(items, currentIndex, event.key);
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusTaskStatusMenuItem(nextIndex);
+      return;
+    }
+    if (!isTypeaheadKey(event)) return;
+    event.preventDefault();
+    const key = event.key.toLocaleLowerCase();
+    let query = statusMenuTypeaheadQuery.length === 1 && statusMenuTypeaheadQuery === key
+      ? key
+      : `${statusMenuTypeaheadQuery}${key}`;
+    let typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    if (typeaheadIndex === null && query.length > 1) {
+      query = key;
+      typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    }
+    statusMenuTypeaheadQuery = query;
+    if (statusMenuTypeaheadTimer !== null) window.clearTimeout(statusMenuTypeaheadTimer);
+    statusMenuTypeaheadTimer = window.setTimeout(() => {
+      statusMenuTypeaheadQuery = "";
+      statusMenuTypeaheadTimer = null;
+    }, 700);
+    if (typeaheadIndex !== null) focusTaskStatusMenuItem(typeaheadIndex);
   }
 
   function closeStatusMenuOutside(event: PointerEvent): void {
     if (!statusMenuTaskId) return;
     const target = event.target as HTMLElement | null;
-    if (!target?.closest("[data-task-status-control]")) statusMenuTaskId = null;
+    if (!target?.closest("[data-task-status-control]")) closeTaskStatusMenu();
   }
 
   function startTaskDrag(event: PointerEvent, taskId: string): void {
@@ -794,6 +897,14 @@
     return indicator ? `${label}, ${indicator.reason}` : label;
   }
 
+  function handleActivityBarKeydown(event: KeyboardEvent, tab: SidebarTab): void {
+    const currentIndex = SIDEBAR_TABS.indexOf(tab);
+    const nextIndex = linearFocusIndex(currentIndex, event.key, SIDEBAR_TABS.length, "vertical", true);
+    if (nextIndex === null) return;
+    event.preventDefault();
+    activityBar?.querySelectorAll<HTMLButtonElement>("[data-sidebar-tab]")[nextIndex]?.focus();
+  }
+
 </script>
 
 <aside
@@ -805,14 +916,23 @@
   style:max-width="100vw"
   aria-label="Workspace sidebar"
 >
-  <nav class="flex h-full w-12 shrink-0 flex-col items-center border-r border-sidebar-border bg-chrome py-1.5" aria-label="Workspace views">
+  <div
+    bind:this={activityBar}
+    class="flex h-full w-12 shrink-0 flex-col items-center border-r border-sidebar-border bg-chrome py-1.5"
+    role="toolbar"
+    aria-label="Workspace views"
+    aria-orientation="vertical"
+  >
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
+      data-sidebar-tab
+      tabindex={activeTab === "project" ? 0 : -1}
       title={activityTitle("project", activeTab === "project" && !collapsed ? "Hide Project" : "Project")}
       aria-label={activityLabel("project", "Project files")}
       aria-controls="workspace-project-panel"
       aria-pressed={activeTab === "project" && !collapsed}
+      onkeydown={(event) => handleActivityBarKeydown(event, "project")}
       onclick={() => selectTab("project")}
     >
       {#if workspace}
@@ -825,10 +945,13 @@
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
+      data-sidebar-tab
+      tabindex={activeTab === "tasks" ? 0 : -1}
       title={activityTitle("tasks", activeTab === "tasks" && !collapsed ? "Hide Tasks" : "Tasks")}
       aria-label={activityLabel("tasks", "Tasks")}
       aria-controls="workspace-tasks-panel"
       aria-pressed={activeTab === "tasks" && !collapsed}
+      onkeydown={(event) => handleActivityBarKeydown(event, "tasks")}
       onclick={() => selectTab("tasks")}
     >
       <ListTodo class="h-5 w-5" aria-hidden="true" />
@@ -837,10 +960,13 @@
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
+      data-sidebar-tab
+      tabindex={activeTab === "git" ? 0 : -1}
       title={activityTitle("git", activeTab === "git" && !collapsed ? "Hide Source Control" : "Source Control")}
       aria-label={activityLabel("git", "Source Control")}
       aria-controls="workspace-git-panel"
       aria-pressed={activeTab === "git" && !collapsed}
+      onkeydown={(event) => handleActivityBarKeydown(event, "git")}
       onclick={() => selectTab("git")}
     >
       <GitBranch class="h-5 w-5" aria-hidden="true" />
@@ -849,10 +975,13 @@
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
+      data-sidebar-tab
+      tabindex={activeTab === "registry" ? 0 : -1}
       title={activityTitle("registry", activeTab === "registry" && !collapsed ? "Hide Registry" : "Registry")}
       aria-label={activityLabel("registry", "Resource registry")}
       aria-controls="workspace-registry-panel"
       aria-pressed={activeTab === "registry" && !collapsed}
+      onkeydown={(event) => handleActivityBarKeydown(event, "registry")}
       onclick={() => selectTab("registry")}
     >
       <Database class="h-5 w-5" aria-hidden="true" />
@@ -861,19 +990,25 @@
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "scripts" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
+      data-sidebar-tab
+      tabindex={activeTab === "scripts" ? 0 : -1}
       title={activityTitle("scripts", activeTab === "scripts" && !collapsed ? "Hide Package Scripts" : "Package Scripts")}
       aria-label={activityLabel("scripts", "Package scripts and terminals")}
       aria-controls="workspace-scripts-panel"
       aria-pressed={activeTab === "scripts" && !collapsed}
+      onkeydown={(event) => handleActivityBarKeydown(event, "scripts")}
       onclick={() => selectTab("scripts")}
     ><SquareTerminal class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.scripts} /></button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "idx" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
+      data-sidebar-tab
+      tabindex={activeTab === "idx" ? 0 : -1}
       title={activityTitle("idx", activeTab === "idx" && !collapsed ? "Hide IDX" : "IDX")}
       aria-label={activityLabel("idx", "IDX repository intelligence")}
       aria-controls="workspace-idx-panel"
       aria-pressed={activeTab === "idx" && !collapsed}
+      onkeydown={(event) => handleActivityBarKeydown(event, "idx")}
       onclick={() => selectTab("idx")}
     >
       <ScanSearch class="h-5 w-5" aria-hidden="true" />
@@ -882,13 +1017,16 @@
     <button
       class={["relative mt-auto grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "settings" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
+      data-sidebar-tab
+      tabindex={activeTab === "settings" ? 0 : -1}
       title={activityTitle("settings", activeTab === "settings" && !collapsed ? "Hide Settings" : "Settings")}
       aria-label={activityLabel("settings", "Settings")}
       aria-controls="workspace-settings-panel"
       aria-pressed={activeTab === "settings" && !collapsed}
+      onkeydown={(event) => handleActivityBarKeydown(event, "settings")}
       onclick={() => selectTab("settings")}
     ><Settings class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.settings} /></button>
-  </nav>
+  </div>
 
   {#if !collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
@@ -1042,7 +1180,7 @@
                                       aria-label={`Change status for ${taskLabel}. Current status: ${taskStatusLabel(task.status)}`}
                                       aria-haspopup="menu"
                                       aria-expanded={statusMenuTaskId === task.id}
-                                      onclick={() => statusMenuTaskId = statusMenuTaskId === task.id ? null : task.id}
+                                      onclick={(event) => toggleTaskStatusMenu(event, task)}
                                       disabled={busy}
                                     >
                                       {#if task.status === "done"}<CheckCircle2 class="h-3 w-3" aria-hidden="true" />
@@ -1052,12 +1190,20 @@
                                     </button>
 
                                     {#if statusMenuTaskId === task.id}
-                                      <div class="absolute top-7 right-0 z-40 w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md" role="menu" aria-label={`Status for ${taskLabel}`}>
+                                      <div
+                                        bind:this={statusMenu}
+                                        class="absolute top-7 right-0 z-40 w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+                                        role="menu"
+                                        tabindex="-1"
+                                        aria-label={`Status for ${taskLabel}`}
+                                        onkeydown={handleTaskStatusMenuKeydown}
+                                      >
                                         {#each TASK_STATUSES as status}
                                           <button
                                             class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[11px] leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
                                             type="button"
                                             role="menuitemradio"
+                                            tabindex="-1"
                                             aria-checked={status === task.status}
                                             onclick={() => setTaskStatus(task.id, status)}
                                           >

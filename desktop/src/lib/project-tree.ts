@@ -35,6 +35,16 @@ export function flattenProjectTree(
   return rows;
 }
 
+/** Resolve the nearest visible parent row for keyboard Left-arrow navigation. */
+export function projectTreeParentIndex(rows: readonly ProjectTreeRow[], index: number): number | null {
+  const row = rows[index];
+  if (!row || row.depth <= 0) return null;
+  for (let candidate = index - 1; candidate >= 0; candidate -= 1) {
+    if ((rows[candidate]?.depth ?? -1) === row.depth - 1) return candidate;
+  }
+  return null;
+}
+
 export function serializeProjectTreeDrag(entry: ProjectTreeEntry): string {
   return JSON.stringify({ version: 1, path: entry.path, kind: entry.kind });
 }

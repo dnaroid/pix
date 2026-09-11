@@ -3,7 +3,13 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
+  import {
+    isTypeaheadKey,
+    menuFocusIndex,
+    menuTypeaheadFocusIndex,
+    type MenuNavigationItem,
+  } from "../lib/keyboard-navigation";
   import { projectSwitcherMinimumWidth } from "../lib/project-switcher-layout";
   import { MAX_RECENT_PROJECTS, projectName, projectParentPath } from "../lib/recent-projects";
   import ProjectFolderIcon from "./ProjectFolderIcon.svelte";
@@ -39,6 +45,13 @@
   let chevronSlot = $state<HTMLSpanElement | null>(null);
   let open = $state(false);
   let reportedMinimumWidth = 0;
+  let menu = $state<HTMLDivElement | null>(null);
+  let menuTypeaheadQuery = "";
+  let menuTypeaheadTimer: number | null = null;
+
+  onDestroy(() => {
+    if (menuTypeaheadTimer !== null) window.clearTimeout(menuTypeaheadTimer);
+  });
 
   $effect(() => {
     workspace;
@@ -106,7 +119,17 @@
     onChooseWorkspaceInNewWindow();
   }
 
+  function openProjectInNewWindow(project: string): void {
+    close();
+    onOpenProjectInNewWindow(project);
+  }
+
   function handleWindowClick(event: MouseEvent): void {
+    if (!open || !root || !(event.target instanceof Node) || root.contains(event.target)) return;
+    close();
+  }
+
+  function handleWindowFocusin(event: FocusEvent): void {
     if (!open || !root || !(event.target instanceof Node) || root.contains(event.target)) return;
     close();
   }
@@ -119,14 +142,74 @@
   }
 
   function handleTriggerKeydown(event: KeyboardEvent): void {
-    if (event.key !== "ArrowDown") return;
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
     if (!open) toggle();
-    requestAnimationFrame(() => root?.querySelector<HTMLButtonElement>("[data-project-option]")?.focus());
+    requestAnimationFrame(() => {
+      const items = projectMenuNavigationItems();
+      const index = menuFocusIndex(items, -1, event.key);
+      if (index !== null) projectMenuButtons()[index]?.focus();
+    });
+  }
+
+  function projectMenuButtons(): HTMLButtonElement[] {
+    return [...(menu?.querySelectorAll<HTMLButtonElement>("[data-project-option]") ?? [])];
+  }
+
+  function projectMenuNavigationItems(): MenuNavigationItem[] {
+    return projectMenuButtons().map((button) => ({
+      label: button.getAttribute("aria-label") ?? button.textContent ?? "",
+      disabled: button.disabled,
+    }));
+  }
+
+  function handleMenuKeydown(event: KeyboardEvent): void {
+    const buttons = projectMenuButtons();
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLButtonElement>("[data-project-option]")
+      : null;
+    const currentIndex = target ? buttons.indexOf(target) : -1;
+    const items = projectMenuNavigationItems();
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      trigger?.focus();
+      return;
+    }
+    if (event.key === "Tab") {
+      close();
+      return;
+    }
+    const nextIndex = menuFocusIndex(items, currentIndex, event.key);
+    if (nextIndex !== null) {
+      event.preventDefault();
+      buttons[nextIndex]?.focus();
+      return;
+    }
+    if (!isTypeaheadKey(event)) return;
+    event.preventDefault();
+    const key = event.key.toLocaleLowerCase();
+    let query = menuTypeaheadQuery.length === 1 && menuTypeaheadQuery === key
+      ? key
+      : `${menuTypeaheadQuery}${key}`;
+    let typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    if (typeaheadIndex === null && query.length > 1) {
+      query = key;
+      typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    }
+    menuTypeaheadQuery = query;
+    if (menuTypeaheadTimer !== null) window.clearTimeout(menuTypeaheadTimer);
+    menuTypeaheadTimer = window.setTimeout(() => {
+      menuTypeaheadQuery = "";
+      menuTypeaheadTimer = null;
+    }, 700);
+    if (typeaheadIndex !== null) buttons[typeaheadIndex]?.focus();
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
+<svelte:window onclick={handleWindowClick} onfocusin={handleWindowFocusin} onkeydown={handleWindowKeydown} />
 
 <div class="border-b border-sidebar-border bg-chrome/70" bind:this={root}>
   <button
@@ -135,7 +218,7 @@
     type="button"
     title={workspace || "Choose project"}
     aria-label={workspace ? `Change project, current project: ${projectName(workspace)}` : "Choose project"}
-    aria-haspopup="dialog"
+    aria-haspopup="menu"
     aria-expanded={open}
     onclick={toggle}
     onkeydown={handleTriggerKeydown}
@@ -161,7 +244,14 @@
   </button>
 
   {#if open}
-    <div class="grid max-h-[min(360px,46vh)] grid-rows-[auto_minmax(0,1fr)_auto] border-t border-sidebar-border bg-sidebar" role="dialog" aria-label="Select project">
+    <div
+      bind:this={menu}
+      class="grid max-h-[min(360px,46vh)] grid-rows-[auto_minmax(0,1fr)_auto] border-t border-sidebar-border bg-sidebar"
+      role="menu"
+      tabindex="-1"
+      aria-label="Select project"
+      onkeydown={handleMenuKeydown}
+    >
       <div class="flex h-7 items-center px-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         <span>Recent projects</span>
         <span class="ml-auto font-mono font-normal tracking-normal opacity-70">{recentProjects.length}/{MAX_RECENT_PROJECTS}</span>
@@ -175,6 +265,8 @@
               class="grid min-w-0 grid-cols-[22px_minmax(0,1fr)_14px] items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
               data-project-option
               type="button"
+              role="menuitem"
+              tabindex="-1"
               aria-current={selected ? "true" : undefined}
               onclick={() => selectProject(project)}
               disabled={currentWindowDisabled}
@@ -190,9 +282,11 @@
               class="m-0.5 grid place-items-center rounded-md text-muted-foreground opacity-70 hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
               data-project-option
               type="button"
+              role="menuitem"
+              tabindex="-1"
               title={`Open ${projectName(project)} in a new window`}
               aria-label={`Open ${projectName(project)} in a new window`}
-              onclick={() => onOpenProjectInNewWindow(project)}
+              onclick={() => openProjectInNewWindow(project)}
             ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
           </div>
         {:else}
@@ -205,6 +299,8 @@
           class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           data-project-option
           type="button"
+          role="menuitem"
+          tabindex="-1"
           onclick={chooseWorkspace}
           disabled={currentWindowDisabled}
         ><FolderPlus class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /><span class="truncate">Open folder…</span></button>
@@ -212,6 +308,8 @@
           class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
           data-project-option
           type="button"
+          role="menuitem"
+          tabindex="-1"
           onclick={chooseWorkspaceInNewWindow}
         ><ExternalLink class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /><span class="truncate">Open folder in new window…</span></button>
       </div>

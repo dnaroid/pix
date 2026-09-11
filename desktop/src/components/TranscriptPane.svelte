@@ -8,7 +8,15 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import PanelTopOpen from "@lucide/svelte/icons/panel-top-open";
   import Undo2 from "@lucide/svelte/icons/undo-2";
+  import { onDestroy, tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
+  import { desktopCommandDefinition } from "../lib/desktop-commands";
+  import {
+    isTypeaheadKey,
+    menuFocusIndex,
+    menuTypeaheadFocusIndex,
+    type MenuNavigationItem,
+  } from "../lib/keyboard-navigation";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
   import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
@@ -73,9 +81,18 @@
     onUserMessageAction: (message: MessageItem, action: UserMessageAction) => void | Promise<void>;
   } = $props();
 
+  const copyMessageCommand = desktopCommandDefinition("message.copy");
+  const forkMessageCommand = desktopCommandDefinition("message.fork");
+  const forkNewTabCommand = desktopCommandDefinition("message.forkNewTab");
+  const undoMessageCommand = desktopCommandDefinition("message.undo");
+
   let displayItems = $derived(groupTranscriptItems(transcript.items));
   let activeUserMessageMenu = $state<string | null>(null);
   let userMessageMenuPosition = $state<{ left: number; top: number } | null>(null);
+  let userMessageMenu = $state<HTMLDivElement | null>(null);
+  let userMessageMenuTrigger: HTMLElement | null = null;
+  let userMessageMenuTypeaheadQuery = "";
+  let userMessageMenuTypeaheadTimer: number | null = null;
   let canMutateUserMessages = $derived(
     !!activeSessionId && !promptRunning && !operationRunning && !historyLoading,
   );
@@ -91,6 +108,10 @@
   const USER_MESSAGE_MENU_HEIGHT = 164;
   const USER_MESSAGE_MENU_GAP = 6;
   const USER_MESSAGE_MENU_MARGIN = 8;
+
+  onDestroy(() => {
+    if (userMessageMenuTypeaheadTimer !== null) window.clearTimeout(userMessageMenuTypeaheadTimer);
+  });
 
   function handleToolResultToggle(event: Event, tool: ToolItem): void {
     const details = event.currentTarget as HTMLDetailsElement;
@@ -127,9 +148,81 @@
     return toolGroupPresentationNames(tools);
   }
 
-  function closeUserMessageMenu(): void {
+  function closeUserMessageMenu(restoreFocus = false): void {
     activeUserMessageMenu = null;
     userMessageMenuPosition = null;
+    if (restoreFocus) userMessageMenuTrigger?.focus();
+    userMessageMenuTrigger = null;
+  }
+
+  function userMessageMenuItems(): MenuNavigationItem[] {
+    const mutationDisabled = !canMutateUserMessages || !!activeUserMessage?.localOnly;
+    return [
+      { label: copyMessageCommand.label },
+      { label: forkMessageCommand.label, disabled: mutationDisabled },
+      { label: forkNewTabCommand.label, disabled: mutationDisabled },
+      { label: undoMessageCommand.label, disabled: mutationDisabled },
+    ];
+  }
+
+  function userMessageMenuButtons(): HTMLButtonElement[] {
+    return [...(userMessageMenu?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? [])];
+  }
+
+  function focusUserMessageMenuItem(index: number): void {
+    userMessageMenuButtons()[index]?.focus();
+  }
+
+  function focusFirstUserMessageMenuItem(): void {
+    void tick().then(() => {
+      const firstIndex = menuFocusIndex(userMessageMenuItems(), -1, "ArrowDown");
+      if (firstIndex !== null) focusUserMessageMenuItem(firstIndex);
+    });
+  }
+
+  function handleUserMessageMenuKeydown(event: KeyboardEvent): void {
+    const buttons = userMessageMenuButtons();
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLButtonElement>("[role='menuitem']")
+      : null;
+    const currentIndex = target ? buttons.indexOf(target) : -1;
+    const items = userMessageMenuItems();
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeUserMessageMenu(true);
+      return;
+    }
+    if (event.key === "Tab") {
+      closeUserMessageMenu();
+      return;
+    }
+
+    const nextIndex = menuFocusIndex(items, currentIndex, event.key);
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusUserMessageMenuItem(nextIndex);
+      return;
+    }
+    if (!isTypeaheadKey(event)) return;
+    event.preventDefault();
+    const key = event.key.toLocaleLowerCase();
+    let query = userMessageMenuTypeaheadQuery.length === 1 && userMessageMenuTypeaheadQuery === key
+      ? key
+      : `${userMessageMenuTypeaheadQuery}${key}`;
+    let typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    if (typeaheadIndex === null && query.length > 1) {
+      query = key;
+      typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
+    }
+    userMessageMenuTypeaheadQuery = query;
+    if (userMessageMenuTypeaheadTimer !== null) window.clearTimeout(userMessageMenuTypeaheadTimer);
+    userMessageMenuTypeaheadTimer = window.setTimeout(() => {
+      userMessageMenuTypeaheadQuery = "";
+      userMessageMenuTypeaheadTimer = null;
+    }, 700);
+    if (typeaheadIndex !== null) focusUserMessageMenuItem(typeaheadIndex);
   }
 
   function clampMenuCoordinate(value: number, min: number, max: number): number {
@@ -165,15 +258,19 @@
     }
     const trigger = event.currentTarget as HTMLElement;
     const rect = trigger.getBoundingClientRect();
+    userMessageMenuTrigger = trigger;
     activeUserMessageMenu = messageId;
     positionUserMessageMenu(rect.right, rect.top, rect.bottom, true);
+    focusFirstUserMessageMenuItem();
   }
 
   function openUserMessageContextMenu(event: MouseEvent, messageId: string): void {
     event.preventDefault();
     event.stopPropagation();
+    userMessageMenuTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     activeUserMessageMenu = messageId;
     positionUserMessageMenu(event.clientX, event.clientY, event.clientY, false);
+    focusFirstUserMessageMenuItem();
   }
 
   function handleWindowClick(event: MouseEvent): void {
@@ -185,7 +282,7 @@
   function handleWindowKeydown(event: KeyboardEvent): void {
     if (event.key !== "Escape" || !activeUserMessageMenu) return;
     event.preventDefault();
-    closeUserMessageMenu();
+    closeUserMessageMenu(true);
   }
 
   function handleWindowResize(): void {
@@ -371,35 +468,38 @@
 
   {#if activeUserMessage && userMessageMenuPosition}
     <div
+      bind:this={userMessageMenu}
       class="fixed z-[100] max-h-[calc(100vh-1rem)] w-48 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
       style={`left: ${userMessageMenuPosition.left}px; top: ${userMessageMenuPosition.top}px;`}
       role="menu"
       tabindex="-1"
       aria-label="Message actions"
       data-user-message-menu
+      onkeydown={handleUserMessageMenuKeydown}
     >
-      <button class="message-action-item" type="button" role="menuitem" onclick={() => void runUserMessageAction(activeUserMessage, "copy")}>
+      <button class="message-action-item" type="button" role="menuitem" tabindex="-1" onclick={() => void runUserMessageAction(activeUserMessage, "copy")}>
         <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>Copy message</span>
+        <span>{copyMessageCommand.label}</span>
       </button>
-      <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork")}>
+      <button class="message-action-item" type="button" role="menuitem" tabindex="-1" disabled={!canMutateUserMessages || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork")}>
         <GitFork class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>Fork</span>
+        <span>{forkMessageCommand.label}</span>
       </button>
-      <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork-new-tab")}>
+      <button class="message-action-item" type="button" role="menuitem" tabindex="-1" disabled={!canMutateUserMessages || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork-new-tab")}>
         <PanelTopOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>Fork in new tab</span>
+        <span>{forkNewTabCommand.label}</span>
       </button>
       <div class="my-1 h-px bg-border" role="separator"></div>
       <button
         class="message-action-item danger"
         type="button"
         role="menuitem"
+        tabindex="-1"
         disabled={!canMutateUserMessages || activeUserMessage.localOnly}
         onclick={() => void runUserMessageAction(activeUserMessage, "undo")}
       >
         <Undo2 class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>Undo changes</span>
+        <span>{undoMessageCommand.label}</span>
       </button>
     </div>
   {/if}

@@ -42,9 +42,12 @@ without blocking desktop interactions.
 - Recent projects persist locally under `pix.desktop.recentProjects`; malformed,
   relative, and duplicate entries are ignored. `pix.desktop.workspace` remains
   the persisted active project and is folded into the recent list on startup.
-- Escape and outside-click dismiss the project menu. Opening it closes the
-  conversation selector, and top-level session/workspace actions can close it
-  through the sidebar component handle.
+- Escape and outside-click dismiss the project menu. Escape restores focus to
+  the project-switcher trigger. ArrowUp/ArrowDown plus Home/End navigate enabled
+  project commands, printable-key type-ahead searches visible menu labels, and
+  disabled current-window actions are skipped without being hidden. Opening the
+  menu closes the conversation selector, and top-level session/workspace actions
+  can close it through the sidebar component handle.
 - The project activity-rail folder and project-switcher folders use a stable
   fallback hue derived from the normalized full project path rather than only
   its basename. Windows drive and UNC identities are compared case-insensitively.

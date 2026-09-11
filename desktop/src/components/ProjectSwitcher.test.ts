@@ -11,7 +11,15 @@ describe("ProjectSwitcher project opening actions", () => {
   it("keeps new-window actions usable while current-window navigation is busy", () => {
     expect(switcherSource).toContain("currentWindowDisabled");
     expect(switcherSource).toContain("disabled={currentWindowDisabled}");
-    expect(switcherSource).toContain("onclick={() => onOpenProjectInNewWindow(project)}");
+    expect(switcherSource).toContain("onclick={() => openProjectInNewWindow(project)}");
+  });
+
+  it("behaves as a keyboard navigable command menu", () => {
+    expect(switcherSource).toContain('aria-haspopup="menu"');
+    expect(switcherSource).toContain('role="menu"');
+    expect(switcherSource).toContain('role="menuitem"');
+    expect(switcherSource).toContain("menuFocusIndex");
+    expect(switcherSource).toContain("menuTypeaheadFocusIndex");
   });
 
   it("renders per-project override colors without owning filesystem IO", () => {

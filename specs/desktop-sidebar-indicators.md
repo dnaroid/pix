@@ -39,6 +39,21 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - When several conditions apply, severity order is `error > warning > info` and only one dot is rendered.
 - No normal/healthy state renders a dot.
 
+## Activity Bar keyboard contract
+
+- The Workspace Activity Bar is one vertical `toolbar` composite rather than
+  seven unrelated Tab stops.
+- The currently remembered workspace view owns the toolbar's roving Tab stop,
+  including when its panel is collapsed.
+- ArrowUp/ArrowDown move focus between Project, Tasks, Source Control, Registry,
+  Package Scripts, IDX, and Settings; Home/End move to the bounds and movement
+  wraps at the rail ends.
+- Moving keyboard focus does not activate or expand a view. Enter/Space/click
+  retains the existing `selectTab` behavior, including collapsing the current
+  panel when its active button is invoked again.
+- Indicator tone/reason and `aria-pressed` selection remain independent from the
+  temporary keyboard-focus position.
+
 ## Signals by activity view
 
 - **Project** — error only when the workspace/project tree cannot be read. A populated project is not attention by itself.

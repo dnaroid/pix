@@ -7,12 +7,15 @@
   import Folder from "@lucide/svelte/icons/folder";
   import ImageIcon from "@lucide/svelte/icons/image";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import { onDestroy, tick } from "svelte";
+  import { isTypeaheadKey, linearFocusIndex, typeaheadFocusIndex } from "../lib/keyboard-navigation";
   import {
     flattenProjectTree,
     PROJECT_TREE_DRAG_STATE_EVENT,
     PROJECT_TREE_DROP_EVENT,
     PROJECT_TREE_DROP_TARGET_SELECTOR,
     projectTreeDragPayload,
+    projectTreeParentIndex,
     type ProjectTreeEntry,
   } from "../lib/project-tree";
 
@@ -39,6 +42,8 @@
   let loadingDirectories = $state<string[]>([]);
   let errorByDirectory = $state<Record<string, string>>({});
   let selectedPath = $state<string | null>(null);
+  let focusedPath = $state<string | null>(null);
+  let treeRoot = $state<HTMLDivElement | null>(null);
   let draggedEntry = $state<ProjectTreeEntry | null>(null);
   let projectEntryDragging = $state(false);
   let dragClientX = $state(0);
@@ -52,6 +57,8 @@
   let suppressEntryClick = false;
   let previousDragUserSelect: string | null = null;
   let previousDragCursor: string | null = null;
+  let typeaheadQuery = "";
+  let typeaheadTimer: number | null = null;
   const dragThreshold = 4;
 
   const rootEntries = $derived(entriesByDirectory[""] ?? []);
@@ -62,6 +69,16 @@
   ));
   const rootLoading = $derived(loadingDirectories.includes(""));
   const rootError = $derived(errorByDirectory[""]);
+  const tabbablePath = $derived.by(() => {
+    const visiblePaths = new Set(rows.map((row) => row.entry.path));
+    if (focusedPath && visiblePaths.has(focusedPath)) return focusedPath;
+    if (selectedPath && visiblePaths.has(selectedPath)) return selectedPath;
+    return rows[0]?.entry.path ?? null;
+  });
+
+  onDestroy(() => {
+    if (typeaheadTimer !== null) window.clearTimeout(typeaheadTimer);
+  });
 
   $effect(() => {
     const currentWorkspace = workspace;
@@ -73,6 +90,7 @@
     loadingDirectories = [];
     errorByDirectory = {};
     selectedPath = null;
+    focusedPath = null;
     clearProjectEntryDrag();
     queueMicrotask(() => {
       if (!cancelled && nextGeneration === generation) onHealthChange?.(null);
@@ -136,6 +154,80 @@
   function openFile(path: string): void {
     selectedPath = path;
     onOpenFile(path);
+  }
+
+  async function focusTreeRow(index: number): Promise<void> {
+    const row = rows[index];
+    if (!row) return;
+    focusedPath = row.entry.path;
+    await tick();
+    const item = treeRoot?.querySelector<HTMLButtonElement>(
+      `[data-project-tree-path="${CSS.escape(row.entry.path)}"]`,
+    );
+    item?.focus();
+    item?.scrollIntoView({ block: "nearest" });
+  }
+
+  function handleTreeItemKeydown(event: KeyboardEvent, index: number, entry: ProjectTreeEntry): void {
+    const linearIndex = linearFocusIndex(index, event.key, rows.length, "vertical", false);
+    if (linearIndex !== null && ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      void focusTreeRow(linearIndex);
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (entry.kind !== "directory") return;
+      if (!expandedDirectories.includes(entry.path)) {
+        toggleDirectory(entry.path);
+        return;
+      }
+      const next = rows[index + 1];
+      if (next && next.depth > rows[index]!.depth) void focusTreeRow(index + 1);
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (entry.kind === "directory" && expandedDirectories.includes(entry.path)) {
+        toggleDirectory(entry.path);
+        return;
+      }
+      const parentIndex = projectTreeParentIndex(rows, index);
+      if (parentIndex !== null) void focusTreeRow(parentIndex);
+      return;
+    }
+
+    if (event.key === "Enter" && event.shiftKey) {
+      event.preventDefault();
+      onOpenExternal(entry.path);
+      return;
+    }
+
+    if ((event.key === "Enter" || event.key === " ") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      if (entry.kind === "directory") toggleDirectory(entry.path);
+      else openFile(entry.path);
+      return;
+    }
+
+    if (!isTypeaheadKey(event)) return;
+    event.preventDefault();
+    const key = event.key.toLocaleLowerCase();
+    let query = typeaheadQuery.length === 1 && typeaheadQuery === key ? key : `${typeaheadQuery}${key}`;
+    let nextIndex = typeaheadFocusIndex(rows.map((row) => row.entry.name), index, query);
+    if (nextIndex === null && query.length > 1) {
+      query = key;
+      nextIndex = typeaheadFocusIndex(rows.map((row) => row.entry.name), index, query);
+    }
+    typeaheadQuery = query;
+    if (typeaheadTimer !== null) window.clearTimeout(typeaheadTimer);
+    typeaheadTimer = window.setTimeout(() => {
+      typeaheadQuery = "";
+      typeaheadTimer = null;
+    }, 700);
+    if (nextIndex !== null) void focusTreeRow(nextIndex);
   }
 
   function fileIconKind(path: string): "text" | "code" | "image" | "file" {
@@ -274,7 +366,12 @@
 </script>
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files">
-  <div class="min-h-0 flex-1 overflow-auto py-1">
+  <div
+    bind:this={treeRoot}
+    class="min-h-0 flex-1 overflow-auto py-1"
+    role="tree"
+    aria-label="Project files"
+  >
     {#if rootLoading && rootEntries.length === 0}
       <div class="flex items-center justify-center gap-1.5 py-8 text-[11px] text-muted-foreground">
         <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading project files…
@@ -286,7 +383,7 @@
     {:else if rootEntries.length === 0}
       <div class="px-3 py-8 text-center text-[11px] text-muted-foreground">This project folder is empty.</div>
     {:else}
-      {#each rows as row (row.entry.path)}
+      {#each rows as row, index (row.entry.path)}
         {@const entry = row.entry}
         {@const expanded = entry.kind === "directory" && expandedDirectories.includes(entry.path)}
         {@const directoryLoading = entry.kind === "directory" && loadingDirectories.includes(entry.path)}
@@ -296,12 +393,21 @@
             selectedPath === entry.path ? "bg-sidebar-accent/70" : "",
           ]}
           style:padding-left={`${4 + row.depth * 14}px`}
+          role="presentation"
         >
           <button
             class="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left text-[11px] text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             type="button"
-            title={entry.path}
+            role="treeitem"
+            title={`${entry.path} · Shift+Enter opens in ${externalEditorLabel}`}
+            aria-level={row.depth + 1}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
+            aria-selected={selectedPath === entry.path}
+            aria-keyshortcuts="Shift+Enter"
+            tabindex={tabbablePath === entry.path ? 0 : -1}
+            data-project-tree-path={entry.path}
+            onfocus={() => focusedPath = entry.path}
+            onkeydown={(event) => handleTreeItemKeydown(event, index, entry)}
             onclick={(event) => activateProjectEntry(event, entry)}
             onpointerdown={(event) => startProjectEntryPointerDrag(event, entry)}
             onpointermove={moveProjectEntryPointerDrag}
@@ -329,10 +435,11 @@
           </button>
 
           <button
-            class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100"
+            class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100"
             type="button"
+            tabindex="-1"
+            aria-hidden="true"
             title={`Open ${entry.name} in ${externalEditorLabel}`}
-            aria-label={`Open ${entry.path} in ${externalEditorLabel}`}
             onclick={(event) => stopAndOpenExternal(event, entry.path)}
           >
             <ExternalLink class="h-3 w-3" aria-hidden="true" />

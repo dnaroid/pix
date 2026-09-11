@@ -1,7 +1,13 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import {
+  desktopShortcutLabel,
+  type DesktopCommandDefinition,
+  type DesktopShortcutPlatform,
+} from "./desktop-commands";
 import { modelRefTone, thinkingLevelTone, type ModelDisplayTone } from "./model-display";
 
 export type InteractiveSlashCommand = "model" | "thinking" | "jump" | "history";
+export type CommandPickerKind = InteractiveSlashCommand | "commands";
 type ConfigSlashCommand = Extract<InteractiveSlashCommand, "model" | "thinking">;
 
 export interface CommandPickerItem {
@@ -13,15 +19,37 @@ export interface CommandPickerItem {
   readonly aliases?: readonly string[];
   readonly keywords?: readonly string[];
   readonly tone?: ModelDisplayTone;
+  readonly shortcut?: string;
 }
 
 export interface CommandPickerState {
-  readonly command: InteractiveSlashCommand;
+  readonly command: CommandPickerKind;
   readonly title: string;
   readonly placeholder: string;
   readonly emptyText: string;
   readonly initialQuery?: string;
   readonly items: readonly CommandPickerItem[];
+}
+
+export function desktopCommandPickerState(
+  commands: readonly DesktopCommandDefinition[],
+  platform: DesktopShortcutPlatform,
+): CommandPickerState {
+  return {
+    command: "commands",
+    title: "Command Palette",
+    placeholder: "Search commands…",
+    emptyText: "No matching commands",
+    items: commands.map((command) => ({
+      id: command.id,
+      value: command.id,
+      label: command.label,
+      description: command.description,
+      aliases: [command.scope],
+      keywords: command.keywords,
+      shortcut: desktopShortcutLabel(command.shortcut, platform),
+    })),
+  };
 }
 
 type ConfigSelectValue = {

@@ -46,10 +46,20 @@
   } from "./lib/slash-commands";
   import {
     commandPickerState,
+    desktopCommandPickerState,
     listCommandPickerState,
     type CommandPickerItem,
     type CommandPickerState,
   } from "./lib/command-interactions";
+  import {
+    COMMAND_PALETTE_IDS,
+    desktopCommandDefinition,
+    desktopCommandShortcutLabel,
+    isDesktopCommandId,
+    matchesDesktopShortcut,
+    type DesktopCommandId,
+    type DesktopShortcutPlatform,
+  } from "./lib/desktop-commands";
   import { clampThinkingLevel, modelThinkingConfigState } from "./lib/model-thinking";
   import {
     ACTIVE_SESSIONS_STORAGE_KEY,
@@ -255,6 +265,7 @@
   const RUNTIME_MODEL_USAGE_REFRESH_MS = 5 * 60_000;
   const SESSION_INSPECTOR_OPEN_KEY = "pix.desktop.sessionInspectorOpen";
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
+  const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
 
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
@@ -2656,8 +2667,7 @@
     configOptionsBySessionId.clear();
   }
 
-  async function closeSessionTab(event: MouseEvent, sessionId: string): Promise<void> {
-    event.stopPropagation();
+  async function closeSessionTab(sessionId: string): Promise<void> {
     closeSessionSelector();
     sessionPrewarmGeneration += 1;
     if (sessionId !== activeSessionId) {
@@ -2718,21 +2728,10 @@
     sessions = [{ sessionId, cwd, updatedAt: new Date().toISOString() }, ...sessions];
   }
 
-  function handleSessionTabClick(event: MouseEvent, sessionId: string): void {
+  function handleSessionTabClick(sessionId: string): void {
     closeProjectSelector();
-    if (sessionId !== activeSessionId) {
-      closeSessionSelector();
-      void loadSession(sessionId);
-      return;
-    }
-
-    event.stopPropagation();
-    if (sessionSelectorOpen) {
-      closeSessionSelector();
-    } else {
-      sessionSelectorTrigger = event.currentTarget as HTMLButtonElement;
-      openSessionSelector();
-    }
+    closeSessionSelector();
+    if (sessionId !== activeSessionId) void loadSession(sessionId);
   }
 
   function handleSessionPickerClick(event: MouseEvent): void {
@@ -3792,10 +3791,127 @@
     }
   }
 
+  function desktopCommandEnabled(id: DesktopCommandId): boolean {
+    switch (id) {
+      case "application.commandPalette":
+        return !activePreview && !gitDiffPreview && activePendingElicitation?.kind !== "form";
+      case "workspace.choose":
+        return !anyPromptRunning && !operationRunning && !tasksSaving && taskActionId === null;
+      case "session.new":
+        return canUseSession;
+      case "session.open":
+        return status === "ready" && !!workspace && !operationRunning;
+      case "session.jump":
+      case "session.history":
+        return !!client && !!activeSessionId && activeSessionRuntimeReady && !operationRunning;
+      case "session.activity":
+        return !!activeSessionId;
+      case "session.modelThinking":
+        return !!activeSessionId
+          && activeSessionRuntimeReady
+          && !operationRunning
+          && !promptRunning
+          && changingConfig === null;
+      case "composer.focus":
+        return !!activeSessionId;
+      case "composer.enhance":
+      case "composer.createTask":
+      case "composer.defer":
+      case "message.copy":
+      case "message.fork":
+      case "message.forkNewTab":
+      case "message.undo":
+        return false;
+    }
+  }
+
+  async function openDesktopCommandPalette(): Promise<void> {
+    if (!desktopCommandEnabled("application.commandPalette")) return;
+    closeProjectSelector();
+    closeSessionSelector();
+    closeModelThinkingPicker();
+    if (commandPicker && commandPicker.command !== "commands") {
+      commandPicker = null;
+      await tick();
+    }
+    const commands = COMMAND_PALETTE_IDS
+      .filter((id) => desktopCommandEnabled(id))
+      .map((id) => desktopCommandDefinition(id));
+    commandPicker = desktopCommandPickerState(commands, desktopShortcutPlatform);
+  }
+
+  async function executeDesktopCommand(id: DesktopCommandId): Promise<void> {
+    if (!desktopCommandEnabled(id)) return;
+    switch (id) {
+      case "application.commandPalette":
+        await openDesktopCommandPalette();
+        return;
+      case "workspace.choose":
+        await chooseWorkspace();
+        return;
+      case "session.new":
+        await createSession();
+        return;
+      case "session.open":
+        sessionSelectorTrigger = document.querySelector<HTMLButtonElement>("[data-session-picker]");
+        openSessionSelector();
+        return;
+      case "session.jump":
+        await openJumpPicker("");
+        return;
+      case "session.history":
+        await openHistoryPicker("");
+        return;
+      case "session.activity":
+        setSessionInspectorOpen(!sessionInspectorOpen);
+        return;
+      case "session.modelThinking":
+        await openModelThinkingPicker();
+        return;
+      case "composer.focus":
+        await promptComposer?.focus();
+        return;
+      case "composer.enhance":
+      case "composer.createTask":
+      case "composer.defer":
+      case "message.copy":
+      case "message.fork":
+      case "message.forkNewTab":
+      case "message.undo":
+        return;
+    }
+  }
+
+  function handleApplicationKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented || event.isComposing || event.repeat) return;
+    const paletteCommand = desktopCommandDefinition("application.commandPalette");
+    if (matchesDesktopShortcut(event, paletteCommand.shortcut, desktopShortcutPlatform)) {
+      event.preventDefault();
+      if (commandPicker?.command === "commands") {
+        commandPicker = null;
+        return;
+      }
+      void openDesktopCommandPalette();
+      return;
+    }
+
+    const newSessionCommand = desktopCommandDefinition("session.new");
+    if (!matchesDesktopShortcut(event, newSessionCommand.shortcut, desktopShortcutPlatform)) return;
+    if (!desktopCommandEnabled("session.new") || commandPicker || modelThinkingPickerOpen || sessionSelectorOpen) return;
+    event.preventDefault();
+    void executeDesktopCommand("session.new");
+  }
+
   async function selectCommandOption(value: string): Promise<void> {
     const picker = commandPicker;
     if (!picker) return;
     commandPicker = null;
+    if (picker.command === "commands") {
+      if (!isDesktopCommandId(value)) return;
+      await tick();
+      await executeDesktopCommand(value);
+      return;
+    }
     if (picker.command === "history") {
       promptText = value;
       return;
@@ -4111,6 +4227,11 @@
         "Tab: accept the selected slash command or inline autocomplete",
         "Esc: close the active slash menu, picker, or dialog",
         "Up/Down: move through slash-command and picker results",
+        `${desktopCommandShortcutLabel("application.commandPalette", desktopShortcutPlatform)}: open the command palette`,
+        `${desktopCommandShortcutLabel("session.new", desktopShortcutPlatform)}: open a fresh conversation tab`,
+        "Left/Right on the tab strip: move keyboard focus between conversation tabs",
+        "Home/End on the tab strip: move focus to the first/last conversation tab",
+        "Delete on a focused conversation tab: close that tab",
         "/new_tab: open a fresh conversation tab",
         "/search: search saved conversations",
         "/jump: jump to a visible previous user message",
@@ -4718,6 +4839,7 @@
 
 </script>
 
+<svelte:window onkeydown={handleApplicationKeydown} />
 <svelte:head><title>Pix Desktop</title></svelte:head>
 
 <div class="grid h-full grid-rows-[36px_minmax(0,1fr)_28px] bg-background text-foreground">
@@ -4738,9 +4860,10 @@
         selectorOpen={sessionSelectorOpen}
         disabled={operationRunning}
         canCreate={canUseSession}
+        newSessionShortcut={desktopCommandShortcutLabel("session.new", desktopShortcutPlatform)}
         onTabClick={handleSessionTabClick}
         onPickerClick={handleSessionPickerClick}
-        onCloseTab={(event, sessionId) => void closeSessionTab(event, sessionId)}
+        onCloseTab={(sessionId) => closeSessionTab(sessionId)}
         onCreate={() => void createSession()}
       />
 
@@ -4925,6 +5048,8 @@
     sessionActivityOpen={sessionInspectorOpen}
     canOpenSessionActivity={!!activeSessionId}
     sessionNeedsInput={activePendingElicitation !== null}
+    commandPaletteOpen={commandPicker?.command === "commands"}
+    commandPaletteShortcut={desktopCommandShortcutLabel("application.commandPalette", desktopShortcutPlatform)}
     onSetConfig={(option, value) => void setConfig(option, value)}
     onOpenModelThinking={openModelThinkingPicker}
     onRefreshModelUsage={refreshActiveModelUsage}
@@ -4932,6 +5057,7 @@
     onCompressDcpContext={() => void compressActiveDcpContext()}
     onNavigateMessages={() => void openJumpPicker("")}
     onToggleSessionActivity={() => setSessionInspectorOpen(!sessionInspectorOpen)}
+    onOpenCommandPalette={() => void openDesktopCommandPalette()}
   />
 </div>
 

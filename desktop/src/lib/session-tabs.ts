@@ -1,7 +1,19 @@
 import type { ListSessionsResponse, SessionInfo } from "@agentclientprotocol/sdk";
+import { linearFocusIndex } from "./keyboard-navigation";
 
 const PIX_TABS_META_KEY = "pix.tabs";
 export const ACTIVE_SESSIONS_STORAGE_KEY = "pix.desktop.activeSessions";
+
+export type SessionTabNavigationKey = "ArrowLeft" | "ArrowRight" | "Home" | "End";
+
+/** Resolve roving focus for the horizontal session tab strip without activating a tab. */
+export function sessionTabFocusIndex(
+  currentIndex: number,
+  key: string,
+  tabCount: number,
+): number | null {
+  return linearFocusIndex(currentIndex, key, tabCount, "horizontal", true);
+}
 
 /** Read the ordered TUI tab ids from Pix's namespaced ACP response metadata. */
 export function restoredTabSessionIds(response: ListSessionsResponse): string[] | null {

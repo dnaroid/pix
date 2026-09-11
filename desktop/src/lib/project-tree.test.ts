@@ -5,6 +5,7 @@ import {
   insertProjectTreePromptPath,
   parseProjectTreeDrag,
   projectTreeDragPayloadFromUnknown,
+  projectTreeParentIndex,
   projectTreePromptPath,
   serializeProjectTreeDrag,
   type ProjectTreeEntry,
@@ -26,6 +27,18 @@ describe("project tree", () => {
       { entry: nested[0], depth: 1 },
       { entry: root[1], depth: 0 },
     ]);
+  });
+
+  it("resolves the nearest visible parent row", () => {
+    const rows = [
+      { entry: { name: "src", path: "src", kind: "directory" as const }, depth: 0 },
+      { entry: { name: "lib", path: "src/lib", kind: "directory" as const }, depth: 1 },
+      { entry: { name: "a.ts", path: "src/lib/a.ts", kind: "file" as const }, depth: 2 },
+      { entry: { name: "README.md", path: "README.md", kind: "file" as const }, depth: 0 },
+    ];
+    expect(projectTreeParentIndex(rows, 2)).toBe(1);
+    expect(projectTreeParentIndex(rows, 1)).toBe(0);
+    expect(projectTreeParentIndex(rows, 3)).toBeNull();
   });
 
   it("round-trips only workspace-relative drag payloads", () => {

@@ -1,6 +1,7 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
-import { commandPickerState, listCommandPickerState } from "./command-interactions";
+import { commandPickerState, desktopCommandPickerState, listCommandPickerState } from "./command-interactions";
+import { desktopCommandDefinition } from "./desktop-commands";
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -119,5 +120,21 @@ describe("commandPickerState", () => {
       title: "Prompt history",
       items: [{ id: "history:0", value: "Run tests", label: "Run tests" }],
     });
+  });
+});
+
+describe("desktopCommandPickerState", () => {
+  it("maps shared command metadata into searchable picker rows", () => {
+    const state = desktopCommandPickerState([
+      desktopCommandDefinition("session.new"),
+      desktopCommandDefinition("session.jump"),
+    ], "mac");
+    expect(state.command).toBe("commands");
+    expect(state.items[0]).toMatchObject({
+      value: "session.new",
+      label: "New Conversation",
+      shortcut: "⌘T",
+    });
+    expect(state.items[1]?.keywords).toContain("navigate");
   });
 });

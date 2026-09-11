@@ -6,6 +6,7 @@ import {
   parseActiveSessionIds,
   replaceSessionTab,
   restoredTabSessionIds,
+  sessionTabFocusIndex,
   serializeActiveSessionIds,
   startupSessionId,
 } from "./session-tabs";
@@ -84,6 +85,20 @@ describe("buildTabSessions", () => {
 
   it("falls back to all sessions for an older adapter", () => {
     expect(buildTabSessions(sessions, null, [], [], null)).toEqual(sessions);
+  });
+});
+
+describe("sessionTabFocusIndex", () => {
+  it("wraps horizontal arrow navigation without activating tabs", () => {
+    expect(sessionTabFocusIndex(0, "ArrowRight", 3)).toBe(1);
+    expect(sessionTabFocusIndex(2, "ArrowRight", 3)).toBe(0);
+    expect(sessionTabFocusIndex(0, "ArrowLeft", 3)).toBe(2);
+  });
+
+  it("supports Home/End and ignores unrelated keys", () => {
+    expect(sessionTabFocusIndex(1, "Home", 3)).toBe(0);
+    expect(sessionTabFocusIndex(1, "End", 3)).toBe(2);
+    expect(sessionTabFocusIndex(1, "Enter", 3)).toBeNull();
   });
 });
 
