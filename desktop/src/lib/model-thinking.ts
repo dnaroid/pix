@@ -48,9 +48,7 @@ export function modelThinkingConfigState(configOptions: readonly SessionConfigOp
           ? metadataLevels
           : ref === currentModelRef && currentThinkingLevels.length > 0
             ? currentThinkingLevels
-            : currentThinkingLevels.length > 0
-              ? currentThinkingLevels
-              : ["off"];
+            : ["off"];
         models.push({
           ref,
           name: option.name,

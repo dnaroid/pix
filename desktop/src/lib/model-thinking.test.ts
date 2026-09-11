@@ -48,6 +48,20 @@ describe("model + thinking config", () => {
     expect(state.models[1]?.thinkingLevels).toEqual(["off", "minimal", "low", "medium"]);
   });
 
+  it("does not copy the current model thinking levels onto models without capability metadata", () => {
+    const options: SessionConfigOption[] = structuredClone(configOptions);
+    const modelOption = options[0];
+    if (!modelOption || modelOption.type !== "select") throw new Error("missing model option");
+    const group = modelOption.options[0];
+    if (!group || !("options" in group)) throw new Error("missing model group");
+    delete group.options[0]!._meta;
+
+    const state = modelThinkingConfigState(options);
+
+    expect(state.models.find((model) => model.ref === "openai-codex/gpt-5.6-luna")?.thinkingLevels).toEqual(["off"]);
+    expect(state.currentModel?.thinkingLevels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
+  });
+
   it("clamps staged thinking like the pi runtime when a selected model supports fewer levels", () => {
     expect(clampThinkingLevel("high", ["off", "minimal", "low", "medium"])).toBe("medium");
     expect(clampThinkingLevel("xhigh", ["off", "minimal", "medium", "high", "max"])).toBe("max");

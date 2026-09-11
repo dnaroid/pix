@@ -1,7 +1,7 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
@@ -81,9 +81,15 @@
     query;
     visibilityMode;
     if (!initialized) return;
-    selectedIndex = 0;
-    const first = filteredModels[0];
-    if (first && !visibilityMode) stageModel(first);
+    // Only query / mode changes should reset the staged model. `stageModel()`
+    // reads selectedModelRef and selectedThinking, so without untrack those
+    // reads become dependencies of this effect and a row click immediately
+    // retriggers the effect, snapping the selection back to the first model.
+    untrack(() => {
+      selectedIndex = 0;
+      const first = filteredModels[0];
+      if (first && !visibilityMode) stageModel(first);
+    });
   });
 
   $effect(() => {
@@ -98,8 +104,10 @@
   function stageModel(model: ModelThinkingModel): void {
     if (selectedModelRef) thinkingByModel.set(selectedModelRef, selectedThinking);
     selectedModelRef = model.ref;
-    selectedThinking = thinkingByModel.get(model.ref)
-      ?? clampThinkingLevel(config.currentThinking, model.thinkingLevels);
+    selectedThinking = clampThinkingLevel(
+      thinkingByModel.get(model.ref) ?? config.currentThinking,
+      model.thinkingLevels,
+    );
     thinkingByModel.set(model.ref, selectedThinking);
     applyError = "";
   }
@@ -115,7 +123,7 @@
     if (filteredModels.length === 0) return;
     selectedIndex = (selectedIndex + direction + filteredModels.length) % filteredModels.length;
     const model = filteredModels[selectedIndex];
-    if (model) stageModel(model);
+    if (model && !visibilityMode) stageModel(model);
   }
 
   function modelIsVisible(model: ModelThinkingModel): boolean {
@@ -177,7 +185,6 @@
 
   function handleKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
-      if (applying || savingVisibility) return;
       event.preventDefault();
       onClose();
       return;
@@ -244,7 +251,7 @@
   }
 
   function handleBackdropClick(event: MouseEvent): void {
-    if (!applying && !savingVisibility && event.target === event.currentTarget) onClose();
+    if (event.target === event.currentTarget) onClose();
   }
 </script>
 
@@ -281,7 +288,6 @@
           class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           aria-label="Close model and thinking picker"
-          disabled={applying || savingVisibility}
           onclick={onClose}
         ><X class="h-4 w-4" aria-hidden="true" /></button>
       </div>
@@ -308,6 +314,7 @@
           ]}
           type="button"
           role="option"
+          disabled={disabled || applying || savingVisibility}
           aria-selected={visibilityMode ? index === selectedIndex : model.ref === selectedModelRef}
           data-model-ref={model.ref}
           onmouseenter={() => selectedIndex = index}
@@ -352,6 +359,7 @@
             ]}
             type="button"
             role="radio"
+            disabled={disabled || applying || savingVisibility}
             aria-checked={selectedThinking === level}
             data-thinking-level={level}
             tabindex={selectedThinking === level ? 0 : -1}
@@ -382,7 +390,6 @@
         <button
           class="h-7 cursor-pointer rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
-          disabled={applying || savingVisibility}
           onclick={onClose}
         >{visibilityMode ? "Done" : "Cancel"}</button>
         {#if !visibilityMode}<button

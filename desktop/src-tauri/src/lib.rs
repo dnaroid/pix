@@ -612,6 +612,13 @@ struct UserConfigDocument {
     schema: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConditionalUserConfigWrite {
+    written: bool,
+    document: UserConfigDocument,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum PackageManagerKind {
@@ -1349,6 +1356,34 @@ async fn write_user_config(
             .write()
             .map_err(|_| "user config state is poisoned".to_owned())?;
         write_user_config_from(&home, kind, &content)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn write_user_config_if_unchanged(
+    app: AppHandle,
+    kind: UserConfigKind,
+    expected_content: String,
+    content: String,
+) -> Result<ConditionalUserConfigWrite, String> {
+    if content.len() as u64 > MAX_USER_CONFIG_BYTES {
+        return Err(format!(
+            "config is too large to save (maximum {} MB)",
+            MAX_USER_CONFIG_BYTES / (1024 * 1024)
+        ));
+    }
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    run_blocking(move || {
+        let state = app.state::<UserConfigState>();
+        let _guard = state
+            .lock
+            .write()
+            .map_err(|_| "user config state is poisoned".to_owned())?;
+        write_user_config_if_unchanged_from(&home, kind, &expected_content, &content)
     })
     .await
 }
@@ -2919,6 +2954,25 @@ fn write_user_config_from(
     fs::write(&path, normalized)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
     read_user_config_from(home, kind)
+}
+
+fn write_user_config_if_unchanged_from(
+    home: &Path,
+    kind: UserConfigKind,
+    expected_content: &str,
+    content: &str,
+) -> Result<ConditionalUserConfigWrite, String> {
+    let current = read_user_config_from(home, kind)?;
+    if current.content != expected_content {
+        return Ok(ConditionalUserConfigWrite {
+            written: false,
+            document: current,
+        });
+    }
+    Ok(ConditionalUserConfigWrite {
+        written: true,
+        document: write_user_config_from(home, kind, content)?,
+    })
 }
 
 fn workspace_sidebar_indicator_poll_from(
@@ -6349,6 +6403,7 @@ pub fn run() {
             home_file_exists,
             read_user_config,
             write_user_config,
+            write_user_config_if_unchanged,
             workspace_sidebar_indicator_poll,
             idx_overview,
             idx_query,
@@ -7147,6 +7202,33 @@ mod tests {
             fs::read_to_string(&pix_path).expect("read saved config"),
             saved.content
         );
+
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn conditional_user_config_write_rejects_stale_snapshots() {
+        let home = temporary_workspace("user-settings-config-cas");
+        let initial = read_user_config_from(&home, UserConfigKind::Pix).expect("read initial config");
+
+        let first = write_user_config_if_unchanged_from(
+            &home,
+            UserConfigKind::Pix,
+            &initial.content,
+            "{\n  \"visibleModels\": [\"openai/a\"]\n}\n",
+        )
+        .expect("write first config");
+        assert!(first.written);
+
+        let stale = write_user_config_if_unchanged_from(
+            &home,
+            UserConfigKind::Pix,
+            &initial.content,
+            "{\n  \"visibleModels\": [\"zai/b\"]\n}\n",
+        )
+        .expect("reject stale config");
+        assert!(!stale.written);
+        assert_eq!(stale.document.content, first.document.content);
 
         fs::remove_dir_all(home).expect("remove temporary home");
     }

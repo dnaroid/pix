@@ -163,16 +163,21 @@
     saving = true;
     error = null;
     try {
-      const document = await invoke<SettingsConfigDocument>("write_user_config", {
+      const result = await invoke<{ written: boolean; document: SettingsConfigDocument }>("write_user_config_if_unchanged", {
         kind,
+        expectedContent: current.savedSource,
         content: savedSource,
       });
       if (indicatorDisposed || generation !== saveGeneration) return;
+      if (!result.written) {
+        error = "This config changed on disk. Reload it before saving to avoid overwriting newer changes.";
+        return;
+      }
       const latest = drafts[kind];
       if (!latest) return;
       setDrafts({
         ...drafts,
-        [kind]: reconcileSavedSettingsDraft(latest, savedSource, document),
+        [kind]: reconcileSavedSettingsDraft(latest, savedSource, result.document),
       });
     } catch (caught) {
       if (!indicatorDisposed && generation === saveGeneration) {

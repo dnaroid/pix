@@ -248,7 +248,8 @@
   let operationRunning = $state(false);
   let sessionHistoryLoading = $state(false);
   let activeSessionRuntimeReady = $state(false);
-  let changingConfig = $state<string | null>(null);
+  let changingConfigBySessionId = $state<Map<string, string>>(new Map());
+  const changingConfig = $derived(activeSessionId ? changingConfigBySessionId.get(activeSessionId) ?? null : null);
   let errorMessage = $state<string | null>(null);
   let diagnostics = $state<string[]>([]);
   let pendingElicitation = $state<PendingElicitation | null>(null);
@@ -311,6 +312,7 @@
   let autocompleteSettingsGeneration = 0;
   let attachmentSequence = 0;
   let previewSequence = 0;
+  let visibleModelsSavePromise: Promise<void> | null = null;
   let attachmentDraftGeneration = 0;
   let attachmentAddQueue = Promise.resolve();
   let pendingSessionUpdates: Array<{ sessionId: string; update: SessionUpdate; occurredAtMs: number }> = [];
@@ -337,6 +339,7 @@
   const autoFlushInProgress = new Set<string>();
   const runtimeStatusRequestGeneration = new Map<string, number>();
   const modelUsageRefreshGeneration = new Map<string, number>();
+  const configChangeGenerations = new Map<string, number>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
   const promptRunning = $derived(activeSessionId ? runningSessionIds.has(activeSessionId) : false);
@@ -568,7 +571,8 @@
         }
         runningSessionIds = new Set();
         operationRunning = false;
-        changingConfig = null;
+        configChangeGenerations.clear();
+        changingConfigBySessionId = new Map();
       },
     });
     client = next;
@@ -630,7 +634,8 @@
     configOptions = [];
     runningSessionIds = new Set();
     operationRunning = false;
-    changingConfig = null;
+    configChangeGenerations.clear();
+    changingConfigBySessionId = new Map();
     await previous?.dispose().catch(() => {});
     await connect();
   }
@@ -1176,6 +1181,12 @@
     runtimeReadySessionIds.delete(sessionId);
     runtimeLoadsBySessionId.delete(sessionId);
     configOptionsBySessionId.delete(sessionId);
+    configChangeGenerations.set(sessionId, (configChangeGenerations.get(sessionId) ?? 0) + 1);
+    if (changingConfigBySessionId.has(sessionId)) {
+      const nextChanging = new Map(changingConfigBySessionId);
+      nextChanging.delete(sessionId);
+      changingConfigBySessionId = nextChanging;
+    }
     runtimeStatusRequestGeneration.delete(sessionId);
     modelUsageRefreshGeneration.delete(sessionId);
     const statuses = new Map(runtimeStatusBySessionId);
@@ -3575,6 +3586,8 @@
     if (!activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
     const sessionId = activeSessionId;
     commandPicker = null;
+    await visibleModelsSavePromise?.catch(() => undefined);
+    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
     try {
       const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
       visibleModelRefs = visibleModelRefsFromPixConfig(document.content);
@@ -3593,16 +3606,60 @@
   }
 
   async function saveVisibleModelRefs(modelRefs: readonly string[]): Promise<void> {
-    const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
-    const content = updateVisibleModelRefsInPixConfig(document.content, modelRefs);
-    const saved = await invoke<SettingsConfigDocument>("write_user_config", { kind: "pix", content });
-    visibleModelRefs = visibleModelRefsFromPixConfig(saved.content) ?? [...modelRefs];
+    const save = performVisibleModelRefsSave(modelRefs);
+    visibleModelsSavePromise = save;
+    try {
+      await save;
+    } finally {
+      if (visibleModelsSavePromise === save) visibleModelsSavePromise = null;
+    }
+  }
+
+  async function performVisibleModelRefsSave(modelRefs: readonly string[]): Promise<void> {
+    let document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const content = updateVisibleModelRefsInPixConfig(document.content, modelRefs);
+      const result = await invoke<{ written: boolean; document: SettingsConfigDocument }>(
+        "write_user_config_if_unchanged",
+        { kind: "pix", expectedContent: document.content, content },
+      );
+      if (result.written) {
+        visibleModelRefs = visibleModelRefsFromPixConfig(result.document.content) ?? [...modelRefs];
+        return;
+      }
+      document = result.document;
+    }
+    throw new Error("Pix settings changed repeatedly while model visibility was being saved. Try again.");
+  }
+
+  function configChangeInProgress(sessionId: string): boolean {
+    return changingConfigBySessionId.has(sessionId);
+  }
+
+  function beginSessionConfigChange(sessionId: string, value: string): number {
+    const generation = (configChangeGenerations.get(sessionId) ?? 0) + 1;
+    configChangeGenerations.set(sessionId, generation);
+    const next = new Map(changingConfigBySessionId);
+    next.set(sessionId, value);
+    changingConfigBySessionId = next;
+    return generation;
+  }
+
+  function endSessionConfigChange(sessionId: string, generation: number): void {
+    if (configChangeGenerations.get(sessionId) !== generation) return;
+    const next = new Map(changingConfigBySessionId);
+    next.delete(sessionId);
+    changingConfigBySessionId = next;
+  }
+
+  function sessionConfigChangeIsCurrent(sessionId: string, generation: number): boolean {
+    return configChangeGenerations.get(sessionId) === generation;
   }
 
   async function applyModelThinkingSelection(modelRef: string, thinkingLevel: string): Promise<void> {
     const requestClient = client;
     const sessionId = modelThinkingPickerSessionId;
-    if (!requestClient || !sessionId || changingConfig || operationRunning || promptRunning) {
+    if (!requestClient || !sessionId || configChangeInProgress(sessionId) || operationRunning || promptRunning) {
       throw new Error("Model and thinking settings are unavailable right now.");
     }
 
@@ -3615,13 +3672,18 @@
       throw new Error(`${selectedModel.name} does not support ${thinkingLevel} thinking.`);
     }
 
-    changingConfig = "model-thinking";
+    const configGeneration = beginSessionConfigChange(sessionId, "model-thinking");
     try {
       let state = modelThinkingConfigState(options);
       if (state.currentModel?.ref !== modelRef) {
         const modelOption = options.find((option) => option.id === "model" && option.type === "select");
         if (!modelOption || modelOption.type !== "select") throw new Error("Model selection is unavailable.");
         options = (await requestClient.setConfigOption(sessionId, modelOption, modelRef)).configOptions;
+        if (
+          requestClient !== client
+          || !runtimeReadySessionIds.has(sessionId)
+          || !sessionConfigChangeIsCurrent(sessionId, configGeneration)
+        ) return;
         configOptionsBySessionId.set(sessionId, options);
         if (requestClient === client && sessionId === activeSessionId) configOptions = options;
         state = modelThinkingConfigState(options);
@@ -3632,11 +3694,19 @@
         const thinkingOption = options.find((option) => option.id === "thought_level" && option.type === "select");
         if (!thinkingOption || thinkingOption.type !== "select") throw new Error("Thinking selection is unavailable.");
         options = (await requestClient.setConfigOption(sessionId, thinkingOption, effectiveThinking)).configOptions;
+        if (
+          requestClient !== client
+          || !runtimeReadySessionIds.has(sessionId)
+          || !sessionConfigChangeIsCurrent(sessionId, configGeneration)
+        ) return;
         configOptionsBySessionId.set(sessionId, options);
         if (requestClient === client && sessionId === activeSessionId) configOptions = options;
       }
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+      throw error;
     } finally {
-      changingConfig = null;
+      endSessionConfigChange(sessionId, configGeneration);
     }
   }
 
@@ -4252,16 +4322,21 @@
   async function setConfig(option: SessionConfigOption, value: string | boolean): Promise<void> {
     const requestClient = client;
     const sessionId = activeSessionId;
-    if (!requestClient || !sessionId || !activeSessionRuntimeReady || changingConfig) return;
-    changingConfig = option.id;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady || configChangeInProgress(sessionId)) return;
+    const configGeneration = beginSessionConfigChange(sessionId, option.id);
     try {
       const options = (await requestClient.setConfigOption(sessionId, option, value)).configOptions;
+      if (
+        requestClient !== client
+        || !runtimeReadySessionIds.has(sessionId)
+        || !sessionConfigChangeIsCurrent(sessionId, configGeneration)
+      ) return;
       configOptionsBySessionId.set(sessionId, options);
-      if (requestClient === client && sessionId === activeSessionId) configOptions = options;
+      if (sessionId === activeSessionId) configOptions = options;
     } catch (error) {
-      reportError(error);
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
     } finally {
-      changingConfig = null;
+      endSessionConfigChange(sessionId, configGeneration);
     }
   }
 
