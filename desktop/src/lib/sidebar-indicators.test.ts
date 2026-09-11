@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  mergeStableRegistryIndicatorPoll,
   runtimeOutputNeedsRefresh,
   sidebarIndicators,
   strongestIndicator,
@@ -12,6 +13,7 @@ function poll(overrides: Partial<WorkspaceSidebarIndicatorPoll> = {}): Workspace
   return {
     project: {},
     git: { available: true, dirty: false, conflicted: false, detached: false, ahead: 0, behind: 0 },
+    registry: { localChanges: false, stable: true },
     scripts: { runningIds: [], failedIds: [] },
     idx: { runningIds: [], failedIds: [] },
     settings: { errors: [] },
@@ -103,6 +105,28 @@ describe("sidebar indicators", () => {
     expect(result.tasks).toEqual({ tone: "info", reason: "A project task is running" });
     expect(result.registry?.tone).toBe("warning");
     expect(result.idx).toEqual({ tone: "warning", reason: "Knowledge base needs maintenance" });
+  });
+
+  it("shows the registry indicator for locally changed resources", () => {
+    const result = sidebarIndicators(inputs({
+      poll: poll({ registry: { localChanges: true, stable: true } }),
+      unseenScriptFailureIds: [],
+      unseenIdxFailureIds: [],
+    }));
+
+    expect(result.registry).toEqual({
+      tone: "warning",
+      reason: "Local registry resources need sync",
+    });
+  });
+
+  it("keeps the last registry signal when a filesystem scan races a write", () => {
+    const previous = poll({ registry: { localChanges: true, stable: true } });
+    const unstable = poll({ registry: { localChanges: false, stable: false }, checkedAtMs: 2 });
+    const merged = mergeStableRegistryIndicatorPoll(previous, unstable);
+
+    expect(merged.registry).toEqual(previous.registry);
+    expect(merged.checkedAtMs).toBe(unstable.checkedAtMs);
   });
 
   it("surfaces project and config health errors without creating normal-state dots", () => {

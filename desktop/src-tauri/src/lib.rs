@@ -5,9 +5,11 @@ use serde::{
     de::{IgnoredAny, MapAccess, Visitor},
     Deserialize, Serialize,
 };
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     env, fmt, fs,
+    hash::{Hash, Hasher},
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
@@ -41,6 +43,9 @@ const MAX_GIT_UNTRACKED_STAT_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_SIDEBAR_GIT_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const SIDEBAR_GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_SIDEBAR_REGISTRY_PROVENANCE_BYTES: u64 = 512 * 1024;
+const MAX_SIDEBAR_REGISTRY_ENTRIES: usize = 4_096;
+const MAX_SIDEBAR_REGISTRY_HASH_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_USER_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_IDX_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_IDX_LOG_BYTES: usize = 256 * 1024;
@@ -110,6 +115,23 @@ struct UserConfigState {
 #[derive(Default)]
 struct WorkspaceConfigState {
     lock: RwLock<()>,
+}
+
+#[derive(Default)]
+struct SidebarIndicatorState {
+    registry_cache: Mutex<HashMap<PathBuf, SidebarRegistryWorkspaceCache>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SidebarRegistryWorkspaceCache {
+    entries: HashMap<String, SidebarRegistryCacheEntry>,
+}
+
+#[derive(Clone, Debug)]
+struct SidebarRegistryCacheEntry {
+    expected_hash: String,
+    fingerprint: u64,
+    changed: bool,
 }
 
 struct PackageTerminalSession {
@@ -757,6 +779,53 @@ struct SidebarRuntimeIndicatorState {
 
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SidebarRegistryIndicatorState {
+    local_changes: bool,
+    stable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SidebarRegistryProvenance {
+    version: u32,
+    #[serde(default)]
+    resources: HashMap<String, SidebarRegistryProvenanceEntry>,
+    #[serde(default)]
+    project_resources: HashMap<String, SidebarRegistryProjectProvenanceEntry>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct SidebarRegistryProvenanceEntry {
+    #[serde(rename = "type", default)]
+    resource_type: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    hash: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct SidebarRegistryProjectProvenanceEntry {
+    #[serde(default)]
+    hash: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SidebarFileStamp {
+    len: u64,
+    modified_ns: u128,
+}
+
+enum SidebarStableFileRead {
+    Missing,
+    Changed,
+    Stable(Vec<u8>, SidebarFileStamp),
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SidebarSettingsIndicatorState {
     errors: Vec<String>,
 }
@@ -766,6 +835,7 @@ struct SidebarSettingsIndicatorState {
 struct WorkspaceSidebarIndicatorPoll {
     project: SidebarProjectIndicatorState,
     git: SidebarGitIndicatorState,
+    registry: SidebarRegistryIndicatorState,
     scripts: SidebarRuntimeIndicatorState,
     idx: SidebarRuntimeIndicatorState,
     settings: SidebarSettingsIndicatorState,
@@ -3123,6 +3193,7 @@ fn workspace_sidebar_indicator_poll_from(
             return Ok(WorkspaceSidebarIndicatorPoll {
                 project: SidebarProjectIndicatorState { error: Some(error) },
                 git: SidebarGitIndicatorState::default(),
+                registry: SidebarRegistryIndicatorState { stable: true, ..SidebarRegistryIndicatorState::default() },
                 scripts: SidebarRuntimeIndicatorState::default(),
                 idx: SidebarRuntimeIndicatorState::default(),
                 settings,
@@ -3136,15 +3207,608 @@ fn workspace_sidebar_indicator_poll_from(
             .err()
             .map(|error| format!("failed to read project directory: {error}")),
     };
+    let registry = sidebar_registry_indicator_state(
+        app.state::<SidebarIndicatorState>().inner(),
+        &root,
+        home,
+    );
 
     Ok(WorkspaceSidebarIndicatorPoll {
         project,
         git: sidebar_git_indicator_state(&root),
+        registry,
         scripts: sidebar_scripts_indicator_state(app, window_label, &root),
         idx: sidebar_idx_runtime_indicator_state(app, window_label, &root),
         settings,
         checked_at_ms: idx_now_ms(),
     })
+}
+
+fn sidebar_registry_indicator_state(
+    state: &SidebarIndicatorState,
+    root: &Path,
+    home: &Path,
+) -> SidebarRegistryIndicatorState {
+    match sidebar_registry_indicator_state_inner(state, root, home) {
+        Ok(result) => result,
+        Err(error) => SidebarRegistryIndicatorState {
+            local_changes: false,
+            stable: true,
+            error: Some(error),
+        },
+    }
+}
+
+fn sidebar_registry_indicator_state_inner(
+    state: &SidebarIndicatorState,
+    root: &Path,
+    home: &Path,
+) -> Result<SidebarRegistryIndicatorState, String> {
+    let configured_before = match sidebar_registry_configured(home, root)? {
+        Some(configured) => configured,
+        None => return Ok(SidebarRegistryIndicatorState::default()),
+    };
+    let pi_dir = root.join(".pi");
+    let surface_before = sidebar_registry_surface_stamp(&pi_dir)?;
+    let provenance_path = pi_dir.join("registry.json");
+    let (provenance, provenance_stamp) = match sidebar_read_stable_file(
+        &provenance_path,
+        MAX_SIDEBAR_REGISTRY_PROVENANCE_BYTES,
+    )? {
+        SidebarStableFileRead::Missing => (SidebarRegistryProvenance::default(), None),
+        SidebarStableFileRead::Changed => return Ok(SidebarRegistryIndicatorState::default()),
+        SidebarStableFileRead::Stable(bytes, stamp) => {
+            let provenance = serde_json::from_slice::<SidebarRegistryProvenance>(&bytes)
+                .map_err(|error| format!("invalid .pi/registry.json: {error}"))?;
+            if provenance.version != 1 {
+                return Err(format!(
+                    "unsupported .pi/registry.json version {}",
+                    provenance.version
+                ));
+            }
+            (provenance, Some(stamp))
+        }
+    };
+
+    let local_resources = sidebar_registry_local_resources(root)?;
+    let mut hash_budget = MAX_SIDEBAR_REGISTRY_HASH_BYTES;
+    let mut local_changes = configured_before
+        && local_resources
+            .keys()
+            .any(|key| !provenance.resources.contains_key(key));
+
+    if !local_changes {
+        let mut tracked_resources = provenance.resources.iter().collect::<Vec<_>>();
+        tracked_resources.sort_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, tracked) in tracked_resources {
+            let Some(path) = sidebar_registry_resource_path(root, tracked) else {
+                continue;
+            };
+            if !path.exists() {
+                local_changes = true;
+                break;
+            }
+            if tracked.hash.is_empty() {
+                return Err(format!("registry provenance for {key} has no content hash"));
+            }
+            match sidebar_registry_cached_path_changed(
+                state,
+                root,
+                key,
+                &path,
+                &tracked.hash,
+                &mut hash_budget,
+            )? {
+                Some(changed) => {
+                    if changed {
+                        local_changes = true;
+                        break;
+                    }
+                }
+                None => return Ok(SidebarRegistryIndicatorState::default()),
+            }
+        }
+    }
+
+    if !local_changes {
+        for artifact in ["tasks", "plans", "todo"] {
+            let tracked = provenance.project_resources.get(artifact);
+            let path = sidebar_registry_project_artifact_path(root, artifact);
+            let exists = sidebar_registry_project_artifact_exists(&path, artifact, tracked.is_some())?;
+            if tracked.is_none() {
+                if configured_before && exists {
+                    local_changes = true;
+                    break;
+                }
+                continue;
+            }
+            if !exists {
+                local_changes = true;
+                break;
+            }
+            let tracked = tracked.expect("tracked project artifact exists");
+            if tracked.hash.is_empty() {
+                return Err(format!("registry provenance for project {artifact} has no content hash"));
+            }
+            let cache_key = format!("project:{artifact}");
+            match sidebar_registry_cached_path_changed(
+                state,
+                root,
+                &cache_key,
+                &path,
+                &tracked.hash,
+                &mut hash_budget,
+            )? {
+                Some(changed) => {
+                    if changed {
+                        local_changes = true;
+                        break;
+                    }
+                }
+                None => return Ok(SidebarRegistryIndicatorState::default()),
+            }
+        }
+    }
+
+    if let Some(expected) = provenance_stamp {
+        if sidebar_file_stamp(&provenance_path)? != Some(expected) {
+            return Ok(SidebarRegistryIndicatorState::default());
+        }
+    } else if provenance_path.exists() {
+        return Ok(SidebarRegistryIndicatorState::default());
+    }
+    if sidebar_registry_surface_stamp(&pi_dir)? != surface_before {
+        return Ok(SidebarRegistryIndicatorState::default());
+    }
+    let configured_after = match sidebar_registry_configured(home, root)? {
+        Some(configured) => configured,
+        None => return Ok(SidebarRegistryIndicatorState::default()),
+    };
+    if configured_before != configured_after {
+        return Ok(SidebarRegistryIndicatorState::default());
+    }
+
+    Ok(SidebarRegistryIndicatorState {
+        local_changes,
+        stable: true,
+        error: None,
+    })
+}
+
+fn sidebar_registry_configured(home: &Path, root: &Path) -> Result<Option<bool>, String> {
+    let mut remote: Option<String> = None;
+    let user_path = user_config_path(home, UserConfigKind::PiToolsSuite);
+    for path in [
+        Some(user_path),
+        env::var_os("PI_CONFIG_DIR").map(|dir| PathBuf::from(dir).join("pi-tools-suite.jsonc")),
+        Some(root.join(".pi/pi-tools-suite.jsonc")),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        match sidebar_registry_remote_override(&path)? {
+            SidebarRegistryRemoteOverride::Unstable => return Ok(None),
+            SidebarRegistryRemoteOverride::Absent => {}
+            SidebarRegistryRemoteOverride::Present(value) => remote = value,
+        }
+    }
+    if let Ok(value) = env::var("PI_RESOURCE_REGISTRY_REMOTE") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            remote = Some(trimmed.to_owned());
+        }
+    }
+    Ok(Some(remote.is_some()))
+}
+
+enum SidebarRegistryRemoteOverride {
+    Absent,
+    Unstable,
+    Present(Option<String>),
+}
+
+fn sidebar_registry_remote_override(path: &Path) -> Result<SidebarRegistryRemoteOverride, String> {
+    let bytes = match sidebar_read_stable_file(path, MAX_USER_CONFIG_BYTES)? {
+        SidebarStableFileRead::Missing => return Ok(SidebarRegistryRemoteOverride::Absent),
+        SidebarStableFileRead::Changed => return Ok(SidebarRegistryRemoteOverride::Unstable),
+        SidebarStableFileRead::Stable(bytes, _) => bytes,
+    };
+    let source = std::str::from_utf8(&bytes)
+        .map_err(|error| format!("invalid {} UTF-8: {error}", path.display()))?;
+    let normalized = match normalize_jsonc(source) {
+        Ok(normalized) => normalized,
+        Err(_) => return Ok(SidebarRegistryRemoteOverride::Absent),
+    };
+    let value = match serde_json::from_str::<serde_json::Value>(&normalized) {
+        Ok(value) => value,
+        Err(_) => return Ok(SidebarRegistryRemoteOverride::Absent),
+    };
+    let Some(registry) = value.get("resourceRegistry").and_then(serde_json::Value::as_object) else {
+        return Ok(SidebarRegistryRemoteOverride::Absent);
+    };
+    if !registry.contains_key("remote") {
+        return Ok(SidebarRegistryRemoteOverride::Absent);
+    }
+    let remote = registry
+        .get("remote")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    Ok(SidebarRegistryRemoteOverride::Present(remote))
+}
+
+fn sidebar_registry_surface_stamp(pi_dir: &Path) -> Result<(Option<SidebarFileStamp>, Option<SidebarFileStamp>, Option<SidebarFileStamp>), String> {
+    Ok((
+        sidebar_path_stamp(pi_dir)?,
+        sidebar_path_stamp(&pi_dir.join("skills"))?,
+        sidebar_path_stamp(&pi_dir.join("agents"))?,
+    ))
+}
+
+fn sidebar_registry_local_resources(root: &Path) -> Result<HashMap<String, PathBuf>, String> {
+    let mut resources = HashMap::new();
+    let mut count = 0usize;
+    let skills = root.join(".pi/skills");
+    if skills.exists() {
+        for entry in fs::read_dir(&skills)
+            .map_err(|error| format!("failed to read {}: {error}", skills.display()))?
+        {
+            let entry = entry.map_err(|error| format!("failed to read skill entry: {error}"))?;
+            count += 1;
+            if count > MAX_SIDEBAR_REGISTRY_ENTRIES {
+                return Err("too many local registry resources to inspect cheaply".to_owned());
+            }
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("failed to inspect skill entry: {error}"))?;
+            if !file_type.is_dir() || file_type.is_symlink() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !sidebar_registry_safe_name(&name) || name == ".DS_Store" {
+                continue;
+            }
+            let path = entry.path();
+            if path.join("SKILL.md").is_file() {
+                resources.insert(format!("skill:{name}"), path);
+            }
+        }
+    }
+    let agents = root.join(".pi/agents");
+    if agents.exists() {
+        for entry in fs::read_dir(&agents)
+            .map_err(|error| format!("failed to read {}: {error}", agents.display()))?
+        {
+            let entry = entry.map_err(|error| format!("failed to read agent entry: {error}"))?;
+            count += 1;
+            if count > MAX_SIDEBAR_REGISTRY_ENTRIES {
+                return Err("too many local registry resources to inspect cheaply".to_owned());
+            }
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("failed to inspect agent entry: {error}"))?;
+            if !file_type.is_file() || file_type.is_symlink() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            let Some(name) = file_name.strip_suffix(".md") else {
+                continue;
+            };
+            if name.starts_with('.') || !sidebar_registry_safe_name(name) {
+                continue;
+            }
+            resources.insert(format!("agent:{name}"), entry.path());
+        }
+    }
+    Ok(resources)
+}
+
+fn sidebar_registry_safe_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains("..")
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        && name.as_bytes()[0].is_ascii_alphanumeric()
+}
+
+fn sidebar_registry_resource_path(
+    root: &Path,
+    tracked: &SidebarRegistryProvenanceEntry,
+) -> Option<PathBuf> {
+    if !sidebar_registry_safe_name(&tracked.name) {
+        return None;
+    }
+    match tracked.resource_type.as_str() {
+        "skill" => Some(root.join(".pi/skills").join(&tracked.name)),
+        "agent" => Some(root.join(".pi/agents").join(format!("{}.md", tracked.name))),
+        _ => None,
+    }
+}
+
+fn sidebar_registry_project_artifact_path(root: &Path, artifact: &str) -> PathBuf {
+    match artifact {
+        "tasks" => root.join(".pi/tasks.jsonc"),
+        "plans" => root.join(".pi/plans"),
+        "todo" => root.join(".pi/TODO.md"),
+        _ => root.join(".pi"),
+    }
+}
+
+fn sidebar_registry_project_artifact_exists(
+    path: &Path,
+    artifact: &str,
+    tracked: bool,
+) -> Result<bool, String> {
+    if artifact != "plans" || tracked {
+        return Ok(path.exists());
+    }
+    if !path.exists() {
+        return Ok(false);
+    }
+    let mut count = 0usize;
+    sidebar_registry_has_trackable_file(path, &mut count)
+}
+
+fn sidebar_registry_has_trackable_file(path: &Path, count: &mut usize) -> Result<bool, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        return Ok(true);
+    }
+    if !metadata.is_dir() {
+        return Ok(true);
+    }
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+    {
+        let entry = entry.map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        if entry.file_name().to_string_lossy() == ".DS_Store" {
+            continue;
+        }
+        *count += 1;
+        if *count > MAX_SIDEBAR_REGISTRY_ENTRIES {
+            return Err("project plans are too large to inspect cheaply".to_owned());
+        }
+        if sidebar_registry_has_trackable_file(&entry.path(), count)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn sidebar_registry_cached_path_changed(
+    state: &SidebarIndicatorState,
+    root: &Path,
+    cache_key: &str,
+    path: &Path,
+    expected_hash: &str,
+    hash_budget: &mut u64,
+) -> Result<Option<bool>, String> {
+    let (fingerprint_before, file_bytes) = sidebar_registry_tree_fingerprint(path)?;
+    let cached = state
+        .registry_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(root).and_then(|workspace| workspace.entries.get(cache_key)).cloned());
+    if let Some(cached) = cached {
+        if cached.expected_hash == expected_hash && cached.fingerprint == fingerprint_before {
+            let (fingerprint_after, _) = sidebar_registry_tree_fingerprint(path)?;
+            return Ok((fingerprint_before == fingerprint_after).then_some(cached.changed));
+        }
+    }
+
+    if file_bytes > *hash_budget {
+        return Ok(None);
+    }
+    *hash_budget -= file_bytes;
+    let actual_hash = sidebar_registry_hash_path(path)?;
+    let (fingerprint_after, _) = sidebar_registry_tree_fingerprint(path)?;
+    if fingerprint_before != fingerprint_after {
+        return Ok(None);
+    }
+    let changed = actual_hash != expected_hash;
+    if let Ok(mut cache) = state.registry_cache.lock() {
+        if !cache.contains_key(root) && cache.len() >= 32 {
+            cache.clear();
+        }
+        cache
+            .entry(root.to_path_buf())
+            .or_default()
+            .entries
+            .insert(
+                cache_key.to_owned(),
+                SidebarRegistryCacheEntry {
+                    expected_hash: expected_hash.to_owned(),
+                    fingerprint: fingerprint_after,
+                    changed,
+                },
+            );
+    }
+    Ok(Some(changed))
+}
+
+fn sidebar_registry_tree_fingerprint(path: &Path) -> Result<(u64, u64), String> {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut count = 0usize;
+    let mut bytes = 0u64;
+    sidebar_registry_fingerprint_visit(path, "", &mut count, &mut bytes, &mut hasher)?;
+    Ok((hasher.finish(), bytes))
+}
+
+fn sidebar_registry_fingerprint_visit(
+    path: &Path,
+    relative: &str,
+    count: &mut usize,
+    bytes: &mut u64,
+    hasher: &mut impl Hasher,
+) -> Result<(), String> {
+    *count += 1;
+    if *count > MAX_SIDEBAR_REGISTRY_ENTRIES {
+        return Err("registry resource is too large to inspect cheaply".to_owned());
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    relative.hash(hasher);
+    metadata.len().hash(hasher);
+    sidebar_modified_ns(&metadata).hash(hasher);
+    if metadata.file_type().is_symlink() {
+        return Err(format!("registry resource contains a symbolic link: {relative}"));
+    }
+    if metadata.is_file() {
+        *bytes = bytes.saturating_add(metadata.len());
+        1u8.hash(hasher);
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        return Err(format!("registry resource contains an unsupported entry: {relative}"));
+    }
+    2u8.hash(hasher);
+    let mut entries = fs::read_dir(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    entries.retain(|entry| entry.file_name().to_string_lossy() != ".DS_Store");
+    entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let child_relative = if relative.is_empty() {
+            name
+        } else {
+            format!("{relative}/{name}")
+        };
+        sidebar_registry_fingerprint_visit(&entry.path(), &child_relative, count, bytes, hasher)?;
+    }
+    Ok(())
+}
+
+fn sidebar_registry_hash_path(path: &Path) -> Result<String, String> {
+    let mut hasher = Sha256::new();
+    let mut count = 0usize;
+    let mut bytes = 0u64;
+    sidebar_registry_hash_visit(path, "", &mut count, &mut bytes, &mut hasher)?;
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn sidebar_registry_hash_visit(
+    path: &Path,
+    relative: &str,
+    count: &mut usize,
+    bytes: &mut u64,
+    hasher: &mut Sha256,
+) -> Result<(), String> {
+    *count += 1;
+    if *count > MAX_SIDEBAR_REGISTRY_ENTRIES {
+        return Err("registry resource is too large to hash cheaply".to_owned());
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("registry resource contains a symbolic link: {relative}"));
+    }
+    if metadata.is_file() {
+        *bytes = bytes.saturating_add(metadata.len());
+        if *bytes > MAX_SIDEBAR_REGISTRY_HASH_BYTES {
+            return Err("registry resource is too large to hash in the indicator service".to_owned());
+        }
+        hasher.update(b"file\0");
+        hasher.update(relative.as_bytes());
+        hasher.update(b"\0");
+        let mut file = fs::File::open(path)
+            .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+        let mut buffer = [0u8; 16 * 1024];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        return Err(format!("registry resource contains an unsupported entry: {relative}"));
+    }
+    hasher.update(b"dir\0");
+    hasher.update(relative.as_bytes());
+    hasher.update(b"\0");
+    let mut entries = fs::read_dir(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    entries.retain(|entry| entry.file_name().to_string_lossy() != ".DS_Store");
+    entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let child_relative = if relative.is_empty() {
+            name
+        } else {
+            format!("{relative}/{name}")
+        };
+        sidebar_registry_hash_visit(&entry.path(), &child_relative, count, bytes, hasher)?;
+    }
+    Ok(())
+}
+
+fn sidebar_read_stable_file(path: &Path, max_bytes: u64) -> Result<SidebarStableFileRead, String> {
+    let Some(before) = sidebar_file_stamp(path)? else {
+        return Ok(SidebarStableFileRead::Missing);
+    };
+    if before.len > max_bytes {
+        return Err(format!("{} is too large to inspect", path.display()));
+    }
+    let bytes = fs::read(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("{} grew too large while being inspected", path.display()));
+    }
+    let Some(after) = sidebar_file_stamp(path)? else {
+        return Ok(SidebarStableFileRead::Changed);
+    };
+    if before != after {
+        return Ok(SidebarStableFileRead::Changed);
+    }
+    Ok(SidebarStableFileRead::Stable(bytes, after))
+}
+
+fn sidebar_file_stamp(path: &Path) -> Result<Option<SidebarFileStamp>, String> {
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            if !metadata.is_file() {
+                return Err(format!("{} is not a file", path.display()));
+            }
+            Ok(Some(SidebarFileStamp {
+                len: metadata.len(),
+                modified_ns: sidebar_modified_ns(&metadata),
+            }))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("failed to inspect {}: {error}", path.display())),
+    }
+}
+
+fn sidebar_path_stamp(path: &Path) -> Result<Option<SidebarFileStamp>, String> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(Some(SidebarFileStamp {
+            len: metadata.len(),
+            modified_ns: sidebar_modified_ns(&metadata),
+        })),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("failed to inspect {}: {error}", path.display())),
+    }
+}
+
+fn sidebar_modified_ns(metadata: &fs::Metadata) -> u128 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
 }
 
 fn sidebar_git_indicator_state(root: &Path) -> SidebarGitIndicatorState {
@@ -6513,6 +7177,7 @@ pub fn run() {
         .manage(PackageTerminalState::default())
         .manage(UserConfigState::default())
         .manage(WorkspaceConfigState::default())
+        .manage(SidebarIndicatorState::default())
         .manage(IdxOperationState::default())
         .setup(|app| {
             app.manage(AttachmentPathState::new(app.handle()));
@@ -7133,6 +7798,74 @@ mod tests {
         let conflicted = parse_sidebar_git_status(b"# branch.head main\0u UU conflict.ts\0");
         assert!(conflicted.dirty);
         assert!(conflicted.conflicted);
+    }
+
+    #[test]
+    fn sidebar_registry_indicator_detects_tracked_local_edits() {
+        let workspace = temporary_workspace("sidebar-registry-tracked");
+        let home = temporary_workspace("sidebar-registry-home");
+        let skill = workspace.join(".pi/skills/demo");
+        fs::create_dir_all(&skill).expect("create skill directory");
+        fs::write(skill.join("SKILL.md"), "hello\n").expect("write skill");
+        let hash = sidebar_registry_hash_path(&skill).expect("hash skill");
+        assert_eq!(
+            hash,
+            "906b614c27e4807264026c53f5017570ac51970b1f0e092a54d9a35f063fb33a"
+        );
+        fs::write(
+            workspace.join(".pi/registry.json"),
+            format!(
+                "{{\"version\":1,\"resources\":{{\"skill:demo\":{{\"type\":\"skill\",\"name\":\"demo\",\"hash\":\"{hash}\"}}}},\"projectResources\":{{}}}}\n"
+            ),
+        )
+        .expect("write registry provenance");
+
+        let state = SidebarIndicatorState::default();
+        let clean = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(clean.stable);
+        assert!(!clean.local_changes);
+        assert!(clean.error.is_none());
+
+        fs::write(skill.join("SKILL.md"), "changed locally\n").expect("edit skill");
+        let changed = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(changed.stable);
+        assert!(changed.local_changes);
+        assert!(changed.error.is_none());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn sidebar_registry_indicator_flags_local_only_resources_only_when_configured() {
+        let workspace = temporary_workspace("sidebar-registry-local-only");
+        let home = temporary_workspace("sidebar-registry-config-home");
+        fs::create_dir_all(workspace.join(".pi/agents")).expect("create agents directory");
+        fs::write(
+            workspace.join(".pi/agents/test-runner.md"),
+            "---\nname: test-runner\n---\n",
+        )
+        .expect("write local agent");
+        let state = SidebarIndicatorState::default();
+
+        let unconfigured = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(unconfigured.stable);
+        assert!(!unconfigured.local_changes);
+
+        let config_dir = home.join(".config/pi");
+        fs::create_dir_all(&config_dir).expect("create config directory");
+        fs::write(
+            config_dir.join("pi-tools-suite.jsonc"),
+            "{ \"resourceRegistry\": { \"remote\": \"git@example.invalid:registry.git\" } }\n",
+        )
+        .expect("write registry config");
+        let configured = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(configured.stable);
+        assert!(configured.local_changes);
+        assert!(configured.error.is_none());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(home).expect("remove temporary home");
     }
 
     #[test]

@@ -45,6 +45,11 @@ export interface WorkspaceSidebarIndicatorPoll {
     readonly behind: number;
     readonly error?: string;
   };
+  readonly registry: {
+    readonly localChanges: boolean;
+    readonly stable: boolean;
+    readonly error?: string;
+  };
   readonly scripts: RuntimeIndicatorPoll;
   readonly idx: RuntimeIndicatorPoll;
   readonly settings: {
@@ -114,8 +119,12 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
 
   indicators.registry = strongestIndicator(
     errorIndicator(inputs.registrySnapshot?.error),
+    errorIndicator(poll?.registry.error),
     inputs.registrySnapshot?.projectIssue
       ? { tone: "warning", reason: inputs.registrySnapshot.projectIssue }
+      : undefined,
+    poll?.registry.localChanges
+      ? { tone: "warning", reason: "Local registry resources need sync" }
       : undefined,
     registryHasAttention(inputs.registrySnapshot)
       ? { tone: "warning", reason: "Registry has resources that need attention" }
@@ -180,6 +189,14 @@ export function runtimeOutputNeedsRefresh(
   runtimeId: string,
 ): boolean {
   return !knownRunningIds?.includes(runtimeId);
+}
+
+export function mergeStableRegistryIndicatorPoll(
+  previous: WorkspaceSidebarIndicatorPoll | undefined,
+  next: WorkspaceSidebarIndicatorPoll,
+): WorkspaceSidebarIndicatorPoll {
+  if (next.registry.stable || !previous) return next;
+  return { ...next, registry: previous.registry };
 }
 
 function errorIndicator(reason: string | null | undefined): SidebarIndicator | undefined {
@@ -340,11 +357,12 @@ export class SidebarIndicatorService {
     const workspace = this.workspace;
     const generation = ++this.fastGeneration;
     try {
-      const poll = await invoke<WorkspaceSidebarIndicatorPoll>("workspace_sidebar_indicator_poll", {
+      const nextPoll = await invoke<WorkspaceSidebarIndicatorPoll>("workspace_sidebar_indicator_poll", {
         windowLabel: this.windowLabel,
         workspace,
       });
       if (this.destroyed || workspace !== this.workspace || generation !== this.fastGeneration) return;
+      const poll = mergeStableRegistryIndicatorPoll(this.state.poll, nextPoll);
       this.state = { ...this.state, poll };
       this.reconcileFailureAcknowledgements();
       this.acknowledgeVisibleFailures();
@@ -360,6 +378,7 @@ export class SidebarIndicatorService {
           : {
               project: { error: reason },
               git: { available: false, dirty: false, conflicted: false, detached: false, ahead: 0, behind: 0 },
+              registry: { localChanges: false, stable: true },
               scripts: { runningIds: [], failedIds: [] },
               idx: { runningIds: [], failedIds: [] },
               settings: { errors: [] },

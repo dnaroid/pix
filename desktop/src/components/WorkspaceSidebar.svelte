@@ -393,6 +393,14 @@
     queueMicrotask(() => indicatorService?.invalidateFast());
   });
 
+  $effect(() => {
+    // Registry session-state remains authoritative for remote state, but a
+    // pushed refresh/action result is also a good point to recheck the cheap
+    // local-dirty signal instead of waiting for the next fast poll.
+    registrySnapshot;
+    queueMicrotask(() => indicatorService?.invalidateFast());
+  });
+
   onMount(() => {
     const updateViewportWidth = () => {
       viewportWidth = window.innerWidth;
