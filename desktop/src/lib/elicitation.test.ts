@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { CreateElicitationRequest } from "@agentclientprotocol/sdk";
-import { parseElicitation } from "./elicitation";
+import {
+  canAcceptElicitationForSession,
+  elicitationBelongsToActiveSession,
+  elicitationSessionId,
+  parseElicitation,
+} from "./elicitation";
 
 function request(property: Record<string, unknown>): CreateElicitationRequest {
   return {
@@ -50,5 +55,26 @@ describe("parseElicitation", () => {
   it("rejects unsupported schemas", () => {
     expect(parseElicitation({ mode: "url" } as unknown as CreateElicitationRequest)).toBeNull();
     expect(parseElicitation(request({ type: "number" }))).toBeNull();
+  });
+
+  it("keeps session-scoped elicitation owned by the requesting session", () => {
+    const scoped = {
+      ...request({ type: "string" }),
+      sessionId: "session-a",
+    } as CreateElicitationRequest;
+
+    expect(elicitationSessionId(scoped)).toBe("session-a");
+    expect(elicitationBelongsToActiveSession("session-a", "session-a")).toBe(true);
+    expect(elicitationBelongsToActiveSession("session-a", "session-b")).toBe(false);
+    expect(elicitationBelongsToActiveSession(null, "session-b")).toBe(true);
+  });
+
+  it("allows independent pending elicitations in different sessions without making global UI concurrent", () => {
+    const pending = new Set(["session-a"]);
+    expect(canAcceptElicitationForSession("session-b", pending, false)).toBe(true);
+    expect(canAcceptElicitationForSession("session-a", pending, false)).toBe(false);
+    expect(canAcceptElicitationForSession(null, pending, false)).toBe(false);
+    expect(canAcceptElicitationForSession(null, new Set(), false)).toBe(true);
+    expect(canAcceptElicitationForSession("session-b", pending, true)).toBe(false);
   });
 });

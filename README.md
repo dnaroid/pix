@@ -536,7 +536,8 @@ npm run watch:all
 `watch:all` rebuilds only the affected project parts. It keeps the last working
 Desktop process alive while changes compile, then replaces it only after the
 entire queued build succeeds. A failed build is reported without replacing the
-running Desktop.
+running Desktop. Desktop web changes rebuild the Vite bundle first and then
+invalidate the native Tauri asset embedding before the replacement app starts.
 
 Regenerate the README screenshots without accounts or live model traffic:
 

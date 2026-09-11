@@ -9,6 +9,28 @@ export interface ElicitationField {
   value: string | boolean;
 }
 
+export function elicitationSessionId(request: CreateElicitationRequest): string | null {
+  const raw = request as unknown as Record<string, unknown>;
+  return typeof raw.sessionId === "string" && raw.sessionId.trim() ? raw.sessionId : null;
+}
+
+export function elicitationBelongsToActiveSession(
+  ownerSessionId: string | null,
+  activeSessionId: string | null,
+): boolean {
+  return ownerSessionId === null || ownerSessionId === activeSessionId;
+}
+
+export function canAcceptElicitationForSession(
+  ownerSessionId: string | null,
+  pendingSessionIds: ReadonlySet<string>,
+  hasUnscopedElicitation: boolean,
+): boolean {
+  if (hasUnscopedElicitation) return false;
+  if (ownerSessionId === null) return pendingSessionIds.size === 0;
+  return !pendingSessionIds.has(ownerSessionId);
+}
+
 export function parseElicitation(request: CreateElicitationRequest): ElicitationField | null {
   const raw = request as unknown as Record<string, unknown>;
   if (raw.mode !== "form" || !isRecord(raw.requestedSchema)) return null;

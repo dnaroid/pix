@@ -27,7 +27,9 @@ Bring the TUI's context-usage, DCP-session-statistics, and current-model quota s
 - Clicking the model-limit control forces a fresh quota request. Normal model-quota refresh happens when the active runtime/model changes and every five minutes.
 - Context and DCP data refresh after each completed prompt without forcing a quota network request.
 - A failed quota refresh retains the previously displayed quota snapshot; an explicit unavailable/unsupported result clears it.
+- Quota refreshes are tracked with a generation independent of snapshot (context/DCP) refreshes: a concurrent non-quota snapshot refresh must not invalidate a successful in-flight quota refresh; only a newer quota refresh supersedes an in-flight one.
 - Runtime status is scoped per Desktop session and is cleared when that runtime is forgotten or the ACP connection is reset.
+- The same status-bar chrome also hosts the separate Session activity entry/HUD. Session Plan/Subagent counts come from pushed session-state snapshots rather than the runtime-status request, so opening or updating that HUD does not add quota/context polling.
 
 ## Protocol bridge
 
@@ -58,6 +60,7 @@ Bring the TUI's context-usage, DCP-session-statistics, and current-model quota s
 - ACP tests assert that `/dcp compress` remains extension-owned and never falls through to native Pi context compaction.
 - Desktop ACP-client tests cover request shape and response validation for context, DCP text, and quota windows.
 - Desktop helper tests cover TUI threshold parity, reset formatting, compact token formatting, and projected-exhaustion warning behavior.
+- Desktop helper tests cover the refresh-generation race: a non-quota snapshot refresh that settles first must not discard a successful in-flight quota refresh, while a newer quota refresh still supersedes an older in-flight one.
 - Desktop `check` and `build:web`, ACP typecheck/tests, and focused Desktop tests pass.
 
 ## Risks / compatibility

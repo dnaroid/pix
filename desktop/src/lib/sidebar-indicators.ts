@@ -23,7 +23,6 @@ export type SidebarIndicatorTab =
   | "registry"
   | "scripts"
   | "idx"
-  | "session"
   | "settings";
 
 export type SidebarIndicatorTone = "info" | "warning" | "error";
@@ -75,9 +74,6 @@ export interface SidebarIndicatorInputs {
   readonly taskStorageSaveError?: string | null;
   readonly activeTaskId?: string | null;
   readonly registrySnapshot?: RegistrySnapshot;
-  readonly sessionNeedsInput: boolean;
-  readonly openTodoCount: number;
-  readonly activeSubagentCount: number;
   readonly settingsPanelError?: string | null;
 }
 
@@ -157,18 +153,6 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
       : undefined,
     (poll?.idx.runningIds.length ?? 0) > 0
       ? { tone: "info", reason: "IDX maintenance is running" }
-      : undefined,
-  );
-
-  indicators.session = strongestIndicator(
-    inputs.sessionNeedsInput
-      ? { tone: "warning", reason: "The active session is waiting for your input" }
-      : undefined,
-    inputs.openTodoCount > 0
-      ? { tone: "warning", reason: `${inputs.openTodoCount} open session todo${inputs.openTodoCount === 1 ? "" : "s"}` }
-      : undefined,
-    inputs.activeSubagentCount > 0
-      ? { tone: "info", reason: `${inputs.activeSubagentCount} active subagent${inputs.activeSubagentCount === 1 ? "" : "s"}` }
       : undefined,
   );
 

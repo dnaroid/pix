@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
@@ -77,6 +78,11 @@ describe("watch:all build planning", () => {
 			steps: [PARTS.SUITE, PARTS.PIX, PARTS.ACP, PARTS.WEB, PARTS.NATIVE],
 			restartDesktop: true,
 		});
+	});
+
+	it("makes the Vite entrypoint a Cargo input for Tauri asset embedding", async () => {
+		const buildScript = await readFile(resolve("desktop/src-tauri/build.rs"), "utf8");
+		assert.match(buildScript, /cargo:rerun-if-changed=\.\.\/dist\/index\.html/u);
 	});
 });
 

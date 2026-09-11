@@ -6,19 +6,22 @@
   import Clock3 from "@lucide/svelte/icons/clock-3";
   import ListChecks from "@lucide/svelte/icons/list-checks";
   import UserRound from "@lucide/svelte/icons/user-round";
+  import type { SessionActivitySummary } from "../lib/session-activity";
   import {
-    hasOpenSessionTodos,
-    sessionTodoCounts,
     visibleSessionTodoRows,
     type SessionTodoSnapshot,
     type SessionTodoStatus,
   } from "../lib/session-todos";
 
-  let { snapshot }: { snapshot: SessionTodoSnapshot | undefined } = $props();
+  let {
+    snapshot,
+    summary,
+  }: {
+    snapshot: SessionTodoSnapshot | undefined;
+    summary: SessionActivitySummary;
+  } = $props();
 
   const rows = $derived(visibleSessionTodoRows(snapshot));
-  const counts = $derived(sessionTodoCounts(snapshot));
-  const openCount = $derived(counts.pending + counts.in_progress + counts.deferred);
 
   function statusTone(status: SessionTodoStatus): string {
     if (status === "completed") return "text-tool-success";
@@ -34,58 +37,50 @@
 </script>
 
 <section aria-labelledby="session-todos-heading">
-  <div class="border-b border-sidebar-border p-2.5">
-    <div class="flex items-center justify-between gap-2">
-      <div class="flex min-w-0 items-center gap-1.5">
-        <ListChecks class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-        <h2 id="session-todos-heading" class="text-xs font-semibold text-foreground">Todos</h2>
-      </div>
-      {#if hasOpenSessionTodos(snapshot)}
-        <span class="text-[11px] text-muted-foreground">{openCount} open · {counts.completed} done</span>
-      {/if}
-    </div>
-    <p class="mt-1 text-[11px] leading-3.5 text-muted-foreground">Read-only plan for the active session.</p>
+  <div class="flex h-8 items-center gap-1.5 border-b border-border px-2.5">
+    <ListChecks class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <h2 id="session-todos-heading" class="text-[11px] font-semibold uppercase tracking-wide text-foreground">Plan</h2>
+    {#if summary.openTodos > 0 && summary.totalTodos > 0}
+      <span class="ml-auto font-mono text-[11px] text-muted-foreground">{summary.completedTodos}/{summary.totalTodos}</span>
+    {/if}
   </div>
 
-  <div class="p-2">
+  <div>
     {#if rows.length === 0}
-      <div class="px-4 py-5 text-center">
-        <ListChecks class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
-        <p class="text-xs font-medium">No open todos</p>
-        <p class="mt-1 text-[11px] leading-4 text-muted-foreground">This session has no unfinished plan.</p>
-      </div>
+      <div class="px-2.5 py-3 text-[11px] text-muted-foreground">No open plan</div>
     {:else}
-      <div class="space-y-1.5">
+      <div>
         {#each rows as row (row.task.id)}
           {@const task = row.task}
           <article
-            class={["rounded-md bg-panel-hover/65 p-2.5 transition-colors hover:bg-panel-hover", task.status === "completed" && "opacity-65"]}
-            style:margin-left={`${Math.min(row.depth, 4) * 12}px`}
+            class={["border-b border-border py-1.5 pr-2.5 transition-colors hover:bg-panel-hover", task.status === "completed" && "opacity-60"]}
+            style:padding-left={`${10 + Math.min(row.depth, 4) * 12}px`}
             aria-label={`Todo ${task.id}: ${task.subject}`}
           >
-            <div class="flex items-start gap-2">
-              <span class={["mt-0.5 shrink-0", statusTone(task.status)]} title={statusLabel(task.status)}>
-                {#if task.status === "completed"}<CheckCircle2 class="h-4 w-4" aria-hidden="true" />
-                {:else if task.status === "in_progress"}<Clock3 class="h-4 w-4" aria-hidden="true" />
-                {:else if task.status === "deferred"}<CirclePause class="h-4 w-4" aria-hidden="true" />
-                {:else}<Circle class="h-4 w-4" aria-hidden="true" />{/if}
+            <div class="flex min-w-0 items-start gap-1.5">
+              <span class={["mt-px shrink-0", statusTone(task.status)]} title={statusLabel(task.status)}>
+                {#if task.status === "completed"}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
+                {:else if task.status === "in_progress"}<Clock3 class="h-3.5 w-3.5" aria-hidden="true" />
+                {:else if task.status === "deferred"}<CirclePause class="h-3.5 w-3.5" aria-hidden="true" />
+                {:else}<Circle class="h-3.5 w-3.5" aria-hidden="true" />{/if}
               </span>
               <div class="min-w-0 flex-1">
-                <h3 class={["break-words text-xs font-medium leading-4 text-foreground", task.status === "completed" && "line-through"]}>
-                  <span class="mr-1 font-mono text-[11px] text-muted-foreground">#{task.id}</span>{task.subject}
+                <h3 class={["break-words text-[11px] font-medium leading-4 text-foreground", task.status === "completed" && "line-through"]}>
+                  <span class="mr-1 font-mono text-[10px] text-muted-foreground">#{task.id}</span>{task.subject}
                 </h3>
                 {#if task.status === "in_progress" && task.activeForm}
-                  <p class="mt-1 break-words text-[11px] leading-3.5 text-tool-warning">{task.activeForm}</p>
+                  <p class="mt-0.5 line-clamp-2 break-words text-[10px] leading-3.5 text-tool-warning">{task.activeForm}</p>
                 {:else if task.description}
-                  <p class="mt-1 line-clamp-3 break-words text-[11px] leading-3.5 text-muted-foreground">{task.description}</p>
+                  <p class="mt-0.5 line-clamp-2 break-words text-[10px] leading-3.5 text-muted-foreground">{task.description}</p>
+                {/if}
+                {#if task.thinking || task.owner || task.blockedBy?.length}
+                  <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+                    {#if task.thinking}<span class="inline-flex items-center gap-1"><Brain class="h-2.5 w-2.5" aria-hidden="true" />{task.thinking}</span>{/if}
+                    {#if task.owner}<span class="inline-flex min-w-0 items-center gap-1"><UserRound class="h-2.5 w-2.5 shrink-0" aria-hidden="true" /><span class="truncate">{task.owner}</span></span>{/if}
+                    {#if task.blockedBy?.length}<span class="text-tool-warning">Blocked by {task.blockedBy.map((id) => `#${id}`).join(", ")}</span>{/if}
+                  </div>
                 {/if}
               </div>
-            </div>
-            <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-              <span class={["font-medium", statusTone(task.status)]}>{statusLabel(task.status)}</span>
-              {#if task.thinking}<span class="inline-flex items-center gap-1"><Brain class="h-3 w-3" aria-hidden="true" />{task.thinking}</span>{/if}
-              {#if task.owner}<span class="inline-flex min-w-0 items-center gap-1"><UserRound class="h-3 w-3 shrink-0" aria-hidden="true" /><span class="truncate">{task.owner}</span></span>{/if}
-              {#if task.blockedBy?.length}<span class="text-tool-warning">Blocked by {task.blockedBy.map((id) => `#${id}`).join(", ")}</span>{/if}
             </div>
           </article>
         {/each}

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Activity from "@lucide/svelte/icons/activity";
   import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Circle from "@lucide/svelte/icons/circle";
@@ -61,11 +60,6 @@
     type SidebarIndicatorServiceState,
     type SidebarIndicatorTab,
   } from "../lib/sidebar-indicators";
-  import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
-  import {
-    sessionSubagentCount,
-    type SessionSubagentSnapshot,
-  } from "../lib/session-subagents";
   import RegistryPanel from "./RegistryPanel.svelte";
   import IdxPanel from "./IdxPanel.svelte";
   import GitPanel from "./GitPanel.svelte";
@@ -74,7 +68,6 @@
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
   import SidebarIndicatorDot from "./SidebarIndicatorDot.svelte";
-  import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
   type TaskDraft = {
     title: string;
@@ -103,7 +96,6 @@
     registry: "Registry",
     scripts: "Package Scripts",
     idx: "IDX",
-    session: "Session",
     settings: "Settings",
   };
 
@@ -116,10 +108,6 @@
     taskStorageIndicatorError,
     activeTaskId,
     sessionReady,
-    activeSessionId,
-    sessionNeedsInput,
-    todoSnapshot,
-    subagentSnapshot,
     registrySnapshot,
     registryLoading,
     registryActionId,
@@ -168,10 +156,6 @@
     taskStorageIndicatorError: string | null;
     activeTaskId: string | null;
     sessionReady: boolean;
-    activeSessionId: string | null;
-    sessionNeedsInput: boolean;
-    todoSnapshot: SessionTodoSnapshot | undefined;
-    subagentSnapshot: SessionSubagentSnapshot | undefined;
     registrySnapshot: RegistrySnapshot | undefined;
     registryLoading: boolean;
     registryActionId: string | null;
@@ -278,9 +262,6 @@
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
-  const todoCounts = $derived(sessionTodoCounts(todoSnapshot));
-  const openTodoCount = $derived(todoCounts.pending + todoCounts.in_progress + todoCounts.deferred);
-  const activeSubagentCount = $derived(sessionSubagentCount(subagentSnapshot));
   const indicators = $derived<SidebarIndicatorMap>(sidebarIndicators({
     service: indicatorServiceState,
     projectPanelError,
@@ -288,9 +269,6 @@
     taskStorageSaveError: taskStorageIndicatorError,
     activeTaskId,
     registrySnapshot,
-    sessionNeedsInput,
-    openTodoCount,
-    activeSubagentCount,
     settingsPanelError,
   }));
   const activeMinWidth = $derived(sidebarMinWidth(activeTab));
@@ -403,7 +381,7 @@
   }
 
   function isSidebarTab(value: string | null): value is SidebarTab {
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "idx" || value === "session" || value === "settings";
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "idx" || value === "settings";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -819,18 +797,6 @@
       <SidebarIndicatorDot indicator={indicators.idx} />
     </button>
     <button
-      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      title={activityTitle("session", activeTab === "session" && !collapsed ? "Hide Session" : "Session")}
-      aria-label={activityLabel("session", "Session activity")}
-      aria-controls="workspace-session-panel"
-      aria-pressed={activeTab === "session" && !collapsed}
-      onclick={() => selectTab("session")}
-    >
-      <Activity class="h-5 w-5" aria-hidden="true" />
-      <SidebarIndicatorDot indicator={indicators.session} />
-    </button>
-    <button
       class={["relative mt-auto grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "settings" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activityTitle("settings", activeTab === "settings" && !collapsed ? "Hide Settings" : "Settings")}
@@ -1128,10 +1094,6 @@
               onOverviewChange={(sourceWorkspace, next) => indicatorService?.setIdxOverview(sourceWorkspace, next)}
             />
           {/key}
-        </div>
-      {:else if activeTab === "session"}
-        <div id="workspace-session-panel" class="grid min-h-0" aria-label="Session">
-          <SessionActivityPanel {activeSessionId} {todoSnapshot} {subagentSnapshot} />
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">

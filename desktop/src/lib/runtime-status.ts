@@ -1,4 +1,4 @@
-import type { ModelUsageLimitWindow } from "./acp-client";
+import type { ModelUsageLimitWindow, RuntimeStatus } from "./acp-client";
 
 export type UsageTone = "success" | "warning" | "error";
 
@@ -58,6 +58,69 @@ export function dcpStatsBody(text: string | undefined): string | undefined {
   const value = text?.trim();
   if (!value) return undefined;
   return value.replace(/^DCP Session Statistics:\s*/i, "").trim();
+}
+
+// Snapshot (context/DCP) and quota refreshes count generations independently so
+// a non-quota snapshot refresh can never invalidate an in-flight quota refresh.
+export interface RuntimeStatusGenerations {
+  readonly snapshot: number;
+  readonly quota: number;
+}
+
+export const EMPTY_RUNTIME_STATUS_GENERATIONS: RuntimeStatusGenerations = {
+  snapshot: 0,
+  quota: 0,
+};
+
+export interface RuntimeStatusRefreshRequest {
+  readonly generations: RuntimeStatusGenerations;
+  readonly snapshotGeneration: number;
+  readonly quotaGeneration?: number;
+}
+
+export function beginRuntimeStatusRefresh(
+  generations: RuntimeStatusGenerations,
+  refreshModelUsage: boolean,
+): RuntimeStatusRefreshRequest {
+  const snapshot = generations.snapshot + 1;
+  const quota = refreshModelUsage ? generations.quota + 1 : generations.quota;
+  return {
+    generations: { snapshot, quota },
+    snapshotGeneration: snapshot,
+    ...(refreshModelUsage ? { quotaGeneration: quota } : {}),
+  };
+}
+
+export function isLatestRuntimeStatusRefresh(
+  generations: RuntimeStatusGenerations,
+  snapshotGeneration: number,
+  quotaGeneration?: number,
+): { snapshot: boolean; quotaRefresh: boolean } {
+  return {
+    snapshot: generations.snapshot === snapshotGeneration,
+    quotaRefresh: quotaGeneration !== undefined && generations.quota === quotaGeneration,
+  };
+}
+
+export function mergeRuntimeStatusResponse(
+  previous: RuntimeStatus | undefined,
+  next: RuntimeStatus,
+  latest: { snapshot: boolean; quotaRefresh: boolean },
+): RuntimeStatus {
+  const snapshot = latest.snapshot || !previous ? next : previous;
+  let modelUsage = previous?.modelUsage ?? snapshot.modelUsage;
+  let modelUsageRefresh = snapshot.modelUsageRefresh;
+  if (latest.quotaRefresh) {
+    modelUsageRefresh = next.modelUsageRefresh;
+    if (next.modelUsageRefresh === "ready") modelUsage = next.modelUsage;
+    else if (next.modelUsageRefresh === "unavailable") modelUsage = undefined;
+  }
+  const { modelUsage: _snapshotModelUsage, ...snapshotWithoutModelUsage } = snapshot;
+  return {
+    ...snapshotWithoutModelUsage,
+    modelUsageRefresh,
+    ...(modelUsage ? { modelUsage } : {}),
+  };
 }
 
 function trimDecimal(value: number): string {

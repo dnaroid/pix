@@ -16,9 +16,9 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 ## Scope
 
-- Centralize Activity Bar indicator policy for Project, Tasks, Source Control, Registry, Package Scripts, IDX, Session, and Settings.
+- Centralize Activity Bar indicator policy for Project, Tasks, Source Control, Registry, Package Scripts, IDX, and Settings.
 - Use a cheap workspace poll for filesystem/config/Git/runtime state that exists outside the currently mounted panel.
-- Reuse already-pushed session/registry state and backend terminal/IDX events instead of polling those systems again.
+- Reuse already-pushed Registry state and backend terminal/IDX events instead of polling those systems again.
 - Distinguish persistent conditions from unseen failure events.
 - Keep indicator reasons available through the activity button title/accessibility label.
 
@@ -47,7 +47,6 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - **Registry** — warning for existing Registry attention (`update-available`, `missing-local`, `diverged`, `registry-changed`) or project-level review issues; error for a Registry snapshot error. Registry freshness continues to arrive through ACP session-state notifications/actions.
 - **Package Scripts** — info while one or more package/shell terminals are running; error for a newly observed failed terminal or non-zero exit, or for package-script discovery errors. A failure event is acknowledged once the Scripts view is visible.
 - **IDX** — info while maintenance is running; warning when current/proposed knowledge needs semantic maintenance; error for failed/timed-out maintenance, IDX health/status errors, or IDX becoming unavailable for a project that is already initialized. Failed-operation attention is acknowledged once the IDX view is visible.
-- **Session** — info for live/planned/retrying Subagents; warning for open session todos or an active elicitation waiting for user input. Terminal Subagent results do not create Activity Bar attention.
 - **Settings** — error when either supported user config is unreadable, malformed JSONC, schema-invalid, or the mounted Settings editor reports a load/save/validation error. Missing optional user config files are healthy.
 
 ## Polling and invalidation
@@ -58,13 +57,13 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - Package-terminal and IDX-operation state are read from the existing in-memory backend registries; no subprocess is started for those checks.
 - Package-terminal and IDX **exit** events always invalidate the fast snapshot. Output events invalidate only until that runtime id is already known as running; ordinary terminal/log output does not turn a noisy process into a sub-second Git/config polling loop.
 - Existing full Git refreshes triggered by Pix mutations invalidate the fast indicator snapshot immediately. External Git changes are discovered by the next fast poll.
-- Session todo/Subagent state, Registry state, task execution state, Project Explorer read errors, and mounted Settings errors flow reactively from their existing owners and do not require extra filesystem polling.
+- Registry state, task execution state, Project Explorer read errors, and mounted Settings errors flow reactively from their existing owners and do not require extra filesystem polling. Session todo/Subagent state is intentionally presented in session tabs/status chrome/the contextual inspector rather than in the workspace Activity Bar.
 - IDX overview/knowledge health has a separate approximately 60-second foreground / 180-second background cadence because it invokes IDX. Both the shared service and mounted IDX panel coalesce refreshes to at most one in-flight request plus one queued refresh. While the IDX view is mounted, its own idle overview refresh is reused instead of issuing duplicate health commands; workspace/generation guards prevent a late background response from overwriting newer panel state.
 - Refocusing or making the window visible triggers an immediate refresh.
 
 ## Persistent versus unseen state
 
-- Persistent conditions such as dirty Git, open todos, knowledge drift, invalid configs, and active processes remain visible until the underlying condition clears.
+- Persistent conditions such as dirty Git, knowledge drift, invalid configs, and active processes remain visible until the underlying condition clears.
 - Terminal and IDX-operation failures are treated as unseen events: they attract attention while another view is active and are acknowledged when their owning view is shown.
 - Failure acknowledgements are scoped to the current Desktop process/window and workspace. They are not persisted to disk.
 
@@ -85,14 +84,12 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - `desktop/src/components/SettingsPanel.svelte`
 - `desktop/src/lib/sidebar-indicators.ts`
 - `desktop/src/lib/sidebar-indicators.test.ts`
-- `desktop/src/lib/session-subagents.ts`
 - `desktop/src/App.svelte`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification
 
-- TypeScript tests cover severity precedence, Git dirty/conflict semantics, runtime failure precedence, output-event throttling, Session input/Subagent semantics, and healthy/error Project/Settings states.
-- Session helper tests cover active Subagent filtering/counting and stale/session-isolated snapshots; failed Subagent completions intentionally do not participate in Activity Bar indicator state.
+- TypeScript tests cover severity precedence, Git dirty/conflict semantics, runtime failure precedence, output-event throttling, and healthy/error Project/Settings states.
 - Rust tests cover the lightweight dirty-Git indicator, rename-record parsing, and JSONC/schema-invalid user-config health.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, `npm --prefix desktop run build:web`, and the Desktop Tauri Rust unit tests.
 

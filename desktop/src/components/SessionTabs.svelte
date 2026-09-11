@@ -3,6 +3,11 @@
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
+  import {
+    sessionActivityLabel,
+    sessionActivityTone,
+    type SessionActivitySummary,
+  } from "../lib/session-activity";
   import { titlebarDrag } from "../lib/titlebar-drag";
 
   let {
@@ -10,6 +15,8 @@
     allSessionsCount,
     activeSessionId,
     runningSessionIds,
+    activityBySessionId,
+    needsInputSessionIds,
     selectorOpen,
     disabled,
     canCreate,
@@ -22,6 +29,8 @@
     allSessionsCount: number;
     activeSessionId: string | null;
     runningSessionIds: ReadonlySet<string>;
+    activityBySessionId: ReadonlyMap<string, SessionActivitySummary>;
+    needsInputSessionIds: ReadonlySet<string>;
     selectorOpen: boolean;
     disabled: boolean;
     canCreate: boolean;
@@ -39,6 +48,14 @@
     return `${title} · ${date.toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`;
   }
 
+  function indicatorClass(tone: ReturnType<typeof sessionActivityTone>, active: boolean): string {
+    if (tone === "warning") return "border-tool-warning bg-tool-warning opacity-100";
+    if (tone === "info") return "border-tool-info bg-tool-info opacity-100";
+    return active
+      ? "border-primary bg-primary opacity-100"
+      : "border-muted-foreground bg-transparent opacity-70";
+  }
+
 </script>
 
 <nav
@@ -49,6 +66,10 @@
   {#each sessions as session (session.sessionId)}
     {@const active = session.sessionId === activeSessionId}
     {@const running = runningSessionIds.has(session.sessionId)}
+    {@const activity = activityBySessionId.get(session.sessionId)}
+    {@const needsInput = needsInputSessionIds.has(session.sessionId)}
+    {@const activityTone = sessionActivityTone(activity, running, needsInput)}
+    {@const pulsing = running || (activity?.activeSubagents ?? 0) > 0}
     <div
       class={[
         "group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-md border transition-colors max-[760px]:basis-[230px]",
@@ -66,16 +87,15 @@
         aria-current={active ? "page" : undefined}
         aria-haspopup={active ? "dialog" : undefined}
         aria-expanded={active ? selectorOpen : undefined}
-        title={`${sessionTitle(session)}${running ? " · Running" : ""}`}
+        title={`${sessionTitle(session)} · ${sessionActivityLabel(activity, running, needsInput)}`}
         onclick={(event) => onTabClick(event, session.sessionId)}
         {disabled}
       >
         <span
           class={[
             "h-[7px] w-[7px] shrink-0 rounded-full border opacity-70",
-            running
-              ? "animate-pulse border-primary bg-primary opacity-100 motion-reduce:animate-none"
-              : active ? "border-primary bg-primary opacity-100" : "border-muted-foreground",
+            indicatorClass(activityTone, active),
+            pulsing && "animate-pulse motion-reduce:animate-none",
           ]}
           aria-hidden="true"
         ></span>

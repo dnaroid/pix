@@ -26,9 +26,6 @@ function inputs(service: SidebarIndicatorServiceState): SidebarIndicatorInputs {
     taskStorageError: false,
     activeTaskId: null,
     registrySnapshot: undefined,
-    sessionNeedsInput: false,
-    openTodoCount: 0,
-    activeSubagentCount: 0,
   };
 }
 
@@ -60,21 +57,6 @@ describe("sidebar indicators", () => {
       unseenIdxFailureIds: [],
     }));
     expect(result.scripts).toEqual({ tone: "error", reason: "A terminal exited with an error" });
-  });
-
-  it("reports session input as warning and live subagents as info", () => {
-    const waiting = sidebarIndicators({
-      ...inputs({ poll: poll(), unseenScriptFailureIds: [], unseenIdxFailureIds: [] }),
-      sessionNeedsInput: true,
-      activeSubagentCount: 2,
-    });
-    expect(waiting.session?.tone).toBe("warning");
-
-    const running = sidebarIndicators({
-      ...inputs({ poll: poll(), unseenScriptFailureIds: [], unseenIdxFailureIds: [] }),
-      activeSubagentCount: 2,
-    });
-    expect(running.session).toEqual({ tone: "info", reason: "2 active subagents" });
   });
 
   it("covers task activity, registry review, and IDX knowledge maintenance", () => {

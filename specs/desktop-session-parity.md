@@ -34,6 +34,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - Reconciliation deduplicates by resolved Pi session path and retains an existing ACP ID when present.
 - The response carries ordered TUI open-tab session IDs in namespaced ACP metadata.
 - Desktop uses all returned sessions in its selector and only restored TUI tabs, Desktop-opened tabs, and the active session in its tab strip.
+- Per-session activity indicators may decorate those tabs, but runtime activity never changes restored membership, ordering, close semantics, or selector contents.
 - Missing, malformed, or stale tab snapshots produce no restored tabs and do not break session listing.
 - Overlapping Desktop refreshes cannot apply results from an older workspace or ACP connection.
 - If native discovery fails, mapped ACP sessions remain available.

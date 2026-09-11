@@ -899,6 +899,26 @@ test("pix/git/assist runs independently while the main session prompt is active"
 	});
 });
 
+test("pix/git/assist exposes backend failures instead of masking them as Internal error", async () => {
+	const harness = createTestAdapter({
+		gitAssistant: async () => {
+			throw new Error("review backend unavailable");
+		},
+	});
+
+	await connect(harness.adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/git-review-project").start();
+		await assert.rejects(
+			cx.request(PIX_GIT_ASSIST_METHOD, {
+				sessionId: session.sessionId,
+				kind: "review",
+				diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
+			}),
+			/Git assistant failed: review backend unavailable/,
+		);
+	});
+});
+
 test("pix/autocomplete/config exposes project eligibility and debounce", async () => {
 	const harness = createTestAdapter({
 		loadAutocompleteConfig: () => ({

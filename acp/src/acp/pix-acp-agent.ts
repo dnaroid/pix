@@ -567,13 +567,19 @@ export class PixAcpAgent {
 	): Promise<DesktopGitAssistantResponse> {
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
-		const text = await this.gitAssistant({
-			cwd: session.cwd,
-			kind: params.kind,
-			diff: params.diff,
-			signal,
-		});
-		return { text };
+		try {
+			const text = await this.gitAssistant({
+				cwd: session.cwd,
+				kind: params.kind,
+				diff: params.diff,
+				signal,
+			});
+			return { text };
+		} catch (error) {
+			if (error instanceof RequestError) throw error;
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new RequestError(ERROR_SERVER, `Git assistant failed: ${detail || "unknown error"}`);
+		}
 	}
 
 	private async desktopRegistryAction(params: DesktopRegistryActionRequest): Promise<Record<string, never>> {

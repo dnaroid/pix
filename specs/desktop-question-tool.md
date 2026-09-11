@@ -19,8 +19,8 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - Load Pix's bundled question extension in Desktop-owned Pi RPC sessions.
 - Bridge a validated private question payload through Pi RPC and ACP.
 - Present one to five single- or multi-select questions, predefined choices, custom text, and custom image attachments inside the bottom composer while leaving the transcript visible.
-- Support direct question tabs, a permanent final Preview tab, edit, submit, cancel, and safe cancellation during reconnect or shutdown.
-- Keep existing TUI behavior and ordinary ACP form elicitations unchanged.
+- Support direct question tabs, a permanent final Preview tab, edit, submit, cancel, safe cancellation during reconnect or shutdown, and session ownership when the user changes conversation tabs.
+- Keep existing TUI behavior and ordinary ACP form elicitation schema/answer semantics unchanged.
 
 ## Non-goals
 
@@ -37,6 +37,9 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 5. Preview lists every answer, highlights missing answers, and links back to each question. `Submit answers` is available only there and is disabled until all questions are complete.
 6. Cancel returns a user-canceled tool result; reconnect, shutdown, malformed payloads, and unsupported responses also cancel rather than inventing an answer. Normal chat submission is unavailable in questionnaire mode.
 7. Custom images are previewed locally and returned as Pi image content. Desktop limits a questionnaire to 10 images, 25 MB per image, and 50 MB total.
+8. A session-scoped elicitation belongs to the `sessionId` carried by ACP. If that session becomes inactive, its questionnaire/form UI is hidden without resolving or moving the request; the owning session's top-tab activity remains in warning state. Activating the owning session restores the pending UI. Another active tab keeps its ordinary composer/drop behavior instead of inheriting the inactive session's question state.
+9. Different sessions may each hold one pending session-scoped elicitation at the same time, so an inactive session waiting for input does not cancel or globally lock an elicitation requested by another running session. A second elicitation for the same session is still canceled while that session already owns one. Request-scoped/unscoped elicitation remains exclusive because it has no session tab that can own its UI.
+10. Closing/forgetting the owning runtime cancels its pending elicitation. Notifications or requests from a superseded ACP client are ignored after reconnect so old client callbacks cannot recreate UI state in the replacement connection.
 
 ## Contracts
 
@@ -60,7 +63,7 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 
 - Root tests cover schema normalization, limits, additive custom answers, carrier validation, result compatibility, cancellation, and TUI interaction.
 - ACP tests cover multi-select carrier mapping, malformed bound rejection, response mapping, and explicit Pi extension arguments.
-- Desktop tests cover request parsing, single/multi selection state, limits, additive custom answers, serialization, and tab/Preview navigation.
+- Desktop tests cover request parsing, session ownership/admission matching (including independent pending sessions), single/multi selection state, limits, additive custom answers, serialization, and tab/Preview navigation.
 - Run root question tests and typecheck, ACP tests/check, and Desktop tests/check/build:web.
 
 ## Related files

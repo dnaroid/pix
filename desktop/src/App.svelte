@@ -61,7 +61,13 @@
     serializeActiveSessionIds,
     startupSessionId,
   } from "./lib/session-tabs";
-  import { parseElicitation, type ElicitationField } from "./lib/elicitation";
+  import {
+    canAcceptElicitationForSession,
+    elicitationBelongsToActiveSession,
+    elicitationSessionId,
+    parseElicitation,
+    type ElicitationField,
+  } from "./lib/elicitation";
   import {
     MAX_QUESTION_IMAGE_BYTES,
     MAX_QUESTION_IMAGE_BYTES_TOTAL,
@@ -103,9 +109,23 @@
     workspaceFromLocation,
     WORKSPACE_STORAGE_KEY,
   } from "./lib/recent-projects";
+  import {
+    EMPTY_RUNTIME_STATUS_GENERATIONS,
+    beginRuntimeStatusRefresh,
+    isLatestRuntimeStatusRefresh,
+    mergeRuntimeStatusResponse,
+    type RuntimeStatusGenerations,
+  } from "./lib/runtime-status";
+  import {
+    EMPTY_SESSION_ACTIVITY,
+    shouldAcceptSessionActivitySnapshot,
+    updateSessionActivitySummary,
+    type SessionActivitySummary,
+  } from "./lib/session-activity";
   import ProjectTitlebar from "./components/ProjectTitlebar.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import SessionSelector from "./components/SessionSelector.svelte";
+  import SessionInspector from "./components/SessionInspector.svelte";
   import ErrorBanner from "./components/ErrorBanner.svelte";
   import TranscriptPane from "./components/TranscriptPane.svelte";
   import PromptComposer from "./components/PromptComposer.svelte";
@@ -191,12 +211,14 @@
   type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
   type PendingFormElicitation = {
     kind: "form";
+    sessionId: string | null;
     message: string;
     field: ElicitationField;
     resolve: (response: CreateElicitationResponse) => void;
   };
   type PendingQuestionElicitation = {
     kind: "question";
+    sessionId: string | null;
     requestId: number;
     message: string;
     questions: DesktopQuestion[];
@@ -227,6 +249,7 @@
   const SESSION_PREWARM_LIMIT = 2;
   const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 24;
   const RUNTIME_MODEL_USAGE_REFRESH_MS = 5 * 60_000;
+  const SESSION_INSPECTOR_OPEN_KEY = "pix.desktop.sessionInspectorOpen";
 
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
@@ -252,17 +275,18 @@
   const changingConfig = $derived(activeSessionId ? changingConfigBySessionId.get(activeSessionId) ?? null : null);
   let errorMessage = $state<string | null>(null);
   let diagnostics = $state<string[]>([]);
-  let pendingElicitation = $state<PendingElicitation | null>(null);
+  let pendingElicitationsBySession = $state<Map<string, PendingElicitation>>(new Map());
+  let pendingUnscopedElicitation = $state<PendingElicitation | null>(null);
   let commandPicker = $state<CommandPickerState | null>(null);
   let modelThinkingPickerOpen = $state(false);
   let modelThinkingPickerSessionId = $state<string | null>(null);
   let visibleModelRefs = $state<string[] | undefined>(undefined);
-  let addingQuestionImages = $state(false);
   let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
   let sessionSelectorQuery = $state("");
   let sessionSelectorMode = $state<"open" | "delete">("open");
   let sessionSelectorTrigger = $state<HTMLButtonElement | null>(null);
+  let sessionInspectorOpen = $state(false);
   let dragActive = $state(false);
   let previewHistory = $state<PreviewHistory<PreviewEntry>>(emptyPreviewHistory());
   let taskDocument = $state<ProjectTaskDocument>(EMPTY_TASK_DOCUMENT);
@@ -276,6 +300,7 @@
   let externalEditor = $state(DEFAULT_EXTERNAL_EDITOR);
   let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagentSnapshots = $state<Map<string, SessionSubagentSnapshot>>(new Map());
+  let sessionActivityBySessionId = $state<Map<string, SessionActivitySummary>>(new Map());
   let registrySnapshot = $state<RegistrySnapshot | undefined>(undefined);
   let registryActionId = $state<string | null>(null);
   let gitSnapshot = $state<GitSnapshot | undefined>(undefined);
@@ -325,7 +350,7 @@
   let gitLoadGeneration = 0;
   let elicitationSequence = 0;
   let questionImageOperationSequence = 0;
-  let activeQuestionImageOperationId: number | null = null;
+  let questionImageOperationIds = $state<Map<number, number>>(new Map());
   const registeredAttachmentPaths = new Set<string>();
   const preparingAttachmentPaths = new Map<string, Promise<void>>();
   const preparingDeferredImages = new Map<string, Promise<void>>();
@@ -337,9 +362,9 @@
   const promptRunsBySessionId = new Map<string, Promise<void>>();
   const promptEndedAtBySessionId = new Map<string, number>();
   const autoFlushInProgress = new Set<string>();
-  const runtimeStatusRequestGeneration = new Map<string, number>();
-  const modelUsageRefreshGeneration = new Map<string, number>();
+  const runtimeStatusGenerationsBySession = new Map<string, RuntimeStatusGenerations>();
   const configChangeGenerations = new Map<string, number>();
+  const sessionActivityForgottenAt = new Map<string, number>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
   const promptRunning = $derived(activeSessionId ? runningSessionIds.has(activeSessionId) : false);
@@ -363,6 +388,19 @@
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
+  const activeSessionActivity = $derived(
+    activeSessionId ? (sessionActivityBySessionId.get(activeSessionId) ?? EMPTY_SESSION_ACTIVITY) : EMPTY_SESSION_ACTIVITY,
+  );
+  const activePendingElicitation = $derived.by<PendingElicitation | null>(() => {
+    const pending = pendingUnscopedElicitation
+      ?? (activeSessionId ? pendingElicitationsBySession.get(activeSessionId) ?? null : null);
+    return pending && elicitationBelongsToActiveSession(pending.sessionId, activeSessionId) ? pending : null;
+  });
+  const pendingElicitationSessionIds = $derived.by<ReadonlySet<string>>(() => {
+    const sessionIds = new Set(pendingElicitationsBySession.keys());
+    if (pendingUnscopedElicitation && activeSessionId) sessionIds.add(activeSessionId);
+    return sessionIds;
+  });
   const activeRegistrySnapshot = $derived(registrySnapshot);
   const externalEditorDisplayName = $derived(externalEditorLabel(externalEditor));
   const registryLoading = $derived(registryActionId === "refresh");
@@ -400,14 +438,14 @@
     queueMicrotask(() => void refreshRuntimeStatus(sessionId, true));
   });
   const questionMode = $derived.by<QuestionComposerMode | undefined>(() => {
-    const pending = pendingElicitation;
+    const pending = activePendingElicitation;
     if (!pending || pending.kind !== "question") return undefined;
     const requestId = pending.requestId;
     return {
       message: pending.message,
       questions: pending.questions,
       state: pending.state,
-      addingImages: addingQuestionImages,
+      addingImages: questionImageOperationIds.has(requestId),
       onStateChange: (state) => updateQuestionnaire(state, requestId),
       onSubmit: (state) => answerQuestion(state, requestId),
       onCancel: () => cancelElicitation(requestId),
@@ -483,6 +521,11 @@
       if (sessionId && activeSessionRuntimeReady) void refreshRuntimeStatus(sessionId, true);
     }, RUNTIME_MODEL_USAGE_REFRESH_MS);
     restoreProjects();
+    try {
+      sessionInspectorOpen = localStorage.getItem(SESSION_INSPECTOR_OPEN_KEY) === "true";
+    } catch {
+      sessionInspectorOpen = false;
+    }
     if (workspace) {
       void loadProjectTasks(workspace);
       void loadProjectDocuments(workspace);
@@ -498,7 +541,7 @@
         const questionId = activeCustomQuestionId();
         if (questionId) {
           void addQuestionImagePaths(questionId, payload.paths);
-        } else if (activeSessionId && !operationRunning && pendingElicitation?.kind !== "question") {
+        } else if (activeSessionId && !operationRunning && activePendingElicitation?.kind !== "question") {
           void promptComposer?.insertPaths(payload.paths);
         }
       }
@@ -516,23 +559,42 @@
       if (sessionUpdateFrame) cancelAnimationFrame(sessionUpdateFrame);
       if (transcriptScrollFrame) cancelAnimationFrame(transcriptScrollFrame);
       pendingSessionUpdates = [];
-      pendingElicitation?.resolve({ action: "cancel" });
-      pendingElicitation = null;
-      cancelQuestionImageOperation();
+      cancelAllPendingElicitations();
       void client?.dispose();
     };
   });
 
+  function setSessionInspectorOpen(next: boolean): void {
+    sessionInspectorOpen = next;
+    try {
+      localStorage.setItem(SESSION_INSPECTOR_OPEN_KEY, String(next));
+    } catch {
+      // Persistence is a convenience; keep the in-memory preference.
+    }
+  }
+
   async function connect(): Promise<void> {
     status = "starting";
     errorMessage = null;
-    const next = new AcpClient(new TauriAcpTransport(), {
-      onSessionUpdate: handleSessionUpdate,
-      onSessionState: handleSessionState,
-      onQueueState: handleQueueState,
-      onQueueConsumed: handleQueueConsumed,
-      onElicitation: requestElicitation,
+    let next: AcpClient;
+    next = new AcpClient(new TauriAcpTransport(), {
+      onSessionUpdate: (notification) => {
+        if (client === next) handleSessionUpdate(notification);
+      },
+      onSessionState: (notification) => {
+        if (client === next) handleSessionState(notification);
+      },
+      onQueueState: (state) => {
+        if (client === next) handleQueueState(state);
+      },
+      onQueueConsumed: (sessionId, message) => {
+        if (client === next) handleQueueConsumed(sessionId, message);
+      },
+      onElicitation: (request): Promise<CreateElicitationResponse> => client === next
+        ? requestElicitation(request)
+        : Promise.resolve({ action: "cancel" }),
       onDiagnostic: (line) => {
+        if (client !== next) return;
         diagnostics = [...diagnostics.slice(-49), line];
       },
       onExit: (exit) => {
@@ -540,9 +602,7 @@
         closeProjectSelector();
         closeSessionSelector();
         commandPicker = null;
-        pendingElicitation?.resolve({ action: "cancel" });
-        pendingElicitation = null;
-        cancelQuestionImageOperation();
+        cancelAllPendingElicitations();
         activeSessionId = null;
         activeSessionRuntimeReady = false;
         runtimeReadySessionIds.clear();
@@ -552,6 +612,8 @@
         sessionPrewarmGeneration += 1;
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
+        sessionActivityBySessionId = new Map();
+        sessionActivityForgottenAt.clear();
         registrySnapshot = undefined;
         registryActionId = null;
         gitResolveRunning = false;
@@ -561,8 +623,7 @@
         runtimeStatusBySessionId = new Map();
         modelUsageRefreshSessionIds = new Set();
         dcpCompressionSessionIds = new Set();
-        runtimeStatusRequestGeneration.clear();
-        modelUsageRefreshGeneration.clear();
+        runtimeStatusGenerationsBySession.clear();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -606,9 +667,7 @@
     closeProjectSelector();
     closeSessionSelector();
     commandPicker = null;
-    pendingElicitation?.resolve({ action: "cancel" });
-    pendingElicitation = null;
-    cancelQuestionImageOperation();
+    cancelAllPendingElicitations();
     activeSessionId = null;
     activeSessionRuntimeReady = false;
     runtimeReadySessionIds.clear();
@@ -619,6 +678,8 @@
     sessionPrewarmGeneration += 1;
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
+    sessionActivityBySessionId = new Map();
+    sessionActivityForgottenAt.clear();
     registrySnapshot = undefined;
     registryActionId = null;
     gitResolveRunning = false;
@@ -628,8 +689,7 @@
     runtimeStatusBySessionId = new Map();
     modelUsageRefreshSessionIds = new Set();
     dcpCompressionSessionIds = new Set();
-    runtimeStatusRequestGeneration.clear();
-    modelUsageRefreshGeneration.clear();
+    runtimeStatusGenerationsBySession.clear();
     transcript = emptyTranscript;
     configOptions = [];
     runningSessionIds = new Set();
@@ -748,12 +808,36 @@
     }
     const todoSnapshot = sessionTodoSnapshot(notification);
     if (todoSnapshot) {
+      const previous = todoSnapshots.get(notification.sessionId);
+      if (!shouldAcceptSessionActivitySnapshot(
+        todoSnapshot.checkedAt,
+        previous?.checkedAt,
+        sessionActivityForgottenAt.get(notification.sessionId),
+      )) return;
       todoSnapshots = updateSessionTodoSnapshots(todoSnapshots, notification.sessionId, todoSnapshot);
+      sessionActivityBySessionId = updateSessionActivitySummary(
+        sessionActivityBySessionId,
+        notification.sessionId,
+        todoSnapshots.get(notification.sessionId),
+        subagentSnapshots.get(notification.sessionId),
+      );
       return;
     }
     const subagentSnapshot = sessionSubagentSnapshot(notification);
     if (subagentSnapshot) {
+      const previous = subagentSnapshots.get(notification.sessionId);
+      if (!shouldAcceptSessionActivitySnapshot(
+        subagentSnapshot.checkedAt,
+        previous?.checkedAt,
+        sessionActivityForgottenAt.get(notification.sessionId),
+      )) return;
       subagentSnapshots = updateSessionSubagentSnapshots(subagentSnapshots, notification.sessionId, subagentSnapshot);
+      sessionActivityBySessionId = updateSessionActivitySummary(
+        sessionActivityBySessionId,
+        notification.sessionId,
+        todoSnapshots.get(notification.sessionId),
+        subagentSnapshots.get(notification.sessionId),
+      );
     }
   }
 
@@ -820,11 +904,13 @@
   async function refreshRuntimeStatus(sessionId: string, refreshModelUsage = false): Promise<void> {
     const requestClient = client;
     if (!requestClient || !runtimeReadySessionIds.has(sessionId)) return;
-    const generation = (runtimeStatusRequestGeneration.get(sessionId) ?? 0) + 1;
-    runtimeStatusRequestGeneration.set(sessionId, generation);
+    const request = beginRuntimeStatusRefresh(
+      runtimeStatusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
+      refreshModelUsage,
+    );
+    runtimeStatusGenerationsBySession.set(sessionId, request.generations);
 
     if (refreshModelUsage) {
-      modelUsageRefreshGeneration.set(sessionId, generation);
       const refreshing = new Set(modelUsageRefreshSessionIds);
       refreshing.add(sessionId);
       modelUsageRefreshSessionIds = refreshing;
@@ -833,23 +919,15 @@
     try {
       const next = await requestClient.runtimeStatus(sessionId, refreshModelUsage);
       if (requestClient !== client || !runtimeReadySessionIds.has(sessionId)) return;
-      const previous = runtimeStatusBySessionId.get(sessionId);
-      const latestSnapshot = runtimeStatusRequestGeneration.get(sessionId) === generation;
-      const latestModelUsageRefresh = refreshModelUsage && modelUsageRefreshGeneration.get(sessionId) === generation;
-      const snapshot = latestSnapshot || !previous ? next : previous;
-      let modelUsage = previous?.modelUsage ?? snapshot.modelUsage;
-      let modelUsageRefresh = snapshot.modelUsageRefresh;
-      if (latestModelUsageRefresh) {
-        modelUsageRefresh = next.modelUsageRefresh;
-        if (next.modelUsageRefresh === "ready") modelUsage = next.modelUsage;
-        else if (next.modelUsageRefresh === "unavailable") modelUsage = undefined;
-      }
-      const { modelUsage: _snapshotModelUsage, ...snapshotWithoutModelUsage } = snapshot;
-      const merged: RuntimeStatus = {
-        ...snapshotWithoutModelUsage,
-        modelUsageRefresh,
-        ...(modelUsage ? { modelUsage } : {}),
-      };
+      const merged = mergeRuntimeStatusResponse(
+        runtimeStatusBySessionId.get(sessionId),
+        next,
+        isLatestRuntimeStatusRefresh(
+          runtimeStatusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
+          request.snapshotGeneration,
+          request.quotaGeneration,
+        ),
+      );
       const statuses = new Map(runtimeStatusBySessionId);
       statuses.set(sessionId, merged);
       runtimeStatusBySessionId = statuses;
@@ -857,8 +935,10 @@
       // Runtime chrome is best-effort. Keep the previous snapshot when the
       // private status request races a session reload or transient transport failure.
     } finally {
-      if (refreshModelUsage && modelUsageRefreshGeneration.get(sessionId) === generation) {
-        modelUsageRefreshGeneration.delete(sessionId);
+      // Only the newest quota refresh owns the busy state; it is invalidated by
+      // a newer quota refresh generation, never by snapshot refreshes.
+      const live = runtimeStatusGenerationsBySession.get(sessionId);
+      if (request.quotaGeneration !== undefined && live?.quota === request.quotaGeneration) {
         const refreshing = new Set(modelUsageRefreshSessionIds);
         refreshing.delete(sessionId);
         modelUsageRefreshSessionIds = refreshing;
@@ -910,6 +990,9 @@
     const nextSubagents = new Map(subagentSnapshots);
     nextSubagents.delete(sessionId);
     subagentSnapshots = nextSubagents;
+    const nextActivity = new Map(sessionActivityBySessionId);
+    nextActivity.delete(sessionId);
+    sessionActivityBySessionId = nextActivity;
     const nextCommands = new Map(slashCommandsBySession);
     nextCommands.delete(sessionId);
     slashCommandsBySession = nextCommands;
@@ -1178,6 +1261,11 @@
   }
 
   function forgetSessionRuntime(sessionId: string): void {
+    sessionActivityForgottenAt.set(
+      sessionId,
+      Math.max(sessionActivityForgottenAt.get(sessionId) ?? 0, Date.now()),
+    );
+    cancelPendingElicitationForSession(sessionId);
     runtimeReadySessionIds.delete(sessionId);
     runtimeLoadsBySessionId.delete(sessionId);
     configOptionsBySessionId.delete(sessionId);
@@ -1187,8 +1275,7 @@
       nextChanging.delete(sessionId);
       changingConfigBySessionId = nextChanging;
     }
-    runtimeStatusRequestGeneration.delete(sessionId);
-    modelUsageRefreshGeneration.delete(sessionId);
+    runtimeStatusGenerationsBySession.delete(sessionId);
     const statuses = new Map(runtimeStatusBySessionId);
     statuses.delete(sessionId);
     runtimeStatusBySessionId = statuses;
@@ -1412,6 +1499,7 @@
       projectDocuments = EMPTY_PROJECT_DOCUMENTS;
       todoSnapshots = new Map();
       subagentSnapshots = new Map();
+      sessionActivityBySessionId = new Map();
       registrySnapshot = undefined;
       registryActionId = null;
       gitLoadGeneration += 1;
@@ -2604,7 +2692,7 @@
   }
 
   function activeCustomQuestionId(): string | null {
-    const pending = pendingElicitation;
+    const pending = activePendingElicitation;
     if (!pending || pending.kind !== "question") return null;
     const question = pending.questions[pending.state.activeTab];
     if (!question || !pending.state.drafts[question.id]?.customSelected) return null;
@@ -2612,50 +2700,66 @@
   }
 
   function canAcceptDroppedAttachments(): boolean {
-    if (addingQuestionImages) return false;
-    if (pendingElicitation?.kind === "question") return activeCustomQuestionId() !== null;
+    const pending = activePendingElicitation;
+    if (
+      pending?.kind === "question"
+      && questionImageOperationIds.has(pending.requestId)
+    ) return false;
+    if (pending?.kind === "question") return activeCustomQuestionId() !== null;
     return !!activeSessionId && !operationRunning;
   }
 
   function questionCanAcceptImages(questionId: string, requestId?: number): boolean {
-    const pending = pendingElicitation;
+    const pending = requestId === undefined
+      ? (activePendingElicitation?.kind === "question" ? activePendingElicitation : null)
+      : pendingQuestionForRequestId(requestId);
     return !!pending
-      && pending.kind === "question"
-      && (requestId === undefined || pending.requestId === requestId)
       && pending.questions.some((question) => question.id === questionId)
       && pending.state.drafts[questionId]?.customSelected === true;
   }
 
+  function questionRequestIsActive(requestId: number): boolean {
+    return activePendingElicitation?.kind === "question" && activePendingElicitation.requestId === requestId;
+  }
+
   function questionImageRequestId(questionId: string): number | null {
-    const pending = pendingElicitation;
+    const pending = activePendingElicitation;
     return pending?.kind === "question" && questionCanAcceptImages(questionId)
       ? pending.requestId
       : null;
   }
 
-  function beginQuestionImageOperation(): number | null {
-    if (activeQuestionImageOperationId !== null) return null;
+  function beginQuestionImageOperation(requestId: number): number | null {
+    if (questionImageOperationIds.has(requestId)) return null;
     const operationId = ++questionImageOperationSequence;
-    activeQuestionImageOperationId = operationId;
-    addingQuestionImages = true;
+    const next = new Map(questionImageOperationIds);
+    next.set(requestId, operationId);
+    questionImageOperationIds = next;
     return operationId;
   }
 
-  function finishQuestionImageOperation(operationId: number): void {
-    if (activeQuestionImageOperationId !== operationId) return;
-    activeQuestionImageOperationId = null;
-    addingQuestionImages = false;
+  function finishQuestionImageOperation(requestId: number, operationId: number): void {
+    if (questionImageOperationIds.get(requestId) !== operationId) return;
+    const next = new Map(questionImageOperationIds);
+    next.delete(requestId);
+    questionImageOperationIds = next;
   }
 
-  function cancelQuestionImageOperation(): void {
-    activeQuestionImageOperationId = null;
-    addingQuestionImages = false;
+  function cancelQuestionImageOperation(requestId?: number): void {
+    if (requestId === undefined) {
+      questionImageOperationIds = new Map();
+      return;
+    }
+    if (!questionImageOperationIds.has(requestId)) return;
+    const next = new Map(questionImageOperationIds);
+    next.delete(requestId);
+    questionImageOperationIds = next;
   }
 
   async function chooseQuestionImages(questionId: string, expectedRequestId?: number): Promise<void> {
     const requestId = questionImageRequestId(questionId);
     if (requestId === null || (expectedRequestId !== undefined && requestId !== expectedRequestId)) return;
-    const operationId = beginQuestionImageOperation();
+    const operationId = beginQuestionImageOperation(requestId);
     if (operationId === null) return;
     try {
       const selected = await open({
@@ -2667,23 +2771,23 @@
       if (!selected) return;
       await appendQuestionImagePaths(questionId, requestId, typeof selected === "string" ? [selected] : selected);
     } catch (error) {
-      if (questionCanAcceptImages(questionId, requestId)) reportError(error);
+      if (questionCanAcceptImages(questionId, requestId) && questionRequestIsActive(requestId)) reportError(error);
     } finally {
-      finishQuestionImageOperation(operationId);
+      finishQuestionImageOperation(requestId, operationId);
     }
   }
 
   async function addQuestionImagePaths(questionId: string, paths: readonly string[]): Promise<void> {
     const requestId = questionImageRequestId(questionId);
     if (requestId === null || paths.length === 0) return;
-    const operationId = beginQuestionImageOperation();
+    const operationId = beginQuestionImageOperation(requestId);
     if (operationId === null) return;
     try {
       await appendQuestionImagePaths(questionId, requestId, paths);
     } catch (error) {
-      if (questionCanAcceptImages(questionId, requestId)) reportError(error);
+      if (questionCanAcceptImages(questionId, requestId) && questionRequestIsActive(requestId)) reportError(error);
     } finally {
-      finishQuestionImageOperation(operationId);
+      finishQuestionImageOperation(requestId, operationId);
     }
   }
 
@@ -2699,7 +2803,7 @@
       mimeType: mimeTypeForName(file.name),
       readData: () => invoke<string>("read_attachment_base64", { path: file.path }),
     })));
-    if (issue) errorMessage = issue;
+    if (issue && questionRequestIsActive(requestId)) errorMessage = issue;
   }
 
   async function addPastedQuestionImages(
@@ -2709,7 +2813,7 @@
   ): Promise<void> {
     const requestId = questionImageRequestId(questionId);
     if (requestId === null || (expectedRequestId !== undefined && requestId !== expectedRequestId) || files.length === 0) return;
-    const operationId = beginQuestionImageOperation();
+    const operationId = beginQuestionImageOperation(requestId);
     if (operationId === null) return;
     try {
       const issue = await appendQuestionImageCandidates(questionId, requestId, files.map((file) => ({
@@ -2718,11 +2822,11 @@
         mimeType: file.type || mimeTypeForName(file.name),
         readData: () => fileBase64(file),
       })));
-      if (issue) errorMessage = issue;
+      if (issue && questionRequestIsActive(requestId)) errorMessage = issue;
     } catch (error) {
-      if (questionCanAcceptImages(questionId, requestId)) reportError(error);
+      if (questionCanAcceptImages(questionId, requestId) && questionRequestIsActive(requestId)) reportError(error);
     } finally {
-      finishQuestionImageOperation(operationId);
+      finishQuestionImageOperation(requestId, operationId);
     }
   }
 
@@ -2735,8 +2839,8 @@
     let issue: string | null = null;
     let queuedBytes = 0;
     for (const candidate of candidates) {
-      const pending = pendingElicitation;
-      if (!pending || pending.kind !== "question" || !questionCanAcceptImages(questionId, requestId)) return null;
+      let pending = pendingQuestionForRequestId(requestId);
+      if (!pending || !questionCanAcceptImages(questionId, requestId)) return null;
       if (totalQuestionImageCount(pending.state) + images.length >= MAX_QUESTION_IMAGES) {
         issue = `Attach at most ${MAX_QUESTION_IMAGES} images to a questionnaire.`;
         break;
@@ -2754,7 +2858,8 @@
         continue;
       }
       const data = await candidate.readData();
-      if (!questionCanAcceptImages(questionId, requestId)) return null;
+      pending = pendingQuestionForRequestId(requestId);
+      if (!pending || !questionCanAcceptImages(questionId, requestId)) return null;
       const decodedBytes = decodedQuestionImageBytes(data);
       if (decodedBytes === null || decodedBytes === 0) {
         issue = `${candidate.name} is empty or invalid and could not be attached.`;
@@ -2782,16 +2887,18 @@
   }
 
   function appendQuestionImages(questionId: string, requestId: number, images: readonly QuestionImage[]): void {
-    const pending = pendingElicitation;
+    const pending = pendingQuestionForRequestId(requestId);
     if (
       !pending
-      || pending.kind !== "question"
       || !questionCanAcceptImages(questionId, requestId)
       || images.length === 0
     ) return;
     const question = pending.questions.find((candidate) => candidate.id === questionId);
     if (!question) return;
-    updateQuestionnaire(addQuestionImages(pending.state, questionId, images, question), requestId);
+    replacePendingElicitation({
+      ...pending,
+      state: addQuestionImages(pending.state, questionId, images, question),
+    });
   }
 
   function openQuestionImage(image: QuestionImage): void {
@@ -4080,7 +4187,6 @@
         forgetSessionRuntime(sourceSessionId);
         clearSessionActivity(sourceSessionId);
       }
-      clearSessionActivity(forked.sessionId);
       activeSessionId = forked.sessionId;
       transcript = emptyTranscript;
       configOptions = forked.configOptions;
@@ -4340,65 +4446,137 @@
     }
   }
 
+  function replacePendingElicitation(pending: PendingElicitation): void {
+    if (pending.sessionId === null) {
+      if (pendingUnscopedElicitation?.resolve === pending.resolve) pendingUnscopedElicitation = pending;
+      return;
+    }
+    if (pendingElicitationsBySession.get(pending.sessionId)?.resolve !== pending.resolve) return;
+    const next = new Map(pendingElicitationsBySession);
+    next.set(pending.sessionId, pending);
+    pendingElicitationsBySession = next;
+  }
+
+  function removePendingElicitation(pending: PendingElicitation): void {
+    if (pending.sessionId === null) {
+      if (pendingUnscopedElicitation?.resolve === pending.resolve) pendingUnscopedElicitation = null;
+      return;
+    }
+    if (pendingElicitationsBySession.get(pending.sessionId)?.resolve !== pending.resolve) return;
+    const next = new Map(pendingElicitationsBySession);
+    next.delete(pending.sessionId);
+    pendingElicitationsBySession = next;
+  }
+
+  function pendingQuestionForRequestId(requestId: number): PendingQuestionElicitation | null {
+    if (pendingUnscopedElicitation?.kind === "question" && pendingUnscopedElicitation.requestId === requestId) {
+      return pendingUnscopedElicitation;
+    }
+    for (const pending of pendingElicitationsBySession.values()) {
+      if (pending.kind === "question" && pending.requestId === requestId) return pending;
+    }
+    return null;
+  }
+
+  function cancelAllPendingElicitations(): void {
+    const pending = [
+      ...(pendingUnscopedElicitation ? [pendingUnscopedElicitation] : []),
+      ...pendingElicitationsBySession.values(),
+    ];
+    pendingUnscopedElicitation = null;
+    pendingElicitationsBySession = new Map();
+    cancelQuestionImageOperation();
+    for (const item of pending) item.resolve({ action: "cancel" });
+  }
+
   function requestElicitation(request: CreateElicitationRequest): Promise<CreateElicitationResponse> {
     const question = parseQuestionElicitation(request);
     const field = parseElicitation(request);
-    if ((!question && !field) || pendingElicitation) return Promise.resolve({ action: "cancel" });
+    if (!question && !field) return Promise.resolve({ action: "cancel" });
+    const ownerSessionId = elicitationSessionId(request);
+    if (!canAcceptElicitationForSession(
+      ownerSessionId,
+      new Set(pendingElicitationsBySession.keys()),
+      pendingUnscopedElicitation !== null,
+    )) {
+      return Promise.resolve({ action: "cancel" });
+    }
+
     return new Promise((resolve) => {
-      pendingElicitation = question
+      const pending: PendingElicitation = question
         ? {
             kind: "question",
+            sessionId: ownerSessionId,
             requestId: ++elicitationSequence,
             message: question.message,
             questions: question.questions,
             state: createQuestionnaireState(question.questions),
             resolve,
           }
-        : { kind: "form", message: request.message, field: field!, resolve };
+        : { kind: "form", sessionId: ownerSessionId, message: request.message, field: field!, resolve };
+      if (ownerSessionId === null) {
+        pendingUnscopedElicitation = pending;
+      } else {
+        const next = new Map(pendingElicitationsBySession);
+        next.set(ownerSessionId, pending);
+        pendingElicitationsBySession = next;
+      }
     });
   }
 
   function updateQuestionnaire(state: QuestionnaireState, requestId?: number): void {
+    const pending = activePendingElicitation;
     if (
-      !pendingElicitation
-      || pendingElicitation.kind !== "question"
-      || (requestId !== undefined && pendingElicitation.requestId !== requestId)
+      !pending
+      || pending.kind !== "question"
+      || (requestId !== undefined && pending.requestId !== requestId)
     ) return;
-    pendingElicitation = { ...pendingElicitation, state };
+    replacePendingElicitation({ ...pending, state });
   }
 
   function updateElicitationValue(value: string | boolean): void {
-    if (!pendingElicitation || pendingElicitation.kind !== "form") return;
-    pendingElicitation = {
-      ...pendingElicitation,
-      field: { ...pendingElicitation.field, value },
-    };
+    const pending = activePendingElicitation;
+    if (!pending || pending.kind !== "form") return;
+    replacePendingElicitation({
+      ...pending,
+      field: { ...pending.field, value },
+    });
   }
 
   function answerElicitation(accepted: boolean): void {
-    const pending = pendingElicitation;
+    const pending = activePendingElicitation;
     if (!pending || pending.kind !== "form") return;
-    pendingElicitation = null;
+    removePendingElicitation(pending);
     pending.resolve(accepted
       ? { action: "accept", content: { [pending.field.key]: pending.field.value } }
       : { action: "cancel" });
   }
 
   function answerQuestion(state: QuestionnaireState, requestId: number): void {
-    const pending = pendingElicitation;
-    if (!pending || pending.kind !== "question" || pending.requestId !== requestId) return;
+    const pending = pendingQuestionForRequestId(requestId);
+    if (!pending) return;
     const selections = createQuestionSelections(state, pending.questions);
     if (!selections) return;
-    pendingElicitation = null;
-    cancelQuestionImageOperation();
+    removePendingElicitation(pending);
+    cancelQuestionImageOperation(requestId);
     pending.resolve(createQuestionAcceptResponse(selections));
   }
 
   function cancelElicitation(requestId: number): void {
-    const pending = pendingElicitation;
-    if (!pending || pending.kind !== "question" || pending.requestId !== requestId) return;
-    pendingElicitation = null;
-    cancelQuestionImageOperation();
+    const pending = pendingQuestionForRequestId(requestId);
+    if (!pending) return;
+    removePendingElicitation(pending);
+    cancelQuestionImageOperation(requestId);
+    pending.resolve({ action: "cancel" });
+  }
+
+  function cancelPendingElicitationForSession(sessionId: string): void {
+    const pending = pendingElicitationsBySession.get(sessionId);
+    if (!pending) return;
+    const next = new Map(pendingElicitationsBySession);
+    next.delete(sessionId);
+    pendingElicitationsBySession = next;
+    if (pending.kind === "question") cancelQuestionImageOperation(pending.requestId);
     pending.resolve({ action: "cancel" });
   }
 
@@ -4442,6 +4620,8 @@
         allSessionsCount={sessions.length}
         {activeSessionId}
         {runningSessionIds}
+        activityBySessionId={sessionActivityBySessionId}
+        needsInputSessionIds={pendingElicitationSessionIds}
         selectorOpen={sessionSelectorOpen}
         disabled={operationRunning}
         canCreate={canUseSession}
@@ -4479,10 +4659,6 @@
       taskStorageIndicatorError={taskSaveError}
       activeTaskId={taskActionId}
       sessionReady={canUseSession}
-      {activeSessionId}
-      sessionNeedsInput={pendingElicitation !== null}
-      todoSnapshot={activeTodoSnapshot}
-      subagentSnapshot={activeSubagentSnapshot}
       registrySnapshot={activeRegistrySnapshot}
       {registryLoading}
       {registryActionId}
@@ -4524,50 +4700,51 @@
       onRefreshKnowledge={() => void refreshKnowledgeBaseInNewSession()}
     />
 
-    <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
-      {#if errorMessage}
-        <ErrorBanner
-          message={errorMessage}
-          canReconnect={status === "error"}
-          onReconnect={() => void reconnect()}
-          onDismiss={() => errorMessage = null}
-        />
-      {/if}
+    <div class="relative flex min-h-0 min-w-0 flex-1">
+      <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
+        {#if errorMessage}
+          <ErrorBanner
+            message={errorMessage}
+            canReconnect={status === "error"}
+            onReconnect={() => void reconnect()}
+            onDismiss={() => errorMessage = null}
+          />
+        {/if}
 
-      <TranscriptPane
-        {transcript}
-        {activeSessionId}
-        {workspace}
-        {promptRunning}
-        {operationRunning}
-        historyLoading={sessionHistoryLoading}
-        bind:pane={transcriptPane}
-        bind:content={transcriptContent}
-        showScrollToBottom={!transcriptFollowsLatest}
-        onScroll={handleTranscriptScroll}
-        onScrollToBottom={jumpToLatest}
-        onChooseWorkspace={() => void chooseWorkspace()}
-        onOpenAttachment={(attachment) => void activateAttachment(attachment)}
-        onPrepareAttachment={prepareTranscriptAttachment}
-        onValidateProjectFile={validateProjectFile}
-        onValidateLocalFile={validateLocalFile}
-        onOpenProjectFile={(path, range) => openProjectFile(path, "replace", range)}
-        onResolveProjectMedia={resolveProjectMedia}
-        onOpenLocalFile={openLocalFile}
-        onResolveLocalMedia={resolveLocalMedia}
-        onLoadToolResult={(toolCallId) => void loadDeferredToolResult(toolCallId)}
-        onUserMessageAction={(message, action) => void runUserMessageContextAction(message, action)}
-      />
-
-      <div class="row-start-3 min-w-0">
-        <QueuedMessagesPanel
-          items={activeQueueItems}
-          disabled={operationRunning || queueActionRunning}
-          onAction={(item, action) => void actOnQueuedMessage(item, action)}
+        <TranscriptPane
+          {transcript}
+          {activeSessionId}
+          {workspace}
+          {promptRunning}
+          {operationRunning}
+          historyLoading={sessionHistoryLoading}
+          bind:pane={transcriptPane}
+          bind:content={transcriptContent}
+          showScrollToBottom={!transcriptFollowsLatest}
+          onScroll={handleTranscriptScroll}
+          onScrollToBottom={jumpToLatest}
+          onChooseWorkspace={() => void chooseWorkspace()}
+          onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+          onPrepareAttachment={prepareTranscriptAttachment}
+          onValidateProjectFile={validateProjectFile}
+          onValidateLocalFile={validateLocalFile}
+          onOpenProjectFile={(path, range) => openProjectFile(path, "replace", range)}
+          onResolveProjectMedia={resolveProjectMedia}
+          onOpenLocalFile={openLocalFile}
+          onResolveLocalMedia={resolveLocalMedia}
+          onLoadToolResult={(toolCallId) => void loadDeferredToolResult(toolCallId)}
+          onUserMessageAction={(message, action) => void runUserMessageContextAction(message, action)}
         />
-      <PromptComposer
-        bind:this={promptComposer}
-        bind:promptText
+
+        <div class="row-start-3 min-w-0">
+          <QueuedMessagesPanel
+            items={activeQueueItems}
+            disabled={operationRunning || queueActionRunning}
+            onAction={(item, action) => void actOnQueuedMessage(item, action)}
+          />
+          <PromptComposer
+            bind:this={promptComposer}
+            bind:promptText
           attachments={promptAttachments}
           availableCommands={activeSlashCommands}
           {activeSessionId}
@@ -4590,9 +4767,21 @@
           onPasteAttachments={addPastedAttachments}
           onRemoveAttachment={removeAttachment}
           onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+          />
+        </div>
+      </main>
+
+      {#if sessionInspectorOpen}
+        <SessionInspector
+          {activeSessionId}
+          sessionTitle={activeTitle}
+          summary={activeSessionActivity}
+          todoSnapshot={activeTodoSnapshot}
+          subagentSnapshot={activeSubagentSnapshot}
+          onClose={() => setSessionInspectorOpen(false)}
         />
-      </div>
-    </main>
+      {/if}
+    </div>
   </div>
 
   <StatusBar
@@ -4609,18 +4798,23 @@
     canCompressContext={dcpCompressionAvailable && canUseSession && !!activeSessionId && activeSessionRuntimeReady && changingConfig === null && !sessionHistoryLoading && !promptRunning && activeAgentControlState === "idle"}
     canNavigateMessages={canUseSession && !!activeSessionId && activeSessionRuntimeReady && !sessionHistoryLoading}
     messageNavigationOpen={commandPicker?.command === "jump"}
+    sessionActivity={activeSessionActivity}
+    sessionActivityOpen={sessionInspectorOpen}
+    canOpenSessionActivity={!!activeSessionId}
+    sessionNeedsInput={activePendingElicitation !== null}
     onSetConfig={(option, value) => void setConfig(option, value)}
     onOpenModelThinking={openModelThinkingPicker}
     onRefreshModelUsage={refreshActiveModelUsage}
     onCompressDcpContext={() => void compressActiveDcpContext()}
     onNavigateMessages={() => void openJumpPicker("")}
+    onToggleSessionActivity={() => setSessionInspectorOpen(!sessionInspectorOpen)}
   />
 </div>
 
-{#if pendingElicitation?.kind === "form"}
+{#if activePendingElicitation?.kind === "form"}
   <ElicitationDialog
-    message={pendingElicitation.message}
-    field={pendingElicitation.field}
+    message={activePendingElicitation.message}
+    field={activePendingElicitation.field}
     onValueChange={updateElicitationValue}
     onAnswer={answerElicitation}
   />
