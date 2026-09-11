@@ -22,6 +22,12 @@ export type AppModelUsageControllerHost = {
 	render(): void;
 };
 
+function descriptorCacheKey(descriptor: ModelUsageDescriptor | undefined): string | undefined {
+	if (!descriptor) return undefined;
+	if (descriptor.kind !== "google-antigravity") return descriptor.modelKey;
+	return `${descriptor.modelKey}\0${(descriptor.quotaModelCandidates ?? [descriptor.quotaModelKey]).join("|")}`;
+}
+
 export class AppModelUsageController {
 	private activeModelKey: string | undefined;
 	private readonly statuses = new Map<string, ModelUsageStatus>();
@@ -63,7 +69,7 @@ export class AppModelUsageController {
 	refreshNow(): ModelUsageRefreshStart {
 		const session = this.host.runtimeSession();
 		this.syncActiveModel(session);
-		const descriptor = modelUsageDescriptor(session?.model);
+		const descriptor = modelUsageDescriptor(session?.model, session?.thinkingLevel);
 		if (!descriptor) return { kind: "unsupported" };
 
 		const promise = this.refresh(true, descriptor);
@@ -71,11 +77,13 @@ export class AppModelUsageController {
 	}
 
 	private tick(force = false): void {
-		this.syncActiveModel(this.host.runtimeSession());
-		const descriptor = modelUsageDescriptor(this.host.runtimeSession()?.model);
+		const session = this.host.runtimeSession();
+		this.syncActiveModel(session);
+		const descriptor = modelUsageDescriptor(session?.model, session?.thinkingLevel);
 		if (!descriptor) return;
+		const cacheKey = descriptorCacheKey(descriptor)!;
 
-		const lastAttemptAt = this.lastAttemptAt.get(descriptor.modelKey) ?? 0;
+		const lastAttemptAt = this.lastAttemptAt.get(cacheKey) ?? 0;
 		if (force || Date.now() - lastAttemptAt >= MODEL_USAGE_POLL_INTERVAL_MS) {
 			this.refresh(force, descriptor);
 			return;
@@ -85,10 +93,11 @@ export class AppModelUsageController {
 	}
 
 	private refresh(force = false, activeDescriptor?: ModelUsageDescriptor): Promise<ModelUsageRefreshResult> | undefined {
-		const descriptor = activeDescriptor ?? modelUsageDescriptor(this.host.runtimeSession()?.model);
+		const session = this.host.runtimeSession();
+		const descriptor = activeDescriptor ?? modelUsageDescriptor(session?.model, session?.thinkingLevel);
 		if (!descriptor) return undefined;
 
-		const modelKey = descriptor.modelKey;
+		const modelKey = descriptorCacheKey(descriptor)!;
 		if (this.inFlightModelKeys.has(modelKey)) return undefined;
 
 		const lastAttemptAt = this.lastAttemptAt.get(modelKey) ?? 0;
@@ -118,7 +127,7 @@ export class AppModelUsageController {
 	}
 
 	private syncActiveModel(session: AgentSession | undefined): boolean {
-		const nextModelKey = modelUsageDescriptor(session?.model)?.modelKey;
+		const nextModelKey = descriptorCacheKey(modelUsageDescriptor(session?.model, session?.thinkingLevel));
 		if (nextModelKey === this.activeModelKey) return false;
 
 		this.activeModelKey = nextModelKey;

@@ -7,6 +7,24 @@ export function projectName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? "workspace";
 }
 
+/** Parent directory shown under the project name, without repeating the basename. */
+export function projectParentPath(path: string): string {
+  let value = path;
+  while (
+    value.length > 1
+    && /[\\/]$/u.test(value)
+    && !/^[A-Za-z]:[\\/]$/u.test(value)
+  ) {
+    value = value.slice(0, -1);
+  }
+
+  const separator = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  if (separator < 0) return value;
+  if (separator === 0) return value.slice(0, 1);
+  if (separator === 2 && /^[A-Za-z]:/u.test(value)) return value.slice(0, 3);
+  return value.slice(0, separator);
+}
+
 export function isAbsoluteProjectPath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
 }
@@ -66,10 +84,12 @@ export function parseRecentProjects(serialized: string | null, selectedPath?: st
 
 /** Stable hue used only as a visual identity for a project's folder icon. */
 export function projectFolderHue(path: string): number {
-  const name = projectName(path).normalize("NFKC").toLocaleLowerCase();
+  let identity = path.replaceAll("\\", "/").normalize("NFKC");
+  if (identity.length > 1 && !/^[A-Za-z]:\/$/u.test(identity)) identity = identity.replace(/\/+$/u, "");
+  if (/^[A-Za-z]:\//u.test(identity) || identity.startsWith("//")) identity = identity.toLocaleLowerCase();
   let hash = 2166136261;
-  for (let index = 0; index < name.length; index += 1) {
-    hash ^= name.charCodeAt(index);
+  for (let index = 0; index < identity.length; index += 1) {
+    hash ^= identity.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0) % 360;

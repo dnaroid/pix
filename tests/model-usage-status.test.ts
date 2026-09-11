@@ -430,6 +430,56 @@ describe("model usage status", () => {
 		assert.equal(formatModelUsageStatusLabel(status, now), `user@example.com 99% ████▉ ${formatExpectedResetDuration(now + (6 * 24 + 22) * 60 * 60 * 1000, now)}`);
 	});
 
+	it("uses the active Antigravity route quota for xhigh versioned Flash", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const descriptor = modelUsageDescriptor(
+			{ provider: "antigravity", id: "antigravity-gemini-3.8-flash" } as SessionModel,
+			"xhigh",
+		);
+		if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+		assert.deepEqual(descriptor.quotaModelCandidates, ["gemini-3.8-flash", "gemini-3.8-flash-high"]);
+
+		const status = googleAntigravityUsageStatusFromResponse({
+			models: {
+				"gemini-3.8-flash-high": {
+					quotaInfo: {
+						remainingFraction: 0.67,
+						resetTime: new Date(now + 3 * 60 * 60 * 1000).toISOString(),
+					},
+				},
+			},
+		}, descriptor, now);
+
+		assert.equal(status?.hourly?.remainingPercent, 67);
+	});
+
+	it("does not substitute a legacy live Flash bucket for a missing current Antigravity bucket", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const descriptor = {
+			kind: "google-antigravity",
+			modelKey: "antigravity/antigravity-gemini-3.8-flash",
+			quotaModelKey: "gemini-3.8-flash",
+			account: {
+				email: "user@example.com",
+				refreshToken: "refresh-token",
+				projectId: "project-id",
+				cacheKey: "user@example.com",
+			},
+		} as const satisfies Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>;
+		const response = {
+			models: {
+				"gemini-3-flash": {
+					quotaInfo: {
+						remainingFraction: 0.42,
+						resetTime: new Date(now + 2 * 60 * 60 * 1000).toISOString(),
+					},
+				},
+			},
+		};
+
+		assert.equal(googleAntigravityUsageStatusFromResponse(response, descriptor, now), undefined);
+	});
+
 	it("does not warn for Antigravity reset-only multi-day windows", () => {
 		const fetchedAt = Date.UTC(2026, 0, 1, 0, 0, 0);
 		const formattedAt = fetchedAt + 2 * 24 * 60 * 60 * 1000;
@@ -532,6 +582,263 @@ describe("model usage status", () => {
 			assert.equal(status?.weekly, undefined);
 			assert.equal(formatModelUsageStatusLabel(status, now), `Σ 21% █▏    ${formatExpectedResetDuration(nearestResetAt, now)}`);
 		});
+	});
+
+	it("resolves current versioned Antigravity Flash models from the cached shared Flash quota", async () => {
+		const now = Date.now();
+		const resetAt = now + 2 * 60 * 60 * 1000;
+		await withPiAuthAsync({
+			antigravity: {
+				type: "oauth",
+				email: "flash@example.com",
+				accounts: [{
+					email: "flash@example.com",
+					refreshToken: "refresh-flash",
+					projectId: "project-flash",
+					enabled: true,
+					cachedQuotaUpdatedAt: now,
+					cachedQuota: {
+						"gemini-flash": { remainingFraction: 0.73, resetTime: new Date(resetAt).toISOString() },
+					},
+				}],
+				activeIndex: 0,
+			},
+		}, async () => {
+			const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "antigravity-gemini-3.8-flash" } as SessionModel);
+			if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+
+			const status = await queryModelUsageStatus(descriptor);
+
+			assert.equal(status?.provider, "google-antigravity");
+			assert.equal(status?.accountEmail, "Σ");
+			assert.equal(status?.hourly?.remainingPercent, 73);
+			assert.equal(status?.weekly, undefined);
+		});
+	});
+
+	it("falls back to cached shared Flash quota when live Antigravity response omits the current route", async () => {
+		const oldFetch = globalThis.fetch;
+		const now = Date.now();
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+			if (String(input) !== "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels") {
+				throw new Error(`Unexpected fetch: ${String(input)}`);
+			}
+			return Response.json({
+				models: {
+					"gemini-3-flash": {
+						quotaInfo: {
+							remainingFraction: 0.1,
+							resetTime: new Date(now + 60 * 60 * 1000).toISOString(),
+						},
+					},
+				},
+			});
+		}) as typeof fetch;
+
+		try {
+			await withPiAuthAsync({
+				antigravity: {
+					type: "oauth",
+					access: `live-access|project-live`,
+					expires: now + 60 * 60 * 1000,
+					accounts: [{
+						email: "flash@example.com",
+						refreshToken: "refresh-flash",
+						enabled: true,
+						cachedQuotaUpdatedAt: now,
+						cachedQuota: {
+							"gemini-flash": {
+								remainingFraction: 0.73,
+								resetTime: new Date(now + 2 * 60 * 60 * 1000).toISOString(),
+							},
+						},
+					}],
+					activeIndex: 0,
+				},
+			}, async () => {
+				const descriptor = modelUsageDescriptor(
+					{ provider: "antigravity", id: "antigravity-gemini-3.8-flash" } as SessionModel,
+					"xhigh",
+				);
+				if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+
+				const status = await queryModelUsageStatus(descriptor);
+
+				assert.equal(status?.hourly?.remainingPercent, 73);
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
+	});
+
+	it("uses the configured Pi agent directory when loading Antigravity quota auth", async () => {
+		const previousNodeEnv = process.env.NODE_ENV;
+		const previousTestAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		const agentDir = mkdtempSync(join(tmpdir(), "pix-agent-dir-"));
+		const now = Date.now();
+		writeFileSync(join(agentDir, "auth.json"), JSON.stringify({
+			antigravity: {
+				type: "oauth",
+				email: "agent-dir@example.com",
+				accounts: [{
+					email: "agent-dir@example.com",
+					refreshToken: "refresh-agent-dir",
+					projectId: "project-agent-dir",
+					enabled: true,
+					cachedQuotaUpdatedAt: now,
+					cachedQuota: {
+						claude: { remainingFraction: 0.61, resetTime: new Date(now + 3 * 60 * 60 * 1000).toISOString() },
+					},
+				}],
+				activeIndex: 0,
+			},
+		}), "utf8");
+		process.env.NODE_ENV = "development";
+		delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+
+		try {
+			const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "antigravity-claude-opus-4-6-thinking" } as SessionModel);
+			if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+
+			const status = await queryModelUsageStatus(descriptor);
+
+			assert.equal(status?.hourly?.remainingPercent, 61);
+		} finally {
+			if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+			else process.env.NODE_ENV = previousNodeEnv;
+			if (previousTestAuthPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+			else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = previousTestAuthPath;
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			rmSync(agentDir, { recursive: true, force: true });
+		}
+	});
+
+	it("uses Antigravity OAuth client environment credentials for quota refresh", async () => {
+		const previousClientId = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+		const previousClientSecret = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+		const oldFetch = globalThis.fetch;
+		let tokenRequests = 0;
+		let quotaRequests = 0;
+		process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID = "desktop-client-id";
+		process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET = "desktop-client-secret";
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+			const url = String(input);
+			if (url === "https://oauth2.googleapis.com/token") {
+				tokenRequests += 1;
+				assert.equal(String(init?.body), "client_id=desktop-client-id&refresh_token=refresh-env&grant_type=refresh_token&client_secret=desktop-client-secret");
+				return Response.json({ access_token: "refreshed-access" });
+			}
+			if (url === "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels") {
+				quotaRequests += 1;
+				assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer refreshed-access");
+				return Response.json({
+					models: {
+						"gemini-3.8-flash": {
+							quotaInfo: { remainingFraction: 0.84, resetTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() },
+						},
+					},
+				});
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		}) as typeof fetch;
+
+		try {
+			await withPiAuthAsync({
+				antigravity: {
+					type: "oauth",
+					email: "env@example.com",
+					accounts: [{
+						email: "env@example.com",
+						refreshToken: "refresh-env",
+						projectId: "project-env",
+						enabled: true,
+					}],
+					activeIndex: 0,
+				},
+			}, async () => {
+				const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "antigravity-gemini-3.8-flash" } as SessionModel);
+				if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+
+				const status = await queryModelUsageStatus(descriptor);
+
+				assert.equal(status?.hourly?.remainingPercent, 84);
+				assert.equal(tokenRequests, 1);
+				assert.equal(quotaRequests, 1);
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+			if (previousClientId === undefined) delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+			else process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID = previousClientId;
+			if (previousClientSecret === undefined) delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+			else process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET = previousClientSecret;
+		}
+	});
+
+	it("refreshes a rejected active Antigravity access token and keeps its live project id", async () => {
+		const oldFetch = globalThis.fetch;
+		let quotaRequests = 0;
+		let tokenRequests = 0;
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+			const url = String(input);
+			if (url === "https://oauth2.googleapis.com/token") {
+				tokenRequests += 1;
+				return Response.json({ access_token: "refreshed-access" });
+			}
+			if (url === "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels") {
+				quotaRequests += 1;
+				const headers = new Headers(init?.headers);
+				assert.equal(String(init?.body), JSON.stringify({ project: "live-project" }));
+				if (headers.get("Authorization") === "Bearer stale-access") {
+					return new Response("expired", { status: 401 });
+				}
+				assert.equal(headers.get("Authorization"), "Bearer refreshed-access");
+				return Response.json({
+					models: {
+						"gemini-3.8-flash-high": {
+							quotaInfo: {
+								remainingFraction: 0.66,
+								resetTime: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+							},
+						},
+					},
+				});
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		}) as typeof fetch;
+
+		try {
+			await withPiAuthAsync({
+				antigravity: {
+					type: "oauth",
+					access: `stale-access|live-project`,
+					expires: Date.now() + 60 * 60 * 1000,
+					oauthClient: { clientId: "stored-client-id" },
+					accounts: [{
+						email: "active@example.com",
+						refreshToken: "refresh-active",
+						enabled: true,
+					}],
+					activeIndex: 0,
+				},
+			}, async () => {
+				const descriptor = modelUsageDescriptor(
+					{ provider: "antigravity", id: "antigravity-gemini-3.8-flash" } as SessionModel,
+					"xhigh",
+				);
+				if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+
+				const status = await queryModelUsageStatus(descriptor);
+
+				assert.equal(status?.hourly?.remainingPercent, 66);
+				assert.equal(quotaRequests, 2);
+				assert.equal(tokenRequests, 1);
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
 	});
 
 	it("formats the local account quota report", () => {

@@ -110,6 +110,11 @@
     WORKSPACE_STORAGE_KEY,
   } from "./lib/recent-projects";
   import {
+    projectColorFromWorkspaceConfig,
+    workspaceConfigWithProjectColor,
+    WORKSPACE_CONFIG_PATH,
+  } from "./lib/project-colors";
+  import {
     EMPTY_RUNTIME_STATUS_GENERATIONS,
     beginRuntimeStatusRefresh,
     isLatestRuntimeStatusRefresh,
@@ -122,7 +127,6 @@
     updateSessionActivitySummary,
     type SessionActivitySummary,
   } from "./lib/session-activity";
-  import ProjectTitlebar from "./components/ProjectTitlebar.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import SessionSelector from "./components/SessionSelector.svelte";
   import SessionInspector from "./components/SessionInspector.svelte";
@@ -250,11 +254,13 @@
   const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 24;
   const RUNTIME_MODEL_USAGE_REFRESH_MS = 5 * 60_000;
   const SESSION_INSPECTOR_OPEN_KEY = "pix.desktop.sessionInspectorOpen";
+  const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
 
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
   let workspace = $state("");
   let recentProjects = $state<string[]>([]);
+  let projectColors = $state<Map<string, string>>(new Map());
   let sessions = $state<SessionInfo[]>([]);
   let savedActiveSessionIds = new Map<string, string>();
   let restoredSessionTabs = $state<string[] | null>(null);
@@ -281,7 +287,6 @@
   let modelThinkingPickerOpen = $state(false);
   let modelThinkingPickerSessionId = $state<string | null>(null);
   let visibleModelRefs = $state<string[] | undefined>(undefined);
-  let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
   let sessionSelectorQuery = $state("");
   let sessionSelectorMode = $state<"open" | "delete">("open");
@@ -316,6 +321,7 @@
   let agentControlStates = $state<Map<string, AgentControlState>>(new Map());
   let runtimeStatusBySessionId = $state<Map<string, RuntimeStatus>>(new Map());
   let modelUsageRefreshSessionIds = $state<Set<string>>(new Set());
+  let dcpStatsRefreshSessionIds = $state<Set<string>>(new Set());
   let dcpCompressionSessionIds = $state<Set<string>>(new Set());
   let queueActionRunning = $state(false);
   let imagePromptSupported = false;
@@ -328,6 +334,7 @@
   } | null>(null);
   let workspaceSidebar = $state<{
     openTasksPanel: (taskId?: string) => Promise<void>;
+    closeProjectSwitcher: () => void;
   } | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
@@ -346,6 +353,8 @@
   let sessionHistoryGeneration = 0;
   let previousAttachmentDraftKey: string | null = null;
   let projectFilePreviewGeneration = 0;
+  let projectColorLoadGeneration = 0;
+  let projectColorSaveGeneration = 0;
   let taskLoadGeneration = 0;
   let gitLoadGeneration = 0;
   let elicitationSequence = 0;
@@ -363,6 +372,7 @@
   const promptEndedAtBySessionId = new Map<string, number>();
   const autoFlushInProgress = new Set<string>();
   const runtimeStatusGenerationsBySession = new Map<string, RuntimeStatusGenerations>();
+  const dcpStatsRequestGenerations = new Map<string, number>();
   const configChangeGenerations = new Map<string, number>();
   const sessionActivityForgottenAt = new Map<string, number>();
 
@@ -407,6 +417,7 @@
   const activeQueueItems = $derived(activeSessionId ? (queueItemsBySession.get(activeSessionId) ?? []) : []);
   const activeRuntimeStatus = $derived(activeSessionId ? runtimeStatusBySessionId.get(activeSessionId) : undefined);
   const modelUsageRefreshing = $derived(activeSessionId ? modelUsageRefreshSessionIds.has(activeSessionId) : false);
+  const dcpStatsRefreshing = $derived(activeSessionId ? dcpStatsRefreshSessionIds.has(activeSessionId) : false);
   const dcpCompressionRunning = $derived(activeSessionId ? dcpCompressionSessionIds.has(activeSessionId) : false);
   const activeSlashCommands = $derived(
     mergeSlashCommands(
@@ -427,12 +438,14 @@
   let runtimeStatusActivationKey = "";
   $effect(() => {
     const sessionId = activeSessionId;
-    const currentModel = modelThinkingConfigState(configOptions).currentModel?.ref ?? "";
+    const modelThinking = modelThinkingConfigState(configOptions);
+    const currentModel = modelThinking.currentModel?.ref ?? "";
+    const currentThinking = modelThinking.currentThinking;
     if (status !== "ready" || !sessionId || !activeSessionRuntimeReady) {
       runtimeStatusActivationKey = "";
       return;
     }
-    const key = `${sessionId}\0${currentModel}`;
+    const key = `${sessionId}\0${currentModel}\0${currentThinking}`;
     if (runtimeStatusActivationKey === key) return;
     runtimeStatusActivationKey = key;
     queueMicrotask(() => void refreshRuntimeStatus(sessionId, true));
@@ -521,6 +534,7 @@
       if (sessionId && activeSessionRuntimeReady) void refreshRuntimeStatus(sessionId, true);
     }, RUNTIME_MODEL_USAGE_REFRESH_MS);
     restoreProjects();
+    refreshProjectColors(recentProjects);
     try {
       sessionInspectorOpen = localStorage.getItem(SESSION_INSPECTOR_OPEN_KEY) === "true";
     } catch {
@@ -622,8 +636,10 @@
         agentControlStates = new Map();
         runtimeStatusBySessionId = new Map();
         modelUsageRefreshSessionIds = new Set();
+        dcpStatsRefreshSessionIds = new Set();
         dcpCompressionSessionIds = new Set();
         runtimeStatusGenerationsBySession.clear();
+        dcpStatsRequestGenerations.clear();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -688,8 +704,10 @@
     agentControlStates = new Map();
     runtimeStatusBySessionId = new Map();
     modelUsageRefreshSessionIds = new Set();
+    dcpStatsRefreshSessionIds = new Set();
     dcpCompressionSessionIds = new Set();
     runtimeStatusGenerationsBySession.clear();
+    dcpStatsRequestGenerations.clear();
     transcript = emptyTranscript;
     configOptions = [];
     runningSessionIds = new Set();
@@ -950,6 +968,43 @@
     const sessionId = activeSessionId;
     if (!sessionId) return;
     void refreshRuntimeStatus(sessionId, true);
+  }
+
+  async function refreshActiveDcpStats(): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || !runtimeReadySessionIds.has(sessionId) || dcpStatsRefreshSessionIds.has(sessionId)) return;
+
+    const generation = (dcpStatsRequestGenerations.get(sessionId) ?? 0) + 1;
+    dcpStatsRequestGenerations.set(sessionId, generation);
+
+    const refreshing = new Set(dcpStatsRefreshSessionIds);
+    refreshing.add(sessionId);
+    dcpStatsRefreshSessionIds = refreshing;
+    try {
+      const next = await requestClient.dcpStats(sessionId);
+      if (
+        requestClient !== client
+        || !runtimeReadySessionIds.has(sessionId)
+        || dcpStatsRequestGenerations.get(sessionId) !== generation
+      ) return;
+      const previous = runtimeStatusBySessionId.get(sessionId);
+      if (!previous) return;
+      const { dcpStats: _staleDcpStats, ...withoutDcpStats } = previous;
+      const statuses = new Map(runtimeStatusBySessionId);
+      statuses.set(sessionId, {
+        ...withoutDcpStats,
+        ...(next.dcpStats ? { dcpStats: next.dcpStats } : {}),
+      });
+      runtimeStatusBySessionId = statuses;
+    } catch {
+      // DCP telemetry is best-effort; keep the last successfully loaded snapshot.
+    } finally {
+      if (dcpStatsRequestGenerations.get(sessionId) !== generation) return;
+      const next = new Set(dcpStatsRefreshSessionIds);
+      next.delete(sessionId);
+      dcpStatsRefreshSessionIds = next;
+    }
   }
 
   async function compressActiveDcpContext(): Promise<void> {
@@ -1276,12 +1331,16 @@
       changingConfigBySessionId = nextChanging;
     }
     runtimeStatusGenerationsBySession.delete(sessionId);
+    dcpStatsRequestGenerations.set(sessionId, (dcpStatsRequestGenerations.get(sessionId) ?? 0) + 1);
     const statuses = new Map(runtimeStatusBySessionId);
     statuses.delete(sessionId);
     runtimeStatusBySessionId = statuses;
     const refreshing = new Set(modelUsageRefreshSessionIds);
     refreshing.delete(sessionId);
     modelUsageRefreshSessionIds = refreshing;
+    const refreshingDcp = new Set(dcpStatsRefreshSessionIds);
+    refreshingDcp.delete(sessionId);
+    dcpStatsRefreshSessionIds = refreshingDcp;
     const compressing = new Set(dcpCompressionSessionIds);
     compressing.delete(sessionId);
     dcpCompressionSessionIds = compressing;
@@ -1398,7 +1457,6 @@
 
   async function chooseWorkspace(): Promise<void> {
     if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
-    closeProjectSelector();
     const selected = await open({
       directory: true,
       multiple: false,
@@ -1411,7 +1469,6 @@
   }
 
   async function chooseWorkspaceInNewWindow(): Promise<void> {
-    closeProjectSelector();
     const selected = await open({
       directory: true,
       multiple: false,
@@ -1437,7 +1494,6 @@
 
   function openWorkspaceInNewWindow(selected: string): void {
     if (!isAbsoluteProjectPath(selected)) return;
-    closeProjectSelector();
     rememberProject(selected);
     const label = `project-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     try {
@@ -1463,7 +1519,6 @@
 
   async function selectWorkspace(selected: string): Promise<void> {
     if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
-    closeProjectSelector();
     closeSessionSelector();
     if (!isAbsoluteProjectPath(selected)) {
       errorMessage = "The selected project path is not absolute.";
@@ -1548,6 +1603,7 @@
     } catch {
       // Keep the in-memory recent list usable when storage is unavailable.
     }
+    refreshProjectColors(recentProjects);
   }
 
   function restoreProjects(): void {
@@ -1563,6 +1619,78 @@
       workspace = "";
       recentProjects = [];
       savedActiveSessionIds = new Map();
+    }
+  }
+
+  function refreshProjectColors(paths: readonly string[]): void {
+    const generation = ++projectColorLoadGeneration;
+    const activePaths = new Set(paths);
+    projectColors = new Map([...projectColors].filter(([path]) => activePaths.has(path)));
+    for (const projectPath of paths) void loadProjectColor(projectPath, generation);
+  }
+
+  async function loadProjectColor(projectPath: string, generation: number): Promise<void> {
+    const preview = await invoke<ProjectFilePreview>("read_project_file", {
+      workspace: projectPath,
+      path: WORKSPACE_CONFIG_PATH,
+    }).catch(() => undefined);
+    if (generation !== projectColorLoadGeneration || !recentProjects.includes(projectPath)) return;
+    const color = projectColorFromWorkspaceConfig(preview?.content);
+    const next = new Map(projectColors);
+    if (color) next.set(projectPath, color);
+    else next.delete(projectPath);
+    projectColors = next;
+  }
+
+  async function saveProjectColor(color: string | undefined): Promise<string | undefined> {
+    if (!workspace) return "Open a project before changing project settings.";
+    const requestWorkspace = workspace;
+    const generation = ++projectColorSaveGeneration;
+    // Any read that started before this save must not repaint the just-saved value.
+    projectColorLoadGeneration += 1;
+    try {
+      const exists = await invoke<boolean>("project_file_exists", {
+        workspace: requestWorkspace,
+        path: WORKSPACE_CONFIG_PATH,
+      });
+      if (generation !== projectColorSaveGeneration || workspace !== requestWorkspace) {
+        return "The active project changed before settings could be saved.";
+      }
+      let current = exists
+        ? await invoke<ProjectFilePreview>("read_project_file", {
+            workspace: requestWorkspace,
+            path: WORKSPACE_CONFIG_PATH,
+          })
+        : undefined;
+      if (generation !== projectColorSaveGeneration || workspace !== requestWorkspace) {
+        return "The active project changed before settings could be saved.";
+      }
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const content = workspaceConfigWithProjectColor(current?.content, color);
+        const result = await invoke<{ written: boolean; document: ProjectFilePreview | null }>(
+          "write_project_workspace_config_if_unchanged",
+          {
+            workspace: requestWorkspace,
+            expectedContent: current?.content ?? null,
+            content,
+          },
+        );
+        if (generation !== projectColorSaveGeneration || workspace !== requestWorkspace) return undefined;
+        if (result.written && result.document) {
+          const savedColor = projectColorFromWorkspaceConfig(result.document.content);
+          const next = new Map(projectColors);
+          if (savedColor) next.set(requestWorkspace, savedColor);
+          else next.delete(requestWorkspace);
+          projectColors = next;
+          refreshProjectColors(recentProjects);
+          return undefined;
+        }
+        current = result.document ?? undefined;
+      }
+      return ".pi/workspace.jsonc changed repeatedly while project settings were being saved. Try again.";
+    } catch (error) {
+      if (generation !== projectColorSaveGeneration || workspace !== requestWorkspace) return undefined;
+      return error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -2097,17 +2225,13 @@
     }
   }
 
-  function toggleProjectSelector(): void {
-    if (projectSelectorOpen) {
-      closeProjectSelector();
-      return;
-    }
-    closeSessionSelector();
-    projectSelectorOpen = true;
+  function closeProjectSelector(): void {
+    workspaceSidebar?.closeProjectSwitcher();
   }
 
-  function closeProjectSelector(): void {
-    projectSelectorOpen = false;
+  function prepareProjectSwitcher(): void {
+    closeSessionSelector();
+    refreshProjectColors(recentProjects);
   }
 
   async function refreshSessions(): Promise<void> {
@@ -4601,18 +4725,7 @@
     class="flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground"
     data-tauri-drag-region
   >
-    <ProjectTitlebar
-      {workspace}
-      {recentProjects}
-      open={projectSelectorOpen}
-      currentWindowDisabled={anyPromptRunning || operationRunning || tasksSaving || taskActionId !== null}
-      onToggle={toggleProjectSelector}
-      onSelectProject={(path) => void selectWorkspace(path)}
-      onOpenProjectInNewWindow={openWorkspaceInNewWindow}
-      onChooseWorkspace={() => void chooseWorkspace()}
-      onChooseWorkspaceInNewWindow={() => void chooseWorkspaceInNewWindow()}
-      onClose={closeProjectSelector}
-    />
+    <div class={["shrink-0", isMacOS ? "w-[76px]" : "w-3"]} data-tauri-drag-region></div>
 
     <div class="relative flex min-w-0 flex-1" data-tauri-drag-region>
       <SessionTabs
@@ -4668,6 +4781,9 @@
       {gitActionId}
       {gitLlmActionId}
       {projectDocuments}
+      {recentProjects}
+      {projectColors}
+      projectSwitchDisabled={anyPromptRunning || operationRunning || tasksSaving || taskActionId !== null}
       externalEditorLabel={externalEditorDisplayName}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
@@ -4684,6 +4800,12 @@
       onValidateProjectFile={validateProjectFile}
       onOpenProjectFile={(path, range) => void openProjectFile(path, "replace", range)}
       onOpenExternalEditor={(path) => void openInExternalEditor(path)}
+      onProjectSwitcherOpen={prepareProjectSwitcher}
+      onSelectProject={(path) => void selectWorkspace(path)}
+      onOpenProjectInNewWindow={openWorkspaceInNewWindow}
+      onChooseWorkspace={() => void chooseWorkspace()}
+      onChooseWorkspaceInNewWindow={() => void chooseWorkspaceInNewWindow()}
+      onSaveProjectColor={saveProjectColor}
       onReload={() => void loadProjectTasks(workspace)}
       onRegistryRefresh={refreshRegistry}
       onRegistryAction={(request, actionId) => void runRegistryAction(request, actionId)}
@@ -4793,6 +4915,7 @@
     modelThinkingOpen={modelThinkingPickerOpen}
     runtimeStatus={activeRuntimeStatus}
     {modelUsageRefreshing}
+    {dcpStatsRefreshing}
     {dcpCompressionRunning}
     {dcpCompressionAvailable}
     canCompressContext={dcpCompressionAvailable && canUseSession && !!activeSessionId && activeSessionRuntimeReady && changingConfig === null && !sessionHistoryLoading && !promptRunning && activeAgentControlState === "idle"}
@@ -4805,6 +4928,7 @@
     onSetConfig={(option, value) => void setConfig(option, value)}
     onOpenModelThinking={openModelThinkingPicker}
     onRefreshModelUsage={refreshActiveModelUsage}
+    onOpenDcpStats={() => void refreshActiveDcpStats()}
     onCompressDcpContext={() => void compressActiveDcpContext()}
     onNavigateMessages={() => void openJumpPicker("")}
     onToggleSessionActivity={() => setSessionInspectorOpen(!sessionInspectorOpen)}

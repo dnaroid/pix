@@ -59,10 +59,11 @@ type DcpNudgeStats = {
 type FormatDcpStatsOptions = {
 	manualModeBaseline?: boolean;
 	configPath?: string;
+	branch?: readonly any[];
 };
 
 export function formatDcpStatsToast(session: AgentSession, options: FormatDcpStatsOptions = {}): string {
-	const branch = dcpStatsBranch(session);
+	const branch = options.branch ?? dcpStatsBranch(session);
 	const latestState = resolveJournalDcpState(branch);
 	const manualModeBaseline = options.manualModeBaseline ?? readDcpManualModeBaseline(session, options.configPath);
 	const stats = collectDcpSessionStats(session, latestState, branch, manualModeBaseline);

@@ -32,6 +32,7 @@ const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PROJECT_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_WORKSPACE_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const MAX_GIT_CHANGES: usize = 5_000;
 const MAX_GIT_DIFF_BYTES: usize = 512 * 1024;
@@ -64,6 +65,7 @@ const PI_TOOLS_SUITE_SCHEMA_URL: &str =
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static WORKSPACE_CONFIG_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 
 #[derive(Serialize)]
@@ -102,6 +104,11 @@ struct PackageTerminalState {
 
 #[derive(Default)]
 struct UserConfigState {
+    lock: RwLock<()>,
+}
+
+#[derive(Default)]
+struct WorkspaceConfigState {
     lock: RwLock<()>,
 }
 
@@ -459,7 +466,7 @@ fn resolve_deepgram_runtime_config(
 ) -> Result<DeepgramRuntimeConfig, String> {
     let parsed = match deepgram_user_pix_config(home) {
         Ok(parsed) => parsed,
-        Err(error) if env_api_key.is_some() => None,
+        Err(_error) if env_api_key.is_some() => None,
         Err(error) => return Err(error),
     };
     let dictation = parsed
@@ -544,6 +551,13 @@ struct AttachmentFile {
 struct ProjectFilePreview {
     path: String,
     content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConditionalWorkspaceConfigWrite {
+    written: bool,
+    document: Option<ProjectFilePreview>,
 }
 
 #[derive(Serialize)]
@@ -1187,6 +1201,28 @@ async fn read_project_file(workspace: String, path: String) -> Result<ProjectFil
             Path::new(&workspace),
             Path::new(&path),
             MAX_PROJECT_FILE_PREVIEW_BYTES,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn write_project_workspace_config_if_unchanged(
+    app: AppHandle,
+    workspace: String,
+    expected_content: Option<String>,
+    content: String,
+) -> Result<ConditionalWorkspaceConfigWrite, String> {
+    run_blocking(move || {
+        let state = app.state::<WorkspaceConfigState>();
+        let _guard = state
+            .lock
+            .write()
+            .map_err(|_| "workspace config state is poisoned".to_owned())?;
+        write_project_workspace_config_if_unchanged_from(
+            Path::new(&workspace),
+            expected_content.as_deref(),
+            &content,
         )
     })
     .await
@@ -1896,6 +1932,96 @@ fn write_project_markdown_from(
     fs::write(&target, content.as_bytes())
         .map_err(|error| format!("failed to save {normalized}: {error}"))?;
     read_project_file_from(&root, relative_path, MAX_PROJECT_MARKDOWN_BYTES)
+}
+
+fn write_project_workspace_config_from(
+    workspace: &Path,
+    content: &str,
+) -> Result<ProjectFilePreview, String> {
+    if content.len() as u64 > MAX_WORKSPACE_CONFIG_BYTES {
+        return Err(".pi/workspace.jsonc is too large (maximum 64 KB)".to_owned());
+    }
+    let root = canonical_workspace(workspace)?;
+    let project_dir_path = root.join(".pi");
+    if !project_dir_path.exists() {
+        fs::create_dir(&project_dir_path)
+            .map_err(|error| format!("failed to create {}: {error}", project_dir_path.display()))?;
+    }
+    let project_dir = canonical_project_directory(&root, &project_dir_path)?;
+    let target = project_dir.join("workspace.jsonc");
+    if target.exists() {
+        if fs::symlink_metadata(&target)
+            .map_err(|error| format!("failed to inspect {}: {error}", target.display()))?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(".pi/workspace.jsonc cannot be a symbolic link".to_owned());
+        }
+        let canonical = fs::canonicalize(&target)
+            .map_err(|error| format!("failed to resolve {}: {error}", target.display()))?;
+        if !canonical.starts_with(&project_dir) {
+            return Err(".pi/workspace.jsonc resolves outside the workspace".to_owned());
+        }
+        if !fs::metadata(&canonical)
+            .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?
+            .is_file()
+        {
+            return Err(".pi/workspace.jsonc is not a file".to_owned());
+        }
+    }
+
+    let sequence = WORKSPACE_CONFIG_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = project_dir.join(format!(
+        ".workspace.jsonc.{}.{}.tmp",
+        std::process::id(),
+        sequence,
+    ));
+    let write_result: Result<(), String> = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("failed to create workspace config temporary file: {error}"))?;
+        file.write_all(content.as_bytes())
+            .map_err(|error| format!("failed to write .pi/workspace.jsonc: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("failed to flush .pi/workspace.jsonc: {error}"))?;
+        replace_workspace_config_file(&temporary, &target)?;
+        sync_directory(&project_dir)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_result?;
+    read_project_file_from(&root, Path::new(".pi/workspace.jsonc"), MAX_WORKSPACE_CONFIG_BYTES)
+}
+
+fn write_project_workspace_config_if_unchanged_from(
+    workspace: &Path,
+    expected_content: Option<&str>,
+    content: &str,
+) -> Result<ConditionalWorkspaceConfigWrite, String> {
+    let config_path = Path::new(".pi/workspace.jsonc");
+    let current = if project_file_exists_from(workspace, config_path) {
+        Some(read_project_file_from(
+            workspace,
+            config_path,
+            MAX_WORKSPACE_CONFIG_BYTES,
+        )?)
+    } else {
+        None
+    };
+    if current.as_ref().map(|document| document.content.as_str()) != expected_content {
+        return Ok(ConditionalWorkspaceConfigWrite {
+            written: false,
+            document: current,
+        });
+    }
+    Ok(ConditionalWorkspaceConfigWrite {
+        written: true,
+        document: Some(write_project_workspace_config_from(workspace, content)?),
+    })
 }
 
 fn read_project_file_from(
@@ -5843,11 +5969,35 @@ fn replace_task_file(temporary: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(windows))]
+fn replace_workspace_config_file(temporary: &Path, target: &Path) -> Result<(), String> {
+    fs::rename(temporary, target)
+        .map_err(|error| format!("failed to replace .pi/workspace.jsonc: {error}"))
+}
+
+#[cfg(windows)]
+fn replace_workspace_config_file(temporary: &Path, target: &Path) -> Result<(), String> {
+    if !target.exists() {
+        return fs::rename(temporary, target)
+            .map_err(|error| format!("failed to install .pi/workspace.jsonc: {error}"));
+    }
+    let backup = target.with_extension("jsonc.bak");
+    let _ = fs::remove_file(&backup);
+    fs::rename(target, &backup)
+        .map_err(|error| format!("failed to prepare .pi/workspace.jsonc replacement: {error}"))?;
+    if let Err(error) = fs::rename(temporary, target) {
+        let _ = fs::rename(&backup, target);
+        return Err(format!("failed to replace .pi/workspace.jsonc: {error}"));
+    }
+    let _ = fs::remove_file(backup);
+    Ok(())
+}
+
 #[cfg(unix)]
 fn sync_directory(directory: &Path) -> Result<(), String> {
     fs::File::open(directory)
         .and_then(|file| file.sync_all())
-        .map_err(|error| format!("failed to flush task document directory: {error}"))
+        .map_err(|error| format!("failed to flush project directory: {error}"))
 }
 
 #[cfg(not(unix))]
@@ -6362,6 +6512,7 @@ pub fn run() {
         .manage(AcpProcessState::default())
         .manage(PackageTerminalState::default())
         .manage(UserConfigState::default())
+        .manage(WorkspaceConfigState::default())
         .manage(IdxOperationState::default())
         .setup(|app| {
             app.manage(AttachmentPathState::new(app.handle()));
@@ -6386,6 +6537,7 @@ pub fn run() {
             open_attachment,
             open_local_file,
             read_project_file,
+            write_project_workspace_config_if_unchanged,
             project_file_exists,
             list_project_directory,
             open_in_external_editor,
@@ -7145,6 +7297,48 @@ mod tests {
         assert!(read_project_file_from(&workspace, Path::new("../secret.txt"), 1024).is_err());
         assert!(read_project_file_from(&workspace, Path::new("large.txt"), 4).is_err());
         assert!(read_project_file_from(&workspace, Path::new("binary.bin"), 1024).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn writes_project_workspace_config_with_atomic_replacement() {
+        let workspace = temporary_workspace("workspace-config-write");
+        let first = write_project_workspace_config_from(
+            &workspace,
+            "{\n  // Project identity\n  \"color\": \"#7aa2f7\"\n}\n",
+        )
+        .expect("write workspace config");
+        assert_eq!(first.path, ".pi/workspace.jsonc");
+        assert!(first.content.contains("#7aa2f7"));
+
+        let second = write_project_workspace_config_if_unchanged_from(
+            &workspace,
+            Some(&first.content),
+            "{\n  \"color\": \"#ff8844\"\n}\n",
+        )
+        .expect("replace workspace config");
+        assert!(second.written);
+        let second_document = second.document.expect("written workspace config");
+        assert!(second_document.content.contains("#ff8844"));
+        assert!(!second_document.content.contains("#7aa2f7"));
+        assert_eq!(
+            fs::read_to_string(workspace.join(".pi/workspace.jsonc")).expect("read config"),
+            second_document.content,
+        );
+
+        let stale = write_project_workspace_config_if_unchanged_from(
+            &workspace,
+            Some(&first.content),
+            "{\n  \"color\": \"#22cc88\"\n}\n",
+        )
+        .expect("reject stale workspace config write");
+        assert!(!stale.written);
+        assert!(stale
+            .document
+            .expect("current workspace config")
+            .content
+            .contains("#ff8844"));
+
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

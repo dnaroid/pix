@@ -161,6 +161,11 @@ export interface RuntimeStatus {
   readonly modelUsage?: ModelUsageStatus;
 }
 
+export interface DcpStatsStatus {
+  readonly sessionId: string;
+  readonly dcpStats?: string;
+}
+
 type JsonRpcId = string | number;
 
 interface PendingRequest {
@@ -328,6 +333,17 @@ export class AcpClient {
       { sessionId, refreshModelUsage },
     );
     return parseRuntimeStatus(response);
+  }
+
+  async dcpStats(sessionId: string): Promise<DcpStatsStatus> {
+    const response = await this.request<unknown>("pix/session/dcp_stats", { sessionId });
+    if (!isRecord(response) || typeof response.sessionId !== "string" || (response.dcpStats !== undefined && typeof response.dcpStats !== "string")) {
+      throw new Error("pix/session/dcp_stats returned an invalid response");
+    }
+    return {
+      sessionId: response.sessionId,
+      ...(typeof response.dcpStats === "string" ? { dcpStats: response.dcpStats } : {}),
+    };
   }
 
   async userMessageAction(

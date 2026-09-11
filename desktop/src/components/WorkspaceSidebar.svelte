@@ -19,6 +19,7 @@
   import Search from "@lucide/svelte/icons/search";
   import ScanSearch from "@lucide/svelte/icons/scan-search";
   import Settings from "@lucide/svelte/icons/settings";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
@@ -66,6 +67,9 @@
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import PromptComposer from "./PromptComposer.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
+  import ProjectFolderIcon from "./ProjectFolderIcon.svelte";
+  import ProjectSettingsDialog from "./ProjectSettingsDialog.svelte";
+  import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
   import SidebarIndicatorDot from "./SidebarIndicatorDot.svelte";
 
@@ -117,6 +121,9 @@
     gitActionId,
     gitLlmActionId,
     projectDocuments,
+    recentProjects,
+    projectColors,
+    projectSwitchDisabled,
     externalEditorLabel,
     onCreate,
     onUpdate,
@@ -133,6 +140,12 @@
     onValidateProjectFile,
     onOpenProjectFile,
     onOpenExternalEditor,
+    onProjectSwitcherOpen,
+    onSelectProject,
+    onOpenProjectInNewWindow,
+    onChooseWorkspace,
+    onChooseWorkspaceInNewWindow,
+    onSaveProjectColor,
     onReload,
     onRegistryRefresh,
     onRegistryAction,
@@ -165,6 +178,9 @@
     gitActionId: string | null;
     gitLlmActionId: string | null;
     projectDocuments: ProjectDocumentsSnapshot;
+    recentProjects: string[];
+    projectColors: ReadonlyMap<string, string>;
+    projectSwitchDisabled: boolean;
     externalEditorLabel: string;
     onCreate: (draft: TaskDraft) => void;
     onUpdate: (taskId: string, draft: TaskDraft) => void;
@@ -186,6 +202,12 @@
     onValidateProjectFile: (path: string) => Promise<boolean>;
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
     onOpenExternalEditor: (path?: string) => void;
+    onProjectSwitcherOpen: () => void;
+    onSelectProject: (path: string) => void;
+    onOpenProjectInNewWindow: (path: string) => void;
+    onChooseWorkspace: () => void;
+    onChooseWorkspaceInNewWindow: () => void;
+    onSaveProjectColor: (color: string | undefined) => Promise<string | undefined>;
     onReload: () => void;
     onRegistryRefresh: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
@@ -219,6 +241,11 @@
 
   let collapsed = $state(false);
   let sidebarElement = $state<HTMLElement | null>(null);
+  let projectSwitcher = $state<{ close: () => void } | null>(null);
+  let projectSwitcherMinimumWidth = $state(MIN_WIDTH);
+  let projectSettingsOpen = $state(false);
+  let projectSettingsSaving = $state(false);
+  let projectSettingsError = $state<string | null>(null);
   let sidebarWidth = $state(DEFAULT_WIDTH);
   let activeTab = $state<SidebarTab>("tasks");
   let viewportWidth = $state(1240);
@@ -278,6 +305,7 @@
   ));
   const expandedSidebarWidth = $derived(clampWidth(sidebarWidth, activeMinWidth, activeMaxWidth));
   const renderedSidebarWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : expandedSidebarWidth));
+  const renderedSidebarMinWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : activeMinWidth));
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(draggedTaskId ? tasks.find((task) => task.id === draggedTaskId) : undefined);
   const visiblePlanChoices = $derived.by(() => {
@@ -320,8 +348,36 @@
   $effect(() => {
     const requestWorkspace = workspace;
     projectPanelError = null;
+    projectSettingsOpen = false;
+    projectSettingsSaving = false;
+    projectSettingsError = null;
     indicatorService?.setWorkspace(requestWorkspace);
   });
+
+  function openProjectSettings(): void {
+    if (!workspace) return;
+    projectSwitcher?.close();
+    projectSettingsError = null;
+    projectSettingsOpen = true;
+  }
+
+  async function saveProjectSettings(color: string | undefined): Promise<void> {
+    if (!workspace || projectSettingsSaving) return;
+    const requestWorkspace = workspace;
+    projectSettingsSaving = true;
+    projectSettingsError = null;
+    try {
+      const error = await onSaveProjectColor(color);
+      if (workspace !== requestWorkspace) return;
+      if (error) {
+        projectSettingsError = error;
+        return;
+      }
+      projectSettingsOpen = false;
+    } finally {
+      if (workspace === requestWorkspace) projectSettingsSaving = false;
+    }
+  }
 
   $effect(() => {
     const viewedTab = collapsed ? undefined : activeTab;
@@ -430,6 +486,11 @@
     taskCard?.scrollIntoView({ block: "nearest" });
   }
 
+  /** Close the project picker when another top-level interaction takes focus. */
+  export function closeProjectSwitcher(): void {
+    projectSwitcher?.close();
+  }
+
   function startResize(event: PointerEvent): void {
     if (collapsed || event.button !== 0) return;
     event.preventDefault();
@@ -497,11 +558,17 @@
   }
 
   function sidebarMinWidth(tab: SidebarTab): number {
+    if (tab === "project") return Math.max(MIN_WIDTH, projectSwitcherMinimumWidth);
     if (tab === "registry") return REGISTRY_MIN_WIDTH;
     if (tab === "settings") return SETTINGS_MIN_WIDTH;
     if (tab === "scripts") return SCRIPTS_MIN_WIDTH;
     if (tab === "idx") return IDX_MIN_WIDTH;
     return MIN_WIDTH;
+  }
+
+  function setProjectSwitcherMinimumWidth(width: number): void {
+    if (!Number.isFinite(width)) return;
+    projectSwitcherMinimumWidth = Math.max(MIN_WIDTH, Math.ceil(width));
   }
 
   function sidebarMaxWidth(tab: SidebarTab): number {
@@ -726,6 +793,7 @@
   class="relative flex min-h-0 shrink-0 bg-sidebar text-sidebar-foreground"
   class:select-none={resizePointerId !== null}
   style:width={`${renderedSidebarWidth}px`}
+  style:min-width={`${renderedSidebarMinWidth}px`}
   style:max-width="100vw"
   aria-label="Workspace sidebar"
 >
@@ -738,7 +806,14 @@
       aria-controls="workspace-project-panel"
       aria-pressed={activeTab === "project" && !collapsed}
       onclick={() => selectTab("project")}
-    ><Folder class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.project} /></button>
+    >
+      {#if workspace}
+        <ProjectFolderIcon project={workspace} color={projectColors.get(workspace)} class="h-5 w-5" />
+      {:else}
+        <Folder class="h-5 w-5" aria-hidden="true" />
+      {/if}
+      <SidebarIndicatorDot indicator={indicators.project} />
+    </button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
@@ -821,6 +896,14 @@
           ><Plus class="h-3 w-3" aria-hidden="true" />Add</button>
         {:else if activeTab === "project"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
+            <button
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              type="button"
+              title="Project settings"
+              aria-label="Project settings"
+              onclick={openProjectSettings}
+              disabled={!workspace}
+            ><SlidersHorizontal class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
               class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
@@ -1029,20 +1112,35 @@
           </div>
         </section>
       {:else if activeTab === "project"}
-        <section id="workspace-project-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Project">
-          {#if !workspace}
-            <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p></div>
-          {:else}
-            <ProjectExplorer
-              {workspace}
-              {externalEditorLabel}
-              refreshKey={projectTreeRefreshKey}
-              onListDirectory={onListProjectDirectory}
-              onOpenFile={onOpenProjectFile}
-              onOpenExternal={(path) => onOpenExternalEditor(path)}
-              onHealthChange={(error) => projectPanelError = error}
-            />
-          {/if}
+        <section id="workspace-project-panel" class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden" aria-label="Project">
+          <ProjectSwitcher
+            bind:this={projectSwitcher}
+            {workspace}
+            {recentProjects}
+            {projectColors}
+            currentWindowDisabled={projectSwitchDisabled}
+            onOpen={onProjectSwitcherOpen}
+            onMinimumWidthChange={setProjectSwitcherMinimumWidth}
+            {onSelectProject}
+            {onOpenProjectInNewWindow}
+            {onChooseWorkspace}
+            {onChooseWorkspaceInNewWindow}
+          />
+          <div class="grid min-h-0 min-w-0 overflow-hidden">
+            {#if !workspace}
+              <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Open a project to browse files</p></div>
+            {:else}
+              <ProjectExplorer
+                {workspace}
+                {externalEditorLabel}
+                refreshKey={projectTreeRefreshKey}
+                onListDirectory={onListProjectDirectory}
+                onOpenFile={onOpenProjectFile}
+                onOpenExternal={(path) => onOpenExternalEditor(path)}
+                onHealthChange={(error) => projectPanelError = error}
+              />
+            {/if}
+          </div>
         </section>
       {:else if activeTab === "git"}
         <div id="workspace-git-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Source Control">
@@ -1261,5 +1359,20 @@
         </div>
       </div>
     </div>
+  {/if}
+
+  {#if projectSettingsOpen && workspace}
+    <ProjectSettingsDialog
+      {workspace}
+      color={projectColors.get(workspace)}
+      saving={projectSettingsSaving}
+      error={projectSettingsError}
+      onSave={(color) => void saveProjectSettings(color)}
+      onClose={() => {
+        if (projectSettingsSaving) return;
+        projectSettingsOpen = false;
+        projectSettingsError = null;
+      }}
+    />
   {/if}
 </aside>

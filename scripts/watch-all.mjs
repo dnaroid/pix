@@ -29,6 +29,7 @@ const APP_KILL_WAIT_MS = 500;
 const DEBOUNCE_MS = 200;
 const RESTART_DEBOUNCE_MS = 750;
 const STARTUP_GRACE_MS = 800;
+const COMMAND_FAILURE_TAIL_BYTES = 16 * 1024;
 const NATIVE_ICON_PATH = "desktop/src-tauri/icons";
 
 export const PARTS = Object.freeze({
@@ -38,6 +39,25 @@ export const PARTS = Object.freeze({
 	WEB: "web",
 	NATIVE: "native",
 });
+
+/** Keep only a bounded tail of command output so failed builds can repeat the useful error at the bottom. */
+export function appendCommandOutputTail(current, chunk, maxBytes = COMMAND_FAILURE_TAIL_BYTES) {
+	const next = `${current}${String(chunk)}`;
+	if (Buffer.byteLength(next) <= maxBytes) return next;
+	const bytes = Buffer.from(next);
+	return bytes.subarray(Math.max(0, bytes.length - maxBytes)).toString("utf8").replace(/^\uFFFD+/u, "");
+}
+
+export function formatCommandFailureReport(label, result, outputTail) {
+	const reason = result.signal ?? `exit ${result.code}`;
+	const tail = outputTail.trim();
+	return [
+		"",
+		`[watch:all] ========== BUILD FAILED: ${label} (${reason}) ==========`,
+		...(tail ? [tail] : ["[watch:all] command produced no captured output"]),
+		"[watch:all] ========================================================",
+	].join("\n");
+}
 
 const PART_ORDER = [PARTS.SUITE, PARTS.PIX, PARTS.ACP, PARTS.WEB, PARTS.NATIVE];
 const SUITE_ENTRIES = new Set([
@@ -392,6 +412,7 @@ class WatchAllSupervisor {
 		this.tempDirectory = undefined;
 		this.executableSequence = 0;
 		this.watchedPathStamps = new Map();
+		this.lastBuildFailure = undefined;
 	}
 
 	async start() {
@@ -464,6 +485,9 @@ class WatchAllSupervisor {
 		for (const part of this.blockedParts) this.pendingParts.add(part);
 		this.blockedParts.clear();
 		for (const part of parts) this.pendingParts.add(part);
+		if (this.lastBuildFailure) {
+			console.error(`[watch:all] retrying after failed build: ${this.lastBuildFailure}`);
+		}
 		console.error(`[watch:all] change queued (${reason}): ${[...parts].join(", ")}`);
 		if (this.building) return;
 		clearTimeout(this.buildTimer);
@@ -486,11 +510,15 @@ class WatchAllSupervisor {
 		try {
 			for (const step of plan.steps) await this.runBuildStep(step);
 			succeeded = true;
+			if (this.lastBuildFailure) console.error("[watch:all] recovered from previous build failure");
+			this.lastBuildFailure = undefined;
 			if (plan.restartDesktop) this.restartPending = true;
 			console.error("[watch:all] build cycle succeeded");
 		} catch (error) {
 			if (!this.stopping) {
-				console.error(`[watch:all] build cycle failed: ${error instanceof Error ? error.message : String(error)}`);
+				this.lastBuildFailure = error instanceof Error ? error.message : String(error);
+				console.error(`[watch:all] build cycle failed: ${this.lastBuildFailure}`);
+				console.error("[watch:all] previous Desktop stays running; fix the failure above and the next relevant edit will retry");
 				for (const part of requestedParts) this.blockedParts.add(part);
 			}
 		}
@@ -580,21 +608,36 @@ class WatchAllSupervisor {
 		console.error(`[watch:all] ${label}`);
 		const child = spawn(command, args, {
 			cwd,
-			stdio: "inherit",
+			stdio: ["inherit", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 			env: { ...process.env, ...environment },
 		});
+		let outputTail = "";
+		const tee = (source, destination) => {
+			source?.on("data", (chunk) => {
+				destination.write(chunk);
+				outputTail = appendCommandOutputTail(outputTail, chunk);
+			});
+		};
+		tee(child.stdout, process.stdout);
+		tee(child.stderr, process.stderr);
 		this.activeCommand = child;
 		let result;
 		try {
 			result = await new Promise((resolveCommand, rejectCommand) => {
 				child.once("error", rejectCommand);
-				child.once("exit", (code, signal) => resolveCommand({ code, signal }));
+				// With piped stdout/stderr, wait for `close`, not merely `exit`, so the
+				// failure report includes the command's final compiler diagnostics.
+				child.once("close", (code, signal) => resolveCommand({ code, signal }));
 			});
 		} finally {
 			if (this.activeCommand === child) this.activeCommand = undefined;
 		}
-		if (result.code !== 0) throw new Error(`${label} failed (${result.signal ?? `exit ${result.code}`})`);
+		if (result.code !== 0) {
+			process.stderr.write("\u0007");
+			console.error(formatCommandFailureReport(label, result, outputTail));
+			throw new Error(`${label} failed (${result.signal ?? `exit ${result.code}`})`);
+		}
 	}
 
 	async captureDesktopArtifact() {

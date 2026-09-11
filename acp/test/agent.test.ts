@@ -22,6 +22,7 @@ import type {
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
+	PIX_DCP_STATS_METHOD,
 	PIX_AGENT_CONTROL_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -37,6 +38,7 @@ import {
 	PIX_TOOL_RESULT_METHOD,
 	type DesktopQueueStateResponse,
 	type DesktopAgentControlResponse,
+	type DesktopDcpStatsResponse,
 	type DesktopRuntimeStatusResponse,
 	type DesktopQueuedUserMessage,
 } from "../src/acp/desktop-commands.js";
@@ -110,6 +112,7 @@ class FakePiClient implements PiClient {
 	commandsGate: Promise<void> | undefined;
 	readonly forkCalls: string[] = [];
 	readonly forkMessagesCalls: number[] = [];
+	getTreeCalls = 0;
 	readonly lastAssistantTextCalls: number[] = [];
 	forkMessagesList: Array<{ entryId: string; text: string }> = [];
 	forkCancelled = false;
@@ -281,6 +284,7 @@ class FakePiClient implements PiClient {
 	}
 
 	async getTree(): Promise<{ tree: PiSessionTreeNode[]; leafId: string | null }> {
+		this.getTreeCalls += 1;
 		return this.treeState;
 	}
 
@@ -1220,6 +1224,65 @@ test("Pix Desktop runtime status exposes pi context usage without refreshing mod
 		assert.deepEqual(response.context, { tokens: 128_000, contextWindow: 200_000, percent: 64 });
 		assert.equal(response.modelUsageRefresh, "skipped");
 		assert.equal(response.modelUsage, undefined);
+		assert.equal(pi.getTreeCalls, 0, "periodic runtime status must not traverse the DCP session tree");
+	});
+});
+
+test("Pix Desktop loads DCP statistics only through the on-demand DCP request", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-dcp-stats").start();
+		const pi = clients[0]!;
+		Object.assign(pi.sessionStats, {
+			contextUsage: { tokens: 10_000, contextWindow: 200_000, percent: 5 },
+		});
+
+		const response = await cx.request(PIX_DCP_STATS_METHOD, {
+			sessionId: session.sessionId,
+		}) as DesktopDcpStatsResponse;
+
+		assert.equal(response.sessionId, session.sessionId);
+		assert.match(response.dcpStats ?? "", /DCP Session Statistics:/u);
+		assert.equal(pi.getTreeCalls, 1);
+	});
+});
+
+test("Pix Desktop deduplicates concurrent quota refreshes for one session model route", async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => { release = resolve; });
+	let queryCalls = 0;
+	const { adapter } = createTestAdapter({
+		queryModelUsage: async (state) => {
+			queryCalls += 1;
+			await gate;
+			return {
+				refresh: "ready",
+				status: {
+					modelKey: `${state.model?.provider ?? "unknown"}/${state.model?.id ?? "unknown"}`,
+					provider: "openai",
+					updatedAt: Date.now(),
+					hourly: { remainingPercent: 75, resetAt: Date.now() + 60_000, windowSeconds: 3_600 },
+				},
+			};
+		},
+	});
+
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-quota-single-flight").start();
+		const first = cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: session.sessionId, refreshModelUsage: true });
+		const second = cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: session.sessionId, refreshModelUsage: true });
+
+		await waitFor(() => queryCalls === 1);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(queryCalls, 1);
+		release();
+		const [firstResult, secondResult] = await Promise.all([first, second]) as DesktopRuntimeStatusResponse[];
+
+		assert.equal(queryCalls, 1);
+		assert.equal(firstResult.modelUsageRefresh, "ready");
+		assert.equal(secondResult.modelUsageRefresh, "ready");
+		assert.equal(firstResult.modelUsage?.hourly?.remainingPercent, 75);
+		assert.equal(secondResult.modelUsage?.hourly?.remainingPercent, 75);
 	});
 });
 

@@ -23,6 +23,7 @@ export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages
 export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
 export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
+export const PIX_DCP_STATS_METHOD = "pix/session/dcp_stats";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -71,9 +72,13 @@ export type DesktopModelUsageRefresh = "skipped" | "ready" | "unavailable" | "fa
 export interface DesktopRuntimeStatusResponse {
 	readonly sessionId: string;
 	readonly context?: DesktopContextUsage;
-	readonly dcpStats?: string;
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
+}
+
+export interface DesktopDcpStatsResponse {
+	readonly sessionId: string;
+	readonly dcpStats?: string;
 }
 
 export interface DesktopSessionHistoryRequest extends DesktopSessionRequest {

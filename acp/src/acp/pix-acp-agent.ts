@@ -99,6 +99,7 @@ import {
 	PIX_BRANCH_USER_MESSAGES_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
+	PIX_DCP_STATS_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_IMPORT_SESSION_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -134,6 +135,7 @@ import {
 	type DesktopAgentControlRequest,
 	type DesktopAgentControlResponse,
 	type DesktopAgentControlState,
+	type DesktopDcpStatsResponse,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
 	type DesktopImportSessionRequest,
@@ -324,6 +326,8 @@ export interface PixAcpAgentOptions {
 	readonly enhancePrompt?: PromptEnhancer;
 	/** One-shot Git review/commit-message backend (overridable for hermetic tests). */
 	readonly gitAssistant?: GitAssistant;
+	/** Shared model-usage query (overridable for deterministic concurrency tests). */
+	readonly queryModelUsage?: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
 	/** Pix autocomplete config reader (overridable for hermetic tests). */
 	readonly loadAutocompleteConfig?: (cwd: string) => AutocompleteConfig;
 	/** Pix default-model reader (overridable for hermetic tests). */
@@ -348,6 +352,8 @@ export class PixAcpAgent {
 	private readonly pendingSpawns = new Set<Promise<AgentSessionState>>();
 	/** Serializes load/resume/fork/delete/close operations for the same id. */
 	private readonly sessionLifecycle = new Map<string, Promise<void>>();
+	/** Deduplicates concurrent account-quota I/O for one Desktop session/model/thinking route. */
+	private readonly modelUsageRefreshes = new Map<string, Promise<ModelUsageRefreshResult>>();
 	private readonly app: AgentApp;
 	private readonly options: PixAcpAgentOptions;
 	private readonly sessionMap: SessionMapStore;
@@ -356,6 +362,7 @@ export class PixAcpAgent {
 	private readonly completeAutocomplete: AutocompleteCompleter;
 	private readonly enhancePrompt: PromptEnhancer;
 	private readonly gitAssistant: GitAssistant;
+	private readonly queryModelUsage: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
 	private readonly loadDefaultModel: (cwd: string) => PixDefaultModel | undefined;
 	private readonly loadIgnoreContextFiles: (cwd: string) => boolean;
@@ -385,6 +392,7 @@ export class PixAcpAgent {
 		});
 		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
+		this.queryModelUsage = options.queryModelUsage ?? queryPixModelUsage;
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
@@ -431,6 +439,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_RUNTIME_STATUS_METHOD, parseDesktopRuntimeStatusRequest, (ctx) =>
 				this.desktopRuntimeStatus(ctx.params),
+			)
+			.onRequest(PIX_DCP_STATS_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopDcpStats(ctx.params),
 			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
 				this.autocomplete(ctx.params, ctx.signal),
@@ -1835,18 +1846,46 @@ export class PixAcpAgent {
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 
 		const [state, stats] = await Promise.all([session.pi.getState(), session.pi.getSessionStats()]);
-		const [dcpStats, modelUsage] = await Promise.all([
-			formatPixDcpStats(state, stats, session.cwd),
-			params.refreshModelUsage ? queryPixModelUsage(state) : Promise.resolve({ refresh: "skipped" as const }),
-		]);
+		const modelUsage = params.refreshModelUsage
+			? await this.querySessionModelUsage(session.acpSessionId, state)
+			: { refresh: "skipped" as const };
 
 		return {
 			sessionId: session.acpSessionId,
 			...(stats.contextUsage ? { context: stats.contextUsage } : {}),
-			...(dcpStats ? { dcpStats } : {}),
 			modelUsageRefresh: modelUsage.refresh,
 			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
 		};
+	}
+
+	private async desktopDcpStats(params: DesktopSessionRequest): Promise<DesktopDcpStatsResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+
+		const [state, stats, treeState] = await Promise.all([
+			session.pi.getState(),
+			session.pi.getSessionStats(),
+			session.pi.getTree(),
+		]);
+		const branch = activeTreeBranchEntries(treeState.tree, treeState.leafId);
+		const dcpStats = await formatPixDcpStats(state, stats, branch);
+		return {
+			sessionId: session.acpSessionId,
+			...(dcpStats ? { dcpStats } : {}),
+		};
+	}
+
+	private querySessionModelUsage(sessionId: string, state: PiSessionState): Promise<ModelUsageRefreshResult> {
+		const model = state.model;
+		const key = `${sessionId}\0${model?.provider ?? ""}/${model?.id ?? ""}\0${state.thinkingLevel}`;
+		const existing = this.modelUsageRefreshes.get(key);
+		if (existing) return existing;
+
+		const pending = this.queryModelUsage(state).finally(() => {
+			if (this.modelUsageRefreshes.get(key) === pending) this.modelUsageRefreshes.delete(key);
+		});
+		this.modelUsageRefreshes.set(key, pending);
+		return pending;
 	}
 
 	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState): Promise<void> {
@@ -2644,23 +2683,24 @@ function formatUsageStats(stats: PiSessionStats): string {
 }
 
 type SharedModelUsageModule = {
-	modelUsageDescriptor?: (model: PiSessionState["model"]) => unknown;
+	modelUsageDescriptor?: (model: PiSessionState["model"], thinkingLevel?: string) => unknown;
 	queryModelUsageStatus?: (descriptor: unknown) => Promise<DesktopModelUsageStatus | undefined>;
 };
 
 type SharedDcpStatsModule = {
-	formatDcpStatsToast?: (session: unknown) => string;
+	formatDcpStatsToast?: (session: unknown, options?: { branch?: readonly unknown[] }) => string;
 };
 
-async function queryPixModelUsage(state: PiSessionState): Promise<
+type ModelUsageRefreshResult =
 	| { readonly refresh: "ready"; readonly status: DesktopModelUsageStatus }
-	| { readonly refresh: "unavailable" | "failed" }
-> {
+	| { readonly refresh: "unavailable" | "failed" };
+
+async function queryPixModelUsage(state: PiSessionState): Promise<ModelUsageRefreshResult> {
 	try {
 		const moduleUrl = new URL("../../../dist/app/model/model-usage-status.js", import.meta.url).href;
 		const usage = await import(moduleUrl) as SharedModelUsageModule;
 		if (!usage.modelUsageDescriptor || !usage.queryModelUsageStatus) return { refresh: "unavailable" };
-		const descriptor = usage.modelUsageDescriptor(state.model);
+		const descriptor = usage.modelUsageDescriptor(state.model, state.thinkingLevel);
 		if (!descriptor) return { refresh: "unavailable" };
 		const status = await usage.queryModelUsageStatus(descriptor);
 		return status ? { refresh: "ready", status } : { refresh: "unavailable" };
@@ -2669,19 +2709,37 @@ async function queryPixModelUsage(state: PiSessionState): Promise<
 	}
 }
 
-async function formatPixDcpStats(state: PiSessionState, stats: PiSessionStats, cwd: string): Promise<string | undefined> {
-	const sessionFile = stats.sessionFile ?? state.sessionFile;
-	if (!sessionFile) return undefined;
+function activeTreeBranchEntries(tree: readonly PiSessionTreeNode[], leafId: string | null): readonly Record<string, unknown>[] {
+	if (!leafId) return [];
+	const path: Record<string, unknown>[] = [];
+	const visit = (node: PiSessionTreeNode): boolean => {
+		path.push(node.entry);
+		if (node.entry.id === leafId) return true;
+		for (const child of node.children) if (visit(child)) return true;
+		path.pop();
+		return false;
+	};
+	for (const node of tree) {
+		if (visit(node)) return [...path];
+		path.length = 0;
+	}
+	return [];
+}
+
+async function formatPixDcpStats(
+	state: PiSessionState,
+	stats: PiSessionStats,
+	branch: readonly Record<string, unknown>[],
+): Promise<string | undefined> {
 	try {
 		const moduleUrl = new URL("../../../dist/app/rendering/dcp-stats.js", import.meta.url).href;
 		const dcp = await import(moduleUrl) as SharedDcpStatsModule;
 		if (!dcp.formatDcpStatsToast) return undefined;
-		const sessionManager = SessionManager.open(sessionFile, undefined, cwd);
 		const text = dcp.formatDcpStatsToast({
 			model: state.model,
-			sessionManager,
+			sessionManager: { getBranch: () => branch },
 			getContextUsage: () => stats.contextUsage,
-		}).trim();
+		}, { branch }).trim();
 		return text || undefined;
 	} catch {
 		return undefined;

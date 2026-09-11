@@ -108,6 +108,7 @@ export function mergeRuntimeStatusResponse(
   latest: { snapshot: boolean; quotaRefresh: boolean },
 ): RuntimeStatus {
   const snapshot = latest.snapshot || !previous ? next : previous;
+  const dcpStats = next.dcpStats ?? previous?.dcpStats;
   let modelUsage = previous?.modelUsage ?? snapshot.modelUsage;
   let modelUsageRefresh = snapshot.modelUsageRefresh;
   if (latest.quotaRefresh) {
@@ -115,10 +116,11 @@ export function mergeRuntimeStatusResponse(
     if (next.modelUsageRefresh === "ready") modelUsage = next.modelUsage;
     else if (next.modelUsageRefresh === "unavailable") modelUsage = undefined;
   }
-  const { modelUsage: _snapshotModelUsage, ...snapshotWithoutModelUsage } = snapshot;
+  const { modelUsage: _snapshotModelUsage, dcpStats: _snapshotDcpStats, ...snapshotWithoutModelUsage } = snapshot;
   return {
     ...snapshotWithoutModelUsage,
     modelUsageRefresh,
+    ...(dcpStats ? { dcpStats } : {}),
     ...(modelUsage ? { modelUsage } : {}),
   };
 }

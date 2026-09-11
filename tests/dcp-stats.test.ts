@@ -102,6 +102,32 @@ describe("formatDcpStatsToast", () => {
 		assert.match(formatDcpStatsToast(overridden as never, { manualModeBaseline: true }), /Manual mode: off/u);
 	});
 
+	it("uses an injected active branch without synchronously reading the session file", () => {
+		let syncReads = 0;
+		const branch = [
+			journalInit("init-1"),
+			compressResult({ tokensSaved: 321, activeBlocks: 1, totalBlocks: 1 }),
+		];
+		const session = {
+			getContextUsage: () => ({ tokens: 20_000, contextWindow: 200_000, percent: 10 }),
+			sessionManager: {
+				readFullBranchEntriesSync: () => {
+					syncReads += 1;
+					throw new Error("must not read the session file");
+				},
+				getBranch: () => {
+					throw new Error("must use the injected branch");
+				},
+			},
+		};
+
+		const output = formatDcpStatsToast(session as never, { branch, manualModeBaseline: false });
+
+		assert.equal(syncReads, 0);
+		assert.match(output, /Tokens saved \(estimated\): 321/u);
+		assert.match(output, /Context: 10% \(20K\/200K\)/u);
+	});
+
 	it("reads the manual-mode baseline from JSONC and applies matching model overrides", () => {
 		const dir = mkdtempSync(join(tmpdir(), "pix-dcp-stats-config-"));
 		try {

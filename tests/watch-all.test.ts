@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 
 import {
 	PARTS,
+	appendCommandOutputTail,
 	classifyChange,
 	createBuildPlan,
 	desktopAppBundlePath,
@@ -13,6 +14,7 @@ import {
 	desktopBuildArguments,
 	desktopLaunchExecutable,
 	findProcessByExecutablePath,
+	formatCommandFailureReport,
 	macOSCodeSignArguments,
 	macOSOpenArguments,
 	npmInvocation,
@@ -228,5 +230,23 @@ describe("watch:all npm invocation", () => {
 			command: "npm",
 			args: ["run", "build"],
 		});
+	});
+});
+
+describe("watch:all build failure reporting", () => {
+	it("keeps a bounded tail instead of retaining an unbounded build log", () => {
+		const first = appendCommandOutputTail("", "012345", 8);
+		assert.equal(first, "012345");
+		assert.equal(appendCommandOutputTail(first, "6789", 8), "23456789");
+	});
+
+	it("repeats the captured error underneath a prominent failed-build banner", () => {
+		const report = formatCommandFailureReport(
+			"build desktop native",
+			{ code: 1, signal: null },
+			"Compiling pix-desktop\nerror[E0282]: type annotations needed\n",
+		);
+		assert.match(report, /BUILD FAILED: build desktop native \(exit 1\)/u);
+		assert.match(report, /error\[E0282\]: type annotations needed/u);
 	});
 });

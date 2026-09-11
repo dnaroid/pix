@@ -27,6 +27,7 @@
     modelThinkingOpen,
     runtimeStatus,
     modelUsageRefreshing,
+    dcpStatsRefreshing,
     dcpCompressionRunning,
     dcpCompressionAvailable,
     canCompressContext,
@@ -39,6 +40,7 @@
     onSetConfig,
     onOpenModelThinking,
     onRefreshModelUsage,
+    onOpenDcpStats,
     onCompressDcpContext,
     onNavigateMessages,
     onToggleSessionActivity,
@@ -51,6 +53,7 @@
     modelThinkingOpen: boolean;
     runtimeStatus?: RuntimeStatus;
     modelUsageRefreshing: boolean;
+    dcpStatsRefreshing: boolean;
     dcpCompressionRunning: boolean;
     dcpCompressionAvailable: boolean;
     canCompressContext: boolean;
@@ -63,6 +66,7 @@
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
     onRefreshModelUsage: () => void;
+    onOpenDcpStats: () => void;
     onCompressDcpContext: () => void;
     onNavigateMessages: () => void;
     onToggleSessionActivity: () => void;
@@ -141,11 +145,13 @@
     <RuntimeStatusBarItems
       status={runtimeStatus}
       refreshingModelUsage={modelUsageRefreshing}
+      loadingDcpStats={dcpStatsRefreshing}
       canRefreshModelUsage={canConfigure && changingConfig === null && !promptRunning}
       compressingContext={dcpCompressionRunning}
       compressionAvailable={dcpCompressionAvailable}
       {canCompressContext}
       onRefreshModelUsage={onRefreshModelUsage}
+      {onOpenDcpStats}
       onCompressContext={onCompressDcpContext}
     />
     {#each configOptions as option (option.id)}

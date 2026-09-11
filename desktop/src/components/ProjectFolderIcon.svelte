@@ -4,9 +4,11 @@
 
   let {
     project,
+    color,
     class: className = "h-4 w-4",
   }: {
     project: string;
+    color?: string;
     class?: string;
   } = $props();
 </script>
@@ -14,6 +16,7 @@
 <span
   class={className}
   style:--project-folder-hue={projectFolderHue(project)}
+  style:--project-folder-color={color}
   aria-hidden="true"
 >
   <Folder class="h-full w-full" aria-hidden="true" />
@@ -21,12 +24,12 @@
 
 <style>
   span {
-    color: oklch(0.62 0.15 var(--project-folder-hue));
+    color: var(--project-folder-color, oklch(0.62 0.15 var(--project-folder-hue)));
   }
 
   @media (prefers-color-scheme: dark) {
     span {
-      color: oklch(0.74 0.13 var(--project-folder-hue));
+      color: var(--project-folder-color, oklch(0.74 0.13 var(--project-folder-hue)));
     }
   }
 </style>

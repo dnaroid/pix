@@ -110,6 +110,22 @@ describe("desktop runtime status helpers", () => {
     expect(merged.context).toEqual(snapshotOnlyStatus.context);
   });
 
+  it("preserves lazily loaded DCP telemetry across periodic runtime snapshots", () => {
+    const previous: RuntimeStatus = {
+      ...snapshotOnlyStatus,
+      dcpStats: "DCP Session Statistics:\nTokens saved: 123",
+    };
+    const request = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, false);
+    const merged = mergeRuntimeStatusResponse(
+      previous,
+      { ...snapshotOnlyStatus, context: { tokens: 2_000, contextWindow: 200_000, percent: 2 } },
+      isLatestRuntimeStatusRefresh(request.generations, request.snapshotGeneration, request.quotaGeneration),
+    );
+
+    expect(merged.dcpStats).toBe(previous.dcpStats);
+    expect(merged.context?.percent).toBe(2);
+  });
+
   it("still supersedes an older in-flight quota refresh once a newer quota refresh starts", () => {
     const first = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, true);
     const second = beginRuntimeStatusRefresh(first.generations, true);

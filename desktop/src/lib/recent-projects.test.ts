@@ -7,6 +7,7 @@ import {
   projectWindowUrl,
   projectFolderHue,
   projectName,
+  projectParentPath,
   workspaceFromLocation,
 } from "./recent-projects";
 
@@ -30,9 +31,19 @@ describe("recent projects", () => {
     expect(projectName("\\\\server\\projects\\pix")).toBe("pix");
   });
 
-  it("derives a stable folder hue from the project name", () => {
-    expect(projectFolderHue("/one/pix")).toBe(projectFolderHue("/another/pix"));
+  it("shows the containing directory without repeating the project basename", () => {
+    expect(projectParentPath("/Volumes/work/pix")).toBe("/Volumes/work");
+    expect(projectParentPath("/pix")).toBe("/");
+    expect(projectParentPath("C:\\projects\\pix")).toBe("C:\\projects");
+    expect(projectParentPath("C:\\pix")).toBe("C:\\");
+    expect(projectParentPath("\\\\server\\projects\\pix")).toBe("\\\\server\\projects");
+    expect(projectParentPath("/Volumes/work/pix/")).toBe("/Volumes/work");
+  });
+
+  it("derives a stable folder hue from the full project identity", () => {
+    expect(projectFolderHue("/one/pix")).not.toBe(projectFolderHue("/another/pix"));
     expect(projectFolderHue("/one/pix")).not.toBe(projectFolderHue("/one/other"));
+    expect(projectFolderHue("C:\\Projects\\Pix")).toBe(projectFolderHue("c:/projects/pix"));
     expect(projectFolderHue("/one/pix")).toBeGreaterThanOrEqual(0);
     expect(projectFolderHue("/one/pix")).toBeLessThan(360);
   });

@@ -18,20 +18,24 @@
   let {
     status,
     refreshingModelUsage = false,
+    loadingDcpStats = false,
     canRefreshModelUsage = true,
     compressingContext = false,
     compressionAvailable = true,
     canCompressContext = true,
     onRefreshModelUsage,
+    onOpenDcpStats,
     onCompressContext,
   }: {
     status?: RuntimeStatus;
     refreshingModelUsage?: boolean;
+    loadingDcpStats?: boolean;
     canRefreshModelUsage?: boolean;
     compressingContext?: boolean;
     compressionAvailable?: boolean;
     canCompressContext?: boolean;
     onRefreshModelUsage: () => void;
+    onOpenDcpStats: () => void;
     onCompressContext: () => void;
   } = $props();
 
@@ -41,6 +45,7 @@
   const contextPercent = $derived(status?.context?.percent);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
   const dcpBody = $derived(dcpStatsBody(status?.dcpStats));
+  const usageWindowItems = $derived(usageWindows());
 
   onMount(() => {
     const timer = window.setInterval(() => now = Date.now(), 60_000);
@@ -57,6 +62,12 @@
       dcpOpen = false;
       event.stopPropagation();
     }
+  }
+
+  function toggleDcp(): void {
+    const opening = !dcpOpen;
+    dcpOpen = opening;
+    if (opening) onOpenDcpStats();
   }
 
   function contextTitle(): string {
@@ -110,9 +121,9 @@
         aria-haspopup="dialog"
         aria-expanded={dcpOpen}
         aria-controls="runtime-dcp-popover"
-        onclick={() => dcpOpen = !dcpOpen}
+        onclick={toggleDcp}
       >
-        <span class="font-sans text-[10px] text-muted-foreground max-[860px]:hidden">Ctx</span>
+        <span class="font-sans text-[10px] text-muted-foreground max-[860px]:hidden">Context</span>
         <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
         <span class="relative h-1.5 w-10 overflow-hidden rounded-sm bg-border" aria-hidden="true">
           {#if contextTone && contextPercent !== null && contextPercent !== undefined}
@@ -164,6 +175,11 @@
           <div class="max-h-[min(420px,55vh)] overflow-y-auto px-3 py-2.5">
             {#if dcpBody}
               <pre class="select-text whitespace-pre-wrap font-mono text-[10px] leading-[1.55] text-muted-foreground">{dcpBody}</pre>
+            {:else if loadingDcpStats}
+              <div class="flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground" aria-live="polite">
+                <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+                <span>Loading DCP telemetry…</span>
+              </div>
             {:else}
               <p class="text-[10px] leading-4 text-muted-foreground">DCP telemetry is not available for this session yet.</p>
             {/if}
@@ -182,14 +198,17 @@
         disabled={!canRefreshModelUsage || refreshingModelUsage}
         onclick={onRefreshModelUsage}
       >
+        <span class="font-sans text-[10px] text-muted-foreground max-[900px]:hidden">Usage</span>
         {#if status.modelUsage.accountEmail}
           <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{status.modelUsage.accountEmail}</span>
         {/if}
-        {#each usageWindows() as { label, window } (label)}
+        {#each usageWindowItems as { label, window } (label)}
             {@const tone = modelUsageTone(window.remainingPercent)}
             {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
             <span class="flex items-center gap-1" title={limitTitle(label, window)}>
-              <span class="text-muted-foreground">{label}</span>
+              {#if usageWindowItems.length > 1}
+                <span class="text-muted-foreground">{label === "H" ? "Hourly" : "Weekly"}</span>
+              {/if}
               <span class="relative h-1.5 w-8 overflow-hidden rounded-sm bg-border" aria-hidden="true">
                 <span
                   class={["absolute inset-y-0 left-0 rounded-sm", toneFillClass(tone)]}
@@ -200,7 +219,7 @@
               {#if exhaustsEarly}
                 <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
               {/if}
-              <span class="text-muted-foreground max-[980px]:hidden">{formatResetDuration(window.resetAt, now)}</span>
+              <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
             </span>
         {/each}
       </button>

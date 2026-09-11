@@ -65,6 +65,30 @@ describe("model usage controller", () => {
 		assert.equal(queryCount, 2);
 	});
 
+	it("refreshes Antigravity usage when the thinking tier changes", async () => {
+		let activeSession = sessionWithModel("antigravity", "antigravity-gemini-3.8-flash", "medium");
+		const candidates: string[][] = [];
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			render: () => {},
+		}, async (descriptor) => {
+			if (descriptor.kind !== "google-antigravity") throw new Error("Expected Antigravity descriptor");
+			candidates.push([...(descriptor.quotaModelCandidates ?? [descriptor.quotaModelKey])]);
+			return usageStatus(descriptor, 80);
+		});
+
+		controller.observeSession(activeSession);
+		await settlePromises();
+		activeSession = sessionWithModel("antigravity", "antigravity-gemini-3.8-flash", "xhigh");
+		controller.observeSession(activeSession);
+		await settlePromises();
+
+		assert.deepEqual(candidates, [
+			["gemini-3.8-flash", "gemini-3.8-flash-medium"],
+			["gemini-3.8-flash", "gemini-3.8-flash-high"],
+		]);
+	});
+
 	it("reports an in-flight refresh without starting another request", () => {
 		const activeSession = sessionWithModel("openai-codex", "gpt-5.5");
 		let queryCount = 0;
@@ -167,9 +191,10 @@ describe("model usage controller", () => {
 	});
 });
 
-function sessionWithModel(provider: string, id: string): AgentSession {
+function sessionWithModel(provider: string, id: string, thinkingLevel = "medium"): AgentSession {
 	return {
 		model: { provider, id } as SessionModel,
+		thinkingLevel,
 	} as unknown as AgentSession;
 }
 

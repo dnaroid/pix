@@ -205,6 +205,26 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("requests DCP statistics independently from periodic runtime status", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const reading = client.dcpStats("session-1");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/dcp_stats",
+      params: { sessionId: "session-1" },
+    });
+    const result = {
+      sessionId: "session-1",
+      dcpStats: "DCP Session Statistics:\nTokens saved (estimated): 12,000",
+    };
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result });
+    await expect(reading).resolves.toEqual(result);
+
+    await client.dispose();
+  });
+
   it("routes registry GUI actions through the private ACP registry method", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);
