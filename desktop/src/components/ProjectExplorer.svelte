@@ -385,6 +385,7 @@
     {:else}
       {#each rows as row, index (row.entry.path)}
         {@const entry = row.entry}
+        {@const hiddenEntry = entry.name.startsWith(".")}
         {@const expanded = entry.kind === "directory" && expandedDirectories.includes(entry.path)}
         {@const directoryLoading = entry.kind === "directory" && loadingDirectories.includes(entry.path)}
         <div
@@ -396,7 +397,12 @@
           role="presentation"
         >
           <button
-            class="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left text-[11px] text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            class={[
+              "flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left text-[11px] text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              hiddenEntry && selectedPath !== entry.path
+                ? "opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+                : "",
+            ]}
             type="button"
             role="treeitem"
             title={`${entry.path} · Shift+Enter opens in ${externalEditorLabel}`}

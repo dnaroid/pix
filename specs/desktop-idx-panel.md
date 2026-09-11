@@ -63,7 +63,7 @@ Expose repository intelligence and Spec Wiki maintenance from Pix Desktop withou
 - `desktop/src/components/IdxPanel.svelte`
 - `desktop/src/components/IdxOutput.svelte`
 - `desktop/src/components/TerminalView.svelte`
-- `desktop/src/components/PreviewDialog.svelte`
+- `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/lib/idx.ts`
 - `desktop/src/lib/idx.test.ts`
 - `desktop/src/lib/project-files.ts`

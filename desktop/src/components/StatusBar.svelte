@@ -3,8 +3,6 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Command from "@lucide/svelte/icons/command";
   import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down";
-  import ListChecks from "@lucide/svelte/icons/list-checks";
-  import Workflow from "@lucide/svelte/icons/workflow";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { RuntimeStatus } from "../lib/acp-client";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
@@ -213,41 +211,6 @@
     ><Command class="h-3.5 w-3.5" aria-hidden="true" /></button>
     <button
       class={[
-        "flex h-6 min-w-6 cursor-pointer items-center gap-1.5 rounded-sm bg-transparent px-1.5 text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-        sessionActivityOpen && "bg-chrome-hover text-foreground",
-      ]}
-      type="button"
-      title={`Session activity · ${activityLabel}`}
-      aria-label={`Session activity. ${activityLabel}`}
-      aria-expanded={sessionActivityOpen}
-      onclick={onToggleSessionActivity}
-      disabled={!canOpenSessionActivity}
-    >
-      {#if sessionActivity.activeSubagents === 0 && sessionActivity.openTodos === 0}
-        <Activity class={['h-3.5 w-3.5', activityToneClass()]} aria-hidden="true" />
-        <span class="max-[980px]:hidden">Session</span>
-      {:else}
-        {#if sessionActivity.activeSubagents > 0}
-          <span class={['inline-flex items-center gap-1', activityToneClass()]}>
-            <Workflow class="h-3.5 w-3.5" aria-hidden="true" />
-            <span class="font-mono">{sessionActivity.activeSubagents}</span>
-            <span class="max-[980px]:hidden">{sessionActivity.activeSubagents === 1 ? "agent" : "agents"}</span>
-          </span>
-        {/if}
-        {#if sessionActivity.activeSubagents > 0 && sessionActivity.openTodos > 0}
-          <span class="h-3 w-px bg-border" aria-hidden="true"></span>
-        {/if}
-        {#if sessionActivity.openTodos > 0}
-          <span class={['inline-flex items-center gap-1', sessionActivity.blockedTodos > 0 ? 'text-tool-warning' : 'text-muted-foreground']}>
-            <ListChecks class="h-3.5 w-3.5" aria-hidden="true" />
-            <span class="max-[980px]:hidden">Plan</span>
-            <span class="font-mono">{sessionActivity.completedTodos}/{sessionActivity.totalTodos}</span>
-          </span>
-        {/if}
-      {/if}
-    </button>
-    <button
-      class={[
         "grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
         messageNavigationOpen && "bg-chrome-hover text-foreground",
       ]}
@@ -259,5 +222,25 @@
       onclick={onNavigateMessages}
       disabled={!canNavigateMessages}
     ><ListChevronsUpDown class="h-3.5 w-3.5" aria-hidden="true" /></button>
+    <button
+      class={[
+        "grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+        sessionActivityOpen && "bg-chrome-hover text-foreground",
+      ]}
+      type="button"
+      title={`Session activity · ${activityLabel}`}
+      aria-label={`Session activity. ${activityLabel}`}
+      aria-expanded={sessionActivityOpen}
+      onclick={onToggleSessionActivity}
+      disabled={!canOpenSessionActivity}
+    >
+      <Activity
+        class={[
+          "h-3.5 w-3.5",
+          sessionActivityOpen ? "text-foreground" : activityToneClass(),
+        ]}
+        aria-hidden="true"
+      />
+    </button>
   </div>
 </footer>

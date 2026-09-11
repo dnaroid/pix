@@ -139,6 +139,7 @@
   } from "./lib/session-activity";
   import SessionTabs from "./components/SessionTabs.svelte";
   import SessionSelector from "./components/SessionSelector.svelte";
+  import SessionStartView from "./components/SessionStartView.svelte";
   import SessionInspector from "./components/SessionInspector.svelte";
   import ErrorBanner from "./components/ErrorBanner.svelte";
   import TranscriptPane from "./components/TranscriptPane.svelte";
@@ -148,8 +149,9 @@
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
   import CommandPicker from "./components/CommandPicker.svelte";
   import ModelThinkingPicker from "./components/ModelThinkingPicker.svelte";
-  import PreviewDialog from "./components/PreviewDialog.svelte";
-  import GitDiffDialog from "./components/GitDiffDialog.svelte";
+  import PreviewPane from "./components/PreviewPane.svelte";
+  import GitDiffPane from "./components/GitDiffPane.svelte";
+  import WorkspaceEditorTabs from "./components/WorkspaceEditorTabs.svelte";
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
   import type { SessionStateNotification } from "./lib/session-state";
   import {
@@ -210,6 +212,12 @@
     type PreviewScrollPosition,
   } from "./lib/preview-history";
   import {
+    normalizeWorkspaceEditor,
+    workspaceEditorCloseFallback,
+    type WorkspaceEditorId,
+    type WorkspaceEditorTab,
+  } from "./lib/workspace-editors";
+  import {
     EMPTY_TASK_DOCUMENT,
     moveProjectTask,
     parseTaskDocument,
@@ -264,6 +272,7 @@
   const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 24;
   const RUNTIME_MODEL_USAGE_REFRESH_MS = 5 * 60_000;
   const SESSION_INSPECTOR_OPEN_KEY = "pix.desktop.sessionInspectorOpen";
+  const DRAFT_SESSION_TAB_ID = "pix:desktop-draft-session";
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
 
@@ -301,10 +310,17 @@
   let sessionSelectorOpen = $state(false);
   let sessionSelectorQuery = $state("");
   let sessionSelectorMode = $state<"open" | "delete">("open");
-  let sessionSelectorTrigger = $state<HTMLButtonElement | null>(null);
+  let draftSessionTabOpen = $state(false);
+  let draftSessionTabActive = $state(false);
+  let draftSessionTabTouched = $state(false);
+  let draftSessionMaterializing = $state(false);
   let sessionInspectorOpen = $state(false);
   let dragActive = $state(false);
   let previewHistory = $state<PreviewHistory<PreviewEntry>>(emptyPreviewHistory());
+  let previewDirty = $state(false);
+  let activeWorkspaceEditor = $state<WorkspaceEditorId>("conversation");
+  let previousWorkspaceEditorSessionId: string | null = null;
+  let previewPane = $state<{ requestClose: () => void } | null>(null);
   let taskDocument = $state<ProjectTaskDocument>(EMPTY_TASK_DOCUMENT);
   let tasksLoading = $state(false);
   let tasksSaving = $state(false);
@@ -357,12 +373,14 @@
   let previewSequence = 0;
   let visibleModelsSavePromise: Promise<void> | null = null;
   let attachmentDraftGeneration = 0;
-  let attachmentAddQueue = Promise.resolve();
+  const attachmentAddQueues = new Map<string, Promise<void>>();
   let pendingSessionUpdates: Array<{ sessionId: string; update: SessionUpdate; occurredAtMs: number }> = [];
   let sessionUpdateFrame = 0;
   let transcriptScrollFrame = 0;
   let sessionHistoryGeneration = 0;
+  let draftSessionMaterializationGeneration = 0;
   let previousAttachmentDraftKey: string | null = null;
+  let previousPreviewWorkspace: string | null = null;
   let projectFilePreviewGeneration = 0;
   let projectColorLoadGeneration = 0;
   let projectColorSaveGeneration = 0;
@@ -378,6 +396,7 @@
   const transcriptBySessionId = new Map<string, TranscriptState>();
   const runtimeReadySessionIds = new Set<string>();
   const runtimeLoadsBySessionId = new Map<string, Promise<void>>();
+  const runtimeLoadGenerations = new Map<string, number>();
   const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
   const promptRunsBySessionId = new Map<string, Promise<void>>();
   const promptEndedAtBySessionId = new Map<string, number>();
@@ -387,7 +406,8 @@
   const configChangeGenerations = new Map<string, number>();
   const sessionActivityForgottenAt = new Map<string, number>();
 
-  const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
+  const sessionMutationRunning = $derived(operationRunning || draftSessionMaterializing);
+  const canUseSession = $derived(status === "ready" && !!workspace && !sessionMutationRunning);
   const promptRunning = $derived(activeSessionId ? runningSessionIds.has(activeSessionId) : false);
   const activeAgentControlState = $derived(
     activeSessionId ? (agentControlStates.get(activeSessionId) ?? "idle") : "idle",
@@ -403,10 +423,63 @@
     closedSessionTabs,
     activeSessionId,
   ));
-  const attachmentDraftKey = $derived(`${workspace}\0${activeSessionId ?? ""}`);
+  const draftSessionInfo = $derived<SessionInfo>({
+    sessionId: DRAFT_SESSION_TAB_ID,
+    cwd: workspace,
+    title: "New conversation",
+    updatedAt: null,
+  });
+  const titlebarSessions = $derived(
+    draftSessionTabOpen ? [...tabSessions, draftSessionInfo] : tabSessions,
+  );
+  const activeConversationTabId = $derived(
+    draftSessionTabActive ? DRAFT_SESSION_TAB_ID : activeSessionId,
+  );
+  const sessionStartOpen = $derived(draftSessionTabActive && !draftSessionTabTouched);
+  const sessionStartCandidates = $derived.by<SessionInfo[]>(() => {
+    const openIds = new Set(tabSessions.map((session) => session.sessionId));
+    return sessions.filter((session) => !openIds.has(session.sessionId));
+  });
+  const attachmentDraftKey = $derived(
+    `${workspace}\0${draftSessionTabActive ? DRAFT_SESSION_TAB_ID : activeSessionId ?? ""}`,
+  );
   const activePreview = $derived(currentPreview(previewHistory));
   const canGoBackInPreview = $derived(canMovePreviewHistory(previewHistory, -1));
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
+  const workspaceEditorTabs = $derived.by<WorkspaceEditorTab[]>(() => {
+    const tabs: WorkspaceEditorTab[] = [{
+      id: "conversation",
+      label: "Conversation",
+      title: activeTitle,
+      kind: "conversation",
+      closable: false,
+    }];
+    if (activePreview) {
+      const previewTitle = activePreview.kind === "file"
+        ? activePreview.file.path
+        : activePreview.attachment.name;
+      tabs.push({
+        id: "preview",
+        label: workspaceEditorLabel(previewTitle),
+        title: previewTitle,
+        kind: "file",
+        closable: true,
+        dirty: previewDirty,
+      });
+    }
+    if (gitDiffPreview) {
+      const target = gitDiffPreview.path ?? "All changes";
+      tabs.push({
+        id: "git-diff",
+        label: gitDiffPreview.path ? `${workspaceEditorLabel(target)} · Diff` : "All Changes · Diff",
+        title: `${target} · ${gitDiffPreview.scope}`,
+        kind: "diff",
+        closable: true,
+        busy: gitLlmActionId?.startsWith("review:") === true || gitResolveRunning,
+      });
+    }
+    return tabs;
+  });
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
   const activeSessionActivity = $derived(
@@ -483,10 +556,27 @@
     const key = attachmentDraftKey;
     if (previousAttachmentDraftKey !== null && previousAttachmentDraftKey !== key) {
       invalidateAttachmentDraft();
-      previewHistory = emptyPreviewHistory();
       projectFilePreviewGeneration += 1;
     }
     previousAttachmentDraftKey = key;
+
+    const currentWorkspace = workspace;
+    if (previousPreviewWorkspace !== null && previousPreviewWorkspace !== currentWorkspace) {
+      previewHistory = emptyPreviewHistory();
+      previewDirty = false;
+    }
+    previousPreviewWorkspace = currentWorkspace;
+  });
+
+  $effect(() => {
+    const sessionId = activeSessionId;
+    if (previousWorkspaceEditorSessionId !== sessionId) activeWorkspaceEditor = "conversation";
+    previousWorkspaceEditorSessionId = sessionId;
+  });
+
+  $effect(() => {
+    const normalized = normalizeWorkspaceEditor(activeWorkspaceEditor, workspaceEditorTabs);
+    if (normalized !== activeWorkspaceEditor) activeWorkspaceEditor = normalized;
   });
 
   $effect(() => {
@@ -566,7 +656,11 @@
         const questionId = activeCustomQuestionId();
         if (questionId) {
           void addQuestionImagePaths(questionId, payload.paths);
-        } else if (activeSessionId && !operationRunning && activePendingElicitation?.kind !== "question") {
+        } else if (
+          (activeSessionId || draftSessionTabActive)
+          && !sessionMutationRunning
+          && activePendingElicitation?.kind !== "question"
+        ) {
           void promptComposer?.insertPaths(payload.paths);
         }
       }
@@ -1294,9 +1388,16 @@
     const existing = runtimeLoadsBySessionId.get(sessionId);
     if (existing) return existing;
 
+    const generation = (runtimeLoadGenerations.get(sessionId) ?? 0) + 1;
+    runtimeLoadGenerations.set(sessionId, generation);
+
     const pending = requestClient.loadSession(sessionId, requestWorkspace)
       .then((response) => {
-        if (requestClient !== client || requestWorkspace !== workspace) return;
+        if (
+          requestClient !== client
+          || requestWorkspace !== workspace
+          || runtimeLoadGenerations.get(sessionId) !== generation
+        ) return;
         const options = response.configOptions ?? [];
         runtimeReadySessionIds.add(sessionId);
         configOptionsBySessionId.set(sessionId, options);
@@ -1307,7 +1408,12 @@
         }
       })
       .catch((error) => {
-        if (requestClient === client && requestWorkspace === workspace && sessionId === activeSessionId) {
+        if (
+          requestClient === client
+          && requestWorkspace === workspace
+          && runtimeLoadGenerations.get(sessionId) === generation
+          && sessionId === activeSessionId
+        ) {
           activeSessionRuntimeReady = false;
           reportError(error);
         }
@@ -1327,6 +1433,7 @@
   }
 
   function forgetSessionRuntime(sessionId: string): void {
+    runtimeLoadGenerations.set(sessionId, (runtimeLoadGenerations.get(sessionId) ?? 0) + 1);
     sessionActivityForgottenAt.set(
       sessionId,
       Math.max(sessionActivityForgottenAt.get(sessionId) ?? 0, Date.now()),
@@ -1428,7 +1535,43 @@
       transcriptBySessionId.set(sessionId, nextTranscript);
       scheduleScrollToLatest();
     } catch (error) {
-      if (sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) reportError(error);
+      if (!sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes(`session history ${sessionId} is unavailable`)) {
+        // History and runtime loading start in parallel. A newly-created or
+        // otherwise empty-but-valid session can have no persisted history yet
+        // while its runtime is still perfectly loadable. Do not race that
+        // runtime load by deleting the session just because history answered
+        // first; only treat it as a stale legacy record if loading also fails.
+        await ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
+        if (!sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) return;
+        if (runtimeReadySessionIds.has(sessionId)) {
+          transcript = emptyTranscript;
+          transcriptBySessionId.set(sessionId, transcript);
+          sessionHistoryLoading = false;
+          return;
+        }
+
+        // Compatibility cleanup for empty Desktop sessions created by older
+        // builds before the draft tab became UI-only. They have a mapped id
+        // but no persisted Pi history, so restoring them can never succeed.
+        cancelSessionHistoryLoad();
+        errorMessage = null;
+        forgetActiveSession(requestWorkspace);
+        sessions = sessions.filter((session) => session.sessionId !== sessionId);
+        restoredSessionTabs = restoredSessionTabs?.filter((id) => id !== sessionId) ?? restoredSessionTabs;
+        locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((id) => id !== sessionId);
+        closedSessionTabs = [...new Set([...closedSessionTabs, sessionId])];
+        activeSessionId = null;
+        activeSessionRuntimeReady = false;
+        transcript = emptyTranscript;
+        configOptions = [];
+        forgetSessionRuntime(sessionId);
+        activateDraftSessionTab({ resetComposer: true });
+        void requestClient.deleteSession(sessionId).catch(() => undefined);
+        return;
+      }
+      reportError(error);
     } finally {
       if (sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) {
         sessionHistoryLoading = false;
@@ -1467,7 +1610,7 @@
   }
 
   async function chooseWorkspace(): Promise<void> {
-    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
+    if (anyPromptRunning || sessionMutationRunning || tasksSaving || taskActionId) return;
     const selected = await open({
       directory: true,
       multiple: false,
@@ -1529,7 +1672,7 @@
   }
 
   async function selectWorkspace(selected: string): Promise<void> {
-    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
+    if (anyPromptRunning || sessionMutationRunning || tasksSaving || taskActionId) return;
     closeSessionSelector();
     if (!isAbsoluteProjectPath(selected)) {
       errorMessage = "The selected project path is not absolute.";
@@ -1540,6 +1683,7 @@
       void loadDesktopPreferences(selected);
       return;
     }
+    if (previewDirty && !window.confirm("Discard unsaved Preview changes and switch projects?")) return;
 
     operationRunning = true;
     errorMessage = null;
@@ -1769,6 +1913,11 @@
     options: { reloadProject?: boolean } = {},
   ): Promise<boolean> {
     if (!workspace || gitActionId !== null) return false;
+    if (
+      options.reloadProject
+      && previewDirty
+      && !window.confirm("Discard unsaved Preview changes and reload the project?")
+    ) return false;
     const requestWorkspace = workspace;
     gitActionId = actionId;
     gitError = null;
@@ -1845,6 +1994,7 @@
       if (!diff) return;
       gitDiffPreview = diff;
       gitDiffReview = undefined;
+      activeWorkspaceEditor = "git-diff";
     } finally {
       if (gitActionId === actionId) gitActionId = null;
     }
@@ -1866,6 +2016,7 @@
       if (!diff || requestClient !== client || requestWorkspace !== workspace || sessionId !== activeSessionId) return;
       gitDiffPreview = diff;
       gitDiffReview = undefined;
+      activeWorkspaceEditor = "git-diff";
       if (!diff.content.trim()) {
         gitDiffReview = "No diff to review.";
         return;
@@ -1976,6 +2127,7 @@
       const run = runPromptRequest(requestClient, created.sessionId, [{ type: "text", text: prompt }], [], transcriptMessageId);
       gitDiffPreview = null;
       gitDiffReview = undefined;
+      activeWorkspaceEditor = "conversation";
       void scrollToLatest();
       void refreshSessions();
       void run
@@ -2132,7 +2284,7 @@
   async function createProjectTaskFromComposer(): Promise<void> {
     if (!workspace || tasksSaving || taskLoadFailed) return;
     const initialDraftKey = attachmentDraftKey;
-    await attachmentAddQueue;
+    await waitForAttachmentDraftSettled(initialDraftKey);
     if (initialDraftKey !== attachmentDraftKey || !workspace || tasksSaving || taskLoadFailed) return;
 
     const requestWorkspace = workspace;
@@ -2302,6 +2454,9 @@
       configOptions = [];
       activeSessionRuntimeReady = false;
       if (sessionId) {
+        draftSessionTabOpen = false;
+        draftSessionTabActive = false;
+        draftSessionTabTouched = false;
         activeSessionId = sessionId;
         configOptions = configOptionsBySessionId.get(sessionId) ?? [];
         activeSessionRuntimeReady = runtimeReadySessionIds.has(sessionId);
@@ -2322,19 +2477,7 @@
         return;
       }
 
-      const created = await requestClient.newSession(requestWorkspace);
-      if (client !== requestClient || workspace !== requestWorkspace) return;
-      ensureProvisionalSession(created.sessionId, requestWorkspace);
-      showSessionTab(created.sessionId);
-      activeSessionId = created.sessionId;
-      transcript = emptyTranscript;
-      transcriptBySessionId.set(created.sessionId, transcript);
-      configOptions = [];
-      activeSessionRuntimeReady = false;
-      rememberActiveSession(requestWorkspace, created.sessionId);
-      void ensureSessionRuntime(requestClient, created.sessionId, requestWorkspace).then(() => {
-        if (runtimeReadySessionIds.has(created.sessionId)) void refreshSessions();
-      });
+      activateDraftSessionTab({ resetComposer: true });
     } catch (error) {
       if (client !== requestClient || workspace !== requestWorkspace) return;
       cancelSessionHistoryLoad();
@@ -2346,33 +2489,109 @@
     }
   }
 
-  async function createSession(): Promise<void> {
-    if (!client || !canUseSession) return;
-    const requestClient = client;
-    const requestWorkspace = workspace;
+  function invalidateDraftSessionMaterialization(): void {
+    draftSessionMaterializationGeneration += 1;
+    draftSessionMaterializing = false;
+  }
+
+  function activateDraftSessionTab(options: { resetComposer?: boolean } = {}): void {
+    if (!workspace || status !== "ready") return;
     closeProjectSelector();
     closeSessionSelector();
-    operationRunning = true;
+    if (options.resetComposer) invalidateDraftSessionMaterialization();
+    if (activeSessionId) transcriptBySessionId.set(activeSessionId, transcript);
+    cancelSessionHistoryLoad();
+    activeSessionId = null;
+    activeSessionRuntimeReady = false;
+    transcript = emptyTranscript;
+    configOptions = [];
+    draftSessionTabOpen = true;
+    draftSessionTabActive = true;
+    if (options.resetComposer) {
+      draftSessionTabTouched = false;
+      promptText = "";
+      invalidateAttachmentDraft();
+    }
+  }
+
+  async function openSessionStartTab(): Promise<void> {
+    if (!canUseSession) return;
+    if (draftSessionTabOpen) {
+      activateDraftSessionTab();
+      await tick();
+      await promptComposer?.focus();
+      return;
+    }
+    activateDraftSessionTab({ resetComposer: true });
+    await tick();
+    await promptComposer?.focus();
+  }
+
+  async function materializeDraftSession(): Promise<string | null> {
+    if (!draftSessionTabActive) return activeSessionId;
+    if (!client || !workspace || status !== "ready" || operationRunning || draftSessionMaterializing) return null;
+    const requestClient = client;
+    const requestWorkspace = workspace;
+    const generation = ++draftSessionMaterializationGeneration;
+    let createdSessionId: string | null = null;
+    draftSessionMaterializing = true;
     errorMessage = null;
+
+    const abandoned = (): boolean => (
+      requestClient !== client
+      || requestWorkspace !== workspace
+      || generation !== draftSessionMaterializationGeneration
+      || !draftSessionTabActive
+    );
+    const discardCreatedSession = (sessionId: string): void => {
+      // Invalidate any local runtime completion immediately, but do not keep
+      // the UI disabled while ACP finishes tearing down a background spawn.
+      forgetSessionRuntime(sessionId);
+      void requestClient.closeSession(sessionId).catch(() => undefined);
+    };
+
     try {
-      const response = await requestClient.newSession(requestWorkspace);
-      if (requestClient !== client || requestWorkspace !== workspace) return;
-      if (activeSessionId) transcriptBySessionId.set(activeSessionId, transcript);
-      ensureProvisionalSession(response.sessionId, requestWorkspace);
-      showSessionTab(response.sessionId);
-      activeSessionId = response.sessionId;
-      rememberActiveSession(requestWorkspace, response.sessionId);
+      const created = await requestClient.newSession(requestWorkspace);
+      createdSessionId = created.sessionId;
+      if (abandoned()) {
+        discardCreatedSession(created.sessionId);
+        return null;
+      }
+      const loaded = await requestClient.loadSession(created.sessionId, requestWorkspace);
+      if (abandoned()) {
+        discardCreatedSession(created.sessionId);
+        return null;
+      }
+
+      ensureProvisionalSession(created.sessionId, requestWorkspace);
+      showSessionTab(created.sessionId);
+      // Retarget the existing unsent attachment draft to the real session so
+      // the session-id transition does not clear attachments before submit.
+      previousAttachmentDraftKey = `${requestWorkspace}\0${created.sessionId}`;
+      activeSessionId = created.sessionId;
+      draftSessionTabOpen = false;
+      draftSessionTabActive = false;
+      draftSessionTabTouched = false;
       transcript = emptyTranscript;
-      transcriptBySessionId.set(response.sessionId, transcript);
-      configOptions = [];
-      activeSessionRuntimeReady = false;
-      void ensureSessionRuntime(requestClient, response.sessionId, requestWorkspace).then(() => {
-        if (runtimeReadySessionIds.has(response.sessionId)) void refreshSessions();
-      });
+      transcriptBySessionId.set(created.sessionId, transcript);
+      const options = loaded.configOptions ?? created.configOptions ?? [];
+      configOptions = options;
+      markSessionRuntimeReady(created.sessionId, options);
+      rememberActiveSession(requestWorkspace, created.sessionId);
+      return created.sessionId;
     } catch (error) {
-      reportError(error);
+      if (createdSessionId) {
+        discardCreatedSession(createdSessionId);
+      }
+      if (
+        requestClient === client
+        && requestWorkspace === workspace
+        && generation === draftSessionMaterializationGeneration
+        && draftSessionTabActive
+      ) reportError(error);
+      return null;
     } finally {
-      operationRunning = false;
+      if (generation === draftSessionMaterializationGeneration) draftSessionMaterializing = false;
     }
   }
 
@@ -2521,7 +2740,7 @@
   }
 
   async function openProjectTaskSession(task: ProjectTask): Promise<void> {
-    if (!task.sessionId || taskActionId || operationRunning) return;
+    if (!task.sessionId || taskActionId || sessionMutationRunning) return;
     if (task.sessionId === activeSessionId) return;
     taskActionId = task.id;
     try {
@@ -2539,6 +2758,7 @@
     closeSessionSelector();
     errorMessage = null;
     if (activeSessionId) transcriptBySessionId.set(activeSessionId, transcript);
+    draftSessionTabActive = false;
     closedSessionTabs = closedSessionTabs.filter((closedId) => closedId !== sessionId);
     activeSessionId = sessionId;
     const cachedTranscript = transcriptBySessionId.get(sessionId);
@@ -2569,7 +2789,7 @@
     const requestClient = client;
     const requestWorkspace = workspace;
     const sourceSessionId = activeSessionId;
-    if (!requestClient || !requestWorkspace || status !== "ready" || operationRunning || sessionId === sourceSessionId) {
+    if (!requestClient || !requestWorkspace || status !== "ready" || sessionMutationRunning || sessionId === sourceSessionId) {
       if (sessionId === sourceSessionId) closeSessionSelector();
       return;
     }
@@ -2642,6 +2862,10 @@
 
   async function closeWorkspaceSessions(): Promise<void> {
     sessionPrewarmGeneration += 1;
+    invalidateDraftSessionMaterialization();
+    draftSessionTabOpen = false;
+    draftSessionTabActive = false;
+    draftSessionTabTouched = false;
     const sessionIds = [...new Set([
       ...tabSessions.map((session) => session.sessionId),
       ...(activeSessionId ? [activeSessionId] : []),
@@ -2664,14 +2888,40 @@
     }));
     runtimeReadySessionIds.clear();
     runtimeLoadsBySessionId.clear();
+    runtimeLoadGenerations.clear();
     configOptionsBySessionId.clear();
   }
 
-  async function closeSessionTab(sessionId: string): Promise<void> {
+  async function closeSessionTab(sessionId: string): Promise<boolean> {
     closeSessionSelector();
+    if (sessionMutationRunning) return false;
+    if (sessionId === DRAFT_SESSION_TAB_ID) {
+      if (!draftSessionTabOpen) return false;
+      const wasActive = draftSessionTabActive;
+      invalidateDraftSessionMaterialization();
+      draftSessionTabOpen = false;
+      draftSessionTabActive = false;
+      draftSessionTabTouched = false;
+      if (!wasActive) return true;
+      promptText = "";
+      invalidateAttachmentDraft();
+      const fallbackSessionId = tabSessions.at(-1)?.sessionId;
+      if (fallbackSessionId) await loadSession(fallbackSessionId);
+      else {
+        cancelSessionHistoryLoad();
+        activeSessionId = null;
+        activeSessionRuntimeReady = false;
+        transcript = emptyTranscript;
+        configOptions = [];
+      }
+      return true;
+    }
+    if (runningSessionIds.has(sessionId)) {
+      const title = sessions.find((session) => session.sessionId === sessionId)?.title || "Untitled conversation";
+      if (!window.confirm(`“${title}” is still running.\n\nClosing this tab will stop the active run. Close it?`)) return false;
+    }
     sessionPrewarmGeneration += 1;
     if (sessionId !== activeSessionId) {
-      if (runningSessionIds.has(sessionId) || operationRunning) return;
       operationRunning = true;
       errorMessage = null;
       try {
@@ -2683,12 +2933,12 @@
         locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((openId) => openId !== sessionId);
       } catch (error) {
         reportError(error);
+        return false;
       } finally {
         operationRunning = false;
       }
-      return;
+      return true;
     }
-    if (runningSessionIds.has(sessionId) || operationRunning) return;
 
     const nextSessionId = tabSessions.find((session) => session.sessionId !== sessionId)?.sessionId;
     let closed = false;
@@ -2712,15 +2962,20 @@
     } finally {
       operationRunning = false;
     }
-    if (!closed) return;
+    if (!closed) return false;
     if (nextSessionId) await loadSession(nextSessionId);
-    else await createSession();
+    else await openSessionStartTab();
+    return true;
   }
 
   function showSessionTab(sessionId: string): void {
     closedSessionTabs = closedSessionTabs.filter((closedId) => closedId !== sessionId);
     if (restoredSessionTabs?.includes(sessionId) || locallyOpenedSessionTabs.includes(sessionId)) return;
     locallyOpenedSessionTabs = [...locallyOpenedSessionTabs, sessionId];
+  }
+
+  function promoteSessionStart(): void {
+    if (draftSessionTabActive) draftSessionTabTouched = true;
   }
 
   function ensureProvisionalSession(sessionId: string, cwd: string): void {
@@ -2731,17 +2986,11 @@
   function handleSessionTabClick(sessionId: string): void {
     closeProjectSelector();
     closeSessionSelector();
-    if (sessionId !== activeSessionId) void loadSession(sessionId);
-  }
-
-  function handleSessionPickerClick(event: MouseEvent): void {
-    closeProjectSelector();
-    if (sessionSelectorOpen) {
-      closeSessionSelector();
+    if (sessionId === DRAFT_SESSION_TAB_ID) {
+      if (!draftSessionTabActive) activateDraftSessionTab();
       return;
     }
-    sessionSelectorTrigger = event.currentTarget as HTMLButtonElement;
-    openSessionSelector();
+    if (sessionId !== activeSessionId) void loadSession(sessionId);
   }
 
   function openSessionSelector(query = "", mode: "open" | "delete" = "open"): void {
@@ -2752,14 +3001,17 @@
     void refreshSessions();
   }
 
-  function closeSessionSelector(restoreFocus = false): void {
+  function closeSessionSelector(_restoreFocus = false): void {
     sessionSelectorOpen = false;
     sessionSelectorQuery = "";
     sessionSelectorMode = "open";
-    if (restoreFocus) sessionSelectorTrigger?.focus();
   }
 
   function selectSession(sessionId: string): void {
+    if (draftSessionTabActive) {
+      void selectSessionFromDraft(sessionId);
+      return;
+    }
     if (sessionId === activeSessionId) {
       closeSessionSelector();
       return;
@@ -2767,9 +3019,20 @@
     void replaceCurrentTabWithSession(sessionId);
   }
 
+  async function selectSessionFromDraft(sessionId: string): Promise<void> {
+    if (!draftSessionTabActive || sessionMutationRunning) return;
+    invalidateDraftSessionMaterialization();
+    draftSessionTabOpen = false;
+    draftSessionTabActive = false;
+    draftSessionTabTouched = false;
+    promptText = "";
+    invalidateAttachmentDraft();
+    await loadSession(sessionId);
+  }
+
   async function deleteSelectedSession(sessionId: string): Promise<void> {
     const requestClient = client;
-    if (!requestClient || operationRunning || runningSessionIds.has(sessionId)) return;
+    if (!requestClient || sessionMutationRunning || runningSessionIds.has(sessionId)) return;
     const session = sessions.find((candidate) => candidate.sessionId === sessionId);
     const title = session?.title || "Untitled conversation";
     if (!window.confirm(`Permanently delete “${title}”?\n\nThis removes the Pi session file and its DCP sidecar state.`)) return;
@@ -2811,7 +3074,7 @@
 
     if (!deletingActive) return;
     if (nextSessionId && sessions.some((candidate) => candidate.sessionId === nextSessionId)) await loadSession(nextSessionId);
-    else await createSession();
+    else await openSessionStartTab();
   }
 
   function activeCustomQuestionId(): string | null {
@@ -2829,7 +3092,7 @@
       && questionImageOperationIds.has(pending.requestId)
     ) return false;
     if (pending?.kind === "question") return activeCustomQuestionId() !== null;
-    return !!activeSessionId && !operationRunning;
+    return (!!activeSessionId || draftSessionTabActive) && !sessionMutationRunning;
   }
 
   function questionCanAcceptImages(questionId: string, requestId?: number): boolean {
@@ -3108,7 +3371,7 @@
   }
 
   async function chooseAttachments(): Promise<void> {
-    if (!activeSessionId || operationRunning) return;
+    if ((!activeSessionId && !draftSessionTabActive) || sessionMutationRunning) return;
     try {
       const selected = await open({
         directory: false,
@@ -3123,12 +3386,21 @@
     }
   }
 
+  function enqueueAttachmentDraftOperation(key: string, run: () => Promise<void>): Promise<void> {
+    const previous = attachmentAddQueues.get(key) ?? Promise.resolve();
+    const operation = previous.then(run);
+    const tracked = operation.catch(() => undefined);
+    attachmentAddQueues.set(key, tracked);
+    void tracked.finally(() => {
+      if (attachmentAddQueues.get(key) === tracked) attachmentAddQueues.delete(key);
+    });
+    return operation;
+  }
+
   function addAttachmentPaths(paths: readonly string[]): Promise<void> {
     const key = attachmentDraftKey;
     const generation = attachmentDraftGeneration;
-    const operation = attachmentAddQueue.then(() => addAttachmentPathsNow(paths, key, generation));
-    attachmentAddQueue = operation.catch(() => {});
-    return operation;
+    return enqueueAttachmentDraftOperation(key, () => addAttachmentPathsNow(paths, key, generation));
   }
 
   async function addAttachmentPathsNow(
@@ -3158,9 +3430,7 @@
   function addPastedAttachments(files: readonly File[]): Promise<void> {
     const key = attachmentDraftKey;
     const generation = attachmentDraftGeneration;
-    const operation = attachmentAddQueue.then(() => addPastedAttachmentsNow(files, key, generation));
-    attachmentAddQueue = operation.catch(() => {});
-    return operation;
+    return enqueueAttachmentDraftOperation(key, () => addPastedAttachmentsNow(files, key, generation));
   }
 
   async function addPastedAttachmentsNow(
@@ -3169,7 +3439,7 @@
     generation: number,
   ): Promise<void> {
     if (!attachmentDraftIsCurrent(key, generation)) return;
-    if (!activeSessionId || operationRunning || files.length === 0) return;
+    if ((!activeSessionId && !draftSessionTabActive) || sessionMutationRunning || files.length === 0) return;
     const available = MAX_ATTACHMENTS - promptAttachments.length;
     if (available <= 0) {
       errorMessage = `Attach at most ${MAX_ATTACHMENTS} files.`;
@@ -3204,11 +3474,16 @@
   function attachmentDraftIsCurrent(key: string, generation: number): boolean {
     return key === attachmentDraftKey
       && generation === attachmentDraftGeneration
-      && !!activeSessionId
-      && !operationRunning;
+      && (!!activeSessionId || draftSessionTabActive)
+      && !sessionMutationRunning;
   }
 
   function invalidateAttachmentDraft(): void {
+    // Pending file inspection/cache work may still finish, but the generation
+    // guard below makes those completions inert. Detach their queues as well so
+    // a new draft (notably the reused synthetic draft-tab key) never waits on
+    // stale I/O from a draft that was already abandoned.
+    attachmentAddQueues.clear();
     attachmentDraftGeneration += 1;
     promptAttachments = [];
   }
@@ -3222,6 +3497,32 @@
     return `local-attachment:${attachmentSequence}`;
   }
 
+  function workspaceEditorLabel(value: string): string {
+    const normalized = value.replaceAll("\\", "/").replace(/\/$/u, "");
+    return normalized.split("/").at(-1) || value;
+  }
+
+  function selectWorkspaceEditor(id: WorkspaceEditorId): void {
+    if (!workspaceEditorTabs.some((tab) => tab.id === id)) return;
+    activeWorkspaceEditor = id;
+  }
+
+  function closeWorkspaceEditor(id: WorkspaceEditorId): void {
+    if (id === "preview") {
+      if (previewPane) previewPane.requestClose();
+      else closePreview();
+      return;
+    }
+    if (id === "git-diff") closeGitDiff();
+  }
+
+  function closeGitDiff(): void {
+    const fallback = workspaceEditorCloseFallback(workspaceEditorTabs, "git-diff");
+    gitDiffPreview = null;
+    gitDiffReview = undefined;
+    if (activeWorkspaceEditor === "git-diff") activeWorkspaceEditor = fallback;
+  }
+
   function showPreview(target: PreviewTarget, navigation: PreviewNavigation): void {
     previewSequence += 1;
     const entry: PreviewEntry = {
@@ -3232,6 +3533,8 @@
     previewHistory = navigation === "push"
       ? pushPreviewHistory(previewHistory, entry)
       : resetPreviewHistory(entry);
+    previewDirty = false;
+    activeWorkspaceEditor = "preview";
   }
 
   function rememberPreviewScroll(id: number, scrollPosition: PreviewScrollPosition): void {
@@ -3245,8 +3548,11 @@
   }
 
   function closePreview(): void {
+    const fallback = workspaceEditorCloseFallback(workspaceEditorTabs, "preview");
     projectFilePreviewGeneration += 1;
     previewHistory = emptyPreviewHistory();
+    previewDirty = false;
+    if (activeWorkspaceEditor === "preview") activeWorkspaceEditor = fallback;
   }
 
   function movePreview(offset: -1 | 1): void {
@@ -3552,18 +3858,34 @@
     return (value.length / 4) * 3 - padding;
   }
 
+  async function waitForAttachmentDraftSettled(key: string): Promise<void> {
+    let pending = attachmentAddQueues.get(key);
+    while (true) {
+      if (!pending) return;
+      await pending.catch(() => undefined);
+      const next = attachmentAddQueues.get(key);
+      if (!next || next === pending) return;
+      pending = next;
+    }
+  }
+
   async function submitPrompt(): Promise<void> {
+    if (!client || sessionMutationRunning || sessionHistoryLoading) return;
+    // File inspection/caching is asynchronous. Wait for every attachment add
+    // already initiated by the user before snapshotting the draft, otherwise a
+    // fast Enter can send the text first and silently drop the pending file.
+    const initialDraftKey = attachmentDraftKey;
+    await waitForAttachmentDraftSettled(initialDraftKey);
+    if (initialDraftKey !== attachmentDraftKey) return;
     const text = promptText.trim();
     const attachments = promptAttachments;
-    const sessionId = activeSessionId;
-    const draftKey = attachmentDraftKey;
-    const draftGeneration = attachmentDraftGeneration;
+    let sessionId = activeSessionId;
+    let draftKey = attachmentDraftKey;
+    let draftGeneration = attachmentDraftGeneration;
     if (
       !client
-      || !sessionId
-      || !activeSessionRuntimeReady
       || (!text && attachments.length === 0)
-      || operationRunning
+      || sessionMutationRunning
       || sessionHistoryLoading
     ) return;
     const desktopCommand = parseDesktopSlashCommand(text, attachments.length > 0);
@@ -3573,7 +3895,7 @@
         case "new_tab":
           if (promptRunning) return;
           promptText = "";
-          await createSession();
+          await openSessionStartTab();
           break;
         case "enhance":
           if (promptRunning) return;
@@ -3655,6 +3977,15 @@
       }
       return;
     }
+
+    if (!sessionId) {
+      if (!draftSessionTabActive) return;
+      sessionId = await materializeDraftSession();
+      if (!sessionId) return;
+      draftKey = attachmentDraftKey;
+      draftGeneration = attachmentDraftGeneration;
+    }
+    if (!activeSessionRuntimeReady) return;
 
     if (promptRunning) {
       if (text.startsWith("/")) {
@@ -3794,26 +4125,34 @@
   function desktopCommandEnabled(id: DesktopCommandId): boolean {
     switch (id) {
       case "application.commandPalette":
-        return !activePreview && !gitDiffPreview && activePendingElicitation?.kind !== "form";
+        return activePendingElicitation?.kind !== "form";
       case "workspace.choose":
-        return !anyPromptRunning && !operationRunning && !tasksSaving && taskActionId === null;
+        return !anyPromptRunning && !sessionMutationRunning && !tasksSaving && taskActionId === null;
+      case "editor.conversation":
+        return workspaceEditorTabs.length > 1 && activeWorkspaceEditor !== "conversation";
+      case "editor.preview":
+        return !!activePreview && activeWorkspaceEditor !== "preview";
+      case "editor.gitDiff":
+        return !!gitDiffPreview && activeWorkspaceEditor !== "git-diff";
+      case "editor.close":
+        return activeWorkspaceEditor !== "conversation";
       case "session.new":
         return canUseSession;
       case "session.open":
-        return status === "ready" && !!workspace && !operationRunning;
+        return status === "ready" && !!workspace && !sessionMutationRunning;
       case "session.jump":
       case "session.history":
-        return !!client && !!activeSessionId && activeSessionRuntimeReady && !operationRunning;
+        return !!client && !!activeSessionId && activeSessionRuntimeReady && !sessionMutationRunning;
       case "session.activity":
         return !!activeSessionId;
       case "session.modelThinking":
         return !!activeSessionId
           && activeSessionRuntimeReady
-          && !operationRunning
+          && !sessionMutationRunning
           && !promptRunning
           && changingConfig === null;
       case "composer.focus":
-        return !!activeSessionId;
+        return draftSessionTabActive || !!activeSessionId;
       case "composer.enhance":
       case "composer.createTask":
       case "composer.defer":
@@ -3849,12 +4188,23 @@
       case "workspace.choose":
         await chooseWorkspace();
         return;
+      case "editor.conversation":
+        selectWorkspaceEditor("conversation");
+        return;
+      case "editor.preview":
+        selectWorkspaceEditor("preview");
+        return;
+      case "editor.gitDiff":
+        selectWorkspaceEditor("git-diff");
+        return;
+      case "editor.close":
+        closeWorkspaceEditor(activeWorkspaceEditor);
+        return;
       case "session.new":
-        await createSession();
+        await openSessionStartTab();
         return;
       case "session.open":
-        sessionSelectorTrigger = document.querySelector<HTMLButtonElement>("[data-session-picker]");
-        openSessionSelector();
+        await openSessionStartTab();
         return;
       case "session.jump":
         await openJumpPicker("");
@@ -4851,20 +5201,17 @@
 
     <div class="relative flex min-w-0 flex-1" data-tauri-drag-region>
       <SessionTabs
-        sessions={tabSessions}
-        allSessionsCount={sessions.length}
-        {activeSessionId}
+        sessions={titlebarSessions}
+        activeSessionId={activeConversationTabId}
         {runningSessionIds}
         activityBySessionId={sessionActivityBySessionId}
         needsInputSessionIds={pendingElicitationSessionIds}
-        selectorOpen={sessionSelectorOpen}
-        disabled={operationRunning}
+        disabled={sessionMutationRunning}
         canCreate={canUseSession}
         newSessionShortcut={desktopCommandShortcutLabel("session.new", desktopShortcutPlatform)}
         onTabClick={handleSessionTabClick}
-        onPickerClick={handleSessionPickerClick}
         onCloseTab={(sessionId) => closeSessionTab(sessionId)}
-        onCreate={() => void createSession()}
+        onCreate={() => void openSessionStartTab()}
       />
 
       {#if sessionSelectorOpen}
@@ -4875,8 +5222,8 @@
           initialQuery={sessionSelectorQuery}
           mode={sessionSelectorMode}
           canCreate={sessionSelectorMode === "open" && canUseSession}
-          disabled={operationRunning}
-          onCreate={() => void createSession()}
+          disabled={sessionMutationRunning}
+          onCreate={() => void openSessionStartTab()}
           onSelect={sessionSelectorMode === "delete" ? (sessionId) => void deleteSelectedSession(sessionId) : selectSession}
           onClose={closeSessionSelector}
         />
@@ -4906,7 +5253,7 @@
       {projectDocuments}
       {recentProjects}
       {projectColors}
-      projectSwitchDisabled={anyPromptRunning || operationRunning || tasksSaving || taskActionId !== null}
+      projectSwitchDisabled={anyPromptRunning || sessionMutationRunning || tasksSaving || taskActionId !== null}
       externalEditorLabel={externalEditorDisplayName}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
@@ -4946,7 +5293,29 @@
     />
 
     <div class="relative flex min-h-0 min-w-0 flex-1">
-      <main id="conversation-workspace" class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
+      <div id="conversation-workspace" class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] bg-background">
+        {#if workspaceEditorTabs.length > 1}
+          <WorkspaceEditorTabs
+            tabs={workspaceEditorTabs}
+            activeId={activeWorkspaceEditor}
+            onSelect={selectWorkspaceEditor}
+            onClose={closeWorkspaceEditor}
+            onFallbackFocus={(id) => {
+              if (id === "conversation") void promptComposer?.focus();
+            }}
+          />
+        {/if}
+
+        <div class="relative row-start-2 grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-1 overflow-hidden">
+      <main
+        id="workspace-editor-panel-conversation"
+        class={[
+          "col-start-1 row-start-1 min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-background",
+          activeWorkspaceEditor === "conversation" ? "grid" : "hidden",
+        ]}
+        role={workspaceEditorTabs.length > 1 ? "tabpanel" : undefined}
+        aria-labelledby={workspaceEditorTabs.length > 1 ? "workspace-editor-tab-conversation" : undefined}
+      >
         {#if errorMessage}
           <ErrorBanner
             message={errorMessage}
@@ -4956,30 +5325,39 @@
           />
         {/if}
 
-        <TranscriptPane
-          {transcript}
-          {activeSessionId}
-          {workspace}
-          {promptRunning}
-          {operationRunning}
-          historyLoading={sessionHistoryLoading}
-          bind:pane={transcriptPane}
-          bind:content={transcriptContent}
-          showScrollToBottom={!transcriptFollowsLatest}
-          onScroll={handleTranscriptScroll}
-          onScrollToBottom={jumpToLatest}
-          onChooseWorkspace={() => void chooseWorkspace()}
-          onOpenAttachment={(attachment) => void activateAttachment(attachment)}
-          onPrepareAttachment={prepareTranscriptAttachment}
-          onValidateProjectFile={validateProjectFile}
-          onValidateLocalFile={validateLocalFile}
-          onOpenProjectFile={(path, range) => openProjectFile(path, "replace", range)}
-          onResolveProjectMedia={resolveProjectMedia}
-          onOpenLocalFile={openLocalFile}
-          onResolveLocalMedia={resolveLocalMedia}
-          onLoadToolResult={(toolCallId) => void loadDeferredToolResult(toolCallId)}
-          onUserMessageAction={(message, action) => void runUserMessageContextAction(message, action)}
-        />
+        {#if sessionStartOpen}
+          <div class="row-start-2 min-h-0 min-w-0">
+            <SessionStartView
+              sessions={sessionStartCandidates}
+              onSelect={(sessionId) => void selectSessionFromDraft(sessionId)}
+            />
+          </div>
+        {:else}
+          <TranscriptPane
+            {transcript}
+            {activeSessionId}
+            {workspace}
+            {promptRunning}
+            {operationRunning}
+            historyLoading={sessionHistoryLoading}
+            bind:pane={transcriptPane}
+            bind:content={transcriptContent}
+            showScrollToBottom={!transcriptFollowsLatest}
+            onScroll={handleTranscriptScroll}
+            onScrollToBottom={jumpToLatest}
+            onChooseWorkspace={() => void chooseWorkspace()}
+            onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+            onPrepareAttachment={prepareTranscriptAttachment}
+            onValidateProjectFile={validateProjectFile}
+            onValidateLocalFile={validateLocalFile}
+            onOpenProjectFile={(path, range) => openProjectFile(path, "replace", range)}
+            onResolveProjectMedia={resolveProjectMedia}
+            onOpenLocalFile={openLocalFile}
+            onResolveLocalMedia={resolveLocalMedia}
+            onLoadToolResult={(toolCallId) => void loadDeferredToolResult(toolCallId)}
+            onUserMessageAction={(message, action) => void runUserMessageContextAction(message, action)}
+          />
+        {/if}
 
         <div class="row-start-3 min-w-0">
           <QueuedMessagesPanel
@@ -4993,7 +5371,11 @@
           attachments={promptAttachments}
           availableCommands={activeSlashCommands}
           {activeSessionId}
-          ready={status === "ready" && activeSessionRuntimeReady && !operationRunning && !sessionHistoryLoading}
+          draftSession={draftSessionTabActive}
+          ready={status === "ready"
+            && !sessionMutationRunning
+            && !sessionHistoryLoading
+            && (draftSessionTabActive || activeSessionRuntimeReady)}
           {promptRunning}
           agentControlState={activeAgentControlState}
           {dragActive}
@@ -5001,6 +5383,7 @@
           {autocompleteDebounceMs}
           {questionMode}
           onAutocomplete={autocompletePrompt}
+          onDraftChange={promoteSessionStart}
           onEnhance={() => enhancePromptDraft(promptText)}
           onSubmit={submitPrompt}
           onDefer={deferCurrentDraft}
@@ -5008,13 +5391,84 @@
           onPause={pauseAgent}
           onContinue={continueAgent}
           onCancel={cancelPrompt}
-          onChooseAttachments={chooseAttachments}
-          onPasteAttachments={addPastedAttachments}
+          onChooseAttachments={() => {
+            promoteSessionStart();
+            return chooseAttachments();
+          }}
+          onPasteAttachments={(files) => {
+            promoteSessionStart();
+            return addPastedAttachments(files);
+          }}
           onRemoveAttachment={removeAttachment}
           onOpenAttachment={(attachment) => void activateAttachment(attachment)}
           />
         </div>
       </main>
+
+          {#if activePreview}
+            <div
+              id="workspace-editor-panel-preview"
+              class={activeWorkspaceEditor === "preview" ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
+              role="tabpanel"
+              aria-labelledby="workspace-editor-tab-preview"
+            >
+              <PreviewPane
+                bind:this={previewPane}
+                previewId={activePreview.id}
+                scrollPosition={activePreview.scrollPosition}
+                file={activePreview.kind === "file" ? activePreview.file : undefined}
+                lineRange={activePreview.kind === "file" ? activePreview.lineRange : undefined}
+                attachment={activePreview.kind === "attachment" ? activePreview.attachment : undefined}
+                canGoBack={canGoBackInPreview}
+                canGoForward={canGoForwardInPreview}
+                editable={activePreview.kind === "file" && isEditableProjectMarkdown(activePreview.file.path)}
+                externalEditorLabel={activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
+                  ? externalEditorDisplayName
+                  : undefined}
+                onBack={() => movePreview(-1)}
+                onForward={() => movePreview(1)}
+                onOpenProjectFile={(path, range) => openProjectFile(path, "push", range)}
+                onValidateProjectFile={validateProjectFile}
+                onValidateLocalFile={validateLocalFile}
+                onResolveProjectMedia={resolveProjectMedia}
+                onOpenLocalFile={(path) => openLocalFile(path, "push")}
+                onResolveLocalMedia={resolveLocalMedia}
+                onSaveProjectFile={saveProjectMarkdown}
+                onOpenExternalEditor={activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
+                  ? (path) => void openInExternalEditor(path)
+                  : undefined}
+                onScrollPositionChange={rememberPreviewScroll}
+                onDirtyChange={(dirty) => previewDirty = dirty}
+                onClose={closePreview}
+              />
+            </div>
+          {/if}
+
+          {#if gitDiffPreview}
+            <div
+              id="workspace-editor-panel-git-diff"
+              class={activeWorkspaceEditor === "git-diff" ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
+              role="tabpanel"
+              aria-labelledby="workspace-editor-tab-git-diff"
+            >
+              <GitDiffPane
+                diff={gitDiffPreview}
+                review={gitDiffReview}
+                reviewLoading={gitLlmActionId?.startsWith("review:") === true}
+                resolveLoading={gitResolveRunning}
+                canReview={Boolean(client && activeSessionId && activeSessionRuntimeReady)}
+                canResolve={Boolean(client && workspace && status === "ready" && !operationRunning)}
+                onValidateProjectFile={validateProjectFile}
+                onValidateLocalFile={validateLocalFile}
+                onOpenProjectFile={(path, range) => void openProjectFile(path, "replace", range)}
+                onOpenLocalFile={(path) => void openLocalFile(path)}
+                onReview={() => void reviewGitDiff(gitDiffPreview?.path, gitDiffPreview?.scope ?? "all")}
+                onResolve={() => void resolveGitReviewInNewSession()}
+              />
+            </div>
+          {/if}
+        </div>
+      </div>
 
       {#if sessionInspectorOpen}
         <SessionInspector
@@ -5069,7 +5523,6 @@
     onAnswer={answerElicitation}
   />
 {/if}
-
 {#if commandPicker}
   <CommandPicker
     picker={commandPicker}
@@ -5086,56 +5539,5 @@
     onApply={applyModelThinkingSelection}
     onVisibleModelsChange={saveVisibleModelRefs}
     onClose={closeModelThinkingPicker}
-  />
-{/if}
-
-{#if activePreview}
-  <PreviewDialog
-    previewId={activePreview.id}
-    scrollPosition={activePreview.scrollPosition}
-    file={activePreview.kind === "file" ? activePreview.file : undefined}
-    lineRange={activePreview.kind === "file" ? activePreview.lineRange : undefined}
-    attachment={activePreview.kind === "attachment" ? activePreview.attachment : undefined}
-    canGoBack={canGoBackInPreview}
-    canGoForward={canGoForwardInPreview}
-    editable={activePreview.kind === "file" && isEditableProjectMarkdown(activePreview.file.path)}
-    externalEditorLabel={activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
-      ? externalEditorDisplayName
-      : undefined}
-    onBack={() => movePreview(-1)}
-    onForward={() => movePreview(1)}
-    onOpenProjectFile={(path, range) => openProjectFile(path, "push", range)}
-    onValidateProjectFile={validateProjectFile}
-    onValidateLocalFile={validateLocalFile}
-    onResolveProjectMedia={resolveProjectMedia}
-    onOpenLocalFile={(path) => openLocalFile(path, "push")}
-    onResolveLocalMedia={resolveLocalMedia}
-    onSaveProjectFile={saveProjectMarkdown}
-    onOpenExternalEditor={activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
-      ? (path) => void openInExternalEditor(path)
-      : undefined}
-    onScrollPositionChange={rememberPreviewScroll}
-    onClose={closePreview}
-  />
-{/if}
-
-{#if gitDiffPreview}
-  <GitDiffDialog
-    diff={gitDiffPreview}
-    review={gitDiffReview}
-    reviewLoading={gitLlmActionId?.startsWith("review:") === true}
-    resolveLoading={gitResolveRunning}
-    canReview={Boolean(client && activeSessionId && activeSessionRuntimeReady)}
-    canResolve={Boolean(client && workspace && status === "ready" && !operationRunning)}
-    onValidateProjectFile={validateProjectFile}
-    onValidateLocalFile={validateLocalFile}
-    onOpenProjectFile={(path, range) => void openProjectFile(path, "replace", range)}
-    onOpenLocalFile={(path) => void openLocalFile(path)}
-    onReview={() => void reviewGitDiff(gitDiffPreview?.path, gitDiffPreview?.scope ?? "all")}
-    onResolve={() => void resolveGitReviewInNewSession()}
-    onClose={() => {
-      gitDiffPreview = null;
-      gitDiffReview = undefined;
-    }}
   />
 {/if}

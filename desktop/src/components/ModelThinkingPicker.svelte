@@ -4,6 +4,7 @@
   import { onMount, tick, untrack } from "svelte";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
+  import { activateModalDialog } from "../lib/modal-dialog";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import {
     clampThinkingLevel,
@@ -28,6 +29,7 @@
   } = $props();
 
   const config = $derived(modelThinkingConfigState(configOptions));
+  let dialogElement = $state<HTMLDialogElement | null>(null);
   let panel = $state<HTMLElement | null>(null);
   let search = $state<HTMLInputElement | null>(null);
   let query = $state("");
@@ -40,7 +42,6 @@
   let visibilityMode = $state(false);
   let visibleRefs = $state<string[] | undefined>(undefined);
   let initialized = false;
-  let previousFocus: HTMLElement | null = null;
   const thinkingByModel = new Map<string, string>();
 
   const pickerModels = $derived(visibilityMode
@@ -64,7 +65,6 @@
   );
 
   onMount(() => {
-    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     visibleRefs = visibleModelRefs === undefined ? undefined : [...visibleModelRefs];
     const initialModel = config.currentModel ?? config.models[0];
     if (initialModel) {
@@ -73,8 +73,8 @@
       thinkingByModel.set(initialModel.ref, selectedThinking);
     }
     initialized = true;
-    search?.focus();
-    return () => previousFocus?.focus();
+    if (!dialogElement) return;
+    return activateModalDialog(dialogElement, () => search);
   });
 
   $effect(() => {
@@ -184,11 +184,6 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
     if (event.target === search && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
       moveModel(event.key === "ArrowDown" ? 1 : -1);
@@ -255,17 +250,16 @@
   }
 </script>
 
-<div
-  class="fixed inset-0 z-40 grid place-items-center bg-overlay p-6"
-  role="presentation"
+<dialog
+  bind:this={dialogElement}
+  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center border-0 bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
+  aria-labelledby="model-thinking-picker-title"
   onclick={handleBackdropClick}
   onkeydown={handleKeydown}
+  oncancel={(event) => { event.preventDefault(); onClose(); }}
 >
   <div
     class="grid max-h-[min(660px,calc(100vh-48px))] w-[min(620px,100%)] grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="model-thinking-picker-title"
     bind:this={panel}
   >
     <header class="flex items-start justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
@@ -300,8 +294,12 @@
         bind:this={search}
         bind:value={query}
         type="search"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded="true"
         placeholder="Search models…"
         aria-controls="model-thinking-models"
+        aria-activedescendant={filteredModels[selectedIndex] ? `model-thinking-option-${selectedIndex}` : undefined}
       />
     </label>
 
@@ -314,6 +312,8 @@
           ]}
           type="button"
           role="option"
+          id={`model-thinking-option-${index}`}
+          tabindex="-1"
           disabled={disabled || applying || savingVisibility}
           aria-selected={visibilityMode ? index === selectedIndex : model.ref === selectedModelRef}
           data-model-ref={model.ref}
@@ -405,4 +405,4 @@
       <p class="border-t border-destructive/30 bg-destructive/5 px-3.5 py-2 text-[11px] text-destructive" role="alert">{applyError}</p>
     {/if}
   </div>
-</div>
+</dialog>

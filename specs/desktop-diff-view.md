@@ -20,6 +20,7 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - Render Edit/Write structured old/new text with added, removed, and unchanged lines.
 - Render output from shell `git diff` commands as a unified diff.
 - Keep ordinary tool output, read results, and non-diff shell commands unchanged.
+- Present Source Control diff/review as a central workspace editor rather than a modal overlay.
 
 ## Behavior
 
@@ -30,6 +31,8 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - ANSI control sequences in shell diffs are removed before browser rendering.
 - Large structured replacements use a bounded fallback instead of quadratic line matching.
 - Diff panes scroll vertically and horizontally without widening the transcript.
+- Inline transcript diffs remain inline. Source Control `git diff` actions open the separate Git Diff workspace editor tab, which preserves its LLM review output while the user switches to Conversation or Preview.
+- File links opened from Git Diff activate the Preview editor without closing the diff editor, allowing users to move between source and review without stacked modal dialogs.
 
 ## Non-goals
 
@@ -44,6 +47,9 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - `desktop/src/components/DiffView.svelte`
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/components/GitDiffPane.svelte`
+- `desktop/src/components/WorkspaceEditorTabs.svelte`
+- `desktop/src/App.svelte`
 
 ## Verification
 

@@ -2,6 +2,7 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
+  import { activateModalDialog } from "../lib/modal-dialog";
   import { normalizeProjectColor } from "../lib/project-colors";
   import { projectName } from "../lib/recent-projects";
   import ProjectFolderIcon from "./ProjectFolderIcon.svelte";
@@ -34,14 +35,7 @@
   $effect(() => {
     const dialog = dialogElement;
     if (!dialog) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    dialog.showModal();
-    const frame = requestAnimationFrame(() => closeButton?.focus());
-    return () => {
-      cancelAnimationFrame(frame);
-      if (dialog.open) dialog.close();
-      requestAnimationFrame(() => previous?.focus());
-    };
+    return activateModalDialog(dialog, () => closeButton);
   });
 
   function pickerColor(value: string): string {
@@ -62,6 +56,11 @@
     if (saveDisabled) return;
     onSave(custom ? normalizedColor : undefined);
   }
+
+  function handleSubmit(event: SubmitEvent): void {
+    event.preventDefault();
+    submit();
+  }
 </script>
 
 <dialog
@@ -71,7 +70,7 @@
   oncancel={(event) => { event.preventDefault(); if (!saving) onClose(); }}
   onclick={(event) => { if (!saving && event.target === event.currentTarget) onClose(); }}
 >
-  <div class="w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
+  <form class="w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md" onsubmit={handleSubmit}>
     <header class="flex h-10 items-center gap-2 border-b border-border bg-chrome px-3">
       <ProjectFolderIcon project={workspace} color={previewColor} class="h-4 w-4 shrink-0" />
       <strong class="min-w-0 flex-1 truncate text-xs font-semibold">Project settings</strong>
@@ -152,10 +151,10 @@
 
     <footer class="flex h-12 items-center justify-end gap-2 border-t border-border bg-chrome/60 px-3">
       <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={saving} onclick={onClose}>Cancel</button>
-      <button class="inline-flex h-8 min-w-20 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={saveDisabled} onclick={submit}>
+      <button class="inline-flex h-8 min-w-20 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="submit" disabled={saveDisabled}>
         {#if saving}<RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{/if}
         {saving ? "Saving…" : "Save"}
       </button>
     </footer>
-  </div>
+  </form>
 </dialog>

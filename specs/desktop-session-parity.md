@@ -19,7 +19,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - Reconcile native Pi JSONL sessions into the ACP session map during `session/list`.
 - Preserve existing ACP session IDs for already-mapped Pi session files.
 - Report the TUI tab snapshot through ACP metadata.
-- Keep Desktop's all-session selector separate from its top tab strip.
+- Keep Desktop's saved-session chooser separate from restored/open tab membership.
 
 ## Non-goals
 
@@ -33,8 +33,10 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - A discovered native session is persisted in the ACP map so `session/load` can open it later.
 - Reconciliation deduplicates by resolved Pi session path and retains an existing ACP ID when present.
 - The response carries ordered TUI open-tab session IDs in namespaced ACP metadata.
-- Desktop uses all returned sessions in its selector and only restored TUI tabs, Desktop-opened tabs, and the active session in its tab strip.
-- Per-session activity indicators may decorate those tabs, but runtime activity never changes restored membership, ordering, close semantics, or selector contents.
+- Desktop uses the returned sessions as the source for saved-session discovery. The titlebar still contains only restored TUI tabs, Desktop-opened tabs, and the active session.
+- The UI-only New Conversation draft tab is not an ACP session and never participates in `session/list`, restored TUI metadata, or persisted Desktop active-session ids. Its embedded chooser presents only returned sessions that are not already represented by real titlebar tabs; already-open/running conversations therefore are not duplicated there.
+- When restoring an older mapped session whose persisted history is unavailable, Desktop first waits for the concurrent runtime load. A loadable empty session is retained; only a record whose history and runtime both fail is cleaned up. Runtime-load generations prevent a late completion from repopulating state after that cleanup.
+- Per-session activity indicators may decorate titlebar tabs, but runtime activity never changes restored membership, ordering, close semantics, or saved-session discovery.
 - Missing, malformed, or stale tab snapshots produce no restored tabs and do not break session listing.
 - Overlapping Desktop refreshes cannot apply results from an older workspace or ACP connection.
 - If native discovery fails, mapped ACP sessions remain available.

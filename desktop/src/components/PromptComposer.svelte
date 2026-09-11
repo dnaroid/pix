@@ -74,6 +74,7 @@
     ariaLabel,
     availableCommands = [],
     activeSessionId,
+    draftSession = false,
     ready,
     promptRunning,
     agentControlState = "idle",
@@ -82,6 +83,7 @@
     autocompleteDebounceMs,
     questionMode,
     onAutocomplete,
+    onDraftChange = () => {},
     onEnhance,
     onSubmit,
     onDefer,
@@ -101,6 +103,7 @@
     ariaLabel?: string;
     availableCommands?: readonly AvailableCommand[];
     activeSessionId: string | null;
+    draftSession?: boolean;
     ready: boolean;
     promptRunning: boolean;
     agentControlState?: AgentControlState;
@@ -109,6 +112,7 @@
     autocompleteDebounceMs: number;
     questionMode?: QuestionComposerMode;
     onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
+    onDraftChange?: () => void;
     onEnhance?: () => void | Promise<void>;
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
@@ -182,6 +186,8 @@
   const currentSelectionCount = $derived(questionDraftSelectionCount(currentDraft));
   const displayedAttachments = $derived(questionMode ? questionAttachments : attachments);
   const textareaValue = $derived(composerText());
+  const conversationContextKey = $derived(activeSessionId ?? (draftSession ? "pix:desktop-draft-session" : undefined));
+  const hasConversationTarget = $derived(!!conversationContextKey);
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
   const canCreateTask = $derived(
     !editorMode
@@ -201,7 +207,7 @@
       && promptText.trim().length >= 3,
   );
   const voiceCanStart = $derived(
-    !editorMode && !questionMode && voiceSupported && ready && !!activeSessionId,
+    !editorMode && !questionMode && voiceSupported && ready && hasConversationTarget,
   );
   const slashQuery = $derived.by(() => {
     if (editorMode || !ready || !activeSessionId || promptRunning || questionMode || composing || attachments.length > 0) {
@@ -234,8 +240,8 @@
   function composerPlaceholder(): string {
     if (placeholder) return placeholder;
     if (questionMode) return "Type a custom answer or paste an image…";
-    return activeSessionId
-      ? "Ask Pix to change, explain, or investigate…"
+    return hasConversationTarget
+      ? "Ask Pix anything…"
       : "Start or load a conversation first";
   }
 
@@ -289,12 +295,13 @@
 
   /** Insert one or more filesystem paths as plain quoted text in the prompt. */
   export async function insertPaths(paths: readonly string[]): Promise<void> {
-    if (questionMode || editorMode || !ready || !activeSessionId || paths.length === 0) return;
+    if (questionMode || editorMode || !ready || !hasConversationTarget || paths.length === 0) return;
     const start = textarea?.selectionStart ?? selectionStart;
     const end = textarea?.selectionEnd ?? selectionEnd;
     const insertion = insertPromptPaths(promptText, start, end, paths);
     if (insertion.text === promptText) return;
     promptText = insertion.text;
+    onDraftChange();
     dismissedSlashDraft = null;
     autocompleteController.dismiss();
     await tick();
@@ -311,6 +318,7 @@
     promptRunning;
     attachments.length;
     activeSessionId;
+    draftSession;
     ready;
     autocompleteEnabled;
     questionMode?.state.activeTab;
@@ -365,7 +373,7 @@
         onState: (state) => { voiceState = state; },
         onFinal: (text) => { void insertVoiceTranscript(text, voiceSessionId); },
         onInterim: (text) => {
-          voiceInterim = voiceSessionId === activeSessionId ? text : undefined;
+          voiceInterim = voiceSessionId === conversationContextKey ? text : undefined;
         },
         onError: (message) => { voiceError = message; },
       },
@@ -391,12 +399,12 @@
   });
 
   $effect(() => {
-    if (editorMode || questionMode || !activeSessionId || !ready) composerMenuOpen = false;
+    if (editorMode || questionMode || !hasConversationTarget || !ready) composerMenuOpen = false;
   });
 
   $effect(() => {
     if (voiceState === "idle") return;
-    if (!activeSessionId || voiceSessionId !== activeSessionId || !ready || editorMode || questionMode) {
+    if (!conversationContextKey || voiceSessionId !== conversationContextKey || !ready || editorMode || questionMode) {
       voiceSessionId = undefined;
       voiceInterim = undefined;
       void stopVoiceInput();
@@ -460,8 +468,8 @@
     if (!voiceController) return;
     const starting = voiceController.currentState() === "idle";
     if (starting) {
-      if (!voiceCanStart || !activeSessionId) return;
-      voiceSessionId = activeSessionId;
+      if (!voiceCanStart || !conversationContextKey) return;
+      voiceSessionId = conversationContextKey;
     }
     voiceError = "";
     autocompleteController.dismiss();
@@ -583,7 +591,7 @@
   }
 
   async function insertVoiceTranscript(rawText: string, sessionId: string | undefined): Promise<void> {
-    if (editorMode || questionMode || !sessionId || sessionId !== activeSessionId) return;
+    if (editorMode || questionMode || !sessionId || sessionId !== conversationContextKey) return;
     const transcript = rawText.trim().replace(/\s+/gu, " ");
     if (!transcript) return;
     const start = textarea?.selectionStart ?? selectionStart;
@@ -594,6 +602,7 @@
     const suffix = after.length > 0 && !/^\s/u.test(after) ? " " : "";
     const insertion = `${prefix}${transcript}${suffix}`;
     promptText = `${before}${insertion}${after}`;
+    onDraftChange();
     const cursor = before.length + insertion.length;
     dismissedSlashDraft = null;
     autocompleteController.dismiss();
@@ -648,6 +657,7 @@
       if (accepted !== undefined) {
         event.preventDefault();
         promptText = accepted;
+        onDraftChange();
         void tick().then(() => {
           textarea?.setSelectionRange(accepted.length, accepted.length);
           resizeComposer();
@@ -674,6 +684,7 @@
       updateQuestionState(updateCustomAnswer(questionMode.state, currentQuestion.id, value, currentQuestion));
     } else {
       promptText = value;
+      onDraftChange();
     }
     updateSelection(target);
     resizeComposer();
@@ -699,6 +710,7 @@
 
   async function acceptSlashCommand(match: SlashCommandMatch, submit: boolean): Promise<void> {
     promptText = slashCommandInsertion(match.command);
+    onDraftChange();
     dismissedSlashDraft = submit ? null : promptText;
     autocompleteController.dismiss();
     await tick();
@@ -1222,7 +1234,7 @@
           type="button"
           aria-label={questionMode ? "Attach images" : "Attach files"}
           title={questionMode ? "Attach images" : "Attach files"}
-          disabled={questionMode ? questionMode.addingImages : editorMode ? !ready : !activeSessionId || !ready}
+          disabled={questionMode ? questionMode.addingImages : editorMode ? !ready : !hasConversationTarget || !ready}
           onclick={() => {
             if (questionMode && currentQuestion) void questionMode.onChooseImages(currentQuestion.id);
             else void onChooseAttachments();
@@ -1239,7 +1251,7 @@
             ><span class="text-transparent">{promptText}</span><span class="text-muted-foreground/45">{autocompleteSuggestion}</span></div>
           {/if}
           <textarea
-            class="relative z-10 block min-h-6 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 leading-relaxed text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-40 disabled:cursor-default disabled:opacity-40"
+            class="relative z-10 block min-h-6 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 leading-relaxed text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-40 [&::placeholder]:whitespace-nowrap disabled:cursor-default disabled:opacity-40"
             bind:this={textarea}
             value={textareaValue}
             oninput={handleInput}
@@ -1259,7 +1271,7 @@
             aria-controls={!editorMode && !questionMode && slashMenuOpen ? slashListboxId : undefined}
             aria-activedescendant={!editorMode && !questionMode && slashMenuOpen ? `prompt-slash-command-${selectedSlashCommand}` : undefined}
             placeholder={composerPlaceholder()}
-            disabled={questionMode ? !currentQuestion : editorMode ? !ready : !activeSessionId || !ready}
+            disabled={questionMode ? !currentQuestion : editorMode ? !ready : !hasConversationTarget || !ready}
             rows="1"
           ></textarea>
         </div>

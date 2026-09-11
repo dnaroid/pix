@@ -4,6 +4,7 @@
   import { onMount, tick } from "svelte";
   import type { CommandPickerState } from "../lib/command-interactions";
   import { fuzzySearch } from "../lib/fuzzy";
+  import { activateModalDialog } from "../lib/modal-dialog";
   import { modelDisplayToneClass } from "../lib/model-display";
 
   let {
@@ -17,10 +18,10 @@
   } = $props();
 
   let panel = $state<HTMLElement | null>(null);
+  let dialogElement = $state<HTMLDialogElement | null>(null);
   let search = $state<HTMLInputElement | null>(null);
   let query = $state("");
   let selectedIndex = $state(0);
-  let previousFocus: HTMLElement | null = null;
   const filteredItems = $derived(fuzzySearch(
     picker.items.map((item) => ({
       value: item,
@@ -46,32 +47,12 @@
   });
 
   onMount(() => {
-    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     query = picker.initialQuery ?? "";
-    search?.focus();
-    return () => previousFocus?.focus();
+    if (!dialogElement) return;
+    return activateModalDialog(dialogElement, () => search);
   });
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key === "Tab" && panel) {
-      const focusable = [...panel.querySelectorAll<HTMLElement>(
-        'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"])',
-      )];
-      if (focusable.length === 0) return;
-      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-      if (currentIndex < 0) return;
-      const nextIndex = event.shiftKey
-        ? (currentIndex - 1 + focusable.length) % focusable.length
-        : (currentIndex + 1) % focusable.length;
-      event.preventDefault();
-      focusable[nextIndex]?.focus();
-      return;
-    }
     if (event.target !== search) return;
     if (filteredItems.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -101,17 +82,16 @@
   }
 </script>
 
-<div
-  class="fixed inset-0 z-40 grid place-items-center bg-overlay p-6"
-  role="presentation"
+<dialog
+  bind:this={dialogElement}
+  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center border-0 bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
+  aria-labelledby="command-picker-title"
   onclick={handleBackdropClick}
   onkeydown={handleKeydown}
+  oncancel={(event) => { event.preventDefault(); onClose(); }}
 >
   <div
     class="grid max-h-[min(560px,calc(100vh-48px))] w-[min(540px,100%)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="command-picker-title"
     bind:this={panel}
   >
     <header class="flex items-center justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
@@ -181,4 +161,4 @@
       {/each}
     </div>
   </div>
-</div>
+</dialog>

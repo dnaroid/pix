@@ -38,10 +38,13 @@ while project selection/open state remains separate from transient focus.
   editor. The pointer hover icon remains available but is removed from the normal
   Tab sequence so every tree row does not add a second Tab stop.
 - Existing pointer drag/drop behavior and lazy directory loading remain unchanged.
+- Project Explorer keeps dotfiles and dotfolders in the normal tree. Entries whose basename starts with `.` use muted opacity by default so ordinary source files retain visual priority; hover, keyboard focus, and selected/open state restore normal readability.
 
 ## Activity Bar behavior
 
 - The workspace rail is one vertical toolbar with a roving Tab stop.
+- The rail is a compact 40 px column with 40×40 view buttons. Density changes
+  must preserve visible focus and the single-composite keyboard model.
 - ArrowUp/ArrowDown and Home/End move focus without activating a destination.
 - Enter/Space/click keeps the existing view-selection/collapse behavior.
 - Focus movement does not alter indicator state or acknowledge a destination;

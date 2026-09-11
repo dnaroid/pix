@@ -5,10 +5,8 @@
   import Check from "@lucide/svelte/icons/check";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FileCode from "@lucide/svelte/icons/file-code";
-  import MoveDiagonal2 from "@lucide/svelte/icons/move-diagonal-2";
   import Pencil from "@lucide/svelte/icons/pencil";
   import WrapText from "@lucide/svelte/icons/wrap-text";
-  import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import type { PreviewScrollPosition } from "../lib/preview-history";
@@ -37,6 +35,7 @@
     onSaveProjectFile,
     onOpenExternalEditor,
     onScrollPositionChange,
+    onDirtyChange,
     onClose,
   }: {
     attachment?: Attachment;
@@ -59,25 +58,16 @@
     onSaveProjectFile?: (path: string, content: string) => Promise<boolean>;
     onOpenExternalEditor?: (path: string) => void;
     onScrollPositionChange?: (id: number, position: PreviewScrollPosition) => void;
+    onDirtyChange?: (dirty: boolean) => void;
     onClose: () => void;
   } = $props();
 
-  let dialogElement: HTMLDialogElement | undefined;
-  let previewElement: HTMLDivElement | undefined;
   let contentScrollElement = $state<HTMLDivElement | undefined>();
-  let closeButton: HTMLButtonElement | undefined;
   let wrapLines = $state(false);
   let editing = $state(false);
   let draft = $state("");
   let saving = $state(false);
   const resolvedMarkdownProjectPaths = new Map<string, string>();
-  let resizeStart: {
-    pointerId: number;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | undefined;
 
   const title = $derived(file?.path ?? attachment?.name ?? "Preview");
   const source = $derived(
@@ -108,27 +98,12 @@
   });
 
   $effect(() => {
-    const dialog = dialogElement;
-    if (!dialog) return;
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : undefined;
-    dialog.showModal();
-    const focusFrame = requestAnimationFrame(() => closeButton?.focus());
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      if (dialog.open) dialog.close();
-      requestAnimationFrame(() => previouslyFocused?.focus());
-    };
+    onDirtyChange?.(dirty);
   });
 
-  function requestClose(): void {
+  export function requestClose(): void {
     if (editing && dirty && !window.confirm("Discard unsaved changes?")) return;
     onClose();
-  }
-
-  function handleBackdropClick(event: MouseEvent): void {
-    if (event.target === event.currentTarget) requestClose();
   }
 
   function restoreScroll(
@@ -217,16 +192,6 @@
     return onOpenLocalFile?.(path);
   }
 
-  function handleCancel(event: Event): void {
-    event.preventDefault();
-    if (editing) {
-      draft = file?.content ?? "";
-      editing = false;
-      return;
-    }
-    requestClose();
-  }
-
   async function saveEdit(): Promise<void> {
     if (!file || !canEdit || !onSaveProjectFile || saving || !dirty) return;
     saving = true;
@@ -242,6 +207,12 @@
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       void saveEdit();
+      return;
+    }
+    if (event.key === "Escape" && !event.isComposing) {
+      event.preventDefault();
+      draft = file?.content ?? "";
+      editing = false;
     }
   }
 
@@ -289,67 +260,13 @@
     };
   });
 
-  function setPreviewSize(width: number, height: number): void {
-    if (!previewElement) return;
-    const maxWidth = window.innerWidth - 48;
-    const maxHeight = window.innerHeight - 48;
-    const minWidth = Math.min(480, maxWidth);
-    const minHeight = Math.min(320, maxHeight);
-    previewElement.style.width = `${Math.max(minWidth, Math.min(width, maxWidth))}px`;
-    previewElement.style.height = `${Math.max(minHeight, Math.min(height, maxHeight))}px`;
-  }
-
-  function handleResizeStart(event: PointerEvent): void {
-    if (!previewElement || !(event.currentTarget instanceof HTMLElement)) return;
-    event.preventDefault();
-    const bounds = previewElement.getBoundingClientRect();
-    resizeStart = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      width: bounds.width,
-      height: bounds.height,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function handleResizeMove(event: PointerEvent): void {
-    if (!resizeStart || resizeStart.pointerId !== event.pointerId) return;
-    // The panel stays centered, so each dimension changes on both sides.
-    setPreviewSize(
-      resizeStart.width + (event.clientX - resizeStart.x) * 2,
-      resizeStart.height + (event.clientY - resizeStart.y) * 2,
-    );
-  }
-
-  function handleResizeEnd(event: PointerEvent): void {
-    if (resizeStart?.pointerId === event.pointerId) resizeStart = undefined;
-  }
-
-  function handleResizeKey(event: KeyboardEvent): void {
-    if (!previewElement) return;
-    const step = event.shiftKey ? 64 : 24;
-    const widthDelta = event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0;
-    const heightDelta = event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0;
-    if (widthDelta === 0 && heightDelta === 0) return;
-    event.preventDefault();
-    const bounds = previewElement.getBoundingClientRect();
-    setPreviewSize(bounds.width + widthDelta, bounds.height + heightDelta);
-  }
 </script>
 
-<dialog
-  bind:this={dialogElement}
-  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
+<section
+  class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
   aria-label={`Preview ${title}`}
-  oncancel={handleCancel}
-  onclick={handleBackdropClick}
 >
-  <div
-    bind:this={previewElement}
-    class="relative flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
-  >
-    <header class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border px-3">
+    <header class="flex min-h-9 min-w-0 items-center gap-2 border-b border-border bg-chrome px-3">
       <div class="flex shrink-0 items-center gap-0.5" aria-label="Preview history">
         <button
           class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground/35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35"
@@ -441,16 +358,6 @@
           <ExternalLink class="h-4 w-4" aria-hidden="true" />
         </button>
       {/if}
-      <button
-        class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        type="button"
-        aria-label="Close preview"
-        title="Close preview"
-        bind:this={closeButton}
-        onclick={requestClose}
-      >
-        <X class="h-4 w-4" aria-hidden="true" />
-      </button>
     </header>
     {#if file}
       {#if renderAsMarkdown && editing}
@@ -511,32 +418,18 @@
     {:else if attachment}
       <div class="grid min-h-0 min-w-0 flex-1 place-items-center overflow-hidden bg-background p-3">
         {#if attachment.kind === "image"}
-          <img class="max-h-[calc(100vh-112px)] max-w-[calc(100vw-72px)] object-contain" src={source} alt={attachment.name} />
+          <img class="max-h-full max-w-full object-contain" src={source} alt={attachment.name} />
         {:else}
         <!-- svelte-ignore a11y_media_has_caption User-selected videos do not necessarily include a captions track. -->
           <video
-            class="max-h-[calc(100vh-112px)] max-w-[calc(100vw-72px)]"
+            class="max-h-full max-w-full"
             src={source}
             controls
           ></video>
         {/if}
       </div>
     {/if}
-    <button
-      class="absolute right-0 bottom-0 z-20 grid h-8 w-8 touch-none cursor-se-resize place-items-center rounded-tl-md text-muted-foreground transition-colors select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-ring"
-      type="button"
-      aria-label="Resize preview"
-      title="Drag to resize preview; arrow keys also work"
-      onpointerdown={handleResizeStart}
-      onpointermove={handleResizeMove}
-      onpointerup={handleResizeEnd}
-      onpointercancel={handleResizeEnd}
-      onkeydown={handleResizeKey}
-    >
-      <MoveDiagonal2 class="h-4 w-4" aria-hidden="true" />
-    </button>
-  </div>
-</dialog>
+</section>
 
 <style>
   .preview-code {

@@ -369,7 +369,7 @@
                         <input
                           id={`setting-${formatSettingsPath(field.path)}`}
                           class={[
-                            "h-7 w-full rounded-md border border-input bg-panel-strong px-2 font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                            "h-7 w-full appearance-none rounded-md border border-input bg-panel-strong px-2 font-mono text-[11px] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none focus-visible:ring-2 focus-visible:ring-ring/30",
                             hasValue ? "text-foreground" : "text-muted-foreground",
                           ]}
                           type="number"
@@ -402,7 +402,7 @@
                         <textarea
                           id={`setting-${formatSettingsPath(field.path)}`}
                           class={[
-                            "min-h-16 w-full resize-y rounded-md border border-input bg-panel-strong px-2 py-1.5 font-mono text-[10px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:ring-2 focus-visible:ring-ring/30",
+                            "min-h-16 w-full resize-none rounded-md border border-input bg-panel-strong px-2 py-1.5 font-mono text-[10px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:ring-2 focus-visible:ring-ring/30",
                             hasValue ? "text-foreground" : "text-muted-foreground",
                           ]}
                           value={formatSettingValueForList(effectiveValue)}
@@ -414,7 +414,7 @@
                         <textarea
                           id={`setting-${formatSettingsPath(field.path)}`}
                           class={[
-                            "min-h-20 w-full resize-y rounded-md border border-code-border bg-code px-2 py-1.5 font-mono text-[10px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20",
+                            "min-h-20 w-full resize-none rounded-md border border-code-border bg-code px-2 py-1.5 font-mono text-[10px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20",
                             hasValue ? "text-foreground" : "text-muted-foreground",
                           ]}
                           value={formatSettingJson(effectiveValue)}

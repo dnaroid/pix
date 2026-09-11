@@ -1,9 +1,13 @@
-export type DesktopCommandScope = "application" | "workspace" | "session" | "composer" | "message";
+export type DesktopCommandScope = "application" | "workspace" | "session" | "editor" | "composer" | "message";
 export type DesktopShortcutPlatform = "mac" | "other";
 
 export type DesktopCommandId =
   | "application.commandPalette"
   | "workspace.choose"
+  | "editor.conversation"
+  | "editor.preview"
+  | "editor.gitDiff"
+  | "editor.close"
   | "session.new"
   | "session.open"
   | "session.jump"
@@ -59,6 +63,34 @@ const DEFINITIONS: Record<DesktopCommandId, DesktopCommandDefinition> = {
     description: "Choose a project folder for this window",
     scope: "workspace",
     keywords: ["workspace", "folder", "project", "open"],
+  },
+  "editor.conversation": {
+    id: "editor.conversation",
+    label: "Show Conversation",
+    description: "Return to the conversation editor",
+    scope: "editor",
+    keywords: ["editor", "conversation", "chat", "workbench"],
+  },
+  "editor.preview": {
+    id: "editor.preview",
+    label: "Show Preview",
+    description: "Show the open file or media preview",
+    scope: "editor",
+    keywords: ["editor", "preview", "file", "document", "media"],
+  },
+  "editor.gitDiff": {
+    id: "editor.gitDiff",
+    label: "Show Git Diff",
+    description: "Show the open Source Control diff editor",
+    scope: "editor",
+    keywords: ["editor", "git", "diff", "review", "source control"],
+  },
+  "editor.close": {
+    id: "editor.close",
+    label: "Close Active Editor",
+    description: "Close the current preview or diff editor",
+    scope: "editor",
+    keywords: ["editor", "close", "preview", "diff"],
   },
   "session.new": {
     id: "session.new",
@@ -165,6 +197,10 @@ export const COMMAND_PALETTE_IDS: readonly DesktopCommandId[] = [
   "workspace.choose",
   "session.new",
   "session.open",
+  "editor.conversation",
+  "editor.preview",
+  "editor.gitDiff",
+  "editor.close",
   "composer.focus",
   "session.jump",
   "session.history",

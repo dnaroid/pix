@@ -12,14 +12,14 @@ Implemented; this is the current Desktop Markdown contract.
 
 ## Goal
 
-Render Markdown in Desktop transcripts and Markdown file previews without adding a large parser or sanitizer dependency.
+Render Markdown in Desktop transcripts and the workspace Preview editor without adding a large parser or sanitizer dependency.
 
 ## Scope
 
-- The Pix Desktop transcript and rendered `.md` file preview popup.
+- The Pix Desktop transcript and rendered `.md` file Preview editor.
 - Headings, paragraphs, line breaks, emphasis, inline code, safe links, lists, task lists, blockquotes, horizontal rules, fenced code, and simple tables.
 - Complete and still-streaming ACP message chunks.
-- Popup-only navigation, embedded media, remote images, and table fitting behavior.
+- Preview-editor navigation, embedded media, remote images, and table fitting behavior.
 - Markdown content returned by `read` tools when the read target is Markdown.
 - Inline previews for supported project/local image and video links in transcript
   Markdown. Supported image extensions are AVIF, BMP, GIF, JPEG, PNG, SVG, and
@@ -47,14 +47,14 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
   HTML labels disabled. While rendering is pending, or if parsing/rendering
   fails, the escaped source remains readable.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
-- External Markdown links are marked with an external-link icon in both transcripts and preview popups.
-- Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then opens its source in the preview dialog with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
-- Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing preview dialog.
+- External Markdown links are marked with an external-link icon in both transcripts and the Preview editor.
+- Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then activates the Preview editor with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
+- Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing Preview editor tab.
 - Trailing prose punctuation is not included in a bare URL; balanced URL parentheses remain part of it.
 - Activating a link delegates it to Tauri's opener plugin so the operating system opens it in the default browser or mail application.
 - Unsupported destinations render as plain labels and are never passed to the system opener.
-- In a Markdown file preview popup, project links and local `file://` links use the same trusted preview/open handlers as transcript links. For a project path, the preview first tries the workspace-root interpretation commonly emitted by agents, then falls back to the Markdown document-relative interpretation. Opening another preview replaces the current popup content.
-- In a Markdown file preview popup, supported project and local images resolve through the existing confined Tauri media commands instead of remaining in a loading state.
+- In a Markdown file Preview editor, project links and local `file://` links use the same trusted preview/open handlers as transcript links. For a project path, the preview first tries the workspace-root interpretation commonly emitted by agents, then falls back to the Markdown document-relative interpretation. Following another preview target pushes/replaces the current Preview editor history entry according to the existing navigation mode.
+- In a Markdown file Preview editor, supported project and local images resolve through the existing confined Tauri media commands instead of remaining in a loading state.
 - Supported project and absolute `file://` image/video links in transcript
   Markdown render bounded inline media previews with their label as a caption.
   Images lazy-load and open the media viewer when activated; videos expose native
@@ -66,11 +66,11 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 - Missing, disallowed, or unrenderable local media keeps a readable fallback and
   actionable caption; a media load failure does not replace the whole transcript
   with a global error.
-- Remote `http` and `https` image syntax is embedded only in the Markdown file preview popup. Remote images do not send a referrer, and linked remote images retain their safe local or external destination behavior.
-- In a Markdown file preview popup, tables use the available content width and wrap long cell content rather than creating a horizontal table scrollbar. Transcript tables retain horizontal scrolling.
-- Internal preview navigations push file or media entries onto a browser-like history stack. Back and forward controls traverse that stack; following a new link after going back discards the old forward branch. Opening a preview from outside the popup starts a new history and closing it clears the history.
+- Remote `http` and `https` image syntax is embedded only in the Markdown file Preview editor. Remote images do not send a referrer, and linked remote images retain their safe local or external destination behavior.
+- In a Markdown file Preview editor, tables use the available content width and wrap long cell content rather than creating a horizontal table scrollbar. Transcript tables retain horizontal scrolling.
+- Internal preview navigations push file or media entries onto a browser-like history stack inside the single Preview editor tab. Back and forward controls traverse that stack; following a new link after going back discards the old forward branch. Opening a preview from outside Preview starts a new history and activates the Preview tab; closing the Preview editor clears the history.
 - Each preview history entry retains its horizontal and vertical scroll position, which is restored when Back or Forward returns to that entry.
-- The preview popup keeps its current dimensions while navigating between files and media instead of shrinking to fit the next entry's content. User resizing remains in effect for the lifetime of the open popup.
+- Preview consumes the central editor region rather than a resizable modal. Switching to Conversation or Git Diff leaves the still-open Preview component mounted so its current edit draft and scroll/history state are not reset merely by editor switching.
 - Same-document hash links in a Markdown preview scroll to stable, deduplicated heading anchors.
 - Raw absolute paths, URL-like destinations other than the separately supported `file://` flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
 - An unclosed fenced code block remains visible while the message streams.
@@ -88,7 +88,8 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 - `desktop/src/lib/external-links.test.ts`
 - `desktop/src/components/MarkdownText.svelte`
 - `desktop/src/components/ToolResult.svelte`
-- `desktop/src/components/PreviewDialog.svelte`
+- `desktop/src/components/PreviewPane.svelte`
+- `desktop/src/components/WorkspaceEditorTabs.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/mermaid.ts`
 - `desktop/src/App.svelte`

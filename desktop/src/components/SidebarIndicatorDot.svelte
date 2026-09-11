@@ -14,7 +14,7 @@
 
 {#if indicator}
   <span
-    class={["absolute top-2 right-2 h-1.5 w-1.5 rounded-full", toneClass]}
+    class={["absolute top-1 right-1 h-[5px] w-[5px] rounded-full ring-1 ring-chrome", toneClass]}
     title={indicator.reason}
     aria-hidden="true"
   ></span>

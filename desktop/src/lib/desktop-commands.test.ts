@@ -13,6 +13,10 @@ describe("desktop commands", () => {
       scope: "session",
     });
     expect(isDesktopCommandId("message.undo")).toBe(true);
+    expect(desktopCommandDefinition("editor.close")).toMatchObject({
+      label: "Close Active Editor",
+      scope: "editor",
+    });
     expect(isDesktopCommandId("unknown.command")).toBe(false);
   });
 

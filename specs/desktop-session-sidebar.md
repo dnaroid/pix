@@ -18,9 +18,9 @@ Add read-only, live views of the active session's execution Plan and Subagents t
 
 - Keep session activity out of the workspace Activity Bar; Project, Tasks, Source Control, Registry, Package Scripts, IDX, and Settings remain workspace/tool destinations.
 - Give every visible session tab a compact per-session runtime indicator derived from that session's own snapshots and prompt-running state.
-- Add a compact **Session activity** HUD/control to the status bar. It remains the persistent entry point for the active session inspector and expands to show live Subagent count and Plan progress when relevant.
+- Add a compact icon-only **Session activity** control at the far-right end of the status-bar actions. It remains the persistent entry point for the active session inspector; live detail stays in the tooltip/inspector rather than widening status chrome with text or counts.
 - Add a right-side contextual **Session** inspector for the active session. On narrow windows it becomes an overlay so the primary transcript retains usable width.
-- Use `Activity` for the inspector/status entry point, `Workflow` for the Agents section, and `ListChecks` for the Plan section.
+- Use `Activity` for the inspector/status entry point, `Workflow` for the Agents section, and `ListChecks` for the Plan section. The status icon becomes visually active while the inspector is open.
 - Bridge versioned, session-scoped extension state from pi RPC through a private ACP notification.
 - Render the todo hierarchy, status, active form, thinking level, owner, and blockers read-only.
 - Exclude deleted todos and match the TUI's rule that a completed-only snapshot has no open todo panel.

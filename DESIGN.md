@@ -282,6 +282,33 @@ The shell remains fixed to the window. Long-lived regions own their scroll:
 Pane headers, title/tabs, composer chrome, and status chrome should remain stable
 while their corresponding content scrolls. Avoid ambiguous nested scrolling.
 
+### 8.4 Editor work surfaces
+
+Long-lived, navigable work belongs in the primary workspace rather than in a
+modal simply because it was opened from another surface.
+
+Use an editor tab when the user is expected to inspect, navigate, edit, review,
+or repeatedly switch away from and back to the content. Current examples are:
+
+- the active conversation editor;
+- project/local file and media preview;
+- Source Control diff/review.
+
+Session tabs and editor tabs are different layers. Session tabs select the
+conversation/runtime. Editor tabs select the work surface shown inside that
+session/workspace. Selecting another session returns the active editor to the
+conversation, while workspace-scoped editor state may remain available as an
+inactive tab where its existing lifecycle permits it.
+
+When a stateful editor tab is merely switched away from, keep its mounted state
+when practical so drafts, scroll position, media playback state, and review
+output do not reset merely because focus moved to another editor.
+
+Do not open a modal for a document/diff surface that needs browser-like history,
+editor shortcuts, independent scrolling, or prolonged comparison. Closing an
+editor tab must move focus to a logical neighboring editor or back into the
+conversation when the editor strip disappears.
+
 ## 9. Panels and cards
 
 Do not wrap every section in a card.
@@ -463,6 +490,21 @@ Dialogs need:
 - obvious primary/secondary action ordering;
 - keyboard-safe focus behavior;
 - restrained shadow and backdrop.
+
+Reserve modal dialogs for bounded decisions or short configuration flows. A
+modal should block the workbench because the user must resolve or dismiss that
+decision before continuing, not merely because the content is visually large.
+
+In the WebView, prefer native `<dialog>.showModal()` for true modals when its
+behavior fits the product. Let the platform own focus containment, then add only
+the application lifecycle Pix actually needs: intentional initial focus,
+Escape/cancel semantics, backdrop dismissal where safe, and focus restoration to
+the invoker.
+
+Decision/configuration dialogs SHOULD use semantic forms when they have a natural
+default action. `Enter` should submit the primary action from ordinary form
+controls without requiring a pointer click; textarea Enter keeps its text-editing
+meaning.
 
 Avoid oversized modal padding and huge dialog titles.
 

@@ -51,8 +51,10 @@
 
   onMount(() => search?.focus());
 
-  function handleWindowClick(event: MouseEvent): void {
-    if (!selector || !(event.target instanceof Node) || selector.contains(event.target)) return;
+  function handleWindowPointerDown(event: PointerEvent): void {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-session-picker]")) return;
+    if (!selector || !(target instanceof Node) || selector.contains(target)) return;
     onClose();
   }
 
@@ -83,7 +85,7 @@
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
+<svelte:window onpointerdown={handleWindowPointerDown} onkeydown={handleWindowKeydown} />
 
 <div
   class="absolute top-[calc(100%-1px)] right-0 z-20 grid max-h-[min(480px,calc(100vh-82px))] w-[min(430px,calc(100vw-24px))] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
