@@ -27,16 +27,6 @@ const DEFAULT_ASK_USER_NOTIFICATION_MESSAGE = "{sessionName}";
 const DEFAULT_MAC_SOUND = "Glass";
 const TERMINAL_BELL_CONFIG_KEY = "terminalBell";
 const SOUND_CONFIG_KEY = "sound";
-const TELEGRAM_CONFIG_KEY = "telegram";
-const TELEGRAM_BOT_TOKEN_CONFIG_KEY = "botToken";
-const TELEGRAM_CHAT_ID_CONFIG_KEY = "chatId";
-const TELEGRAM_API_BASE = "https://api.telegram.org";
-
-type TelegramConfig = {
-	botToken?: string;
-	chatId?: string;
-};
-
 const TERM_PROGRAM_BUNDLE_IDS: Record<string, string> = {
 	Apple_Terminal: "com.apple.Terminal",
 	iTerm: "com.googlecode.iterm2",
@@ -122,47 +112,6 @@ export function readTerminalBellSoundConfig(configPath = getPiToolsSuiteUserConf
 	} catch {
 		return undefined;
 	}
-}
-
-export function readTerminalBellTelegramConfig(configPath = getPiToolsSuiteUserConfigPath()): TelegramConfig {
-	if (!existsSync(configPath)) return {};
-	try {
-		const parsed = parseJsonc(readFileSync(configPath, "utf-8")) as unknown;
-		if (!isRecord(parsed)) return {};
-		const terminalBell = parsed[TERMINAL_BELL_CONFIG_KEY];
-		if (!isRecord(terminalBell)) return {};
-		const telegram = terminalBell[TELEGRAM_CONFIG_KEY];
-		if (!isRecord(telegram)) return {};
-		const botToken = telegram[TELEGRAM_BOT_TOKEN_CONFIG_KEY];
-		const chatId = telegram[TELEGRAM_CHAT_ID_CONFIG_KEY];
-		return buildTelegramConfig(
-			typeof botToken === "string" ? botToken.trim() : undefined,
-			typeof chatId === "string" ? chatId.trim() : undefined,
-		);
-	} catch {
-		return {};
-	}
-}
-
-export function resolveTerminalBellTelegramConfig(configPath = getPiToolsSuiteUserConfigPath()): TelegramConfig {
-	const fromConfig = readTerminalBellTelegramConfig(configPath);
-	return buildTelegramConfig(
-		trimmed(process.env.PI_TERMINAL_BELL_TELEGRAM_BOT_TOKEN) ?? fromConfig.botToken,
-		trimmed(process.env.PI_TERMINAL_BELL_TELEGRAM_CHAT_ID) ?? fromConfig.chatId,
-	);
-}
-
-function buildTelegramConfig(botToken: string | undefined, chatId: string | undefined): TelegramConfig {
-	const config: TelegramConfig = {};
-	if (botToken) config.botToken = botToken;
-	if (chatId) config.chatId = chatId;
-	return config;
-}
-
-export function terminalBellTelegramEnabled(configPath = getPiToolsSuiteUserConfigPath()): boolean {
-	if (process.env.PI_TERMINAL_BELL_TELEGRAM === "0") return false;
-	const { botToken, chatId } = resolveTerminalBellTelegramConfig(configPath);
-	return Boolean(botToken && chatId);
 }
 
 export function terminalBellSoundEnabled(ctx: Pick<ExtensionContext, "hasUI">, configPath = getPiToolsSuiteUserConfigPath()): boolean {
@@ -333,40 +282,6 @@ function playAttentionSoundFor(context: Pick<ExtensionContext, "hasUI">): void {
 	spawnDetached("/usr/bin/afplay", [soundPath]);
 }
 
-function sendTelegramNotification(title: string, message: string): void {
-	if (process.env.PI_TERMINAL_BELL_TELEGRAM === "0") return;
-	const { botToken, chatId } = resolveTerminalBellTelegramConfig();
-	if (!botToken || !chatId) return;
-
-	// Telegram is delivered independently of the bundled desktop sound/notification
-	// gate, so it works even when terminalBell.sound is false. Compose a single text
-	// body from the already-rendered title/message used by desktop notifications.
-	const text = message ? `${title}\n${message}` : title;
-	const url = `${TELEGRAM_API_BASE}/bot${botToken}/sendMessage`;
-
-	try {
-		fetch(url, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				chat_id: chatId,
-				text,
-				disable_web_page_preview: true,
-			}),
-		}).then(
-			() => {
-				// Best-effort delivery; ignore the response body.
-			},
-			() => {
-				// Network/API failures must not affect the agent loop or suppress the
-				// terminal bell / desktop notification.
-			},
-		);
-	} catch {
-		// fetch may be unavailable or throw synchronously; ignore.
-	}
-}
-
 function notifySessionStopped(
 	context: NotificationContextSnapshot,
 	macActivationBundleId: string | undefined,
@@ -375,9 +290,6 @@ function notifySessionStopped(
 	const templateValues = context.templateValues;
 	const title = renderNotificationTemplate(notificationTitleTemplate(options.title), templateValues);
 	const renderedMessage = renderNotificationTemplate(options.message ?? process.env.PI_TERMINAL_BELL_NOTIFY_MESSAGE ?? DEFAULT_NOTIFICATION_MESSAGE, templateValues);
-
-	// Telegram is independent of the bundled desktop sound/notification gate.
-	sendTelegramNotification(title, renderedMessage);
 
 	if (!terminalBellNotificationsEnabled(context)) return;
 

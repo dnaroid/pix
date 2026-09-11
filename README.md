@@ -212,7 +212,7 @@ Pix uses Pi's model and authentication stores. Environment-based API keys and cr
 | Model-backed helpers | No | Review `promptEnhancer`, `autocomplete`, and `sessionTitle` in `pix.jsonc` | Each configured helper model needs credentials for its own provider; it need not use the main session provider. |
 | Ollama/Tavily web access | No | Use local Ollama without a cloud key, set `OLLAMA_API_KEY`/`TAVILY_API_KEY`, or run `/web-credentials` | Stored keys live in `~/.config/pi/pi-tools-suite-credentials.json` with mode `0600`. |
 | Context7 documentation skill | No | Export `CONTEXT7_API_KEY` | The skill fails before making a network request when the variable is absent. |
-| Telegram terminal bell | No | Configure `terminalBell.telegram` or `PI_TERMINAL_BELL_TELEGRAM_BOT_TOKEN` plus `PI_TERMINAL_BELL_TELEGRAM_CHAT_ID` | Used only for the optional terminal notification integration. |
+| Telegram task connector | No | Configure `telegramConnector.botToken` + `telegramConnector.chatId`, or `PIX_TELEGRAM_BOT_TOKEN` + `PIX_TELEGRAM_CHAT_ID` | Completion/question notifications; reply to continue the exact live session, or use `/new <task>` for a fresh session. |
 
 `pix install` reports whether these sources appear configured, but never displays, copies, or overwrites token values.
 

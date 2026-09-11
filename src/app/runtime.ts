@@ -35,6 +35,7 @@ const BUNDLED_QUESTION_EXTENSION_DIR = resolve(
 );
 const BUNDLED_SESSION_TITLE_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "session-title");
 const BUNDLED_TERMINAL_BELL_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "terminal-bell");
+const BUNDLED_TELEGRAM_CONNECTOR_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "telegram-connector");
 const PI_TOOLS_SUITE_SOURCE_DIR = resolve(
 	dirname(fileURLToPath(import.meta.url)),
 	"../..",
@@ -87,6 +88,10 @@ export function bundledSessionTitleExtensionPath(): string {
 
 export function bundledTerminalBellExtensionPath(): string {
 	return BUNDLED_TERMINAL_BELL_EXTENSION_DIR;
+}
+
+export function bundledTelegramConnectorExtensionPath(): string {
+	return BUNDLED_TELEGRAM_CONNECTOR_EXTENSION_DIR;
 }
 
 export function piToolsSuiteExtensionSourcePath(): string {
@@ -175,6 +180,7 @@ export function getBundledExtensionPaths(): string[] {
 		bundledQuestionExtensionPath(),
 		bundledSessionTitleExtensionPath(),
 		bundledTerminalBellExtensionPath(),
+		bundledTelegramConnectorExtensionPath(),
 	].filter(extensionEntryExists);
 }
 
@@ -183,6 +189,7 @@ export async function getBundledExtensionPathsAsync(): Promise<string[]> {
 		bundledQuestionExtensionPath(),
 		bundledSessionTitleExtensionPath(),
 		bundledTerminalBellExtensionPath(),
+		bundledTelegramConnectorExtensionPath(),
 	].map(async (extensionPath) => await extensionEntryExistsAsync(extensionPath) ? extensionPath : undefined));
 	return paths.filter((path): path is string => path !== undefined);
 }

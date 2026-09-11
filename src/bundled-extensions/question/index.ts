@@ -3,6 +3,7 @@ import { questionParameters, normalizeQuestionInput } from "./contract.js";
 import { renderQuestionCall, renderQuestionResult } from "./render.js";
 import { createCanceledQuestionResult, createQuestionToolResult, createSuccessfulQuestionResult } from "./result.js";
 import { runDesktopQuestionnaire, shouldUseDesktopQuestionBridge } from "./desktop.js";
+import { runRemoteQuestionnaire } from "./remote.js";
 import { runQuestionnaire } from "./tui.js";
 import type { QuestionToolInput, QuestionUiContext } from "./types.js";
 
@@ -20,8 +21,14 @@ export default function questionExtension(pi: ExtensionApiLike): void {
 		renderResult(result: any, _options: unknown, theme: any, context: { args?: Partial<QuestionToolInput> }) {
 			return renderQuestionResult(result, theme, context.args);
 		},
-		async execute(_toolCallId: string, params: QuestionToolInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: QuestionUiContext) {
+		async execute(_toolCallId: string, params: QuestionToolInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: QuestionUiContext & { sessionManager?: { getSessionId(): string } }) {
 			const questions = normalizeQuestionInput(params);
+			const sessionId = ctx.sessionManager?.getSessionId();
+			const remoteSelections = sessionId ? await runRemoteQuestionnaire(sessionId, questions, signal) : undefined;
+			if (remoteSelections !== undefined) {
+				if (remoteSelections === null) return createQuestionToolResult(createCanceledQuestionResult("user_canceled"), questions);
+				return createQuestionToolResult(createSuccessfulQuestionResult(questions, remoteSelections), questions);
+			}
 			if (!ctx.hasUI) return createQuestionToolResult(createCanceledQuestionResult("ui_unavailable", questions), questions);
 			const selections = shouldUseDesktopQuestionBridge(ctx)
 				? await runDesktopQuestionnaire(questions, ctx)

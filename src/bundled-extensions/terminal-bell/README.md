@@ -1,6 +1,7 @@
 # terminal-bell
 
-Bundled Pix extension that rings the terminal bell, optionally plays a sound, and can show a desktop notification when a session needs attention.
+Bundled Pix extension that rings the terminal bell, optionally plays a sound,
+and can show a desktop notification when a session needs attention.
 
 ## Config
 
@@ -9,17 +10,13 @@ Shared pi-tools-suite config (`~/.config/pi/pi-tools-suite.jsonc`):
 ```jsonc
 {
   "terminalBell": {
-    "sound": true,
-    "telegram": {
-      "botToken": "123456789:AA...your-bot-token",
-      "chatId": "123456789"
-    }
+    "sound": true
   }
 }
 ```
 
-- `terminalBell.sound: false` disables bundled bell sound and bundled notifications by default.
-- `terminalBell.telegram` forwards the same completion/error/question notifications to a Telegram chat. It is independent of `sound`, so it keeps working even when the desktop bell is muted. Both `botToken` and `chatId` must be set to enable it.
+- `terminalBell.sound: false` disables bundled bell sound and bundled
+  notifications by default.
 
 ## Environment variables
 
@@ -30,10 +27,8 @@ Shared pi-tools-suite config (`~/.config/pi/pi-tools-suite.jsonc`):
 - `PI_TERMINAL_BELL_DELAY_MS=<ms>` — idle delay before notifying.
 - `PI_TERMINAL_BELL_NOTIFY_TITLE=<template>` — notification title template.
 - `PI_TERMINAL_BELL_NOTIFY_MESSAGE=<template>` — notification message template.
-- `PI_TERMINAL_BELL_ASK_USER_NOTIFY_MESSAGE=<template>` — message used when Pi is waiting for a user answer.
-- `PI_TERMINAL_BELL_TELEGRAM=0` — force Telegram forwarding off (overrides config).
-- `PI_TERMINAL_BELL_TELEGRAM_BOT_TOKEN=<token>` — override `terminalBell.telegram.botToken`.
-- `PI_TERMINAL_BELL_TELEGRAM_CHAT_ID=<id>` — override `terminalBell.telegram.chatId`.
+- `PI_TERMINAL_BELL_ASK_USER_NOTIFY_MESSAGE=<template>` — message used when Pi
+  is waiting for a user answer.
 
 Platform-specific variables are still supported, including:
 
@@ -44,7 +39,8 @@ Platform-specific variables are still supported, including:
 
 ## Notification templates
 
-`PI_TERMINAL_BELL_NOTIFY_TITLE` and `PI_TERMINAL_BELL_NOTIFY_MESSAGE` support these placeholders:
+`PI_TERMINAL_BELL_NOTIFY_TITLE` and `PI_TERMINAL_BELL_NOTIFY_MESSAGE` support
+these placeholders:
 
 - `{sessionTitle}` — session name when available, otherwise short session id.
 - `{sessionName}` — session name only.
@@ -63,8 +59,10 @@ PI_TERMINAL_BELL_ASK_USER_NOTIFY_MESSAGE="{sessionName}"
 Retry behavior:
 
 - Intermediate automatic model retries do not trigger the stop notification.
-- If the session finally fails after all retries are exhausted, the notification message can include `{reason}`.
-- By default, exhausted-retry failures use the `Pix - error` title and the session name as the message body.
+- If the session finally fails after all retries are exhausted, the notification
+  message can include `{reason}`.
+- By default, exhausted-retry failures use the `Pix - error` title and the
+  session name as the message body.
 
 Default titles:
 

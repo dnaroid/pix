@@ -38,20 +38,23 @@ const ToolRendererConfig = Type.Object(
 // Terminal bell
 // ---------------------------------------------------------------------------
 
-const TerminalBellTelegramConfig = Type.Object(
-	{
-		botToken: Type.Optional(Type.String({ description: "Telegram bot token (from @BotFather) used to send completion/error/question notifications." })),
-		chatId: Type.Optional(Type.String({ description: "Telegram chat id that receives the notifications. Message @userinfobot to look yours up." })),
-	},
-	{ description: "Forward terminal-bell notifications to a Telegram chat. Independent of the bundled desktop sound gate." },
-);
-
 const TerminalBellConfig = Type.Object(
 	{
 		sound: Type.Optional(Type.Boolean({ description: "Play terminal bell sound on completion/error." })),
-		telegram: Type.Optional(TerminalBellTelegramConfig),
 	},
 	{ description: "Terminal bell configuration." },
+);
+
+const TelegramConnectorConfig = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean({ description: "Enable the Telegram task connector. Defaults to enabled when botToken and chatId are present." })),
+		botToken: Type.Optional(Type.String({ description: "Telegram Bot API token from @BotFather." })),
+		chatId: Type.Optional(Type.Union([
+			Type.String(),
+			Type.Integer(),
+		], { description: "Private Telegram chat id allowed to control Pix." })),
+	},
+	{ description: "Receive completion/question notifications and send follow-up or new-session tasks from Telegram." },
 );
 
 // ---------------------------------------------------------------------------
@@ -329,6 +332,7 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		lookupModel: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup." })),
 		lookupFallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered lookup model fallbacks tried after lookupModel." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
+		telegramConnector: Type.Optional(TelegramConnectorConfig),
 		commentChecker: Type.Optional(CommentCheckerConfig),
 		dcp: Type.Optional(DcpConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),

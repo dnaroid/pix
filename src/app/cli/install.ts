@@ -104,7 +104,7 @@ export function inspectPixOnboarding(homeDir = homedir(), env: NodeJS.ProcessEnv
 		opencodeAntigravityExists: pixInstallDeps.existsSync(join(opencodeConfigDir, "antigravity-accounts.json")),
 		webCredentialsConfigured: Boolean(env.OLLAMA_API_KEY?.trim() || env.TAVILY_API_KEY?.trim()) || jsonObjectHasEntries(webCredentialPath),
 		context7Configured: Boolean(env.CONTEXT7_API_KEY?.trim()),
-		telegramConfigured: Boolean(env.PI_TERMINAL_BELL_TELEGRAM_BOT_TOKEN?.trim() && env.PI_TERMINAL_BELL_TELEGRAM_CHAT_ID?.trim()),
+		telegramConfigured: Boolean(env.PIX_TELEGRAM_BOT_TOKEN?.trim() && env.PIX_TELEGRAM_CHAT_ID?.trim()),
 	};
 }
 
@@ -151,7 +151,7 @@ export function formatPixInstallNextSteps(homeDir = homedir(), state = inspectPi
 		"Optional integrations:",
 		`  ${state.webCredentialsConfigured ? "✓ Web credentials detected." : "○ Web search: use local Ollama without a key, or run /web-credentials for Ollama Cloud/Tavily."}`,
 		`  ${state.context7Configured ? "✓ Context7 API key detected." : "○ Context7 docs skill: export CONTEXT7_API_KEY."}`,
-		`  ${state.telegramConfigured ? "✓ Telegram terminal-bell credentials detected in the environment." : "○ Telegram bell: set terminalBell.telegram in Pix config or PI_TERMINAL_BELL_TELEGRAM_* env vars."}`,
+		`  ${state.telegramConfigured ? "✓ Telegram connector credentials detected in the environment." : "○ Telegram connector: set telegramConnector in tools config or PIX_TELEGRAM_BOT_TOKEN plus PIX_TELEGRAM_CHAT_ID."}`,
 		"  ○ Model-backed helpers: review promptEnhancer, autocomplete, and sessionTitle model refs; each provider needs its own credentials.",
 		"  ○ Voice: set dictation.language in Pix config. LSP: configure and trust servers under lsp.servers in tools config.",
 		"",
