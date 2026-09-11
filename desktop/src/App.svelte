@@ -4720,7 +4720,7 @@
 
 <svelte:head><title>Pix Desktop</title></svelte:head>
 
-<div class="grid h-full grid-rows-[36px_minmax(0,1fr)_36px] bg-background text-foreground max-[760px]:grid-rows-[36px_minmax(0,1fr)_32px]">
+<div class="grid h-full grid-rows-[36px_minmax(0,1fr)_28px] bg-background text-foreground">
   <header
     class="flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground"
     data-tauri-drag-region
@@ -4823,7 +4823,7 @@
     />
 
     <div class="relative flex min-h-0 min-w-0 flex-1">
-      <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
+      <main id="conversation-workspace" class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
         {#if errorMessage}
           <ErrorBanner
             message={errorMessage}

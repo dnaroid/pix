@@ -883,13 +883,13 @@
   </nav>
 
   {#if !collapsed}
-    <div class="grid min-w-0 flex-1 grid-rows-[40px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
+    <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
       <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome px-3">
         <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
           <span class="min-w-0 truncate text-[11px] text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
           <button
-            class="ml-auto flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground transition hover:brightness-110 active:brightness-95 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            class="ml-auto flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
             onclick={openCreate}
             disabled={!workspace || busy}
@@ -976,13 +976,13 @@
 
                     <div
                       class={[
-                        "min-h-8 space-y-1 rounded-md p-0.5 transition-colors",
-                        draggedTaskId && taskDropTarget?.type === group.type ? "bg-panel-hover/50" : "",
+                        "min-h-8 divide-y divide-sidebar-border/60 transition-colors",
+                        draggedTaskId && taskDropTarget?.type === group.type ? "bg-panel-hover/40" : "",
                       ]}
                       role="list"
                     >
                       {#if groupTasks.length === 0 && !isDropPlaceholder(group.type, null, "after")}
-                        <div class="pointer-events-none grid h-8 place-items-center rounded-md border border-dashed border-sidebar-border/70 text-[11px] text-muted-foreground/55">
+                        <div class="pointer-events-none grid h-8 place-items-center border border-dashed border-sidebar-border/70 text-[11px] text-muted-foreground/55">
                           Empty
                         </div>
                       {/if}
@@ -992,7 +992,7 @@
                         {#if isDropPlaceholder(group.type, task.id, "before")}
                           <div
                             data-task-drop-placeholder
-                            class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
+                            class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
                             style:min-height={`${draggedTaskHeight}px`}
                             role="presentation"
                           >Move to {group.label}</div>
@@ -1002,9 +1002,9 @@
                           data-task-card
                           data-task-id={task.id}
                           class={[
-                            "group relative rounded-md bg-panel-hover/65 px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-panel-hover",
+                            "group relative px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-panel-hover",
                             draggedTaskId === task.id ? "border border-dashed border-primary/35 bg-primary/5 opacity-25" : "",
-                            revealedTaskId === task.id ? "bg-panel-selected ring-1 ring-primary/30" : "",
+                            revealedTaskId === task.id ? "border-l-2 border-l-primary bg-panel-selected" : "",
                           ]}
                           aria-label={taskLabel}
                         >
@@ -1089,7 +1089,7 @@
                         {#if isDropPlaceholder(group.type, task.id, "after")}
                           <div
                             data-task-drop-placeholder
-                            class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
+                            class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
                             style:min-height={`${draggedTaskHeight}px`}
                             role="presentation"
                           >Move to {group.label}</div>
@@ -1099,7 +1099,7 @@
                       {#if isDropPlaceholder(group.type, null, "after")}
                         <div
                           data-task-drop-placeholder
-                          class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
+                          class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
                           style:min-height={`${draggedTaskHeight}px`}
                           role="presentation"
                         >Move to {group.label}</div>
@@ -1298,7 +1298,7 @@
 
   {#if editorOpen && !collapsed}
     <div
-      class="absolute inset-y-0 right-0 left-12 z-20 grid min-h-0 grid-rows-[40px_minmax(0,1fr)] border-r border-sidebar-border bg-sidebar"
+      class="absolute inset-y-0 right-0 left-12 z-20 grid min-h-0 grid-rows-[36px_minmax(0,1fr)] border-r border-sidebar-border bg-sidebar"
       role="dialog"
       aria-modal="true"
       aria-label={editingTaskId ? "Edit task" : "Add task"}

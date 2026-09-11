@@ -72,7 +72,7 @@
     {@const pulsing = running || (activity?.activeSubagents ?? 0) > 0}
     <div
       class={[
-        "group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-md border transition-colors max-[760px]:basis-[230px]",
+        "group relative -mb-px h-8 min-w-[120px] max-w-[240px] flex-[0_1_220px] overflow-hidden rounded-t-sm border transition-colors max-[760px]:basis-[200px]",
         active
           ? "border-border border-b-background bg-background"
           : "border-transparent hover:bg-chrome-hover",
@@ -120,7 +120,7 @@
   {/each}
 
   {#if sessions.length === 0 && allSessionsCount > 0}
-    <div class="group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-md border border-transparent transition-colors hover:bg-chrome-hover max-[760px]:basis-[230px]">
+    <div class="group relative -mb-px h-8 min-w-[120px] max-w-[240px] flex-[0_1_220px] overflow-hidden rounded-t-sm border border-transparent transition-colors hover:bg-chrome-hover max-[760px]:basis-[200px]">
       <button
         use:titlebarDrag
         class="flex h-full w-full items-center gap-2.5 bg-transparent pt-0 px-3.5 pb-1.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"

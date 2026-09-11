@@ -103,7 +103,7 @@
 
 </script>
 
-<footer class="flex min-w-0 items-center gap-3 border-t border-border bg-window-titlebar px-[22px] text-[11px] text-muted-foreground max-[760px]:px-3">
+<footer class="flex h-full min-w-0 select-none items-center gap-2 border-t border-border bg-chrome px-2.5 text-[11px] text-muted-foreground">
   <div class={[
     "flex items-center gap-2",
     status === "error" && "text-destructive",
@@ -115,7 +115,7 @@
     <span class="max-[760px]:hidden">{connectionLabel(status)}</span>
   </div>
 
-  <div class="flex min-w-0 items-center gap-3">
+  <div class="flex min-w-0 items-center gap-2">
     {#if modelThinking.currentModel}
       <button
         class={[

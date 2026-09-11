@@ -16,6 +16,8 @@ bundled with the frontend skill at:
 
 The application is a compact desktop productivity tool.
 
+Do not design pages. Design a window, panes, commands, and transient surfaces.
+
 Its visual model is a strict modern **chat/IDE workbench**: conversation,
 technical output, navigation, editor-like input, and runtime chrome should feel
 like one integrated desktop environment rather than separate chat and dashboard
@@ -225,6 +227,61 @@ Prefer persistent desktop regions:
 
 Keep the application window itself stable. Prefer scrolling inside content regions rather than allowing the entire desktop shell to behave like a web page.
 
+### 8.1 Desktop application model
+
+Treat the product as a stable workbench:
+
+```text
+window
+├─ titlebar / session tabs
+├─ activity rail + optional navigation pane
+├─ primary workspace
+│  ├─ transcript/document surface
+│  └─ anchored composer/editor
+├─ optional contextual inspector
+└─ compact status chrome
+```
+
+Transient surfaces (menus, context menus, pickers, popovers, dialogs, drag
+previews) live above this workbench rather than reshaping it.
+
+Every substantial surface must be classifiable as either:
+
+- **attached** — persistent workbench geometry with shared edges and separators;
+- **floating** — transient/elevated UI where radius and shadow communicate layer.
+
+Attached panes MUST NOT use card geometry merely for decoration. In particular,
+sidebar, workspace, composer region, inspector, titlebar/tab strip, and status bar
+should feel structurally connected.
+
+### 8.2 Desktop density scale
+
+Prefer a small repeated geometry vocabulary:
+
+- titlebar/session tabs: `36px`;
+- compact pane headers/toolbars: `32–36px`;
+- status bar: approximately `28px`;
+- compact icon actions: `24–28px`;
+- navigator/menu/tree rows: `24–30px`;
+- ordinary desktop form controls: `28–32px` by default;
+- composed modal form controls may reach `36px` when readability warrants it.
+
+These are Pix defaults rather than universal hit-target requirements. The goal is
+consistent desktop density, not making every control the same size.
+
+### 8.3 Scroll ownership
+
+The shell remains fixed to the window. Long-lived regions own their scroll:
+
+- transcript/editor;
+- file/project explorer;
+- task/source-control/registry panes;
+- inspectors;
+- menus/pickers when their contents exceed their bounds.
+
+Pane headers, title/tabs, composer chrome, and status chrome should remain stable
+while their corresponding content scrolls. Avoid ambiguous nested scrolling.
+
 ## 9. Panels and cards
 
 Do not wrap every section in a card.
@@ -238,16 +295,27 @@ Use a card/panel only when it provides one of these functions:
 
 Otherwise use spacing, typography, and separators.
 
-Default panel recipe:
+Default **attached workbench pane** recipe:
 
 ```text
-bg-card
-text-card-foreground
-border border-border
-rounded-xl
+bg-panel
+text-foreground
+border-border on the shared pane edge that needs separation
+no outer shadow
+no outer radius where the pane attaches to other workbench regions
 ```
 
-Add `shadow-xs` only when the surface needs slight lift.
+Default **floating/contained** recipe when genuine elevation/containment is needed:
+
+```text
+bg-popover text-popover-foreground
+border border-border
+rounded-md or rounded-lg
+shadow-xs / shadow-md only when elevation is semantically meaningful
+```
+
+Do not use `rounded-xl` as the generic answer for grouping. Add a shadow only
+when the surface needs actual lift.
 
 ## 10. Buttons and actions
 
@@ -299,6 +367,54 @@ Selected state can be communicated with:
 - restrained primary indicator.
 
 Do not flood active navigation rows with primary unless the local design specifically requires it.
+
+Keyboard focus and selected/active state are separate and MUST remain visually
+distinguishable. Selection persists when focus leaves a selected tab/list/tree
+item; focus indicates where keyboard input currently acts.
+
+For true composite widgets:
+
+- `Tab` / `Shift+Tab` move between meaningful components;
+- arrow keys move inside tablists, menus, trees, grids, radio groups, and similar
+  composites;
+- `Home` / `End` move to the first/last item where conventional;
+- `Escape` dismisses the topmost transient surface where expected;
+- closing/removing the focused object moves focus to a logical neighbor;
+- dismissing a transient surface restores focus to its invoker when possible.
+
+Do not add ARIA composite roles without implementing their keyboard behavior.
+
+### 12.1 Commands and context actions
+
+Choose command surfaces intentionally:
+
+- frequent local command → toolbar/stable pane action;
+- contextual command → context menu plus optional hover accelerator;
+- global/frequent command → command picker/menu and shortcut;
+- secondary/rare command → menu/overflow;
+- destructive command → destructive semantics, with confirmation or undo where
+  the risk warrants it.
+
+Hover-only UI must not be the only path to a critical command. Prefer one command
+definition that can feed toolbar, menu, context-menu, and shortcut surfaces.
+
+### 12.2 Resizable panes and spatial memory
+
+Persistent secondary panes such as sidebars and inspectors SHOULD be resizable
+when width materially affects repeated work.
+
+Resizable panes need:
+
+- sensible minimum and maximum widths;
+- a separator hit target wider than the visible one-pixel divider;
+- pointer resizing;
+- keyboard resizing when the separator is focusable;
+- visible hover/focus affordance;
+- best-effort persistence of the preferred size;
+- clamping restored size to current window constraints.
+
+At narrow widths, collapse or overlay secondary panes before crushing the primary
+workspace.
 
 ## 13. Dialogs, popovers, and menus
 
@@ -410,6 +526,20 @@ Dark mode SHOULD favor:
 
 Never fix a dark-mode problem by adding a one-off hard-coded color when a semantic token can express the role.
 
+## 18.1 Platform-aware desktop behavior
+
+Pix uses one cross-platform visual identity, but platform interaction conventions
+remain part of the product contract.
+
+- Keep native minimize/maximize/close controls where practical.
+- Maintain real draggable titlebar space that does not overlap buttons/inputs.
+- On macOS, reserve and verify traffic-light geometry in the actual Tauri window.
+- Prefer native/transparent/overlay titlebar approaches when they satisfy the
+  requirement; a fully custom titlebar can sacrifice system window behavior.
+- Use `Command` conventions on macOS and `Control` conventions on Windows/Linux
+  for primary shortcuts.
+- Do not intercept system/WebView shortcuts without a strong product reason.
+
 ## 19. Legacy CSS and migration
 
 Existing CSS does not need a wholesale rewrite.
@@ -420,6 +550,19 @@ When touching existing UI:
 - migrate visual values to semantic tokens when it improves consistency;
 - use Tailwind for new UI or substantial component changes;
 - do not perform unrelated style migrations.
+
+For a broad migration from web-like UI to native desktop behavior, use this order:
+
+1. classify attached vs floating surfaces;
+2. fix shell and scroll ownership;
+3. normalize geometry/density;
+4. fix focus lifecycle and composite keyboard behavior;
+5. consolidate commands/context actions;
+6. add resize/collapse persistence to useful panes;
+7. flatten unnecessary cards/radii/shadows;
+8. tune palette and micro-polish last.
+
+This migration order is preferred over a cosmetic palette-only redesign.
 
 ## 20. Design review questions
 
@@ -435,3 +578,7 @@ Before considering a UI task complete, ask:
 8. Are hover, focus-visible, disabled, loading, and error states covered where relevant?
 9. Does the narrow desktop window remain usable?
 10. Did I avoid redesigning unrelated UI?
+11. Are focus and selected state distinct, and does focus return somewhere logical after closing/removing UI?
+12. Are important contextual commands reachable without hover alone?
+13. Do resizable/secondary panes preserve the primary workspace and useful spatial memory?
+14. Does each large region clearly read as attached workbench geometry or intentional floating UI?

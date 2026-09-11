@@ -844,7 +844,7 @@
 
 <svelte:window onresize={resizeComposer} onkeydown={handleWindowKeydown} />
 
-<div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-2"}>
+<div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-1.5"}>
 {#if slashMenuOpen}
   <div
     bind:this={slashListbox}
@@ -928,8 +928,8 @@
 
 <form
   class={[
-    "overflow-hidden rounded-lg border bg-panel-strong shadow-none focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20",
-    dragActive || projectPathDragActive ? "border-ring ring-2 ring-ring/30" : "border-input",
+    "overflow-hidden rounded-md border bg-panel-strong focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/25",
+    dragActive || projectPathDragActive ? "border-ring ring-1 ring-ring/40" : "border-input",
   ]}
   bind:this={composerForm}
   data-pix-project-path-drop-target="true"
