@@ -15,7 +15,8 @@ import {
 } from "./command-host.js";
 import { getIdleRuntime } from "./command-runtime.js";
 
-const GIT_ASSISTANT_TIMEOUT_MS = 45_000;
+const GIT_REVIEW_TIMEOUT_MS = 120_000;
+const GIT_COMMIT_MESSAGE_TIMEOUT_MS = 45_000;
 const GIT_REVIEW_MAX_TOKENS = 4_096;
 const GIT_COMMIT_MESSAGE_MAX_TOKENS = 768;
 const GIT_DIFF_MAX_CHARS = 200_000;
@@ -267,7 +268,8 @@ export async function generateGitAssistantText(
 ): Promise<string> {
 	const normalizedDiff = diff.trim();
 	if (!normalizedDiff) throw new Error("Git diff is empty");
-	const signal = AbortSignal.timeout(GIT_ASSISTANT_TIMEOUT_MS);
+	const timeoutMs = kind === "review" ? GIT_REVIEW_TIMEOUT_MS : GIT_COMMIT_MESSAGE_TIMEOUT_MS;
+	const signal = AbortSignal.timeout(timeoutMs);
 	const modelRuntime = runtime.services.modelRuntime;
 	await modelRuntime.refresh({ signal });
 
@@ -314,7 +316,7 @@ export async function generateGitAssistantText(
 					maxRetryDelayMs: 0,
 					maxRetries: 0,
 					maxTokens,
-					timeoutMs: GIT_ASSISTANT_TIMEOUT_MS,
+					timeoutMs,
 				},
 			);
 			for await (const event of stream) {

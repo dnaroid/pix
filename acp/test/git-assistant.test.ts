@@ -98,3 +98,31 @@ test("Git assistant timeout includes ModelRuntime initialization", async () => {
 	assert.ok(Date.now() - startedAt < 1_000, "runtime initialization should be bounded by the request timeout");
 });
 
+test("Git assistant gives code review more time than commit-message generation", async () => {
+	const timeoutValues: number[] = [];
+	const assistant = createGitAssistant({
+		createModelRuntime: async () => ({
+			getModel: (provider: string, modelId: string) => ({ provider, id: modelId, maxTokens: 4_096 }),
+			refresh: async () => {},
+			streamSimple: (_model: unknown, _context: unknown, options: { timeoutMs?: number }) => {
+				timeoutValues.push(options.timeoutMs ?? 0);
+				return (async function* () {
+					yield { type: "text_delta", delta: "ok" };
+				})();
+			},
+		}) as never,
+		loadModelRef: () => "provider/model",
+	});
+
+	for (const kind of ["review", "commit-message"] as const) {
+		await assistant({
+			cwd: "/tmp/project",
+			kind,
+			diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
+			signal: new AbortController().signal,
+		});
+	}
+
+	assert.deepEqual(timeoutValues, [120_000, 45_000]);
+});
+

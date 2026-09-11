@@ -5,7 +5,8 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { parse as parseJsonc } from "jsonc-parser";
 import { parseModelRef } from "./pix-settings.js";
 
-const GIT_ASSISTANT_TIMEOUT_MS = 45_000;
+const GIT_REVIEW_TIMEOUT_MS = 120_000;
+const GIT_COMMIT_MESSAGE_TIMEOUT_MS = 45_000;
 const GIT_REVIEW_MAX_TOKENS = 4_096;
 const GIT_COMMIT_MESSAGE_MAX_TOKENS = 768;
 const DEFAULT_GIT_REVIEW_MODEL = "openai-codex/gpt-5.6-luna:medium";
@@ -67,7 +68,8 @@ export function createGitAssistant(options: CreateGitAssistantOptions = {}): Git
 		const modelRefs = options.loadModelRef
 			? [(options.loadModelRef(cwd, kind) ?? "").trim()].filter(Boolean)
 			: loadGitAssistantModelRefs(cwd, kind);
-		const timeoutMs = options.timeoutMs ?? GIT_ASSISTANT_TIMEOUT_MS;
+		const timeoutMs = options.timeoutMs
+			?? (kind === "review" ? GIT_REVIEW_TIMEOUT_MS : GIT_COMMIT_MESSAGE_TIMEOUT_MS);
 		const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
 		const runtime = await getRuntime(requestSignal);
 		const systemPrompt = kind === "review" ? REVIEW_SYSTEM_PROMPT : COMMIT_MESSAGE_SYSTEM_PROMPT;

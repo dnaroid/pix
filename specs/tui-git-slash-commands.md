@@ -38,6 +38,7 @@ Expose Pix's existing Git review and commit-message helper workflows directly in
 - TUI Git helpers intentionally reuse the existing `desktop.git` configuration keys for compatibility: `reviewModelRef` + `reviewFallbackModels`, and `commitMessageModelRef` + `commitMessageFallbackModels`. The namespace name is legacy; both Desktop and TUI consume these values. `[confirmed by code: src/app/commands/command-git-actions.ts, acp/src/acp/git-assistant.ts]`
 - Project `.pi/pix.jsonc` values override user `~/.config/pi/pix.jsonc` values. An omitted project fallback array inherits the user fallback chain; an explicitly configured empty array clears it. Candidate refs are de-duplicated in order. `[confirmed by code]` `[confirmed by tests: tests/command-git-actions.test.ts]`
 - Defaults remain `openai-codex/gpt-5.6-luna:medium` for review and `openai-codex/gpt-5.6-luna:minimal` for commit-message generation. `[confirmed by code: src/default-pix-config.ts, src/app/commands/command-git-actions.ts]`
+- Model execution uses a longer default deadline for code review than for commit-message generation: review gets 120 seconds, while commit-message generation remains at 45 seconds. Desktop ACP and TUI use the same split. `[confirmed by code: acp/src/acp/git-assistant.ts, src/app/commands/command-git-actions.ts]`
 
 ## Non-goals
 
