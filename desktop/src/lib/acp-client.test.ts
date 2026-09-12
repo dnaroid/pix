@@ -75,6 +75,46 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("carries a draft model override only when the UI selected one", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const creating = client.newSession("/workspace", {
+      modelRef: "openai-codex/gpt-5.6-sol",
+      thinkingLevel: "high",
+    });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "session/new",
+      params: {
+        cwd: "/workspace",
+        _meta: {
+          "pix.lazyRuntime": true,
+          "pix.draftModel": "openai-codex/gpt-5.6-sol",
+          "pix.draftThinking": "high",
+        },
+      },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { sessionId: "new-draft" } });
+    await expect(creating).resolves.toEqual({ sessionId: "new-draft" });
+    await client.dispose();
+  });
+
+  it("requests sessionless config options for a Desktop draft", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const loading = client.draftConfig("/workspace");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/draft_config",
+      params: { cwd: "/workspace" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { configOptions: [] } });
+    await expect(loading).resolves.toEqual({ configOptions: [] });
+    await client.dispose();
+  });
+
   it("routes Desktop enhance, import, and request-history helpers through private ACP methods", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

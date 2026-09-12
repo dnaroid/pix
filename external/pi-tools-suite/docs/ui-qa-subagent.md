@@ -1,4 +1,4 @@
-# Browser QA sub-agent specification
+# UI QA sub-agent specification
 
 ## Type
 
@@ -10,36 +10,49 @@ Active implemented contract.
 
 ## Goal
 
-Provide a cheap, fast `browser-qa` async-subagent that reproduces browser bugs
-and proves fixes with deterministic assertions plus screenshot, video, and trace
-evidence. Its ranked `models` list prefers `zai/glm-5.3-flash`, then
+Provide a cheap, fast `ui-qa` async-subagent that reproduces user-visible bugs
+and proves fixes across browser/web UI, terminal/TUI applications, and native
+desktop GUIs. Browser QA keeps deterministic assertions plus screenshot, video,
+and trace evidence through the existing trusted runner; native/TUI QA uses a
+real PTY or deterministic app/platform UI driver and retains inspectable
+captures. Its ranked `models` list prefers `zai/glm-5.3-flash`, then
 `openai-codex/gpt-5.6-luna`, filtered by the active preset's model pool and
 confirmed runtime image support.
 
 ## Inline agent workflow and skill isolation
 
-- All operating instructions, flow contracts, scenario-design guidance, and
-  auth-scaffolding rules live in `src/async-subagents/agents/browser-qa.md`.
+- All operating instructions, backend-selection rules, browser flow contracts,
+  native/TUI guidance, and auth-scaffolding rules live in
+  `src/async-subagents/agents/ui-qa.md`.
   Its body becomes the QA child's `promptAppend` through the shared agent
   loader. Parent and router catalogs include only its short `description`.
-- Runner code, vendor dependencies/licenses, and optional JSONC examples live
-  under `src/async-subagents/agents/browser-qa/`; none is a discoverable skill.
+- The capability-first runner lives under
+  `src/async-subagents/agents/ui-qa/`, with browser, PTY/TUI, and macOS
+  accessibility backends. Browser vendor dependencies/licenses and optional
+  legacy JSONC examples remain under `agents/browser-qa/`; none is a
+  discoverable skill.
 - Sub-agent processes disable normal extension discovery, then always load the
   suite's model-tools extension. They load the Antigravity provider extension
   only when an Antigravity model is explicitly selected.
 - A type profile may declare `isolatedSkills`. Spawning that profile adds
   `--no-skills` followed by one explicit `--skill` per configured path.
-- `browser-qa` always disables normal skill discovery and filters skill flags
+- `ui-qa` always disables normal skill discovery and filters skill flags
   out of `extraArgs`, even without configured skills. It no longer injects a
   mandatory QA skill. Explicitly configured skills are optional additions.
-- The launcher sets `PI_BROWSER_QA_RUNNER` to the absolute installed runner path,
-  replacing inherited values, and strips it from ordinary child environments.
-  QA invokes `node "$PI_BROWSER_QA_RUNNER"` without guessing paths from cwd.
+- Explicit legacy `browser-qa` tasks normalize to `ui-qa`; a project-local
+  `browser-qa.md` profile override is migrated onto the canonical `ui-qa`
+  profile during config loading. Browser runner resources keep their historical
+  `browser-qa/` directory because that is a backend path, not a role name.
+- The launcher sets `PI_UI_QA_RUNNER` to the absolute capability-first runner
+  and `PI_BROWSER_QA_RUNNER` to its trusted browser backend, replacing inherited
+  values and stripping both from ordinary children. QA uses the unified runner
+  for backend probe/run and the browser runner directly only for credential
+  profile discovery or form-auth scaffolding.
 - Model-only profile overrides inherit the workflow. An explicit profile
   `promptAppend` replaces the body like any other agent profile; it is not an
   immutable security boundary. Runtime protections remain in the runner.
 
-## Authentication contract
+## Browser authentication contract
 
 - Public browser QA requires no auth profile and does not create or require
   `.pi/qa_auth.jsonc`. Its explicit base URL supplies the one exact allowed
@@ -71,7 +84,55 @@ confirmed runtime image support.
   file, and redacted reason. The parent asks the user to update the file and
   reruns; there is no `/qa-auth` command.
 
-## QA execution contract
+## Native/TUI execution contract
+
+- The QA target must be the actual user-facing TUI or desktop application named
+  by the task. Repository tests, snapshots, source inspection, or a different
+  CLI/web surface may support discovery but cannot substitute for requested UI
+  execution.
+- The launcher creates a private `ui-qa/` workspace under the owning agent
+  directory. Native/TUI transcripts, captures, screenshots, and small temporary
+  driver artifacts stay there and are removed with the sub-agent run.
+- Terminal/TUI verification is selected from `target.command` and drives the
+  shipping interactive program through the bundled PTY plus headless ANSI/VT
+  backend. Non-interactive stdout from another CLI path is not a TUI verification.
+- Native desktop verification is selected from `target.application`. The
+  bundled macOS accessibility/window backend is used when its required
+  permissions are already available; unsupported platforms or missing
+  capabilities return `BLOCKED`. The agent must not install UI automation
+  dependencies, change OS privacy/accessibility permissions, disable sandboxing,
+  or operate unrelated user windows.
+- Pass/fail requires a deterministic product-visible oracle such as terminal
+  content/state, accessibility/app-driver control state, window/dialog state,
+  visible copy, enabled/checked/value state, or another explicit application
+  result. Screenshots explain the result but are not the sole oracle.
+- When no safe deterministic PTY/GUI control path is available, the correct
+  result is `BLOCKED`; static tests are not promoted to UI QA evidence.
+- Cleanup is ownership-scoped: terminate only the PTY/session/app/driver process
+  created by the run, never all processes with a matching application name.
+
+## Unified capability-first runner contract
+
+- One private JSONC flow under the owning agent's `ui-qa/flows/` declares
+  exactly one browser URL, TUI command, or desktop application target. `probe`
+  reports deterministic candidate capabilities and selects the matching backend;
+  `run` executes that same bounded flow.
+- Browser execution adapts the unified target and steps to the existing trusted
+  browser runner, preserving its auth, origin, evidence, and cleanup boundary.
+- TUI execution launches only a bounded project-local/package-runtime contract
+  through a real PTY, models ANSI/VT alternate-screen state with a headless
+  terminal, and supports text, cursor, process, resize, stability, and capture
+  assertions.
+- On macOS, desktop execution uses a bundled compiled Accessibility/CGWindow
+  helper for semantic window/control actions, state assertions, accessibility
+  snapshots, and screenshots. Explicit PID lookup must observe GUI processes
+  that register after the helper starts. Unsupported platforms or missing OS
+  permissions return a structured `BLOCKED` result.
+- Results normalize selection rationale, assertions, observations, and typed
+  artifact groups across all backends. Every runner/app/helper process has a
+  bounded deadline and cleanup is limited to processes launched by that run.
+
+## Browser backend execution contract
 
 - A model-authored QA flow is declarative JSONC, not executable JavaScript. The
   trusted runner implements a bounded set of navigation, interaction,
@@ -80,10 +141,11 @@ confirmed runtime image support.
 - Target discovery is a bounded preflight, not an open-ended research task. The
   sub-agent invokes the runner within 45 seconds or returns `BLOCKED`; it does
   not spend the full launcher budget reading source or probing prerequisites.
-- The launcher injects `PI_SUBAGENT_AGENT_DIR`, pre-creates a private
-  `browser-qa/flows/` workspace, and clears stale browser QA files when an agent
-  id is reused. The runner validates the directory's project/type metadata and
-  refuses flows outside it; the model cannot select a shared evidence root.
+- The launcher injects `PI_SUBAGENT_AGENT_DIR`, pre-creates private `ui-qa/` and
+  `browser-qa/flows/` workspaces, and clears stale UI/browser QA files when an
+  agent id is reused. The runner validates the directory's project/type
+  metadata and refuses flows outside it; the model cannot select a shared
+  evidence root.
 - The runner owns browser lifecycle, origin checks, auth application, tracing,
   screenshots, video finalization, and redacted result output. Before retaining
   a trace it removes network/non-image resource entries, redacts configured and
@@ -113,7 +175,7 @@ confirmed runtime image support.
 
 ## Reliability and shutdown contract
 
-- The built-in `browser-qa` profile has a 300-second wall-clock budget unless
+- The built-in `ui-qa` profile has a 300-second wall-clock budget unless
   the caller explicitly supplies a task or spawn timeout. This bounds model
   stalls as well as browser work.
 - The trusted runner has its own bounded lifecycle. Browser launch, context
@@ -139,23 +201,30 @@ confirmed runtime image support.
 
 ## Related files
 
-- `external/pi-tools-suite/src/async-subagents/agents/browser-qa.md`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
 - `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/browser-qa/scripts/browser-qa-runner.mjs`
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.e2e.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-desktop.e2e.test.ts`
 - `external/pi-tools-suite/test/async-subagents/selection-e2e.test.ts`
 
 ## Acceptance criteria
 
-1. `browser-qa` resolves to the intended model/fallback and its inline Markdown
-   workflow, and its isolated child process can register the configured
+1. `ui-qa` resolves to the intended model/fallback and its inline Markdown
+   workflow; explicit legacy `browser-qa` requests resolve to it, and its
+   isolated child process can register the configured
    model provider.
 2. Default QA spawn args contain `--no-skills` but no `--skill`. The child
-   receives the full workflow in its initial prompt and can invoke the bundled
-   runner through `PI_BROWSER_QA_RUNNER` from an unrelated project directory.
+   receives the full workflow in its initial prompt and can invoke the unified
+   runner through `PI_UI_QA_RUNNER`, plus the credential-owning browser backend
+   through `PI_BROWSER_QA_RUNNER`, from an unrelated project directory.
    Optional configured skills still load; ordinary profiles retain existing
    skill discovery behavior and do not receive QA-only environment paths.
 3. Auth profile listing and all error output are redacted; model-authored input
@@ -164,8 +233,9 @@ confirmed runtime image support.
    selection, all auth modes, fail-closed origins, path/mode hardening, private
    empty-template creation only on an explicit auth request, non-executable
    flows, and successful redacted evidence creation.
-5. Browser QA flows/evidence live only inside the owning sub-agent directory;
-   deleting the run removes them while persistent auth config/state remains.
+5. Native/TUI evidence lives under the owning agent's `ui-qa/` workspace and
+   browser flows/evidence under its browser-backend `browser-qa/` workspace;
+   deleting the run removes both while persistent auth config/state remains.
 6. Runner tests prove that network activity and visible loading indicators are
    awaited, persistent loading fails the flow, visible actions retain a stable
    500 ms video interval, and context-wide click/drag video visualization is
@@ -175,7 +245,15 @@ confirmed runtime image support.
 8. Timeout tests identify the last browser stage, launcher progress remains
    available when full RPC logging is disabled, and process-tree tests prove a
    descendant is terminated without signalling unrelated processes.
-9. Suite tests/typecheck, host checks, and suite sync pass.
+9. TUI/native instructions require a real PTY/app driver, deterministic
+   product-visible oracles, scoped cleanup, and a `BLOCKED` result when safe
+   automation is unavailable rather than substituting source/unit tests.
+10. Suite tests/typecheck, host checks, and suite sync pass.
+11. Unified runner tests cover deterministic backend selection, real PTY screen
+    state and scoped cleanup, unsafe launch/path rejection, timeout bounds, and
+    platform blockers; the opt-in macOS E2E launches a real AppKit window,
+    semantically activates its control, and retains accessibility/screenshot
+    evidence.
 
 ## Real-browser regression test
 

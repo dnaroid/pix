@@ -1,6 +1,6 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
-import { clampThinkingLevel, modelThinkingConfigState } from "./model-thinking";
+import { applyLocalModelThinkingSelection, clampThinkingLevel, modelThinkingConfigState } from "./model-thinking";
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -66,5 +66,19 @@ describe("model + thinking config", () => {
     expect(clampThinkingLevel("high", ["off", "minimal", "low", "medium"])).toBe("medium");
     expect(clampThinkingLevel("xhigh", ["off", "minimal", "medium", "high", "max"])).toBe("max");
     expect(clampThinkingLevel("medium", ["off"])).toBe("off");
+  });
+
+  it("updates model and thinking locally for an unmaterialized draft", () => {
+    const updated = applyLocalModelThinkingSelection(
+      configOptions,
+      "openai-codex/gpt-5.6-luna",
+      "medium",
+    );
+    const state = modelThinkingConfigState(updated);
+
+    expect(state.currentModel?.ref).toBe("openai-codex/gpt-5.6-luna");
+    expect(state.currentThinking).toBe("medium");
+    expect(state.currentThinkingLevels).toEqual(["off", "minimal", "low", "medium"]);
+    expect(modelThinkingConfigState(configOptions).currentModel?.ref).toBe("openai-codex/gpt-5.6-sol");
   });
 });

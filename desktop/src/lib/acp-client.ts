@@ -67,6 +67,11 @@ export interface ForkSessionResult {
   readonly selectedText?: string;
 }
 
+export interface DraftSessionConfig {
+  readonly modelRef: string;
+  readonly thinkingLevel: string;
+}
+
 export type UserMessageAction = "copy" | "undo";
 
 export interface UserMessageActionResult {
@@ -228,12 +233,22 @@ export class AcpClient {
     return this.request("session/list", { cwd });
   }
 
-  newSession(cwd: string): Promise<NewSessionResponse> {
+  newSession(cwd: string, draftConfig?: DraftSessionConfig): Promise<NewSessionResponse> {
     return this.request("session/new", {
       cwd,
       mcpServers: [],
-      _meta: { "pix.lazyRuntime": true },
+      _meta: {
+        "pix.lazyRuntime": true,
+        ...(draftConfig ? {
+          "pix.draftModel": draftConfig.modelRef,
+          "pix.draftThinking": draftConfig.thinkingLevel,
+        } : {}),
+      },
     });
+  }
+
+  draftConfig(cwd: string): Promise<{ configOptions: SessionConfigOption[] }> {
+    return this.request("pix/session/draft_config", { cwd });
   }
 
   loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse> {

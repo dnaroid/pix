@@ -99,6 +99,32 @@ describe("AppMenuItemsController queue menu", () => {
 		]);
 	});
 
+	it("uses draft model state before a session runtime exists", () => {
+		const models = [model("zai", "glm-5-turbo", "GLM"), model("openai-codex", "gpt-5.5", "GPT")];
+		const controller = new AppMenuItemsController({
+			...host(undefined),
+			draftModelState: () => ({
+				models: models as never,
+				modelRef: "openai-codex/gpt-5.5",
+				thinkingLevel: "high",
+			}),
+		});
+
+		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.label), [
+			`openai-codex/gpt-5.5 ${APP_ICONS.check}`,
+			"zai/glm-5-turbo",
+		]);
+		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), [
+			"off",
+			"minimal",
+			"low",
+			"medium",
+			`high ${APP_ICONS.check}`,
+			"xhigh",
+			"max",
+		]);
+	});
+
 	it("filters model pickers by visibleModels while management mode exposes hidden models", () => {
 		const models = [
 			model("zai", "glm-5-turbo", "GLM"),

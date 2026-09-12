@@ -72,6 +72,8 @@ Apply the project's house checklist before approving changes.
 				{ id: "write-docs", task: "Update the API documentation and examples for the already specified pagination contract. Make the required file changes." },
 				{ id: "test-run", task: "Run the targeted payment tests, inspect their failure logs, and report pass/fail without changing any files." },
 				{ id: "browser-check", task: "Verify Add to cart in the real browser with screenshots, video, trace and deterministic assertions." },
+				{ id: "tui-check", task: "Verify the shipping terminal UI in a real pseudo-terminal: press the navigation keys and assert the visible selected item changes." },
+				{ id: "desktop-check", task: "Verify the actual desktop GUI: open Settings, toggle the requested control, and assert the visible control state in the app." },
 				{ id: "explicit-override", task: "Give the requested independent strong second opinion.", subagentType: "oracle" },
 			], routingConfig(), {
 				model: live.model,
@@ -87,7 +89,9 @@ Apply the project's house checklist before approving changes.
 			"race-root-cause": "research",
 			"write-docs": "implement",
 			"test-run": "verify",
-			"browser-check": "browser-qa",
+			"browser-check": "ui-qa",
+			"tui-check": "ui-qa",
+			"desktop-check": "ui-qa",
 		});
 		expect(result.tasks.find((task) => task.id === "explicit-override")?.subagentType).toBe("oracle");
 		expect(result.routes["explicit-override"]).toBeUndefined();

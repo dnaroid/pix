@@ -5,7 +5,7 @@ import type { AppMenuItemsController } from "./menu-items-controller.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import type { AppPopupMenuController } from "./popup-menu-controller.js";
 import type { AppQueuedMessageController } from "../session/queued-message-controller.js";
-import type { Entry, SessionModel, SlashCommand, UserMessageJumpMenuValue } from "../types.js";
+import type { Entry, SessionModel, SlashCommand, ThinkingLevel, UserMessageJumpMenuValue } from "../types.js";
 import type { AppWorkspaceActionsController } from "../workspace/workspace-actions-controller.js";
 
 export type AppPopupActionControllerHost = {
@@ -13,6 +13,7 @@ export type AppPopupActionControllerHost = {
 	inputScopeKey?(): string | undefined;
 	isDraftTabActive?(): boolean;
 	materializeDraftSession?(): Promise<AgentSessionRuntime | undefined>;
+	selectDraftModel?(model: SessionModel, thinkingLevel: ThinkingLevel): void;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	isRunning(): boolean;
@@ -131,6 +132,11 @@ export class AppPopupActionController {
 		if (!selected) return false;
 
 		this.popupMenus.closeModelSelection();
+		if (!scope.runtime && this.host.isDraftTabActive?.()) {
+			this.host.selectDraftModel?.(selected.value.model, selected.thinkingLevel);
+			this.host.render();
+			return true;
+		}
 		if (!selected.direct) {
 			this.host.setInput("");
 			this.host.addEntry({

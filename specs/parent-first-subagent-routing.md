@@ -23,7 +23,8 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
    user-requested role. Omission is allowed for uncertainty or a user request for
    automatic routing. Before prompt/routing, `forParentModels` /
    `notForParentModels` gates remove roles that are unavailable to the current
-   parent model. Browser QA retains its explicit `browser-qa` requirement.
+   parent model. Real UI QA retains its explicit `ui-qa` requirement; legacy
+   `browser-qa` requests normalize to that role before validation.
 2. Explicit names are validated against the effective config before any router
    request. Unknown names are errors, not unconfigured/ad-hoc agent profiles.
    Valid names bypass routing and its provider/auth calls, even when disabled.

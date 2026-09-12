@@ -1,0 +1,365 @@
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { spawn, spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
+import { desktopPlatformContract } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
+
+const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
+const nodeExecutable = fs.realpathSync(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
+const tempDirs: string[] = [];
+const children: Array<ReturnType<typeof spawn>> = [];
+
+setDefaultTimeout(60_000);
+
+afterEach(() => {
+	for (const child of children.splice(0)) {
+		try { child.kill("SIGKILL"); } catch { /* already exited */ }
+	}
+	for (const directory of tempDirs.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+});
+
+function createProject(type = "ui-qa") {
+	const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ui-qa-runner-")));
+	tempDirs.push(project);
+	const agentDir = path.join(project, ".pi", "subagents", "run", "qa");
+	const uiWorkspace = path.join(agentDir, "ui-qa");
+	const browserWorkspace = path.join(agentDir, "browser-qa");
+	fs.mkdirSync(path.join(uiWorkspace, "flows"), { recursive: true, mode: 0o700 });
+	fs.mkdirSync(path.join(browserWorkspace, "flows"), { recursive: true, mode: 0o700 });
+	for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "subagents"), path.join(project, ".pi", "subagents", "run"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), browserWorkspace, path.join(browserWorkspace, "flows")]) {
+		if (process.platform !== "win32") fs.chmodSync(directory, 0o700);
+	}
+	fs.writeFileSync(path.join(agentDir, "prompt.md"), "QA prompt\n", { mode: 0o600 });
+	fs.writeFileSync(path.join(agentDir, "project_cwd"), `${project}\n`, { mode: 0o600 });
+	fs.writeFileSync(path.join(agentDir, "subagent_type"), `${type}\n`, { mode: 0o600 });
+	return { project, agentDir, uiWorkspace };
+}
+
+function writeProjectFile(project: string, name: string, content: string) {
+	const file = path.join(project, name);
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, content, { mode: 0o700 });
+	return file;
+}
+
+function writeFlow(uiWorkspace: string, name: string, value: unknown) {
+	const file = path.join(uiWorkspace, "flows", name);
+	fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+	if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+	return file;
+}
+
+function invoke(project: string, agentDir: string, args: string[], timeout = 20_000) {
+	const result = spawnSync(nodeExecutable, [runner, ...args], {
+		cwd: project,
+		env: { ...process.env, PI_SUBAGENT_AGENT_DIR: agentDir },
+		encoding: "utf8",
+		timeout,
+		maxBuffer: 2 * 1024 * 1024,
+	});
+	const lines = result.stdout.trim().split(/\r?\n/).filter(Boolean);
+	let payload: any;
+	for (const line of lines.reverse()) {
+		try { payload = JSON.parse(line); break; } catch { /* diagnostic line */ }
+	}
+	return { ...result, payload };
+}
+
+function expectUnifiedArtifacts(payload: any) {
+	expect(Object.keys(payload.artifacts).sort()).toEqual([
+		"accessibilitySnapshots", "downloads", "observations", "screenshots", "terminalCaptures", "traces", "videos",
+	]);
+}
+
+describe("capability-first UI QA runner", () => {
+	test("selects the browser backend for a URL without launching Playwright", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeFlow(uiWorkspace, "browser.jsonc", { version: 1, target: { url: "https://example.test/path" } });
+		const result = invoke(project, agentDir, ["probe", "--flow", "browser.jsonc"]);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("AVAILABLE");
+		expect(result.payload.selection.detectedTargetKind).toBe("browser");
+		expect(result.payload.selection.selectedBackend).toBe("browser");
+		expect(result.payload.selection.whySelected).toContain("browser");
+		expectUnifiedArtifacts(result.payload);
+	});
+
+	test("preserves the browser backend's bounded in-memory upload flow size", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeFlow(uiWorkspace, "browser-upload.jsonc", {
+			version: 1,
+			target: { url: "https://example.test/upload" },
+			steps: [{
+				action: "uploadFiles",
+				locator: { testId: "file" },
+				files: [{ name: "fixture.bin", mimeType: "application/octet-stream", base64: "A".repeat(1_100_000) }],
+			}],
+		});
+		const result = invoke(project, agentDir, ["probe", "--flow", "browser-upload.jsonc"], 30_000);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("AVAILABLE");
+		expect(result.payload.selection.selectedBackend).toBe("browser");
+	});
+
+	test("preserves redacted browser credential update metadata", async () => {
+		const { project, agentDir } = createProject();
+		const fakeRunner = writeProjectFile(project, "fake-browser-runner.mjs", `
+console.log(JSON.stringify({
+  status: "QA_AUTH_UPDATE_REQUIRED",
+  profile: "staging-admin",
+  file: ".pi/qa_auth.jsonc",
+  reason: "credentials are required",
+  action: "fill_credentials",
+  templateCreated: false,
+  placeholderCount: 2
+}));
+process.exitCode = 2;
+`);
+		const result = await runBrowserBackend({
+			flow: {
+				target: { profile: "staging-admin" },
+				steps: [{ action: "assertVisible", locator: { testId: "account" } }],
+			},
+			projectRoot: project,
+			agentDir,
+			runId: "auth-update",
+			deadline: Date.now() + 10_000,
+			browserRunnerPath: fakeRunner,
+			progress() {},
+		});
+		expect(result.status).toBe("BLOCKED");
+		expect(result.profile).toBe("staging-admin");
+		expect(result.file).toBe(".pi/qa_auth.jsonc");
+		expect(result.action).toBe("fill_credentials");
+		expect(result.templateCreated).toBe(false);
+		expect(result.placeholderCount).toBe(2);
+	});
+
+	test("drives a real alternate-screen TUI through PTY input and screen assertions", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "fixture.mjs", `
+process.stdin.setRawMode?.(true);
+process.stdin.setEncoding("utf8");
+process.stdout.write("\\u001b[?1049h\\u001b[2J\\u001b[HReady\\r\\nPress enter");
+process.stdin.on("data", (data) => {
+  if (data.includes("\\r")) process.stdout.write("\\u001b[2J\\u001b[HAccepted\\r\\nDone");
+});
+`);
+		writeFlow(uiWorkspace, "tui.jsonc", {
+			version: 1,
+			target: { command: { argv: [nodeExecutable, "fixture.mjs"], cwd: "." } },
+			viewport: { cols: 40, rows: 10 },
+			steps: [
+				{ action: "waitForText", text: "Ready" },
+				{ action: "sendKeys", keys: ["enter"] },
+				{ action: "waitForText", text: "Accepted" },
+				{ action: "waitForStable", settleMs: 100 },
+				{ action: "assertText", text: "Accepted" },
+				{ action: "assertNotText", text: "Ready" },
+				{ action: "assertProcessRunning" },
+				{ action: "capture", name: "accepted" },
+			],
+		});
+		const result = invoke(project, agentDir, ["run", "--flow", "tui.jsonc", "--run-id", "interactive", "--runner-timeout-ms", "10000"]);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("PASSED");
+		expect(result.payload.selection.selectedBackend).toBe("tui");
+		expect(result.payload.assertions.every((entry: any) => entry.passed)).toBe(true);
+		expect(result.payload.artifacts.terminalCaptures.length).toBeGreaterThanOrEqual(5);
+		const snapshot = JSON.parse(fs.readFileSync(result.payload.artifacts.terminalCaptures.find((entry: any) => entry.path.endsWith("accepted.screen.json")).path, "utf8"));
+		expect(snapshot.bufferType).toBe("alternate");
+		expect(snapshot.text).toContain("Accepted");
+		expect(snapshot.text).not.toContain("Ready");
+	});
+
+	test("models cursor movement, erase operations, and resize as terminal state", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "ansi-fixture.mjs", `
+process.stdin.setRawMode?.(true);
+process.stdin.setEncoding("utf8");
+process.stdout.write("Old text\\u001b[H\\u001b[2KNew text");
+process.stdin.on("data", (data) => {
+  if (data.includes("s")) process.stdout.write("\\u001b[2;1HSIZE=" + process.stdout.columns + "x" + process.stdout.rows);
+});
+`);
+		writeFlow(uiWorkspace, "ansi.jsonc", {
+			target: { command: { argv: [nodeExecutable, "ansi-fixture.mjs"] } },
+			steps: [
+				{ action: "waitForText", text: "New text" },
+				{ action: "assertNotText", text: "Old text" },
+				{ action: "assertCursor", row: 1, column: 9 },
+				{ action: "resize", cols: 50, rows: 12 },
+				{ action: "sendText", text: "s" },
+				{ action: "waitForText", text: "SIZE=50x12" },
+				{ action: "assertText", text: "SIZE=50x12" },
+			],
+		});
+		const result = invoke(project, agentDir, ["run", "--flow", "ansi.jsonc", "--run-id", "ansi", "--runner-timeout-ms", "10000"]);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("PASSED");
+		expect(result.payload.assertions).toHaveLength(3);
+	});
+
+	test("does not retain the exit assertion timeout after the PTY exits", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "exit-fixture.mjs", `
+process.stdout.write("exiting");
+setTimeout(() => process.exit(7), 50);
+`);
+		writeFlow(uiWorkspace, "exit.jsonc", {
+			target: { command: { argv: [nodeExecutable, "exit-fixture.mjs"] } },
+			steps: [
+				{ action: "waitForText", text: "exiting" },
+				{ action: "assertProcessExited", exitCode: 7, timeoutMs: 5_000 },
+			],
+		});
+		const started = Date.now();
+		const result = invoke(project, agentDir, ["run", "--flow", "exit.jsonc", "--run-id", "exit", "--runner-timeout-ms", "6000"], 10_000);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("PASSED");
+		expect(Date.now() - started).toBeLessThan(3_000);
+	});
+
+	test("cleanup terminates its PTY but leaves an unrelated process alive", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "long-running.mjs", `
+process.stdin.setRawMode?.(true);
+process.stdout.write("running");
+setInterval(() => {}, 1000);
+`);
+		writeFlow(uiWorkspace, "cleanup.jsonc", {
+			target: { command: { argv: [nodeExecutable, "long-running.mjs"] } },
+			steps: [{ action: "waitForText", text: "running" }, { action: "assertProcessRunning" }],
+		});
+		const unrelated = spawn(nodeExecutable, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+		children.push(unrelated);
+		const result = invoke(project, agentDir, ["run", "--flow", "cleanup.jsonc", "--run-id", "cleanup", "--runner-timeout-ms", "5000"]);
+		expect(result.payload.status).toBe("PASSED");
+		expect(unrelated.pid).toBeDefined();
+		expect(() => process.kill(unrelated.pid!, 0)).not.toThrow();
+	});
+
+	test("rejects shell, generic utility, inline-code, and untrusted environment launch primitives", () => {
+		for (const [name, command] of [
+			["shell", { argv: ["sh", "-c", "echo pwned"] }],
+			["utility", { argv: ["/bin/cat", "/etc/passwd"] }],
+			["inline", { argv: ["node", "-e", "console.log('pwned')"] }],
+			["env", { argv: [nodeExecutable, "fixture.mjs"], env: { SECRET: "read-me" } }],
+		] as const) {
+			const { project, agentDir, uiWorkspace } = createProject();
+			writeProjectFile(project, "fixture.mjs", "setInterval(() => {}, 1000);\n");
+			writeFlow(uiWorkspace, `${name}.jsonc`, { target: { command }, steps: [{ action: "assertProcessRunning" }] });
+			const result = invoke(project, agentDir, ["run", "--flow", `${name}.jsonc`, "--run-id", name, "--runner-timeout-ms", "2000"]);
+			expect(result.status).toBe(1);
+			expect(result.payload.status).toBe("FAILED");
+			expect(result.payload.reason).toMatch(/shell|project|inline|environment|env key|scripting/i);
+		}
+	});
+
+	test("rejects flow and launch paths that escape or symlink outside the owning workspace", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		const outside = path.join(project, "outside.jsonc");
+		fs.writeFileSync(outside, JSON.stringify({ target: { url: "https://example.test" } }), { mode: 0o600 });
+		const escaped = invoke(project, agentDir, ["probe", "--flow", "../../../outside.jsonc"]);
+		expect(escaped.status).toBe(1);
+		expect(escaped.payload.reason).toContain("owning workspace");
+
+		if (process.platform !== "win32") {
+			const link = path.join(uiWorkspace, "flows", "link.jsonc");
+			fs.symlinkSync(outside, link);
+			const linked = invoke(project, agentDir, ["probe", "--flow", "link.jsonc"]);
+			expect(linked.status).toBe(1);
+			expect(linked.payload.reason).toMatch(/symbolic|workspace/);
+		}
+
+		writeProjectFile(project, "fixture.mjs", "setInterval(() => {}, 1000);\n");
+		writeFlow(uiWorkspace, "cwd.jsonc", { target: { command: { argv: [nodeExecutable, "fixture.mjs"], cwd: ".." } }, steps: [{ action: "assertProcessRunning" }] });
+		const cwdEscape = invoke(project, agentDir, ["run", "--flow", "cwd.jsonc", "--run-id", "cwd", "--runner-timeout-ms", "2000"]);
+		expect(cwdEscape.status).toBe(1);
+		expect(cwdEscape.payload.reason).toContain("project-local");
+
+		if (process.platform !== "win32") {
+			const progressTarget = path.join(project, "outside-progress.jsonl");
+			fs.writeFileSync(progressTarget, "unchanged\n", { mode: 0o600 });
+			writeFlow(uiWorkspace, "valid.jsonc", { target: { url: "https://example.test" } });
+			fs.rmSync(path.join(uiWorkspace, "progress.jsonl"), { force: true });
+			fs.symlinkSync(progressTarget, path.join(uiWorkspace, "progress.jsonl"));
+			const progressLink = invoke(project, agentDir, ["probe", "--flow", "valid.jsonc"]);
+			expect(progressLink.status).toBe(1);
+			expect(progressLink.payload.reason).toContain("progress path");
+			expect(fs.readFileSync(progressTarget, "utf8")).toBe("unchanged\n");
+		}
+	});
+
+	test("bounds action and runner timeouts", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "changing.mjs", "let i=0; setInterval(() => process.stdout.write(`\\r${++i}`), 10);\n");
+		writeFlow(uiWorkspace, "action-timeout.jsonc", {
+			target: { command: { argv: [nodeExecutable, "changing.mjs"] } },
+			steps: [{ action: "waitForText", text: "1" }, { action: "waitForStable", settleMs: 100, timeoutMs: 150 }],
+		});
+		const action = invoke(project, agentDir, ["run", "--flow", "action-timeout.jsonc", "--run-id", "action-timeout", "--runner-timeout-ms", "2000"]);
+		expect(action.status).toBe(1);
+		expect(action.payload.reason).toContain("did not settle");
+
+		writeFlow(uiWorkspace, "runner-timeout.jsonc", {
+			target: { command: { argv: [nodeExecutable, "changing.mjs"] } },
+			steps: [{ action: "waitForText", text: "1" }, { action: "waitForStable", settleMs: 100, timeoutMs: 30000 }],
+		});
+		const overall = invoke(project, agentDir, ["run", "--flow", "runner-timeout.jsonc", "--run-id", "runner-timeout", "--runner-timeout-ms", "100"]);
+		expect(overall.status).toBe(124);
+		expect(overall.payload.timedOut).toBe(true);
+	});
+
+	test("hard timeout leaves backend cleanup time to kill a SIGTERM-resistant PTY", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "resistant.mjs", `
+process.on("SIGTERM", () => {});
+process.on("SIGHUP", () => {});
+process.stdout.write("running");
+let i = 0;
+setInterval(() => process.stdout.write("\\r" + (++i)), 10);
+`);
+		writeFlow(uiWorkspace, "resistant.jsonc", {
+			target: { command: { argv: [nodeExecutable, "resistant.mjs"] } },
+			steps: [{ action: "waitForText", text: "running" }, { action: "waitForStable", settleMs: 100, timeoutMs: 30_000 }],
+		});
+		const started = Date.now();
+		const result = invoke(project, agentDir, ["run", "--flow", "resistant.jsonc", "--run-id", "resistant", "--runner-timeout-ms", "100"], 12_000);
+		expect(result.status).toBe(124);
+		expect(result.payload.timedOut).toBe(true);
+		expect(Date.now() - started).toBeLessThan(8_000);
+		const pid = result.payload.observations?.find((entry: any) => entry.action === "launch")?.pid;
+		expect(pid).toBeNumber();
+		expect(() => process.kill(pid, 0)).toThrow();
+	});
+
+	test("returns deterministic desktop platform capabilities and structured blockers", () => {
+		const windows = desktopPlatformContract("win32");
+		const linux = desktopPlatformContract("linux");
+		expect(windows.available).toBe(false);
+		expect(windows.platformDriver).toBe("windows-uia-planned");
+		expect(windows.reason).toContain("not implemented");
+		expect(windows.remediation).toContain("Windows UI Automation");
+		expect(linux.available).toBe(false);
+		expect(linux.platformDriver).toBe("linux-at-spi-planned");
+		expect(linux.missingCapabilities).toContain("semanticAccessibility");
+
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeFlow(uiWorkspace, "desktop.jsonc", { target: { application: { name: "Nonexistent UI QA Fixture" } } });
+		const first = invoke(project, agentDir, ["probe", "--flow", "desktop.jsonc", "--runner-timeout-ms", "30000"], 40_000);
+		const second = invoke(project, agentDir, ["probe", "--flow", "desktop.jsonc", "--runner-timeout-ms", "30000"], 40_000);
+		expect(first.payload.selection.selectedBackend).toBe("desktop");
+		expect(second.payload.selection.selectedBackend).toBe("desktop");
+		expect(second.payload.status).toBe(first.payload.status);
+		expect(second.payload.selection.supportedCapabilities).toEqual(first.payload.selection.supportedCapabilities);
+		if (first.payload.status === "BLOCKED") {
+			expect(first.status).toBe(2);
+			expect(first.payload.reason).toBeString();
+			expect(first.payload.remediation).toBeString();
+		}
+		expectUnifiedArtifacts(first.payload);
+	});
+});

@@ -5,7 +5,7 @@ import {
   type AutoCompressionResult,
   type CreateAutoCompressionBlockOptions,
 } from "./auto-compress.js";
-import { canonicalMessageHash } from "./conversation-index.js";
+import { buildExactRangeMembership, canonicalMessageHash } from "./conversation-index.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import type { CompressionCandidate } from "./pruner-types.js";
 import type { DcpState } from "./state.js";
@@ -13,6 +13,24 @@ import type { DcpState } from "./state.js";
 const rejectedSources = new WeakMap<DcpState, { key: string; error: AutoCompressionBlockedError }>();
 const FINALIZATION_GRACE_MS = 1_000;
 const SUMMARY_DEADLINE_FRACTION = 0.75;
+
+function exactCandidateFingerprint(
+  options: CreateAutoCompressionBlockOptions,
+  candidate: CompressionCandidate,
+): { startId: string; endId: string; sourceMembers: Array<{ stableId: string; hash: string }> } | undefined {
+  const membership = buildExactRangeMembership(
+    options.state.conversationIndexSnapshot,
+    candidate.startId,
+    candidate.endId,
+    options.state,
+  );
+  if (!membership) return undefined;
+  return {
+    startId: candidate.startId,
+    endId: candidate.endId,
+    sourceMembers: membership.sourceMembers,
+  };
+}
 
 /**
  * A source-size estimate is not a net-savings estimate. Try the economical
@@ -26,14 +44,28 @@ export async function createBudgetedAutoCompressionBlock(
 ): Promise<AutoCompressionResult> {
   options.signal?.throwIfAborted();
   const epoch = options.state.sessionEpoch;
+  const primaryFingerprint = exactCandidateFingerprint(options, options.candidate);
+  const largestFingerprint = largestSafeCandidate
+    ? exactCandidateFingerprint(options, largestSafeCandidate)
+    : undefined;
+  // Rejection memoization belongs to the exact source that was rejected, not
+  // to the whole provider tail. A long-running agent can append unrelated
+  // messages while the oldest safe candidate stays byte-identical; hashing the
+  // whole tail made that same impossible candidate run again after every tool
+  // result. Fall back to the full-context identity only when exact membership
+  // is unavailable, so memoization never guesses source equivalence.
+  const sourceIdentity = primaryFingerprint && (!largestSafeCandidate || largestFingerprint)
+    ? { primary: primaryFingerprint, largest: largestFingerprint }
+    : {
+      source: options.messages.map(canonicalMessageHash),
+      ids: stableMessageKeys(options.messages),
+    };
   const key = createHash("sha256").update(JSON.stringify({
     epoch,
-    source: options.messages.map(canonicalMessageHash),
-    ids: stableMessageKeys(options.messages),
+    sourceIdentity,
     config: options.config,
     budget: options.requiredGainTokens ?? 0,
     allowPartialGain: options.allowPartialGain === true,
-    largest: largestSafeCandidate,
   })).digest("hex");
   const rejected = rejectedSources.get(options.state);
   if (rejected?.key === key) throw rejected.error;

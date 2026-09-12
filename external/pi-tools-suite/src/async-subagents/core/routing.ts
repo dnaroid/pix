@@ -5,6 +5,7 @@ import {
 	currentModelRef,
 	defaultSubagentType,
 	filterSubagentConfigForParentModel,
+	normalizeSubagentType,
 	resolveSubagentRoutingConfig,
 	type ResolvedSubagentRoutingConfig,
 	type SubagentConfig,
@@ -46,7 +47,7 @@ export class SubagentRoutingError extends Error {
 const ROUTER_SYSTEM_PROMPT = [
 	"You route Pi async sub-agent tasks to the best configured subagentType.",
 	"Choose exactly one allowed type for each task. Use the allowed type descriptions as the source of truth.",
-	"Prefer a matching project specialist. Otherwise use research for reading/evidence or focused review questions, implement for code/docs/tests/UI changes, verify for running checks, browser-qa for real-browser testing, and frontier-review for an independent post-implementation code review when that type is allowed. Oracle is a deliberate strong second opinion, not routine code review or the default for difficult work.",
+	"Prefer a matching project specialist. Otherwise use research for reading/evidence or focused review questions, implement for code/docs/tests/UI changes, verify for running checks, ui-qa for real user-interface testing across browsers, TUIs, and desktop GUIs, and frontier-review for an independent post-implementation code review when that type is allowed. Oracle is a deliberate strong second opinion, not routine code review or the default for difficult work.",
 	"Return only strict JSON with this shape: {\"routes\":[{\"id\":\"task-id\",\"subagentType\":\"type\"}]}",
 	"Do not include markdown, comments, explanations, or unknown types.",
 ].join("\n");
@@ -59,9 +60,11 @@ export async function routeSubagentTasks(
 ): Promise<RoutedSubagentTasks> {
 	if (signal?.aborted) throw new Error("Aborted");
 	// Validate even the fast path: an explicit typo must not bypass profiles.
-	tasks = tasks.map((task) => hasText(task.subagentType) && task.subagentType !== task.subagentType.trim()
-		? { ...task, subagentType: task.subagentType.trim() }
-		: task);
+	tasks = tasks.map((task) => {
+		if (!hasText(task.subagentType)) return task;
+		const subagentType = normalizeSubagentType(task.subagentType, config);
+		return subagentType !== task.subagentType ? { ...task, subagentType } : task;
+	});
 	const parentModel = currentModelRef(ctx.model);
 	const effectiveConfig = filterSubagentConfigForParentModel(config, parentModel);
 	const invalidTasks = tasks.filter((task) => hasText(task.subagentType)

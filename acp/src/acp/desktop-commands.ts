@@ -1,4 +1,4 @@
-import { RequestError, type ContentBlock, type SessionUpdate } from "@agentclientprotocol/sdk";
+import { RequestError, type ContentBlock, type SessionConfigOption, type SessionUpdate } from "@agentclientprotocol/sdk";
 
 const ERROR_INVALID_PARAMS = -32602;
 
@@ -24,9 +24,18 @@ export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
 export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
 export const PIX_DCP_STATS_METHOD = "pix/session/dcp_stats";
+export const PIX_DRAFT_CONFIG_METHOD = "pix/session/draft_config";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
+}
+
+export interface DesktopDraftConfigRequest {
+	readonly cwd: string;
+}
+
+export interface DesktopDraftConfigResponse {
+	readonly configOptions: SessionConfigOption[];
 }
 
 export type DesktopAgentControlAction = "state" | "pause" | "continue";
@@ -265,6 +274,13 @@ export function parseDesktopSessionHistoryRequest(value: unknown): DesktopSessio
 		throw new RequestError(ERROR_INVALID_PARAMS, "pix/session/history full must be a boolean when provided");
 	}
 	return value.full === undefined ? session : { ...session, full: value.full };
+}
+
+export function parseDesktopDraftConfigRequest(value: unknown): DesktopDraftConfigRequest {
+	if (!isRecord(value) || typeof value.cwd !== "string" || value.cwd.trim().length === 0) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/session/draft_config requires a non-empty string cwd field");
+	}
+	return { cwd: value.cwd };
 }
 
 export function parseDesktopResumePathRequest(value: unknown): DesktopResumePathRequest {

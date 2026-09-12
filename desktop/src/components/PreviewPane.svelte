@@ -101,9 +101,10 @@
     onDirtyChange?.(dirty);
   });
 
-  export function requestClose(): void {
-    if (editing && dirty && !window.confirm("Discard unsaved changes?")) return;
+  export function requestClose(): boolean {
+    if (editing && dirty && !window.confirm("Discard unsaved changes?")) return false;
     onClose();
+    return true;
   }
 
   function restoreScroll(

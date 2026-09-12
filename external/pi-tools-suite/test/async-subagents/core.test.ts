@@ -22,6 +22,7 @@ import {
 	getBuiltinSubagentDefinitionsDir,
 	getBuiltinSubagentPresetsPath,
 	getBrowserQaRunnerPath,
+	getUiQaRunnerPath,
 	getSubagentRegistryPath,
 	getPiInvocation,
 	getRunRoot,
@@ -431,7 +432,7 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "frontier-review", "implement", "oracle", "research", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-5.6-sol", "zai/glm-5.3"]);
 		expect(config.types["frontier-review"].notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*", "zai/glm-5.3"]);
@@ -458,11 +459,12 @@ describe.serial("subagent type config", () => {
 		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3").types["frontier-review"]).toBeUndefined();
 	});
 
-	test.serial("resolves the built-in balanced role models and browser QA profile", () => {
+	test.serial("resolves the built-in balanced role models and UI QA profile", () => {
 		const cwd = tempDir();
 		const config = loadSubagentConfig(cwd, {});
 		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
 		const runner = getBrowserQaRunnerPath();
+		const uiRunner = getUiQaRunnerPath();
 
 		expect(config.routing).toMatchObject({
 			model: "zai/glm-5-turbo",
@@ -480,6 +482,7 @@ describe.serial("subagent type config", () => {
 		const oracle = resolveAgentTaskConfig({ id: "oracle", task: "oracle", subagentType: "oracle" }, config);
 		expect(oracle.task.thinking).toBe("max");
 		expect(resolved.task.model).toBe("zai/glm-5.3-flash");
+		expect(resolved.task.subagentType).toBe("ui-qa");
 		expect(resolved.task.thinking).toBe("low");
 		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
@@ -487,11 +490,20 @@ describe.serial("subagent type config", () => {
 		expect(resolved.isolatedSkills).toEqual([]);
 		expect(fs.existsSync(runner)).toBe(true);
 		expect(path.isAbsolute(runner)).toBe(true);
-		const instructions = config.types["browser-qa"].promptAppend!;
+		expect(fs.existsSync(uiRunner)).toBe(true);
+		expect(path.isAbsolute(uiRunner)).toBe(true);
+		const instructions = config.types["ui-qa"].promptAppend!;
 		expect(instructions).not.toContain("playwright-cli");
 		expect(instructions).not.toMatch(/SKILL\.md|references\//);
 		expect(instructions).toMatch(/user-visible acceptance contract, not an execution\s+plan/);
-		expect(instructions).toMatch(/Never create,\s+serve, or switch to a mock\/synthetic page/);
+		expect(instructions).toContain("## Unified runner workflow");
+		expect(instructions).toContain("## Terminal/TUI and native desktop flow contract");
+		expect(instructions).toContain("PI_UI_QA_RUNNER");
+		expect(instructions).toContain("pseudo-terminal");
+		expect(instructions).toContain("safe deterministic control path");
+		expect(instructions).toContain("$PI_SUBAGENT_AGENT_DIR/ui-qa/");
+		expect(instructions).toContain("return `BLOCKED`");
+		expect(instructions).toMatch(/Never switch to\s+a mock\/synthetic app/);
 		expect(instructions).toMatch(/report the concrete blocker instead of switching to a\s+mock target/);
 		for (const section of ["## Flow contract", "### Form-auth scaffolding", "### Scaffold safety and edge cases", "### Choose resilient locators", "### Diagnose failures without weakening the test", "visualInspection", "PI_BROWSER_QA_RUNNER"]) {
 			expect(instructions).toContain(section);
@@ -499,11 +511,13 @@ describe.serial("subagent type config", () => {
 		expect(generatePrompt(resolved.task)).toContain(instructions);
 		expect(generatePrompt(resolved.task)).toContain("verify the browser bug");
 		const parentCatalog = buildSubagentCatalogPrompt(config)!;
-		expect(parentCatalog).toContain(config.types["browser-qa"].description!);
+		expect(parentCatalog).toContain(config.types["ui-qa"].description!);
 		expect(parentCatalog).not.toContain("## Flow contract");
 		expect(parentCatalog).not.toContain("PI_BROWSER_QA_RUNNER");
+		expect(parentCatalog).not.toContain("PI_UI_QA_RUNNER");
 		const ordinary = resolveAgentTaskConfig({ id: "ordinary", task: "Review", subagentType: "research" }, config);
 		expect(generatePrompt(ordinary.task)).not.toContain("PI_BROWSER_QA_RUNNER");
+		expect(generatePrompt(ordinary.task)).not.toContain("PI_UI_QA_RUNNER");
 	});
 
 	test.serial("defines bundled sub-agent roles as individual markdown agent files", () => {
@@ -511,18 +525,18 @@ describe.serial("subagent type config", () => {
 		const definitions = readAgentDefinitionsFromDir(definitionsDir);
 
 		expect(Object.keys(definitions).sort()).toEqual([
-			"browser-qa",
 			"frontier-review",
 			"implement",
 			"oracle",
 			"research",
+			"ui-qa",
 			"verify",
 		]);
 		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
 		expect(definitions["frontier-review"]?.raw.notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*", "zai/glm-5.3"]);
 		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
-		expect(definitions["browser-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
+		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 	});
 
 	test.serial("inherits QA instructions with model overrides and only adds explicitly configured skills", () => {
@@ -540,6 +554,7 @@ isolatedSkills: ${customSkill}
 		}, config);
 
 		expect(resolved.isolatedSkills).toEqual([customSkill]);
+		expect(resolved.task.subagentType).toBe("ui-qa");
 		expect(resolved.task.model).toBe("custom/qa");
 		expect(generatePrompt(resolved.task)).toStartWith("Custom brief: verify the browser bug");
 		expect(generatePrompt(resolved.task)).toContain("## Flow contract");
@@ -818,7 +833,7 @@ Advise only.
 			expect(builtin.types.research?.icon).toBe("search");
 			expect(builtin.types.implement?.icon).toBe("code");
 			expect(builtin.types.verify?.icon).toBe("flask");
-			expect(builtin.types["browser-qa"]?.icon).toBe("globe");
+			expect(builtin.types["ui-qa"]?.icon).toBe("bug");
 			expect(builtin.types["frontier-review"]?.icon).toBe("eye");
 			expect(builtin.types.oracle?.icon).toBe("sparkles");
 		});
@@ -1334,10 +1349,12 @@ lines.on("line", (line) => {
   const request = JSON.parse(line);
   if (request.type !== "prompt") return;
   const runner = process.env.PI_BROWSER_QA_RUNNER;
+  const uiRunner = process.env.PI_UI_QA_RUNNER;
   const probe = runner ? spawnSync(process.execPath, [runner, "profiles"], { encoding: "utf8" }) : undefined;
   fs.writeFileSync(${JSON.stringify(captured)}, JSON.stringify({
     message: request.message,
     runner: runner ?? null,
+    uiRunner: uiRunner ?? null,
     agentDir: process.env.PI_SUBAGENT_AGENT_DIR ?? null,
     probeExit: probe?.status,
     probeOutput: probe?.stdout,
@@ -1349,14 +1366,16 @@ setTimeout(() => {}, 2000);
 `);
 		process.argv[1] = piScript;
 		const oldRunner = process.env.PI_BROWSER_QA_RUNNER;
+		const oldUiRunner = process.env.PI_UI_QA_RUNNER;
 		const oldAgentDir = process.env.PI_SUBAGENT_AGENT_DIR;
 		try {
 			// The launcher must replace inherited QA paths, and strip them for other roles.
 			process.env.PI_BROWSER_QA_RUNNER = path.join(cwd, "wrong-runner.mjs");
+			process.env.PI_UI_QA_RUNNER = path.join(cwd, "wrong-ui-runner.mjs");
 			process.env.PI_SUBAGENT_AGENT_DIR = path.join(cwd, "wrong-agent");
 			for (const id of ["qa-default", "qa-extra-skill", "ordinary"]) {
 				const qa = id !== "ordinary";
-				const resolved = resolveAgentTaskConfig({ id, task: "Check the requested target", subagentType: qa ? "browser-qa" : "research" }, config);
+				const resolved = resolveAgentTaskConfig({ id, task: "Check the requested target", subagentType: qa ? "ui-qa" : "research" }, config);
 				const skills = id === "qa-extra-skill" ? [extraSkill] : resolved.isolatedSkills;
 				await withTimeout(new Promise<any>((resolve) => {
 					spawnAgent(runDir, resolved.task, cwd,
@@ -1367,9 +1386,11 @@ setTimeout(() => {}, 2000);
 				const args = fs.readFileSync(path.join(runDir, id, "pi_args"), "utf8").split("\n");
 				expect(payload.message).toBe(generatePrompt(resolved.task));
 				if (qa) {
+					expect(payload.message).toContain('node "$PI_UI_QA_RUNNER"');
 					expect(payload.message).toContain('node "$PI_BROWSER_QA_RUNNER"');
 					expect(payload.message).toContain("## Detailed scenario-design guidance");
-					expect(payload.runner).toBe(getBrowserQaRunnerPath());
+					 expect(payload.runner).toBe(getBrowserQaRunnerPath());
+					expect(payload.uiRunner).toBe(getUiQaRunnerPath());
 					expect(payload.agentDir).toBe(fs.realpathSync(path.join(runDir, id)));
 					expect(payload.probeExit).toBe(0);
 					expect(JSON.parse(payload.probeOutput).profiles).toEqual([]);
@@ -1380,8 +1401,10 @@ setTimeout(() => {}, 2000);
 					expect(args).toContain("high");
 				} else {
 					expect(payload.runner).toBeNull();
+					expect(payload.uiRunner).toBeNull();
 					expect(payload.agentDir).toBeNull();
 					expect(payload.message).not.toContain("PI_BROWSER_QA_RUNNER");
+					expect(payload.message).not.toContain("PI_UI_QA_RUNNER");
 					expect(args).not.toContain("--no-skills");
 				}
 				expect(args.filter((arg) => arg === "--skill")).toHaveLength(skills.length);
@@ -1391,18 +1414,22 @@ setTimeout(() => {}, 2000);
 		} finally {
 			if (oldRunner === undefined) delete process.env.PI_BROWSER_QA_RUNNER;
 			else process.env.PI_BROWSER_QA_RUNNER = oldRunner;
+			if (oldUiRunner === undefined) delete process.env.PI_UI_QA_RUNNER;
+			else process.env.PI_UI_QA_RUNNER = oldUiRunner;
 			if (oldAgentDir === undefined) delete process.env.PI_SUBAGENT_AGENT_DIR;
 			else process.env.PI_SUBAGENT_AGENT_DIR = oldAgentDir;
 		}
 	});
 
-	test.serial("provides browser QA with an agent-local workspace and clears stale evidence on reuse", async () => {
+	test.serial("provides UI QA with native and browser-backend workspaces and clears stale evidence on reuse", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "browser-qa-workspace");
+		const runDir = createRunDir(cwd, "ui-qa-workspace");
 		const agentDir = path.join(runDir, "qa-agent");
 		const staleEvidence = path.join(agentDir, "browser-qa", "evidence", "stale.png");
-		const capturedEnv = path.join(cwd, "captured-browser-qa-agent-dir");
+		const staleNativeEvidence = path.join(agentDir, "ui-qa", "evidence", "stale.txt");
+		const capturedEnv = path.join(cwd, "captured-ui-qa-agent-dir");
 		writeFile(staleEvidence, "stale");
+		writeFile(staleNativeEvidence, "stale");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 const fs = require("node:fs");
@@ -1416,13 +1443,18 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		await withTimeout(new Promise<any>((resolve) => {
-			spawnAgent(runDir, { id: "qa-agent", task: "Run browser QA", subagentType: "browser-qa" }, cwd, [], undefined, resolve);
-		}), "Timed out waiting for browser QA workspace spawn");
+			spawnAgent(runDir, { id: "qa-agent", task: "Run UI QA", subagentType: "ui-qa" }, cwd, [], undefined, resolve);
+		}), "Timed out waiting for UI QA workspace spawn");
 
 		expect(fs.readFileSync(capturedEnv, "utf8")).toBe(fs.realpathSync(agentDir));
 		expect(fs.existsSync(staleEvidence)).toBe(false);
+		expect(fs.existsSync(staleNativeEvidence)).toBe(false);
+		expect(fs.statSync(path.join(agentDir, "ui-qa")).isDirectory()).toBe(true);
+		expect(fs.statSync(path.join(agentDir, "ui-qa", "flows")).isDirectory()).toBe(true);
 		expect(fs.statSync(path.join(agentDir, "browser-qa", "flows")).isDirectory()).toBe(true);
 		if (process.platform !== "win32") {
+			expect(fs.statSync(path.join(agentDir, "ui-qa")).mode & 0o777).toBe(0o700);
+			expect(fs.statSync(path.join(agentDir, "ui-qa", "flows")).mode & 0o777).toBe(0o700);
 			expect(fs.statSync(path.join(agentDir, "browser-qa")).mode & 0o777).toBe(0o700);
 			expect(fs.statSync(path.join(agentDir, "browser-qa", "flows")).mode & 0o777).toBe(0o700);
 		}

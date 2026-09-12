@@ -34,6 +34,19 @@ describe("draft-session concurrency guards", () => {
     expect(appSource).toContain("attachmentAddQueues.clear()");
   });
 
+  it("loads and applies model selection on the UI-only draft before materializing a session", () => {
+    expect(appSource).toContain("const response = await requestClient.draftConfig(requestWorkspace)");
+    expect(appSource).toContain("draftConfigOptions = response.configOptions");
+    expect(appSource).toContain("draftConfigOptions = applyLocalModelThinkingSelection(draftConfigOptions, modelRef, thinkingLevel)");
+    expect(appSource).toContain("requestClient.newSession(requestWorkspace, draftModelOverride ?? undefined)");
+
+    const activateStart = appSource.indexOf("function activateDraftSessionTab(");
+    const activateEnd = appSource.indexOf("async function openSessionStartTab", activateStart);
+    const activateDraft = appSource.slice(activateStart, activateEnd);
+    expect(activateDraft).toContain("void refreshDraftConfig()");
+    expect(activateDraft).not.toContain("newSession(");
+  });
+
   it("does not delete an unavailable-history session until its concurrent runtime load also fails", () => {
     const historyStart = appSource.indexOf("async function hydrateSessionHistory(");
     const historyEnd = appSource.indexOf("async function loadDeferredToolResult", historyStart);

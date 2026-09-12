@@ -38,7 +38,7 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 	);
 	assert.deepEqual(
 		manager.buildContextEntries().filter((entry) => entry.type === "message").map((entry) => entry.id),
-		Array.from({ length: 5 }, (_value, index) => `entry-${index + 7}`),
+		Array.from({ length: 12 }, (_value, index) => `entry-${index}`),
 	);
 
 	const reader = (manager as unknown as { createHistoryReader(): LazySessionHistoryReader | undefined }).createHistoryReader();
@@ -52,6 +52,52 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 	assert.deepEqual(fullBranch.map((entry) => entry.id), Array.from({ length: 12 }, (_value, index) => `entry-${index}`));
 	const fullSession = await (manager as unknown as { readFullSessionEntries(): Promise<Array<{ id: string }>> }).readFullSessionEntries();
 	assert.deepEqual(fullSession.map((entry) => entry.id), Array.from({ length: 12 }, (_value, index) => `entry-${index}`));
+});
+
+test("lazy session manager never treats a crash-tail user message as a new provider-context root", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-crash-tail-"));
+	t.after(async () => {
+		await rm(dir, { force: true, recursive: true });
+	});
+
+	const sessionPath = join(dir, "session.jsonl");
+	const lines = [
+		JSON.stringify({ type: "session", version: 3, id: "session-crash", timestamp: "2026-09-12T09:22:07.581Z", cwd: dir }),
+		JSON.stringify({ type: "message", id: "m001-entry", parentId: null, timestamp: "2026-09-12T09:22:08.000Z", message: { role: "user", content: "original objective", timestamp: 1 } }),
+	];
+	let parentId = "m001-entry";
+	for (let index = 2; index <= 225; index += 1) {
+		const id = `entry-${String(index).padStart(3, "0")}`;
+		lines.push(JSON.stringify({
+			type: "message",
+			id,
+			parentId,
+			timestamp: `2026-09-12T09:30:${String(index % 60).padStart(2, "0")}.000Z`,
+			message: { role: "assistant", content: `work ${index}`, timestamp: index },
+		}));
+		parentId = id;
+	}
+	lines.push(
+		JSON.stringify({ type: "message", id: "m226-entry", parentId, timestamp: "2026-09-12T10:01:23.228Z", message: { role: "user", content: "continue and compress", timestamp: 226 } }),
+		JSON.stringify({ type: "message", id: "m227-entry", parentId: "m226-entry", timestamp: "2026-09-12T10:01:23.305Z", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted", timestamp: 227 } }),
+		JSON.stringify({ type: "thinking_level_change", id: "thinking-tail", parentId: "m227-entry", timestamp: "2026-09-12T10:02:37.863Z", thinkingLevel: "medium" }),
+	);
+	await writeFile(sessionPath, `${lines.join("\n")}\n`, "utf8");
+
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 4 });
+	assert.deepEqual(manager.getBranch().map((entry) => entry.id), ["entry-225", "m226-entry", "m227-entry", "thinking-tail"]);
+
+	manager.appendMessage({ role: "user", content: "continue after restart", timestamp: 228 } as never);
+	const context = manager.buildSessionContext().messages;
+
+	assert.equal(context.length, 228);
+	assert.equal(context[0]?.role, "user");
+	assert.equal((context[0] as { content?: unknown } | undefined)?.content, "original objective");
+	assert.equal(context.at(-3)?.role, "user");
+	assert.equal(context.at(-2)?.role, "assistant");
+	assert.equal(context.at(-1)?.role, "user");
+	assert.equal((context.at(-1) as { content?: unknown } | undefined)?.content, "continue after restart");
+	assert.ok((manager as unknown as { createHistoryReader(): LazySessionHistoryReader | undefined }).createHistoryReader()?.hasOlder());
 });
 
 test("lazy session manager reads past oversized history entries", async (t) => {

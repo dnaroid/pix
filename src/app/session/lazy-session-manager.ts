@@ -49,6 +49,7 @@ class LazySessionManager implements SessionManagerFacade {
 	private labelsById = new Map<string, string>();
 	private leafId: string | null = null;
 	private hydrated: SessionManager | undefined;
+	private contextManager: SessionManager | undefined;
 	private readonly tailEntryCount: number;
 	private tailStartOffset = 0;
 
@@ -107,6 +108,7 @@ class LazySessionManager implements SessionManagerFacade {
 		this.byId.clear();
 		this.labelsById.clear();
 		this.leafId = null;
+		this.contextManager = undefined;
 
 		mkdirSync(this.sessionDirPath, { recursive: true });
 		this.sessionFilePath = join(this.sessionDirPath, `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
@@ -202,6 +204,7 @@ class LazySessionManager implements SessionManagerFacade {
 
 	buildContextEntries(): SessionEntry[] {
 		if (this.hydrated) return this.hydrated.buildContextEntries();
+		if (this.tailStartOffset > 0) return this.completeContextManager().buildContextEntries();
 		const entries = this.contextEntries();
 		const byId = new Map(entries.map((entry) => [entry.id, entry]));
 		return buildSdkContextEntries(entries, entries.at(-1)?.id ?? null, byId);
@@ -209,6 +212,7 @@ class LazySessionManager implements SessionManagerFacade {
 
 	buildSessionContext(): SessionContext {
 		if (this.hydrated) return this.hydrated.buildSessionContext();
+		if (this.tailStartOffset > 0) return this.completeContextManager().buildSessionContext();
 		const entries = this.contextEntries();
 		const byId = new Map(entries.map((entry) => [entry.id, entry]));
 		return buildSessionContext(entries, entries.at(-1)?.id ?? null, byId);
@@ -256,6 +260,7 @@ class LazySessionManager implements SessionManagerFacade {
 			return;
 		}
 		this.leafId = branchFromId;
+		this.contextManager = undefined;
 	}
 
 	resetLeaf(): void {
@@ -264,6 +269,7 @@ class LazySessionManager implements SessionManagerFacade {
 			return;
 		}
 		this.leafId = null;
+		this.contextManager = undefined;
 	}
 
 	createBranchedSession(leafId: string): string | undefined {
@@ -334,8 +340,28 @@ class LazySessionManager implements SessionManagerFacade {
 	private hydrate(): SessionManager {
 		if (!this.hydrated) {
 			this.hydrated = SessionManager.open(this.sessionFilePath, this.sessionDirPath, this.cwdPath);
+			this.contextManager = undefined;
 		}
 		return this.hydrated;
+	}
+
+	/**
+	 * The tail cache is a presentation/history optimisation, not a valid model
+	 * context boundary. If older entries exist, reconstruct provider context from
+	 * the complete persisted session while leaving the facade itself lazy so the
+	 * UI can continue paging old history on demand.
+	 */
+	private completeContextManager(): SessionManager {
+		if (!this.contextManager) {
+			const manager = SessionManager.open(this.sessionFilePath, this.sessionDirPath, this.cwdPath);
+			if (this.leafId === null) {
+				manager.resetLeaf();
+			} else if (manager.getLeafId() !== this.leafId && manager.getEntry(this.leafId)) {
+				manager.branch(this.leafId);
+			}
+			this.contextManager = manager;
+		}
+		return this.contextManager;
 	}
 
 	private async loadHeaderAsync(cwdOverride: string | undefined): Promise<SessionHeader> {
@@ -381,6 +407,7 @@ class LazySessionManager implements SessionManagerFacade {
 		this.entries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
+		this.contextManager = undefined;
 		return entry.id;
 	}
 

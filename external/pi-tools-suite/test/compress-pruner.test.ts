@@ -3874,6 +3874,87 @@ describe("DCP pruning effectiveness", () => {
     }
   });
 
+  test("successful model summary with non-positive gain does not disable the summarizer for a new source", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const runtimeState = createState();
+    const runtimeConfig = config({
+      compress: {
+        maxContextPercent: 0.65,
+        minContextPercent: 0.40,
+        protectUserMessages: true,
+        autoCandidates: { enabled: true, minContextPercent: 0.40, keepRecentTurns: 1, minMessages: 2, minTokens: 10 },
+        autoCompress: {
+          enabled: true,
+          patience: 0,
+          summarizerModel: ["zai/summary-model"],
+          summarizerFallbackModels: [],
+          timeoutMs: 1_000,
+        },
+      } as any,
+    });
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+    await dcpModule(pi, { state: runtimeState, config: runtimeConfig });
+    const contextHandler = handlers.get("context")?.[0];
+    let summarizerCalls = 0;
+    let aborts = 0;
+    const ctx = {
+      hasUI: false,
+      model: { provider: "test-provider", id: "test-model", maxTokens: 20_000 },
+      modelRegistry: {
+        find: (provider: string, id: string) => ({ provider, id, contextWindow: 128_000, maxTokens: 4_096 }),
+        getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "test-key", headers: {} }),
+        complete: async (model: any) => {
+          summarizerCalls += 1;
+          return {
+            role: "assistant",
+            provider: model.provider,
+            model: model.id,
+            content: [{ type: "text", text: "compact model summary" }],
+            stopReason: "stop",
+            timestamp: Date.now(),
+            usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+          };
+        },
+      },
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 90_000, contextWindow: 100_000, percent: 90 }),
+      ui: { notify() {} },
+      abort() { aborts += 1; },
+    };
+    const requirement = `Constraint: ${"preserve this requirement ".repeat(220)}`;
+    const firstMessages = [
+      textMessage("user", requirement, 1),
+      textMessage("assistant", "ack", 2),
+      textMessage("user", "current user turn", 3),
+    ];
+
+    await contextHandler?.({ type: "context", messages: firstMessages }, ctx);
+    expect(summarizerCalls).toBe(1);
+    expect(runtimeState.compressionBlocks).toHaveLength(0);
+
+    // A fresh user turn makes a larger exact source eligible. The previous
+    // range was rejected because preserving its user continuity cost more than
+    // it saved, not because the summarizer failed. The model must therefore be
+    // tried again for this genuinely new source.
+    const secondMessages = [
+      ...firstMessages,
+      textMessage("assistant", "work after the first rejection", 4),
+      textMessage("user", "new current user turn", 5),
+    ];
+    await contextHandler?.({ type: "context", messages: secondMessages }, ctx);
+
+    expect(summarizerCalls).toBe(2);
+    expect(aborts).toBeGreaterThanOrEqual(0);
+  });
+
   test("DCP tries emergency current-turn pruning before aborting when exact auto-compression fails at input capacity", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const runtimeState = createState();

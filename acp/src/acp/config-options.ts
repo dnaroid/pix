@@ -43,15 +43,15 @@ export async function buildConfigOptions(pi: PiClient): Promise<SessionConfigOpt
 
 	const options: SessionConfigOption[] = [];
 	if (state.model && models.length > 0) {
-		options.push(modelOption(state, models));
+		options.push(modelOption(state.model, models));
 	}
 	if (levels.length > 0) {
-		options.push(thoughtLevelOption(state, levels));
+		options.push(thoughtLevelOption(state.thinkingLevel, levels));
 	}
 	return options;
 }
 
-function modelOption(state: PiSessionState, models: readonly PiModel[]): SessionConfigOption {
+export function modelOption(currentModel: PiModel, models: readonly PiModel[]): SessionConfigOption {
 	const groups = new Map<string, SessionConfigSelectOption[]>();
 	for (const model of models) {
 		const group = groups.get(model.provider) ?? [];
@@ -78,7 +78,7 @@ function modelOption(state: PiSessionState, models: readonly PiModel[]): Session
 		id: CONFIG_ID_MODEL,
 		name: "Model",
 		category: "model",
-		currentValue: modelValue(state.model!.provider, state.model!.id),
+		currentValue: modelValue(currentModel.provider, currentModel.id),
 		options: grouped,
 	};
 }
@@ -94,9 +94,9 @@ export function supportedThinkingLevels(model: PiModel): string[] {
 	});
 }
 
-function thoughtLevelOption(state: PiSessionState, levels: readonly string[]): SessionConfigOption {
+export function thoughtLevelOption(currentThinkingLevel: string, levels: readonly string[]): SessionConfigOption {
 	const options: SessionConfigSelectOption[] = levels.map((level) => ({ value: level, name: level }));
-	const current = levels.includes(state.thinkingLevel) ? state.thinkingLevel : levels[0]!;
+	const current = levels.includes(currentThinkingLevel) ? currentThinkingLevel : levels[0]!;
 	return {
 		type: "select",
 		id: CONFIG_ID_THOUGHT_LEVEL,

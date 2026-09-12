@@ -498,10 +498,11 @@ Explicit task/CLI model overrides bypass the pool. Setting
 `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) deliberately selects the parent model and
 strips conflicting model arguments; this is not the economical default.
 
-The five built-in modes are `research` (read-only evidence and independent
+The six built-in modes are `research` (read-only evidence and independent
 review), `implement` (bounded code, docs, tests, or UI changes), `verify`
-(run checks and diagnose logs without fixing files), `browser-qa` (trusted
-browser workflow), and `oracle` (deliberate strong second opinion).
+(run checks and diagnose logs without fixing files), `ui-qa` (real browser,
+terminal/TUI, and desktop-GUI verification), `frontier-review` (independent
+post-implementation review), and `oracle` (deliberate strong second opinion).
 Ordinary workers use economical model candidates; no built-in parent-tier
 rule promotes them to a flagship. Oracle is the exception, not an automatic
 retry for difficult work. Task-specific discipline belongs in the brief.
@@ -533,7 +534,8 @@ Model/thinking overrides are not substitutes for selecting a role.
 The router remains enabled as a fallback for omitted types: use it when the role
 is unclear or the user explicitly requests automatic routing. Only omitted
 tasks are classified, in one batch; the parent's explicit choices are preserved.
-Real-browser QA still requires explicit `subagentType: "browser-qa"`.
+Real UI QA still requires explicit `subagentType: "ui-qa"`. Explicit legacy
+`browser-qa` requests normalize to `ui-qa` for compatibility.
 
 Unknown explicit types and failed/incomplete automatic routing reject the
 **entire spawn batch before run state or child processes are created**. The tool
@@ -582,26 +584,51 @@ AGENTS.md before approving anything; cite file paths first.
 - Bundled roles use the same format internally under `src/async-subagents/agents/*.md`; built-in and project-local profiles therefore share one parser and normalization path instead of maintaining a second role-description schema in TypeScript.
 - `icon` names an agent glyph for UIs that render sub-agent widgets (pix TUI panel, Pix Desktop subagents panel): `agent` (neutral default), `search`, `code`, `flask`, `globe`, `sparkles`, `brain`, `wrench`, `terminal`, `bug`, `book`, `eye`, `zap`, `rocket`. The value is passed through opaquely; unknown names render as the neutral agent icon, and status stays color-coded next to it.
 
-### Private browser QA and project auth
+### Real UI QA (browser, TUI, and desktop GUI)
 
-The built-in `browser-qa` role runs on `zai/glm-5.3-flash`, with
+The built-in `ui-qa` role runs on `zai/glm-5.3-flash`, with
 `openai-codex/gpt-5.6-luna` as its fallback. Its complete workflow and detailed
 scenario-design guidance live in the Markdown body of
-`src/async-subagents/agents/browser-qa.md`. The normal profile loader appends
+`src/async-subagents/agents/ui-qa.md`. The normal profile loader appends
 that body to the QA child's task prompt; the parent and LLM router receive only
 the short `description`. There is no additional QA skill to discover or read.
 
-Executable resources live under `src/async-subagents/agents/browser-qa/`.
-The launcher supplies the installed runner's absolute path in
-`PI_BROWSER_QA_RUNNER`; the child invokes `node "$PI_BROWSER_QA_RUNNER"` from
-the delegated project's cwd. This non-secret path is set only for QA children.
+`ui-qa` authors one private declarative flow and invokes the capability-first
+runner supplied in `PI_UI_QA_RUNNER`. The runner selects exactly one backend
+from the target descriptor and reports candidate capabilities plus its selection
+rationale. Browser targets delegate to the trusted Playwright backend described
+below. Terminal/TUI targets run through a real PTY plus a headless ANSI/VT
+terminal model. Native macOS targets use the bundled Accessibility/CGWindow
+driver for semantic actions, state assertions, captures, and screenshots;
+unsupported platforms or missing permissions return `BLOCKED`. QA does not
+install GUI automation dependencies, change OS privacy/accessibility settings,
+disable sandboxing, or operate unrelated user windows. Static or mock checks do
+not substitute for the requested UI.
+
+Unified flows and native/TUI evidence stay in the owning agent's private
+`.pi/subagents/<run>/<agent-id>/ui-qa/` workspace. Pass/fail requires a
+product-visible deterministic oracle such as terminal content/state,
+accessibility/app-driver state, window/dialog state, or visible control values;
+screenshots are supporting evidence, not the sole oracle. Cleanup is scoped to
+the PTY/session/app process created by the QA run.
+
+#### Browser backend and project auth
+
+The capability-first runner and native/TUI resources live under
+`src/async-subagents/agents/ui-qa/`; trusted browser resources remain under
+`agents/browser-qa/`. The launcher supplies absolute paths in
+`PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER`. Normal probe/run uses the former;
+the latter is invoked directly only for browser auth profile discovery and
+form-auth scaffolding. These non-secret paths are set only for QA children.
 QA always launches with `--no-skills`, even when `isolatedSkills` is empty,
 and skill flags in `extraArgs` cannot bypass that isolation. Explicitly
 configured `isolatedSkills` remain supported as optional additions; no built-in
 QA `--skill` is injected. Other roles retain their normal discovery behavior.
 
-Model/thinking/tool-only overrides in a project `browser-qa.md` inherit the
-bundled Markdown workflow. A project Markdown body replaces the inherited
+Model/thinking/tool-only overrides should use a project `ui-qa.md` and inherit
+the bundled Markdown workflow. A legacy project `browser-qa.md` is migrated to
+the canonical `ui-qa` profile when no `ui-qa.md` override exists. A project
+Markdown body replaces the inherited
 `promptAppend` under the usual field-level merge rules; custom QA instructions must preserve the runner-only,
 credential, target, and evidence contracts. Runner-enforced isolation and
 credential handling remain in code, not in the prompt.
@@ -648,9 +675,10 @@ video recording begins on the login page and captures the field-filling and subm
 sequence; password inputs remain browser-masked, but the private video may show
 other visible login identifiers and must be treated as sensitive evidence. Tracing
 starts only after login succeeds and is sanitized before retention. The launcher
-provides each browser QA process with its own
-`.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Declarative flows,
-screenshots, video, sanitized traces, and result manifests stay there, so normal
+provides each UI QA process with its general `ui-qa/` workspace plus the browser
+backend's `.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Unified flows
+stay under `ui-qa/flows/`; browser adapter flows, screenshots, video, sanitized
+traces, and result manifests stay under the backend workspace, so normal
 session shutdown or `subagents cleanup` removes them with the run directory.
 The runner validates the owning agent metadata and refuses flows outside that
 workspace; reusing an agent id clears stale browser QA files first. Trace archives
@@ -692,7 +720,7 @@ Pool order does not change preference and pool-only models are never appended.
 Without a preset, the full agent list is eligible. Candidate order expresses
 the configured budget preference; runtime does not infer current API prices.
 
-Image-bearing tasks and `browser-qa` require confirmed image support; configured
+Image-bearing tasks and `ui-qa` require confirmed image support; configured
 blind-model masks override runtime image metadata. Remaining eligible models
 form the quota fallback chain, so neither quota history nor image fallback can
 escape the pool. Antigravity account rotation still happens before provider

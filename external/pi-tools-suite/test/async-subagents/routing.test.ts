@@ -44,6 +44,20 @@ describe("parent-first sub-agent routing", () => {
 		expect(live.getApiKeyAndHeaders).not.toHaveBeenCalled();
 	});
 
+	test("normalizes the legacy browser-qa role to ui-qa without routing", async () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-ui-qa-alias-test-"));
+		tempDirs.push(cwd);
+		const cfg = loadSubagentConfig(cwd, {});
+		cfg.routing = { ...config().routing, enabled: false };
+		const live = context(async () => { throw new Error("must not call the router"); });
+		const result = await routeSubagentTasks([
+			{ id: "qa", task: "Verify the desktop app", subagentType: "browser-qa" },
+		], cfg, live.ctx);
+		expect(result.tasks[0]?.subagentType).toBe("ui-qa");
+		expect(result.usedLlm).toBe(false);
+		expect(live.complete).not.toHaveBeenCalled();
+	});
+
 	for (const subagentType of ["rewiev", "toString", "__proto__"]) {
 		test(`rejects unknown explicit type ${subagentType} before routing a mixed batch`, async () => {
 			const live = context(async () => response('{"routes":[{"id":"auto","subagentType":"deep"}]}'));

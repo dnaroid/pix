@@ -13,7 +13,7 @@ not broaden scope or make product/architecture decisions for the parent.
 
 For UI work, preserve the existing design language and inspect supplied visual
 references with an image-capable model. Report unavailable capabilities instead
-of claiming visual verification. Actual browser QA belongs to browser-qa.
+of claiming visual verification. Actual user-interface QA belongs to ui-qa.
 
 Run relevant targeted checks and report changed paths plus their results. If
 requirements conflict or the task exceeds your capabilities, stop with a

@@ -26,7 +26,7 @@ import { canonicalMessageHash } from "../src/dcp/conversation-index.js";
 function fixture() {
   const config = loadConfig({ homeDir: "/__dcp_projection_no_config__" });
   config.debug = false;
-  config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], timeoutMs: 1000 };
+  config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], summarizerFallbackModels: [], timeoutMs: 1000 };
   config.compress.autoCandidates.minMessages = 2;
   config.compress.autoCandidates.minTokens = 100;
   return { state: createState(), config };
@@ -72,6 +72,72 @@ function seedToolRecords(state: DcpState) {
 }
 
 describe("DCP auto-compression projection regressions", () => {
+  test("canonical message hash survives JSONL round-trip of runtime-only tool details", () => {
+    const message = {
+      id: "tool-result",
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "todo",
+      isError: false,
+      timestamp: 1,
+      content: [{ type: "text", text: "ok" }],
+      details: {
+        tasks: [{ id: 1, blockedBy: undefined }],
+        optional: undefined,
+        values: ["kept", undefined, Number.NaN],
+      },
+    };
+    const reloaded = JSON.parse(JSON.stringify(message));
+
+    expect(canonicalMessageHash(message)).toBe(canonicalMessageHash(reloaded));
+  });
+
+  test("v2 block with JSON-normalized tool details still materializes after restart-shaped reload", async () => {
+    const { state, config } = fixture();
+    const raw = [
+      { id: "u1", role: "user", timestamp: 1, content: [{ type: "text", text: "inspect" }] },
+      { id: "a1", role: "assistant", timestamp: 2, content: [{ type: "toolCall", id: "c1", name: "read", input: { path: "x" } }] },
+      {
+        id: "r1",
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        timestamp: 3,
+        isError: false,
+        content: [{ type: "text", text: "large output\n".repeat(1_000) }],
+        details: { nested: { optional: undefined }, values: [1, undefined, Number.NaN] },
+      },
+      { id: "u2", role: "user", timestamp: 4, content: [{ type: "text", text: "continue" }] },
+    ];
+    const projected = applyPruning(raw, state, config);
+    const selection = {
+      startId: state.messageIdsByStableId.get("id:u1")!,
+      endId: state.messageIdsByStableId.get("id:r1")!,
+      messageCount: 3,
+      estimatedTokens: 3_000,
+      includedBlockIds: [],
+      reason: "json round-trip regression",
+    };
+
+    const result = await createAutoCompressionBlock({
+      state,
+      config,
+      messages: projected,
+      candidate: selection,
+      topic: "json round-trip",
+    });
+
+    // Simulate exactly what restart does to the raw session messages: JSONL
+    // serialization removes undefined object fields and normalizes unsupported
+    // array/number values. Exact membership must still recognize the same
+    // provider-visible transcript and materialize the persisted block.
+    const reloadedRaw = JSON.parse(JSON.stringify(raw));
+    const replay = applyPruning(reloadedRaw, state, config);
+    expect(state.compressionBlocks.find((block) => block.id === result.blockId)?.active).toBe(true);
+    expect(replay.filter((message: any) => message._dcpBlockId === result.blockId)).toHaveLength(1);
+    expect(JSON.stringify(replay)).not.toContain("large output");
+  });
+
   test("v2 block from a pruned projection materializes on raw messages and a later candidate sees the block", async () => {
     const { state, config } = fixture();
     seedToolRecords(state);
@@ -249,6 +315,59 @@ describe("DCP auto-compression projection regressions", () => {
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toContain("parent-cancelled-reason");
     expect(caught).not.toBeInstanceOf(AutoCompressionBlockedError);
+    expect(state.compressionBlocks).toHaveLength(0);
+  });
+
+  test("rejected exact source stays memoized when unrelated provider tail grows", async () => {
+    const { state, config } = fixture();
+    config.compress.protectUserMessages = true;
+    const requirement = `Constraint: ${"keep exact requirement ".repeat(250)}`;
+    const raw = [
+      { id: "u1", role: "user", timestamp: 1, content: [{ type: "text", text: requirement }] },
+      { id: "a1", role: "assistant", timestamp: 2, content: [{ type: "text", text: "ack" }] },
+      { id: "u2", role: "user", timestamp: 3, content: [{ type: "text", text: "recent turn" }] },
+    ];
+    const firstProjection = applyPruning(raw, state, config);
+    const selection = {
+      startId: state.messageIdsByStableId.get("id:u1")!,
+      endId: state.messageIdsByStableId.get("id:a1")!,
+      messageCount: 2,
+      estimatedTokens: 2_000,
+      includedBlockIds: [],
+      reason: "memoization regression",
+    };
+
+    let firstError: unknown;
+    try {
+      await createBudgetedAutoCompressionBlock(
+        { state, config, messages: firstProjection, candidate: selection, topic: "memo" },
+        null,
+      );
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toBeInstanceOf(AutoCompressionBlockedError);
+    expect((firstError as AutoCompressionBlockedError).blockedReason).toBe("non-positive-gain");
+
+    // Only the provider tail changed. The exact source u1..a1 is byte-identical,
+    // so the wrapper must reuse the cached rejection instead of preparing and
+    // rejecting the same compression again after every autonomous tool turn.
+    const secondProjection = applyPruning([
+      ...raw,
+      { id: "a2", role: "assistant", timestamp: 4, content: [{ type: "text", text: "unrelated tail growth" }] },
+      { id: "u3", role: "user", timestamp: 5, content: [{ type: "text", text: "another recent carrier" }] },
+    ], state, config);
+    let secondError: unknown;
+    try {
+      await createBudgetedAutoCompressionBlock(
+        { state, config, messages: secondProjection, candidate: selection, topic: "memo" },
+        null,
+      );
+    } catch (error) {
+      secondError = error;
+    }
+
+    expect(secondError).toBe(firstError);
     expect(state.compressionBlocks).toHaveLength(0);
   });
 });

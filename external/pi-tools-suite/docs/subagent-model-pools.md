@@ -11,7 +11,8 @@ not a price oracle.
 - `research`: read-only evidence gathering, searches and focused review questions.
 - `implement`: bounded code, documentation, test and frontend changes.
 - `verify`: run checks and interpret logs, without fixing source or tests.
-- `browser-qa`: isolated browser workflow with assertions and visual artifacts.
+- `ui-qa`: isolated real-UI workflow for browsers, terminal/TUI apps, and
+  desktop GUIs with deterministic assertions and inspectable evidence.
 - `frontier-review`: independent post-implementation code review on a strong
   model; hidden when the current parent model matches the role's availability
   gate.
@@ -62,7 +63,7 @@ declare Sol in their own chains. Model references in `models` must be exact
 
 The resolver intersects the agent chain with the selected pool. Runtime
 selection then skips unregistered, unauthenticated or session-exhausted models.
-Tasks with images and browser QA require confirmed image support. The first
+Tasks with images and UI QA require confirmed image support. The first
 eligible candidate runs; only the remaining eligible candidates are passed to
 quota fallback. An empty intersection or unavailable chain rejects the batch
 before any children or run state are created. Model selection makes no LLM

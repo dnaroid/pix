@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { isBlindModelRef, SubagentModelSelectionError, type ResolvedAgentTaskConfig, type SubagentConfig } from "./config.js";
+import { isUiQaType } from "./browser-qa.js";
 import { isSessionModelUnavailable } from "./model-fallback.js";
 
 export interface SubagentModelRegistry {
@@ -17,7 +18,7 @@ export async function selectAvailableAgentModels(
 	signal?: AbortSignal,
 ): Promise<ResolvedAgentTaskConfig> {
 	if (signal?.aborted) throw new Error("Aborted");
-	const needsImages = Boolean(resolved.task.imagePaths?.length) || resolved.task.subagentType === "browser-qa";
+	const needsImages = Boolean(resolved.task.imagePaths?.length) || isUiQaType(resolved.task.subagentType);
 	if (!registry && !needsImages) return resolved; // Narrow offline/test callers.
 	const candidates = [resolved.task.model, ...resolved.fallbackModels].filter((ref): ref is string => Boolean(ref));
 	let registeredAvailable: Set<string> | undefined;

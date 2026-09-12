@@ -9,6 +9,7 @@ import {
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 	getAgentDir,
+	ModelRuntime,
 	SessionManager,
 	type EventBus,
 	type AgentSessionRuntime,
@@ -369,6 +370,20 @@ export async function refreshPixModelRuntimeForStartup(
 	// Startup only needs the locally configured model catalog. Remote catalog
 	// refreshes belong to explicit model-management flows and must not block boot.
 	await modelRuntime.refresh({ allowNetwork: false });
+}
+
+/**
+ * Build the model catalogue used by UI-only draft tabs without allocating an
+ * AgentSession or session file. Drafts can therefore expose model selection
+ * while preserving lazy session materialization until the first prompt.
+ */
+export async function createPixDraftModelCatalog(): Promise<SessionModel[]> {
+	const modelRuntime = await ModelRuntime.create({
+		allowModelNetwork: false,
+		refreshOnCreate: false,
+	});
+	await refreshPixModelRuntimeForStartup(modelRuntime);
+	return [...modelRuntime.getAvailableSnapshot()] as SessionModel[];
 }
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {

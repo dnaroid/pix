@@ -5,6 +5,7 @@ import {
 	compileOutputFilterPatterns,
 	defaultPixConfig,
 	loadPixConfig,
+	resolveDefaultModelRef,
 	resolveToolRule,
 	savePixVisibleModels,
 	type PixConfig,
@@ -14,7 +15,9 @@ import type {
 	Entry,
 	PixEditorSnapshot,
 	SessionActivity,
+	SessionModel,
 	SlashCommand,
+	ThinkingLevel,
 	UserMessageJumpMenuValue,
 } from "./types.js";
 import { AppCommandController } from "./commands/command-controller.js";
@@ -39,7 +42,8 @@ import { AppAutocompleteController } from "./input/autocomplete-controller.js";
 import { AppQueuedMessageController } from "./session/queued-message-controller.js";
 import { AppRequestHistory } from "./session/request-history.js";
 import { AppRenderController } from "./rendering/render-controller.js";
-import { createPixRuntime, type CreatePixRuntimeOptions } from "./runtime.js";
+import { createPixDraftModelCatalog, createPixRuntime, type CreatePixRuntimeOptions } from "./runtime.js";
+import { parseModelRef } from "./model/model-ref.js";
 import { ScreenStyler } from "./screen/screen-styler.js";
 import { AppScrollController, type AppScrollState } from "./screen/scroll-controller.js";
 import { searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "./session/session-search.js";
@@ -180,6 +184,10 @@ export class PiUiExtendApp {
 	private voicePartialText: string | undefined;
 	private resumeSessions: SessionInfo[] = [];
 	private resumeLoading = false;
+	private draftModels: SessionModel[] = [];
+	private draftModelRef: string | undefined;
+	private draftThinkingLevel: ThinkingLevel = "off";
+	private draftModelOverrideRef: string | undefined;
 
 	constructor(options: AppOptions) {
 		this.options = options;
@@ -209,6 +217,7 @@ export class PiUiExtendApp {
 			theme: this.theme,
 			blinkController: this.blinkController,
 			runtimeSession: () => this.runtime?.session,
+			draftModelStatus: () => this.draftModelStatus(),
 			render: () => this.scheduleRender(),
 		});
 		this.agentPauseController = new AgentPauseController({
@@ -225,7 +234,7 @@ export class PiUiExtendApp {
 			maxProjectSessions: () => this.pixConfig.maxProjectSessions,
 			blinkController: this.blinkController,
 			runtime: () => this.runtime,
-			createRuntimeForNewSession: () => this.createRuntime(
+			createRuntimeForNewSession: (modelRef) => this.createRuntime(
 				// Never reuse services across tabs. The SDK ties the extension
 				// runtime (resourceLoader.getExtensions().runtime) to the
 				// resourceLoader, and that runtime is shared by every session
@@ -236,13 +245,18 @@ export class PiUiExtendApp {
 				// then throw "ctx is stale after session replacement or reload".
 				// Fresh services per session = fresh extension runtime = no
 				// cross-session invalidation.
-				newTabRuntimeOptions(this.options),
+				{
+					...newTabRuntimeOptions(this.options),
+					...(modelRef ? { modelRef } : {}),
+				},
 			),
 			createRuntimeForSession: (sessionPath) => this.createRuntime({
 				...this.options,
 				noSession: false,
 				sessionPath,
 			}),
+			draftModelOverrideRef: () => this.draftModelOverrideRef,
+			resetDraftModelSelection: () => this.resetDraftModelSelection(),
 			deactivateRuntimeForDraft: () => this.deactivateRuntimeForDraft(),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			activateRuntime: (runtime, options) => this.activateRuntime(runtime, options),
@@ -309,6 +323,7 @@ export class PiUiExtendApp {
 		}, this.pixConfig.dictation);
 		this.menuItems = new AppMenuItemsController({
 			runtime: () => this.runtime,
+			draftModelState: () => this.draftModelState(),
 			visibleModels: () => this.pixConfig.visibleModels,
 			getBuiltinSlashCommands: () => this.slashCommands,
 			getEntries: () => this.entries,
@@ -328,6 +343,7 @@ export class PiUiExtendApp {
 		this.popupMenus = new AppPopupMenuController({
 			get entries() { return app.entries; },
 			get session() { return app.runtime?.session; },
+			currentThinkingLevel: () => this.runtime?.session.thinkingLevel ?? this.draftModelState()?.thinkingLevel,
 			get resumeLoading() { return app.resumeLoading; },
 			get resumeSessionCount() { return app.resumeSessions.length; },
 			isRunning: () => this.running,
@@ -351,6 +367,7 @@ export class PiUiExtendApp {
 			theme: this.theme,
 			screenStyler: this.screenStyler,
 			get session() { return app.runtime?.session; },
+			draftModelStatus: () => this.draftModelStatus(),
 			modelColors: this.pixConfig.modelColors,
 			get sessionActivity() { return app.statusController.sessionActivity; },
 			get statusDotBright() { return app.statusController.statusDotBright; },
@@ -635,6 +652,7 @@ export class PiUiExtendApp {
 				inputScopeKey: () => this.tabsController.activeInputTabId(),
 				isDraftTabActive: () => this.tabsController.isDraftTabActive(),
 				materializeDraftSession: () => this.tabsController.materializeActiveDraftTab(),
+				selectDraftModel: (model, thinkingLevel) => this.selectDraftModel(model, thinkingLevel),
 				getBuiltinSlashCommands: () => this.slashCommands,
 				isRunning: () => this.running,
 				setInput: (value) => this.setInput(value),
@@ -960,6 +978,60 @@ export class PiUiExtendApp {
 	private async loadStartupConfig(): Promise<void> {
 		await yieldToEventLoop();
 		this.applyPixConfig(loadPixConfig(this.options.cwd));
+		await this.refreshDraftModelCatalog();
+	}
+
+	private async refreshDraftModelCatalog(): Promise<void> {
+		try {
+			this.draftModels = await createPixDraftModelCatalog();
+		} catch {
+			this.draftModels = [];
+		}
+		this.resetDraftModelSelection();
+	}
+
+	private resetDraftModelSelection(): void {
+		this.draftModelOverrideRef = undefined;
+		const configuredRef = this.options.modelRef ?? resolveDefaultModelRef(this.pixConfig);
+		if (configuredRef) {
+			try {
+				const parsed = parseModelRef(configuredRef);
+				this.draftModelRef = `${parsed.provider}/${parsed.modelId}`;
+				this.draftThinkingLevel = parsed.thinkingLevel ?? "off";
+				return;
+			} catch {
+				// Runtime creation will surface an invalid configured model. Keep the
+				// draft picker usable so the user can select a valid model first.
+			}
+		}
+
+		const first = this.draftModels[0];
+		this.draftModelRef = first ? `${first.provider}/${first.id}` : undefined;
+		this.draftThinkingLevel = "off";
+	}
+
+	private selectDraftModel(model: SessionModel, thinkingLevel: ThinkingLevel): void {
+		if (!this.tabsController.isDraftTabActive()) return;
+		const ref = `${model.provider}/${model.id}`;
+		this.draftModelRef = ref;
+		this.draftThinkingLevel = thinkingLevel;
+		this.draftModelOverrideRef = `${ref}:${thinkingLevel}`;
+		this.setStatus("new conversation");
+	}
+
+	private draftModelState(): { models: readonly SessionModel[]; modelRef?: string; thinkingLevel: ThinkingLevel } | undefined {
+		if (!this.tabsController.isDraftTabActive()) return undefined;
+		return {
+			models: this.draftModels,
+			...(this.draftModelRef ? { modelRef: this.draftModelRef } : {}),
+			thinkingLevel: this.draftThinkingLevel,
+		};
+	}
+
+	private draftModelStatus(): { modelLabel: string; thinkingLabel: string } | undefined {
+		const state = this.draftModelState();
+		if (!state?.modelRef) return undefined;
+		return { modelLabel: state.modelRef, thinkingLabel: state.thinkingLevel };
 	}
 
 	private applyPixConfig(config: PixConfig): void {

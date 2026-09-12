@@ -31,8 +31,8 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - ANSI control sequences in shell diffs are removed before browser rendering.
 - Large structured replacements use a bounded fallback instead of quadratic line matching.
 - Diff panes scroll vertically and horizontally without widening the transcript.
-- Inline transcript diffs remain inline. Source Control `git diff` actions open the separate Git Diff workspace editor tab, which preserves its LLM review output while the user switches to Conversation or Preview.
-- File links opened from Git Diff activate the Preview editor without closing the diff editor, allowing users to move between source and review without stacked modal dialogs.
+- Inline transcript diffs remain inline. Source Control `git diff` actions open/select the Git Diff tab in the unified top workbench strip, which preserves its LLM review output while the user switches to conversation or Preview tabs.
+- File links opened from Git Diff activate the Preview workbench tab without closing Git Diff, allowing users to move between source and review without stacked modal dialogs or a second nested tab strip.
 
 ## Non-goals
 
@@ -48,7 +48,7 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/GitDiffPane.svelte`
-- `desktop/src/components/WorkspaceEditorTabs.svelte`
+- `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/App.svelte`
 
 ## Verification

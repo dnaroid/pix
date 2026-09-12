@@ -46,7 +46,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/PromptComposer.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/SessionTabs.svelte`
+- `desktop/src/components/WorkbenchTabs.svelte`
 
 ## Verification
 

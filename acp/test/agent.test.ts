@@ -549,6 +549,34 @@ test("desktop lazy session/new returns before pi startup and session/load joins 
 	});
 });
 
+test("desktop draft model metadata overrides the configured default only for the new session", async () => {
+	const harness = createTestAdapter({
+		loadDefaultModel: () => ({
+			provider: "anthropic",
+			modelId: "claude-4",
+			thinkingLevel: "medium",
+			fallbackModels: [],
+		}),
+	});
+
+	await connect(harness.adapter, async (cx) => {
+		await cx.request("session/new", {
+			cwd: "/tmp/draft-model",
+			mcpServers: [],
+			_meta: {
+				"pix.draftModel": "openai-codex/gpt-5.6-sol",
+				"pix.draftThinking": "high",
+			},
+		});
+	});
+
+	assert.equal(harness.options.length, 1);
+	assert.equal(harness.options[0]?.provider, "openai-codex");
+	assert.equal(harness.options[0]?.model, "gpt-5.6-sol");
+	assert.ok(harness.options[0]?.args?.includes("--thinking"));
+	assert.ok(harness.options[0]?.args?.includes("high"));
+});
+
 test("session/new advertises supported built-ins and pi runtime slash commands", async () => {
 	const harness = createTestAdapter({
 		createPiClient: () => {

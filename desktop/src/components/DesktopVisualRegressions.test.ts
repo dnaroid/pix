@@ -32,8 +32,14 @@ describe("desktop visual regressions", () => {
     expect(applySelection).not.toContain("promptRunning");
 
     expect(appSource).toContain(
-      "disabled={!canUseSession || !activeSessionRuntimeReady || changingConfig !== null}",
+      "disabled={!canUseSession || changingConfig !== null || (draftSessionTabActive ? draftConfigOptions.length === 0 : !activeSessionRuntimeReady)}",
     );
+
+    const commandStart = appSource.indexOf('case "session.modelThinking":');
+    const commandEnd = appSource.indexOf('case "composer.focus":', commandStart);
+    const commandAvailability = appSource.slice(commandStart, commandEnd);
+    expect(commandAvailability).toContain("draftSessionTabActive ? draftConfigOptions.length > 0");
+    expect(commandAvailability).not.toContain("promptRunning");
   });
 
   it("suppresses browser-native number and textarea chrome in generated settings", () => {

@@ -31,6 +31,20 @@ describe("AppStatusController", () => {
 		assert.equal(controller.currentStatus(), `no model ${APP_ICONS.lightbulb} off ?%`);
 	});
 
+	it("shows draft model and thinking before a runtime session exists", () => {
+		const controller = new AppStatusController({
+			cwd: "/tmp/workspace",
+			theme: THEMES.dark,
+			blinkController: fakeBlinkController(),
+			runtimeSession: () => undefined,
+			draftModelStatus: () => ({ modelLabel: "openai-codex/gpt-5.5", thinkingLabel: "high" }),
+			render: () => {},
+		});
+
+		controller.setStatus("new conversation");
+		assert.equal(controller.currentStatus(), `openai-codex/gpt-5.5 ${APP_ICONS.lightbulb} high`);
+	});
+
 	it("formats session, workspace, context, and severity labels", async () => {
 		let renders = 0;
 		const blink = fakeBlinkController();
@@ -77,6 +91,30 @@ describe("AppStatusController", () => {
 });
 
 describe("StatusLineRenderer", () => {
+	it("exposes draft model and thinking click targets without a runtime session", () => {
+		const modelLabel = "openai-codex/gpt-5.5";
+		const thinkingLabel = "high";
+		const statusText = `${modelLabel} ${APP_ICONS.lightbulb} ${thinkingLabel}`;
+		const renderer = statusLineRenderer({
+			widgetText: "",
+			voiceActive: false,
+			currentStatus: statusText,
+			draftModelStatus: { modelLabel, thinkingLabel },
+		});
+
+		assert.deepEqual(renderer.modelTarget(statusText, 3), {
+			row: 3,
+			startColumn: 1,
+			endColumn: modelLabel.length + 1,
+		});
+		const thinkingStart = statusText.indexOf(thinkingLabel) + 1;
+		assert.deepEqual(renderer.thinkingTarget(statusText, 3), {
+			row: 3,
+			startColumn: thinkingStart,
+			endColumn: thinkingStart + thinkingLabel.length,
+		});
+	});
+
 	it("places the voice widget flush right in the status bar", () => {
 		const widgetText = `${APP_ICONS.microphone} RU`;
 		const width = 40;
@@ -723,11 +761,12 @@ function widgetsText(...parts: string[]): string {
 	return parts.filter((part) => part.length > 0).join(" ");
 }
 
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; agentPauseWidgetText?: string; agentPauseActive?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; agentPauseWidgetText?: string; agentPauseActive?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; draftModelStatus?: { modelLabel: string; thinkingLabel: string }; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
 		session: options.session,
+		draftModelStatus: () => options.draftModelStatus,
 		modelColors: options.modelColors,
 		sessionActivity: options.sessionActivity ?? "idle",
 		statusDotBright: options.statusDotBright ?? false,

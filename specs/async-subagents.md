@@ -49,11 +49,22 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    `routing.fallbackModels`, then the current parent model, de-duplicating refs
    and continuing past unavailable/provider-error candidates. Abort remains
    terminal. `[confirmed by code, routing.ts/ultrawork-auto.ts]`
-9. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
-10. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
-11. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
-12. **RPC prompt failure** (`success=false`): writes result.md with error, `notifyComplete(1)`, SIGTERM. `[confirmed by code]`
-13. **Exit handling**: waits 10ms for stdio flush, then finalizes. Exit-code resolution: timed_out→124, completedFromAgentEnd→0, lastAgentEndError→1, numeric→code, signal→128, else→1. `[confirmed by code]`
+9. **UI QA special role**: `ui-qa` is the canonical real-UI role for browser,
+   terminal/TUI, and desktop-GUI verification. Explicit legacy `browser-qa`
+   requests normalize to `ui-qa`, and a project-local `browser-qa.md` override
+   migrates to the canonical profile when no `ui-qa.md` exists. UI QA always
+   disables ordinary skill discovery, receives `PI_SUBAGENT_AGENT_DIR` plus
+   launcher-owned `PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER` paths, and gets
+   private `ui-qa/flows/` plus browser-backend `browser-qa/flows/` workspaces.
+   The unified runner selects browser, PTY/TUI, or macOS Accessibility backends
+   from a declarative target and owns bounded execution/evidence cleanup.
+   `[confirmed by code,
+   config.ts/routing.ts/spawn.ts]`
+10. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
+11. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
+12. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
+13. **RPC prompt failure** (`success=false`): writes result.md with error, `notifyComplete(1)`, SIGTERM. `[confirmed by code]`
+14. **Exit handling**: waits 10ms for stdio flush, then finalizes. Exit-code resolution: timed_out→124, completedFromAgentEnd→0, lastAgentEndError→1, numeric→code, signal→128, else→1. `[confirmed by code]`
 
 ### Concurrency (`core/concurrency.ts`)
 - `createSemaphore(limit)`: `limit ≤ 0` = unlimited. `acquire(signal?)` queues when full, rejects on abort. `[confirmed by code]`
@@ -98,6 +109,10 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ### Tools (`tools/*.ts`)
 - **spawn**: `{tasks: AgentTask[], runDir?, slug?, thinking?, extraArgs?, timeoutSeconds?, watchSeconds?}`. `AgentTask = {id?, task, scope?, subagentType?, model?, thinking?, promptAppend?, promptOverride?, focus?, imagePaths?, tools?, extraArgs?, timeoutSeconds?, parentObjective?}`. `[confirmed by code]`
+- `ui-qa` is an explicit built-in role. The compatibility name `browser-qa`
+  normalizes to it before explicit-type validation/routing. UI-QA tasks require
+  confirmed image-capable model candidates even when `imagePaths` is empty.
+  `[confirmed by code, routing.ts/model-selection.ts]`
 - **status** `{runDir?, agentIds?}`, **wait** `{runDir?, agentIds?, timeout?, interval?, failFast?}`, **result** `{runDir?, agentId}`, **stop** `{runDir?, agentIds?, force?, signal?}`, **cleanup** `{runRoot?, days?, keep?, delete?}`. `[confirmed by code]`
 
 ### Disk layout
@@ -114,6 +129,8 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
       retry_count?, retry_pending?, next_retry_at?, retry.log?,
       model_fallback_from?, model_fallback_to?, model_fallback.log?,
       sessions/   (if ASYNC_SUBAGENTS_ENABLE_SESSIONS)
+      ui-qa/flows/ (for ui-qa; unified flows plus native/TUI evidence)
+      browser-qa/flows/ (for ui-qa; trusted browser backend workspace)
 ```
 `[confirmed by code]`
 
@@ -123,6 +140,12 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - Registry `version` is always 1. `[confirmed by code]`
 - Sub-agents never receive the `subagents` tool → recursive spawning is impossible. `[confirmed by code, tool-guard.ts]`
 - Semaphore is project-wide (keyed by resolved cwd). `[confirmed by code]`
+- `ui-qa` tests the requested user-facing surface through the capability-first
+  runner: browser delegates to the trusted backend, TUI uses a real PTY plus
+  headless ANSI/VT screen model, and macOS desktop uses the bundled semantic
+  Accessibility/CGWindow driver. Missing capabilities return `BLOCKED`; static
+  or mock checks never replace requested UI execution. `[confirmed by code and
+  agent contract]`
 
 ## Edge cases
 - **No runDir**: registry `latestRunDir` → mtime scan → throw if nothing. `[confirmed by code]`
@@ -147,6 +170,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - `external/pi-tools-suite/src/async-subagents/core/routing.ts`
 - `external/pi-tools-suite/src/async-subagents/core/ultrawork-auto.ts`
 - `external/pi-tools-suite/src/async-subagents/core/model-selection.ts`
+- `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
 - `external/pi-tools-suite/src/async-subagents/core/model-fallback.ts`
 - `external/pi-tools-suite/src/async-subagents/core/retry.ts`
 - `external/pi-tools-suite/src/async-subagents/core/concurrency.ts`
@@ -159,6 +183,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - `external/pi-tools-suite/src/async-subagents/core/structured-result.ts`
 - `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
 - `external/pi-tools-suite/src/async-subagents/commands.ts`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
 
 ## Existing tests
 
@@ -168,7 +193,8 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - `external/pi-tools-suite/test/async-subagents/tools.test.ts`: public tool
   validation and spawn/status/wait/result/stop integration.
 - `external/pi-tools-suite/test/async-subagents/routing.test.ts`: explicit and
-  automatic role routing, parent-model gates, and routing failures.
+  automatic role routing, parent-model gates, routing failures, and the legacy
+  `browser-qa` → `ui-qa` alias.
 - `external/pi-tools-suite/test/async-subagents/model-pools.test.ts` and
   `model-pool-contract.test.ts`: pool filtering and session fallback behavior.
 - `external/pi-tools-suite/test/async-subagents/ui.test.ts`: task normalization,

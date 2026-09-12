@@ -121,10 +121,11 @@ merge pipeline.
 - `defaultType` is now `research` while bundled files are loaded in
   deterministic filename order. Spec 29 supersedes silent spawn-error fallback
   with parent-first role selection and recoverable routing errors.
-- Runtime-only invariants stay in runtime code. As extended by
-  `30-browser-qa-inline-agent.md`, `browser-qa` disables ordinary skill discovery
-  and receives launcher-owned runner/workspace paths, while the complete QA
-  workflow lives in the body of `agents/browser-qa.md` without a separate skill.
+- Runtime-only invariants stay in runtime code. As extended by `ui-qa-agent.md`,
+  `ui-qa` disables ordinary skill discovery and receives launcher-owned
+  runner/workspace paths, while the complete QA workflow lives in the body of
+  `agents/ui-qa.md` without a separate skill. Legacy `browser-qa` requests
+  normalize to that canonical role.
 
 ## Non-goals
 

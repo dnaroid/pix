@@ -68,4 +68,4 @@ model behavior when the user has not configured `enabledModels`.
 - Confirmed by code: Pix previously substituted `PI_FAVORITE_MODEL_REFS` when
   `enabledModels` was missing or empty.
 - Confirmed by current verification: schema generation and SDK pin checks pass,
-  TypeScript is clean, and the full root test suite passes (1078 tests).
+  TypeScript is clean, and the full root test suite passes.

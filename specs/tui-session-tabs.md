@@ -29,9 +29,17 @@ user actually sends work to the agent.
   session already represented by a real open TUI tab.
 - Typing, pasting, adding attachments, path insertion, or voice input marks the
   draft as edited and dismisses the selector, but does not create a Pi session.
+- The status line exposes the normal model + thinking selector while the active
+  tab is still a UI-only draft. Pix may load the locally available model
+  catalogue for that UI, but selecting a model/thinking level must not allocate
+  an `AgentSession`, create a session file, or otherwise materialize the draft.
+  The staged draft selection remains attached to that draft while the user
+  switches between tabs.
 - A normal first prompt submission materializes the draft in place: Pix creates
-  the new runtime, activates/binds it, converts the same tab id from draft to
-  real-session ownership, and only then submits the prompt.
+  the new runtime using any staged draft model/thinking selection, activates/
+  binds it, converts the same tab id from draft to real-session ownership, and
+  only then submits the prompt. If the user did not stage a selection, the
+  normal configured default/fallback model resolution remains unchanged.
 - Resource slash commands that require a Pi session materialize the draft
   before execution. Purely local slash commands and shell input do not create a
   Pi session merely because the draft exists.
@@ -48,6 +56,14 @@ user actually sends work to the agent.
   when available. If a required history refresh is cancelled or fails, Pix
   falls back to that cached snapshot instead of leaving the restored tab with
   an empty conversation surface.
+- Persisted conversation **rendering** may stay tail-lazy, but that tail is not
+  a valid provider-context root. When older session entries exist,
+  `buildSessionContext()` / `buildContextEntries()` reconstruct the complete
+  active branch with the SDK's compaction semantics while the UI-facing history
+  reader remains lazy. A user message that happens to be the first user entry in
+  the loaded tail must never be reparented into a synthetic model-context root;
+  after an error/restart the agent therefore retains the pre-error objective and
+  work even when those entries are older than the initial display tail.
 - The sole UI-only draft tab is the minimum conversation surface and cannot be
   closed. Its close glyph/target is omitted, and close commands against it are
   ignored until another real tab exists.
@@ -96,6 +112,10 @@ user actually sends work to the agent.
 
 - `src/app/session/tabs-controller.ts`
 - `src/app/session/session-lifecycle-controller.ts`
+- `src/app/session/lazy-session-manager.ts`
+- `src/app/runtime.ts`
+- `src/app/screen/status-controller.ts`
+- `src/app/rendering/status-line-renderer.ts`
 - `src/app/input/input-action-controller.ts`
 - `src/app/popup/popup-menu-controller.ts`
 - `src/app/popup/menu-items-controller.ts`
@@ -104,6 +124,7 @@ user actually sends work to the agent.
 - `src/app/commands/command-host.ts`
 - `src/app/app.ts`
 - `tests/tabs-controller.test.ts`
+- `tests/lazy-session-manager.test.ts`
 - `tests/input-action-controller.test.ts`
 - `tests/menu-items-controller.test.ts`
 - `tests/command-navigation-actions.test.ts`
@@ -119,8 +140,10 @@ user actually sends work to the agent.
 - Input-action tests cover materializing the draft only when a normal first
   prompt is actually submitted.
 - Menu/popup tests cover excluding already-open sessions, omitting the **new**
-  row, the **Open a conversation** selector label, and direct replacement of
-  the draft tab.
+  row, the **Open a conversation** selector label, direct replacement of the
+  draft tab, and applying a draft model choice without materializing a runtime.
+- Status tests cover rendering/click-targeting draft model and thinking values
+  before a runtime session exists.
 - Command-navigation tests cover synchronizing the draft selector query while a
   shared saved-session load is already in progress.
 - `npm run test:inner`

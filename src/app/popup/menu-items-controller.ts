@@ -24,6 +24,11 @@ import type {
 
 export type AppMenuItemsControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
+	draftModelState?(): {
+		models: readonly SessionModel[];
+		modelRef?: string;
+		thinkingLevel?: ThinkingLevel;
+	} | undefined;
 	visibleModels(): readonly string[] | undefined;
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	getEntries(): readonly Entry[];
@@ -107,7 +112,7 @@ export class AppMenuItemsController {
 
 	getThinkingMenuItems(query: string): PopupMenuItem<ThinkingMenuValue>[] {
 		const session = this.host.runtime()?.session;
-		const currentLevel = session?.thinkingLevel ?? "off";
+		const currentLevel = session?.thinkingLevel ?? this.host.draftModelState?.()?.thinkingLevel ?? "off";
 		const levels = session ? normalizeAvailableThinkingLevels(session.getAvailableThinkingLevels()) : [...THINKING_LEVELS];
 		const items: FuzzySearchItem<ThinkingMenuValue>[] = levels.map((level) => ({
 			value: { level, current: level === currentLevel },
@@ -231,7 +236,8 @@ export class AppMenuItemsController {
 
 	private isCurrentModel(model: SessionModel): boolean {
 		const current = this.host.runtime()?.session.model;
-		return current?.provider === model.provider && current.id === model.id;
+		if (current) return current.provider === model.provider && current.id === model.id;
+		return this.host.draftModelState?.()?.modelRef === this.modelRef(model);
 	}
 
 	private isVisibleModel(model: SessionModel, visibleModels: readonly string[] | undefined): boolean {
@@ -240,7 +246,7 @@ export class AppMenuItemsController {
 
 	private getModelMenuModels(): SessionModel[] {
 		const runtime = this.host.runtime();
-		if (!runtime) return [];
+		if (!runtime) return [...(this.host.draftModelState?.()?.models ?? [])];
 
 		const modelRuntime = runtime.services.modelRuntime;
 		const models = [...modelRuntime.getAvailableSnapshot()] as SessionModel[];

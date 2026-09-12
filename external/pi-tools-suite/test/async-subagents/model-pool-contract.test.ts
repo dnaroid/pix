@@ -104,12 +104,12 @@ describe.serial("model-pool selection contract", () => {
 	test("new-install pools do not redefine agents or change worker instructions", () => {
 		const { cwd } = fixture();
 		const config = loadSubagentConfig(cwd, {});
-		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "frontier-review", "implement", "oracle", "research", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		for (const preset of Object.values(config.presets ?? {})) {
 			expect(preset.models?.length).toBeGreaterThan(0);
 			expect(preset.types).toBeUndefined();
 			expect(preset.model).toBeUndefined();
-			for (const type of ["research", "implement", "verify", "browser-qa"]) {
+			for (const type of ["research", "implement", "verify", "ui-qa"]) {
 				const selected = resolve(config, preset, type);
 				expect(preset.models).toContain(selected.task.model);
 				expect(selected.task.promptAppend).toBe(config.types[type].promptAppend);
@@ -154,7 +154,7 @@ describe.serial("model-pool selection contract", () => {
 		writePresets(cwd, { cheap: { description: "project cheap", models: ["zai/glm-5-turbo"] } });
 		const config = loadSubagentConfig(cwd, {});
 		expect(config.presets?.cheap).toEqual({ description: "project cheap", models: ["zai/glm-5-turbo"] });
-		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "frontier-review", "implement", "oracle", "research", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(resolve(config, config.presets!.cheap).task.model).toBe("zai/glm-5-turbo");
 	});
 

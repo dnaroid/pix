@@ -76,6 +76,7 @@ export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
 export type AppPopupMenuControllerHost = {
 	readonly entries: readonly Entry[];
 	readonly session: AgentSession | undefined;
+	currentThinkingLevel?(): ThinkingLevel | undefined;
 	readonly resumeLoading: boolean;
 	readonly resumeSessionCount: number;
 	isRunning(): boolean;
@@ -800,7 +801,7 @@ export class AppPopupMenuController {
 			return;
 		}
 		const levels = this.selectedModelThinkingLevels();
-		const initial = this.modelThinkingLevel ?? this.host.session?.thinkingLevel ?? "off";
+		const initial = this.modelThinkingLevel ?? this.host.session?.thinkingLevel ?? this.host.currentThinkingLevel?.() ?? "off";
 		if (this.modelThinkingSelectedRef !== selected.ref || this.modelThinkingLevel === undefined) {
 			this.modelThinkingLevel = this.clampThinkingLevel(initial, levels);
 			this.modelThinkingSelectedRef = selected.ref;

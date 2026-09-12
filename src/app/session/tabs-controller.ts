@@ -65,8 +65,10 @@ export type AppTabsControllerHost = {
 	readonly maxProjectSessions?: number | (() => number | undefined);
 	readonly blinkController: AppBlinkController;
 	runtime(): AgentSessionRuntime | undefined;
-	createRuntimeForNewSession(): Promise<AgentSessionRuntime>;
+	createRuntimeForNewSession(modelRef?: string): Promise<AgentSessionRuntime>;
 	createRuntimeForSession(sessionPath: string): Promise<AgentSessionRuntime>;
+	draftModelOverrideRef?(): string | undefined;
+	resetDraftModelSelection?(): void;
 	deactivateRuntimeForDraft?(): void;
 	awaitCurrentSessionExtensions?(runtime?: AgentSessionRuntime): Promise<void>;
 	activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void>;
@@ -555,7 +557,7 @@ export class AppTabsController {
 
 		let newRuntime: AgentSessionRuntime | undefined;
 		try {
-			newRuntime = await this.host.createRuntimeForNewSession();
+			newRuntime = await this.host.createRuntimeForNewSession(this.host.draftModelOverrideRef?.());
 			if (!this.ownsDraftLifecycle(tab.id, generation)) {
 				await this.disposeRuntimeIfOrphan(newRuntime);
 				return undefined;
@@ -1467,6 +1469,7 @@ export class AppTabsController {
 			this.autoUserMessagesByTabId.delete(tab.id);
 			this.deferredUserMessagesByTabId.delete(tab.id);
 			this.touchedDraftTabIds.delete(tab.id);
+			this.host.resetDraftModelSelection?.();
 		}
 		this.restoreInputState(tab.id);
 		this.host.closeMenusForTabSwitch?.();

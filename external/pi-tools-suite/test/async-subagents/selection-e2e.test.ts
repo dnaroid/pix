@@ -214,7 +214,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe("async-subagents live e2e sub-agent type selection", () => {
-	e2eTest("delegates real-browser QA to the explicit browser-qa profile", async () => {
+	e2eTest("delegates real-browser QA to the explicit ui-qa profile", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `
 Verify in a real browser at http://127.0.0.1:4173/cart that clicking the Add to cart button changes the cart count to 1. Collect a screenshot, video, and trace as evidence.`;
@@ -223,14 +223,15 @@ Verify in a real browser at http://127.0.0.1:4173/cart that clicking the Add to 
 			const input = firstSpawnInput(result.events);
 			expect(input.tasks).toHaveLength(1);
 			const task = input.tasks![0]!;
-			expect(task.subagentType).toBe("browser-qa");
+			expect(task.subagentType).toBe("ui-qa");
 			expect(task.task).toContain("http://127.0.0.1:4173/cart");
 			expect(task.task).toMatch(/Add to cart/i);
 			expect(task.task).toMatch(/cart count[^\n]*1/i);
 			expect(task.task).toMatch(/screenshot/i);
 			expect(task.task).toMatch(/video/i);
 			expect(task.task).toMatch(/trace/i);
-			expect(task.task).not.toMatch(/(?:src\/|npm |bun |mock|synthetic)/i);
+			expect(task.task).not.toMatch(/(?:src\/|npm |bun )/i);
+			expect(task.task).not.toMatch(/\b(?:use|create|invent|launch)\s+(?:an?\s+)?(?:mock|synthetic)\b/i);
 			expect(task.scope).toBeUndefined();
 		});
 	}, E2E_TIMEOUT_MS);

@@ -127,7 +127,7 @@ without blocking desktop interactions.
 - `desktop/src/components/ProjectFolderIcon.svelte`
 - `desktop/src/lib/recent-projects.ts`
 - `desktop/src/lib/project-colors.ts`
-- `desktop/src/components/SessionTabs.svelte`
+- `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification

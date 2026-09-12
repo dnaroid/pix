@@ -139,6 +139,34 @@ describe("summary source manifest + extractive fallback", () => {
 		expect(summary).toContain("src/payments.ts");
 	});
 
+	test("extractive fallback may exceed 8192 tokens when the source is much larger", async () => {
+		const { prepareCompressionSummary } = await loadModule();
+		const messages = Array.from({ length: 12 }, (_value, index) =>
+			textMessage("user", `Constraint ${index}: ${"preserve-this-checkpoint ".repeat(190)}`, index + 1),
+		);
+		const prepared = await prepareCompressionSummary({
+			topic: "Large continuity floor",
+			messages,
+			candidate: {
+				startId: "m001",
+				endId: "m012",
+				messageCount: messages.length,
+				estimatedTokens: 50_000,
+				includedBlockIds: [],
+				reason: "regression",
+			},
+			modelRefs: ["zai/unavailable"],
+			timeoutMs: 100,
+			modelRegistry: makeRegistry({ findModel: false }),
+		});
+
+		expect(prepared.representation).toBe("extractive-fallback");
+		expect(prepared.summarizerAttempts).toEqual([{ ref: "zai/unavailable", outcome: "no-model" }]);
+		expect(prepared.text.length).toBeGreaterThan(32_768);
+		expect(prepared.text).toContain("Constraint 0");
+		expect(prepared.text).toContain("Constraint 11");
+	});
+
 	test("refuses to split one parallel tool group across a manifest budget boundary", async () => {
 		const { buildSummarySourceManifest, partitionSummarySourceManifest } = await loadModule();
 		const manifest = buildSummarySourceManifest([
@@ -538,5 +566,69 @@ describe("createAutoCompressionBlock summaryMode + debug fields", () => {
 		// The extractive floor is applied when it still yields positive projected gain.
 		expect(result.blockId).toBeGreaterThan(0);
 		expect(state.compressionBlocks[0]?.summary).toContain("Earlier work");
+	});
+
+	test("non-positive gain after a successful model summary does not masquerade as summarizer failure", async () => {
+		const { AutoCompressionBlockedError, createAutoCompressionBlock } = await loadModule();
+		const state = await loadState();
+		seedState(state);
+		const userText = `Constraint: ${"preserve this requirement ".repeat(220)}`;
+		state.messageMetaSnapshot.get("m001")!.text = userText;
+		const cfg = makeConfig(["zai/glm-5.2"]);
+		cfg.compress.protectUserMessages = true;
+		nextResults = [{ content: [{ type: "text", text: "compact model summary" }] }];
+
+		let caught: unknown;
+		try {
+			await createAutoCompressionBlock({
+				candidate,
+				topic: "Economically bad range",
+				state,
+				config: cfg,
+				messages: [textMessage("user", userText, 1000), textMessage("assistant", "ack", 2000)],
+				modelRegistry: makeRegistry(),
+			});
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toBeInstanceOf(AutoCompressionBlockedError);
+		expect((caught as InstanceType<typeof AutoCompressionBlockedError>).blockedReason).toBe("non-positive-gain");
+		expect((caught as InstanceType<typeof AutoCompressionBlockedError>).summarizerFallbackUsed).toBe(false);
+		expect((caught as InstanceType<typeof AutoCompressionBlockedError>).summarizerAttempts).toEqual([
+			{ ref: "zai/glm-5.2", outcome: "ok" },
+		]);
+	});
+
+	test("blocked gain records when the configured summarizer really fell back to extraction", async () => {
+		const { AutoCompressionBlockedError, createAutoCompressionBlock } = await loadModule();
+		const state = await loadState();
+		seedState(state);
+		const userText = `Constraint: ${"preserve this requirement ".repeat(220)}`;
+		state.messageMetaSnapshot.get("m001")!.text = userText;
+		const cfg = makeConfig(["zai/glm-5.2"]);
+		cfg.compress.protectUserMessages = true;
+		nextResults = [{ error: new Error("summarizer unavailable") }];
+
+		let caught: unknown;
+		try {
+			await createAutoCompressionBlock({
+				candidate,
+				topic: "Fallback range",
+				state,
+				config: cfg,
+				messages: [textMessage("user", userText, 1000), textMessage("assistant", "ack", 2000)],
+				modelRegistry: makeRegistry(),
+			});
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toBeInstanceOf(AutoCompressionBlockedError);
+		expect((caught as InstanceType<typeof AutoCompressionBlockedError>).blockedReason).toBe("non-positive-gain");
+		expect((caught as InstanceType<typeof AutoCompressionBlockedError>).summarizerFallbackUsed).toBe(true);
+		expect((caught as InstanceType<typeof AutoCompressionBlockedError>).summarizerAttempts).toEqual([
+			{ ref: "zai/glm-5.2", outcome: "error", error: "summarizer unavailable" },
+		]);
 	});
 });

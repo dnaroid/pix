@@ -34,7 +34,15 @@ export {
 	shouldForceCurrentSubagentModel,
 } from "./core/config.js";
 export { routeSubagentTasks, SubagentRoutingError } from "./core/routing.js";
-export { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath } from "./core/browser-qa.js";
+export {
+	BROWSER_QA_RUNNER_ENV,
+	UI_QA_RUNNER_ENV,
+	LEGACY_BROWSER_QA_TYPE,
+	UI_QA_TYPE,
+	getBrowserQaRunnerPath,
+	getUiQaRunnerPath,
+	isUiQaType,
+} from "./core/browser-qa.js";
 export type { RoutedSubagentTasks, SubagentRoutingContext } from "./core/routing.js";
 export { agentDefinitionFiles, agentNameFromFilename, parseAgentMarkdown, projectAgentDefinitionFiles, projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions } from "./core/agents-dir.js";
 export type { AgentDefinition, ProjectAgentDefinition } from "./core/agents-dir.js";

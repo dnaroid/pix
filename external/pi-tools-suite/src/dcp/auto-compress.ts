@@ -37,11 +37,19 @@ import { settleCompressionProgress } from "./compression-progress.js"
 
 export class AutoCompressionBlockedError extends Error {
 	readonly blockedReason: DcpBlockedReason
+	readonly summarizerFallbackUsed: boolean
+	readonly summarizerAttempts?: ModelSummaryAttempt[]
 
-	constructor(blockedReason: DcpBlockedReason, message: string) {
+	constructor(
+		blockedReason: DcpBlockedReason,
+		message: string,
+		details: { summarizerFallbackUsed?: boolean; summarizerAttempts?: ModelSummaryAttempt[] } = {},
+	) {
 		super(message)
 		this.name = "AutoCompressionBlockedError"
 		this.blockedReason = blockedReason
+		this.summarizerFallbackUsed = details.summarizerFallbackUsed === true
+		this.summarizerAttempts = details.summarizerAttempts
 	}
 }
 
@@ -828,12 +836,12 @@ export async function prepareCompressionSummary(options: {
 		fallbackCandidate,
 		sourceManifest,
 	)
-	if (!modelResult?.text && estimateTokens(text) > 8192) {
-		throw new AutoCompressionBlockedError(
-			"budget-exhausted",
-			"Extractive continuity minimum exceeds its 8192-token budget; no checkpoints were silently dropped",
-		)
-	}
+	// Do not impose a second, fixed output ceiling on the deterministic safety
+	// floor. A large source can legitimately require more than 8192 tokens to
+	// preserve every explicit continuity checkpoint. The auto-compression path
+	// already measures the actual replacement against the exact source and
+	// rejects non-positive/full-projection gain below, so compression economics
+	// — not an unrelated constant — decide whether this fallback is usable.
 	return {
 		text,
 		representation: modelResult?.text
@@ -1068,11 +1076,16 @@ export async function createAutoCompressionBlock(
 	const sourceExactEstimate = messagesInRange.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
 	const replacementExactEstimate = estimateCompressionBlockReplacementTokens(created.block)
 	const projectedGain = sourceExactEstimate - replacementExactEstimate
+	const blockedSummaryDetails = {
+		summarizerFallbackUsed: preparedSummary.representation === "extractive-fallback",
+		summarizerAttempts: preparedSummary.summarizerAttempts,
+	}
 	if (projectedGain <= 0) {
 		throw new AutoCompressionBlockedError(
 			"non-positive-gain",
 			`Auto-compress rejected non-positive full-projection gain for ${effectiveCandidate.startId}..${effectiveCandidate.endId}: ` +
 			`source ${sourceExactEstimate} tokens, replacement ${replacementExactEstimate} tokens`,
+			blockedSummaryDetails,
 		)
 	}
 	const requiredGainTokens = Math.max(0, Math.floor(options.requiredGainTokens ?? 0))
@@ -1081,6 +1094,7 @@ export async function createAutoCompressionBlock(
 			"budget-exhausted",
 			`Auto-compress projected gain for ${effectiveCandidate.startId}..${effectiveCandidate.endId} is below required budget recovery: ` +
 			`${projectedGain} < ${requiredGainTokens} tokens`,
+			blockedSummaryDetails,
 		)
 	}
 
@@ -1092,7 +1106,11 @@ export async function createAutoCompressionBlock(
 		fullProjectedAfterTokens = finalProjection.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
 		fullProjectionGain = fullBefore - fullProjectedAfterTokens
 		if (fullProjectionGain <= 0 || (fullProjectionGain < requiredGainTokens && !options.allowPartialGain)) {
-			throw new AutoCompressionBlockedError("budget-exhausted", `Final provider projection saves ${fullProjectionGain}, below required ${requiredGainTokens}; no state published`)
+			throw new AutoCompressionBlockedError(
+				"budget-exhausted",
+				`Final provider projection saves ${fullProjectionGain}, below required ${requiredGainTokens}; no state published`,
+				blockedSummaryDetails,
+			)
 		}
 	}
 	const pressureRelieved = workingState.compressionProgress

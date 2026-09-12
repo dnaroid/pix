@@ -2580,8 +2580,9 @@ function resolveBrowserQaAgentDirectory(cwd, value) {
 	if (!recordedProject || fs.realpathSync(recordedProject) !== projectRoot) {
 		throw new Error("browser QA agent directory belongs to another project");
 	}
-	if (fs.readFileSync(typeFile, "utf8").trim() !== "browser-qa") {
-		throw new Error("browser QA runner requires a browser-qa sub-agent directory");
+	const subagentType = fs.readFileSync(typeFile, "utf8").trim();
+	if (subagentType !== "ui-qa" && subagentType !== "browser-qa") {
+		throw new Error("browser QA runner requires a ui-qa/browser-qa sub-agent directory");
 	}
 
 	const workspace = path.join(real, QA_WORKSPACE_RELATIVE);

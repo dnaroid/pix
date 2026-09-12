@@ -141,7 +141,7 @@ describe("tool descriptions", () => {
 			expect(text).not.toContain("Usually omit subagentType");
 			expect(text).not.toContain("omit subagentType unless user-named/deterministic");
 			expect(text).toContain("resubmit the whole batch");
-			expect(text).toContain("subagentType: \"browser-qa\"");
+			expect(text).toContain("subagentType: \"ui-qa\"");
 		}
 		const catalog = buildSubagentCatalogPrompt({ types: { review: { description: "Review code." } } });
 		expect(catalog).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
@@ -223,13 +223,13 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("one sequential task can qualify");
 		expect(promptText).toContain("do not let repo_* availability suppress delegation");
 		expect(promptText).toContain("one discovery question");
-		expect(promptText).toContain("subagentType: \"browser-qa\"");
+		expect(promptText).toContain("subagentType: \"ui-qa\"");
 		expect(promptText).toContain("generated `.pi/qa_auth.jsonc` template path");
-		expect(promptText).toContain("clickable screenshot, video, and trace links");
+		expect(promptText).toContain("clickable screenshot, terminal capture, video, trace");
 		expect(promptText).toContain("mandatory delegation trigger");
 		expect(promptText).toContain("before checking prerequisites");
 		expect(promptText).toContain("parent must not inspect the project first");
-		expect(promptText).toContain("known target URL/app, user-visible flow, expected observable result, and required artifacts");
+		expect(promptText).toContain("known target URL/app/command, actions to perform, expected observable outcome, and requested evidence");
 		expect(promptText).toContain("Do not turn it into a repository investigation plan");
 		expect(promptText).toContain("invent a mock/synthetic target");
 	});

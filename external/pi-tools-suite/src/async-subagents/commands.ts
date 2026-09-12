@@ -49,7 +49,7 @@ const CLEAR_ACTIVE_PRESET_LABEL = "Use no active preset";
 
 export const ULTRAWORK_PROMPT = `Run ultrawork mode for the current objective.
 
-Use subagents when a lower-cost worker or isolation of noisy evidence helps, including one bounded sequential task. Pick subagentType from the effective catalog: research for reading/review, implement for code/docs/tests/UI changes, verify for running checks, browser-qa for real-browser testing, and oracle only for a deliberate strong independent opinion. Prefer an appropriate project-local specialist. Keep decisions and integration in the parent; do not create agents just to assign a discipline.
+Use subagents when a lower-cost worker or isolation of noisy evidence helps, including one bounded sequential task. Pick subagentType from the effective catalog: research for reading/review, implement for code/docs/tests/UI changes, verify for running checks, ui-qa for real UI testing across browsers, TUIs, and desktop GUIs, and oracle only for a deliberate strong independent opinion. Prefer an appropriate project-local specialist. Keep decisions and integration in the parent; do not create agents just to assign a discipline.
 
 Keep parent context lean: spawn for broad parallel work, read results only when needed, and finish unless genuinely blocked.`;
 

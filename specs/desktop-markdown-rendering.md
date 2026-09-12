@@ -70,7 +70,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - In a Markdown file Preview editor, tables use the available content width and wrap long cell content rather than creating a horizontal table scrollbar. Transcript tables retain horizontal scrolling.
 - Internal preview navigations push file or media entries onto a browser-like history stack inside the single Preview editor tab. Back and forward controls traverse that stack; following a new link after going back discards the old forward branch. Opening a preview from outside Preview starts a new history and activates the Preview tab; closing the Preview editor clears the history.
 - Each preview history entry retains its horizontal and vertical scroll position, which is restored when Back or Forward returns to that entry.
-- Preview consumes the central editor region rather than a resizable modal. Switching to Conversation or Git Diff leaves the still-open Preview component mounted so its current edit draft and scroll/history state are not reset merely by editor switching.
+- Preview consumes the central workbench region rather than a resizable modal. Switching to a conversation or Git Diff tab in the unified top strip leaves the still-open Preview component mounted so its current edit draft and scroll/history state are not reset merely by tab switching.
 - Same-document hash links in a Markdown preview scroll to stable, deduplicated heading anchors.
 - Raw absolute paths, URL-like destinations other than the separately supported `file://` flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
 - An unclosed fenced code block remains visible while the message streams.
@@ -89,7 +89,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/components/MarkdownText.svelte`
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/PreviewPane.svelte`
-- `desktop/src/components/WorkspaceEditorTabs.svelte`
+- `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/mermaid.ts`
 - `desktop/src/App.svelte`

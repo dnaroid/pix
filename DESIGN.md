@@ -294,20 +294,33 @@ or repeatedly switch away from and back to the content. Current examples are:
 - project/local file and media preview;
 - Source Control diff/review.
 
-Session tabs and editor tabs are different layers. Session tabs select the
-conversation/runtime. Editor tabs select the work surface shown inside that
-session/workspace. Selecting another session returns the active editor to the
-conversation, while workspace-scoped editor state may remain available as an
-inactive tab where its existing lifecycle permits it.
+Pix uses **one top workbench tab strip** for all long-lived work surfaces.
+Conversation sessions, Preview, and Git Diff appear as sibling tabs in that one
+strip; do not add a second editor-tab row inside the workspace.
 
-When a stateful editor tab is merely switched away from, keep its mounted state
+Shared presentation does not mean shared lifecycle:
+
+- session tabs own conversation/runtime identity and keep the existing
+  ACP/Desktop/TUI membership, persistence, and close semantics;
+- Preview and Git Diff are workspace-scoped UI tabs and MUST NOT enter session
+  snapshots, saved-session pickers, ACP session maps, or TUI tab metadata;
+- selecting Preview/Diff keeps the underlying active conversation runtime intact;
+- selecting a session tab activates that conversation and shows the conversation
+  work surface.
+
+When practical, open Preview/Diff adjacent to the tab that launched them while
+preserving the canonical relative order of session tabs. This gives ordinary IDE
+tab locality without allowing UI-only tabs to rewrite session synchronization.
+
+When a stateful workbench tab is merely switched away from, keep its mounted state
 when practical so drafts, scroll position, media playback state, and review
 output do not reset merely because focus moved to another editor.
 
 Do not open a modal for a document/diff surface that needs browser-like history,
 editor shortcuts, independent scrolling, or prolonged comparison. Closing an
-editor tab must move focus to a logical neighboring editor or back into the
-conversation when the editor strip disappears.
+auxiliary workbench tab must move focus to a logical neighboring workbench tab;
+session closure still follows the session lifecycle even when the visible focus
+fallback is Preview or Git Diff.
 
 ## 9. Panels and cards
 

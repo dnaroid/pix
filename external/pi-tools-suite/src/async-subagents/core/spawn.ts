@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
-import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath } from "./browser-qa.js";
+import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath, getUiQaRunnerPath, isUiQaType, UI_QA_RUNNER_ENV } from "./browser-qa.js";
 import { validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
 import { writePromptFile } from "./prompt.js";
@@ -26,6 +26,7 @@ export interface SpawnAgentOptions {
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
 const BROWSER_QA_WORKSPACE_DIR = "browser-qa";
+const UI_QA_WORKSPACE_DIR = "ui-qa";
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const AGENT_TIMEOUT_EXIT_CODE = 124;
 const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
@@ -50,7 +51,7 @@ export function spawnAgent(
 	validateBasename(task.id, "task.id");
 	const agentDir = path.join(runDir, task.id);
 	fs.mkdirSync(agentDir, { recursive: true });
-	prepareBrowserQaWorkspace(agentDir, task.subagentType);
+	prepareUiQaWorkspace(agentDir, task.subagentType);
 
 	// Clean previous state when reusing a run directory/agent id.
 	for (const f of [
@@ -89,9 +90,9 @@ export function spawnAgent(
 	// detached subprocesses do not depend on persisted local pi settings.
 	const persistSessions = shouldPersistSubagentSessions();
 	const sessionDir = persistSessions ? getAgentSessionDir(agentDir) : undefined;
-	// QA instructions now live in the agent prompt, but normal skill discovery
+	// UI-QA instructions now live in the agent prompt, but normal skill discovery
 	// must stay disabled even when no additional skill is configured.
-	const isolateSkills = task.subagentType === "browser-qa" || Boolean(options.isolatedSkills?.length);
+	const isolateSkills = isUiQaType(task.subagentType) || Boolean(options.isolatedSkills?.length);
 	const forwardedExtraArgs = isolateSkills ? withoutSkillArgs(extraArgs) : extraArgs;
 	if (sessionDir) fs.mkdirSync(sessionDir, { recursive: true });
 	const piArgs: string[] = ["--mode", "rpc"];
@@ -151,7 +152,7 @@ export function spawnAgent(
 
 	const proc = spawn(invocation.command, invocation.args, {
 		cwd,
-		env: subagentEnvironment(process.env, task.subagentType === "browser-qa" ? agentDir : undefined),
+		env: subagentEnvironment(process.env, isUiQaType(task.subagentType) ? agentDir : undefined),
 		stdio: ["pipe", "pipe", "pipe"],
 		detached: process.platform !== "win32",
 	});
@@ -821,21 +822,30 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 	};
 	delete result[SUBAGENT_AGENT_DIR_ENV];
 	delete result[BROWSER_QA_RUNNER_ENV];
+	delete result[UI_QA_RUNNER_ENV];
 	if (agentDir) {
 		result[SUBAGENT_AGENT_DIR_ENV] = fs.realpathSync(agentDir);
 		result[BROWSER_QA_RUNNER_ENV] = getBrowserQaRunnerPath();
+		result[UI_QA_RUNNER_ENV] = getUiQaRunnerPath();
 	}
 	return result;
 }
 
-function prepareBrowserQaWorkspace(agentDir: string, subagentType: string | undefined): void {
-	const workspace = path.join(agentDir, BROWSER_QA_WORKSPACE_DIR);
+function prepareUiQaWorkspace(agentDir: string, subagentType: string | undefined): void {
+	const workspace = path.join(agentDir, UI_QA_WORKSPACE_DIR);
+	const browserWorkspace = path.join(agentDir, BROWSER_QA_WORKSPACE_DIR);
 	fs.rmSync(workspace, { recursive: true, force: true });
-	if (subagentType !== "browser-qa") return;
-	const flows = path.join(workspace, "flows");
+	fs.rmSync(browserWorkspace, { recursive: true, force: true });
+	if (!isUiQaType(subagentType)) return;
+	const flows = path.join(browserWorkspace, "flows");
+	const uiFlows = path.join(workspace, "flows");
+	fs.mkdirSync(workspace, { recursive: true, mode: 0o700 });
+	fs.mkdirSync(uiFlows, { recursive: true, mode: 0o700 });
 	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
 	if (process.platform !== "win32") {
 		fs.chmodSync(workspace, 0o700);
+		fs.chmodSync(uiFlows, 0o700);
+		fs.chmodSync(browserWorkspace, 0o700);
 		fs.chmodSync(flows, 0o700);
 	}
 }

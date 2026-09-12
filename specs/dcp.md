@@ -147,10 +147,19 @@ tool-output deletion.
 
 Configured model summarizers receive only a bounded sub-deadline of the whole
 auto-compression operation, leaving deterministic extractive fallback and
-durable publication time inside the same operation budget. After any failed
-model-backed auto-compression attempt, that session degrades subsequent
-automatic attempts to deterministic extraction instead of repeatedly spending
-the summarizer timeout on each new tool result.
+durable publication time inside the same operation budget. Once configured
+summary models actually fail/unavailable and DCP falls back to deterministic
+extraction, that live session degrades subsequent automatic attempts to
+deterministic extraction instead of repeatedly spending the summarizer timeout
+on each new tool result. A `non-positive-gain`/budget rejection after a
+**successful** model summary is only an economics failure of that exact range
+and does not by itself disable the summarizer for later sources.
+
+Rejected automatic plans are memoized by their exact candidate membership, not
+by the entire provider tail. If unrelated messages are appended while the same
+old safe range remains unchanged, DCP reuses the prior rejection instead of
+re-running summary preparation on every new tool result. A genuinely new or
+changed source invalidates that memoized rejection.
 
 The emergency path protects the current user request, newest live assistant
 group, configured recent pairs, protected tools/files, and results without
@@ -200,10 +209,22 @@ merely to fit the summarizer input budget.
 `summarizerModel` and `summarizerFallbackModels` are resolved as explicit
 ordered arrays (empty arrays are valid); configured refs are de-duplicated and
 tried in that order under a bounded model-summary sub-deadline before falling
-back to the deterministic extractive continuity representation. A replacement with
-non-positive gain is rejected. Protected user/tag/tool fragments and bounded
+back to the deterministic extractive continuity representation. The extractive
+floor has no unrelated fixed 8192-token output ceiling: large source ranges may
+need a larger continuation record to preserve every explicit checkpoint. Its
+acceptance is governed by the same exact source/replacement and full-provider-
+projection gain checks as other automatic summaries, while source-manifest and
+operation deadlines remain bounded. A replacement with non-positive gain is
+rejected. Protected user/tag/tool fragments and bounded
 subagent artifacts are carried through a deduplicated ledger so repeated
 rollups do not recursively duplicate them.
+
+Exact v2 source/mutation membership hashes are canonicalized with JSONL-stable
+value semantics before publication. In-memory-only `undefined` fields (notably
+inside tool-result details), non-finite numbers, unsupported array/object values,
+and `toJSON()` objects therefore hash as the representation that can actually
+survive session serialization. Restart/reopen alone must not turn an unchanged
+block into `exact-membership-mismatch`.
 
 The archive is a safety net, not permission to write weak summaries: active
 requirements, decisions, constraints, verification failures, and unresolved
@@ -271,6 +292,7 @@ undo configuration.
 - `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
 - `external/pi-tools-suite/src/dcp/pruner-tools.ts`
 - `external/pi-tools-suite/src/dcp/auto-compress.ts`
+- `external/pi-tools-suite/test/auto-compress.test.ts`
 - `external/pi-tools-suite/test/compress-pruner.test.ts`
 - `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
 - `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`

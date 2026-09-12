@@ -87,6 +87,34 @@ export function clampThinkingLevel(level: string, availableLevels: readonly stri
   return levels[0] ?? "off";
 }
 
+/** Apply a draft-only model/thinking selection without an ACP session. */
+export function applyLocalModelThinkingSelection(
+  configOptions: readonly SessionConfigOption[],
+  modelRef: string,
+  thinkingLevel: string,
+): SessionConfigOption[] {
+  const state = modelThinkingConfigState(configOptions);
+  const selected = state.models.find((model) => model.ref === modelRef);
+  if (!selected) throw new Error(`Unknown model: ${modelRef}`);
+  if (!selected.thinkingLevels.includes(thinkingLevel)) {
+    throw new Error(`${selected.name} does not support ${thinkingLevel} thinking.`);
+  }
+  const effectiveThinking = clampThinkingLevel(thinkingLevel, selected.thinkingLevels);
+  return configOptions.map((option) => {
+    if (option.id === "model" && option.type === "select") {
+      return { ...option, currentValue: modelRef };
+    }
+    if (option.id === "thought_level" && option.type === "select") {
+      return {
+        ...option,
+        currentValue: effectiveThinking,
+        options: selected.thinkingLevels.map((level) => ({ value: level, name: level })),
+      };
+    }
+    return option;
+  });
+}
+
 function modelThinkingLevels(meta: Record<string, unknown> | null | undefined): string[] {
   const value = meta?.["pix.thinkingLevels"];
   if (!Array.isArray(value)) return [];

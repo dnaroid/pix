@@ -334,7 +334,7 @@ function createBrowserQaAgent(project: string): string {
 	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
 	fs.writeFileSync(path.join(agentDir, "prompt.md"), "browser QA E2E\n", "utf8");
 	fs.writeFileSync(path.join(agentDir, "project_cwd"), project, "utf8");
-	fs.writeFileSync(path.join(agentDir, "subagent_type"), "browser-qa", "utf8");
+	fs.writeFileSync(path.join(agentDir, "subagent_type"), "ui-qa", "utf8");
 	if (process.platform !== "win32") {
 		fs.chmodSync(workspace, 0o700);
 		fs.chmodSync(flows, 0o700);

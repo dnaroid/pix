@@ -68,6 +68,10 @@ be a byte-stable prefix on ordinary continuations.
    `dcp-journal` custom entries in the session. Replaying the journal must yield
    the same IDs, summary bytes, active exact blocks, and frozen reminder data
    without a model call.
+8. Exact block membership hashes use JSONL-stable canonical value semantics.
+   Runtime-only `undefined` object fields cannot make an unchanged tool result
+   acquire a different identity after session serialization/reopen; unsupported
+   array values and non-finite numbers follow their JSON representation.
 
 ## Journal contracts relevant to cache stability
 
@@ -94,6 +98,8 @@ be a byte-stable prefix on ordinary continuations.
   new prefix; subsequent unchanged continuations preserve it.
 - Restart/fork of a supported journal session reuses committed summary and ID
   bytes rather than regenerating them.
+- JSONL round-trip of an otherwise unchanged message preserves its canonical
+  exact-membership hash.
 - UI filtering is outside this contract: display cleanup cannot alter the next
   provider request.
 
@@ -141,6 +147,7 @@ cache-preserving unsafe deletion.
 - `external/pi-tools-suite/src/dcp/auto-compress.ts`
 - `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
 - `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
+- `external/pi-tools-suite/test/dcp-auto-compression-projection.test.ts`
 - `external/pi-tools-suite/test/compress-pruner.test.ts`
 
 ## Verification
@@ -154,6 +161,8 @@ Deterministic tests must cover:
 - byte-equivalent signed assistant reasoning/tool-call content;
 - frozen reminder carrier/text and deferral when no safe carrier exists;
 - restart/fork of a journal session without regenerating summaries;
+- JSONL round-trip stability for exact v2 membership, including tool-result
+  details with runtime-only values;
 - hard-pressure marathon behavior and partial positive recovery;
 - cancellation/stale owner/source/config/model faults before publication.
 

@@ -71,13 +71,28 @@ Active implemented contract.
   publication retain bounded headroom; protection/evidence are never relaxed
   and insufficient gain is never reported as success. `[confirmed by code,
   auto-compress-budget.ts]`
-- Rejected attempts are memoized per state + source key (epoch +
-  `canonicalMessageHash` of the source messages) so the same rejected source
-  is not retried. `[confirmed by code, auto-compress-budget.ts:10,30-32]`
-- Once a model-backed auto-compression attempt fails, later automatic attempts
-  in that live session skip model summarizers and use deterministic extraction;
-  this prevents a growing autonomous tool loop from paying the same model
-  summary timeout repeatedly. `[confirmed by code, dcp/index.ts]`
+- Rejected attempts are memoized per state + **exact candidate source** key
+  (epoch + exact `sourceMembers` for the economical and largest-safe ranges),
+  not by the whole growing provider tail. Appending unrelated tool/user traffic
+  therefore does not repeatedly prepare the same byte-identical rejected range;
+  when exact membership is unavailable the memoizer falls back conservatively
+  to the full-context identity. `[confirmed by code, auto-compress-budget.ts;
+  confirmed by test/dcp-auto-compression-projection.test.ts]`
+- Deterministic extractive fallback is not rejected merely because its
+  continuation record exceeds 8192 tokens. Large sources may require a larger
+  lossless continuity floor; the shared exact replacement/full-projection gain
+  checks decide whether it is economical, and non-positive/insufficient plans
+  remain rejected. `[confirmed by code, auto-compress.ts; confirmed by
+  test/auto-compress.test.ts]`
+- Once a configured model summarizer actually fails/unavailable and DCP reaches
+  deterministic extraction, later automatic attempts in that live session skip
+  model summarizers; a successful deterministic fallback commit also establishes
+  that degraded mode. A later gain/economics rejection after a **successful**
+  model summary does not degrade the summarizer merely because the selected
+  range was too expensive to replace. This prevents repeated model timeouts
+  without turning `non-positive-gain` into a false session-wide model failure.
+  `[confirmed by code, dcp/index.ts, auto-compress.ts; confirmed by
+  test/auto-compress.test.ts and test/compress-pruner.test.ts]`
 - At capacity, a failed exact auto-compression attempt falls through to the
   bounded emergency current-turn pruning floor before abort/handoff. DCP aborts
   only when the projected context still cannot fit after eligible recovery and
@@ -95,6 +110,13 @@ Active implemented contract.
   the single source of exact membership; 10 files under `src/dcp/` import the
   module (pruner, compress tool, budget controller, message ids, …).
   `[confirmed by code]`
+- Canonical identity is normalized to JSONL-stable value semantics before
+  hashing: non-finite numbers become `null`, unsupported array values become
+  `null`, unsupported object properties are omitted, and `toJSON()` values are
+  honored. Runtime-only `undefined` fields inside `toolResult.details` therefore
+  cannot make a valid v2 block fail exact membership solely because the session
+  was serialized and reopened. `[confirmed by code, conversation-index.ts;
+  confirmed by test/dcp-auto-compression-projection.test.ts]`
 - Locked by `test/dcp-conversation-index-generative.test.ts`, whose seeded
   property test checks closure against an independent reference
   implementation, not the production planner against itself.
@@ -176,6 +198,7 @@ git history.
 - `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
 - `external/pi-tools-suite/src/dcp/shadow-plan.ts`
 - `external/pi-tools-suite/src/session-recovery/index.ts`
+- `external/pi-tools-suite/test/auto-compress.test.ts`
 - `external/pi-tools-suite/test/dcp-transaction-faults.test.ts`
 - `external/pi-tools-suite/test/dcp-review-regressions.test.ts`
 - `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`

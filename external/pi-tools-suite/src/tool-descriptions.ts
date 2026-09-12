@@ -71,9 +71,9 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			name: "subagents",
 			label: "Subagents",
 			description: [
-				"For every real-browser QA request, immediately spawn subagentType='browser-qa' before checking files, URLs, servers, or other prerequisites; the QA sub-agent owns feasibility checks and blocked reports, so the parent must not attempt browser QA itself.",
-				"If browser-qa reports that credentials are required, it must identify the generated project-local template and explicitly ask the user to fill it; the parent relays that request without reading or editing the credential file.",
-				"After browser testing, browser-qa must return clickable links for every available screenshot, video, and trace; the parent must preserve those links in its user-facing report.",
+				"For every real user-interface QA request (browser, terminal/TUI, or desktop GUI), immediately spawn subagentType='ui-qa' before checking files, URLs, servers, launch commands, or other prerequisites; the QA sub-agent owns feasibility checks and blocked reports, so the parent must not substitute static checks for requested UI QA.",
+				"If ui-qa browser testing reports that credentials are required, it must identify the generated project-local template and explicitly ask the user to fill it; the parent relays that request without reading or editing the credential file.",
+				"After UI testing, ui-qa must return clickable links for every available screenshot, terminal capture, video, trace, or other retained evidence; the parent must preserve those links in its user-facing report.",
 				SUBAGENT_DELEGATION_GUIDANCE,
 				"Presets declare available models; each agent's ordered models selects the first usable model in that pool. AGENTS_PRESET or /subagent-preset session <name> selects the current session pool. Bundled pools live with agent files, and projects can override/add pools in .pi/agents/presets.jsonc. Do not override the model merely to choose a role.",
 				SUBAGENT_TYPE_SELECTION_GUIDANCE,
@@ -84,18 +84,18 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"Results are compact with artifact links. Agents run isolated pi processes with extensions disabled to prevent recursive spawning; spawn/task timeoutSeconds can shorten the default 30m watchdog, project concurrency queues excess agents, and retry backoff/fallback models/Antigravity account rotation are config-driven.",
 			].join(" "),
 			promptSnippet:
-				"For every browser-based visual QA, UI bug reproduction, or real-browser fix-verification request, immediately spawn subagentType='browser-qa' even for a single track and before inspecting files or checking prerequisites. The browser-qa sub-agent must discover the target and report missing prerequisites; do not preflight, perform, or substitute browser QA in the parent agent. " +
-				"Give browser-qa a concise acceptance brief: the known target URL/app, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
+				"For every real UI QA, UI bug reproduction, or user-facing fix-verification request across browser, terminal/TUI, or desktop GUI, immediately spawn subagentType='ui-qa' even for a single track and before inspecting files or checking prerequisites. The ui-qa sub-agent must discover the actual target/control path and report missing prerequisites; do not preflight, perform, or substitute requested UI QA in the parent agent. " +
+				"Give ui-qa a concise acceptance brief: the known target URL/app/command, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
 				"For other work, use subagents action='spawn' for economical execution or context isolation, including one bounded sequential task or explicit delegate/parallelize/split work requests. " +
 				SUBAGENT_TYPE_SELECTION_GUIDANCE + " Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
 					? "For one semantic code-discovery question, use repo_search; for independent tracks/hypotheses/review axes, delegate even when repo_* tools exist. Read result only after completion when findings are needed."
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, delegate bounded research tracks for broad discovery rather than flooding parent context. Read result only after completion when findings are needed."),
 			promptGuidelines: [
-				"Treat every real-browser QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"browser-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, browser automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-browser checks.",
-				"Keep the browser-qa task payload at the user-visible acceptance level: known target URL/app, actions to perform, expected observable outcome, and requested evidence. Do not turn it into a repository investigation plan, name internal files or commands, dictate server setup, or invent a mock/synthetic target. Leave unknown prerequisites to the QA sub-agent.",
-				"When browser-qa reports missing credentials, relay its explicit request and generated `.pi/qa_auth.jsonc` template path; never inspect, populate, or edit that credential file in the parent.",
-				"After browser-qa completes a test, preserve its clickable screenshot, video, and trace links in the final user-facing response whenever those artifacts exist.",
+				"Treat every real UI QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"ui-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, UI automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-UI checks.",
+				"Keep the ui-qa task payload at the user-visible acceptance level: known target URL/app/command, actions to perform, expected observable outcome, and requested evidence. Do not turn it into a repository investigation plan, name internal files or commands, dictate setup, or invent a mock/synthetic target. Leave unknown prerequisites to the QA sub-agent.",
+				"When ui-qa browser testing reports missing credentials, relay its explicit request and generated `.pi/qa_auth.jsonc` template path; never inspect, populate, or edit that credential file in the parent.",
+				"After ui-qa completes a test, preserve its clickable screenshot, terminal capture, video, trace, and other evidence links in the final user-facing response whenever those artifacts exist.",
 				SUBAGENT_DELEGATION_GUIDANCE,
 				repoDiscovery
 					? "For one discovery question, use repo_search; spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."

@@ -7,15 +7,12 @@
 > tagged with its source: `[confirmed by code]`, `[confirmed by tests]`,
 > `[confirmed by docs]`, `[inferred]`, or `[unknown]`. Re-verify against
 > current code before relying on any claim. Last broad drift audit:
-> 2026-09-10. That pass refreshed the Desktop activity/Markdown/sidebar contracts,
-> added the Desktop IDX contract, indexed recent text-selection/user-config and
-> reload-context work, and re-verified changed knowledge inputs against current
-> implementation/tests. A later same-day pass re-verified every input-changed
-> spec (Desktop task manager, attachments, autocomplete, Markdown, question,
-> text selection, tool rows, session sidebar/parity/slash commands/indicators,
-> window state, Deepgram voice input, Git helpers, popup selectors) against
-> current implementation/tests, fixed the module count and Layout tree in the
-> user-facing guides, and added the missing index entries below.
+> 2026-09-12. That pass re-verified all knowledge entries whose implementation
+> inputs had changed, refreshed changed Spec Wiki metadata, removed brittle test
+> counts from verification evidence, and reconciled this inventory with the
+> current `specs/` directory. Root, Desktop, ACP, and pi-tools-suite tests were
+> green; native Rust compilation could not be rerun because the local rustup
+> installation has no default toolchain configured.
 
 ## Project context
 
@@ -59,7 +56,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [todo-clear-session-replay](./todo-clear-session-replay.md) | Persist todo clear in session replay |
 | [project-agents-dir](./project-agents-dir.md) | Project-local sub-agent roles from `.pi/agents/*.md` |
 | [parent-first-subagent-routing](./parent-first-subagent-routing.md) | Parent-first sub-agent role selection |
-| [browser-qa-inline-agent](./browser-qa-inline-agent.md) | Self-contained browser QA agent |
+| [ui-qa-agent](./ui-qa-agent.md) | Self-contained browser/TUI/desktop UI QA agent |
 | [model-selector-fallbacks](./model-selector-fallbacks.md) | Ordered fallback arrays for singular model selectors |
 | [context-gateway](./context-gateway.md) | Context Gateway (observe-only result chain) |
 | [todo-repo-knowledge-finalization](./todo-repo-knowledge-finalization.md) | Todo repo knowledge finalization reminder |
@@ -81,6 +78,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [model-scope-fallback](./model-scope-fallback.md) | Model scope fallback to the available snapshot |
 | [model-visibility-whitelist](./model-visibility-whitelist.md) | Model picker visibility whitelist |
 | [tui-model-thinking-selector](./tui-model-thinking-selector.md) | Combined model and thinking selector |
+| [tui-session-tabs](./tui-session-tabs.md) | TUI session tabs and lazy UI-only draft conversations |
 | [file-link-opening](./file-link-opening.md) | File link opening (Zed / web / media routing) |
 | [tui-git-slash-commands](./tui-git-slash-commands.md) | TUI Git code-review and confirmed commit-message commands |
 | [deepgram-voice-input](./deepgram-voice-input.md) | Deepgram voice dictation (terminal and Desktop) |
@@ -91,7 +89,13 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | Spec | Topic |
 |------|-------|
 | [desktop-session-parity](./desktop-session-parity.md) | Desktop and TUI session parity |
-| [desktop-project-titlebar](./desktop-project-titlebar.md) | Desktop project selector in the macOS overlay title bar |
+| [desktop-session-tabs](./desktop-session-tabs.md) | Desktop conversation tab interaction and lazy draft conversations |
+| [desktop-project-titlebar](./desktop-project-titlebar.md) | Sidebar project switcher and project identity color |
+| [desktop-workspace-navigation](./desktop-workspace-navigation.md) | Workspace Activity Bar and Project Explorer keyboard navigation |
+| [desktop-command-palette](./desktop-command-palette.md) | Shared Desktop command registry and Command Palette |
+| [desktop-menu-navigation](./desktop-menu-navigation.md) | Shared keyboard navigation for transient Desktop command menus |
+| [desktop-modal-dialogs](./desktop-modal-dialogs.md) | Native modal dialog lifecycle, focus containment, and restoration |
+| [desktop-workbench-tabs](./desktop-workbench-tabs.md) | Unified top workbench tabs for conversations, Preview, and Git Diff |
 | [desktop-activity-row-timing](./desktop-activity-row-timing.md) | Desktop activity names and completed durations |
 | [desktop-markdown-rendering](./desktop-markdown-rendering.md) | Lightweight desktop Markdown rendering |
 | [desktop-attachments](./desktop-attachments.md) | Desktop chat attachments |
@@ -99,7 +103,10 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [desktop-window-state](./desktop-window-state.md) | Desktop window state persistence |
 | [desktop-tool-rows](./desktop-tool-rows.md) | Desktop tool result rows |
 | [desktop-autocomplete](./desktop-autocomplete.md) | Desktop prompt autocomplete |
-| [desktop-session-sidebar](./desktop-session-sidebar.md) | Desktop session sidebar |
+| [desktop-agent-pause](./desktop-agent-pause.md) | Desktop turn-boundary pause and continuation |
+| [desktop-live-model-switching](./desktop-live-model-switching.md) | Live Desktop model/thinking switching while an agent run is active |
+| [desktop-runtime-status](./desktop-runtime-status.md) | Desktop context usage, DCP statistics, and model quota status |
+| [desktop-session-sidebar](./desktop-session-sidebar.md) | Session activity tab indicators, status entry point, and contextual inspector |
 | [desktop-slash-commands](./desktop-slash-commands.md) | Desktop slash commands and fuzzy search |
 | [desktop-user-message-actions](./desktop-user-message-actions.md) | Desktop user-message Copy, Fork, Fork in new tab, and conflict-safe Undo changes |
 | [desktop-question-tool](./desktop-question-tool.md) | Desktop Question tool |
@@ -107,6 +114,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [desktop-user-config-editing](./desktop-user-config-editing.md) | Desktop JSONC user-config editing |
 | [desktop-idx-panel](./desktop-idx-panel.md) | Desktop IDX repository intelligence and Spec Wiki maintenance |
 | [desktop-sidebar-indicators](./desktop-sidebar-indicators.md) | Live semantic Activity Bar health and attention indicators |
+| [watch-all-desktop-assets](./watch-all-desktop-assets.md) | `watch:all` Desktop web-asset embedding and native rebuild invalidation |
 
 **DCP family**
 

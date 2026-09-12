@@ -50,6 +50,6 @@ Allow cheaper or less capable models to use one enforced thinking level for ever
 ## Evidence
 
 - Confirmed by code: todo mutations already pass through `prepareMutation` and model-specific thinking normalization.
-- Targeted config/todo tests passed (49 tests).
-- The pi-tools-suite deterministic check passed (398 tests, 35 skipped live evaluations), including all headless smoke commands.
-- The host `npm run check` passed (955 tests).
+- Targeted config/todo tests pass.
+- The pi-tools-suite deterministic check passes, including all headless smoke commands.
+- The host check passes.

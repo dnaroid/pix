@@ -37,6 +37,7 @@ export type StatusLineRendererHost = {
 	readonly theme: Theme;
 	readonly screenStyler: ScreenStyler;
 	readonly session: AgentSession | undefined;
+	draftModelStatus?(): { modelLabel: string; thinkingLabel: string } | undefined;
 	readonly modelColors?: ModelColorsConfig;
 	readonly sessionActivity: SessionActivity;
 	readonly statusDotBright: boolean;
@@ -249,7 +250,14 @@ export class StatusLineRenderer {
 
 	modelTarget(statusText: string, row: number): StatusModelTarget | undefined {
 		const session = this.host.session;
-		if (!session) return undefined;
+		if (!session) {
+			const draft = this.host.draftModelStatus?.();
+			if (!draft) return undefined;
+			const marker = `${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`;
+			const startIndex = statusText.indexOf(marker);
+			if (startIndex < 0) return undefined;
+			return { row, startColumn: startIndex + 1, endColumn: startIndex + draft.modelLabel.length + 1 };
+		}
 
 		const label = this.host.statusModelLabel(session);
 		const marker = `${label} ${this.statusThinkingDisplayLabel(session)} `;
@@ -261,7 +269,15 @@ export class StatusLineRenderer {
 
 	thinkingTarget(statusText: string, row: number): StatusThinkingTarget | undefined {
 		const session = this.host.session;
-		if (!session) return undefined;
+		if (!session) {
+			const draft = this.host.draftModelStatus?.();
+			if (!draft) return undefined;
+			const marker = `${APP_ICONS.lightbulb} ${draft.thinkingLabel}`;
+			const markerIndex = statusText.indexOf(marker);
+			if (markerIndex < 0) return undefined;
+			const startIndex = markerIndex + APP_ICONS.lightbulb.length + 1;
+			return { row, startColumn: startIndex + 1, endColumn: startIndex + draft.thinkingLabel.length + 1 };
+		}
 
 		const label = this.statusThinkingDisplayLabel(session);
 		const marker = ` ${label} ${this.host.formatContextUsagePercent(session)}`;
@@ -398,7 +414,16 @@ export class StatusLineRenderer {
 		if (layout.modelUsageLabel) this.pushModelUsageSegments(segments, statusText, layout.modelUsageLabel);
 
 		const session = this.host.session;
-		if (!session) return segments;
+		if (!session) {
+			const draft = this.host.draftModelStatus?.();
+			if (!draft) return segments;
+			const modelStart = statusText.indexOf(`${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`);
+			this.pushSegment(segments, modelStart, draft.modelLabel.length, this.modelRefColor(draft.modelLabel));
+			const thinkingMarkerStart = statusText.indexOf(`${APP_ICONS.lightbulb} ${draft.thinkingLabel}`);
+			const thinkingStart = thinkingMarkerStart >= 0 ? thinkingMarkerStart + APP_ICONS.lightbulb.length + 1 : -1;
+			this.pushSegment(segments, thinkingStart, draft.thinkingLabel.length, this.thinkingLevelColor(draft.thinkingLabel));
+			return segments;
+		}
 
 		const modelLabel = this.host.statusModelLabel(session);
 		const thinkingLabel = this.host.statusThinkingLabel(session);
@@ -596,6 +621,16 @@ export class StatusLineRenderer {
 		const configuredColor = modelId && this.host.modelColors
 			? resolveModelColor(`${provider}/${modelId}`, this.host.modelColors)
 			: undefined;
+		return configuredColor
+			? resolveColor(configuredColor, this.host.theme.colors)
+			: modelProviderThemeColor(provider, this.host.theme.colors);
+	}
+
+	private modelRefColor(ref: string): string {
+		const slash = ref.indexOf("/");
+		const provider = slash > 0 ? ref.slice(0, slash) : undefined;
+		if (!provider) return this.host.theme.colors.selectionForeground;
+		const configuredColor = this.host.modelColors ? resolveModelColor(ref, this.host.modelColors) : undefined;
 		return configuredColor
 			? resolveColor(configuredColor, this.host.theme.colors)
 			: modelProviderThemeColor(provider, this.host.theme.colors);

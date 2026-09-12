@@ -55,6 +55,7 @@ import {
 import {
 	getAgentDir,
 	getPackageDir,
+	ModelRuntime,
 	SessionManager,
 	SettingsManager,
 	type JsonAgentSessionEvent,
@@ -87,12 +88,21 @@ import {
 	type PiClient,
 	type PiEvent,
 	type PiImageContent,
+	type PiModel,
 	type PiRpcClientOptions,
 	type PiSessionTreeNode,
 	type PiSessionState,
 	type PiSessionStats,
 } from "../pi/pi-rpc-client.js";
-import { applyConfigOption, buildConfigOptions, CONFIG_ID_MODEL, parseModelValue } from "./config-options.js";
+import {
+	applyConfigOption,
+	buildConfigOptions,
+	CONFIG_ID_MODEL,
+	modelOption,
+	parseModelValue,
+	supportedThinkingLevels,
+	thoughtLevelOption,
+} from "./config-options.js";
 import {
 	PIX_ENHANCE_PROMPT_METHOD,
 	PIX_AGENT_CONTROL_METHOD,
@@ -100,6 +110,7 @@ import {
 	PIX_GIT_ASSIST_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
+	PIX_DRAFT_CONFIG_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_IMPORT_SESSION_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -117,6 +128,7 @@ import {
 	PIX_TOOL_RESULT_METHOD,
 	PIX_USER_MESSAGE_ACTION_METHOD,
 	parseDesktopEnhancePromptRequest,
+	parseDesktopDraftConfigRequest,
 	parseDesktopAgentControlRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopImportSessionRequest,
@@ -136,6 +148,8 @@ import {
 	type DesktopAgentControlResponse,
 	type DesktopAgentControlState,
 	type DesktopDcpStatsResponse,
+	type DesktopDraftConfigRequest,
+	type DesktopDraftConfigResponse,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
 	type DesktopImportSessionRequest,
@@ -235,6 +249,7 @@ type ClientCaller = {
 // JSON-RPC server-error range; plain `throw new Error(...)` would surface
 // to the client as an opaque "Internal error".
 const ERROR_SERVER = -32000;
+const ERROR_INVALID_PARAMS = -32602;
 const WORKSPACE_UNDO_RPC_COMMAND = "__pix-workspace-undo";
 const WORKSPACE_UNDO_RESULT_CHANNEL = "pix.workspace-undo-result";
 let requestHistorySaveChain: Promise<void> = Promise.resolve();
@@ -369,6 +384,7 @@ export class PixAcpAgent {
 	private readonly loadDesktopQueues: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
 	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
+	private draftModelRuntime: Promise<ModelRuntime> | undefined;
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
@@ -442,6 +458,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_DCP_STATS_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopDcpStats(ctx.params),
+			)
+			.onRequest(PIX_DRAFT_CONFIG_METHOD, parseDesktopDraftConfigRequest, (ctx) =>
+				this.desktopDraftConfig(ctx.params),
 			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
 				this.autocomplete(ctx.params, ctx.signal),
@@ -1133,9 +1152,10 @@ export class PixAcpAgent {
 	): Promise<NewSessionResponse> {
 		const acpSessionId = randomUUID();
 		const lazyRuntime = params._meta?.["pix.lazyRuntime"] === true;
+		const draftDefaultModel = draftDefaultModelFromMeta(params._meta);
 		const pending = lazyRuntime
-			? Promise.resolve().then(() => this.startNewSession(acpSessionId, params.cwd, client))
-			: this.startNewSession(acpSessionId, params.cwd, client);
+			? Promise.resolve().then(() => this.startNewSession(acpSessionId, params.cwd, client, draftDefaultModel))
+			: this.startNewSession(acpSessionId, params.cwd, client, draftDefaultModel);
 		if (lazyRuntime) {
 			this.pendingDesktopNewSessions.set(acpSessionId, { promise: pending });
 			void pending.catch((error: unknown) => {
@@ -1154,12 +1174,15 @@ export class PixAcpAgent {
 		acpSessionId: string,
 		cwd: string,
 		client: ClientCaller,
+		defaultModelOverride?: PixDefaultModel,
 	): Promise<{ session: AgentSessionState; configOptions?: SessionConfigOption[] }> {
-		let defaultModel: PixDefaultModel | undefined;
-		try {
-			defaultModel = this.loadDefaultModel(cwd);
-		} catch (error) {
-			throw new RequestError(ERROR_SERVER, `failed to resolve Pix default model: ${stringifyUnknown(error)}`);
+		let defaultModel = defaultModelOverride;
+		if (!defaultModel) {
+			try {
+				defaultModel = this.loadDefaultModel(cwd);
+			} catch (error) {
+				throw new RequestError(ERROR_SERVER, `failed to resolve Pix default model: ${stringifyUnknown(error)}`);
+			}
 		}
 		let session: AgentSessionState | undefined;
 		let lastError: unknown;
@@ -1875,6 +1898,54 @@ export class PixAcpAgent {
 		};
 	}
 
+	private async desktopDraftConfig(params: DesktopDraftConfigRequest): Promise<DesktopDraftConfigResponse> {
+		let pending = this.draftModelRuntime;
+		if (!pending) {
+			pending = ModelRuntime.create({ allowModelNetwork: false, refreshOnCreate: false });
+			this.draftModelRuntime = pending;
+		}
+
+		let modelRuntime: ModelRuntime;
+		try {
+			modelRuntime = await pending;
+			await modelRuntime.refresh({ allowNetwork: false });
+		} catch (error) {
+			if (this.draftModelRuntime === pending) this.draftModelRuntime = undefined;
+			throw new RequestError(ERROR_SERVER, `failed to load draft model catalogue: ${stringifyUnknown(error)}`);
+		}
+
+		const models = [...modelRuntime.getAvailableSnapshot()] as PiModel[];
+		const configured = this.loadDefaultModel(params.cwd);
+		let current: PiModel | undefined;
+		let selectedDefault = configured;
+		for (const candidate of defaultModelCandidates(configured)) {
+			if (!candidate) continue;
+			const match = models.find((model) => model.provider === candidate.provider && model.id === candidate.modelId);
+			if (!match) continue;
+			current = match;
+			selectedDefault = candidate;
+			break;
+		}
+		if (!current && configured) {
+			current = modelRuntime.getModel(configured.provider, configured.modelId) as PiModel | undefined;
+			selectedDefault = configured;
+			if (current && !models.some((model) => model.provider === current!.provider && model.id === current!.id)) {
+				models.push(current);
+			}
+		}
+		current ??= models[0];
+		if (!current) return { configOptions: [] };
+
+		const levels = supportedThinkingLevels(current);
+		const thinkingLevel = selectedDefault?.thinkingLevel ?? levels[0] ?? "off";
+		return {
+			configOptions: [
+				modelOption(current, models),
+				thoughtLevelOption(thinkingLevel, levels),
+			],
+		};
+	}
+
 	private querySessionModelUsage(sessionId: string, state: PiSessionState): Promise<ModelUsageRefreshResult> {
 		const model = state.model;
 		const key = `${sessionId}\0${model?.provider ?? ""}/${model?.id ?? ""}\0${state.thinkingLevel}`;
@@ -2546,6 +2617,27 @@ export class PixAcpAgent {
 		}
 	}
 
+}
+
+function draftDefaultModelFromMeta(meta: Record<string, unknown> | null | undefined): PixDefaultModel | undefined {
+	const rawModel = meta?.["pix.draftModel"];
+	const rawThinking = meta?.["pix.draftThinking"];
+	if (rawModel === undefined && rawThinking === undefined) return undefined;
+	if (typeof rawModel !== "string") {
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix.draftModel must be a provider/model string");
+	}
+	const parsed = parsePixModelRef(rawModel);
+	if (!parsed) throw new RequestError(ERROR_INVALID_PARAMS, "pix.draftModel must use provider/model[:thinking] format");
+	if (rawThinking !== undefined && (typeof rawThinking !== "string" || !isThinkingLevel(rawThinking))) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix.draftThinking is not a supported thinking level");
+	}
+	const thinkingLevel = typeof rawThinking === "string" ? rawThinking : parsed.thinkingLevel;
+	return {
+		provider: parsed.provider,
+		modelId: parsed.modelId,
+		fallbackModels: [],
+		...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+	};
 }
 
 function defaultModelCandidates(defaultModel: PixDefaultModel | undefined): Array<PixDefaultModel | undefined> {

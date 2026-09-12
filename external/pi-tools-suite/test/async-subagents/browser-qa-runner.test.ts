@@ -44,7 +44,7 @@ function createBrowserQaAgent(project: string, id = "qa-agent"): string {
 	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
 	writeFile(path.join(agentDir, "prompt.md"), "browser QA test\n");
 	writeFile(path.join(agentDir, "project_cwd"), project);
-	writeFile(path.join(agentDir, "subagent_type"), "browser-qa");
+	writeFile(path.join(agentDir, "subagent_type"), "ui-qa");
 	if (process.platform !== "win32") {
 		fs.chmodSync(workspace, 0o700);
 		fs.chmodSync(flows, 0o700);

@@ -76,19 +76,43 @@ function stripDcpCarrierText(text: string): string {
   return stripStaleDcpMetadataLines(text)
 }
 
-function canonicalHashValue(value: unknown, seen = new WeakSet<object>()): unknown {
+const OMIT_JSON_OBJECT_VALUE = Symbol("omit-json-object-value")
+
+function canonicalHashValue(
+  value: unknown,
+  seen = new WeakSet<object>(),
+  arrayElement = false,
+): unknown | typeof OMIT_JSON_OBJECT_VALUE {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value
-  if (typeof value === "number") return Number.isFinite(value) ? value : String(value)
+  // Exact membership is persisted in JSONL, so hash the value that can actually
+  // survive that persistence boundary. JSON.stringify serializes non-finite
+  // numbers as null, drops undefined/function/symbol object properties, and
+  // converts those values to null when they occupy an array slot. Encoding an
+  // in-memory-only sentinel here made otherwise unchanged toolResult.details
+  // fail exact replay after restart.
+  if (typeof value === "number") return Number.isFinite(value) ? value : null
   if (typeof value === "bigint") return `${value}n`
-  if (typeof value === "undefined") return "[undefined]"
-  if (typeof value === "function" || typeof value === "symbol") return String(value)
-  if (Array.isArray(value)) return value.map((item) => canonicalHashValue(item, seen))
+  if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol") {
+    return arrayElement ? null : OMIT_JSON_OBJECT_VALUE
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      const canonical = canonicalHashValue(item, seen, true)
+      return canonical === OMIT_JSON_OBJECT_VALUE ? null : canonical
+    })
+  }
   if (typeof value === "object") {
     if (seen.has(value as object)) return "[cycle]"
+    const toJSON = (value as { toJSON?: unknown }).toJSON
+    if (typeof toJSON === "function") {
+      const serialized = (toJSON as () => unknown).call(value)
+      return canonicalHashValue(serialized, seen, arrayElement)
+    }
     seen.add(value as object)
     const output: Record<string, unknown> = {}
     for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      output[key] = canonicalHashValue((value as Record<string, unknown>)[key], seen)
+      const canonical = canonicalHashValue((value as Record<string, unknown>)[key], seen, false)
+      if (canonical !== OMIT_JSON_OBJECT_VALUE) output[key] = canonical
     }
     seen.delete(value as object)
     return output
@@ -106,14 +130,17 @@ export function canonicalMessageHash(message: any): string {
   if (message && typeof message === "object") {
     for (const key of Object.keys(message).sort()) {
       if (IDENTITY_ONLY_MESSAGE_KEYS.has(key)) continue
-      canonical[key] = key === "content"
+      const value = key === "content"
         ? canonicalContentForMessageHash(message)
         : canonicalHashValue(message[key])
+      if (value !== OMIT_JSON_OBJECT_VALUE) canonical[key] = value
     }
   } else {
-    canonical.value = canonicalHashValue(message)
+    const value = canonicalHashValue(message)
+    if (value !== OMIT_JSON_OBJECT_VALUE) canonical.value = value
   }
-  return createHash("sha256").update(JSON.stringify(canonicalHashValue(canonical))).digest("hex")
+  const normalized = canonicalHashValue(canonical)
+  return createHash("sha256").update(JSON.stringify(normalized === OMIT_JSON_OBJECT_VALUE ? {} : normalized)).digest("hex")
 }
 
 const CANONICAL_HASH_RE = /^[a-f0-9]{64}$/i

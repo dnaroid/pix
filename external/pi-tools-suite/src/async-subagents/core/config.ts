@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseJsonc } from "jsonc-parser";
 import { projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
+import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./browser-qa.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
 export interface ModelByParentEntry {
@@ -244,6 +245,11 @@ export function getProjectSubagentPresetsPath(cwd: string): string {
 /** Normalize `.pi/agents/*.md` definitions through the shared type-profile path. */
 function projectAgentTypes(cwd: string): Partial<SubagentConfig> {
 	const definitions = readProjectAgentDefinitions(cwd);
+	const legacyUiQa = definitions[LEGACY_BROWSER_QA_TYPE];
+	if (legacyUiQa) {
+		if (!definitions[UI_QA_TYPE]) definitions[UI_QA_TYPE] = legacyUiQa;
+		delete definitions[LEGACY_BROWSER_QA_TYPE];
+	}
 	const types = normalizeAgentDefinitions(definitions);
 	if (Object.keys(types).length === 0) return {};
 	return { types };
@@ -360,7 +366,7 @@ export function resolveSubagentRoutingConfig(config: SubagentConfig): ResolvedSu
 }
 
 export function defaultSubagentType(config: SubagentConfig): string | undefined {
-	const configured = trimString(config.defaultType);
+	const configured = normalizeSubagentType(config.defaultType, config);
 	if (configured) return Object.prototype.hasOwnProperty.call(config.types, configured) ? configured : undefined;
 	return Object.keys(config.types).find((name) => trimString(name));
 }
@@ -430,9 +436,18 @@ export function filterSubagentConfigForParentModel(
 }
 
 export function selectSubagentType(task: AgentTask, config: SubagentConfig): string | undefined {
-	const explicit = trimString(task.subagentType);
+	const explicit = normalizeSubagentType(task.subagentType, config);
 	if (explicit) return explicit;
 	return defaultSubagentType(config);
+}
+
+/** Preserve explicit legacy browser-qa calls after the built-in role was broadened to ui-qa. */
+export function normalizeSubagentType(value: string | undefined, config: SubagentConfig): string | undefined {
+	const requested = trimString(value);
+	if (!requested) return undefined;
+	if (Object.prototype.hasOwnProperty.call(config.types, requested)) return requested;
+	if (requested === LEGACY_BROWSER_QA_TYPE && Object.prototype.hasOwnProperty.call(config.types, UI_QA_TYPE)) return UI_QA_TYPE;
+	return requested;
 }
 
 function readPresetConfigFile(file: string): Partial<SubagentConfig> {

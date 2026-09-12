@@ -832,6 +832,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					}, ctx)
 				}
 				if (autoDecision.shouldFire && autoCandidate) {
+					const modelSummaryConfigured =
+						effectiveConfig.compress.autoCompress.summarizerModel.length > 0 ||
+						effectiveConfig.compress.autoCompress.summarizerFallbackModels.length > 0
 					try {
 						const autoOperationEpoch = state.sessionEpoch
 						const largestSafeCandidate = candidate
@@ -864,6 +867,21 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							// The captured owner was durably committed; do not label it
 							// failed or mutate/nudge the replacement session.
 							return { messages: contextMessages }
+						}
+						if (
+							modelSummaryConfigured &&
+							!autoSummarizerDegraded &&
+							autoResult.summaryMode === "programmatic_fallback"
+						) {
+							// A successful deterministic commit can still prove that every
+							// configured summary model failed for this live session. Avoid paying
+							// the same model timeout on each subsequent autonomous attempt.
+							autoSummarizerDegraded = true
+							writeDcpDebugLog(effectiveConfig, "compress.auto_summarizer_degraded", {
+								reason: "model-summary-fallback",
+								summarizerAttempts: autoResult.summarizerAttempts,
+								nextMode: "deterministic-extractive",
+							}, ctx)
 						}
 						// Re-apply pruning so the new block takes effect on this
 						// same context pass instead of the next one.
@@ -899,13 +917,14 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							: undefined
 						const autoError = error instanceof Error ? error.message : String(error)
 						autoCompressionFailure = { blockedReason: autoBlockedReason, error: autoError }
-						const modelSummaryConfigured =
-							effectiveConfig.compress.autoCompress.summarizerModel.length > 0 ||
-							effectiveConfig.compress.autoCompress.summarizerFallbackModels.length > 0
-						if (modelSummaryConfigured && !autoSummarizerDegraded) {
+						const summarizerFailure = error instanceof AutoCompressionBlockedError && (
+							error.blockedReason === "summarizer-unavailable" || error.summarizerFallbackUsed
+						)
+						if (modelSummaryConfigured && !autoSummarizerDegraded && summarizerFailure) {
 							autoSummarizerDegraded = true
 							writeDcpDebugLog(effectiveConfig, "compress.auto_summarizer_degraded", {
-								reason: autoBlockedReason ?? "auto-failed",
+								reason: error.summarizerFallbackUsed ? "model-summary-fallback" : autoBlockedReason ?? "auto-failed",
+								summarizerAttempts: error.summarizerAttempts,
 								nextMode: "deterministic-extractive",
 							}, ctx)
 						}
@@ -914,11 +933,12 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							phase: autoBlockedReason ? "blocked" : "degraded",
 							blocked_reason: autoBlockedReason,
 							error: autoError,
+							summarizerAttempts: error instanceof AutoCompressionBlockedError ? error.summarizerAttempts : undefined,
 							candidate: autoCandidate,
 							state: summarizeDcpState(state, effectiveConfig),
 						}, ctx)
 						warnProgress(ctx, autoBlockedReason ?? "auto-failed",
-							`DCP automatic compression failed (${autoBlockedReason ?? "preparation failed"}). ${modelSummaryConfigured ? "Future attempts in this session will skip the summary model and use deterministic extraction. " : ""}The current context is preserved; emergency pruning will be attempted before any capacity abort.`)
+							`DCP automatic compression failed (${autoBlockedReason ?? "preparation failed"}). ${modelSummaryConfigured && autoSummarizerDegraded ? "Future attempts in this session will skip the summary model and use deterministic extraction. " : ""}The current context is preserved; emergency pruning will be attempted before any capacity abort.`)
 						if (budget.capacityExceeded && emergencySettings.enabled) {
 							emergencySelection = analyzeEmergencyCurrentTurn(prunedMessages, state, effectiveConfig)
 							messageCandidates = emergencyCurrentTurnMessageCandidates(emergencySelection, effectiveConfig)

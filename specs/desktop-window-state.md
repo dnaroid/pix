@@ -43,7 +43,6 @@ Reopen Pix Desktop at the size and position where the user last left it, includi
 ## Related files
 
 - `desktop/src-tauri/Cargo.toml`
-- `desktop/src-tauri/Cargo.lock`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/tauri.conf.json`
 

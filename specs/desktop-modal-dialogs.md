@@ -16,7 +16,7 @@ Keep true modal UI limited to bounded decisions/configuration and give those dia
 
 ## Behavior
 
-- File/media Preview and Git Diff are explicitly not modal dialogs; they are workspace editor tabs governed by `specs/desktop-editor-tabs.md`.
+- File/media Preview and Git Diff are explicitly not modal dialogs; they are UI-only tabs in the unified titlebar workbench governed by `specs/desktop-workbench-tabs.md`.
 - General form elicitation, Project settings, Command Picker/Palette, and Model + Thinking selection use native HTML `<dialog>` with `showModal()` rather than a hand-built fullscreen `role=dialog` overlay.
 - `desktop/src/lib/modal-dialog.ts` centralizes opening the native modal, intentional initial focus, close-on-unmount, and best-effort focus restoration to the invoker.
 - Escape follows the native dialog `cancel` event. Components prevent the browser's implicit close and route cancellation through their existing state owner so async/saving guards remain authoritative.

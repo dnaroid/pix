@@ -34,7 +34,7 @@ function poolConfig(): SubagentConfig {
 		types: {
 			research: { models: ["cheap/text", "fast/vision", "backup/vision"] },
 			oracle: { models: ["strong/a", "independent/b"] },
-			"browser-qa": { models: ["cheap/text", "fast/vision", "backup/vision"] },
+			"ui-qa": { models: ["cheap/text", "fast/vision", "backup/vision"] },
 		},
 	};
 }
@@ -54,7 +54,7 @@ afterEach(() => {
 describe("ordered agent models and preset pools", () => {
 	test("ships six Markdown modes and pool-only presets from a single defaults source", () => {
 		const cfg = loadSubagentConfig(temp(), {});
-		expect(Object.keys(cfg.types).sort()).toEqual(["browser-qa", "frontier-review", "implement", "oracle", "research", "verify"]);
+		expect(Object.keys(cfg.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		for (const [name, profile] of Object.entries(cfg.types)) {
 			expect(profile.models?.length).toBeGreaterThan(0);
 			expect(profile.model).toBeUndefined();
@@ -251,9 +251,9 @@ describe("model availability and capabilities", () => {
 		expect(runtime.complete).not.toHaveBeenCalled();
 	});
 
-	test("image tasks and browser QA keep only confirmed image-capable candidates", async () => {
+	test("image tasks and UI QA keep only confirmed image-capable candidates", async () => {
 		const cfg = poolConfig();
-		for (const work of [{ ...task(), imagePaths: ["screen.png"] }, task("browser-qa")]) {
+		for (const work of [{ ...task(), imagePaths: ["screen.png"] }, task("ui-qa")]) {
 			const result = await selectAvailableAgentModels(resolveAgentTaskConfig(work, cfg), cfg, registry());
 			expect(result.task.model).toBe("fast/vision");
 			expect(result.fallbackModels).toEqual(["backup/vision"]);
@@ -272,7 +272,7 @@ describe("model availability and capabilities", () => {
 
 	test("configured blind-model overrides take priority over runtime image metadata", async () => {
 		const cfg = { ...poolConfig(), vision: { blindModelPatterns: ["fast/*"] } };
-		const result = await selectAvailableAgentModels(resolveAgentTaskConfig(task("browser-qa"), cfg), cfg, registry());
+		const result = await selectAvailableAgentModels(resolveAgentTaskConfig(task("ui-qa"), cfg), cfg, registry());
 		expect(result.task.model).toBe("backup/vision");
 		expect(result.fallbackModels).toEqual([]);
 	});

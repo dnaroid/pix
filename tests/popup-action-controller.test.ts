@@ -164,6 +164,44 @@ describe("AppPopupActionController model visibility", () => {
 		assert.equal(openedPath, undefined);
 		assert.equal(slashCommandSubmitted, false);
 	});
+
+	it("applies a model choice to the active draft without materializing a runtime", async () => {
+		const selectedModel = { provider: "openai-codex", id: "gpt-5.5", name: "GPT" } as never;
+		let applied: { model: unknown; thinking: string } | undefined;
+		let materialized = false;
+		let commandRan = false;
+		const popupMenus = {
+			syncActivePopupMenu: () => "model",
+			modelVisibilityModeActive: () => false,
+			selectedModelThinking: () => ({
+				value: { model: selectedModel, ref: "openai-codex/gpt-5.5", current: false, visible: true },
+				thinkingLevel: "high",
+				direct: true,
+				source: "model",
+			}),
+			closeModelSelection: () => {},
+		} as unknown as AppPopupMenuController;
+		const controller = new AppPopupActionController(
+			host({
+				isDraftTabActive: () => true,
+				materializeDraftSession: async () => {
+					materialized = true;
+					return undefined;
+				},
+				selectDraftModel: (model, thinking) => { applied = { model, thinking }; },
+			}),
+			popupMenus,
+			{ runModelThinkingCommand: async () => { commandRan = true; } } as unknown as AppCommandController,
+			{} as AppMenuItemsController,
+			{} as AppQueuedMessageController,
+			{} as AppWorkspaceActionsController,
+		);
+
+		assert.equal(await controller.submitActivePopupMenu(), true);
+		assert.deepEqual(applied, { model: selectedModel, thinking: "high" });
+		assert.equal(materialized, false);
+		assert.equal(commandRan, false);
+	});
 });
 
 function host(overrides: Partial<AppPopupActionControllerHost> = {}): AppPopupActionControllerHost {

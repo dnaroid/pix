@@ -60,7 +60,7 @@
     type DesktopCommandId,
     type DesktopShortcutPlatform,
   } from "./lib/desktop-commands";
-  import { clampThinkingLevel, modelThinkingConfigState } from "./lib/model-thinking";
+  import { applyLocalModelThinkingSelection, clampThinkingLevel, modelThinkingConfigState } from "./lib/model-thinking";
   import {
     ACTIVE_SESSIONS_STORAGE_KEY,
     buildTabSessions,
@@ -133,11 +133,13 @@
   } from "./lib/runtime-status";
   import {
     EMPTY_SESSION_ACTIVITY,
+    sessionActivityLabel,
+    sessionActivityTone,
     shouldAcceptSessionActivitySnapshot,
     updateSessionActivitySummary,
     type SessionActivitySummary,
   } from "./lib/session-activity";
-  import SessionTabs from "./components/SessionTabs.svelte";
+  import WorkbenchTabs from "./components/WorkbenchTabs.svelte";
   import SessionSelector from "./components/SessionSelector.svelte";
   import SessionStartView from "./components/SessionStartView.svelte";
   import SessionInspector from "./components/SessionInspector.svelte";
@@ -151,7 +153,6 @@
   import ModelThinkingPicker from "./components/ModelThinkingPicker.svelte";
   import PreviewPane from "./components/PreviewPane.svelte";
   import GitDiffPane from "./components/GitDiffPane.svelte";
-  import WorkspaceEditorTabs from "./components/WorkspaceEditorTabs.svelte";
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
   import type { SessionStateNotification } from "./lib/session-state";
   import {
@@ -212,11 +213,18 @@
     type PreviewScrollPosition,
   } from "./lib/preview-history";
   import {
-    normalizeWorkspaceEditor,
-    workspaceEditorCloseFallback,
-    type WorkspaceEditorId,
-    type WorkspaceEditorTab,
-  } from "./lib/workspace-editors";
+    buildWorkbenchTabs,
+    normalizeWorkbenchTab,
+    workbenchSessionId,
+    workbenchSessionTabId,
+    workbenchTabCloseFallback,
+    type WorkbenchAuxiliaryPlacement,
+    type WorkbenchDiffTab,
+    type WorkbenchPreviewTab,
+    type WorkbenchSessionTab,
+    type WorkbenchTab,
+    type WorkbenchTabId,
+  } from "./lib/workbench-tabs";
   import {
     EMPTY_TASK_DOCUMENT,
     moveProjectTask,
@@ -306,6 +314,7 @@
   let commandPicker = $state<CommandPickerState | null>(null);
   let modelThinkingPickerOpen = $state(false);
   let modelThinkingPickerSessionId = $state<string | null>(null);
+  let modelThinkingPickerDraft = $state(false);
   let visibleModelRefs = $state<string[] | undefined>(undefined);
   let sessionSelectorOpen = $state(false);
   let sessionSelectorQuery = $state("");
@@ -314,13 +323,21 @@
   let draftSessionTabActive = $state(false);
   let draftSessionTabTouched = $state(false);
   let draftSessionMaterializing = $state(false);
+  let draftConfigOptions = $state<SessionConfigOption[]>([]);
+  let draftModelOverride = $state<{ modelRef: string; thinkingLevel: string } | null>(null);
+  let draftConfigGeneration = 0;
   let sessionInspectorOpen = $state(false);
   let dragActive = $state(false);
   let previewHistory = $state<PreviewHistory<PreviewEntry>>(emptyPreviewHistory());
   let previewDirty = $state(false);
-  let activeWorkspaceEditor = $state<WorkspaceEditorId>("conversation");
-  let previousWorkspaceEditorSessionId: string | null = null;
-  let previewPane = $state<{ requestClose: () => void } | null>(null);
+  let activeWorkbenchTabId = $state<WorkbenchTabId | null>(null);
+  let previousConversationWorkbenchTabId: WorkbenchTabId | null = null;
+  let previewWorkbenchAnchorId = $state<WorkbenchTabId | null>(null);
+  let previewWorkbenchOpenedOrder = $state(0);
+  let gitDiffWorkbenchAnchorId = $state<WorkbenchTabId | null>(null);
+  let gitDiffWorkbenchOpenedOrder = $state(0);
+  let workbenchAuxSequence = 0;
+  let previewPane = $state<{ requestClose: () => boolean } | null>(null);
   let taskDocument = $state<ProjectTaskDocument>(EMPTY_TASK_DOCUMENT);
   let tasksLoading = $state(false);
   let tasksSaving = $state(false);
@@ -435,6 +452,9 @@
   const activeConversationTabId = $derived(
     draftSessionTabActive ? DRAFT_SESSION_TAB_ID : activeSessionId,
   );
+  const activeConversationWorkbenchTabId = $derived(
+    activeConversationTabId ? workbenchSessionTabId(activeConversationTabId) : null,
+  );
   const sessionStartOpen = $derived(draftSessionTabActive && !draftSessionTabTouched);
   const sessionStartCandidates = $derived.by<SessionInfo[]>(() => {
     const openIds = new Set(tabSessions.map((session) => session.sessionId));
@@ -446,45 +466,6 @@
   const activePreview = $derived(currentPreview(previewHistory));
   const canGoBackInPreview = $derived(canMovePreviewHistory(previewHistory, -1));
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
-  const workspaceEditorTabs = $derived.by<WorkspaceEditorTab[]>(() => {
-    const tabs: WorkspaceEditorTab[] = [{
-      id: "conversation",
-      label: "Conversation",
-      title: activeTitle,
-      kind: "conversation",
-      closable: false,
-    }];
-    if (activePreview) {
-      const previewTitle = activePreview.kind === "file"
-        ? activePreview.file.path
-        : activePreview.attachment.name;
-      tabs.push({
-        id: "preview",
-        label: workspaceEditorLabel(previewTitle),
-        title: previewTitle,
-        kind: "file",
-        closable: true,
-        dirty: previewDirty,
-      });
-    }
-    if (gitDiffPreview) {
-      const target = gitDiffPreview.path ?? "All changes";
-      tabs.push({
-        id: "git-diff",
-        label: gitDiffPreview.path ? `${workspaceEditorLabel(target)} · Diff` : "All Changes · Diff",
-        title: `${target} · ${gitDiffPreview.scope}`,
-        kind: "diff",
-        closable: true,
-        busy: gitLlmActionId?.startsWith("review:") === true || gitResolveRunning,
-      });
-    }
-    return tabs;
-  });
-  const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
-  const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
-  const activeSessionActivity = $derived(
-    activeSessionId ? (sessionActivityBySessionId.get(activeSessionId) ?? EMPTY_SESSION_ACTIVITY) : EMPTY_SESSION_ACTIVITY,
-  );
   const activePendingElicitation = $derived.by<PendingElicitation | null>(() => {
     const pending = pendingUnscopedElicitation
       ?? (activeSessionId ? pendingElicitationsBySession.get(activeSessionId) ?? null : null);
@@ -495,6 +476,77 @@
     if (pendingUnscopedElicitation && activeSessionId) sessionIds.add(activeSessionId);
     return sessionIds;
   });
+  const workbenchSessionTabs = $derived.by<WorkbenchSessionTab[]>(() => titlebarSessions.map((session) => {
+    const running = runningSessionIds.has(session.sessionId);
+    const activity = sessionActivityBySessionId.get(session.sessionId);
+    const needsInput = pendingElicitationSessionIds.has(session.sessionId);
+    const draft = session.sessionId === DRAFT_SESSION_TAB_ID;
+    const activityLabel = sessionActivityLabel(activity, running, needsInput);
+    return {
+      id: workbenchSessionTabId(session.sessionId),
+      kind: "session",
+      sessionId: session.sessionId,
+      label: session.title || "Untitled conversation",
+      title: `${sessionWorkbenchTitle(session)} · ${activityLabel}`,
+      panelId: "conversation-workspace",
+      closable: !draft || tabSessions.length > 0,
+      disabled: sessionMutationRunning,
+      runtimeActive: session.sessionId === activeConversationTabId,
+      running,
+      draft,
+      activityTone: sessionActivityTone(activity, running, needsInput),
+      activityLabel,
+      pulsing: running || (activity?.activeSubagents ?? 0) > 0,
+    };
+  }));
+  const workbenchTabs = $derived.by<WorkbenchTab[]>(() => {
+    const auxiliary: WorkbenchAuxiliaryPlacement[] = [];
+    if (activePreview) {
+      const previewTitle = activePreview.kind === "file"
+        ? activePreview.file.path
+        : activePreview.attachment.name;
+      const previewTab: WorkbenchPreviewTab = {
+        id: "preview",
+        label: workbenchTabLabel(previewTitle),
+        title: previewTitle,
+        panelId: "workbench-panel-preview",
+        kind: "preview",
+        closable: true,
+        dirty: previewDirty,
+      };
+      auxiliary.push({
+        tab: previewTab,
+        insertAfterId: previewWorkbenchAnchorId,
+        openedOrder: previewWorkbenchOpenedOrder || 1,
+      });
+    }
+    if (gitDiffPreview) {
+      const target = gitDiffPreview.path ?? "All changes";
+      const diffTab: WorkbenchDiffTab = {
+        id: "git-diff",
+        label: gitDiffPreview.path ? `${workbenchTabLabel(target)} · Diff` : "All Changes · Diff",
+        title: `${target} · ${gitDiffPreview.scope}`,
+        panelId: "workbench-panel-git-diff",
+        kind: "diff",
+        closable: true,
+        busy: gitLlmActionId?.startsWith("review:") === true || gitResolveRunning,
+      };
+      auxiliary.push({
+        tab: diffTab,
+        insertAfterId: gitDiffWorkbenchAnchorId,
+        openedOrder: gitDiffWorkbenchOpenedOrder || 2,
+      });
+    }
+    return buildWorkbenchTabs(workbenchSessionTabs, auxiliary);
+  });
+  const activeWorkbenchTab = $derived(
+    workbenchTabs.find((tab) => tab.id === activeWorkbenchTabId),
+  );
+  const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
+  const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
+  const activeSessionActivity = $derived(
+    activeSessionId ? (sessionActivityBySessionId.get(activeSessionId) ?? EMPTY_SESSION_ACTIVITY) : EMPTY_SESSION_ACTIVITY,
+  );
   const activeRegistrySnapshot = $derived(registrySnapshot);
   const externalEditorDisplayName = $derived(externalEditorLabel(externalEditor));
   const registryLoading = $derived(registryActionId === "refresh");
@@ -512,11 +564,16 @@
   const dcpCompressionAvailable = $derived(
     activeSlashCommands.some((command) => command.name.toLowerCase() === "dcp"),
   );
+  const displayedConfigOptions = $derived(draftSessionTabActive ? draftConfigOptions : configOptions);
 
   $effect(() => {
-    if (modelThinkingPickerOpen && modelThinkingPickerSessionId !== activeSessionId) {
+    const pickerLostOwner = modelThinkingPickerDraft
+      ? !draftSessionTabActive
+      : modelThinkingPickerSessionId !== activeSessionId;
+    if (modelThinkingPickerOpen && pickerLostOwner) {
       modelThinkingPickerOpen = false;
       modelThinkingPickerSessionId = null;
+      modelThinkingPickerDraft = false;
     }
   });
   let runtimeStatusActivationKey = "";
@@ -564,19 +621,27 @@
     if (previousPreviewWorkspace !== null && previousPreviewWorkspace !== currentWorkspace) {
       previewHistory = emptyPreviewHistory();
       previewDirty = false;
+      previewWorkbenchAnchorId = null;
+      previewWorkbenchOpenedOrder = 0;
     }
     previousPreviewWorkspace = currentWorkspace;
   });
 
   $effect(() => {
-    const sessionId = activeSessionId;
-    if (previousWorkspaceEditorSessionId !== sessionId) activeWorkspaceEditor = "conversation";
-    previousWorkspaceEditorSessionId = sessionId;
+    const conversationTabId = activeConversationWorkbenchTabId;
+    if (conversationTabId !== previousConversationWorkbenchTabId) {
+      if (conversationTabId) activeWorkbenchTabId = conversationTabId;
+      previousConversationWorkbenchTabId = conversationTabId;
+    }
   });
 
   $effect(() => {
-    const normalized = normalizeWorkspaceEditor(activeWorkspaceEditor, workspaceEditorTabs);
-    if (normalized !== activeWorkspaceEditor) activeWorkspaceEditor = normalized;
+    const normalized = normalizeWorkbenchTab(
+      activeWorkbenchTabId,
+      workbenchTabs,
+      activeConversationWorkbenchTabId,
+    );
+    if (normalized !== activeWorkbenchTabId) activeWorkbenchTabId = normalized;
   });
 
   $effect(() => {
@@ -1701,6 +1766,11 @@
         });
       }
       await closeWorkspaceSessions();
+      closePreview();
+      closeGitDiff();
+      activeWorkbenchTabId = null;
+      previousConversationWorkbenchTabId = null;
+      workbenchAuxSequence = 0;
       workspace = selected;
       sessions = [];
       taskLoadGeneration += 1;
@@ -1719,8 +1789,6 @@
       gitActionId = null;
       gitLlmActionId = null;
       gitResolveRunning = false;
-      gitDiffPreview = null;
-      gitDiffReview = undefined;
       slashCommandsBySession = new Map();
       taskActionId = null;
       taskLoadFailed = false;
@@ -1926,8 +1994,7 @@
       if (workspace !== requestWorkspace) return false;
       if (options.reloadProject) {
         closePreview();
-        gitDiffPreview = null;
-        gitDiffReview = undefined;
+        closeGitDiff();
         await Promise.all([
           loadProjectTasks(requestWorkspace),
           loadProjectDocuments(requestWorkspace),
@@ -1992,9 +2059,13 @@
     try {
       const diff = await requestGitDiff(path, scope);
       if (!diff) return;
+      if (!gitDiffPreview) {
+        gitDiffWorkbenchAnchorId = activeWorkbenchTabId ?? activeConversationWorkbenchTabId;
+        gitDiffWorkbenchOpenedOrder = ++workbenchAuxSequence;
+      }
       gitDiffPreview = diff;
       gitDiffReview = undefined;
-      activeWorkspaceEditor = "git-diff";
+      activeWorkbenchTabId = "git-diff";
     } finally {
       if (gitActionId === actionId) gitActionId = null;
     }
@@ -2014,9 +2085,13 @@
         ? current
         : await requestGitDiff(path, scope);
       if (!diff || requestClient !== client || requestWorkspace !== workspace || sessionId !== activeSessionId) return;
+      if (!gitDiffPreview) {
+        gitDiffWorkbenchAnchorId = activeWorkbenchTabId ?? activeConversationWorkbenchTabId;
+        gitDiffWorkbenchOpenedOrder = ++workbenchAuxSequence;
+      }
       gitDiffPreview = diff;
       gitDiffReview = undefined;
-      activeWorkspaceEditor = "git-diff";
+      activeWorkbenchTabId = "git-diff";
       if (!diff.content.trim()) {
         gitDiffReview = "No diff to review.";
         return;
@@ -2092,7 +2167,7 @@
       }
 
       // Warm the new runtime before making it the active tab. If startup fails,
-      // the user's current conversation and review popup remain untouched.
+      // the user's current conversation and Git Diff tab remain untouched.
       await ensureSessionRuntime(requestClient, created.sessionId, requestWorkspace);
       if (requestClient !== client || requestWorkspace !== workspace) {
         await requestClient.closeSession(created.sessionId).catch(() => undefined);
@@ -2125,9 +2200,8 @@
       transcriptBySessionId.set(created.sessionId, transcript);
 
       const run = runPromptRequest(requestClient, created.sessionId, [{ type: "text", text: prompt }], [], transcriptMessageId);
-      gitDiffPreview = null;
-      gitDiffReview = undefined;
-      activeWorkspaceEditor = "conversation";
+      closeGitDiff();
+      activeWorkbenchTabId = workbenchSessionTabId(created.sessionId);
       void scrollToLatest();
       void refreshSessions();
       void run
@@ -2494,6 +2568,30 @@
     draftSessionMaterializing = false;
   }
 
+  async function refreshDraftConfig(): Promise<void> {
+    if (!client || !workspace || status !== "ready") return;
+    const requestClient = client;
+    const requestWorkspace = workspace;
+    const generation = ++draftConfigGeneration;
+    try {
+      const response = await requestClient.draftConfig(requestWorkspace);
+      if (
+        generation !== draftConfigGeneration
+        || requestClient !== client
+        || requestWorkspace !== workspace
+        || !draftSessionTabOpen
+      ) return;
+      draftConfigOptions = response.configOptions;
+    } catch (error) {
+      if (
+        generation === draftConfigGeneration
+        && requestClient === client
+        && requestWorkspace === workspace
+        && draftSessionTabActive
+      ) reportError(error);
+    }
+  }
+
   function activateDraftSessionTab(options: { resetComposer?: boolean } = {}): void {
     if (!workspace || status !== "ready") return;
     closeProjectSelector();
@@ -2509,9 +2607,13 @@
     draftSessionTabActive = true;
     if (options.resetComposer) {
       draftSessionTabTouched = false;
+      draftConfigOptions = [];
+      draftModelOverride = null;
+      draftConfigGeneration += 1;
       promptText = "";
       invalidateAttachmentDraft();
     }
+    if (draftConfigOptions.length === 0) void refreshDraftConfig();
   }
 
   async function openSessionStartTab(): Promise<void> {
@@ -2551,7 +2653,7 @@
     };
 
     try {
-      const created = await requestClient.newSession(requestWorkspace);
+      const created = await requestClient.newSession(requestWorkspace, draftModelOverride ?? undefined);
       createdSessionId = created.sessionId;
       if (abandoned()) {
         discardCreatedSession(created.sessionId);
@@ -2565,6 +2667,7 @@
 
       ensureProvisionalSession(created.sessionId, requestWorkspace);
       showSessionTab(created.sessionId);
+      retargetWorkbenchSessionAnchors(DRAFT_SESSION_TAB_ID, created.sessionId);
       // Retarget the existing unsent attachment draft to the real session so
       // the session-id transition does not clear attachments before submit.
       previousAttachmentDraftKey = `${requestWorkspace}\0${created.sessionId}`;
@@ -2572,6 +2675,9 @@
       draftSessionTabOpen = false;
       draftSessionTabActive = false;
       draftSessionTabTouched = false;
+      draftConfigOptions = [];
+      draftModelOverride = null;
+      draftConfigGeneration += 1;
       transcript = emptyTranscript;
       transcriptBySessionId.set(created.sessionId, transcript);
       const options = loaded.configOptions ?? created.configOptions ?? [];
@@ -2834,6 +2940,7 @@
       restoredSessionTabs = nextTabs.restoredIds;
       locallyOpenedSessionTabs = nextTabs.locallyOpenedIds;
       closedSessionTabs = nextTabs.closedIds;
+      if (sourceSessionId) retargetWorkbenchSessionAnchors(sourceSessionId, sessionId);
 
       cancelSessionHistoryLoad();
       activeSessionId = sessionId;
@@ -2892,7 +2999,10 @@
     configOptionsBySessionId.clear();
   }
 
-  async function closeSessionTab(sessionId: string): Promise<boolean> {
+  async function closeSessionTab(
+    sessionId: string,
+    preferredNextSessionId?: string,
+  ): Promise<boolean> {
     closeSessionSelector();
     if (sessionMutationRunning) return false;
     if (sessionId === DRAFT_SESSION_TAB_ID) {
@@ -2906,7 +3016,10 @@
       if (!wasActive) return true;
       promptText = "";
       invalidateAttachmentDraft();
-      const fallbackSessionId = tabSessions.at(-1)?.sessionId;
+      const fallbackSessionId = preferredNextSessionId && tabSessions.some((session) => session.sessionId === preferredNextSessionId)
+        ? preferredNextSessionId
+        : tabSessions.at(-1)?.sessionId;
+      if (fallbackSessionId) retargetWorkbenchSessionAnchors(DRAFT_SESSION_TAB_ID, fallbackSessionId);
       if (fallbackSessionId) await loadSession(fallbackSessionId);
       else {
         cancelSessionHistoryLoad();
@@ -2930,6 +3043,7 @@
         forgetSessionRuntime(sessionId);
         clearSessionActivity(sessionId);
         transcriptBySessionId.delete(sessionId);
+        retargetWorkbenchSessionAnchors(sessionId, activeSessionId ?? undefined);
         closedSessionTabs = [...closedSessionTabs, sessionId];
         locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((openId) => openId !== sessionId);
       } catch (error) {
@@ -2941,7 +3055,9 @@
       return true;
     }
 
-    const nextSessionId = tabSessions.find((session) => session.sessionId !== sessionId)?.sessionId;
+    const nextSessionId = preferredNextSessionId && tabSessions.some((session) => session.sessionId === preferredNextSessionId)
+      ? preferredNextSessionId
+      : tabSessions.find((session) => session.sessionId !== sessionId)?.sessionId;
     let closed = false;
     operationRunning = true;
     errorMessage = null;
@@ -2955,6 +3071,7 @@
       activeSessionRuntimeReady = false;
       transcript = emptyTranscript;
       configOptions = [];
+      retargetWorkbenchSessionAnchors(sessionId, nextSessionId);
       closedSessionTabs = [...closedSessionTabs, sessionId];
       locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((openId) => openId !== sessionId);
       closed = true;
@@ -3028,6 +3145,7 @@
     draftSessionTabTouched = false;
     promptText = "";
     invalidateAttachmentDraft();
+    retargetWorkbenchSessionAnchors(DRAFT_SESSION_TAB_ID, sessionId);
     await loadSession(sessionId);
   }
 
@@ -3498,33 +3616,71 @@
     return `local-attachment:${attachmentSequence}`;
   }
 
-  function workspaceEditorLabel(value: string): string {
+  function workbenchTabLabel(value: string): string {
     const normalized = value.replaceAll("\\", "/").replace(/\/$/u, "");
     return normalized.split("/").at(-1) || value;
   }
 
-  function selectWorkspaceEditor(id: WorkspaceEditorId): void {
-    if (!workspaceEditorTabs.some((tab) => tab.id === id)) return;
-    activeWorkspaceEditor = id;
+  function sessionWorkbenchTitle(session: SessionInfo): string {
+    const title = session.title || "Untitled conversation";
+    if (!session.updatedAt) return title;
+    const date = new Date(session.updatedAt);
+    if (Number.isNaN(date.valueOf())) return title;
+    return `${title} · ${date.toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`;
   }
 
-  function closeWorkspaceEditor(id: WorkspaceEditorId): void {
-    if (id === "preview") {
-      if (previewPane) previewPane.requestClose();
-      else closePreview();
-      return;
+  function retargetWorkbenchSessionAnchors(sourceSessionId: string, targetSessionId?: string): void {
+    const sourceId = workbenchSessionTabId(sourceSessionId);
+    const targetId = targetSessionId ? workbenchSessionTabId(targetSessionId) : null;
+    if (previewWorkbenchAnchorId === sourceId) previewWorkbenchAnchorId = targetId;
+    if (gitDiffWorkbenchAnchorId === sourceId) gitDiffWorkbenchAnchorId = targetId;
+  }
+
+  function selectWorkbenchTab(id: WorkbenchTabId): void {
+    const tab = workbenchTabs.find((candidate) => candidate.id === id);
+    if (!tab || tab.disabled) return;
+    activeWorkbenchTabId = id;
+    if (tab.kind === "session") handleSessionTabClick(tab.sessionId);
+  }
+
+  async function closeWorkbenchTab(
+    id: WorkbenchTabId,
+    fallbackId: WorkbenchTabId | null,
+  ): Promise<boolean> {
+    const tab = workbenchTabs.find((candidate) => candidate.id === id);
+    if (!tab || tab.disabled || !tab.closable) return false;
+    const wasSelected = activeWorkbenchTabId === id;
+
+    let closed = false;
+    if (tab.kind === "session") {
+      const preferredNextSessionId = workbenchSessionId(fallbackId) ?? undefined;
+      closed = await closeSessionTab(tab.sessionId, preferredNextSessionId);
+    } else if (tab.kind === "preview") {
+      closed = previewPane ? previewPane.requestClose() : (closePreview(), true);
+    } else {
+      closeGitDiff();
+      closed = true;
     }
-    if (id === "git-diff") closeGitDiff();
+
+    if (closed && wasSelected) {
+      activeWorkbenchTabId = fallbackId ?? activeConversationWorkbenchTabId;
+    }
+    return closed;
   }
 
   function closeGitDiff(): void {
-    const fallback = workspaceEditorCloseFallback(workspaceEditorTabs, "git-diff");
     gitDiffPreview = null;
     gitDiffReview = undefined;
-    if (activeWorkspaceEditor === "git-diff") activeWorkspaceEditor = fallback;
+    gitDiffWorkbenchAnchorId = null;
+    gitDiffWorkbenchOpenedOrder = 0;
   }
 
   function showPreview(target: PreviewTarget, navigation: PreviewNavigation): void {
+    const opening = currentPreview(previewHistory) === undefined;
+    if (opening) {
+      previewWorkbenchAnchorId = activeWorkbenchTabId ?? activeConversationWorkbenchTabId;
+      previewWorkbenchOpenedOrder = ++workbenchAuxSequence;
+    }
     previewSequence += 1;
     const entry: PreviewEntry = {
       ...target,
@@ -3535,7 +3691,7 @@
       ? pushPreviewHistory(previewHistory, entry)
       : resetPreviewHistory(entry);
     previewDirty = false;
-    activeWorkspaceEditor = "preview";
+    activeWorkbenchTabId = "preview";
   }
 
   function rememberPreviewScroll(id: number, scrollPosition: PreviewScrollPosition): void {
@@ -3549,11 +3705,11 @@
   }
 
   function closePreview(): void {
-    const fallback = workspaceEditorCloseFallback(workspaceEditorTabs, "preview");
     projectFilePreviewGeneration += 1;
     previewHistory = emptyPreviewHistory();
     previewDirty = false;
-    if (activeWorkspaceEditor === "preview") activeWorkspaceEditor = fallback;
+    previewWorkbenchAnchorId = null;
+    previewWorkbenchOpenedOrder = 0;
   }
 
   function movePreview(offset: -1 | 1): void {
@@ -3965,7 +4121,7 @@
           closeProjectSelector();
           closeSessionSelector();
           if (desktopCommand.value) await applyModelSlashCommand(desktopCommand.value);
-          else commandPicker = commandPickerState("model", configOptions);
+          else commandPicker = commandPickerState("model", displayedConfigOptions);
           break;
         case "thinking":
           if (promptRunning) return;
@@ -3973,7 +4129,7 @@
           closeProjectSelector();
           closeSessionSelector();
           if (desktopCommand.level) await applyThinkingSlashCommand(desktopCommand.level);
-          else commandPicker = commandPickerState("thinking", configOptions);
+          else commandPicker = commandPickerState("thinking", displayedConfigOptions);
           break;
       }
       return;
@@ -4130,13 +4286,13 @@
       case "workspace.choose":
         return !anyPromptRunning && !sessionMutationRunning && !tasksSaving && taskActionId === null;
       case "editor.conversation":
-        return workspaceEditorTabs.length > 1 && activeWorkspaceEditor !== "conversation";
+        return !!activeConversationWorkbenchTabId && activeWorkbenchTab?.kind !== "session";
       case "editor.preview":
-        return !!activePreview && activeWorkspaceEditor !== "preview";
+        return !!activePreview && activeWorkbenchTabId !== "preview";
       case "editor.gitDiff":
-        return !!gitDiffPreview && activeWorkspaceEditor !== "git-diff";
+        return !!gitDiffPreview && activeWorkbenchTabId !== "git-diff";
       case "editor.close":
-        return activeWorkspaceEditor !== "conversation";
+        return activeWorkbenchTab?.kind === "preview" || activeWorkbenchTab?.kind === "diff";
       case "session.new":
         return canUseSession;
       case "session.open":
@@ -4147,10 +4303,8 @@
       case "session.activity":
         return !!activeSessionId;
       case "session.modelThinking":
-        return !!activeSessionId
-          && activeSessionRuntimeReady
+        return (draftSessionTabActive ? draftConfigOptions.length > 0 : !!activeSessionId && activeSessionRuntimeReady)
           && !sessionMutationRunning
-          && !promptRunning
           && changingConfig === null;
       case "composer.focus":
         return draftSessionTabActive || !!activeSessionId;
@@ -4190,17 +4344,21 @@
         await chooseWorkspace();
         return;
       case "editor.conversation":
-        selectWorkspaceEditor("conversation");
+        if (activeConversationWorkbenchTabId) selectWorkbenchTab(activeConversationWorkbenchTabId);
         return;
       case "editor.preview":
-        selectWorkspaceEditor("preview");
+        selectWorkbenchTab("preview");
         return;
       case "editor.gitDiff":
-        selectWorkspaceEditor("git-diff");
+        selectWorkbenchTab("git-diff");
         return;
-      case "editor.close":
-        closeWorkspaceEditor(activeWorkspaceEditor);
+      case "editor.close": {
+        const activeId = activeWorkbenchTabId;
+        if (!activeId) return;
+        const fallbackId = workbenchTabCloseFallback(workbenchTabs, activeId);
+        await closeWorkbenchTab(activeId, fallbackId);
         return;
+      }
       case "session.new":
         await openSessionStartTab();
         return;
@@ -4220,6 +4378,10 @@
         await openModelThinkingPicker();
         return;
       case "composer.focus":
+        if (activeConversationWorkbenchTabId) {
+          selectWorkbenchTab(activeConversationWorkbenchTabId);
+          await tick();
+        }
         await promptComposer?.focus();
         return;
       case "composer.enhance":
@@ -4281,11 +4443,17 @@
   }
 
   async function openModelThinkingPicker(): Promise<void> {
-    if (!activeSessionId || !activeSessionRuntimeReady || operationRunning || changingConfig) return;
+    const draft = draftSessionTabActive;
+    if ((!draft && (!activeSessionId || !activeSessionRuntimeReady)) || operationRunning || changingConfig) return;
     const sessionId = activeSessionId;
     commandPicker = null;
+    if (draft && draftConfigOptions.length === 0) await refreshDraftConfig();
     await visibleModelsSavePromise?.catch(() => undefined);
-    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || changingConfig) return;
+    if (
+      operationRunning
+      || changingConfig
+      || (draft ? !draftSessionTabActive || draftConfigOptions.length === 0 : sessionId !== activeSessionId || !activeSessionRuntimeReady)
+    ) return;
     try {
       const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
       visibleModelRefs = visibleModelRefsFromPixConfig(document.content);
@@ -4293,14 +4461,20 @@
       // A missing/unreadable preference falls back to the full model catalog.
       visibleModelRefs = undefined;
     }
-    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || changingConfig) return;
-    modelThinkingPickerSessionId = sessionId;
+    if (
+      operationRunning
+      || changingConfig
+      || (draft ? !draftSessionTabActive : sessionId !== activeSessionId || !activeSessionRuntimeReady)
+    ) return;
+    modelThinkingPickerDraft = draft;
+    modelThinkingPickerSessionId = draft ? null : sessionId;
     modelThinkingPickerOpen = true;
   }
 
   function closeModelThinkingPicker(): void {
     modelThinkingPickerOpen = false;
     modelThinkingPickerSessionId = null;
+    modelThinkingPickerDraft = false;
   }
 
   async function saveVisibleModelRefs(modelRefs: readonly string[]): Promise<void> {
@@ -4355,6 +4529,19 @@
   }
 
   async function applyModelThinkingSelection(modelRef: string, thinkingLevel: string): Promise<void> {
+    if (modelThinkingPickerDraft) {
+      if (!draftSessionTabActive || operationRunning) {
+        throw new Error("Model and thinking settings are unavailable right now.");
+      }
+      draftConfigOptions = applyLocalModelThinkingSelection(draftConfigOptions, modelRef, thinkingLevel);
+      const state = modelThinkingConfigState(draftConfigOptions);
+      draftModelOverride = {
+        modelRef,
+        thinkingLevel: state.currentThinking,
+      };
+      return;
+    }
+
     const requestClient = client;
     const sessionId = modelThinkingPickerSessionId;
     if (!requestClient || !sessionId || configChangeInProgress(sessionId) || operationRunning) {
@@ -4715,14 +4902,32 @@
   async function setConfigValue(configId: string, value: string): Promise<void> {
     const requestClient = client;
     const sessionId = activeSessionId;
-    const option = configOptions.find((candidate) => candidate.id === configId);
-    if (!requestClient || !sessionId || !option) throw new Error(`/${configId === "model" ? "model" : "thinking"} is unavailable.`);
+    const optionsSource = draftSessionTabActive ? draftConfigOptions : configOptions;
+    const option = optionsSource.find((candidate) => candidate.id === configId);
+    if (!requestClient || !option) throw new Error(`/${configId === "model" ? "model" : "thinking"} is unavailable.`);
     const validValues = option.type === "select"
       ? option.options.flatMap((entry) => "options" in entry ? entry.options.map((item) => item.value) : [entry.value])
       : [];
     if (option.type !== "select" || !validValues.includes(value)) {
       throw new Error(`Unknown ${configId === "model" ? "model" : "thinking level"}: ${value}`);
     }
+
+    if (draftSessionTabActive) {
+      const state = modelThinkingConfigState(draftConfigOptions);
+      const modelRef = configId === "model" ? value : state.currentModel?.ref;
+      if (!modelRef) throw new Error("Model selection is unavailable.");
+      const selected = state.models.find((model) => model.ref === modelRef);
+      if (!selected) throw new Error(`Unknown model: ${modelRef}`);
+      const thinkingLevel = configId === "thought_level"
+        ? value
+        : clampThinkingLevel(state.currentThinking, selected.thinkingLevels);
+      draftConfigOptions = applyLocalModelThinkingSelection(draftConfigOptions, modelRef, thinkingLevel);
+      const next = modelThinkingConfigState(draftConfigOptions);
+      draftModelOverride = { modelRef, thinkingLevel: next.currentThinking };
+      return;
+    }
+
+    if (!sessionId) throw new Error(`/${configId === "model" ? "model" : "thinking"} is unavailable.`);
     const options = (await requestClient.setConfigOption(sessionId, option, value)).configOptions;
     configOptionsBySessionId.set(sessionId, options);
     if (requestClient === client && sessionId === activeSessionId) configOptions = options;
@@ -5201,19 +5406,14 @@
     <div class={["shrink-0", isMacOS ? "w-[76px]" : "w-3"]} data-tauri-drag-region></div>
 
     <div class="relative flex min-w-0 flex-1" data-tauri-drag-region>
-      <SessionTabs
-        sessions={titlebarSessions}
-        activeSessionId={activeConversationTabId}
-        {runningSessionIds}
-        activityBySessionId={sessionActivityBySessionId}
-        needsInputSessionIds={pendingElicitationSessionIds}
-        disabled={sessionMutationRunning}
-        canCreate={canUseSession}
+      <WorkbenchTabs
+        tabs={workbenchTabs}
+        activeId={activeWorkbenchTabId}
+        canCreateSession={canUseSession}
         newSessionShortcut={desktopCommandShortcutLabel("session.new", desktopShortcutPlatform)}
-        onTabClick={handleSessionTabClick}
-        canCloseTab={(sessionId) => sessionId !== DRAFT_SESSION_TAB_ID || tabSessions.length > 0}
-        onCloseTab={(sessionId) => closeSessionTab(sessionId)}
-        onCreate={() => void openSessionStartTab()}
+        onSelect={selectWorkbenchTab}
+        onClose={closeWorkbenchTab}
+        onCreateSession={() => void openSessionStartTab()}
       />
 
       {#if sessionSelectorOpen}
@@ -5295,28 +5495,15 @@
     />
 
     <div class="relative flex min-h-0 min-w-0 flex-1">
-      <div id="conversation-workspace" class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] bg-background">
-        {#if workspaceEditorTabs.length > 1}
-          <WorkspaceEditorTabs
-            tabs={workspaceEditorTabs}
-            activeId={activeWorkspaceEditor}
-            onSelect={selectWorkspaceEditor}
-            onClose={closeWorkspaceEditor}
-            onFallbackFocus={(id) => {
-              if (id === "conversation") void promptComposer?.focus();
-            }}
-          />
-        {/if}
-
-        <div class="relative row-start-2 grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-1 overflow-hidden">
-      <main
-        id="workspace-editor-panel-conversation"
+      <div class="relative grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden bg-background">
+      <div
+        id="conversation-workspace"
         class={[
           "col-start-1 row-start-1 min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-background",
-          activeWorkspaceEditor === "conversation" ? "grid" : "hidden",
+          activeWorkbenchTab?.kind === "session" ? "grid" : "hidden",
         ]}
-        role={workspaceEditorTabs.length > 1 ? "tabpanel" : undefined}
-        aria-labelledby={workspaceEditorTabs.length > 1 ? "workspace-editor-tab-conversation" : undefined}
+        role="tabpanel"
+        aria-labelledby={activeConversationWorkbenchTabId ? `workbench-tab-${activeConversationWorkbenchTabId}` : undefined}
       >
         {#if errorMessage}
           <ErrorBanner
@@ -5405,14 +5592,14 @@
           onOpenAttachment={(attachment) => void activateAttachment(attachment)}
           />
         </div>
-      </main>
+      </div>
 
           {#if activePreview}
             <div
-              id="workspace-editor-panel-preview"
-              class={activeWorkspaceEditor === "preview" ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
+              id="workbench-panel-preview"
+              class={activeWorkbenchTabId === "preview" ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
               role="tabpanel"
-              aria-labelledby="workspace-editor-tab-preview"
+              aria-labelledby="workbench-tab-preview"
             >
               <PreviewPane
                 bind:this={previewPane}
@@ -5448,10 +5635,10 @@
 
           {#if gitDiffPreview}
             <div
-              id="workspace-editor-panel-git-diff"
-              class={activeWorkspaceEditor === "git-diff" ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
+              id="workbench-panel-git-diff"
+              class={activeWorkbenchTabId === "git-diff" ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
               role="tabpanel"
-              aria-labelledby="workspace-editor-tab-git-diff"
+              aria-labelledby="workbench-tab-git-diff"
             >
               <GitDiffPane
                 diff={gitDiffPreview}
@@ -5469,7 +5656,6 @@
               />
             </div>
           {/if}
-        </div>
       </div>
 
       {#if sessionInspectorOpen}
@@ -5487,10 +5673,10 @@
 
   <StatusBar
     {status}
-    {configOptions}
+    configOptions={displayedConfigOptions}
     {changingConfig}
     {promptRunning}
-    canConfigure={canUseSession && activeSessionRuntimeReady && !sessionHistoryLoading}
+    canConfigure={canUseSession && !sessionHistoryLoading && (draftSessionTabActive ? draftConfigOptions.length > 0 : activeSessionRuntimeReady)}
     modelThinkingOpen={modelThinkingPickerOpen}
     runtimeStatus={activeRuntimeStatus}
     {modelUsageRefreshing}
@@ -5535,9 +5721,9 @@
 
 {#if modelThinkingPickerOpen}
   <ModelThinkingPicker
-    {configOptions}
+    configOptions={displayedConfigOptions}
     {visibleModelRefs}
-    disabled={!canUseSession || !activeSessionRuntimeReady || changingConfig !== null}
+    disabled={!canUseSession || changingConfig !== null || (draftSessionTabActive ? draftConfigOptions.length === 0 : !activeSessionRuntimeReady)}
     onApply={applyModelThinkingSelection}
     onVisibleModelsChange={saveVisibleModelRefs}
     onClose={closeModelThinkingPicker}
