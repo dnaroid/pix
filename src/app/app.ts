@@ -990,7 +990,7 @@ export class PiUiExtendApp {
 
 	private async refreshDraftModelCatalog(): Promise<void> {
 		try {
-			this.draftModels = await createPixDraftModelCatalog();
+			this.draftModels = await createPixDraftModelCatalog({ cwd: this.options.cwd });
 		} catch {
 			this.draftModels = [];
 		}

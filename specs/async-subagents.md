@@ -29,7 +29,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Spawn (`core/spawn.ts`)
 1. Each sub-agent is spawned via `node:child_process.spawn()` running the pi binary in RPC mode. `[confirmed by code, spawn.ts ~188]`
 2. **Pi invocation resolution** (`core/pi-invocation.ts`): detects how pi was launched (Bun virtual script, direct node script, or generic runtime). Direct pi entrypoint → `process.execPath + [currentScript, ...args]`; generic node/bun → `pi` from PATH; Windows → `process.execPath args`. `[confirmed by code]`
-3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, conditionally `--extension <antigravity-auth>`, `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, then `--extension <tool-guard>`. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
+3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, conditionally `--extension <antigravity-auth>`, `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
 6. **Environment**: child inherits parent env plus `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION=1`, `PI_TERMINAL_BELL_DISABLED=1`, and `PI_TOOLS_SUITE_DISABLED_MODULES` appended with `async-subagents,coding-discipline,question`. `[confirmed by code, spawn.ts ~230-240]`
@@ -57,10 +57,14 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    `PI_SUBAGENT_AGENT_DIR` plus launcher-owned `PI_UI_QA_RUNNER` and
    `PI_BROWSER_QA_RUNNER` paths, and gets private `ui-qa/flows/` plus
    browser-backend `browser-qa/flows/` workspaces.
-   The unified runner selects browser, PTY/TUI, or macOS Accessibility backends
-   from a declarative target and owns bounded execution/evidence cleanup.
+   The start prompt is a thin common contract: the child loads exactly one
+   backend guide (`browser`/`tui`/`desktop`, plus `browser --topic auth` only
+   when authentication is required) through the read-only allowlisted
+   `PI_UI_QA_RUNNER guide` command before any UI action. The unified runner
+   selects browser, PTY/TUI, or macOS Accessibility backends from a declarative
+   target and owns bounded execution/evidence cleanup.
    `[confirmed by code,
-   config.ts/routing.ts/spawn.ts]`
+   config.ts/routing.ts/spawn.ts/ui-qa-runner.mjs]`
 10. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
 11. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
 12. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`

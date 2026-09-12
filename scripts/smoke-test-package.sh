@@ -89,6 +89,11 @@ REQUIRED_FILES=(
 	"$PKG_ROOT/external/pi-tools-suite/src/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/package.json"
 	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/browser.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/browser-auth.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/tui.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/desktop.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs"
 	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs"
 	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/vendor/fflate.mjs"
 	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/vendor/fflate.LICENSE"
@@ -102,7 +107,13 @@ for required_file in "${REQUIRED_FILES[@]}"; do
 		exit 1
 	fi
 done
-pass "Renderer extensions, pi-tools-suite payload, and inline browser QA agent/resources are present"
+
+GUIDE_OUTPUT=$(node "$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs" guide --backend browser)
+if [[ "$GUIDE_OUTPUT" != "# Browser backend guide"$'\n'* ]] || [[ "$GUIDE_OUTPUT" == *"QA_AUTH_UPDATE_REQUIRED"* ]]; then
+	fail "Packaged UI-QA runner did not return the isolated browser guide"
+	exit 1
+fi
+pass "Renderer extensions, pi-tools-suite payload, and progressive UI-QA guides are present and runnable"
 
 banner "Step 5/5: Running non-interactive Pix commands..."
 ERRORS=0

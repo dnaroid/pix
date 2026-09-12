@@ -377,13 +377,40 @@ export async function refreshPixModelRuntimeForStartup(
  * AgentSession or session file. Drafts can therefore expose model selection
  * while preserving lazy session materialization until the first prompt.
  */
-export async function createPixDraftModelCatalog(): Promise<SessionModel[]> {
+export async function createPixDraftModelCatalog(options: { cwd: string; agentDir?: string }): Promise<SessionModel[]> {
+	const agentDir = options.agentDir ?? getAgentDir();
+	await ensurePiToolsSuiteExtensionInstalledOnce({ agentDir });
+	const bundledExtensionPaths = await getBundledExtensionPathsAsync();
 	const modelRuntime = await ModelRuntime.create({
+		authPath: join(agentDir, "auth.json"),
+		modelsPath: join(agentDir, "models.json"),
 		allowModelNetwork: false,
 		refreshOnCreate: false,
 	});
-	await refreshPixModelRuntimeForStartup(modelRuntime);
-	return [...modelRuntime.getAvailableSnapshot()] as SessionModel[];
+	const services = await createAgentSessionServices({
+		cwd: options.cwd,
+		agentDir,
+		modelRuntime,
+		resourceLoaderOptions: {
+			noContextFiles: true,
+			noSkills: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			...(bundledExtensionPaths.length === 0 ? {} : {
+				additionalExtensionPaths: bundledExtensionPaths,
+				extensionsOverride: prioritizeBundledQuestionExtension,
+			}),
+		},
+	});
+
+	try {
+		return [...services.modelRuntime.getAvailableSnapshot()] as SessionModel[];
+	} finally {
+		// Draft discovery needs extension provider registrations, but it does not
+		// own a session. Invalidate the temporary extension runtime so event-bus
+		// subscriptions and captured ctx/pi handles cannot outlive discovery.
+		services.resourceLoader.getExtensions().runtime.invalidate("Draft model catalog discovery completed");
+	}
 }
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {

@@ -30,7 +30,7 @@ Make choosing the model and reasoning effort one staged TUI interaction, includi
 ## Behavior
 
 - `/model` and `/thinking` without an argument expose the same combined `Select model & thinking` popup. The model and thinking status-line targets open that same popup.
-- On a real session the popup starts from `ModelRuntime.getAvailableSnapshot()` even when the session has an explicit `enabledModels` scope. On a UI-only draft Pix builds the same locally available model catalogue without allocating an `AgentSession`. Both paths then apply the separate Pix `visibleModels` whitelist used by TUI and Desktop.
+- On a real session the popup starts from `ModelRuntime.getAvailableSnapshot()` even when the session has an explicit `enabledModels` scope. On a UI-only draft Pix builds the same locally available model catalogue, including providers registered by extensions, without allocating an `AgentSession`; the temporary extension runtime used for provider discovery is invalidated immediately afterward. Both paths then apply the separate Pix `visibleModels` whitelist used by TUI and Desktop.
 - The popup reuses the model selector's fuzzy search contract: current model first, then stable provider/model ordering, with matching across model ref, model id, model name, and provider.
 - `Up`/`Down` move the staged model selection. Selecting a model does not mutate the session.
 - A separate `Thinking  ← level →` row reflects the staged thinking level for the selected model. `Left`/`Right` cycle only through levels supported by that model.
@@ -72,4 +72,5 @@ Make choosing the model and reasoning effort one staged TUI interaction, includi
 - Input tests cover routing left/right to staged thinking before editor cursor movement.
 - Model action tests cover applying thinking before a changed-model reload and avoiding reload for a thinking-only change.
 - Draft menu/action/status tests cover listing and staging model/thinking values without a runtime and exposing model/thinking click targets before the first prompt.
+- Runtime tests cover extension-registered provider models in the UI-only draft catalogue.
 - Root TypeScript checks and the full Pix test suite must pass.

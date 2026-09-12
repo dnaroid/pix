@@ -11,6 +11,7 @@ import {
 	bundledSessionTitleExtensionPath,
 	bundledTelegramConnectorExtensionPath,
 	bundledTerminalBellExtensionPath,
+	createPixDraftModelCatalog,
 	ensureBundledSkillsInstalled,
 	ensurePiToolsSuiteExtensionInstalled,
 	getBundledExtensionPaths,
@@ -127,6 +128,39 @@ describe("runtime installation helpers", () => {
 		});
 
 		assert.deepEqual(refreshCalls, [{ allowNetwork: false }]);
+	});
+
+	it("includes models registered by extensions in the draft catalog", async () => {
+		const root = await mkdtemp(join(tmpdir(), "pix-draft-models-"));
+		const agentDir = join(root, "agent");
+		const extensionDir = join(agentDir, "extensions", "draft-provider");
+		try {
+			await mkdir(extensionDir, { recursive: true });
+			await writeFile(join(extensionDir, "index.ts"), `
+export default function draftProvider(pi) {
+	pi.registerProvider("draft-provider", {
+		baseUrl: "https://example.invalid",
+		apiKey: "test-key",
+		api: "openai-completions",
+		models: [{
+			id: "draft-model",
+			name: "Draft model",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1024,
+			maxTokens: 256,
+		}],
+	});
+}
+`, "utf8");
+
+			const models = await createPixDraftModelCatalog({ cwd: root, agentDir });
+
+			assert.ok(models.some((model) => model.provider === "draft-provider" && model.id === "draft-model"));
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
 	});
 });
 

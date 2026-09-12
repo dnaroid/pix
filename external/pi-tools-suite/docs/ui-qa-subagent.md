@@ -22,22 +22,41 @@ confirmed runtime image support.
 
 ## Inline agent workflow and skill isolation
 
-- All operating instructions, backend-selection rules, browser flow contracts,
-  native/TUI guidance, and auth-scaffolding rules live in
-  `src/async-subagents/agents/ui-qa.md`.
-  Its body becomes the QA child's `promptAppend` through the shared agent
-  loader. Parent and router catalogs include only its short `description`.
+- The bundled role is a thin common contract: `src/async-subagents/agents/ui-qa.md`
+  keeps only the shared invariants (real target, backend classification,
+  `BLOCKED` semantics, deterministic-assertion oracle, bounded execution, owned
+  cleanup, private evidence, credential opacity) plus the guide-routing and
+  probe/run invocation syntax. Its body becomes the QA child's `promptAppend`
+  through the shared agent loader. Parent and router catalogs include only its
+  short `description`.
+- Backend-specific instructions live in the canonical resource tree under
+  `src/async-subagents/agents/ui-qa/guides/`: `browser.md`, `tui.md`,
+  `desktop.md`, and the explicit `browser-auth.md` companion. The child loads
+  exactly the matching guide before any UI action through the read-only runner
+  command `node "$PI_UI_QA_RUNNER" guide --backend browser|tui|desktop`
+  (plus `--topic auth` for browser authentication). The command resolves its
+  bundled files from a fixed allowlist, rejects unknown backends/topics,
+  unknown options, extra arguments, and traversal, bounds guide size, and
+  prints only the requested document; the model never composes or reads the
+  source path itself. Browser runs do not receive TUI/desktop text and vice
+  versa, and the auth guide is loaded only when authentication is actually
+  required.
 - The capability-first runner lives under
   `src/async-subagents/agents/ui-qa/`, with browser, PTY/TUI, and macOS
   accessibility backends. The trusted browser runner, vendor
   dependencies/licenses, and optional legacy JSONC examples are colocated
-  under `agents/ui-qa/browser/`; none is a discoverable skill.
+  under `agents/ui-qa/browser/`; none of these assets, including the guides,
+  is a discoverable skill or agent role (`agents/*.md` discovery stays
+  non-recursive and top-level only).
 - Sub-agent processes disable normal extension discovery, then always load the
   suite's model-tools extension. They load the Antigravity provider extension
-  only when an Antigravity model is explicitly selected.
+  only when an Antigravity model is explicitly selected. The launcher appends
+  `--models <effective-model>` after forwarded arguments so persisted model
+  patterns cannot resolve unrelated providers inside the isolated child.
 - Every async sub-agent launches with `--no-skills`. `--skill` and
   `--skill=...` flags are removed from `extraArgs`, and role profiles have no
-  skill-loading field. Agent Markdown is the complete role instruction source.
+  skill-loading field. The thin agent Markdown plus its on-demand bundled
+  guides are the complete role instruction source.
 - Explicit legacy `browser-qa` tasks normalize to `ui-qa`; a project-local
   `browser-qa.md` profile override is migrated onto the canonical `ui-qa`
   profile during config loading. Installed browser resources are part of the
@@ -50,7 +69,9 @@ confirmed runtime image support.
   profile discovery or form-auth scaffolding.
 - Model-only profile overrides inherit the workflow. An explicit profile
   `promptAppend` replaces the body like any other agent profile; it is not an
-  immutable security boundary. Runtime protections remain in the runner.
+  immutable security boundary. Runtime protections remain in the runner, and
+  the thin prompt's guide-routing requirement does not weaken them: every
+  backend action still goes through the runner's fail-closed checks.
 
 ## Browser authentication contract
 
@@ -125,7 +146,8 @@ confirmed runtime image support.
 - One private JSONC flow under the owning agent's `ui-qa/flows/` declares
   exactly one browser URL, TUI command, or desktop application target. `probe`
   reports deterministic candidate capabilities and selects the matching backend;
-  `run` executes that same bounded flow.
+  `run` executes that same bounded flow. The child keeps the flow at mode `0600`
+  on POSIX before either command, matching the runner's private-path checks.
 - Browser execution adapts the unified target and steps to the existing trusted
   browser runner, preserving its auth, origin, evidence, and cleanup boundary.
 - TUI execution launches only a bounded project-local/package-runtime contract
@@ -213,6 +235,7 @@ confirmed runtime image support.
 ## Related files
 
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
@@ -233,9 +256,11 @@ confirmed runtime image support.
    isolated child process can register the configured
    model provider.
 2. Every child spawn contains `--no-skills` but no `--skill`. The QA child
-   receives the full workflow in its initial prompt and can invoke the unified
-   runner through `PI_UI_QA_RUNNER`, plus the credential-owning browser backend
-   through `PI_BROWSER_QA_RUNNER`, from an unrelated project directory.
+   receives the thin common contract plus guide-routing workflow in its initial
+   prompt, loads exactly one backend guide (plus the auth guide only when
+   authentication is required) through `PI_UI_QA_RUNNER guide`, can invoke the
+   unified runner probe/run, and can reach the credential-owning browser
+   backend through `PI_BROWSER_QA_RUNNER`, from an unrelated project directory.
    Ordinary profiles are equally skill-free and do not receive QA-only
    environment paths.
 3. Auth profile listing and all error output are redacted; model-authored input

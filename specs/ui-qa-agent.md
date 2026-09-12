@@ -18,10 +18,22 @@ runner's credential and evidence protections.
 ## Definition and resources
 
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md` holds the model,
-  fallback, thinking, tools, and timeout frontmatter plus backend selection,
-  native/TUI guidance, the browser flow contract, auth-scaffold guidance, and
-  detailed browser scenario-design instructions.
-- The shared loader turns the body into `promptAppend`; only the short
+  fallback, thinking, tools, and timeout frontmatter plus a thin common
+  contract: real-target and `BLOCKED` invariants, deterministic-assertion
+  oracle, bounded execution, owned cleanup, private evidence with clickable
+  artifact links, credential opacity for `.pi/qa_auth.jsonc`, and the minimal
+  guide/probe/run invocation syntax.
+- Backend-specific instructions are progressive-disclosure guides under
+  `external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/`
+  (`browser.md`, `tui.md`, `desktop.md`, plus `browser-auth.md`). The child
+  must load exactly the one matching guide before any UI action through the
+  read-only runner command `node "$PI_UI_QA_RUNNER" guide --backend
+  browser|tui|desktop`; `--topic auth` is available only for browser and only
+  when authentication is actually required. The command selects files from a
+  fixed bundled allowlist (no model-composed paths or traversal), rejects
+  unknown backends/topics/options and extra arguments, bounds guide size, and
+  prints only the requested document. Guides are not discoverable agent roles.
+- The shared loader turns the thin body into `promptAppend`; only the short
   `description` reaches parent/router catalogs. No QA-specific prompt injection
   or extra skill read is required.
 - The capability-first runner and its browser/TUI/desktop backends live under
@@ -38,7 +50,10 @@ runner's credential and evidence protections.
 All async sub-agent children are self-contained: `spawnAgent` always forces
 `--no-skills` and strips `--skill` / `--skill=...` flags from forwarded CLI
 arguments. `isolatedSkills` is no longer a supported profile field, so UI QA has
-no special skill-loading path and cannot receive optional injected skills.
+no special skill-loading path and cannot receive optional injected skills. The
+launcher also appends `--models <effective-model>` after forwarded arguments,
+preventing persisted model patterns from resolving unrelated providers in the
+isolated child.
 
 Explicit legacy `browser-qa` task names normalize to `ui-qa`. A project-local
 `browser-qa.md` override is migrated to the canonical role when no `ui-qa.md`
@@ -47,12 +62,15 @@ rename.
 
 The launcher sets non-secret `PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER` paths
 resolved relative to the installed package. QA instructions invoke the unified
-runner for capability probe and browser/TUI/desktop execution; they invoke the
-trusted browser runner directly only for auth profile discovery/scaffolding.
+runner for the read-only `guide` loader, capability probe, and browser/TUI/desktop
+execution; they invoke the trusted browser runner directly only for auth profile
+discovery/scaffolding as the browser-auth guide instructs.
 Inherited runner/workspace paths are replaced for QA children and stripped from
 other children. Unified flows plus native/TUI evidence use the private
 agent-local `ui-qa/` workspace; the trusted browser backend retains its
 historical `browser-qa/` workspace.
+Model-authored flows are credential-free but still use mode `0600` on POSIX so
+the existing runner path/privacy validation succeeds without weakening it.
 
 The unified runner selects exactly one backend from the flow target, reports
 candidate capabilities and rationale, and normalizes assertions, observations,
@@ -90,6 +108,7 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 ## Related files
 
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/`
@@ -105,16 +124,21 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 
 ## Verification
 
-Core regression tests cover body inheritance, the legacy name migration, short
-parent catalogs, prompt delivery over child RPC without skills, global child
-skill isolation and skill-flag stripping, ordinary-child env cleanup, both
-UI-QA workspaces, and invoking both installed runner paths from a temporary
-project with spaces.
-Unified runner tests cover backend selection, real PTY behavior and bounded
-asciicast evidence, unsafe launch and path rejection, timeout bounds, platform
-blockers, and an opt-in real macOS AppKit accessibility flow with automatic
-exact-window video. Browser runner tests continue covering the trusted
-credential-owning backend.
+Core regression tests cover the thin body size and router contract, absence of
+backend-specific sections from the start prompt, presence of every guide file
+in the package/sync payload without new discoverable roles, body inheritance,
+the legacy name migration, short parent catalogs, prompt delivery over child
+RPC without skills, global child skill isolation and skill-flag stripping,
+ordinary-child env cleanup, both UI-QA workspaces, and invoking both installed
+runner paths from a temporary project with spaces.
+Unified runner tests cover backend selection, the read-only allowlisted
+`guide` command (exact document output, explicit-only auth topic, strict
+rejection of unknown backends/topics/options/extra args/traversal, and
+operation from arbitrary cwd including paths with spaces), real PTY behavior
+and bounded asciicast evidence, unsafe launch and path rejection, timeout
+bounds, platform blockers, and an opt-in real macOS AppKit accessibility flow
+with automatic exact-window video. Browser runner tests continue covering the
+trusted credential-owning backend.
 
 Live QA/model behavior must be verified separately from deterministic tests;
-moving instructions into the initial prompt changes their presentation.
+loading instructions through a second `guide` step changes their presentation.

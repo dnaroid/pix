@@ -78,6 +78,102 @@ function readAsciicast(file: string) {
 	return { header: JSON.parse(lines[0]), events: lines.slice(1).map((line) => JSON.parse(line)) };
 }
 
+/** Invoke `guide` from an arbitrary cwd without launcher-provided env. */
+function invokeGuide(args: string[], cwd = os.tmpdir()) {
+	const result = spawnSync(nodeExecutable, [runner, "guide", ...args], {
+		cwd,
+		encoding: "utf8",
+		timeout: 15_000,
+		maxBuffer: 2 * 1024 * 1024,
+		env: { ...process.env, PI_SUBAGENT_AGENT_DIR: "" },
+	});
+	return result;
+}
+
+function guidePath(name: string) {
+	return path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/guides", name);
+}
+
+describe("ui-qa guide routing", () => {
+	test("prints only the requested backend guide from the fixed allowlist", () => {
+		const spaced = fs.mkdtempSync(path.join(os.tmpdir(), "ui-qa-guide-"));
+		tempDirs.push(spaced);
+		const spacedCwd = path.join(spaced, "cwd with spaces");
+		fs.mkdirSync(spacedCwd, { recursive: true });
+		for (const [backend, file] of [
+			["browser", "browser.md"],
+			["tui", "tui.md"],
+			["desktop", "desktop.md"],
+		] as const) {
+			const result = invokeGuide(["--backend", backend], spacedCwd);
+			expect(result.status).toBe(0);
+			expect(result.stderr).toBe("");
+			expect(result.stdout).toBe(fs.readFileSync(guidePath(file), "utf8"));
+		}
+	});
+
+	test("serves the browser auth guide only through the explicit auth topic", () => {
+		const authGuide = fs.readFileSync(guidePath("browser-auth.md"), "utf8");
+		const browserGuide = invokeGuide(["--backend", "browser"], process.cwd());
+		expect(browserGuide.status).toBe(0);
+		expect(browserGuide.stdout).toBe(fs.readFileSync(guidePath("browser.md"), "utf8"));
+		// Backend isolation: the plain browser guide points to the auth guide but
+		// must not embed the scaffold/update workflow, and browser runs get no
+		// TUI/desktop instructions.
+		expect(browserGuide.stdout).not.toContain("QA_AUTH_UPDATE_REQUIRED");
+		expect(browserGuide.stdout).not.toContain("--success-selector");
+		expect(browserGuide.stdout).not.toContain("snapshotAccessibility");
+		expect(browserGuide.stdout).not.toContain("waitForStable");
+		const auth = invokeGuide(["--backend", "browser", "--topic", "auth"]);
+		expect(auth.status).toBe(0);
+		expect(auth.stdout).toBe(authGuide);
+		expect(auth.stdout).toContain("auth scaffold");
+		// TUI and desktop runs never receive browser/auth instructions.
+		expect(invokeGuide(["--backend", "tui"]).stdout).not.toContain("Playwright");
+		expect(invokeGuide(["--backend", "desktop"]).stdout).not.toContain("Playwright");
+		expect(invokeGuide(["--backend", "tui"]).stdout).not.toContain("qa_auth.jsonc");
+	});
+
+	test("rejects unknown backends, topics, options, and extra arguments", () => {
+		const rejections: Array<[string[], RegExp]> = [
+			[["--backend", "web"], /unknown guide backend/],
+			[["--backend", "../ui-qa/guides/browser"], /unknown guide backend/],
+			[["--backend", "browser", "--topic", "locators"], /unknown guide topic/],
+			[["--backend", "browser", "--topic", "../../../etc/passwd"], /unknown guide topic/],
+			[["--backend", "tui", "--topic", "auth"], /only for --backend browser/],
+			[["--backend"], /invalid guide argument/],
+			[["--backend", "browser", "--flow", "x.jsonc"], /unknown guide option/],
+			[["--backend", "browser", "extra"], /invalid guide argument/],
+			[["positional"], /invalid guide argument/],
+			[[], /--backend is required/],
+		];
+		for (const [args, expected] of rejections) {
+			const result = invokeGuide(args);
+			expect(result.status).toBe(1);
+			expect(result.stdout).not.toContain("# ");
+			expect(JSON.parse(result.stdout.trim().split("\n").pop()!).reason).toMatch(expected);
+		}
+	});
+
+	test("runs from an arbitrary project cwd including paths with spaces", () => {
+		const project = fs.mkdtempSync(path.join(os.tmpdir(), "ui-qa-guide-"));
+		tempDirs.push(project);
+		const spaced = path.join(project, "space dir name");
+		fs.mkdirSync(spaced, { recursive: true });
+		for (const cwd of [project, spaced, "/tmp"]) {
+			const result = invokeGuide(["--backend", "desktop"], cwd);
+			expect(result.status).toBe(0);
+			expect(result.stdout).toBe(fs.readFileSync(guidePath("desktop.md"), "utf8"));
+		}
+	});
+
+	test("keeps every bundled guide within the bounded guide size", () => {
+		for (const file of ["browser.md", "browser-auth.md", "tui.md", "desktop.md"]) {
+			expect(fs.statSync(guidePath(file)).size).toBeLessThanOrEqual(256 * 1024);
+		}
+	});
+});
+
 describe("capability-first UI QA runner", () => {
 	test("selects the browser backend for a URL without launching Playwright", () => {
 		const { project, agentDir, uiWorkspace } = createProject();

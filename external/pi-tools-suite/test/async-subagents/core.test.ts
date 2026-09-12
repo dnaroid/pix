@@ -496,18 +496,30 @@ describe.serial("subagent type config", () => {
 		expect(instructions).not.toContain("playwright-cli");
 		expect(instructions).not.toMatch(/SKILL\.md|references\//);
 		expect(instructions).toMatch(/user-visible acceptance contract, not an execution\s+plan/);
-		expect(instructions).toContain("## Unified runner workflow");
-		expect(instructions).toContain("## Terminal/TUI and native desktop flow contract");
+		// The bundled role is a thin common contract plus a deterministic
+		// guide-routing workflow; backend specifics load via `guide` at runtime.
+		expect(instructions.length).toBeLessThan(8_000);
 		expect(instructions).toContain("PI_UI_QA_RUNNER");
-		expect(instructions).toContain("pseudo-terminal");
-		expect(instructions).toContain("safe deterministic control path");
+		expect(instructions).toContain('guide --backend browser');
+		expect(instructions).toContain('guide --backend tui');
+		expect(instructions).toContain('guide --backend desktop');
+		expect(instructions).toContain('guide --backend browser --topic auth');
+		expect(instructions).toContain("probe --flow");
+		expect(instructions).toContain("run --flow");
 		expect(instructions).toContain("$PI_SUBAGENT_AGENT_DIR/ui-qa/");
+		expect(instructions).toContain("chmod 600");
+		expect(instructions).toMatch(/no\s+safe deterministic control\s+path/);
 		expect(instructions).toContain("return `BLOCKED`");
-		expect(instructions).toMatch(/Never switch to\s+a mock\/synthetic app/);
-		expect(instructions).toMatch(/report the concrete blocker instead of switching to a\s+mock target/);
-		for (const section of ["## Flow contract", "### Form-auth scaffolding", "### Scaffold safety and edge cases", "### Choose resilient locators", "### Diagnose failures without weakening the test", "visualInspection", "PI_BROWSER_QA_RUNNER"]) {
-			expect(instructions).toContain(section);
+		expect(instructions).toContain(".pi/qa_auth.jsonc");
+		expect(instructions).toMatch(/If\s+—\s+and only if\s+—\s+a browser task actually requires authentication/);
+		// Backend-specific guidance must live only in the backend guides.
+		for (const section of ["## Flow contract", "### Form-auth scaffolding", "### Scaffold safety and edge cases", "### Choose resilient locators", "### Diagnose failures without weakening the test", "## Detailed scenario-design guidance", "expectResponse", "snapshotAccessibility", "waitForStable", "asciicast", "pseudo-terminal"]) {
+			expect(instructions).not.toContain(section);
 		}
+		// The base prompt must not embed the browser action vocabulary or the
+		// auth scaffold command; those belong to browser/browser-auth guides.
+		expect(instructions).not.toContain("assertDOMMetric");
+		expect(instructions).not.toContain("auth scaffold");
 		expect(generatePrompt(resolved.task)).toContain(instructions);
 		expect(generatePrompt(resolved.task)).toContain("verify the browser bug");
 		const parentCatalog = buildSubagentCatalogPrompt(config)!;
@@ -539,6 +551,28 @@ describe.serial("subagent type config", () => {
 		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 	});
 
+	test.serial("ships the ui-qa progressive-disclosure guides in the package/sync payload without new roles", () => {
+		const definitionsDir = getBuiltinSubagentDefinitionsDir();
+		const guidesDir = path.join(definitionsDir, "ui-qa", "guides");
+		const guides = ["browser.md", "browser-auth.md", "tui.md", "desktop.md"];
+		for (const guide of guides) {
+			const file = path.join(guidesDir, guide);
+			expect(fs.existsSync(file)).toBe(true);
+			// The guide tree must stay inside the suite source: the host sync
+			// mirrors `src/` and the package `files` list publishes it.
+			expect(file).toContain(path.join("src", "async-subagents", "agents", "ui-qa", "guides"));
+			expect(fs.statSync(file).size).toBeGreaterThan(0);
+			expect(fs.statSync(file).size).toBeLessThanOrEqual(256 * 1024);
+		}
+		const packageManifest = JSON.parse(fs.readFileSync(path.resolve(definitionsDir, "..", "..", "..", "package.json"), "utf8"));
+		expect(packageManifest.files).toContain("src");
+		// Guides are non-role assets: agent discovery stays top-level *.md only.
+		const definitions = readAgentDefinitionsFromDir(definitionsDir);
+		expect(Object.keys(definitions).sort()).not.toContain("browser");
+		expect(Object.keys(definitions).sort()).not.toContain("tui");
+		expect(Object.keys(definitions).sort()).not.toContain("desktop");
+	});
+
 	test.serial("inherits QA instructions with model overrides", () => {
 		const cwd = tempDir();
 		writeFile(path.join(cwd, ".pi", "agents", "browser-qa.md"), `---
@@ -554,7 +588,7 @@ model: custom/qa
 		expect(resolved.task.subagentType).toBe("ui-qa");
 		expect(resolved.task.model).toBe("custom/qa");
 		expect(generatePrompt(resolved.task)).toStartWith("Custom brief: verify the browser bug");
-		expect(generatePrompt(resolved.task)).toContain("## Flow contract");
+		expect(generatePrompt(resolved.task)).toContain("guide --backend browser");
 		expect(generatePrompt(resolved.task)).toContain("Check the mobile layout too.");
 	});
 
@@ -1389,8 +1423,13 @@ setTimeout(() => {}, 2000);
 				expect(args).toContain("high");
 				if (qa) {
 					expect(payload.message).toContain('node "$PI_UI_QA_RUNNER"');
-					expect(payload.message).toContain('node "$PI_BROWSER_QA_RUNNER"');
-					expect(payload.message).toContain("## Detailed scenario-design guidance");
+					expect(payload.message).toContain("guide --backend browser");
+					// The thin prompt routes via the unified runner; the browser
+					// backend env is present but its direct invocation lives in
+					// the auth guide, not the base prompt.
+					expect(payload.message).toContain("PI_BROWSER_QA_RUNNER");
+					expect(payload.message).not.toContain('node "$PI_BROWSER_QA_RUNNER"');
+					expect(payload.message).not.toContain("## Detailed scenario-design guidance");
 					 expect(payload.runner).toBe(getBrowserQaRunnerPath());
 					expect(payload.uiRunner).toBe(getUiQaRunnerPath());
 					expect(payload.agentDir).toBe(fs.realpathSync(path.join(runDir, id)));
@@ -1491,6 +1530,7 @@ setTimeout(() => {}, 1000);
 		// Environment fallback models do not opt provider extensions back in.
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).not.toContain(path.join("antigravity-auth", "index.ts"));
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--model\nzai/glm-5-turbo");
+		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--models\nzai/glm-5-turbo");
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--tools\nRead,Grep");
 		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("done result");
 		expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("0");
@@ -1539,6 +1579,7 @@ setTimeout(() => {}, 1000);
 			model: "antigravity/gemini-explicit",
 		});
 		expect(taskModelArgs).toContain(path.join("antigravity-auth", "index.ts"));
+		expect(taskModelArgs).toContain("--models\nantigravity/gemini-explicit");
 
 		const cliModelArgs = await spawnAndReadArgs(
 			"cli-model",
@@ -1553,6 +1594,18 @@ setTimeout(() => {}, 1000);
 			["--model", "zai/glm-5-turbo"],
 		);
 		expect(overriddenArgs).not.toContain(path.join("antigravity-auth", "index.ts"));
+		expect(overriddenArgs.trim().split("\n").slice(-4, -2)).toEqual(["--models", "zai/glm-5-turbo"]);
+
+		const overriddenScopeArgs = await spawnAndReadArgs(
+			"overridden-scope",
+			{ id: "overridden-scope", task: "Do work", model: "zai/glm-5-turbo" },
+			["--models", "antigravity/*"],
+		);
+		const overriddenScopeArgv = overriddenScopeArgs.trim().split("\n");
+		expect(overriddenScopeArgv.slice(overriddenScopeArgv.lastIndexOf("--models"), overriddenScopeArgv.lastIndexOf("--models") + 2)).toEqual([
+			"--models",
+			"zai/glm-5-turbo",
+		]);
 	});
 
 	test.serial("notifies completion when the pi process cannot be spawned", async () => {

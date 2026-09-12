@@ -10,6 +10,17 @@ import { probeTuiBackend, runTuiBackend } from "../backends/tui.mjs";
 
 const AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const WORKSPACE_RELATIVE = "ui-qa";
+// Guides are a fixed allowlist of bundled documents, never model-provided
+// paths. `guide` is read-only: it touches only these files and requires no
+// agent workspace, so it stays usable from any cwd.
+const GUIDES_DIR_RELATIVE_URL = "../guides/";
+const GUIDE_FILES = {
+	browser: "browser.md",
+	tui: "tui.md",
+	desktop: "desktop.md",
+};
+const GUIDE_AUTH_FILE = "browser-auth.md";
+const MAX_GUIDE_BYTES = 256 * 1024;
 const FLOW_RELATIVE = "flows";
 const EVIDENCE_RELATIVE = "evidence";
 // Preserve the trusted browser runner's bounded in-memory upload contract.
@@ -52,9 +63,10 @@ main().catch((error) => {
 
 async function main() {
 	const [command = "probe", ...rawArgs] = process.argv.slice(2);
-	if (command !== "probe" && command !== "run") {
+	if (command !== "guide" && command !== "probe" && command !== "run") {
 		throw new UiQaError("FAILED", `unknown command: ${command}`);
 	}
+	if (command === "guide") return runGuideCommand(rawArgs);
 	const args = parseArgs(rawArgs, command);
 	const projectRoot = fs.realpathSync(process.cwd());
 	const agentDir = resolveAgentDirectory(projectRoot, process.env[AGENT_DIR_ENV]);
@@ -142,6 +154,51 @@ async function main() {
 		clearTimeout(hardTimer);
 		progress("runner_finished");
 	}
+}
+
+/**
+ * Read-only progressive-disclosure loader. Prints exactly one allowlisted
+ * bundled guide to stdout; anything else (unknown backend/topic/option, extra
+ * or positional arguments, traversal) fails closed. Deliberately independent
+ * of PI_SUBAGENT_AGENT_DIR and the project cwd.
+ */
+function runGuideCommand(rawArgs) {
+	const options = parseGuideArgs(rawArgs);
+	const fileName = options.topic === "auth" ? GUIDE_AUTH_FILE : GUIDE_FILES[options.backend];
+	const guidesDir = fileURLToPath(new URL(GUIDES_DIR_RELATIVE_URL, import.meta.url));
+	const guidePath = path.join(guidesDir, fileName);
+	// The allowlisted name cannot traverse, but keep the containment, symlink,
+	// regular-file, and bounded-size checks for defense in depth.
+	assertInside(guidesDir, guidePath, "UI QA guide");
+	assertNoSymlinkComponents(guidesDir, guidePath, "UI QA guide");
+	const stat = fs.statSync(guidePath);
+	if (!stat.isFile()) throw new UiQaError("FAILED", "UI QA guide must be a regular file");
+	if (stat.size > MAX_GUIDE_BYTES) {
+		throw new UiQaError("FAILED", `UI QA guide must be no larger than ${MAX_GUIDE_BYTES} bytes`);
+	}
+	process.stdout.write(fs.readFileSync(guidePath, "utf8"));
+}
+
+function parseGuideArgs(values) {
+	const options = {};
+	for (let index = 0; index < values.length; index += 2) {
+		const flag = values[index];
+		const value = values[index + 1];
+		if (!flag?.startsWith("--") || value === undefined) throw new UiQaError("FAILED", `invalid guide argument: ${flag ?? "(missing)"}`);
+		const key = flag.slice(2);
+		if (key !== "backend" && key !== "topic") throw new UiQaError("FAILED", `unknown guide option: ${flag}`);
+		if (options[key] !== undefined) throw new UiQaError("FAILED", `duplicate guide option: ${flag}`);
+		options[key] = value;
+	}
+	if (!options.backend) throw new UiQaError("FAILED", "--backend is required for guide");
+	if (!Object.hasOwn(GUIDE_FILES, options.backend)) {
+		throw new UiQaError("FAILED", `unknown guide backend: ${options.backend}`);
+	}
+	if (options.topic !== undefined) {
+		if (options.topic !== "auth") throw new UiQaError("FAILED", `unknown guide topic: ${options.topic}`);
+		if (options.backend !== "browser") throw new UiQaError("FAILED", "--topic auth is available only for --backend browser");
+	}
+	return options;
 }
 
 async function selectBackend(context) {

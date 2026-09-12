@@ -587,11 +587,29 @@ AGENTS.md before approving anything; cite file paths first.
 ### Real UI QA (browser, TUI, and desktop GUI)
 
 The built-in `ui-qa` role runs on `zai/glm-5.3-flash`, with
-`openai-codex/gpt-5.6-luna` as its fallback. Its complete workflow and detailed
-scenario-design guidance live in the Markdown body of
-`src/async-subagents/agents/ui-qa.md`. The normal profile loader appends
-that body to the QA child's task prompt; the parent and LLM router receive only
-the short `description`. There is no additional QA skill to discover or read.
+`openai-codex/gpt-5.6-luna` as its fallback. Its Markdown body
+(`src/async-subagents/agents/ui-qa.md`) is a deliberately thin common contract:
+test the real user-facing target, classify the backend, load exactly one
+backend guide, run through the unified runner, and keep deterministic
+assertions as the oracle with bounded execution, owned cleanup, and private
+evidence. The normal profile loader appends that body to the QA child's task
+prompt; the parent and LLM router receive only the short `description`. There
+is no additional QA skill to discover or read.
+
+Backend specifics use progressive disclosure through bundled guides under
+`src/async-subagents/agents/ui-qa/guides/` (`browser.md`, `tui.md`,
+`desktop.md`, plus the explicit `browser-auth.md`). Before any UI action the
+child loads exactly the matching guide read-only via the runner:
+
+```sh
+node "$PI_UI_QA_RUNNER" guide --backend browser   # or: tui | desktop
+node "$PI_UI_QA_RUNNER" guide --backend browser --topic auth   # only when auth is actually required
+```
+
+The command resolves the guide from a fixed allowlist bundled with the suite
+(never a model-composed path), rejects unknown backends/topics/options and
+extra arguments, bounds guide size, and prints only the requested document, so
+browser runs never receive TUI/desktop instructions and vice versa.
 
 `ui-qa` authors one private declarative flow and invokes the capability-first
 runner supplied in `PI_UI_QA_RUNNER`. The runner selects exactly one backend

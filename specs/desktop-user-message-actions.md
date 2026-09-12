@@ -61,6 +61,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 ## Related files
 
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/lib/desktop-commands.ts`
 - `desktop/src/App.svelte`
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/lib/transcript.ts`

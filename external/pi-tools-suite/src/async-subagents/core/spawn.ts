@@ -99,13 +99,15 @@ export function spawnAgent(
 	piArgs.push("--extension", getModelToolsExtensionPath());
 	// Preserve `--no-extensions` unless this invocation explicitly selects an
 	// Antigravity model. Environment/default models do not opt the provider in.
-	if (usesAntigravityModel(task.model, forwardedExtraArgs)) {
+	const configuredModel = task.model || getEnvModel();
+	const selectedModel = resolveSelectedModel(configuredModel, forwardedExtraArgs);
+	const explicitModel = resolveSelectedModel(task.model, forwardedExtraArgs);
+	if (explicitModel?.startsWith("antigravity/") && explicitModel.length > "antigravity/".length) {
 		piArgs.push("--extension", getAntigravityAuthExtensionPath());
 	}
 	piArgs.push("--no-skills");
-	const envModel = task.model || getEnvModel();
-	if (envModel) piArgs.push("--model", envModel);
-	const selectedTools = task.tools ? filterSubagentTools(selectSuitableToolsForModel(envModel, task.tools)) : undefined;
+	if (configuredModel) piArgs.push("--model", configuredModel);
+	const selectedTools = task.tools ? filterSubagentTools(selectSuitableToolsForModel(selectedModel, task.tools)) : undefined;
 	if (selectedTools) {
 		if (selectedTools.length > 0) piArgs.push("--tools", selectedTools.join(","));
 		else piArgs.push("--no-tools");
@@ -114,6 +116,10 @@ export function spawnAgent(
 
 	// User-supplied extra args (e.g. --thinking high)
 	piArgs.push(...forwardedExtraArgs);
+	// The child always runs one explicitly selected model. Override persisted
+	// enabledModels (and any extra --models value) so isolated children do not
+	// resolve unrelated provider patterns before their limited extensions load.
+	if (selectedModel) piArgs.push("--models", selectedModel);
 	// Keep recursive/interactive parent-only tools disabled even if explicit
 	// sub-agent extraArgs load additional extensions or override --tools.
 	piArgs.push("--extension", getSubagentToolGuardExtensionPath());
@@ -472,8 +478,8 @@ function withoutSkillArgs(args: string[]): string[] {
 	return filtered;
 }
 
-function usesAntigravityModel(taskModel: string | undefined, extraArgs: string[]): boolean {
-	let model = taskModel?.trim() || undefined;
+function resolveSelectedModel(configuredModel: string | undefined, extraArgs: string[]): string | undefined {
+	let model = configuredModel?.trim() || undefined;
 	for (let index = 0; index < extraArgs.length; index += 1) {
 		const arg = extraArgs[index];
 		if (arg === "--model" || arg === "-m") {
@@ -485,7 +491,7 @@ function usesAntigravityModel(taskModel: string | undefined, extraArgs: string[]
 			model = arg.slice("--model=".length).trim() || undefined;
 		}
 	}
-	return Boolean(model?.startsWith("antigravity/") && model.length > "antigravity/".length);
+	return model;
 }
 
 function getModelToolsExtensionPath(): string {
