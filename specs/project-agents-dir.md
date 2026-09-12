@@ -65,7 +65,7 @@ You are a ... role prompt (markdown body).
 - Frontmatter keys: `name` (must match the filename if present; mismatch is an
   error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
   `models`, legacy `fallbackModels`/`modelByParent`, `forParentModels`,
-  `notForParentModels`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`,
+  `notForParentModels`, `thinking`, `tools`, `extraArgs`,
   `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`).
   Unknown keys are rejected (typo safety; the JSONC config path stays lenient).
 - `forParentModels` is an optional parent-model allow-list;
@@ -121,11 +121,12 @@ merge pipeline.
 - `defaultType` is now `research` while bundled files are loaded in
   deterministic filename order. Spec 29 supersedes silent spawn-error fallback
   with parent-first role selection and recoverable routing errors.
-- Runtime-only invariants stay in runtime code. As extended by `ui-qa-agent.md`,
-  `ui-qa` disables ordinary skill discovery and receives launcher-owned
-  runner/workspace paths, while the complete QA workflow lives in the body of
-  `agents/ui-qa.md` without a separate skill. Legacy `browser-qa` requests
-  normalize to that canonical role.
+- Runtime-only invariants stay in runtime code. All async sub-agents disable
+  skill discovery and reject skill injection through `extraArgs`; role files are
+  therefore self-contained. As extended by `ui-qa-agent.md`, `ui-qa` additionally
+  receives launcher-owned runner/workspace paths, while the complete QA workflow
+  lives in the body of `agents/ui-qa.md`. Legacy `browser-qa` requests normalize
+  to that canonical role.
 
 ## Non-goals
 

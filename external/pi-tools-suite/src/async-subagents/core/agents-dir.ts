@@ -50,7 +50,6 @@ const KNOWN_FRONTMATTER_KEYS = new Set([
 	"notForParentModels",
 	"thinking",
 	"tools",
-	"isolatedSkills",
 	"extraArgs",
 	"promptAppend",
 	"promptOverride",
@@ -66,7 +65,6 @@ const COMMA_SEPARATED_ARRAY_KEYS = new Set([
 	"fallbackModels",
 	"forParentModels",
 	"notForParentModels",
-	"isolatedSkills",
 	"extraArgs",
 	"retryableExitCodes",
 ]);

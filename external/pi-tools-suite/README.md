@@ -528,7 +528,7 @@ contract, configuration examples, override rules and legacy compatibility.
 The parent normally selects an explicit `subagentType` from the effective
 system-prompt catalog, preferring a matching project-local specialist. Valid
 explicit types bypass the LLM router entirely; presets, model selection, tools,
-skills, and role instructions are still applied by the normal config resolver.
+and role instructions are still applied by the normal config resolver.
 Model/thinking overrides are not substitutes for selecting a role.
 
 The router remains enabled as a fallback for omitted types: use it when the role
@@ -576,7 +576,7 @@ You are this project's staff reviewer. Apply the repo rules from
 AGENTS.md before approving anything; cite file paths first.
 ```
 
-- Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
+- Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
 - Array fields accept block lists (`- item`), inline arrays (`[a, b]`), or comma-separated strings (`tools: read, grep, bash`). The frontmatter YAML subset is intentionally small: scalars, quoted strings, numbers, comments, lists, and nested maps for `modelByParent`/`retry`. Tabs, block scalars (`|`/`>`), anchors/aliases, and flow maps are hard errors naming file and line.
 - The markdown body becomes `promptAppend`: it is appended after the standard generated prompt (parent objective + task + output format), so the agent still receives its task in the usual structure. Use frontmatter `promptOverride` for full prompt replacement.
 - Precedence: bundled Markdown defines the built-ins, then the nearest project `.pi/agents/*.md` file overrides the same-named built-in field-by-field. Markdown is the only source of agent role/profile definitions. The removed `asyncSubagents` section and old standalone config-path variables are not read.
@@ -620,10 +620,9 @@ The capability-first runner and native/TUI resources live under
 `PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER`. Normal probe/run uses the former;
 the latter is invoked directly only for browser auth profile discovery and
 form-auth scaffolding. These non-secret paths are set only for QA children.
-QA always launches with `--no-skills`, even when `isolatedSkills` is empty,
-and skill flags in `extraArgs` cannot bypass that isolation. Explicitly
-configured `isolatedSkills` remain supported as optional additions; no built-in
-QA `--skill` is injected. Other roles retain their normal discovery behavior.
+Every async sub-agent launches with `--no-skills`, and skill flags in
+`extraArgs` are stripped rather than forwarded. Agent roles are self-contained;
+there is no profile field for injecting skills and no built-in QA `--skill`.
 
 Model/thinking/tool-only overrides should use a project `ui-qa.md` and inherit
 the bundled Markdown workflow. A legacy project `browser-qa.md` is migrated to

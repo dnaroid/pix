@@ -99,7 +99,6 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 			parentSession,
 			maxResultBytes: resolved.maxResultBytes,
 			timeoutMs: resolved.timeoutMs,
-			isolatedSkills: resolved.isolatedSkills,
 		};
 		if (resolved.retry.maxRetries > 0 || resolved.fallbackModels.length > 0) {
 			const retryResult = spawnAgentWithRetry(

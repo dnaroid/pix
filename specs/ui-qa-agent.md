@@ -35,12 +35,10 @@ runner's credential and evidence protections.
 
 ## Runtime behavior
 
-The default QA profile resolves with no `isolatedSkills`. `spawnAgent` forces
-`--no-skills` for `ui-qa` (and the compatibility `browser-qa` alias),
-independently of whether any skills were configured. Skill flags in forwarded
-CLI arguments remain filtered. Optional profile `isolatedSkills` load
-explicitly, without a mandatory QA skill. Other profiles keep their existing
-skill-discovery behavior.
+All async sub-agent children are self-contained: `spawnAgent` always forces
+`--no-skills` and strips `--skill` / `--skill=...` flags from forwarded CLI
+arguments. `isolatedSkills` is no longer a supported profile field, so UI QA has
+no special skill-loading path and cannot receive optional injected skills.
 
 Explicit legacy `browser-qa` task names normalize to `ui-qa`. A project-local
 `browser-qa.md` override is migrated to the canonical role when no `ui-qa.md`
@@ -102,9 +100,10 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 ## Verification
 
 Core regression tests cover body inheritance, the legacy name migration, short
-parent catalogs, prompt delivery over child RPC without a skill, forced skill
-isolation, optional skills, ordinary-child env cleanup, both UI-QA workspaces,
-and invoking both installed runner paths from a temporary project with spaces.
+parent catalogs, prompt delivery over child RPC without skills, global child
+skill isolation and skill-flag stripping, ordinary-child env cleanup, both
+UI-QA workspaces, and invoking both installed runner paths from a temporary
+project with spaces.
 Unified runner tests cover backend selection, real PTY behavior, unsafe launch
 and path rejection, timeout bounds, platform blockers, and an opt-in real macOS
 AppKit accessibility flow. Browser runner tests continue covering the trusted

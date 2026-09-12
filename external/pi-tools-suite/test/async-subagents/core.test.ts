@@ -487,7 +487,6 @@ describe.serial("subagent type config", () => {
 		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(300_000);
-		expect(resolved.isolatedSkills).toEqual([]);
 		expect(fs.existsSync(runner)).toBe(true);
 		expect(path.isAbsolute(runner)).toBe(true);
 		expect(fs.existsSync(uiRunner)).toBe(true);
@@ -539,12 +538,10 @@ describe.serial("subagent type config", () => {
 		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 	});
 
-	test.serial("inherits QA instructions with model overrides and only adds explicitly configured skills", () => {
+	test.serial("inherits QA instructions with model overrides", () => {
 		const cwd = tempDir();
-		const customSkill = path.join(cwd, "custom", "SKILL.md");
 		writeFile(path.join(cwd, ".pi", "agents", "browser-qa.md"), `---
 model: custom/qa
-isolatedSkills: ${customSkill}
 ---
 `);
 		const config = loadSubagentConfig(cwd, {});
@@ -553,7 +550,6 @@ isolatedSkills: ${customSkill}
 			promptOverride: "Custom brief: {task}", promptAppend: "Check the mobile layout too.",
 		}, config);
 
-		expect(resolved.isolatedSkills).toEqual([customSkill]);
 		expect(resolved.task.subagentType).toBe("ui-qa");
 		expect(resolved.task.model).toBe("custom/qa");
 		expect(generatePrompt(resolved.task)).toStartWith("Custom brief: verify the browser bug");
@@ -595,7 +591,6 @@ Research quickly.
 		writeFile(path.join(cwd, ".pi", "agents", "review.md"), `---
 models: openai/review-fast, openai/review-backup
 thinking: medium
-isolatedSkills: private/review.md
 extraArgs: --review-fast
 ---
 Review carefully.
@@ -622,7 +617,6 @@ Review carefully.
 		expect(perType.task.model).toBe("openai/review-fast");
 		expect(perType.fallbackModels).toEqual(["openai/review-backup"]);
 		expect(perType.task.thinking).toBe("medium");
-		expect(perType.isolatedSkills).toEqual(["private/review.md"]);
 		expect(perType.extraArgs).toEqual(["--review-fast"]);
 
 		const explicit = resolveAgentTaskConfig({ id: "b", task: "Review", model: "manual/model", thinking: "minimal" }, config, { preset: activePreset });
@@ -871,6 +865,10 @@ Advise only.
 
 			writeFile(path.join(agentsDir, "unknown.md"), "---\ntool: read\n---\n");
 			expect(() => loadSubagentConfig(cwd, {})).toThrow(/Unknown agent frontmatter key "tool"/);
+			fs.rmSync(agentsDir, { recursive: true });
+
+			writeFile(path.join(agentsDir, "skills.md"), "---\nisolatedSkills: private/review.md\n---\n");
+			expect(() => loadSubagentConfig(cwd, {})).toThrow(/Unknown agent frontmatter key "isolatedSkills"/);
 		});
 
 		test.serial("reloads .pi/agents without caching (respects /reload and live edits)", () => {
@@ -1333,14 +1331,12 @@ describe.serial("cleanup candidates", () => {
 });
 
 describe.serial("spawning agents", () => {
-	test.serial("delivers the inline QA workflow and a package-relative runner without loading a skill", async () => {
+	test.serial("delivers the inline QA workflow while disabling skills for every child", async () => {
 		const cwd = path.join(tempDir(), "project with spaces");
 		const config = loadSubagentConfig(cwd, {});
 		const runDir = createRunDir(cwd, "inline-qa");
 		const captured = path.join(cwd, "captured-prompt.json");
 		const piScript = path.join(tempDir(), "pi.js");
-		const extraSkill = path.join(cwd, "optional", "SKILL.md");
-		writeFile(extraSkill, "---\nname: optional-test\ndescription: test\n---\n");
 		writeFile(piScript, `
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
@@ -1373,18 +1369,23 @@ setTimeout(() => {}, 2000);
 			process.env.PI_BROWSER_QA_RUNNER = path.join(cwd, "wrong-runner.mjs");
 			process.env.PI_UI_QA_RUNNER = path.join(cwd, "wrong-ui-runner.mjs");
 			process.env.PI_SUBAGENT_AGENT_DIR = path.join(cwd, "wrong-agent");
-			for (const id of ["qa-default", "qa-extra-skill", "ordinary"]) {
+			for (const id of ["qa-default", "ordinary"]) {
 				const qa = id !== "ordinary";
 				const resolved = resolveAgentTaskConfig({ id, task: "Check the requested target", subagentType: qa ? "ui-qa" : "research" }, config);
-				const skills = id === "qa-extra-skill" ? [extraSkill] : resolved.isolatedSkills;
 				await withTimeout(new Promise<any>((resolve) => {
 					spawnAgent(runDir, resolved.task, cwd,
-						qa ? ["--skill", "injected.md", "--skill=injected-inline.md", "--no-skills", "--thinking", "high"] : [],
-						undefined, resolve, { isolatedSkills: skills });
+						["--skill", "injected.md", "--skill=injected-inline.md", "--no-skills", "--thinking", "high"],
+						undefined, resolve);
 				}), `Timed out waiting for ${id}`);
 				const payload = JSON.parse(fs.readFileSync(captured, "utf8"));
 				const args = fs.readFileSync(path.join(runDir, id, "pi_args"), "utf8").split("\n");
 				expect(payload.message).toBe(generatePrompt(resolved.task));
+				expect(args.filter((arg) => arg === "--no-skills")).toHaveLength(1);
+				expect(args).not.toContain("injected.md");
+				expect(args).not.toContain("--skill=injected-inline.md");
+				expect(args).not.toContain("--skill");
+				expect(args).toContain("--thinking");
+				expect(args).toContain("high");
 				if (qa) {
 					expect(payload.message).toContain('node "$PI_UI_QA_RUNNER"');
 					expect(payload.message).toContain('node "$PI_BROWSER_QA_RUNNER"');
@@ -1394,21 +1395,13 @@ setTimeout(() => {}, 2000);
 					expect(payload.agentDir).toBe(fs.realpathSync(path.join(runDir, id)));
 					expect(payload.probeExit).toBe(0);
 					expect(JSON.parse(payload.probeOutput).profiles).toEqual([]);
-					expect(args.filter((arg) => arg === "--no-skills")).toHaveLength(1);
-					expect(args).not.toContain("injected.md");
-					expect(args).not.toContain("--skill=injected-inline.md");
-					expect(args).toContain("--thinking");
-					expect(args).toContain("high");
 				} else {
 					expect(payload.runner).toBeNull();
 					expect(payload.uiRunner).toBeNull();
 					expect(payload.agentDir).toBeNull();
 					expect(payload.message).not.toContain("PI_BROWSER_QA_RUNNER");
 					expect(payload.message).not.toContain("PI_UI_QA_RUNNER");
-					expect(args).not.toContain("--no-skills");
 				}
-				expect(args.filter((arg) => arg === "--skill")).toHaveLength(skills.length);
-				if (skills.length > 0) expect(args).toContain(extraSkill);
 			}
 			expect(fs.existsSync(path.join(cwd, ".pi", "qa_auth.jsonc"))).toBe(false);
 		} finally {
@@ -1458,44 +1451,6 @@ setTimeout(() => {}, 1000);
 			expect(fs.statSync(path.join(agentDir, "browser-qa")).mode & 0o777).toBe(0o700);
 			expect(fs.statSync(path.join(agentDir, "browser-qa", "flows")).mode & 0o777).toBe(0o700);
 		}
-	});
-
-	test.serial("isolates explicitly configured skills without changing ordinary agents", async () => {
-		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-skill");
-		const piScript = path.join(tempDir(), "pi.js");
-		const skillPath = path.join(cwd, "private", "SKILL.md");
-		const additionalSkillPath = path.join(cwd, "additional", "SKILL.md");
-		const injectedSkillPath = path.join(cwd, "untrusted", "SKILL.md");
-		writeFile(skillPath, "---\nname: private-test\ndescription: test\n---\n");
-		writeFile(additionalSkillPath, "---\nname: additional-test\ndescription: test\n---\n");
-		writeFile(piScript, `
-process.stdin.on("data", () => {
-  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] }));
-  setTimeout(() => process.exit(0), 0);
-});
-setTimeout(() => {}, 1000);
-`);
-		process.argv[1] = piScript;
-
-		await withTimeout(new Promise<any>((resolve) => {
-			spawnAgent(runDir, { id: "isolated", task: "Do QA" }, cwd, ["--skill", injectedSkillPath, `--skill=${injectedSkillPath}`, "--thinking", "high"], undefined, resolve, { isolatedSkills: [skillPath, additionalSkillPath] });
-		}), "Timed out waiting for isolated-skill spawn");
-		await withTimeout(new Promise<any>((resolve) => {
-			spawnAgent(runDir, { id: "ordinary", task: "Do work" }, cwd, [], undefined, resolve);
-		}), "Timed out waiting for ordinary spawn");
-
-		const isolatedArgs = fs.readFileSync(path.join(runDir, "isolated", "pi_args"), "utf8").split("\n");
-		expect(isolatedArgs).toContain("--no-skills");
-		expect(isolatedArgs).toContain("--skill");
-		expect(isolatedArgs).toContain(skillPath);
-		expect(isolatedArgs).toContain(additionalSkillPath);
-		expect(isolatedArgs).not.toContain(injectedSkillPath);
-		expect(isolatedArgs).not.toContain(`--skill=${injectedSkillPath}`);
-		expect(isolatedArgs.filter((arg) => arg === "--skill")).toHaveLength(2);
-		const ordinaryArgs = fs.readFileSync(path.join(runDir, "ordinary", "pi_args"), "utf8").split("\n");
-		expect(ordinaryArgs).not.toContain("--no-skills");
-		expect(ordinaryArgs).not.toContain("--skill");
 	});
 
 	test.serial("writes metadata, captures agent_end output, and notifies completion", async () => {
@@ -1882,7 +1837,6 @@ setTimeout(() => {}, 1000);
 		const runDir = createRunDir(cwd, "spawn-model-fallback");
 		const attemptFile = path.join(cwd, "attempts.json");
 		const piScript = path.join(tempDir(), "pi.js");
-		const fallbackSkill = path.join(cwd, "private-fallback-skill.md");
 		writeFile(piScript, `
 const fs = require("node:fs");
 const attemptFile = ${JSON.stringify(attemptFile)};
@@ -1906,7 +1860,7 @@ setTimeout(() => {}, 1000);
 		let firstCompletion: any;
 		const first = spawnAgentWithRetry(runDir, { id: "agent-1", task: "Fallback", model: "primary/model" }, cwd, (completion) => {
 			firstCompletion = completion;
-		}, { retry: { maxRetries: 0, backoffMs: 10 }, extraArgs: ["--skill", "injected-skill.md"], fallbackModels: ["fallback/model"], isolatedSkills: [fallbackSkill] });
+		}, { retry: { maxRetries: 0, backoffMs: 10 }, extraArgs: ["--skill", "injected-skill.md"], fallbackModels: ["fallback/model"] });
 		await withTimeout(first.done, "Timed out waiting for model-fallback first completion", 15000);
 
 		expect(firstCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
@@ -1916,7 +1870,7 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "model_fallback_to"), "utf-8")).toBe("fallback/model");
 		const fallbackArgs = fs.readFileSync(path.join(runDir, "agent-1", "pi_args"), "utf-8").split("\n");
 		expect(fallbackArgs).toContain("--no-skills");
-		expect(fallbackArgs).toContain(fallbackSkill);
+		expect(fallbackArgs).not.toContain("--skill");
 		expect(fallbackArgs).not.toContain("injected-skill.md");
 
 		const secondRun = createRunDir(cwd, "spawn-model-fallback-session");

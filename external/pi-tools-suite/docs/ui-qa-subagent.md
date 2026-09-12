@@ -34,11 +34,9 @@ confirmed runtime image support.
 - Sub-agent processes disable normal extension discovery, then always load the
   suite's model-tools extension. They load the Antigravity provider extension
   only when an Antigravity model is explicitly selected.
-- A type profile may declare `isolatedSkills`. Spawning that profile adds
-  `--no-skills` followed by one explicit `--skill` per configured path.
-- `ui-qa` always disables normal skill discovery and filters skill flags
-  out of `extraArgs`, even without configured skills. It no longer injects a
-  mandatory QA skill. Explicitly configured skills are optional additions.
+- Every async sub-agent launches with `--no-skills`. `--skill` and
+  `--skill=...` flags are removed from `extraArgs`, and role profiles have no
+  skill-loading field. Agent Markdown is the complete role instruction source.
 - Explicit legacy `browser-qa` tasks normalize to `ui-qa`; a project-local
   `browser-qa.md` profile override is migrated onto the canonical `ui-qa`
   profile during config loading. Browser runner resources keep their historical
@@ -221,12 +219,12 @@ confirmed runtime image support.
    workflow; explicit legacy `browser-qa` requests resolve to it, and its
    isolated child process can register the configured
    model provider.
-2. Default QA spawn args contain `--no-skills` but no `--skill`. The child
+2. Every child spawn contains `--no-skills` but no `--skill`. The QA child
    receives the full workflow in its initial prompt and can invoke the unified
    runner through `PI_UI_QA_RUNNER`, plus the credential-owning browser backend
    through `PI_BROWSER_QA_RUNNER`, from an unrelated project directory.
-   Optional configured skills still load; ordinary profiles retain existing
-   skill discovery behavior and do not receive QA-only environment paths.
+   Ordinary profiles are equally skill-free and do not receive QA-only
+   environment paths.
 3. Auth profile listing and all error output are redacted; model-authored input
    cannot execute code in the credential-bearing process.
 4. Runner tests cover public execution without an auth file, explicit profile

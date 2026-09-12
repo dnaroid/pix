@@ -20,8 +20,6 @@ export interface SpawnAgentOptions {
 	parentSession?: string;
 	timeoutMs?: number;
 	maxResultBytes?: number;
-	/** Explicit skills to load after disabling normal skill discovery. */
-	isolatedSkills?: string[];
 }
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -90,10 +88,9 @@ export function spawnAgent(
 	// detached subprocesses do not depend on persisted local pi settings.
 	const persistSessions = shouldPersistSubagentSessions();
 	const sessionDir = persistSessions ? getAgentSessionDir(agentDir) : undefined;
-	// UI-QA instructions now live in the agent prompt, but normal skill discovery
-	// must stay disabled even when no additional skill is configured.
-	const isolateSkills = isUiQaType(task.subagentType) || Boolean(options.isolatedSkills?.length);
-	const forwardedExtraArgs = isolateSkills ? withoutSkillArgs(extraArgs) : extraArgs;
+	// Sub-agent roles are self-contained. Never inherit/discover skills, and do
+	// not allow profile/user extra args to re-enable or inject them.
+	const forwardedExtraArgs = withoutSkillArgs(extraArgs);
 	if (sessionDir) fs.mkdirSync(sessionDir, { recursive: true });
 	const piArgs: string[] = ["--mode", "rpc"];
 	if (sessionDir) piArgs.push("--session-dir", sessionDir);
@@ -105,10 +102,7 @@ export function spawnAgent(
 	if (usesAntigravityModel(task.model, forwardedExtraArgs)) {
 		piArgs.push("--extension", getAntigravityAuthExtensionPath());
 	}
-	if (isolateSkills) {
-		piArgs.push("--no-skills");
-		for (const skillPath of options.isolatedSkills ?? []) piArgs.push("--skill", skillPath);
-	}
+	piArgs.push("--no-skills");
 	const envModel = task.model || getEnvModel();
 	if (envModel) piArgs.push("--model", envModel);
 	const selectedTools = task.tools ? filterSubagentTools(selectSuitableToolsForModel(envModel, task.tools)) : undefined;

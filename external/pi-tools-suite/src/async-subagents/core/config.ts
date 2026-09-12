@@ -48,8 +48,6 @@ export interface SubagentTypeConfig {
 	notForParentModels?: string[];
 	thinking?: string;
 	tools?: string[];
-	/** Explicit skill files loaded after disabling normal skill discovery. */
-	isolatedSkills?: string[];
 	extraArgs?: string[];
 	/** Extra prompt text appended after the generated or overridden prompt. */
 	promptAppend?: string;
@@ -138,8 +136,6 @@ export interface SubagentConfig {
 export interface ResolvedAgentTaskConfig {
 	task: AgentTask;
 	extraArgs: string[];
-	/** Explicit skill files loaded with normal skill discovery disabled. */
-	isolatedSkills: string[];
 	/** Ordered model fallbacks for the resolved model. Current-process exhausted models are skipped before spawning. */
 	fallbackModels: string[];
 	profile?: SubagentTypeConfig;
@@ -343,7 +339,6 @@ export function resolveAgentTaskConfig(
 	return {
 		profile,
 		extraArgs,
-		isolatedSkills: arrayOfStrings(profile?.isolatedSkills) ?? [],
 		fallbackModels,
 		retry: resolveRetryConfig(config.retry, profile?.retry),
 		maxResultBytes: profile?.maxResultBytes ?? config.maxResultBytes,
@@ -496,7 +491,6 @@ export function normalizeSubagentTypeProfile(
 		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
-		isolatedSkills: arrayOfStrings(rawProfile.isolatedSkills),
 		extraArgs: arrayOfStrings(rawProfile.extraArgs),
 		promptAppend: textBlock(rawProfile.promptAppend),
 		promptOverride: textBlock(rawProfile.promptOverride),
@@ -563,7 +557,6 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.notForParentModels !== undefined) compact.notForParentModels = profile.notForParentModels;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
-	if (profile.isolatedSkills && profile.isolatedSkills.length > 0) compact.isolatedSkills = profile.isolatedSkills;
 	if (profile.extraArgs && profile.extraArgs.length > 0) compact.extraArgs = profile.extraArgs;
 	if (profile.promptAppend) compact.promptAppend = profile.promptAppend;
 	if (profile.promptOverride) compact.promptOverride = profile.promptOverride;
