@@ -73,6 +73,44 @@
       },
       "description": "User-level whitelist shared by Pix TUI and Desktop model pickers. Omit to show every available model."
     },
+    "thinkingByModel": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            },
+            {
+              "type": "string",
+              "const": "max"
+            }
+          ]
+        }
+      },
+      "description": "User-level last-applied thinking level per provider/model, shared by Pix TUI and Desktop model pickers."
+    },
     "toolRenderer": {
       "type": "object",
       "properties": {

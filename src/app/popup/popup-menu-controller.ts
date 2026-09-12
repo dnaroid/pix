@@ -77,6 +77,7 @@ export type AppPopupMenuControllerHost = {
 	readonly entries: readonly Entry[];
 	readonly session: AgentSession | undefined;
 	currentThinkingLevel?(): ThinkingLevel | undefined;
+	rememberedThinkingLevel?(modelRef: string): ThinkingLevel | undefined;
 	readonly resumeLoading: boolean;
 	readonly resumeSessionCount: number;
 	isRunning(): boolean;
@@ -123,6 +124,7 @@ export class AppPopupMenuController {
 	private dismissedThinkingMenuInput: string | undefined;
 	private modelThinkingLevel: ThinkingLevel | undefined;
 	private modelThinkingSelectedRef: string | undefined;
+	private readonly stagedThinkingByModel = new Map<string, ThinkingLevel>();
 	private modelThinkingSource: "model" | "thinking" = "model";
 	private modelVisibilityMode = false;
 	private directPopupMenu: DirectPopupMenu | undefined;
@@ -275,6 +277,7 @@ export class AppPopupMenuController {
 		const currentIndex = Math.max(0, levels.indexOf(state.thinkingLevel));
 		const nextIndex = (currentIndex + delta + levels.length) % levels.length;
 		this.modelThinkingLevel = levels[nextIndex] ?? state.thinkingLevel;
+		this.rememberStagedThinking();
 		this.host.render();
 		return true;
 	}
@@ -781,6 +784,7 @@ export class AppPopupMenuController {
 			: this.host.getThinkingMenuItems(query)[0]?.value.level;
 		if (!level) return;
 		this.modelThinkingLevel = this.clampThinkingLevel(level, this.selectedModelThinkingLevels());
+		this.rememberStagedThinking();
 	}
 
 	private modelThinkingMenuState(): ModelThinkingMenuState {
@@ -800,12 +804,28 @@ export class AppPopupMenuController {
 			this.modelThinkingSelectedRef = undefined;
 			return;
 		}
+		if (
+			this.modelThinkingSelectedRef
+			&& this.modelThinkingSelectedRef !== selected.ref
+			&& this.modelThinkingLevel !== undefined
+		) {
+			this.stagedThinkingByModel.set(this.modelThinkingSelectedRef, this.modelThinkingLevel);
+		}
 		const levels = this.selectedModelThinkingLevels();
-		const initial = this.modelThinkingLevel ?? this.host.session?.thinkingLevel ?? this.host.currentThinkingLevel?.() ?? "off";
 		if (this.modelThinkingSelectedRef !== selected.ref || this.modelThinkingLevel === undefined) {
+			const currentThinking = this.host.session?.thinkingLevel ?? this.host.currentThinkingLevel?.() ?? "off";
+			const initial = this.stagedThinkingByModel.get(selected.ref)
+				?? (selected.current ? currentThinking : this.host.rememberedThinkingLevel?.(selected.ref))
+				?? currentThinking;
 			this.modelThinkingLevel = this.clampThinkingLevel(initial, levels);
 			this.modelThinkingSelectedRef = selected.ref;
+			this.stagedThinkingByModel.set(selected.ref, this.modelThinkingLevel);
 		}
+	}
+
+	private rememberStagedThinking(): void {
+		if (!this.modelThinkingSelectedRef || this.modelThinkingLevel === undefined) return;
+		this.stagedThinkingByModel.set(this.modelThinkingSelectedRef, this.modelThinkingLevel);
 	}
 
 	private selectedModelThinkingLevels(): ThinkingLevel[] {
@@ -833,6 +853,7 @@ export class AppPopupMenuController {
 	private resetModelThinkingState(): void {
 		this.modelThinkingLevel = undefined;
 		this.modelThinkingSelectedRef = undefined;
+		this.stagedThinkingByModel.clear();
 		this.modelMenuQuery = "";
 		this.modelThinkingInputQuery = "";
 		this.modelVisibilityMode = false;

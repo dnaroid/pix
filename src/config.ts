@@ -66,6 +66,11 @@ export type DefaultModelConfig = {
 	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 };
 
+export type ModelThinkingPreferences = Record<
+	string,
+	"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+>;
+
 export type ModelColorsConfig = {
 	rules: Record<string, string>;
 };
@@ -97,6 +102,8 @@ export type PixConfig = {
 	defaultModel?: DefaultModelConfig;
 	/** User-level whitelist for model pickers. Undefined means show every available model. */
 	visibleModels?: string[];
+	/** Last applied thinking level for each model, shared by TUI and Desktop pickers. */
+	thinkingByModel?: ModelThinkingPreferences;
 	promptEnhancer: PromptEnhancerConfig;
 	autocomplete: AutocompleteConfig;
 	modelColors: ModelColorsConfig;
@@ -318,6 +325,17 @@ function extractVisibleModelsConfig(raw: unknown): string[] | undefined {
 		.filter(Boolean))];
 }
 
+function extractThinkingByModelConfig(raw: unknown): ModelThinkingPreferences | undefined {
+	if (!isPlainObject(raw) || !isPlainObject(raw.thinkingByModel)) return undefined;
+	const preferences: ModelThinkingPreferences = {};
+	for (const [modelRef, value] of Object.entries(raw.thinkingByModel)) {
+		const normalizedRef = normalizeModelPreferenceRef(modelRef);
+		const thinking = normalizeThinkingLevel(value);
+		if (normalizedRef && thinking) preferences[normalizedRef] = thinking;
+	}
+	return preferences;
+}
+
 function extractModelColorsConfig(raw: unknown): ModelColorsConfig | undefined {
 	if (!isPlainObject(raw)) return undefined;
 	const modelColors = raw.modelColors;
@@ -488,7 +506,11 @@ function cloneDictationConfig(config: DictationConfig): DictationConfig {
 function pixConfigFromParsed(
 	parsed: unknown,
 	fallback: PixConfig = defaultPixConfig(),
-	options: { allowDictationApiKey?: boolean; allowVisibleModels?: boolean } = {},
+	options: {
+		allowDictationApiKey?: boolean;
+		allowVisibleModels?: boolean;
+		allowThinkingByModel?: boolean;
+	} = {},
 ): PixConfig {
 	const toolRenderer = extractToolRendererConfig(parsed) ?? fallback.toolRenderer;
 	const outputFilters = extractOutputFiltersConfig(parsed) ?? fallback.outputFilters;
@@ -496,6 +518,9 @@ function pixConfigFromParsed(
 	const visibleModels = options.allowVisibleModels === false
 		? fallback.visibleModels
 		: extractVisibleModelsConfig(parsed) ?? fallback.visibleModels;
+	const thinkingByModel = options.allowThinkingByModel === false
+		? fallback.thinkingByModel
+		: extractThinkingByModelConfig(parsed) ?? fallback.thinkingByModel;
 	const promptEnhancer = extractPromptEnhancerConfig(parsed) ?? fallback.promptEnhancer;
 	const autocomplete = extractAutocompleteConfig(parsed) ?? fallback.autocomplete;
 	const modelColors = extractModelColorsConfig(parsed) ?? fallback.modelColors;
@@ -511,6 +536,7 @@ function pixConfigFromParsed(
 		outputFilters,
 		...(defaultModel === undefined ? {} : { defaultModel }),
 		...(visibleModels === undefined ? {} : { visibleModels: [...visibleModels] }),
+		...(thinkingByModel === undefined ? {} : { thinkingByModel: { ...thinkingByModel } }),
 		promptEnhancer,
 		autocomplete,
 		modelColors,
@@ -577,6 +603,15 @@ export function savePixVisibleModels(modelRefs: readonly string[]): string[] {
 	return extractVisibleModelsConfig(parseJsonc(updated)) ?? normalized;
 }
 
+export function savePixThinkingLevelForModel(modelRef: string, thinking: string): ModelThinkingPreferences {
+	const configPath = PIX_CONFIG_PATH;
+	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{\n}\n";
+	const updated = upsertPixThinkingLevelForModelInJsonc(source, modelRef, thinking);
+	mkdirSync(dirname(configPath), { recursive: true });
+	writeFileSync(configPath, updated);
+	return extractThinkingByModelConfig(parseJsonc(updated)) ?? {};
+}
+
 export function saveProjectPixIgnoreContextFiles(cwd: string, ignoreContextFiles: boolean): boolean {
 	const configPath = getProjectPixConfigPath(cwd);
 	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : `{
@@ -597,6 +632,14 @@ export function upsertPixIgnoreContextFilesInJsonc(source: string, ignoreContext
 export function upsertPixVisibleModelsInJsonc(source: string, modelRefs: readonly string[]): string {
 	const formattingOptions = { insertSpaces: true, tabSize: 2 };
 	return applyEdits(source, modify(source, ["visibleModels"], normalizeVisibleModelRefs(modelRefs), { formattingOptions }));
+}
+
+export function upsertPixThinkingLevelForModelInJsonc(source: string, modelRef: string, thinking: string): string {
+	const normalizedRef = normalizeModelPreferenceRef(modelRef);
+	const normalizedThinking = normalizeThinkingLevel(thinking);
+	if (!normalizedRef || !normalizedThinking) return source;
+	const formattingOptions = { insertSpaces: true, tabSize: 2 };
+	return applyEdits(source, modify(source, ["thinkingByModel", normalizedRef], normalizedThinking, { formattingOptions }));
 }
 
 export function upsertPixDefaultModelInJsonc(source: string, modelRef: string): string {
@@ -673,6 +716,11 @@ function normalizeVisibleModelRefs(modelRefs: readonly string[]): string[] {
 	return [...new Set(modelRefs.map((entry) => entry.trim()).filter(Boolean))];
 }
 
+function normalizeModelPreferenceRef(modelRef: string): string | undefined {
+	const normalized = stripThinkingSuffix(modelRef.trim());
+	return normalized.length > 0 ? normalized : undefined;
+}
+
 function stripThinkingSuffix(modelRef: string): string {
 	const colonIndex = modelRef.lastIndexOf(":");
 	if (colonIndex <= 0) return modelRef;
@@ -745,6 +793,8 @@ function loadProjectPixConfig(cwd: string | undefined, fallback: PixConfig): Pix
 			// Model visibility is a user UI preference shared by TUI and Desktop.
 			// Project config must not silently fork that picker state.
 			allowVisibleModels: false,
+			// Remembered thinking is the same cross-UI user preference.
+			allowThinkingByModel: false,
 		});
 	} catch (error) {
 		process.stderr.write(`[pix] Failed to load ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);

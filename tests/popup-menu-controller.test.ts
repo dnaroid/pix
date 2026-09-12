@@ -508,6 +508,47 @@ describe("popup menu header", () => {
 		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "xhigh");
 	});
 
+	it("restores remembered thinking per model while current session thinking stays authoritative", () => {
+		const currentModel = {
+			provider: "openai",
+			id: "current",
+			name: "Current",
+			reasoning: true,
+			thinkingLevelMap: { xhigh: "xhigh" },
+		} as never;
+		const otherModel = {
+			provider: "openai",
+			id: "other",
+			name: "Other",
+			reasoning: true,
+			thinkingLevelMap: { xhigh: "xhigh" },
+		} as never;
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			session: { thinkingLevel: "medium" } as never,
+			rememberedThinkingLevel: (ref) => ref === "openai/current" ? "xhigh" : ref === "openai/other" ? "high" : undefined,
+			getModelMenuItems: () => [
+				{ value: { model: currentModel, ref: "openai/current", current: true }, label: "openai/current" },
+				{ value: { model: otherModel, ref: "openai/other", current: false }, label: "openai/other" },
+			],
+		});
+
+		controller.openDirectPopupMenu("model");
+		assert.equal(controller.syncActivePopupMenu(), "model");
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "medium");
+
+		assert.equal(controller.moveActivePopupMenuSelection(1), true);
+		assert.equal(controller.selectedModelThinking()?.value.ref, "openai/other");
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "high");
+
+		assert.equal(controller.moveActiveModelThinkingLevel(1), true);
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "xhigh");
+		assert.equal(controller.moveActivePopupMenuSelection(-1), true);
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "medium");
+		assert.equal(controller.moveActivePopupMenuSelection(1), true);
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "xhigh");
+	});
+
 	it("routes the direct thinking popup through the combined model selector", () => {
 		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),

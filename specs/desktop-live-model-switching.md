@@ -18,6 +18,8 @@ Keep Desktop model and thinking selection available while the agent is running, 
 
 - Desktop keeps the combined model/thinking picker enabled while the active session is processing a prompt.
 - The same picker is visible on a UI-only New Conversation draft before its first prompt. In that state the selection is staged locally from the sessionless draft config catalogue; it does not require an active session runtime and does not send `session/set_config_option`.
+- The picker remembers thinking independently per model. The current model begins from the actual session/draft thinking; switching to another model restores that model's staged value from the current picker interaction or its persisted user-level `thinkingByModel` preference, then clamps it to the model's supported thinking levels.
+- Applying model/thinking successfully updates the shared user `~/.config/pi/pix.jsonc` `thinkingByModel` map. Cancelling the picker does not persist staged-only changes, and project `.pi/pix.jsonc` cannot override this user preference. See `model-thinking-preferences.md`.
 - Applying a new model during an active run sends the normal ACP `session/set_config_option` request immediately; Desktop does not wait for the prompt to finish before issuing it.
 - The ACP adapter applies `model` through Pi's normal `setModel` RPC and `thought_level` through `setThinkingLevel`; there is no ACP idle-only guard around these options.
 - This matches TUI behavior: TUI calls `session.setModel()` while `session.isStreaming` is true. The current in-flight model request is not interrupted; the changed session model is used by subsequent model work according to Pi runtime semantics.
@@ -31,6 +33,9 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - `desktop/src/components/ModelThinkingPicker.svelte`
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/lib/model-thinking.ts`
+- `desktop/src/lib/model-thinking-preferences.ts`
+- `src/config.ts`
+- `schemas/pix.json`
 - `acp/src/acp/config-options.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 - `src/app/commands/command-model-actions.ts`
@@ -40,5 +45,6 @@ Keep Desktop model and thinking selection available while the agent is running, 
 
 - Desktop source-level regression coverage verifies that `promptRunning` does not disable or reject the combined model/thinking selector.
 - Desktop draft coverage verifies that the selector can stage model/thinking before `session/new` and that the staged values are forwarded only on lazy first-prompt materialization.
+- Desktop preference coverage verifies cross-picker per-model restoration and JSONC persistence through the user-config compare-and-swap path.
 - TUI unit coverage verifies that a model change still calls `setModel` while streaming and skips only the reload step.
 - ACP config-option tests cover model/thinking option validation and routing through the shared Pi RPC surface.

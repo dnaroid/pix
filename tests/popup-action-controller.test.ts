@@ -170,6 +170,7 @@ describe("AppPopupActionController model visibility", () => {
 		let applied: { model: unknown; thinking: string } | undefined;
 		let materialized = false;
 		let commandRan = false;
+		const remembered: Array<[string, string]> = [];
 		const popupMenus = {
 			syncActivePopupMenu: () => "model",
 			modelVisibilityModeActive: () => false,
@@ -189,6 +190,7 @@ describe("AppPopupActionController model visibility", () => {
 					return undefined;
 				},
 				selectDraftModel: (model, thinking) => { applied = { model, thinking }; },
+				saveThinkingLevelForModel: (modelRef, thinkingLevel) => { remembered.push([modelRef, thinkingLevel]); },
 			}),
 			popupMenus,
 			{ runModelThinkingCommand: async () => { commandRan = true; } } as unknown as AppCommandController,
@@ -201,6 +203,37 @@ describe("AppPopupActionController model visibility", () => {
 		assert.deepEqual(applied, { model: selectedModel, thinking: "high" });
 		assert.equal(materialized, false);
 		assert.equal(commandRan, false);
+		assert.deepEqual(remembered, [["openai-codex/gpt-5.5", "high"]]);
+	});
+
+	it("persists thinking only after a real model selection succeeds", async () => {
+		const model = { provider: "openai-codex", id: "gpt-5.6-sol", name: "Sol" } as never;
+		const remembered: Array<[string, string]> = [];
+		const popupMenus = {
+			syncActivePopupMenu: () => "model",
+			modelVisibilityModeActive: () => false,
+			selectedModelThinking: () => ({
+				value: { model, ref: "openai-codex/gpt-5.6-sol", current: false, visible: true },
+				thinkingLevel: "xhigh",
+				direct: true,
+				source: "model",
+			}),
+			closeModelSelection: () => {},
+		} as unknown as AppPopupMenuController;
+		const controller = new AppPopupActionController(
+			host({
+				runtime: () => ({ session: {} }) as never,
+				saveThinkingLevelForModel: (modelRef, thinkingLevel) => { remembered.push([modelRef, thinkingLevel]); },
+			}),
+			popupMenus,
+			{ runModelThinkingCommand: async () => undefined } as unknown as AppCommandController,
+			{} as AppMenuItemsController,
+			{} as AppQueuedMessageController,
+			{} as AppWorkspaceActionsController,
+		);
+
+		assert.equal(await controller.submitActivePopupMenu(), true);
+		assert.deepEqual(remembered, [["openai-codex/gpt-5.6-sol", "xhigh"]]);
 	});
 });
 
@@ -217,6 +250,7 @@ function host(overrides: Partial<AppPopupActionControllerHost> = {}): AppPopupAc
 		showToast: () => undefined,
 		visibleModels: () => undefined,
 		saveVisibleModels: (refs) => refs,
+		saveThinkingLevelForModel: () => undefined,
 		render: () => undefined,
 		afterSessionReplacement: () => undefined,
 		scrollToConversationEntry: () => false,

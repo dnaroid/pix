@@ -7,6 +7,7 @@ import {
 	loadPixConfig,
 	resolveDefaultModelRef,
 	resolveToolRule,
+	savePixThinkingLevelForModel,
 	savePixVisibleModels,
 	type PixConfig,
 } from "../config.js";
@@ -344,6 +345,7 @@ export class PiUiExtendApp {
 			get entries() { return app.entries; },
 			get session() { return app.runtime?.session; },
 			currentThinkingLevel: () => this.runtime?.session.thinkingLevel ?? this.draftModelState()?.thinkingLevel,
+			rememberedThinkingLevel: (modelRef) => this.pixConfig.thinkingByModel?.[modelRef],
 			get resumeLoading() { return app.resumeLoading; },
 			get resumeSessionCount() { return app.resumeSessions.length; },
 			isRunning: () => this.running,
@@ -666,6 +668,10 @@ export class PiUiExtendApp {
 					const saved = savePixVisibleModels(modelRefs);
 					this.pixConfig.visibleModels = [...saved];
 					return saved;
+				},
+				saveThinkingLevelForModel: (modelRef, thinkingLevel) => {
+					const saved = savePixThinkingLevelForModel(modelRef, thinkingLevel);
+					this.pixConfig.thinkingByModel = { ...saved };
 				},
 				render: () => this.render(),
 				awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
@@ -1047,6 +1053,8 @@ export class PiUiExtendApp {
 		else this.pixConfig.defaultModel = { ...config.defaultModel };
 		if (config.visibleModels === undefined) delete this.pixConfig.visibleModels;
 		else this.pixConfig.visibleModels = [...config.visibleModels];
+		if (config.thinkingByModel === undefined) delete this.pixConfig.thinkingByModel;
+		else this.pixConfig.thinkingByModel = { ...config.thinkingByModel };
 		this.pixConfig.ignoreContextFiles = config.ignoreContextFiles;
 		this.pixConfig.maxProjectSessions = config.maxProjectSessions;
 		this.updateOutputFilters();

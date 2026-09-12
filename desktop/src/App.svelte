@@ -185,6 +185,10 @@
     updateVisibleModelRefsInPixConfig,
     visibleModelRefsFromPixConfig,
   } from "./lib/model-visibility";
+  import {
+    modelThinkingPreferencesFromPixConfig,
+    updateModelThinkingPreferenceInPixConfig,
+  } from "./lib/model-thinking-preferences";
   import type { SettingsConfigDocument } from "./lib/settings";
   import type { ProjectTreeEntry } from "./lib/project-tree";
   import {
@@ -316,6 +320,7 @@
   let modelThinkingPickerSessionId = $state<string | null>(null);
   let modelThinkingPickerDraft = $state(false);
   let visibleModelRefs = $state<string[] | undefined>(undefined);
+  let rememberedThinkingByModel = $state<Record<string, string>>({});
   let sessionSelectorOpen = $state(false);
   let sessionSelectorQuery = $state("");
   let sessionSelectorMode = $state<"open" | "delete">("open");
@@ -4457,9 +4462,11 @@
     try {
       const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
       visibleModelRefs = visibleModelRefsFromPixConfig(document.content);
+      rememberedThinkingByModel = modelThinkingPreferencesFromPixConfig(document.content);
     } catch {
       // A missing/unreadable preference falls back to the full model catalog.
       visibleModelRefs = undefined;
+      rememberedThinkingByModel = {};
     }
     if (
       operationRunning
@@ -4504,6 +4511,27 @@
     throw new Error("Pix settings changed repeatedly while model visibility was being saved. Try again.");
   }
 
+  async function rememberModelThinkingPreference(modelRef: string, thinkingLevel: string): Promise<void> {
+    try {
+      let document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const content = updateModelThinkingPreferenceInPixConfig(document.content, modelRef, thinkingLevel);
+        const result = await invoke<{ written: boolean; document: SettingsConfigDocument }>(
+          "write_user_config_if_unchanged",
+          { kind: "pix", expectedContent: document.content, content },
+        );
+        if (result.written) {
+          rememberedThinkingByModel = modelThinkingPreferencesFromPixConfig(result.document.content);
+          return;
+        }
+        document = result.document;
+      }
+      throw new Error("Pix settings changed repeatedly while model thinking preference was being saved.");
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
   function configChangeInProgress(sessionId: string): boolean {
     return changingConfigBySessionId.has(sessionId);
   }
@@ -4539,6 +4567,7 @@
         modelRef,
         thinkingLevel: state.currentThinking,
       };
+      await rememberModelThinkingPreference(modelRef, state.currentThinking);
       return;
     }
 
@@ -4587,6 +4616,8 @@
         configOptionsBySessionId.set(sessionId, options);
         if (requestClient === client && sessionId === activeSessionId) configOptions = options;
       }
+      const applied = modelThinkingConfigState(options);
+      await rememberModelThinkingPreference(modelRef, applied.currentThinking);
     } catch (error) {
       if (requestClient === client && sessionId === activeSessionId) reportError(error);
       throw error;
@@ -5723,6 +5754,7 @@
   <ModelThinkingPicker
     configOptions={displayedConfigOptions}
     {visibleModelRefs}
+    {rememberedThinkingByModel}
     disabled={!canUseSession || changingConfig !== null || (draftSessionTabActive ? draftConfigOptions.length === 0 : !activeSessionRuntimeReady)}
     onApply={applyModelThinkingSelection}
     onVisibleModelsChange={saveVisibleModelRefs}

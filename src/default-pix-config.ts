@@ -4,6 +4,8 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "defaultModel": { "modelRef": "openai-codex/gpt-5.6-sol", "fallbackModels": [], "thinking": "medium" },
   // Optional model-picker whitelist shared by Pix TUI and Desktop. Omit it to show all available models.
   // "visibleModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5-turbo"],
+  // Last applied thinking level per model, shared by Pix TUI and Desktop model pickers.
+  // "thinkingByModel": { "openai-codex/gpt-5.6-sol": "high", "zai/glm-5-turbo": "max" },
   // Disable AGENTS.md / CLAUDE.md discovery for this project when set in <cwd>/.pi/pix.jsonc.
   "ignoreContextFiles": false,
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.

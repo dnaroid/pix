@@ -176,6 +176,17 @@ export const PixConfigSchema = Type.Object(
 		}), {
 			description: "User-level whitelist shared by Pix TUI and Desktop model pickers. Omit to show every available model.",
 		})),
+		thinkingByModel: Type.Optional(Type.Record(Type.String(), Type.Union([
+			Type.Literal("off"),
+			Type.Literal("minimal"),
+			Type.Literal("low"),
+			Type.Literal("medium"),
+			Type.Literal("high"),
+			Type.Literal("xhigh"),
+			Type.Literal("max"),
+		]), {
+			description: "User-level last-applied thinking level per provider/model, shared by Pix TUI and Desktop model pickers.",
+		})),
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		outputFilters: Type.Optional(OutputFiltersConfig),
 		promptEnhancer: Type.Optional(PromptEnhancerConfig),

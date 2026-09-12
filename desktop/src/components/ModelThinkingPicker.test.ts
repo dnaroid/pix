@@ -11,6 +11,8 @@ describe("ModelThinkingPicker staged selection", () => {
   it("uses the selected model capability list for the thinking controls", () => {
     expect(pickerSource).toContain('selectedModel?.thinkingLevels ?? ["off"]');
     expect(pickerSource).toContain("selectedModel?.thinkingLevels.includes(level)");
+    expect(pickerSource).toContain("rememberedThinkingByModel = {}");
+    expect(pickerSource).toContain("thinkingByModel.set(modelRef, thinkingLevel)");
     expect(pickerSource).toContain("thinkingByModel.get(model.ref) ?? config.currentThinking");
     expect(pickerSource).toContain("model.thinkingLevels");
   });

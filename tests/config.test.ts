@@ -28,6 +28,7 @@ const {
 	savePixAutocompleteModel,
 	savePixDefaultModel,
 	savePixDefaultThinking,
+	savePixThinkingLevelForModel,
 	savePixVisibleModels,
 	saveProjectPixIgnoreContextFiles,
 	savePixDictationLanguage,
@@ -36,6 +37,7 @@ const {
 	upsertPixAutocompleteModelInJsonc,
 	upsertPixDictationLanguageInJsonc,
 	upsertPixIgnoreContextFilesInJsonc,
+	upsertPixThinkingLevelForModelInJsonc,
 	upsertPixVisibleModelsInJsonc,
 } = await import("../src/config.js");
 type ToolRendererConfig = import("../src/config.js").ToolRendererConfig;
@@ -274,6 +276,40 @@ describe("config helpers", () => {
 		assert.deepEqual(savePixVisibleModels([]), []);
 		assert.deepEqual(loadPixConfig().visibleModels, []);
 		assert.match(upsertPixVisibleModelsInJsonc(`{}`, ["openai/test"]), /"visibleModels"/u);
+	});
+
+	it("persists user-level thinking per model and ignores project overrides", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{
+			// keep comments
+			"thinkingByModel": {
+				"openai-codex/gpt-5.6-sol": "high",
+				"zai/glm-5-turbo": "max",
+				"bad/model": "invalid"
+			}
+		}`);
+
+		assert.deepEqual(loadPixConfig().thinkingByModel, {
+			"openai-codex/gpt-5.6-sol": "high",
+			"zai/glm-5-turbo": "max",
+		});
+		assert.deepEqual(savePixThinkingLevelForModel("openai-codex/gpt-5.6-sol", "medium"), {
+			"openai-codex/gpt-5.6-sol": "medium",
+			"zai/glm-5-turbo": "max",
+		});
+		assert.match(readFileSync(testConfigPath, "utf8"), /keep comments/u);
+
+		const projectDir = mkdtempSync(join(tmpdir(), "pix-project-"));
+		mkdirSync(join(projectDir, ".pi"), { recursive: true });
+		writeFileSync(getProjectPixConfigPath(projectDir), `{ "thinkingByModel": { "project/only": "low" } }`);
+		assert.deepEqual(loadPixConfig(projectDir).thinkingByModel, {
+			"openai-codex/gpt-5.6-sol": "medium",
+			"zai/glm-5-turbo": "max",
+		});
+
+		const inserted = upsertPixThinkingLevelForModelInJsonc(`{}`, "openai/test:high", "xhigh");
+		assert.match(inserted, /"openai\/test": "xhigh"/u);
+		assert.equal(upsertPixThinkingLevelForModelInJsonc(`{}`, "openai/test", "invalid"), `{}`);
 	});
 
 	it("persists autocomplete model and allows an empty disabled value", () => {

@@ -15,6 +15,7 @@
   let {
     configOptions,
     visibleModelRefs,
+    rememberedThinkingByModel = {},
     disabled = false,
     onApply,
     onVisibleModelsChange,
@@ -22,6 +23,7 @@
   }: {
     configOptions: readonly SessionConfigOption[];
     visibleModelRefs?: readonly string[];
+    rememberedThinkingByModel?: Readonly<Record<string, string>>;
     disabled?: boolean;
     onApply: (modelRef: string, thinkingLevel: string) => void | Promise<void>;
     onVisibleModelsChange: (modelRefs: readonly string[]) => void | Promise<void>;
@@ -66,6 +68,9 @@
 
   onMount(() => {
     visibleRefs = visibleModelRefs === undefined ? undefined : [...visibleModelRefs];
+    for (const [modelRef, thinkingLevel] of Object.entries(rememberedThinkingByModel)) {
+      thinkingByModel.set(modelRef, thinkingLevel);
+    }
     const initialModel = config.currentModel ?? config.models[0];
     if (initialModel) {
       selectedModelRef = initialModel.ref;

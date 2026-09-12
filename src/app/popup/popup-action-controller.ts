@@ -24,6 +24,7 @@ export type AppPopupActionControllerHost = {
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 	visibleModels(): readonly string[] | undefined;
 	saveVisibleModels(modelRefs: readonly string[]): readonly string[];
+	saveThinkingLevelForModel(modelRef: string, thinkingLevel: ThinkingLevel): void;
 	render(): void;
 	afterSessionReplacement(message?: string): void;
 	openSessionInActiveDraftTab?(sessionPath: string): Promise<boolean>;
@@ -134,6 +135,7 @@ export class AppPopupActionController {
 		this.popupMenus.closeModelSelection();
 		if (!scope.runtime && this.host.isDraftTabActive?.()) {
 			this.host.selectDraftModel?.(selected.value.model, selected.thinkingLevel);
+			this.persistThinkingPreference(selected.value.ref, selected.thinkingLevel);
 			this.host.render();
 			return true;
 		}
@@ -149,6 +151,7 @@ export class AppPopupActionController {
 
 		try {
 			await this.commandController.runModelThinkingCommand(selected.value.model, selected.thinkingLevel);
+			this.persistThinkingPreference(selected.value.ref, selected.thinkingLevel);
 		} catch (error) {
 			if (!this.isScopeActive(scope)) return true;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
@@ -158,6 +161,14 @@ export class AppPopupActionController {
 
 		if (this.isScopeActive(scope)) this.host.render();
 		return true;
+	}
+
+	private persistThinkingPreference(modelRef: string, thinkingLevel: ThinkingLevel): void {
+		try {
+			this.host.saveThinkingLevelForModel(modelRef, thinkingLevel);
+		} catch (error) {
+			this.host.showToast(`Model changed, but thinking preference could not be saved: ${stringifyUnknown(error)}`, "warning");
+		}
 	}
 
 	private toggleSelectedModelVisibility(): boolean {
