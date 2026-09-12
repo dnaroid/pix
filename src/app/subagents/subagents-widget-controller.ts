@@ -22,6 +22,7 @@ export type SubagentsToolResultObserveOptions = {
 
 export type SubagentsWidgetControllerHost = {
 	readonly cwd: string;
+	hasActiveRuntime(): boolean;
 	sessionFile(): string | undefined;
 	isRunning(): boolean;
 	render(): void;
@@ -43,6 +44,7 @@ export class AppSubagentsWidgetController {
 	constructor(private readonly host: SubagentsWidgetControllerHost) {}
 
 	get widgetState(): SubagentsWidgetState | undefined {
+		if (!this.host.hasActiveRuntime()) return undefined;
 		return this.state;
 	}
 
@@ -72,6 +74,7 @@ export class AppSubagentsWidgetController {
 	observeToolResult(toolName: string, details: unknown, options: SubagentsToolResultObserveOptions = {}): void {
 		if (!isSubagentsToolName(toolName)) return;
 		if (!isSubagentRunRenderDetails(details)) return;
+		if (!this.host.hasActiveRuntime()) return;
 
 		const runDir = resolveSubagentRunDir(this.host.cwd, details.runDir);
 		const normalizedDetails: SubagentRunRenderDetails = { ...details, runDir };
@@ -404,6 +407,7 @@ export class AppSubagentsWidgetController {
 	}
 
 	private eventMatchesCurrentSession(eventSessionFile: string | undefined): boolean {
+		if (!this.host.hasActiveRuntime()) return false;
 		if (!eventSessionFile) return true;
 		const sessionFile = this.host.sessionFile();
 		if (!sessionFile) return true;

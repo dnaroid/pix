@@ -443,6 +443,7 @@ export class PiUiExtendApp {
 		});
 		this.subagentsWidgetController = new AppSubagentsWidgetController({
 			cwd: this.options.cwd,
+			hasActiveRuntime: () => this.runtime !== undefined,
 			sessionFile: () => this.runtime?.session.sessionFile,
 			isRunning: () => this.running,
 			render: () => this.scheduleRender(),

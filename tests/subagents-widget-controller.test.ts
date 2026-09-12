@@ -121,6 +121,44 @@ describe("subagents widget controller", () => {
 		controller.stopPolling();
 	});
 
+	it("ignores late live-state events after the active runtime is detached for a draft tab", () => {
+		let hasActiveRuntime = true;
+		let currentSession: string | undefined = "/tmp/project/current.jsonl";
+		const controller = new AppSubagentsWidgetController({
+			cwd: "/tmp/project",
+			hasActiveRuntime: () => hasActiveRuntime,
+			sessionFile: () => currentSession,
+			isRunning: () => false,
+			render: () => {},
+		});
+
+		controller.observeLiveState({
+			version: 1,
+			count: 1,
+			sessionFile: currentSession,
+			checkedAt: Date.now(),
+			runs: [{ runDir: "/tmp/project/.pi/subagents/run-a", agents: [{ id: "agent-a", status: "running" }] }],
+		});
+		assert.equal(controller.widgetState?.agents[0]?.id, "agent-a");
+
+		controller.reset();
+		hasActiveRuntime = false;
+		currentSession = undefined;
+		controller.observeLiveState({
+			version: 1,
+			count: 1,
+			sessionFile: "/tmp/project/current.jsonl",
+			checkedAt: Date.now(),
+			runs: [{ runDir: "/tmp/project/.pi/subagents/run-a", agents: [{ id: "agent-a", status: "running" }] }],
+		});
+
+		assert.equal(controller.widgetState, undefined);
+
+		hasActiveRuntime = true;
+		currentSession = "/tmp/project/other.jsonl";
+		assert.equal(controller.widgetState, undefined);
+	});
+
 	it("does not show historical subagent snapshots synchronously", () => {
 		const controller = newController("/tmp/project", "/tmp/project/current.jsonl", false);
 
@@ -234,6 +272,7 @@ describe("subagents widget controller", () => {
 function newController(cwd: string, currentSession: string, running = true): AppSubagentsWidgetController {
 	return new AppSubagentsWidgetController({
 		cwd,
+		hasActiveRuntime: () => true,
 		sessionFile: () => currentSession,
 		isRunning: () => running,
 		render: () => {},

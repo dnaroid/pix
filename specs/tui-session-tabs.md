@@ -107,6 +107,10 @@ user actually sends work to the agent.
   subscription/UI while retaining the real runtime under its owning background
   tab. Switching back restores that runtime or lazily reloads it by session
   path.
+- Late runtime-scoped UI signals from the displaced real tab, including
+  async-subagent live-state updates, are ignored while the draft owns the
+  conversation surface. A draft must never render a subagent panel belonging
+  to the detached real session.
 
 ## Related files
 
