@@ -1,7 +1,10 @@
 import AppKit
 import ApplicationServices
+import AVFoundation
+import CoreMedia
 import Darwin
 import Foundation
+import ScreenCaptureKit
 
 struct Failure: Error, CustomStringConvertible {
     let description: String
@@ -25,7 +28,7 @@ struct Arguments {
         let valueOptions: Set<String> = [
             "--app", "--bundle-id", "--pid", "--pgid", "--depth", "--limit", "--match",
             "--role", "--occurrence", "--path", "--value", "--text",
-            "--key", "--modifiers", "--x", "--y", "--out", "--timeout",
+            "--key", "--modifiers", "--x", "--y", "--out", "--timeout", "--duration",
         ]
         var parsedOptions: [String: String] = [:]
         var parsedFlags = Set<String>()
@@ -91,6 +94,8 @@ struct Arguments {
       inspect SELECTOR [--depth 10] [--limit 80] [--all]
       describe SELECTOR (--path PATH | --match TEXT [--role ROLE] [--occurrence N])
       screenshot SELECTOR --out FILE
+      window-id SELECTOR
+      record-window SELECTOR --out FILE [--duration SECONDS]
       click SELECTOR (--path PATH | --match TEXT [--role ROLE] [--occurrence N]) [--frame-fallback]
       set-value SELECTOR (--path PATH | --match TEXT) --value TEXT
       type SELECTOR --text TEXT
@@ -539,7 +544,10 @@ func sendKey(name: String, modifiers: String?) throws {
     up.post(tap: .cghidEventTap)
 }
 
-func screenshotWindow(_ app: NSRunningApplication, window: AXUIElement, output: String) throws {
+// Correlates the app's focused AX window with the on-screen CGWindow that owns
+// it so callers can target exactly that window (never a region or a full
+// display) without shell involvement.
+func correlatedWindowID(_ app: NSRunningApplication, window: AXUIElement) throws -> CGWindowID {
     let targetFrame = try frame(window).unwrap("focused window has no frame")
     let raw = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements],
@@ -559,7 +567,7 @@ func screenshotWindow(_ app: NSRunningApplication, window: AXUIElement, output: 
     guard !candidates.isEmpty else {
         throw Failure("no on-screen window found for screenshot")
     }
-    let scored = candidates.map { candidate in
+    let scored = candidates.map { candidate -> (CGWindowID, CGFloat) in
         let rectangle = candidate.1
         let score = abs(rectangle.minX - targetFrame.minX) + abs(rectangle.minY - targetFrame.minY) +
             abs(rectangle.width - targetFrame.width) + abs(rectangle.height - targetFrame.height)
@@ -568,6 +576,11 @@ func screenshotWindow(_ app: NSRunningApplication, window: AXUIElement, output: 
     guard let selected = scored.first, selected.1 <= 12 else {
         throw Failure("could not correlate the focused AX window with an on-screen window")
     }
+    return selected.0
+}
+
+func screenshotWindow(_ app: NSRunningApplication, window: AXUIElement, output: String) throws {
+    let selected = try correlatedWindowID(app, window: window)
 
     let destination = URL(fileURLWithPath: output).standardizedFileURL
     try FileManager.default.createDirectory(
@@ -576,13 +589,283 @@ func screenshotWindow(_ app: NSRunningApplication, window: AXUIElement, output: 
     )
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    task.arguments = ["-x", "-o", "-l", String(selected.0), destination.path]
+    task.arguments = ["-x", "-o", "-l", String(selected), destination.path]
     try task.run()
     task.waitUntilExit()
     guard task.terminationStatus == 0, FileManager.default.fileExists(atPath: destination.path) else {
         throw Failure("screencapture failed with status \(task.terminationStatus)")
     }
     print(destination.path)
+}
+
+// Swift screen-recording producer: captures exactly the on-screen window that
+// backs the app's focused AX window through ScreenCaptureKit's
+// desktop-independent window filter and encodes it to a silent H.264 MP4 with
+// AVAssetWriter. There is deliberately no display/region fallback, no audio,
+// and no screencapture(1) involvement for video.
+@available(macOS 12.3, *)
+final class WindowVideoRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
+    let queue = DispatchQueue(label: "ui-qa.window-video-recorder")
+    private let writer: AVAssetWriter
+    private let input: AVAssetWriterInput
+    private let adaptor: AVAssetWriterInputPixelBufferAdaptor
+    private let completed = DispatchSemaphore(value: 0)
+    private var stream: SCStream?
+    private var duration: Double
+    private var sessionStarted = false
+    private var stopping = false
+    private var failure: String?
+    private var firstSourceTime: CMTime?
+    private var lastSourceTime: CMTime?
+    private var lastPixelBuffer: CVPixelBuffer?
+    private var firstFrameUptime: UInt64?
+
+    init(output: URL, width: Int, height: Int, duration: Double) throws {
+        writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
+        input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+        ])
+        input.expectsMediaDataInRealTime = true
+        adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
+        writer.add(input)
+        self.duration = duration
+        super.init()
+    }
+
+    func start(filter: SCContentFilter, configuration: SCStreamConfiguration) throws {
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        self.stream = stream
+        guard writer.startWriting() else {
+            throw Failure("could not start the video asset writer: \(writer.error.map { String(describing: $0) } ?? "unknown error")")
+        }
+        let started = DispatchSemaphore(value: 0)
+        var startError: Error?
+        stream.startCapture { error in
+            startError = error
+            started.signal()
+        }
+        guard started.wait(timeout: .now() + 10) == .success else {
+            throw Failure("timed out starting the window capture stream")
+        }
+        if let startError {
+            throw Failure("could not start the window capture stream: \(startError.localizedDescription)")
+        }
+        // Hard cap enforced inside the helper regardless of caller behavior.
+        queue.asyncAfter(deadline: .now() + duration) { self.stopNow() }
+    }
+
+    func requestStop() {
+        queue.async { self.stopNow() }
+    }
+
+    // Blocks until the recording is finalized; returns the failure reason, if any.
+    func waitAndFinish() -> String? {
+        let margin: Double = 15
+        if completed.wait(timeout: .now() + duration + margin) == .timedOut {
+            requestStop()
+            _ = completed.wait(timeout: .now() + margin)
+        }
+        return failure
+    }
+
+    private func stopNow() {
+        guard !stopping else { return }
+        stopping = true
+        let group = DispatchGroup()
+        if let stream {
+            group.enter()
+            stream.stopCapture { _ in group.leave() }
+        }
+        group.notify(queue: queue) {
+            guard self.sessionStarted else {
+                if self.failure == nil { self.failure = "no frames were captured from the target window" }
+                self.completed.signal()
+                return
+            }
+            self.appendFinalFrame()
+            self.input.markAsFinished()
+            self.writer.finishWriting {
+                if self.writer.status != .completed, self.failure == nil {
+                    self.failure = "video asset writer finished with status \(self.writer.status.rawValue)"
+                }
+                self.completed.signal()
+            }
+        }
+    }
+
+    private func appendFinalFrame() {
+        guard let firstSourceTime, let lastSourceTime, let lastPixelBuffer,
+              let firstFrameUptime, input.isReadyForMoreMediaData
+        else { return }
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - firstFrameUptime
+        let elapsedSeconds = min(Double(elapsedNanoseconds) / 1_000_000_000, duration)
+        var finalTime = CMTimeAdd(
+            firstSourceTime,
+            CMTime(seconds: elapsedSeconds, preferredTimescale: 600)
+        )
+        if CMTimeCompare(finalTime, lastSourceTime) <= 0 {
+            finalTime = CMTimeAdd(lastSourceTime, CMTime(value: 1, timescale: 15))
+        }
+        if !adaptor.append(lastPixelBuffer, withPresentationTime: finalTime), failure == nil {
+            failure = "video final-frame append failed: \(writer.error.map { String(describing: $0) } ?? "unknown error")"
+        }
+    }
+
+    private func frameStatus(_ sampleBuffer: CMSampleBuffer) -> SCFrameStatus {
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+            as? [[SCStreamFrameInfo: Any]]
+        guard let raw = attachments?.first?[.status] else { return .complete }
+        if let status = raw as? SCFrameStatus { return status }
+        if let number = raw as? NSNumber, let status = SCFrameStatus(rawValue: number.intValue) { return status }
+        return .complete
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+        guard outputType == .screen, !stopping else { return }
+        let status = frameStatus(sampleBuffer)
+        // ScreenCaptureKit marks unchanged-window frames as `idle`; they still
+        // carry the current window surface and must be encoded so a static UI
+        // produces a truthful non-zero-duration timeline.
+        guard status == .complete || status == .started || status == .idle else { return }
+        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        if !sessionStarted {
+            writer.startSession(atSourceTime: timestamp)
+            sessionStarted = true
+            firstSourceTime = timestamp
+            firstFrameUptime = DispatchTime.now().uptimeNanoseconds
+        }
+        guard writer.status == .writing, input.isReadyForMoreMediaData,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+        else { return }
+        if adaptor.append(pixelBuffer, withPresentationTime: timestamp) {
+            lastSourceTime = timestamp
+            lastPixelBuffer = pixelBuffer
+            return
+        }
+        if failure == nil {
+            failure = "video pixel buffer append failed: \(writer.error.map { String(describing: $0) } ?? "unknown error")"
+        }
+        stopNow()
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        // The captured window or its app died: finalize best-effort. A clean
+        // programmatic stopCapture never reaches this callback.
+        queue.async {
+            if !self.stopping, self.failure == nil {
+                self.failure = "capture stream stopped early: \(error.localizedDescription)"
+            }
+            self.stopNow()
+        }
+    }
+}
+
+private var recorderSignalSources: [DispatchSourceSignal] = []
+private let recorderSignalLock = NSLock()
+private var activeRecorder: WindowVideoRecorder?
+private var recorderStopRequestedStorage = false
+
+private var recorderStopRequested: Bool {
+    get {
+        recorderSignalLock.lock()
+        defer { recorderSignalLock.unlock() }
+        return recorderStopRequestedStorage
+    }
+    set {
+        recorderSignalLock.lock()
+        recorderStopRequestedStorage = newValue
+        recorderSignalLock.unlock()
+    }
+}
+
+// Installs graceful-stop handling for the record-window command. This must run
+// before any slow startup work (app activation, shareable-content
+// enumeration), because the desktop backend may legitimately SIGTERM the
+// recorder early to stop and finalize.
+func installRecorderSignalHandlers() {
+    signal(SIGTERM, SIG_IGN)
+    signal(SIGINT, SIG_IGN)
+    for number in [SIGTERM, SIGINT] {
+        let source = DispatchSource.makeSignalSource(signal: number, queue: DispatchQueue.global())
+        source.setEventHandler {
+            recorderStopRequested = true
+            activeRecorder?.requestStop()
+        }
+        source.resume()
+        recorderSignalSources.append(source)
+    }
+}
+
+@available(macOS 12.3, *)
+func recordWindowVideo(app: NSRunningApplication, window: AXUIElement, arguments: Arguments) throws {
+    let windowID = try correlatedWindowID(app, window: window)
+    let output = URL(fileURLWithPath: try arguments.required("out")).standardizedFileURL
+    try FileManager.default.createDirectory(
+        at: output.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    let temporary = URL(fileURLWithPath: "\(output.path).\(ProcessInfo.processInfo.processIdentifier).tmp")
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var content: SCShareableContent?
+    var enumerationError: Error?
+    SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { result, error in
+        content = result
+        enumerationError = error
+        semaphore.signal()
+    }
+    guard semaphore.wait(timeout: .now() + 15) == .success else {
+        throw Failure("timed out enumerating capturable windows")
+    }
+    if let enumerationError {
+        throw Failure("could not enumerate capturable windows: \(enumerationError.localizedDescription)")
+    }
+    guard let content, let target = content.windows.first(where: { $0.windowID == windowID }) else {
+        throw Failure("window \(windowID) is not present among capturable on-screen windows")
+    }
+
+    let requested = try arguments.double("duration", default: 30)
+    let duration = min(max(requested, 0.5), 30)
+    let windowFrame = try frame(window).unwrap("focused window has no frame")
+    let scale = (NSScreen.screens.first { $0.frame.intersects(windowFrame) } ?? NSScreen.main)?.backingScaleFactor ?? 2
+    let pixelWidth = evenPixel(Double(windowFrame.width) * scale)
+    let pixelHeight = evenPixel(Double(windowFrame.height) * scale)
+    let configuration = SCStreamConfiguration()
+    configuration.width = pixelWidth
+    configuration.height = pixelHeight
+    configuration.minimumFrameInterval = CMTime(value: 1, timescale: 15)
+    configuration.showsCursor = false
+
+    let recorder = try WindowVideoRecorder(
+        output: temporary,
+        width: pixelWidth,
+        height: pixelHeight,
+        duration: duration
+    )
+    activeRecorder = recorder
+    try recorder.start(filter: SCContentFilter(desktopIndependentWindow: target), configuration: configuration)
+    print("recording-started")
+    fflush(stdout)
+    if recorderStopRequested { recorder.requestStop() }
+    let failure = recorder.waitAndFinish()
+    if let failure {
+        try? FileManager.default.removeItem(at: temporary)
+        throw Failure(failure)
+    }
+    // Publish atomically: a killed helper can never leave a partial artifact.
+    if FileManager.default.fileExists(atPath: output.path) {
+        try FileManager.default.removeItem(at: output)
+    }
+    try FileManager.default.moveItem(at: temporary, to: output)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
+    print(output.path)
+}
+
+private func evenPixel(_ value: Double) -> Int {
+    max(2, (Int(value.rounded(.down)) / 2) * 2)
 }
 
 func isUseful(_ element: AXUIElement) -> Bool {
@@ -608,9 +891,13 @@ func run(_ arguments: Arguments) throws {
         let screenRecording = arguments.has("prompt")
             ? CGRequestScreenCaptureAccess()
             : CGPreflightScreenCaptureAccess()
+        let screenCaptureKit = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 12, minorVersion: 3, patchVersion: 0)
+        )
         print("macos=\(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("accessibility=\(accessibility ? "granted" : "missing")")
         print("screen_recording=\(screenRecording ? "granted" : "missing")")
+        print("sck=\(screenCaptureKit ? "available" : "unsupported")")
 
     case "list":
         for app in NSWorkspace.shared.runningApplications
@@ -672,6 +959,27 @@ func run(_ arguments: Arguments) throws {
         try activate(app)
         let window = try frontWindow(app)
         try screenshotWindow(app, window: window, output: arguments.required("out"))
+
+    case "window-id":
+        let app = try findApplication(arguments)
+        let window = try frontWindow(app)
+        print(try correlatedWindowID(app, window: window))
+
+    case "record-window":
+        // Graceful-stop handlers go in before any slow startup work so the
+        // desktop backend can always stop and finalize the recorder.
+        installRecorderSignalHandlers()
+        try requireAccessibility()
+        guard #available(macOS 12.3, *) else {
+            throw Failure("ScreenCaptureKit window recording requires macOS 12.3 or newer")
+        }
+        guard CGPreflightScreenCaptureAccess() else {
+            throw Failure("Screen Recording permission is required to record a window; run doctor --prompt")
+        }
+        let app = try findApplication(arguments)
+        try activate(app)
+        let window = try frontWindow(app)
+        try recordWindowVideo(app: app, window: window, arguments: arguments)
 
     case "click":
         try requireAccessibility()

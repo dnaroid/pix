@@ -99,6 +99,11 @@ persistent user settings merely to make UI automation possible.
    visible copy, enabled/checked/value state, or another explicit application
    result. A screenshot alone is evidence, not the only pass/fail oracle.
 6. Save a meaningful terminal capture and/or desktop screenshot when available.
+   TUI runs automatically publish a bounded asciicast replay and supported
+   macOS runs automatically publish a silent exact-window video; no extra flow
+   action is required. These recordings explain chronology but never replace a
+   deterministic assertion. Treat an unavailable best-effort recording as a
+   reported evidence limitation, not by itself as a product failure.
    If screenshots are present, inspect at least one representative PNG with the
    `read` tool before claiming visual QA; record the inspected path and concrete
    findings. If image reading or screenshot capture is unavailable, report that
@@ -108,9 +113,9 @@ persistent user settings merely to make UI automation possible.
    kill by app name when that could terminate an unrelated user session.
 
 Report `PASS`, `FAIL`, or `BLOCKED`, the concrete oracle(s), launch/control path,
-and every retained evidence file as a clickable Markdown link plus absolute
-path. For a failure, state expected versus observed behavior without rewriting
-the acceptance criterion.
+and every retained evidence file—including terminal replay or desktop video—as
+a clickable Markdown link plus absolute path. For a failure, state expected
+versus observed behavior without rewriting the acceptance criterion.
 
 ## Browser backend
 

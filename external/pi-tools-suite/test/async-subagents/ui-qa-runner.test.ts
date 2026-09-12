@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
-import { desktopPlatformContract } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
+import { desktopPlatformContract, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
 
 const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
 const nodeExecutable = fs.realpathSync(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
@@ -71,6 +71,11 @@ function expectUnifiedArtifacts(payload: any) {
 	expect(Object.keys(payload.artifacts).sort()).toEqual([
 		"accessibilitySnapshots", "downloads", "observations", "screenshots", "terminalCaptures", "traces", "videos",
 	]);
+}
+
+function readAsciicast(file: string) {
+	const lines = fs.readFileSync(file, "utf8").trim().split("\n");
+	return { header: JSON.parse(lines[0]), events: lines.slice(1).map((line) => JSON.parse(line)) };
 }
 
 describe("capability-first UI QA runner", () => {
@@ -172,6 +177,96 @@ process.stdin.on("data", (data) => {
 		expect(snapshot.bufferType).toBe("alternate");
 		expect(snapshot.text).toContain("Accepted");
 		expect(snapshot.text).not.toContain("Ready");
+	});
+
+	test("advertises terminalRecording as a TUI capability", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "fixture.mjs", "setInterval(() => {}, 1000);\n");
+		writeFlow(uiWorkspace, "tui-capabilities.jsonc", { target: { command: { argv: [nodeExecutable, "fixture.mjs"] } } });
+		const result = invoke(project, agentDir, ["probe", "--flow", "tui-capabilities.jsonc"]);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("AVAILABLE");
+		expect(result.payload.selection.selectedBackend).toBe("tui");
+		expect(result.payload.selection.supportedCapabilities).toContain("terminalRecording");
+		expect(result.payload.selection.missingCapabilities).not.toContain("terminalRecording");
+	});
+
+	test("records a bounded asciicast v2 terminal video under the evidence directory", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "fixture.mjs", `
+process.stdin.setRawMode?.(true);
+process.stdout.write("\\u001b[?1049h\\u001b[2J\\u001b[HReady\\r\\nPress enter");
+process.stdin.on("data", (data) => {
+  if (data.includes("\\r")) process.stdout.write("\\u001b[2J\\u001b[HAccepted\\r\\nDone");
+});
+`);
+		writeFlow(uiWorkspace, "recording.jsonc", {
+			version: 1,
+			target: { command: { argv: [nodeExecutable, "fixture.mjs"], cwd: "." } },
+			viewport: { cols: 40, rows: 10 },
+			steps: [
+				{ action: "waitForText", text: "Ready" },
+				{ action: "resize", cols: 60, rows: 12 },
+				{ action: "sendKeys", keys: ["enter"] },
+				{ action: "waitForText", text: "Accepted" },
+				{ action: "assertText", text: "Accepted" },
+			],
+		});
+		const result = invoke(project, agentDir, ["run", "--flow", "recording.jsonc", "--run-id", "recording", "--runner-timeout-ms", "10000"]);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("PASSED");
+		expect(result.payload.selection.supportedCapabilities).toContain("terminalRecording");
+		expect(result.payload.artifacts.videos).toHaveLength(1);
+		const video = result.payload.artifacts.videos[0];
+		expect(video.format).toBe("asciicast-v2");
+		expect(video.truncated).toBe(false);
+		expect(video.path.endsWith("terminal-recording.cast")).toBe(true);
+		expect(video.path.startsWith(path.join(project, ".pi", "subagents", "run", "qa", "ui-qa", "evidence", "recording"))).toBe(true);
+		const stat = fs.statSync(video.path);
+		expect(stat.isFile()).toBe(true);
+		expect(stat.mode & 0o777).toBe(0o600);
+		const { header, events } = readAsciicast(video.path);
+		expect(header.version).toBe(2);
+		expect(header.width).toBe(40);
+		expect(header.height).toBe(10);
+		expect(header.env.TERM).toBe("xterm-256color");
+		expect(events).toHaveLength(video.events);
+		expect(events.length).toBeGreaterThan(0);
+		expect(events.every((event: any) => Array.isArray(event) && event.length === 3 && typeof event[0] === "number" && ["o", "r"].includes(event[1]))).toBe(true);
+		for (let index = 1; index < events.length; index += 1) {
+			expect(events[index][0]).toBeGreaterThanOrEqual(events[index - 1][0]);
+		}
+		expect(events.some((event: any) => event[1] === "r" && event[2] === "60x12")).toBe(true);
+		const output = events.filter((event: any) => event[1] === "o").map((event: any) => event[2]).join("");
+		expect(output).toContain("Ready");
+		expect(output).toContain("Accepted");
+		const observation = result.payload.observations.find((entry: any) => entry.action === "terminalRecording");
+		expect(observation).toMatchObject({ status: "recorded", truncated: false });
+	});
+
+	test("bounds the terminal recording to the transcript limit without failing the run", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "flooding.mjs", `
+const flood = setInterval(() => process.stdout.write("x".repeat(64 * 1024)), 5);
+setTimeout(() => { clearInterval(flood); process.stdout.write("\\nREADY\\nDONE\\n"); }, 300);
+`);
+		writeFlow(uiWorkspace, "flood.jsonc", {
+			target: { command: { argv: [nodeExecutable, "flooding.mjs"] } },
+			steps: [
+				{ action: "waitForText", text: "DONE", timeoutMs: 10_000 },
+				{ action: "assertText", text: "DONE" },
+				{ action: "assertText", text: "READY" },
+			],
+		});
+		const result = invoke(project, agentDir, ["run", "--flow", "flood.jsonc", "--run-id", "flood", "--runner-timeout-ms", "15000"]);
+		expect(result.status).toBe(0);
+		expect(result.payload.status).toBe("PASSED");
+		expect(result.payload.assertions.every((entry: any) => entry.passed)).toBe(true);
+		expect(result.payload.artifacts.videos).toHaveLength(1);
+		const video = result.payload.artifacts.videos[0];
+		expect(video.format).toBe("asciicast-v2");
+		expect(video.truncated).toBe(true);
+		expect(fs.statSync(video.path).size).toBeLessThanOrEqual(1024 * 1024);
 	});
 
 	test("models cursor movement, erase operations, and resize as terminal state", () => {
@@ -346,6 +441,7 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		expect(linux.available).toBe(false);
 		expect(linux.platformDriver).toBe("linux-at-spi-planned");
 		expect(linux.missingCapabilities).toContain("semanticAccessibility");
+		expect(linux.missingCapabilities).toContain("windowVideo");
 
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeFlow(uiWorkspace, "desktop.jsonc", { target: { application: { name: "Nonexistent UI QA Fixture" } } });
@@ -355,11 +451,24 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		expect(second.payload.selection.selectedBackend).toBe("desktop");
 		expect(second.payload.status).toBe(first.payload.status);
 		expect(second.payload.selection.supportedCapabilities).toEqual(first.payload.selection.supportedCapabilities);
+		// Exact-window video additionally requires ScreenCaptureKit, so it may be
+		// stricter than screenshots but can never be advertised without them.
+		if (first.payload.selection.supportedCapabilities.includes("windowVideo")) {
+			expect(first.payload.selection.supportedCapabilities).toContain("windowScreenshot");
+		}
 		if (first.payload.status === "BLOCKED") {
 			expect(first.status).toBe(2);
 			expect(first.payload.reason).toBeString();
 			expect(first.payload.remediation).toBeString();
 		}
 		expectUnifiedArtifacts(first.payload);
+	});
+
+	test("gates desktop capture steps on honestly probed capabilities", () => {
+		const full = ["windowScreenshot", "windowVideo"];
+		expect(validateDesktopStepCapabilities({ action: "screenshot", name: "shot" }, full)).toBeDefined();
+		// Screenshot-only producers still reject every capture-shape step.
+		expect(() => validateDesktopStepCapabilities({ action: "screenshot" }, [])).toThrow(/windowScreenshot/);
+		expect(() => validateDesktopStepCapabilities({ action: "capture" }, [])).toThrow(/windowScreenshot/);
 	});
 });

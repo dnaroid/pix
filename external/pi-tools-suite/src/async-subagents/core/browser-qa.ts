@@ -14,7 +14,7 @@ export const UI_QA_RUNNER_ENV = "PI_UI_QA_RUNNER";
 
 /** Resolve against the installed package, never the delegated project's cwd. */
 export function getBrowserQaRunnerPath(): string {
-	return fileURLToPath(new URL("../agents/browser-qa/scripts/browser-qa-runner.mjs", import.meta.url));
+	return fileURLToPath(new URL("../agents/ui-qa/browser/scripts/browser-qa-runner.mjs", import.meta.url));
 }
 
 /** Resolve the capability-first UI-QA runner against the installed package. */

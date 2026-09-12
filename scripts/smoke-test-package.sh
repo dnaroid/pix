@@ -88,12 +88,12 @@ REQUIRED_FILES=(
 	"$PKG_ROOT/external/pi-tools-suite/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/src/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/package.json"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa.md"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/scripts/browser-qa-runner.mjs"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/vendor/fflate.mjs"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/vendor/fflate.LICENSE"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/examples/qa-auth.example.jsonc"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/examples/qa-flow.example.jsonc"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/vendor/fflate.mjs"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/vendor/fflate.LICENSE"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/examples/qa-auth.example.jsonc"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/examples/qa-flow.example.jsonc"
 )
 
 for required_file in "${REQUIRED_FILES[@]}"; do

@@ -489,6 +489,7 @@ describe.serial("subagent type config", () => {
 		expect(resolved.timeoutMs).toBe(300_000);
 		expect(fs.existsSync(runner)).toBe(true);
 		expect(path.isAbsolute(runner)).toBe(true);
+		expect(runner).toContain(path.join("agents", "ui-qa", "browser"));
 		expect(fs.existsSync(uiRunner)).toBe(true);
 		expect(path.isAbsolute(uiRunner)).toBe(true);
 		const instructions = config.types["ui-qa"].promptAppend!;

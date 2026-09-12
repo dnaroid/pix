@@ -25,8 +25,8 @@ runner's credential and evidence protections.
   `description` reaches parent/router catalogs. No QA-specific prompt injection
   or extra skill read is required.
 - The capability-first runner and its browser/TUI/desktop backends live under
-  `agents/ui-qa/`. Browser vendor dependency/license and legacy JSONC assets
-  remain in the sibling `agents/browser-qa/` resource directory. Vendor bytes
+  `agents/ui-qa/`. The trusted browser runner, vendor dependency/license, and
+  legacy JSONC assets are grouped under `agents/ui-qa/browser/`. Vendor bytes
   stay unchanged; both runners accept the canonical `ui-qa` owner type as well
   as the legacy alias. JSONC examples are optional reference assets, not
   additional instructions.
@@ -56,10 +56,14 @@ historical `browser-qa/` workspace.
 
 The unified runner selects exactly one backend from the flow target, reports
 candidate capabilities and rationale, and normalizes assertions, observations,
-and typed artifact links. TUI runs use a real PTY plus ANSI/VT screen model;
-macOS desktop runs use the bundled Accessibility/CGWindow helper. Launch
-contracts, private paths, deadlines, and owned-process cleanup are enforced by
-the runner rather than by model instructions alone.
+and typed artifact links. TUI runs use a real PTY plus ANSI/VT screen model and
+automatically retain a bounded asciicast v2 replay. macOS desktop runs use the
+bundled Accessibility/CGWindow helper and, when ScreenCaptureKit plus Screen
+Recording permission are available, automatically retain a silent, bounded
+video of only the correlated application window. Video remains best-effort
+evidence and never replaces deterministic assertions. Launch contracts, private
+paths, deadlines, and owned-process cleanup are enforced by the runner rather
+than by model instructions alone.
 
 Profile merge semantics are unchanged: model-only overrides retain the body,
 task prompt additions follow it, and a task `promptOverride` still receives
@@ -79,13 +83,15 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - Auth scaffolding uses discovered public selectors and secret placeholders;
   agents never read/edit the credential file. Auth paths stay private and
   fail closed on invalid permissions, symlinks, or non-empty replacement.
-- Deterministic assertions, screenshot inspection, redacted statuses, artifact
-  links, bounded execution, and agent-local cleanup are preserved.
+- Deterministic assertions, screenshot inspection, automatic bounded video
+  evidence, redacted statuses, artifact links, bounded execution, and
+  agent-local cleanup are preserved.
 
 ## Related files
 
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
@@ -104,9 +110,10 @@ parent catalogs, prompt delivery over child RPC without skills, global child
 skill isolation and skill-flag stripping, ordinary-child env cleanup, both
 UI-QA workspaces, and invoking both installed runner paths from a temporary
 project with spaces.
-Unified runner tests cover backend selection, real PTY behavior, unsafe launch
-and path rejection, timeout bounds, platform blockers, and an opt-in real macOS
-AppKit accessibility flow. Browser runner tests continue covering the trusted
+Unified runner tests cover backend selection, real PTY behavior and bounded
+asciicast evidence, unsafe launch and path rejection, timeout bounds, platform
+blockers, and an opt-in real macOS AppKit accessibility flow with automatic
+exact-window video. Browser runner tests continue covering the trusted
 credential-owning backend.
 
 Live QA/model behavior must be verified separately from deterministic tests;

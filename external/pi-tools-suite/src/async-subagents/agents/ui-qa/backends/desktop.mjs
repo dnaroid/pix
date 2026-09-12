@@ -26,12 +26,20 @@ const ACTION_FIELDS = {
 	screenshot: new Set(["action", "name", "timeoutMs"]),
 	capture: new Set(["action", "name", "depth", "limit", "timeoutMs"]),
 };
+const MAX_RECORD_DURATION_MS = 30_000;
+// Worst case after SIGTERM: the helper may still be completing startup
+// (activation plus shareable-content enumeration) before it can finalize the
+// MP4; deadline clamping keeps this inside the runner's hard-exit grace.
+const RECORD_FINALIZE_GRACE_MS = 15_000;
+const RECORD_RUNNER_MARGIN_MS = 5_000;
 
 export async function probeDesktopBackend(context = {}) {
 	const supportedCapabilities = ["launch", "attach", "dialogs", "boundedActions", "ownedCleanup"];
 	const platform = desktopPlatformContract(process.platform);
 	if (!platform.available) return { ...platform, supportedCapabilities };
 	if (context.shallow) {
+		// The shallow probe never measures Screen Recording permission, so it must
+		// not advertise permission-gated capabilities such as windowVideo.
 		return {
 			available: true,
 			platformDriver: "macos-accessibility",
@@ -49,12 +57,17 @@ export async function probeDesktopBackend(context = {}) {
 		if (doctor.code !== 0) throw new Error(doctor.stderr || `driver doctor exited ${doctor.code}`);
 		const accessibility = /(?:^|\n)accessibility=granted(?:\n|$)/.test(doctor.stdout);
 		const screenRecording = /(?:^|\n)screen_recording=granted(?:\n|$)/.test(doctor.stdout);
+		// windowVideo has a stricter producer than screenshots: it also needs the
+		// ScreenCaptureKit window-stream API (macOS 12.3+), reported by doctor.
+		const sck = /(?:^|\n)sck=available(?:\n|$)/.test(doctor.stdout);
 		const supported = [...supportedCapabilities];
 		const missing = [];
 		if (accessibility) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "stateAssertions");
 		else missing.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "stateAssertions");
 		if (screenRecording) supported.push("windowScreenshot");
 		else missing.push("windowScreenshot");
+		if (screenRecording && sck) supported.push("windowVideo");
+		else missing.push("windowVideo");
 		return {
 			available: accessibility,
 			platformDriver: "macos-accessibility",
@@ -64,14 +77,14 @@ export async function probeDesktopBackend(context = {}) {
 				? "macOS Accessibility permission is granted for the bundled semantic driver"
 				: "macOS Accessibility permission is missing for the process that runs UI QA",
 			remediation: accessibility ? undefined : "grant Accessibility access to the terminal/Pi host in System Settings > Privacy & Security > Accessibility, then rerun",
-			details: { accessibility, screenRecording },
+			details: { accessibility, screenRecording, sck },
 		};
 	} catch (error) {
 		return {
 			available: false,
 			platformDriver: "macos-accessibility",
 			supportedCapabilities,
-			missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "windowScreenshot"],
+			missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "windowScreenshot", "windowVideo"],
 			reason: `macOS accessibility driver is unavailable: ${safeReason(error)}`,
 			remediation: "install Apple Command Line Tools (xcrun/swiftc) or use a packaged build of the bundled macOS accessibility helper",
 		};
@@ -90,7 +103,7 @@ export function desktopPlatformContract(platform) {
 	return {
 		available: false,
 		platformDriver: platform === "win32" ? "windows-uia-planned" : "linux-at-spi-planned",
-		missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "windowScreenshot"],
+		missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "windowScreenshot", "windowVideo"],
 		reason: `the bundled desktop accessibility driver is not implemented on ${platform}`,
 		remediation: platform === "win32"
 			? "run on macOS for the bundled driver or add the Windows UI Automation platform driver"
@@ -108,6 +121,7 @@ export async function runDesktopBackend(context) {
 	const assertions = [];
 	const observations = [];
 	const artifacts = emptyArtifacts();
+	let recorder;
 	let launched;
 	let selector = application.selector;
 	let failure;
@@ -118,6 +132,15 @@ export async function runDesktopBackend(context) {
 			observations.push({ action: "launch", pid: launched.pid, argv0: application.launch.argv[0] });
 		}
 		if (!selector) throw new Error("desktop target requires an app selector or a launch contract");
+		if (probe.supportedCapabilities.includes("windowVideo")) {
+			recorder = await startWindowVideoRecorder({ context, helper, selector, observations });
+		} else {
+			observations.push({
+				action: "windowVideo",
+				status: "unavailable",
+				reason: "exact-window recording requires macOS 12.3+ and Screen Recording permission",
+			});
+		}
 		for (let index = 0; index < steps.length; index += 1) {
 			const step = steps[index];
 			context.progress("desktop_action_started", { index, action: step.action });
@@ -137,6 +160,19 @@ export async function runDesktopBackend(context) {
 	} catch (error) {
 		failure = error;
 	} finally {
+		// Automatic window video is best-effort evidence: recorders run
+		// concurrently with the remaining flow and are stopped and finalized
+		// here, and their outcome is always a structured observation that can
+		// never fail deterministic UI assertions.
+		if (recorder) {
+			const outcome = await recorder.stop().catch((error) => ({ name: recorder.name, status: "unavailable", reason: safeReason(error) }));
+			if (outcome.status === "recorded") {
+				artifacts.videos.push(outcome.artifact);
+				observations.push({ action: "windowVideo", name: outcome.name, status: "recorded", durationMs: outcome.durationMs, bytes: outcome.bytes });
+			} else {
+				observations.push({ action: "windowVideo", name: outcome.name, status: "unavailable", reason: outcome.reason });
+			}
+		}
 		if (failure && selector) {
 			await captureAccessibility({ context, helper, selector, name: "failure", artifacts, depth: 10, limit: 100 }).catch(() => {});
 			if (probe.details?.screenRecording) {
@@ -317,11 +353,17 @@ function validateSteps(steps, probe) {
 	return steps.map((step, index) => {
 		if (!isObject(step) || typeof step.action !== "string" || !ACTION_FIELDS[step.action]) throw new Error(`desktop step ${index + 1} has an unsupported action`);
 		assertKnownFields(step, ACTION_FIELDS[step.action], `desktop step ${index + 1}`);
-		if ((step.action === "screenshot" || step.action === "capture") && !probe.supportedCapabilities.includes("windowScreenshot")) {
-			throw new Error("desktop flow requires windowScreenshot, but macOS Screen Recording permission is missing");
-		}
-		return step;
+		return validateDesktopStepCapabilities(step, probe.supportedCapabilities ?? []);
 	});
+}
+
+// Exported for focused unit tests: capability gating must be honest about what
+// the probed producer actually supports on this host.
+export function validateDesktopStepCapabilities(step, supportedCapabilities) {
+	if ((step.action === "screenshot" || step.action === "capture") && !supportedCapabilities.includes("windowScreenshot")) {
+		throw new Error("desktop flow requires windowScreenshot, but macOS Screen Recording permission is missing");
+	}
+	return step;
 }
 
 function launchApplication(launch, context) {
@@ -410,6 +452,129 @@ async function captureScreenshot({ context, helper, selector, name, artifacts, t
 	await helperCall(helper, ["screenshot", ...selector, "--out", target], context, timeoutMs);
 	if (!fs.existsSync(target) || !fs.statSync(target).isFile()) throw new Error("desktop screenshot was not created");
 	artifacts.screenshots.push(context.artifact(filename, "screenshot"));
+}
+
+// Starts the helper's ScreenCaptureKit exact-window producer. The recorder only
+// starts after the selector resolves and the target window is ready, records
+// concurrently with the remaining flow, enforces a helper-side 30s hard cap,
+// and is stopped/finalized by the backend's finally block.
+async function startWindowVideoRecorder({ context, helper, selector, observations }) {
+	const name = "window";
+	try {
+		const remaining = Math.max(0, context.deadline - Date.now());
+		const durationMs = Math.min(MAX_RECORD_DURATION_MS, remaining - RECORD_RUNNER_MARGIN_MS);
+		if (durationMs < 500) {
+			observations.push({ action: "windowVideo", name, status: "unavailable", reason: "not enough runner time remains to record window video" });
+			return null;
+		}
+		await helperCall(helper, ["wait-window", ...selector, "--timeout", "5"], context, 10_000);
+		const filename = `${name}.mp4`;
+		const target = path.join(context.evidenceDir, filename);
+		const child = spawn(helper, ["record-window", ...selector, "--out", target, "--duration", String(durationMs / 1000)], {
+			cwd: context.projectRoot,
+			env: launchEnvironment({}),
+			stdio: ["ignore", "pipe", "pipe"],
+			detached: process.platform !== "win32",
+			windowsHide: true,
+		});
+		if (!child.pid) throw new Error("window recorder did not return a process id");
+		const recorder = windowVideoRecorderHandle({ context, child, name, durationMs, filename, target });
+		if (!await recorder.ready(Math.min(15_000, remainingTimeout(context, 15_000)))) {
+			const outcome = await recorder.stop();
+			cleanupPartialVideo(target);
+			observations.push({ action: "windowVideo", name, status: "unavailable", reason: outcome.reason ?? "window recorder exited before capture started" });
+			return null;
+		}
+		observations.push({ action: "windowVideo", name, status: "started", durationMs, pid: child.pid });
+		return recorder;
+	} catch (error) {
+		observations.push({ action: "windowVideo", name, status: "unavailable", reason: safeReason(error) });
+		return null;
+	}
+}
+
+function windowVideoRecorderHandle({ context, child, name, durationMs, filename, target }) {
+	let stdout = Buffer.alloc(0);
+	let stderr = Buffer.alloc(0);
+	let exitCode = null;
+	let ready = false;
+	let startedAt;
+	let resolveReady;
+	const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+	const exited = new Promise((resolve) => {
+		child.stdout?.on("data", (chunk) => {
+			stdout = appendBounded(stdout, chunk);
+			if (!ready && stdout.toString("utf8").includes("recording-started\n")) {
+				ready = true;
+				startedAt = Date.now();
+				resolveReady(true);
+			}
+		});
+		child.stderr?.on("data", (chunk) => { stderr = appendBounded(stderr, chunk); });
+		child.once("error", (error) => {
+			exitCode = 1;
+			stderr = appendBounded(stderr, Buffer.from(safeReason(error)));
+			resolveReady(false);
+			resolve();
+		});
+		child.once("close", (code) => { exitCode = code ?? 1; resolveReady(false); resolve(); });
+	});
+	return {
+		name,
+		durationMs,
+		async ready(timeoutMs) {
+			return Promise.race([readyPromise, sleep(timeoutMs).then(() => false)]);
+		},
+		// Signals the helper (SIGTERM finalizes and publishes the MP4), waits a
+		// bounded grace, then escalates to SIGKILL and cleans partial files.
+		// Never throws: every outcome is structured.
+		async stop() {
+			const graceMs = Math.max(1_000, Math.min(RECORD_FINALIZE_GRACE_MS, context.deadline - Date.now()));
+			if (exitCode === null) {
+				killOwnedPid(child.pid, "SIGTERM");
+				const finished = await Promise.race([exited.then(() => true), sleep(graceMs).then(() => false)]);
+				if (!finished) {
+					killOwnedPid(child.pid, "SIGKILL");
+					await Promise.race([exited, sleep(2_000)]);
+					cleanupPartialVideo(target);
+					return { name, status: "unavailable", reason: "the window recorder did not finalize within its grace period" };
+				}
+			}
+			if (exitCode !== 0) {
+				cleanupPartialVideo(target);
+				const reason = stderr.toString("utf8").trim();
+				return { name, status: "unavailable", reason: reason || `window recorder exited with code ${exitCode}` };
+			}
+			const stat = fs.existsSync(target) ? fs.statSync(target) : null;
+			if (!stat?.isFile() || stat.size < 1) {
+				cleanupPartialVideo(target);
+				return { name, status: "unavailable", reason: stdout.toString("utf8").trim() || "the window recorder produced no video file" };
+			}
+			if (process.platform !== "win32") fs.chmodSync(target, 0o600);
+			const recordedDurationMs = startedAt === undefined ? 0 : Math.min(durationMs, Math.max(0, Date.now() - startedAt));
+			return {
+				name,
+				status: "recorded",
+				durationMs: recordedDurationMs,
+				bytes: stat.size,
+				artifact: { ...context.artifact(filename, "window video"), format: "mp4", durationMs: recordedDurationMs },
+			};
+		},
+	};
+}
+
+function appendBounded(current, chunk) {
+	return Buffer.concat([current, Buffer.from(chunk)]).subarray(0, MAX_CAPTURE_BYTES);
+}
+
+function cleanupPartialVideo(target) {
+	try { fs.rmSync(target, { force: true }); } catch { /* best effort */ }
+	try {
+		const prefix = `${path.basename(target)}.`;
+		for (const entry of fs.readdirSync(path.dirname(target))) {
+			if (entry.startsWith(prefix) && entry.endsWith(".tmp")) fs.rmSync(path.join(path.dirname(target), entry), { force: true });
+		}
+	} catch { /* best effort */ }
 }
 
 function runOwnedProcess(file, args, options) {
@@ -527,9 +692,13 @@ async function waitFor(check, timeoutMs, reason) {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		if (await check()) return;
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await sleep(100);
 	}
 	throw new Error(reason);
+}
+
+function sleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, Math.max(1, ms)));
 }
 
 function boundedInt(value, fallback, min, max, name) {

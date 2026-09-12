@@ -120,6 +120,25 @@ describe("DCP journal lifecycle", () => {
       expect(persistedText).toContain(`\"customType\":\"${DCP_JOURNAL_CUSTOM_TYPE}\"`);
       expect(persistedText).not.toContain("dcp-state/");
 
+      // Pix keeps only a hot presentation tail in getBranch(), while provider
+      // context is reconstructed from the complete persisted branch. DCP must
+      // use the full-branch escape hatch when restoring entry-backed stable IDs;
+      // otherwise restart allocates new ts:/tool: identities and the exact block
+      // remains active without materializing over its raw source.
+      const lazyBaseManager = SessionManager.open(sessionFile!, dir, dir);
+      const lazyManager = new Proxy(lazyBaseManager, {
+        get(target, property, receiver) {
+          if (property === "getBranch") return () => target.getBranch().slice(-4);
+          if (property === "readFullBranchEntries") return async () => target.getBranch();
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as SessionManager;
+      const lazyRestart = makeRuntime(lazyManager);
+      await initialize(lazyRestart, "resume");
+      const lazyProjection = await project(lazyRestart);
+      expect(lazyProjection.messages).toEqual(compressed.messages);
+
       const reopenedManager = SessionManager.open(sessionFile!, dir, dir);
       const reopened = makeRuntime(reopenedManager);
       await initialize(reopened, "resume");

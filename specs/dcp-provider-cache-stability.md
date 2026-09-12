@@ -43,7 +43,9 @@ be a byte-stable prefix on ordinary continuations.
 1. Every addressable raw message receives one monotonic `mNNN` assignment keyed
    by stable session identity. Equal timestamps do not cause renumbering or ID
    reuse; deterministic occurrence identity resolves otherwise identical
-   fallbacks.
+   fallbacks. When a session manager exposes only a lazy presentation tail,
+   DCP resolves persisted entry identities from its full-branch reader before
+   rebuilding the provider projection.
 2. Provider-visible ID metadata is attached only to cloned user, tool-result, or
    bash-result carriers. A carrier publishes its own address and any immediately
    preceding assistant addresses that cannot safely be written into those
@@ -98,6 +100,8 @@ be a byte-stable prefix on ordinary continuations.
   new prefix; subsequent unchanged continuations preserve it.
 - Restart/fork of a supported journal session reuses committed summary and ID
   bytes rather than regenerating them.
+- Lazy session loading must not turn historical entry-backed identities into
+  new timestamp/tool fallbacks or leave an active exact block unmaterialized.
 - JSONL round-trip of an otherwise unchanged message preserves its canonical
   exact-membership hash.
 - UI filtering is outside this contract: display cleanup cannot alter the next
@@ -161,6 +165,8 @@ Deterministic tests must cover:
 - byte-equivalent signed assistant reasoning/tool-call content;
 - frozen reminder carrier/text and deferral when no safe carrier exists;
 - restart/fork of a journal session without regenerating summaries;
+- restart through a lazy tail-only `getBranch()` facade with a full-branch
+  reader, preserving IDs and exact block materialization;
 - JSONL round-trip stability for exact v2 membership, including tool-result
   details with runtime-only values;
 - hard-pressure marathon behavior and partial positive recovery;

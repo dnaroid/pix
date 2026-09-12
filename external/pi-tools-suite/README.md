@@ -599,13 +599,18 @@ from the target descriptor and reports candidate capabilities plus its selection
 rationale. Browser targets delegate to the trusted Playwright backend described
 below. Terminal/TUI targets run through a real PTY plus a headless ANSI/VT
 terminal model. Native macOS targets use the bundled Accessibility/CGWindow
-driver for semantic actions, state assertions, captures, and screenshots;
-unsupported platforms or missing permissions return `BLOCKED`. QA does not
+driver for semantic actions, state assertions, captures, and screenshots. TUI
+runs automatically retain a bounded asciicast v2 replay. On macOS 12.3+ with
+Screen Recording permission, desktop runs automatically retain a silent H.264
+video of only the correlated application window, capped at 30 seconds with no
+display/region fallback. Video is best-effort supporting evidence and does not
+replace deterministic assertions. Unsupported platforms or missing required
+control permissions return `BLOCKED`. QA does not
 install GUI automation dependencies, change OS privacy/accessibility settings,
 disable sandboxing, or operate unrelated user windows. Static or mock checks do
 not substitute for the requested UI.
 
-Unified flows and native/TUI evidence stay in the owning agent's private
+Unified flows and native/TUI evidence—including automatic recordings—stay in the owning agent's private
 `.pi/subagents/<run>/<agent-id>/ui-qa/` workspace. Pass/fail requires a
 product-visible deterministic oracle such as terminal content/state,
 accessibility/app-driver state, window/dialog state, or visible control values;
@@ -614,10 +619,11 @@ the PTY/session/app process created by the QA run.
 
 #### Browser backend and project auth
 
-The capability-first runner and native/TUI resources live under
-`src/async-subagents/agents/ui-qa/`; trusted browser resources remain under
-`agents/browser-qa/`. The launcher supplies absolute paths in
-`PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER`. Normal probe/run uses the former;
+The capability-first runner and all backend resources live under
+`src/async-subagents/agents/ui-qa/`; the trusted browser runner, vendor code,
+license, and examples are grouped under its `browser/` directory. The launcher
+supplies absolute paths in `PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER`. Normal
+probe/run uses the former;
 the latter is invoked directly only for browser auth profile discovery and
 form-auth scaffolding. These non-secret paths are set only for QA children.
 Every async sub-agent launches with `--no-skills`, and skill flags in
@@ -688,7 +694,7 @@ creating a template. Only an explicit authenticated request may create the
 private template. Missing, rejected, or expired selected auth returns
 `QA_AUTH_UPDATE_REQUIRED`, naming only the profile/file/reason needed for the
 parent to ask the user for an update and rerun. See
-`src/async-subagents/agents/browser-qa/examples/qa-auth.example.jsonc`
+`src/async-subagents/agents/ui-qa/browser/examples/qa-auth.example.jsonc`
 for complete profile shapes and `examples/qa-flow.example.jsonc` beside it for
 the declarative, non-executable QA action/assertion format.
 

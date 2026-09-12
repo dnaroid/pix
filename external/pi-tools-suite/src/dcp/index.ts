@@ -77,10 +77,13 @@ import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransa
 // Helpers
 // ---------------------------------------------------------------------------
 
-function annotateMessagesWithBranchEntryIds(messages: any[], ctx: ExtensionContext): void {
+async function annotateMessagesWithBranchEntryIds(messages: any[], ctx: ExtensionContext): Promise<void> {
 	let branch: any[] = []
 	try {
-		branch = ctx.sessionManager.getBranch()
+		const manager = ctx.sessionManager as any
+		branch = typeof manager.readFullBranchEntries === "function"
+			? await manager.readFullBranchEntries()
+			: manager.getBranch()
 	} catch {
 		return
 	}
@@ -465,7 +468,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		}
 		latestProviderOpportunityKind = undefined
 		latestProviderReminder = undefined
-		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
+		await annotateMessagesWithBranchEntryIds(contextMessages, ctx)
 		const rehydration = rehydrateToolRecordsFromMessages(contextMessages, state)
 		if (rehydration.recordsUpdated > 0) {
 			writeDcpDebugLog(effectiveConfig, "context.rehydrated_tool_records", { ...rehydration }, ctx)

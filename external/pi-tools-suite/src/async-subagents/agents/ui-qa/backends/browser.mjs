@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
-const INSTALLED_BROWSER_RUNNER = fileURLToPath(new URL("../../browser-qa/scripts/browser-qa-runner.mjs", import.meta.url));
+const INSTALLED_BROWSER_RUNNER = fileURLToPath(new URL("../browser/scripts/browser-qa-runner.mjs", import.meta.url));
 
 export async function probeBrowserBackend(context = {}) {
 	const runner = context.browserRunnerPath ?? INSTALLED_BROWSER_RUNNER;

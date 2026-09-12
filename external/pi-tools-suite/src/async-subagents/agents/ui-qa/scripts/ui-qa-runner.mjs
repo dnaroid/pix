@@ -120,7 +120,11 @@ async function main() {
 			runId,
 			evidenceDir,
 			artifact,
-			browserRunnerPath: fileURLToPath(new URL("../../browser-qa/scripts/browser-qa-runner.mjs", import.meta.url)),
+			// The selected backend's probed capability record, so backends can
+			// gate producer-dependent steps (screenshot/video) honestly instead
+			// of assuming capabilities the host never granted.
+			selection: publicSelection(selection),
+			browserRunnerPath: fileURLToPath(new URL("../browser/scripts/browser-qa-runner.mjs", import.meta.url)),
 		};
 		const backendResult = await runSelectedBackend(selection.selectedBackend, context);
 		const deadlineExpired = Date.now() >= deadline;

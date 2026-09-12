@@ -85,8 +85,10 @@ itself; DCP does not add a second WAL, file lock, or `fsync` persistence engine.
 
 `conversation-index.ts` builds ordered identity from the actual current
 projection. Stable session entry identity wins over timestamps; equal timestamps
-are disambiguated by branch order and stable IDs. A modern exact operation is
-never widened by guessing a same-timestamp neighbour.
+are disambiguated by branch order and stable IDs. If the host exposes a lazy
+tail-only branch view, DCP recovers those entry identities through the host's
+full-branch reader before rebuilding the projection. A modern exact operation
+is never widened by guessing a same-timestamp neighbour.
 
 `sourceMembers` describe exactly what the summarizer inspected.
 `mutationMembers` describe exactly which canonical raw messages a later replay
