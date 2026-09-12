@@ -204,9 +204,10 @@ export class PopupMenuRenderer {
 	renderResumeMenu(
 		width: number,
 		menu: PopupMenu<ResumeMenuValue>,
-		state: { directQuery: string; allSessionsLoaded: boolean; loadedSessionCount: number },
+		state: { directQuery: string; allSessionsLoaded: boolean; loadedSessionCount: number; draft: boolean },
 	): RenderedLine[] {
-		const title = this.host.resumeLoading ? `Resume session ${APP_ICONS.timerSand}` : "Resume session";
+		const titleBase = state.draft ? "Open a conversation" : "Resume session";
+		const title = this.host.resumeLoading ? `${titleBase} ${APP_ICONS.timerSand}` : titleBase;
 		const lines: RenderedLine[] = [this.popupMenuHeader(title, width)];
 		const visibleItems = menu.visibleItems();
 		if (!this.host.resumeLoading && !this.hasPopupActionItems(menu.items)) {

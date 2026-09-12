@@ -22,8 +22,12 @@ export class AppCommandController {
 		this.slashCommands = createSlashCommands(this.registryActions(), host);
 	}
 
-	async runResumeCommand(queryOrOptions: string | { preserveStatus?: boolean; placement?: PopupMenuPlacement } = ""): Promise<void> {
+	async runResumeCommand(queryOrOptions: string | { preserveStatus?: boolean; placement?: PopupMenuPlacement; draft?: boolean } = ""): Promise<void> {
 		await this.navigationActions.runResumeCommand(queryOrOptions);
+	}
+
+	async runDraftSessionSelector(): Promise<void> {
+		await this.navigationActions.runResumeCommand({ preserveStatus: true, placement: "draft-surface", draft: true });
 	}
 
 	async runModelCommand(model: SessionModel): Promise<void> {

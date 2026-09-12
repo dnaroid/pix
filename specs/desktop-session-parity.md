@@ -34,7 +34,17 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - Reconciliation deduplicates by resolved Pi session path and retains an existing ACP ID when present.
 - The response carries ordered TUI open-tab session IDs in namespaced ACP metadata.
 - Desktop uses the returned sessions as the source for saved-session discovery. The titlebar still contains only restored TUI tabs, Desktop-opened tabs, and the active session.
-- The UI-only New Conversation draft tab is not an ACP session and never participates in `session/list`, restored TUI metadata, or persisted Desktop active-session ids. Its embedded chooser presents only returned sessions that are not already represented by real titlebar tabs; already-open/running conversations therefore are not duplicated there.
+- Desktop and TUI both use UI-only draft tabs for new conversations. A draft is
+  not an ACP/Pi session and never participates in `session/list`, restored TUI
+  metadata, persisted Desktop active-session ids, or the persisted TUI
+  real-tab snapshot.
+- In either client, opening a draft or editing its composer does not create a
+  session. Selecting a saved session replaces the draft directly; a new real
+  session is materialized only on the first prompt or action that requires a
+  Pi session.
+- Desktop's embedded chooser and TUI's under-tabs chooser present only returned
+  sessions that are not already represented by real tabs, so already-open or
+  running conversations are not duplicated there.
 - When restoring an older mapped session whose persisted history is unavailable, Desktop first waits for the concurrent runtime load. A loadable empty session is retained; only a record whose history and runtime both fail is cleaned up. Runtime-load generations prevent a late completion from repopulating state after that cleanup.
 - Per-session activity indicators may decorate titlebar tabs, but runtime activity never changes restored membership, ordering, close semantics, or saved-session discovery.
 - Missing, malformed, or stale tab snapshots produce no restored tabs and do not break session listing.
@@ -48,6 +58,8 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - `acp/src/acp/tui-tabs.ts`
 - `desktop/src/App.svelte`
 - `desktop/src/lib/acp-client.ts`
+- `src/app/session/tabs-controller.ts`
+- `specs/tui-session-tabs.md`
 
 ## Verification
 

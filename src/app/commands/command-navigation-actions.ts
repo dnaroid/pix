@@ -289,17 +289,18 @@ export class NavigationCommandActions {
 		this.host.setSessionStatus(runtime.session);
 	}
 
-	async runResumeCommand(queryOrOptions: string | { preserveStatus?: boolean; placement?: PopupMenuPlacement } = ""): Promise<void> {
+	async runResumeCommand(queryOrOptions: string | { preserveStatus?: boolean; placement?: PopupMenuPlacement; draft?: boolean } = ""): Promise<void> {
 		const preserveStatus = typeof queryOrOptions === "object" && queryOrOptions.preserveStatus === true;
 		const placement = typeof queryOrOptions === "object" ? queryOrOptions.placement : undefined;
+		const draft = typeof queryOrOptions === "object" && queryOrOptions.draft === true;
 		const initialQuery = typeof queryOrOptions === "string" ? queryOrOptions : "";
-		const runtime = preserveStatus ? this.host.runtime() : getIdleRuntime(this.host, "resume");
-		if (!runtime) {
+		const runtime = draft ? this.host.runtime() : preserveStatus ? this.host.runtime() : getIdleRuntime(this.host, "resume");
+		if (!runtime && !draft) {
 			if (!preserveStatus) this.host.render();
 			return;
 		}
 
-		if (runtime.session.isStreaming) {
+		if (runtime?.session.isStreaming) {
 			if (!preserveStatus) {
 				this.host.toast.warning("/resume is unavailable while the agent is running");
 				this.host.render();
@@ -308,6 +309,12 @@ export class NavigationCommandActions {
 		}
 
 		if (this.host.getResumeLoading()) {
+			if (draft) {
+				this.host.setResumeMenuMode?.("draft");
+				this.host.openDirectPopupMenu("resume", { preserveStatus: true, ...(placement === undefined ? {} : { placement }) });
+				this.host.setDirectPopupMenuQuery(initialQuery);
+				this.host.openResumeMenuWithQuery(initialQuery);
+			}
 			if (!preserveStatus) this.host.setStatus("loading sessions…");
 			this.host.render();
 			return;
@@ -315,6 +322,7 @@ export class NavigationCommandActions {
 
 		this.host.setResumeLoading(true);
 		if (!preserveStatus) this.host.setStatus("loading sessions…");
+		this.host.setResumeMenuMode?.(draft ? "draft" : "resume");
 		this.host.openDirectPopupMenu("resume", { preserveStatus, ...(placement === undefined ? {} : { placement }) });
 		this.host.setDirectPopupMenuQuery(initialQuery);
 		if (this.host.getResumeSessions().length > 0) {
@@ -353,6 +361,10 @@ export class NavigationCommandActions {
 			if (!options.preserveStatus) this.host.toast.error("Failed to load sessions");
 			if (!options.preserveStatus) this.host.setSessionStatus(options.scope.session);
 			this.host.render();
+		} finally {
+			if (options.loadId === this.resumeLoadId && !isCommandScopeActive(this.host, options.scope)) {
+				this.host.setResumeLoading(false);
+			}
 		}
 	}
 

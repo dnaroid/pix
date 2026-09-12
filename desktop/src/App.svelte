@@ -2897,6 +2897,7 @@
     if (sessionMutationRunning) return false;
     if (sessionId === DRAFT_SESSION_TAB_ID) {
       if (!draftSessionTabOpen) return false;
+      if (tabSessions.length === 0) return false;
       const wasActive = draftSessionTabActive;
       invalidateDraftSessionMaterialization();
       draftSessionTabOpen = false;
@@ -4280,11 +4281,11 @@
   }
 
   async function openModelThinkingPicker(): Promise<void> {
-    if (!activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
+    if (!activeSessionId || !activeSessionRuntimeReady || operationRunning || changingConfig) return;
     const sessionId = activeSessionId;
     commandPicker = null;
     await visibleModelsSavePromise?.catch(() => undefined);
-    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
+    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || changingConfig) return;
     try {
       const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
       visibleModelRefs = visibleModelRefsFromPixConfig(document.content);
@@ -4292,7 +4293,7 @@
       // A missing/unreadable preference falls back to the full model catalog.
       visibleModelRefs = undefined;
     }
-    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
+    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || changingConfig) return;
     modelThinkingPickerSessionId = sessionId;
     modelThinkingPickerOpen = true;
   }
@@ -4356,7 +4357,7 @@
   async function applyModelThinkingSelection(modelRef: string, thinkingLevel: string): Promise<void> {
     const requestClient = client;
     const sessionId = modelThinkingPickerSessionId;
-    if (!requestClient || !sessionId || configChangeInProgress(sessionId) || operationRunning || promptRunning) {
+    if (!requestClient || !sessionId || configChangeInProgress(sessionId) || operationRunning) {
       throw new Error("Model and thinking settings are unavailable right now.");
     }
 
@@ -5210,6 +5211,7 @@
         canCreate={canUseSession}
         newSessionShortcut={desktopCommandShortcutLabel("session.new", desktopShortcutPlatform)}
         onTabClick={handleSessionTabClick}
+        canCloseTab={(sessionId) => sessionId !== DRAFT_SESSION_TAB_ID || tabSessions.length > 0}
         onCloseTab={(sessionId) => closeSessionTab(sessionId)}
         onCreate={() => void openSessionStartTab()}
       />
@@ -5535,7 +5537,7 @@
   <ModelThinkingPicker
     {configOptions}
     {visibleModelRefs}
-    disabled={!canUseSession || !activeSessionRuntimeReady || promptRunning || changingConfig !== null}
+    disabled={!canUseSession || !activeSessionRuntimeReady || changingConfig !== null}
     onApply={applyModelThinkingSelection}
     onVisibleModelsChange={saveVisibleModelRefs}
     onClose={closeModelThinkingPicker}

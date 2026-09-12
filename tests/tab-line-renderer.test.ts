@@ -221,6 +221,20 @@ describe("TabLineRenderer", () => {
 		assert.equal(layout.targets.filter((target) => target.kind === "new-tab").length, 1);
 	});
 
+	it("does not render a close affordance for the sole UI-only draft tab", () => {
+		const renderer = tabLineRenderer([
+			{ id: "draft", status: "active", title: "new", titlePlaceholder: "new", draft: true },
+		]);
+
+		const layout = renderer.layout(80);
+
+		assert.ok(layout.text.includes("new"));
+		assert.equal(layout.text.includes(APP_ICONS.close), false);
+		assert.equal(layout.targets.filter((target) => target.kind === "close").length, 0);
+		assert.equal(layout.targets.filter((target) => target.kind === "tab").length, 1);
+		assert.equal(layout.targets.filter((target) => target.kind === "new-tab").length, 1);
+	});
+
 	it("reserves panel rows even when there is only one tab", () => {
 		assert.equal(tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },

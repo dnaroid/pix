@@ -243,6 +243,7 @@ export class PiUiExtendApp {
 				noSession: false,
 				sessionPath,
 			}),
+			deactivateRuntimeForDraft: () => this.deactivateRuntimeForDraft(),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			activateRuntime: (runtime, options) => this.activateRuntime(runtime, options),
 			disposeRuntime: (runtime) => this.terminalController.disposeRuntime(runtime),
@@ -264,6 +265,12 @@ export class PiUiExtendApp {
 			restoreAutoUserMessages: (messages) => this.queuedMessages.restoreAutoUserMessages(messages),
 			captureDeferredUserMessages: () => this.queuedMessages.captureDeferredUserMessages(),
 			restoreDeferredUserMessages: (messages) => this.queuedMessages.restoreDeferredUserMessages(messages),
+			openDraftSessionSelector: () => {
+				void this.commandController.runDraftSessionSelector();
+			},
+			closeDraftSessionSelector: () => {
+				this.popupMenus.closeDraftSessionSelectorForTabLifecycle();
+			},
 			contextInventoryText: (runtime, heading) => this.contextInventoryText(runtime, heading),
 			addEntry: (entry) => this.addEntry(entry),
 			showToast: (message, kind) => this.showToast(message, kind),
@@ -306,6 +313,7 @@ export class PiUiExtendApp {
 			getBuiltinSlashCommands: () => this.slashCommands,
 			getEntries: () => this.entries,
 			getResumeSessions: () => this.resumeSessions,
+			getOpenSessionPaths: () => this.tabsController.openSessionPaths(),
 		});
 		const popupMenuRenderer = new PopupMenuRenderer({
 			theme: this.theme,
@@ -329,7 +337,7 @@ export class PiUiExtendApp {
 			getSlashCommandMenuItems: (query) => this.menuItems.getSlashCommandMenuItems(query),
 			getModelMenuItems: (query, includeHidden) => this.menuItems.getModelMenuItems(query, includeHidden),
 			getThinkingMenuItems: (query) => this.menuItems.getThinkingMenuItems(query),
-			getResumeMenuItems: (query, limit) => this.menuItems.getResumeMenuItems(query, limit),
+			getResumeMenuItems: (query, limit, options) => this.menuItems.getResumeMenuItems(query, limit, options),
 			getUserMessageMenuItems: () => this.menuItems.getUserMessageMenuItems(),
 			getUserMessageJumpMenuItems: (query) => this.menuItems.getUserMessageJumpMenuItems(query),
 			getQueueMessageMenuItems: () => this.menuItems.getQueueMessageMenuItems(),
@@ -558,6 +566,7 @@ export class PiUiExtendApp {
 		this.commandController = new AppCommandController({
 			options: this.options,
 			runtime: () => this.runtime,
+			inputScopeKey: () => this.tabsController.activeInputTabId(),
 			subagentTypes: (runtime) => this.subagentTypesForRuntime(runtime),
 			requestHistory: () => this.requestHistory,
 			getInput: () => this.input,
@@ -603,6 +612,7 @@ export class PiUiExtendApp {
 			setDirectPopupMenuQuery: (query) => {
 				this.popupMenus.setDirectQuery(query);
 			},
+			setResumeMenuMode: (mode) => this.popupMenus.setResumeMenuMode(mode),
 			refreshUserMessageJumpMenuItems: () => this.menuItems.refreshUserMessageJumpMenuItems(),
 			getResumeLoading: () => this.resumeLoading,
 			getResumeSessions: () => this.resumeSessions,
@@ -622,6 +632,9 @@ export class PiUiExtendApp {
 		this.popupActions = new AppPopupActionController(
 			{
 				runtime: () => this.runtime,
+				inputScopeKey: () => this.tabsController.activeInputTabId(),
+				isDraftTabActive: () => this.tabsController.isDraftTabActive(),
+				materializeDraftSession: () => this.tabsController.materializeActiveDraftTab(),
 				getBuiltinSlashCommands: () => this.slashCommands,
 				isRunning: () => this.running,
 				setInput: (value) => this.setInput(value),
@@ -638,6 +651,7 @@ export class PiUiExtendApp {
 				render: () => this.render(),
 				awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 				afterSessionReplacement: (message) => this.afterSessionReplacement(message),
+				openSessionInActiveDraftTab: (sessionPath) => this.tabsController.openSessionInActiveDraftTab(sessionPath),
 				scrollToConversationEntry: (entryId) => this.scrollController.scrollToConversationEntry(entryId),
 				scrollToUserMessageJumpTarget: (target) => this.scrollToUserMessageJumpTarget(target),
 			},
@@ -765,6 +779,8 @@ export class PiUiExtendApp {
 			{
 				runtime: () => this.runtime,
 				inputScopeKey: () => this.tabsController.activeInputTabId(),
+				isDraftTabActive: () => this.tabsController.isDraftTabActive(),
+				materializeDraftSession: () => this.tabsController.materializeActiveDraftTab(),
 				isRunning: () => this.running,
 				isSessionSwitching: () => this.tabsController.isSwitching(),
 				inputEditor: () => this.inputEditor,
@@ -856,7 +872,10 @@ export class PiUiExtendApp {
 		});
 		this.sessionLifecycle = new AppSessionLifecycleController({
 			options: this.options,
-			createRuntime: () => this.createRuntime(this.options),
+			prepareStartupRuntime: () => this.tabsController.prepareStartupRuntime(),
+			createRuntime: (startup) => this.createRuntime(startup?.sessionPath
+				? { ...this.options, noSession: false, sessionPath: startup.sessionPath }
+				: this.options),
 			entries: this.entries,
 			runtime: () => this.runtime,
 			setRuntime: (runtime) => {
@@ -1026,6 +1045,20 @@ export class PiUiExtendApp {
 			this.extensionUiController.clearWidgets(this.activeExtensionUiScope());
 		});
 		await this.bindCurrentSession(options);
+	}
+
+	private deactivateRuntimeForDraft(): void {
+		const runtime = this.runtime;
+		if (!runtime) return;
+		const scopeKey = this.activeExtensionUiScope();
+		// Clear the visible runtime before any UI cleanup. cancelCustomUi() can
+		// synchronously render; leaving the old runtime attached during that render
+		// lets tab synchronization incorrectly reactivate the previous real tab.
+		this.runtime = undefined;
+		this.extensionUiController.cancelCustomUi(scopeKey);
+		this.extensionUiController.clearWidgets(scopeKey, { cancelCustomUi: false });
+		void this.voiceController.stopRecording();
+		this.sessionLifecycle.unsubscribeSession();
 	}
 
 	private createExtensionEventBus(): EventBus {
@@ -1395,6 +1428,7 @@ export class PiUiExtendApp {
 		if (contentVersion === this.lastInputEditorContentVersion) return;
 
 		this.lastInputEditorContentVersion = contentVersion;
+		this.tabsController.noteActiveDraftInputChanged();
 		this.scrollController.scrollToBottom();
 	}
 

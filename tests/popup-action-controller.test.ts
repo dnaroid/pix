@@ -98,6 +98,72 @@ describe("AppPopupActionController model visibility", () => {
 		assert.deepEqual(saved, [[]]);
 		assert.match(toasts[0] ?? "", /cleared model picker visibility/iu);
 	});
+
+	it("loads a saved session directly into the active draft tab", async () => {
+		let openedPath: string | undefined;
+		const popupMenus = {
+			syncActivePopupMenu: () => "resume",
+			selectedResume: () => ({ kind: "session", session: { path: "/tmp/saved.jsonl" } }),
+			draftSessionSelectorActive: () => true,
+			setDirectMenu: () => {},
+			setDirectPreserveStatus: () => {},
+			setDirectQuery: () => {},
+			closeResumeMenu: () => {},
+			setResumeMenuMode: () => {},
+		} as unknown as AppPopupMenuController;
+		const controller = new AppPopupActionController(
+			host({
+				openSessionInActiveDraftTab: async (sessionPath) => {
+					openedPath = sessionPath;
+					return true;
+				},
+			}),
+			popupMenus,
+			{} as AppCommandController,
+			{} as AppMenuItemsController,
+			{} as AppQueuedMessageController,
+			{} as AppWorkspaceActionsController,
+		);
+
+		assert.equal(await controller.submitActivePopupMenu(), true);
+		assert.equal(openedPath, "/tmp/saved.jsonl");
+	});
+
+	it("accepts New session from the draft selector without materializing a runtime", async () => {
+		let openedPath: string | undefined;
+		let slashCommandSubmitted = false;
+		const popupMenus = {
+			syncActivePopupMenu: () => "resume",
+			selectedResume: () => ({ kind: "new" }),
+			draftSessionSelectorActive: () => true,
+			setDirectMenu: () => {},
+			setDirectPreserveStatus: () => {},
+			setDirectQuery: () => {},
+			closeResumeMenu: () => {},
+			setResumeMenuMode: () => {},
+		} as unknown as AppPopupMenuController;
+		const controller = new AppPopupActionController(
+			host({
+				openSessionInActiveDraftTab: async (sessionPath) => {
+					openedPath = sessionPath;
+					return true;
+				},
+			}),
+			popupMenus,
+			{ runResumeCommand: async () => {}, } as unknown as AppCommandController,
+			{} as AppMenuItemsController,
+			{
+				submitUserMessage: async () => {
+					slashCommandSubmitted = true;
+				},
+			} as unknown as AppQueuedMessageController,
+			{} as AppWorkspaceActionsController,
+		);
+
+		assert.equal(await controller.submitActivePopupMenu(), true);
+		assert.equal(openedPath, undefined);
+		assert.equal(slashCommandSubmitted, false);
+	});
 });
 
 function host(overrides: Partial<AppPopupActionControllerHost> = {}): AppPopupActionControllerHost {

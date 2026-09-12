@@ -17,6 +17,7 @@ type TabButtonLayout = {
 	statusEnd: number;
 	closeStart: number;
 	closeEnd: number;
+	closable: boolean;
 };
 
 const TAB_SEPARATOR = " │ ";
@@ -47,13 +48,15 @@ export class TabLineRenderer {
 		const newTabPrefix = tabs.length > 0 ? separator : EMPTY_NEW_TAB_PREFIX;
 		const newTabPrefixWidth = stringDisplayWidth(newTabPrefix);
 		const tabsWidth = Math.max(0, width - newTabWidth - newTabPrefixWidth);
-		const naturalButtons = tabs.map((tab) => this.buttonLayout(tab));
+		const naturalButtons = tabs.map((tab) => this.buttonLayout(tab, undefined, tabs.length > 1 || tab.draft !== true));
 		const naturalWidth = naturalButtons.reduce((sum, button) => sum + stringDisplayWidth(button.text), 0)
 			+ separatorCount * separatorWidth;
 		const buttonMaxWidth = naturalWidth <= tabsWidth
 			? undefined
 			: Math.max(7, Math.floor(Math.max(1, tabsWidth - separatorCount * separatorWidth) / tabs.length));
-		const buttons = buttonMaxWidth === undefined ? naturalButtons : tabs.map((tab) => this.buttonLayout(tab, buttonMaxWidth));
+		const buttons = buttonMaxWidth === undefined
+			? naturalButtons
+			: tabs.map((tab) => this.buttonLayout(tab, buttonMaxWidth, tabs.length > 1 || tab.draft !== true));
 		const segments: StyledSegment[] = [];
 		const targets: TabLineTarget[] = [];
 		const separatorColumns: number[] = [];
@@ -83,15 +86,17 @@ export class TabLineRenderer {
 
 			this.addButtonSegments(tab, button, textOffset, segments);
 
-			const closeColumnOffset = stringDisplayWidth(button.text.slice(0, button.closeStart));
-			// Keep the more specific close target before the tab target because the
-			// tab target intentionally spans the whole button, including the close icon.
-			targets.push({
-				kind: "close",
-				tabId: tab.id,
-				startColumn: displayColumn + closeColumnOffset,
-				endColumn: displayColumn + closeColumnOffset + stringDisplayWidth(button.text.slice(button.closeStart, button.closeEnd)),
-			});
+			if (button.closable) {
+				const closeColumnOffset = stringDisplayWidth(button.text.slice(0, button.closeStart));
+				// Keep the more specific close target before the tab target because the
+				// tab target intentionally spans the whole button, including the close icon.
+				targets.push({
+					kind: "close",
+					tabId: tab.id,
+					startColumn: displayColumn + closeColumnOffset,
+					endColumn: displayColumn + closeColumnOffset + stringDisplayWidth(button.text.slice(button.closeStart, button.closeEnd)),
+				});
+			}
 			targets.push({
 				kind: "tab",
 				tabId: tab.id,
@@ -170,33 +175,41 @@ export class TabLineRenderer {
 		return chars.join("");
 	}
 
-	private buttonLayout(tab: SessionTab, maxWidth?: number): TabButtonLayout {
+	private buttonLayout(tab: SessionTab, maxWidth?: number, closable = true): TabButtonLayout {
 		const statusText = this.statusIndicatorIcon(tab);
 		const prefix = `${statusText} `;
-		const suffix = ` ${APP_ICONS.close}`;
+		const suffix = closable ? ` ${APP_ICONS.close}` : "";
 		const title = this.displayTitle(tab);
 		const naturalText = `${prefix}${title}${suffix}`;
 		const naturalWidth = stringDisplayWidth(naturalText);
-		if (maxWidth === undefined || naturalWidth <= maxWidth) return this.buttonLayoutFromText(naturalText, 0, statusText.length);
+		if (maxWidth === undefined || naturalWidth <= maxWidth) return this.buttonLayoutFromText(naturalText, 0, statusText.length, closable);
 
 		const titleWidth = maxWidth - stringDisplayWidth(prefix) - stringDisplayWidth(suffix);
-		if (titleWidth <= 0) return this.buttonLayoutFromText(ellipsizeDisplay(`${statusText}${APP_ICONS.close}`, maxWidth), 0, statusText.length);
+		if (titleWidth <= 0) {
+			return this.buttonLayoutFromText(
+				ellipsizeDisplay(`${statusText}${closable ? APP_ICONS.close : ""}`, maxWidth),
+				0,
+				statusText.length,
+				closable,
+			);
+		}
 
-		return this.buttonLayoutFromText(`${prefix}${ellipsizeDisplay(title, titleWidth)}${suffix}`, 0, statusText.length);
+		return this.buttonLayoutFromText(`${prefix}${ellipsizeDisplay(title, titleWidth)}${suffix}`, 0, statusText.length, closable);
 	}
 
 	private displayTitle(tab: SessionTab): string {
 		return tab.isFork ? `${APP_ICONS.fork}${tab.title}` : tab.title;
 	}
 
-	private buttonLayoutFromText(text: string, statusStart: number, statusLength: number): TabButtonLayout {
-		const closeStart = Math.max(0, text.lastIndexOf(APP_ICONS.close));
+	private buttonLayoutFromText(text: string, statusStart: number, statusLength: number, closable: boolean): TabButtonLayout {
+		const closeStart = closable ? Math.max(0, text.lastIndexOf(APP_ICONS.close)) : text.length;
 		return {
 			text,
 			statusStart,
 			statusEnd: Math.min(text.length, statusStart + statusLength),
 			closeStart,
-			closeEnd: closeStart + APP_ICONS.close.length,
+			closeEnd: closable ? closeStart + APP_ICONS.close.length : closeStart,
+			closable,
 		};
 	}
 

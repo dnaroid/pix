@@ -131,7 +131,7 @@
         aria-label="Select model and thinking level"
         aria-haspopup="dialog"
         aria-expanded={modelThinkingOpen}
-        disabled={!canConfigure || changingConfig !== null || promptRunning}
+        disabled={!canConfigure || changingConfig !== null}
         onclick={onOpenModelThinking}
       >
         <span class="text-muted-foreground/70 max-[760px]:hidden">Model</span>

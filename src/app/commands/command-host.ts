@@ -9,6 +9,7 @@ export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
 export type CommandControllerHost = {
 	readonly options: AppOptions;
 	runtime(): AgentSessionRuntime | undefined;
+	inputScopeKey?(): string | undefined;
 	subagentTypes?(runtime: AgentSessionRuntime): readonly string[] | undefined;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	requestHistory(): AppRequestHistory;
@@ -41,6 +42,7 @@ export type CommandControllerHost = {
 	setDirectPopupMenuPreserveStatus(preserveStatus: boolean): void;
 	getDirectPopupMenuQuery(): string;
 	setDirectPopupMenuQuery(query: string): void;
+	setResumeMenuMode?(mode: "resume" | "draft"): void;
 	refreshUserMessageJumpMenuItems(): Promise<void>;
 	getResumeLoading(): boolean;
 	getResumeSessions(): readonly SessionInfo[];
@@ -55,11 +57,12 @@ export type CommandControllerHost = {
 export type CommandScope = {
 	readonly runtime: AgentSessionRuntime | undefined;
 	readonly session: AgentSession | undefined;
+	readonly inputScopeKey: string | undefined;
 };
 
 export function captureCommandScope(host: CommandControllerHost): CommandScope {
 	const runtime = host.runtime();
-	return { runtime, session: runtime?.session };
+	return { runtime, session: runtime?.session, inputScopeKey: host.inputScopeKey?.() };
 }
 
 export function isCommandRuntimeActive(host: CommandControllerHost, runtime: AgentSessionRuntime): boolean {
@@ -67,5 +70,8 @@ export function isCommandRuntimeActive(host: CommandControllerHost, runtime: Age
 }
 
 export function isCommandScopeActive(host: CommandControllerHost, scope: CommandScope): boolean {
-	return host.isRunning() && host.runtime() === scope.runtime && scope.runtime?.session === scope.session;
+	return host.isRunning()
+		&& host.runtime() === scope.runtime
+		&& scope.runtime?.session === scope.session
+		&& (host.inputScopeKey === undefined || host.inputScopeKey() === scope.inputScopeKey);
 }

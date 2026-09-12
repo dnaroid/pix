@@ -95,6 +95,7 @@ export class AppRenderController {
 		const defaultOverlayLines = menuLines.slice(0, Math.max(0, inputSeparatorRow - 1));
 		const underTabsOverlayStartRow = Math.min(rows, topReservedRows + 1);
 		const underTabsOverlayLines = menuLines.slice(0, Math.max(0, statusRow - underTabsOverlayStartRow));
+		const draftSurfaceLines = menuLines.slice(0, Math.max(0, bodyHeight));
 		const { lines: visible, metrics: scrollMetrics } = this.deps.scrollController.conversationView(columns, bodyHeight);
 		const conversationColumns = Math.max(1, Math.min(columns, scrollMetrics.viewportColumns));
 		this.deps.mouseController.syncConversationSelectionForRender(scrollMetrics.start, bodyHeight, topReservedRows, conversationColumns);
@@ -145,9 +146,27 @@ export class AppRenderController {
 				.filter((target) => target.kind === "new-tab")
 				.map((target) => ({ ...target, row: tabRow })));
 		}
+		const draftSurfaceMenu = popupMenuPlacement === "draft-surface"
+			? this.deps.popupMenus.getActivePopupMenu(activePopupMenu ?? this.deps.popupMenus.syncActivePopupMenu() ?? "slash")
+			: undefined;
 		for (let index = 0; index < bodyHeight; index += 1) {
-			const rendered = visible[index];
 			const row = toScreenRow(index + 1);
+			if (draftSurfaceMenu) {
+				const line = draftSurfaceLines[index];
+				if (line) {
+					const fallbackTarget = { kind: "popup-menu" as const, index: draftSurfaceMenu.selectedIndex };
+					this.deps.mouseController.renderedTargets.set(row, line.target ?? fallbackTarget);
+					this.deps.mouseController.renderedRowTexts.set(row, this.deps.popupMenus.overlayPlainText(line, columns));
+					setRenderedBackground(row, line.backgroundOverride);
+					appendFrameOutput(row, this.renderFrameRow(row, this.deps.popupMenus.styleOverlayLine(row, line, columns)));
+				} else {
+					this.deps.mouseController.renderedRowTexts.set(row, "");
+					appendFrameOutput(row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, undefined, columns)));
+				}
+				continue;
+			}
+
+			const rendered = visible[index];
 			if (rendered?.target) this.deps.mouseController.renderedTargets.set(row, rendered.target);
 			if (rendered?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.imageTargets);
 			if (rendered?.links?.length) this.deps.mouseController.renderedLinks.set(row, rendered.links);
@@ -155,7 +174,9 @@ export class AppRenderController {
 			setRenderedBackground(row, rendered?.backgroundOverride);
 			appendFrameOutput(row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, rendered, conversationColumns)));
 		}
-		const loadingConversationOverlay = this.renderConversationLoadingOverlay(this.deps.loadingConversationOverlayText?.(), conversationColumns, topReservedRows, bodyHeight);
+		const loadingConversationOverlay = popupMenuPlacement === "draft-surface"
+			? undefined
+			: this.renderConversationLoadingOverlay(this.deps.loadingConversationOverlayText?.(), conversationColumns, topReservedRows, bodyHeight);
 		if (loadingConversationOverlay) {
 			this.deps.mouseController.renderedRowTexts.set(loadingConversationOverlay.row, loadingConversationOverlay.text);
 			appendFrameOutput(loadingConversationOverlay.row, this.renderFrameRow(loadingConversationOverlay.row, loadingConversationOverlay.output));

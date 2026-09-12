@@ -28,6 +28,7 @@ export type AppMenuItemsControllerHost = {
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	getEntries(): readonly Entry[];
 	getResumeSessions(): readonly SessionInfo[];
+	getOpenSessionPaths?(): readonly string[];
 };
 
 export class AppMenuItemsController {
@@ -35,6 +36,7 @@ export class AppMenuItemsController {
 		sessions: readonly SessionInfo[];
 		currentSessionFile: string | undefined;
 		query: string;
+		excludedSessionPathsKey: string;
 		loader: SessionInfoMenuItemsLoader;
 	} | undefined;
 	private userMessageJumpItems: PopupMenuItem<UserMessageJumpMenuValue>[] | undefined;
@@ -179,12 +181,21 @@ export class AppMenuItemsController {
 		];
 	}
 
-	getResumeMenuItems(query: string, limit?: number): PopupMenuItem<ResumeMenuValue>[] {
+	getResumeMenuItems(query: string, limit?: number, options: { draft?: boolean } = {}): PopupMenuItem<ResumeMenuValue>[] {
 		const sessionFile = this.host.runtime()?.session.sessionFile;
-		const currentSessionFile = sessionFile ? resolve(sessionFile) : undefined;
-		const loader = this.getResumeMenuItemsLoader(currentSessionFile, query);
+		const currentSessionFile = options.draft ? undefined : sessionFile ? resolve(sessionFile) : undefined;
+		const excludedSessionPaths = options.draft
+			? this.host.getOpenSessionPaths?.().map((path) => resolve(path)) ?? []
+			: [];
+		const excluded = new Set(excludedSessionPaths);
+		const sessions = excluded.size === 0
+			? this.host.getResumeSessions()
+			: this.host.getResumeSessions().filter((session) => !excluded.has(resolve(session.path)));
+		const loader = this.getResumeMenuItemsLoader(sessions, currentSessionFile, query, [...excluded].sort().join("\0"));
 		return [
-			{ value: { kind: "new" }, label: "new", description: "Create a new session" },
+			...(options.draft
+				? [{ value: { kind: "new" } as const, label: "New session", description: "Start typing in the composer" }]
+				: [{ value: { kind: "new" } as const, label: "new", description: "Create a new session" }]),
 			...loader.items(limit).map((item) => ({
 				...item,
 				value: { kind: "session", session: item.value } satisfies ResumeMenuValue,
@@ -192,20 +203,25 @@ export class AppMenuItemsController {
 		];
 	}
 
-	private getResumeMenuItemsLoader(currentSessionFile: string | undefined, query: string): SessionInfoMenuItemsLoader {
-		const sessions = this.host.getResumeSessions();
+	private getResumeMenuItemsLoader(
+		sessions: readonly SessionInfo[],
+		currentSessionFile: string | undefined,
+		query: string,
+		excludedSessionPathsKey: string,
+	): SessionInfoMenuItemsLoader {
 		const cache = this.resumeMenuLoaderCache;
 		if (
 			cache &&
 			cache.sessions === sessions &&
 			cache.currentSessionFile === currentSessionFile &&
-			cache.query === query
+			cache.query === query &&
+			cache.excludedSessionPathsKey === excludedSessionPathsKey
 		) {
 			return cache.loader;
 		}
 
 		const loader = createSessionInfoMenuItemsLoader(sessions, currentSessionFile, query);
-		this.resumeMenuLoaderCache = { sessions, currentSessionFile, query, loader };
+		this.resumeMenuLoaderCache = { sessions, currentSessionFile, query, excludedSessionPathsKey, loader };
 		return loader;
 	}
 

@@ -34,6 +34,24 @@ describe("AppMenuItemsController queue menu", () => {
 		assert.deepEqual(controller.getResumeMenuItems("fir", 5)[1]?.labelHighlightRanges, [{ start: 0, end: 3 }]);
 	});
 
+	it("draft session selector leads with New session and omits sessions already open in tabs", () => {
+		const sessions = [
+			sessionInfo("open", "/tmp/open.jsonl", "Already open"),
+			sessionInfo("saved", "/tmp/saved.jsonl", "Saved conversation"),
+		];
+		const controller = new AppMenuItemsController({
+			...host(undefined),
+			getResumeSessions: () => sessions,
+			getOpenSessionPaths: () => ["/tmp/open.jsonl"],
+		});
+
+		const items = controller.getResumeMenuItems("", 10, { draft: true });
+
+		assert.deepEqual(items.map((item) => item.label), ["New session", "Saved conversation"]);
+		assert.equal(items[0]?.value.kind, "new");
+		assert.equal(items[1]?.value.kind, "session");
+	});
+
 	it("uses the full available-model snapshot even when the session has an explicit scope", () => {
 		const models = [model("zai", "glm-5-turbo", "GLM"), model("openai-codex", "gpt-5.5", "GPT")];
 		const runtime = {

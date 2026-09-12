@@ -34,6 +34,7 @@ Make the top conversation strip behave like a conventional desktop tablist while
 - Pending attachment inspection/caching settles before submit snapshots the composer draft, so pressing Enter immediately after paste/attach cannot race the first prompt and silently omit the file.
 - Choosing a saved conversation from the embedded selector closes the UI-only draft and loads that saved session directly; no throwaway ACP session is created or closed.
 - Repeated New Conversation actions reuse the existing draft tab instead of creating multiple empty chooser tabs.
+- A sole UI-only draft tab is not closable. Its close affordance is omitted, and Delete or middle-click are ignored. Closing the last real session still transitions to one draft tab, which then remains as the minimum conversation surface.
 - A UI-only draft is never persisted as the active project session, so restarting Pix cannot attempt `session/history` for it. For compatibility, an older mapped empty session that returns the exact `session history … is unavailable` condition is discarded only after the concurrent runtime load also fails; a history response may not race a valid runtime into deletion. Stale runtime-load completions are generation-guarded and cannot resurrect a forgotten session.
 - The New Conversation action uses the shared `session.new` command metadata for its platform shortcut hint; the command-palette New/Open Conversation actions use the same UI-only draft surface.
 

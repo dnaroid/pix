@@ -352,6 +352,7 @@ export type SessionTab = {
 	id: string;
 	title: string;
 	titlePlaceholder?: "loading" | "new";
+	draft?: boolean;
 	isFork?: boolean;
 	status: SessionTabStatus;
 	activity?: SessionActivity;
@@ -593,7 +594,7 @@ export type QueueMessageMenuValue = "cancel" | "edit" | "send-now";
 export type ResumeMenuValue = { kind: "new" } | { kind: "session"; session: SessionInfo };
 
 export type ActivePopupMenu = "slash" | "model" | "thinking" | "resume" | "user-message" | "user-message-jump" | "queue-message" | "sdk-menu";
-export type PopupMenuPlacement = "default" | "under-tabs";
+export type PopupMenuPlacement = "default" | "under-tabs" | "draft-surface";
 
 export type StatusThinkingTarget = {
 	row: number;

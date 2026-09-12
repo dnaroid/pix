@@ -367,6 +367,66 @@ describe("AppRenderController", () => {
 		assert.deepEqual(mouseController.renderedTargets.get(4), { kind: "popup-menu", index: 0 });
 	});
 
+	it("renders the draft session selector as the draft conversation surface", () => {
+		const mouseController = fakeMouseController();
+		const controller = new AppRenderController({
+			isRunning: () => true,
+			terminalColumns: () => 40,
+			terminalRows: () => 8,
+		}, {
+			theme: THEMES.dark,
+			screenStyler: fakeScreenStyler(),
+			editorLayoutRenderer: {
+				computeLayout: () => ({
+					renderedInput: {
+						lines: ["INPUT"],
+						cursorRowOffset: 0,
+						cursorColumn: 1,
+						cursorVisible: false,
+						scrollOffset: 0,
+						editorStartRowOffset: 0,
+						tagSpans: [[]],
+					},
+					aboveEditorLines: [],
+					belowEditorLines: [],
+					inputStartRow: 5,
+					inputSeparatorRow: 4,
+					inputBottomSeparatorRow: 6,
+					bodyHeight: 3,
+				}),
+			} as unknown as EditorLayoutRenderer,
+			scrollController: {
+				conversationView: () => ({ lines: [{ text: "OLD1" }, { text: "OLD2" }, { text: "OLD3" }], metrics: { bodyHeight: 3, viewportColumns: 40, conversationLineCount: 3, maxScroll: 0, start: 0 } }),
+			} as unknown as AppScrollController,
+			popupMenus: fakePopupMenus({
+				placement: "draft-surface",
+				lines: [
+					{ text: "Open a conversation", target: { kind: "popup-menu-close" } },
+					{ text: "› New session", target: { kind: "popup-menu", index: 0 } },
+				],
+			}),
+			mouseController,
+			statusLineRenderer: fakeStatusLineRenderer(),
+			tabLineRenderer: {
+				panelRows: () => 2,
+				layout: () => ({ text: "TABS", segments: [], targets: [], separatorColumns: [] }),
+				render: () => "TABS",
+				bottomText: () => "────",
+				renderBottom: () => "────",
+			} as unknown as TabLineRenderer,
+			toastController: { toast: { visibleStates: [] } } as unknown as AppToastController,
+			voiceProgressOverlayText: () => undefined,
+		});
+
+		const output = captureStdout(() => controller.render());
+
+		assert.equal(rowForRenderedText(output, "Open a conversation"), 3);
+		assert.equal(rowForRenderedText(output, "› New session"), 4);
+		assert.doesNotMatch(output, /OLD1|OLD2|OLD3/u);
+		assert.equal(rowForRenderedText(output, "INPUT"), 7);
+		assert.deepEqual(mouseController.renderedTargets.get(4), { kind: "popup-menu", index: 0 });
+	});
+
 	it("overlays the new-tab button without reserving the top row when the tab panel is collapsed", () => {
 		const mouseController = fakeMouseController();
 		let layoutRows: number | undefined;
@@ -727,7 +787,7 @@ function fakeScreenStyler(): ScreenStyler {
 	} as unknown as ScreenStyler;
 }
 
-function fakePopupMenus(options: { placement?: "default" | "under-tabs"; lines?: { text: string; target?: { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } }[] } = {}): AppPopupMenuController {
+function fakePopupMenus(options: { placement?: "default" | "under-tabs" | "draft-surface"; lines?: { text: string; target?: { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } }[] } = {}): AppPopupMenuController {
 	return {
 		syncActivePopupMenu: () => options.lines?.length ? "resume" : undefined,
 		popupMenuPlacement: () => options.placement ?? "default",

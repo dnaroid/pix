@@ -59,7 +59,7 @@ type PopupMenuRendererPort = {
 	renderResumeMenu(
 		width: number,
 		menu: PopupMenu<ResumePopupMenuValue>,
-		state: { directQuery: string; allSessionsLoaded: boolean; loadedSessionCount: number },
+		state: { directQuery: string; allSessionsLoaded: boolean; loadedSessionCount: number; draft: boolean },
 	): RenderedLine[];
 	renderUserMessageJumpMenu(width: number, menu: PopupMenu<UserMessageJumpPopupMenuValue>, directQuery: string): RenderedLine[];
 	renderQueueMessageMenu(width: number, menu: PopupMenu<QueueMessagePopupMenuValue>): RenderedLine[];
@@ -85,7 +85,7 @@ export type AppPopupMenuControllerHost = {
 	getSlashCommandMenuItems(query: string): PopupMenuItem<SlashCommand>[];
 	getModelMenuItems(query: string, includeHidden?: boolean): PopupMenuItem<ModelMenuValue>[];
 	getThinkingMenuItems(query: string): PopupMenuItem<ThinkingMenuValue>[];
-	getResumeMenuItems(query: string, limit?: number): PopupMenuItem<ResumeMenuValue>[];
+	getResumeMenuItems(query: string, limit?: number, options?: { draft?: boolean }): PopupMenuItem<ResumeMenuValue>[];
 	getUserMessageMenuItems(): PopupMenuItem<UserMessageMenuValue>[];
 	getUserMessageJumpMenuItems(query: string): PopupMenuItem<UserMessageJumpMenuValue>[];
 	getQueueMessageMenuItems(): PopupMenuItem<QueueMessageMenuValue>[];
@@ -131,6 +131,7 @@ export class AppPopupMenuController {
 	private resumeMenuQuery = "";
 	private resumeMenuSessionLimit = RESUME_MENU_INITIAL_SESSION_ROWS;
 	private resumeMenuAllSessionsLoaded = false;
+	private resumeMenuMode: "resume" | "draft" = "resume";
 	private activeUserMessageEntryId: string | undefined;
 	private activeQueuedMessageEntryId: string | undefined;
 
@@ -144,7 +145,29 @@ export class AppPopupMenuController {
 		return this.directPopupMenuQuery;
 	}
 
+	draftSessionSelectorActive(): boolean {
+		return this.directPopupMenu === "resume"
+			&& this.resumeMenuMode === "draft"
+			&& this.directPopupMenuPlacement === "draft-surface";
+	}
+
+	closeDraftSessionSelectorForTabLifecycle(): void {
+		if (!this.draftSessionSelectorActive()) return;
+
+		this.directPopupMenu = undefined;
+		this.directPopupMenuQuery = "";
+		this.directPopupMenuPreserveStatus = false;
+		this.directPopupMenuPlacement = "default";
+		this.resumeMenuMode = "resume";
+		this.resumeMenu.close();
+	}
+
+	setResumeMenuMode(mode: "resume" | "draft"): void {
+		this.resumeMenuMode = mode;
+	}
+
 	setDirectMenu(menu: DirectPopupMenu | undefined): void {
+		if (this.directPopupMenu === "resume" && menu !== "resume") this.resumeMenuMode = "resume";
 		if (menu !== this.directPopupMenu && (
 			menu === "model" || menu === "thinking" || this.directPopupMenu === "model" || this.directPopupMenu === "thinking"
 		)) this.resetModelThinkingState();
@@ -359,7 +382,9 @@ export class AppPopupMenuController {
 	openResumeMenuWithQuery(query: string): void {
 		this.resetPopupMenuSelection(this.resumeMenu);
 		this.resetResumeMenuLazyState(query);
-		this.resumeMenu.openWithItems(this.withoutCloseMenuItems(this.host.getResumeMenuItems(query, this.resumeMenuSessionLimit)));
+		this.resumeMenu.openWithItems(this.withoutCloseMenuItems(this.host.getResumeMenuItems(query, this.resumeMenuSessionLimit, {
+			draft: this.resumeMenuMode === "draft",
+		})));
 		this.updateResumeMenuLoadedState();
 	}
 
@@ -434,6 +459,7 @@ export class AppPopupMenuController {
 		this.directPopupMenuQuery = "";
 		this.directPopupMenuPreserveStatus = false;
 		this.directPopupMenuPlacement = "default";
+		this.resumeMenuMode = "resume";
 		this.activeUserMessageEntryId = undefined;
 		this.activeQueuedMessageEntryId = undefined;
 		this.slashCommandMenu.close();
@@ -458,6 +484,7 @@ export class AppPopupMenuController {
 			return;
 		}
 		if (this.directPopupMenu) {
+			const closingResume = this.directPopupMenu === "resume";
 			const closingCombinedModelMenu = this.directPopupMenu === "model" || this.directPopupMenu === "thinking";
 			this.directPopupMenu = undefined;
 			this.directPopupMenuQuery = "";
@@ -470,6 +497,7 @@ export class AppPopupMenuController {
 			this.queueMessageMenu.close();
 			this.sdkMenu.close();
 			if (closingCombinedModelMenu) this.resetModelThinkingState();
+			if (closingResume) this.resumeMenuMode = "resume";
 			const preserveStatus = this.directPopupMenuPreserveStatus;
 			this.directPopupMenuPreserveStatus = false;
 			if (!preserveStatus) this.host.restoreSessionStatus();
@@ -591,6 +619,7 @@ export class AppPopupMenuController {
 				directQuery: this.directPopupMenuQuery,
 				allSessionsLoaded: this.resumeMenuAllSessionsLoaded,
 				loadedSessionCount: this.resumeMenuLoadedSessionCount(),
+				draft: this.resumeMenuMode === "draft",
 			});
 		}
 		if (this.syncSdkMenu()) return this.renderer.renderSdkMenu(width, this.sdkMenu, this.sdkMenuRequest, this.directPopupMenuQuery);
@@ -816,7 +845,9 @@ export class AppPopupMenuController {
 
 		this.closeMenusExcept("resume");
 		this.maybeGrowResumeMenuWindow(this.directPopupMenuQuery);
-		this.resumeMenu.openWithItems(this.withoutCloseMenuItems(this.host.getResumeMenuItems(this.directPopupMenuQuery, this.resumeMenuSessionLimit)));
+		this.resumeMenu.openWithItems(this.withoutCloseMenuItems(this.host.getResumeMenuItems(this.directPopupMenuQuery, this.resumeMenuSessionLimit, {
+			draft: this.resumeMenuMode === "draft",
+		})));
 		this.updateResumeMenuLoadedState();
 		return true;
 	}

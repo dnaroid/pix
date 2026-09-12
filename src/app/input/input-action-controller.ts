@@ -18,6 +18,8 @@ const ABORT_STATUS_RESTORE_MS = 1200;
 export type AppInputActionControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
 	inputScopeKey?(): string | undefined;
+	isDraftTabActive?(): boolean;
+	materializeDraftSession?(): Promise<AgentSessionRuntime | undefined>;
 	isRunning(): boolean;
 	isSessionSwitching(): boolean;
 	inputEditor(): InputEditor;
@@ -195,7 +197,6 @@ export class AppInputActionController {
 		await this.host.stopVoiceInput();
 		if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
 
-		const runtime = this.host.runtime();
 		const inputEditor = this.host.inputEditor();
 		const rawPromptText = inputEditor.promptText;
 		const rawDisplayText = inputEditor.expandedText;
@@ -220,6 +221,13 @@ export class AppInputActionController {
 		if (promptText.startsWith("/")) {
 			await this.popupActions.submitSlashCommand(promptText);
 			return;
+		}
+
+		let runtime = this.host.runtime();
+		if (!runtime && this.host.isDraftTabActive?.()) {
+			runtime = await this.host.materializeDraftSession?.();
+			if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
+			if (!runtime) return;
 		}
 
 		const message = this.queuedMessages.createSubmittedUserMessage(promptText, displayText, images);

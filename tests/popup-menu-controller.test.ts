@@ -356,6 +356,53 @@ describe("popup menu header", () => {
 		assert.ok(lines.every((line) => !/Loading sessions/.test(line.text)));
 	});
 
+	it("labels the draft resume surface as an open-conversation selector", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([], THEMES.dark, [
+			{ value: { kind: "new" }, label: "New session", description: "Start typing in the composer" },
+		]));
+
+		controller.setResumeMenuMode("draft");
+		controller.openDirectPopupMenu("resume", { placement: "draft-surface" });
+		controller.openResumeMenuWithQuery("");
+		const lines = controller.renderActivePopupMenu(80);
+
+		assert.match(lines[0]?.text ?? "", /Open a conversation/u);
+		assert.equal(controller.draftSessionSelectorActive(), true);
+		assert.equal(controller.selectedResume()?.kind, "new");
+	});
+
+	it("closes the draft session selector synchronously for tab lifecycle changes", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([], THEMES.dark, [
+			{ value: { kind: "new" }, label: "New session", description: "Start typing in the composer" },
+		]));
+
+		controller.setResumeMenuMode("draft");
+		controller.openDirectPopupMenu("resume", { preserveStatus: true, placement: "draft-surface" });
+		controller.openResumeMenuWithQuery("");
+		assert.equal(controller.draftSessionSelectorActive(), true);
+
+		controller.closeDraftSessionSelectorForTabLifecycle();
+
+		assert.equal(controller.draftSessionSelectorActive(), false);
+		assert.equal(controller.directMenu, undefined);
+		assert.equal(controller.popupMenuPlacement(), "default");
+	});
+
+	it("does not let a stale draft-selector close displace a live resume menu", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([], THEMES.dark, [
+			{ value: { kind: "new" }, label: "new", description: "Create a new session" },
+		]));
+
+		controller.setResumeMenuMode("draft");
+		controller.openDirectPopupMenu("resume", { placement: "under-tabs" });
+		controller.openResumeMenuWithQuery("");
+
+		controller.closeDraftSessionSelectorForTabLifecycle();
+
+		assert.equal(controller.directMenu, "resume");
+		assert.equal(controller.popupMenuPlacement(), "under-tabs");
+	});
+
 	it("formats user message jump items without repeated action hints", () => {
 		const text = "\u0434\u043e\u0431\u0430\u0432\u044c \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440 \u0438\u043a\u043e\u043d\u043a\u0443 \u043f\u043e\u043a\u0430\u0437\u0430 \u043c\u0435\u043d\u044e \u043f\u0435\u0440\u0435\u0445\u043e\u0434\u0430 \u043a \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u0441\u043a\u0438\u043c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f\u043c";
 		const [item] = buildUserMessageJumpItems([{ id: "user-1", kind: "user", text }]);

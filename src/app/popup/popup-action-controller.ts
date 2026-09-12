@@ -10,6 +10,9 @@ import type { AppWorkspaceActionsController } from "../workspace/workspace-actio
 
 export type AppPopupActionControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
+	inputScopeKey?(): string | undefined;
+	isDraftTabActive?(): boolean;
+	materializeDraftSession?(): Promise<AgentSessionRuntime | undefined>;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	isRunning(): boolean;
@@ -22,6 +25,7 @@ export type AppPopupActionControllerHost = {
 	saveVisibleModels(modelRefs: readonly string[]): readonly string[];
 	render(): void;
 	afterSessionReplacement(message?: string): void;
+	openSessionInActiveDraftTab?(sessionPath: string): Promise<boolean>;
 	scrollToConversationEntry(entryId: string): boolean;
 	scrollToUserMessageJumpTarget(target: UserMessageJumpMenuValue): Promise<boolean>;
 };
@@ -51,7 +55,7 @@ export class AppPopupActionController {
 	}
 
 	async submitSlashCommand(text: string): Promise<void> {
-		const scope = this.captureScope();
+		let scope = this.captureScope();
 		const parsed = this.menuItems.parseSlashInput(text);
 		if (!parsed) return;
 
@@ -75,6 +79,11 @@ export class AppPopupActionController {
 			this.host.showToast(`/${command.name} does not take arguments`, "warning");
 			this.host.render();
 			return;
+		}
+		if (command.kind === "resource" && !scope.runtime && this.host.isDraftTabActive?.()) {
+			const runtime = await this.host.materializeDraftSession?.();
+			if (!runtime || (this.host.inputScopeKey && this.host.inputScopeKey() !== scope.inputScopeKey)) return;
+			scope = this.captureScope();
 		}
 
 		this.host.setInput("");
@@ -266,11 +275,19 @@ export class AppPopupActionController {
 	private async submitSelectedResume(): Promise<boolean> {
 		const selected = this.popupMenus.selectedResume();
 		if (!selected) return false;
+		const draftSelector = this.popupMenus.draftSessionSelectorActive();
 
 		this.popupMenus.setDirectMenu(undefined);
 		this.popupMenus.setDirectPreserveStatus(false);
 		this.popupMenus.setDirectQuery("");
 		this.popupMenus.closeResumeMenu();
+		this.popupMenus.setResumeMenuMode("resume");
+
+		if (draftSelector) {
+			if (selected.kind !== "session") return true;
+			await this.host.openSessionInActiveDraftTab?.(selected.session.path);
+			return true;
+		}
 
 		if (selected.kind === "new") {
 			await this.submitSlashCommand("/new");
@@ -320,13 +337,16 @@ export class AppPopupActionController {
 		await this.queuedMessages.submitUserMessage(this.queuedMessages.createSubmittedUserMessage(promptText, promptText, []), session);
 	}
 
-	private captureScope(): { runtime: AgentSessionRuntime | undefined; session: AgentSession | undefined } {
+	private captureScope(): { runtime: AgentSessionRuntime | undefined; session: AgentSession | undefined; inputScopeKey: string | undefined } {
 		const runtime = this.host.runtime();
-		return { runtime, session: runtime?.session };
+		return { runtime, session: runtime?.session, inputScopeKey: this.host.inputScopeKey?.() };
 	}
 
-	private isScopeActive(scope: { runtime: AgentSessionRuntime | undefined; session: AgentSession | undefined }): boolean {
-		return this.host.isRunning() && this.host.runtime() === scope.runtime && scope.runtime?.session === scope.session;
+	private isScopeActive(scope: { runtime: AgentSessionRuntime | undefined; session: AgentSession | undefined; inputScopeKey: string | undefined }): boolean {
+		return this.host.isRunning()
+			&& this.host.runtime() === scope.runtime
+			&& scope.runtime?.session === scope.session
+			&& (this.host.inputScopeKey === undefined || this.host.inputScopeKey() === scope.inputScopeKey);
 	}
 
 	private isRuntimeActive(runtime: AgentSessionRuntime): boolean {

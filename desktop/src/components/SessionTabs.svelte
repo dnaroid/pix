@@ -21,6 +21,7 @@
     canCreate,
     newSessionShortcut,
     onTabClick,
+    canCloseTab,
     onCloseTab,
     onCreate,
   }: {
@@ -33,6 +34,7 @@
     canCreate: boolean;
     newSessionShortcut?: string;
     onTabClick: (sessionId: string) => void;
+    canCloseTab: (sessionId: string) => boolean;
     onCloseTab: (sessionId: string) => boolean | Promise<boolean>;
     onCreate: () => void;
   } = $props();
@@ -71,7 +73,7 @@
       return;
     }
     if (event.key !== "Delete") return;
-    if (disabled) return;
+    if (disabled || !canCloseTab(sessionId)) return;
     event.preventDefault();
     const fallbackId = sessions[index + 1]?.sessionId ?? sessions[index - 1]?.sessionId;
     void Promise.resolve(onCloseTab(sessionId)).then(async (closed) => {
@@ -91,7 +93,7 @@
   }
 
   function handleTabMouseDown(event: MouseEvent, sessionId: string): void {
-    if (event.button !== 1 || disabled) return;
+    if (event.button !== 1 || disabled || !canCloseTab(sessionId)) return;
     event.preventDefault();
     event.stopPropagation();
     void onCloseTab(sessionId);
@@ -116,6 +118,7 @@
         {@const running = runningSessionIds.has(session.sessionId)}
         {@const activity = activityBySessionId.get(session.sessionId)}
         {@const needsInput = needsInputSessionIds.has(session.sessionId)}
+        {@const closable = canCloseTab(session.sessionId)}
         {@const activityTone = sessionActivityTone(activity, running, needsInput)}
         {@const pulsing = running || (activity?.activeSubagents ?? 0) > 0}
         <div
@@ -131,7 +134,8 @@
           <button
             use:titlebarDrag
             class={[
-              "flex h-full w-full items-center gap-2.5 bg-transparent pt-0 pr-9 pb-1.5 pl-3.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+              "flex h-full w-full items-center gap-2.5 bg-transparent pt-0 pb-1.5 pl-3.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+              closable ? "pr-9" : "pr-3.5",
               active && "font-medium text-foreground",
             ]}
             type="button"
@@ -158,19 +162,21 @@
               {session.title || "Untitled conversation"}
             </span>
           </button>
-          <button
-            use:titlebarDrag
-            class={[
-              "absolute top-1/2 right-1.5 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md bg-transparent text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 group-hover:opacity-100 group-focus-within:opacity-100",
-              active && "opacity-100",
-            ]}
-            type="button"
-            tabindex="-1"
-            aria-label={`Close ${session.title || "Untitled conversation"}`}
-            title={running ? "Close tab and stop running session" : "Close tab"}
-            onclick={() => void onCloseTab(session.sessionId)}
-            disabled={disabled}
-          ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          {#if closable}
+            <button
+              use:titlebarDrag
+              class={[
+                "absolute top-1/2 right-1.5 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md bg-transparent text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 group-hover:opacity-100 group-focus-within:opacity-100",
+                active && "opacity-100",
+              ]}
+              type="button"
+              tabindex="-1"
+              aria-label={`Close ${session.title || "Untitled conversation"}`}
+              title={running ? "Close tab and stop running session" : "Close tab"}
+              onclick={() => void onCloseTab(session.sessionId)}
+              disabled={disabled}
+            ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          {/if}
         </div>
       {/each}
     </div>

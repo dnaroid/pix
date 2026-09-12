@@ -13,7 +13,8 @@ import type { AppOptions, Entry, PixExtensionUIContext, SessionActivity } from "
 
 export type AppSessionLifecycleHost = {
 	options: AppOptions;
-	createRuntime(): Promise<AgentSessionRuntime>;
+	prepareStartupRuntime?(): Promise<{ sessionPath?: string } | null>;
+	createRuntime(options?: { sessionPath?: string }): Promise<AgentSessionRuntime>;
 	entries: Entry[];
 	runtime(): AgentSessionRuntime | undefined;
 	setRuntime(runtime: AgentSessionRuntime | undefined): void;
@@ -91,7 +92,16 @@ export class AppSessionLifecycleController {
 
 		try {
 			await this.host.loadStartupConfig();
-			const runtime = await this.host.createRuntime();
+			const startupRuntime = await this.host.prepareStartupRuntime?.();
+			if (startupRuntime === null) {
+				this.host.setRuntime(undefined);
+				this.host.setSessionStatus(undefined);
+				this.host.setSessionActivity("idle");
+				await this.host.restoreTabsAfterStartup();
+				this.host.render();
+				return;
+			}
+			const runtime = await this.host.createRuntime(startupRuntime ?? undefined);
 			if (!this.host.isRunning()) {
 				await this.host.disposeRuntimeForQuit(runtime);
 				return;

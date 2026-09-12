@@ -83,6 +83,66 @@ describe("AppInputActionController", () => {
 		assert.equal(stopVoiceInputCalls, 1);
 	});
 
+	it("materializes a UI-only draft session only when a normal prompt is submitted", async () => {
+		const inputEditor = new InputEditor();
+		inputEditor.setText("first prompt");
+		const session = {} as AgentSession;
+		const runtime = { session } as AgentSessionRuntime;
+		let activeRuntime: AgentSessionRuntime | undefined;
+		let materializeCalls = 0;
+		let submittedSession: AgentSession | undefined;
+		const controller = new AppInputActionController(
+			{
+				runtime: () => activeRuntime,
+				inputScopeKey: () => "draft-tab",
+				isDraftTabActive: () => activeRuntime === undefined,
+				materializeDraftSession: async () => {
+					materializeCalls += 1;
+					activeRuntime = runtime;
+					return runtime;
+				},
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => inputEditor,
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => false } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{
+				createSubmittedUserMessage: (promptText: string, displayText: string, images: SubmittedUserMessage["images"]) => ({
+					id: "draft-first-prompt",
+					promptText,
+					displayText,
+					images,
+				}),
+				submitUserMessage: async (_message: SubmittedUserMessage, targetSession?: AgentSession) => {
+					submittedSession = targetSession;
+				},
+			} as unknown as AppQueuedMessageController,
+		);
+
+		await (controller as unknown as { submitInput(): Promise<void> }).submitInput();
+
+		assert.equal(materializeCalls, 1);
+		assert.equal(submittedSession, session);
+		assert.equal(inputEditor.text, "");
+	});
+
 	it("queues the current editor input without submitting it to the session", async () => {
 		const inputEditor = new InputEditor();
 		inputEditor.setText("send later");

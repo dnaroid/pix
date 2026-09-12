@@ -24,9 +24,20 @@ describe("SessionTabs desktop interaction", () => {
     expect(source).toContain('tabindex="-1"');
     expect(source).toContain('event.key !== "Delete"');
     expect(source).toContain("event.button !== 1");
+    expect(source).toContain("!canCloseTab(sessionId)");
     expect(source).toContain("onmousedown={(event) => handleTabMouseDown(event, session.sessionId)}");
     expect(source).not.toContain("onauxclick");
     expect(source).not.toContain("disabled={disabled || running}");
+  });
+
+  it("keeps the sole UI-only draft tab non-closable", () => {
+    expect(source).toContain("canCloseTab: (sessionId: string) => boolean");
+    expect(source).toContain("{@const closable = canCloseTab(session.sessionId)}");
+    expect(source).toContain("{#if closable}");
+    expect(appSource).toContain("if (tabSessions.length === 0) return false;");
+    expect(appSource).toContain(
+      "canCloseTab={(sessionId) => sessionId !== DRAFT_SESSION_TAB_ID || tabSessions.length > 0}",
+    );
   });
 
   it("requires confirmation before closing a running conversation", () => {

@@ -479,18 +479,24 @@ describe("AppTabsController", () => {
 		assert.equal(tabs.activeTabId, "tab-2");
 	});
 
-	it("captures the previous tab view before opening a new tab", async () => {
+	it("captures the previous tab view before opening a UI-only draft tab", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
-		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
-		let currentRuntime = activeRuntime;
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
+		let newRuntimeCalls = 0;
 		const entries: string[] = [];
 		const capturedView = fakeSessionView({ scrollState: { scrollFromBottom: 9, detachedScrollStart: 23 } });
 		const controller = new AppTabsController({
 			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
 			blinkController: fakeBlinkController(),
 			runtime: () => currentRuntime,
-			createRuntimeForNewSession: async () => newRuntime,
-			createRuntimeForSession: async () => newRuntime,
+			createRuntimeForNewSession: async () => {
+				newRuntimeCalls += 1;
+				return fakeRuntime("two", "/tmp/two.jsonl");
+			},
+			createRuntimeForSession: async () => fakeRuntime("two", "/tmp/two.jsonl"),
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
 			activateRuntime: async (runtime) => {
 				currentRuntime = runtime;
 			},
@@ -528,7 +534,11 @@ describe("AppTabsController", () => {
 		await controller.openNewTab();
 
 		assert.deepEqual(tabs.sessionViewsByTabId.get("tab-1"), capturedView);
-		assert.deepEqual(entries, ["Opened a new tab. cwd=/tmp\n\nModel: test/model"]);
+		assert.equal(newRuntimeCalls, 0);
+		assert.equal(currentRuntime, undefined);
+		assert.equal(tabs.tabItems[1]?.draft, true);
+		assert.equal(tabs.tabItems[1]?.sessionPath, undefined);
+		assert.deepEqual(entries, []);
 	});
 
 	it("restores the cached scroll position when switching back to a tab", async () => {
@@ -848,6 +858,65 @@ describe("AppTabsController", () => {
 			cursor: 17,
 			attachments: [{ kind: "image", tag: "[Image 1]", image: { type: "image", data: "base64-image", mimeType: "image/png" } }],
 		});
+	});
+
+	it("overwrites stale tab state with an empty snapshot when only a UI draft remains", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-draft-only-"));
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(tabsPath, JSON.stringify({
+			version: 4,
+			cwd: dir,
+			tabs: [{ path: join(dir, "stale.jsonl"), title: "stale" }],
+			activePath: join(dir, "stale.jsonl"),
+		}), "utf8");
+
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => undefined,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("saved", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "draft text", cursor: 10 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			filePath: () => string;
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.filePath = () => tabsPath;
+		tabs.tabItems.push({
+			id: "draft-tab",
+			title: "new",
+			titlePlaceholder: "new",
+			status: "active",
+			activity: "idle",
+			draft: true,
+		});
+		tabs.activeTabId = "draft-tab";
+
+		await tabs.saveTabs();
+
+		const saved = JSON.parse(await readFile(tabsPath, "utf8")) as {
+			tabs: Array<{ path: string }>;
+			activePath?: string;
+		};
+		assert.deepEqual(saved.tabs, []);
+		assert.equal(saved.activePath, undefined);
 	});
 
 	it("persists and restores deferred queued messages after startup", async () => {
@@ -1313,17 +1382,23 @@ describe("AppTabsController", () => {
 		assert.deepEqual(currentInput, { text: "", cursor: 0 });
 	});
 
-	it("opens a new tab even when the active runtime is streaming", async () => {
+	it("opens a UI-only draft tab even when the active runtime is streaming", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl", { isStreaming: true });
-		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
-		let currentRuntime = activeRuntime;
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
+		let newRuntimeCalls = 0;
 		const toasts: string[] = [];
 		const controller = new AppTabsController({
 			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
 			blinkController: fakeBlinkController(),
 			runtime: () => currentRuntime,
-			createRuntimeForNewSession: async () => newRuntime,
+			createRuntimeForNewSession: async () => {
+				newRuntimeCalls += 1;
+				return fakeRuntime("two", "/tmp/two.jsonl");
+			},
 			createRuntimeForSession: async () => activeRuntime,
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
 			activateRuntime: async (runtime) => {
 				currentRuntime = runtime;
 			},
@@ -1357,28 +1432,170 @@ describe("AppTabsController", () => {
 
 		await controller.openNewTab();
 
-		assert.equal(currentRuntime, newRuntime);
+		assert.equal(currentRuntime, undefined);
+		assert.equal(newRuntimeCalls, 0);
 		assert.equal(tabs.tabItems.length, 2);
 		assert.equal(tabs.activeTabId, tabs.tabItems[1]?.id);
+		assert.equal(tabs.tabItems[1]?.draft, true);
+		assert.equal(tabs.tabItems[1]?.sessionPath, undefined);
 		assert.equal(tabs.runtimesByTabId.get("tab-1"), activeRuntime);
-		assert.equal(tabs.runtimesByTabId.get(tabs.activeTabId ?? ""), newRuntime);
+		assert.equal(tabs.runtimesByTabId.get(tabs.activeTabId ?? ""), undefined);
 		assert.deepEqual(toasts, []);
 	});
 
-	it("marks a new tab active while its runtime is still loading", async () => {
+	it("keeps the draft selected through synchronous renders during old-runtime teardown", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
-		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
-		let currentRuntime = activeRuntime;
-		let resolveRuntime: (runtime: AgentSessionRuntime) => void = () => {};
-		const runtimePromise = new Promise<AgentSessionRuntime>((resolve) => {
-			resolveRuntime = resolve;
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
+		let controller!: AppTabsController;
+		const renderedActiveTabIds: Array<string | undefined> = [];
+		controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("two", "/tmp/two.jsonl"),
+			createRuntimeForSession: async () => activeRuntime,
+			deactivateRuntimeForDraft: () => {
+				// UI cleanup may render while the host still exposes the previous
+				// runtime. That render must still see the draft as the active tab.
+				renderedActiveTabIds.push(controller.tabs().find((tab) => tab.status === "active")?.id);
+				currentRuntime = undefined;
+			},
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			openDraftSessionSelector: () => {
+				renderedActiveTabIds.push(controller.tabs().find((tab) => tab.status === "active")?.id);
+			},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {
+				renderedActiveTabIds.push(controller.tabs().find((tab) => tab.status === "active")?.id);
+			},
 		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.saveTabs = async () => {};
+		tabs.tabItems.push({ id: "tab-1", title: "A", status: "active", sessionPath: "/tmp/one.jsonl" });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		await controller.openNewTab();
+
+		const draft = tabs.tabItems.find((tab) => tab.draft === true);
+		assert.ok(draft);
+		assert.equal(tabs.activeTabId, draft.id);
+		assert.equal(controller.tabs().find((tab) => tab.status === "active")?.id, draft.id);
+		assert.ok(renderedActiveTabIds.length > 0);
+		assert.deepEqual(new Set(renderedActiveTabIds), new Set([draft.id]));
+	});
+
+	it("closes an active draft back to the previous real tab without leaking its selector or blanking the cached view", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
+		let selectorOpen = false;
+		const capturedView = fakeSessionView({ scrollState: { scrollFromBottom: 7, detachedScrollStart: 19 } });
+		let restoredView: typeof capturedView | undefined;
 		const controller = new AppTabsController({
 			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
 			blinkController: fakeBlinkController(),
 			runtime: () => currentRuntime,
-			createRuntimeForNewSession: async () => runtimePromise,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
 			createRuntimeForSession: async () => activeRuntime,
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => false,
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => capturedView,
+			restoreSessionView: (view) => {
+				restoredView = view as typeof capturedView;
+			},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			openDraftSessionSelector: () => {
+				selectorOpen = true;
+			},
+			closeDraftSessionSelector: () => {
+				selectorOpen = false;
+			},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			tabIdsNeedingHistoryReload: Set<string>;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.saveTabs = async () => {};
+		tabs.tabItems.push({ id: "tab-1", title: "A", status: "active", sessionPath: "/tmp/one.jsonl" });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		await controller.openNewTab();
+		const draftId = tabs.activeTabId;
+		assert.equal(selectorOpen, true);
+		assert.equal(currentRuntime, undefined);
+		tabs.tabIdsNeedingHistoryReload.add("tab-1");
+		restoredView = undefined;
+
+		await controller.closeTab(draftId ?? "");
+
+		assert.equal(selectorOpen, false);
+		assert.equal(currentRuntime, activeRuntime);
+		assert.equal(tabs.activeTabId, "tab-1");
+		assert.equal(tabs.tabItems.length, 1);
+		assert.equal(tabs.tabItems[0]?.sessionPath, resolve("/tmp/one.jsonl"));
+		assert.equal(restoredView, capturedView);
+	});
+
+	it("opens a saved session directly into the active draft without creating a throwaway session", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const savedRuntime = fakeRuntime("two", "/tmp/two.jsonl");
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
+		let newRuntimeCalls = 0;
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => {
+				newRuntimeCalls += 1;
+				return fakeRuntime("throwaway", "/tmp/throwaway.jsonl");
+			},
+			createRuntimeForSession: async (sessionPath) => {
+				assert.equal(sessionPath, resolve("/tmp/two.jsonl"));
+				return savedRuntime;
+			},
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
 			activateRuntime: async (runtime) => {
 				currentRuntime = runtime;
 			},
@@ -1408,10 +1625,173 @@ describe("AppTabsController", () => {
 		tabs.activeTabId = "tab-1";
 		tabs.runtimesByTabId.set("tab-1", activeRuntime);
 
-		const openPromise = controller.openNewTab();
+		await controller.openNewTab();
+		const draftId = tabs.activeTabId;
+		const opened = await controller.openSessionInActiveDraftTab("/tmp/two.jsonl");
 
+		assert.equal(opened, true);
+		assert.equal(newRuntimeCalls, 0);
+		assert.equal(currentRuntime, savedRuntime);
+		assert.equal(tabs.activeTabId, draftId);
+		assert.equal(tabs.tabItems.find((tab) => tab.id === draftId)?.draft, undefined);
+		assert.equal(tabs.tabItems.find((tab) => tab.id === draftId)?.sessionPath, resolve("/tmp/two.jsonl"));
+	});
+
+	it("restores the real tab activity when switching back from a draft fails", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => activeRuntime,
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
+			activateRuntime: async () => {
+				throw new Error("activation failed");
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.saveTabs = async () => {};
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		await controller.openNewTab();
+		const draftId = tabs.activeTabId;
+		const realTab = tabs.tabItems.find((tab) => tab.id === "tab-1");
+		if (!realTab) throw new Error("Expected the real tab to remain available");
+		realTab.activity = "running";
+		await controller.closeTab(draftId ?? "");
+
+		assert.equal(tabs.activeTabId, draftId);
+		assert.equal(tabs.tabItems.find((tab) => tab.id === "tab-1")?.activity, "running");
+	});
+
+	it("starts with a UI-only draft when there is no persisted real tab snapshot", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-draft-startup-"));
+		const tabsPath = join(dir, "tabs.json");
+		let selectorOpens = 0;
+		let newRuntimeCalls = 0;
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => undefined,
+			createRuntimeForNewSession: async () => {
+				newRuntimeCalls += 1;
+				return fakeRuntime("new", join(dir, "new.jsonl"));
+			},
+			createRuntimeForSession: async () => fakeRuntime("saved", join(dir, "saved.jsonl")),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			openDraftSessionSelector: () => {
+				selectorOpens += 1;
+			},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as { filePath: () => string };
+		tabs.filePath = () => tabsPath;
+
+		assert.equal(await controller.prepareStartupRuntime(), null);
+		await controller.restoreAfterStartup();
+
+		assert.equal(newRuntimeCalls, 0);
+		assert.equal(controller.tabs().length, 1);
+		assert.equal(controller.tabs()[0]?.draft, true);
+		assert.equal(controller.tabs()[0]?.sessionPath, undefined);
+		assert.equal(selectorOpens, 1);
+		const saved = JSON.parse(await readFile(tabsPath, "utf8")) as { tabs: unknown[]; activePath?: string };
+		assert.deepEqual(saved.tabs, []);
+		assert.equal(saved.activePath, undefined);
+	});
+
+	it("materializes the active draft in place while its runtime is loading", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
+		let resolveRuntime: (runtime: AgentSessionRuntime) => void = () => {};
+		const runtimePromise = new Promise<AgentSessionRuntime>((resolve) => {
+			resolveRuntime = resolve;
+		});
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => runtimePromise,
+			createRuntimeForSession: async () => activeRuntime,
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.saveTabs = async () => {};
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		await controller.openNewTab();
+		const draftTabId = tabs.activeTabId;
+		assert.equal(tabs.tabItems[1]?.draft, true);
+		const openPromise = controller.materializeActiveDraftTab();
+
+		await waitFor(() => controller.isSwitching());
 		assert.equal(controller.isSwitching(), true);
-		assert.equal(currentRuntime, activeRuntime);
+		assert.equal(currentRuntime, undefined);
 		assert.equal(tabs.tabItems.length, 2);
 		const pendingTab = controller.tabs()[1];
 		assert.equal(pendingTab?.status, "active");
@@ -1423,7 +1803,9 @@ describe("AppTabsController", () => {
 
 		assert.equal(controller.isSwitching(), false);
 		assert.equal(currentRuntime, newRuntime);
-		assert.equal(tabs.activeTabId, tabs.tabItems[1]?.id);
+		assert.equal(tabs.activeTabId, draftTabId);
+		assert.equal(tabs.tabItems[1]?.draft, undefined);
+		assert.equal(tabs.tabItems[1]?.sessionPath, resolve("/tmp/two.jsonl"));
 		assert.equal(tabs.runtimesByTabId.get(tabs.activeTabId ?? ""), newRuntime);
 	});
 
@@ -1499,7 +1881,7 @@ describe("AppTabsController", () => {
 		assert.deepEqual(toasts, ["Fork opened in new tab"]);
 	});
 
-	it("marks explicit new tabs with the New title placeholder", async () => {
+	it("marks explicit draft tabs with the New title placeholder without a session path", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const newRuntime = fakeRuntime("019e7d3fabc", "/tmp/two.jsonl", { sessionName: undefined });
 		let currentRuntime = activeRuntime;
@@ -1540,9 +1922,10 @@ describe("AppTabsController", () => {
 
 		await controller.openNewTab();
 
-		const newTab = tabs.tabItems.find((tab) => tab.sessionPath === resolve("/tmp/two.jsonl"));
-		assert.equal(newTab?.title, "019e7d3f");
+		const newTab = tabs.tabItems.find((tab) => tab.draft === true);
+		assert.equal(newTab?.title, "new");
 		assert.equal(newTab?.titlePlaceholder, "new");
+		assert.equal(newTab?.sessionPath, undefined);
 	});
 
 	it("marks the initial startup tab with the Loading title placeholder", () => {
@@ -1821,10 +2204,10 @@ describe("AppTabsController", () => {
 		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 
-	it("keeps the previous tab when activation renders during new tab creation", async () => {
+	it("keeps the draft tab identity while first-prompt materialization activates its runtime", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
-		let currentRuntime = activeRuntime;
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
 		let renderedTabPaths: Array<string | undefined> = [];
 		const switchingSnapshots: boolean[] = [];
 		let controller!: AppTabsController;
@@ -1834,6 +2217,9 @@ describe("AppTabsController", () => {
 			runtime: () => currentRuntime,
 			createRuntimeForNewSession: async () => newRuntime,
 			createRuntimeForSession: async () => activeRuntime,
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
 			activateRuntime: async (runtime) => {
 				currentRuntime = runtime;
 				renderedTabPaths = controller.tabs().map((tab) => tab.sessionPath);
@@ -1867,13 +2253,15 @@ describe("AppTabsController", () => {
 		tabs.runtimesByTabId.set("tab-1", activeRuntime);
 
 		await controller.openNewTab();
+		const draftId = tabs.activeTabId;
+		await controller.materializeActiveDraftTab();
 
-		assert.deepEqual(renderedTabPaths, [resolve("/tmp/one.jsonl"), resolve("/tmp/two.jsonl")]);
+		assert.deepEqual(renderedTabPaths, [resolve("/tmp/one.jsonl"), undefined]);
 		assert.equal(switchingSnapshots.includes(true), true);
 		assert.equal(tabs.tabItems.length, 2);
 		assert.equal(tabs.tabItems[0]?.sessionPath, resolve("/tmp/one.jsonl"));
 		assert.equal(tabs.tabItems[1]?.sessionPath, resolve("/tmp/two.jsonl"));
-		assert.equal(tabs.activeTabId, tabs.tabItems[1]?.id);
+		assert.equal(tabs.activeTabId, draftId);
 	});
 
 	it("renders while a searched session tab is pending activation", async () => {
@@ -2070,6 +2458,51 @@ describe("AppTabsController", () => {
 		runtime.emitSessionEvent({ type: "session_info_changed" } as AgentSessionEvent);
 
 		assert.equal(tabs.tabItems[0]?.title, "renamed new");
+	});
+
+	it("does not close the sole UI-only draft tab", async () => {
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => undefined,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async (path) => fakeRuntime("saved", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+		};
+		tabs.tabItems.push({
+			id: "draft",
+			title: "new",
+			titlePlaceholder: "new",
+			status: "active",
+			activity: "idle",
+			draft: true,
+		});
+		tabs.activeTabId = "draft";
+
+		await controller.closeTab("draft");
+
+		assert.equal(tabs.tabItems.length, 1);
+		assert.equal(tabs.tabItems[0]?.id, "draft");
+		assert.equal(tabs.tabItems[0]?.draft, true);
+		assert.equal(tabs.activeTabId, "draft");
 	});
 
 	it("updates an inactive tab title when its runtime session name changes", async () => {
@@ -2500,17 +2933,21 @@ describe("AppTabsController", () => {
 		assert.equal(statusUpdateCount, 0);
 	});
 
-	it("rolls back and disposes a new runtime when activation fails", async () => {
+	it("keeps the draft and disposes its materialized runtime when activation fails", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
-		let currentRuntime = activeRuntime;
+		let currentRuntime: AgentSessionRuntime | undefined = activeRuntime;
 		const disposed: AgentSessionRuntime[] = [];
+		const toasts: string[] = [];
 		const controller = new AppTabsController({
 			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
 			blinkController: fakeBlinkController(),
 			runtime: () => currentRuntime,
 			createRuntimeForNewSession: async () => newRuntime,
 			createRuntimeForSession: async () => activeRuntime,
+			deactivateRuntimeForDraft: () => {
+				currentRuntime = undefined;
+			},
 			activateRuntime: async (runtime) => {
 				currentRuntime = runtime;
 				if (runtime === newRuntime) throw new Error("bind failed");
@@ -2529,7 +2966,9 @@ describe("AppTabsController", () => {
 			captureInputState: () => ({ text: "", cursor: 0 }),
 			restoreInputState: () => {},
 			addEntry: () => {},
-			showToast: () => {},
+			showToast: (message) => {
+				toasts.push(message);
+			},
 			render: () => {},
 		});
 		const tabs = controller as unknown as {
@@ -2543,12 +2982,18 @@ describe("AppTabsController", () => {
 		tabs.activeTabId = "tab-1";
 		tabs.runtimesByTabId.set("tab-1", activeRuntime);
 
-		await assert.rejects(controller.openNewTab(), /bind failed/u);
+		await controller.openNewTab();
+		const draftId = tabs.activeTabId;
+		const materialized = await controller.materializeActiveDraftTab();
 
-		assert.equal(currentRuntime, activeRuntime);
+		assert.equal(materialized, undefined);
+		assert.equal(currentRuntime, undefined);
 		assert.deepEqual(disposed, [newRuntime]);
-		assert.equal(tabs.tabItems.length, 1);
-		assert.equal(tabs.activeTabId, "tab-1");
+		assert.equal(tabs.tabItems.length, 2);
+		assert.equal(tabs.activeTabId, draftId);
+		assert.equal(tabs.tabItems[1]?.draft, true);
+		assert.equal(tabs.tabItems[1]?.sessionPath, undefined);
+		assert.equal(toasts.includes("Could not start new conversation"), true);
 	});
 
 	it("disposes a runtime whose tab closes while it is loading", async () => {
