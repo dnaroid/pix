@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import overlaysViewModelSource from "../app/desktop-overlays-view-model.svelte.ts?raw";
-import modelConfigSource from "../app/model-config.svelte.ts?raw";
+import modelConfigActionsSource from "../app/model-config-actions.ts?raw";
 import preferenceSource from "../app/model-preferences.svelte.ts?raw";
 import overlaysSource from "./DesktopOverlays.svelte?raw";
 import pickerSource from "./ModelThinkingPicker.svelte?raw";
@@ -17,7 +17,7 @@ describe("Desktop model thinking preferences", () => {
 
   it("persists the effective thinking level after draft or session apply", () => {
     expect(preferenceSource).toContain("updateModelThinkingPreferenceInPixConfig(document.content, modelRef, thinkingLevel)");
-    expect(modelConfigSource).toContain("await options.preferences.rememberThinkingPreference(modelRef, state.currentThinking)");
-    expect(modelConfigSource).toContain("await options.preferences.rememberThinkingPreference(modelRef, applied.currentThinking)");
+    expect(modelConfigActionsSource).toContain("await options.preferences.rememberThinkingPreference(modelRef, currentThinking)");
+    expect(modelConfigActionsSource).toContain("await options.preferences.rememberThinkingPreference(modelRef, applied.currentThinking)");
   });
 });

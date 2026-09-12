@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import titlebarViewModelSource from "../app/desktop-titlebar-view-model.svelte.ts?raw";
-import sessionTabSource from "../app/session-tab-controller.ts?raw";
+import sessionTabClosureSource from "../app/session-tab-closure.ts?raw";
 import workbenchControllerSource from "../app/workbench-controller.ts?raw";
 import workbenchModelSource from "../app/workbench-model.ts?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
@@ -37,8 +37,8 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(workbenchControllerSource).toContain("if (closed && wasSelected)");
     expect(workbenchControllerSource).toContain("pane ? pane.requestClose() : (options.closePreview(), true)");
     expect(workbenchControllerSource).toContain("options.closeGitDiff();");
-    expect(sessionTabSource).toContain("if (options.promptRunning(sessionId))");
-    expect(sessionTabSource).toContain("Closing this tab will stop the active run. Close it?");
+    expect(sessionTabClosureSource).toContain("if (options.promptRunning(sessionId))");
+    expect(sessionTabClosureSource).toContain("Closing this tab will stop the active run. Close it?");
   });
 
   it("keeps the sole UI-only draft conversation non-closable", () => {

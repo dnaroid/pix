@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import commandSource from "../app/desktop-command-controller.svelte.ts?raw";
 import overlaysViewModelSource from "../app/desktop-overlays-view-model.svelte.ts?raw";
-import modelConfigSource from "../app/model-config.svelte.ts?raw";
+import modelConfigActionsSource from "../app/model-config-actions.ts?raw";
+import modelPickerStateSource from "../app/model-picker-state.svelte.ts?raw";
 import composerSource from "./PromptComposer.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
@@ -23,14 +24,14 @@ describe("desktop visual regressions", () => {
   it("keeps the model and thinking selector available while a prompt is running", () => {
     expect(statusSource).toContain('disabled={!canConfigure || changingConfig !== null}');
 
-    const openStart = modelConfigSource.indexOf("async function openPicker()");
-    const openEnd = modelConfigSource.indexOf("function closePicker()", openStart);
-    const openPicker = modelConfigSource.slice(openStart, openEnd);
+    const openStart = modelPickerStateSource.indexOf("async function show()");
+    const openEnd = modelPickerStateSource.indexOf("return {", openStart);
+    const openPicker = modelPickerStateSource.slice(openStart, openEnd);
     expect(openPicker).not.toContain("promptRunning");
 
-    const applyStart = modelConfigSource.indexOf("async function applySelection(");
-    const applyEnd = modelConfigSource.indexOf("async function setConfigValue", applyStart);
-    const applySelection = modelConfigSource.slice(applyStart, applyEnd);
+    const applyStart = modelConfigActionsSource.indexOf("async function applySelection(");
+    const applyEnd = modelConfigActionsSource.indexOf("async function setConfigValue", applyStart);
+    const applySelection = modelConfigActionsSource.slice(applyStart, applyEnd);
     expect(applySelection).not.toContain("promptRunning");
 
     expect(overlaysViewModelSource).toContain("disabled: !options.canUseSession()");

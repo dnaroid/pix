@@ -4,9 +4,9 @@ import presentationStateSource from "../app/desktop-presentation-state.svelte.ts
 import draftSource from "../app/draft-session.svelte.ts?raw";
 import promptActionServicesSource from "../app/desktop-prompt-action-services.ts?raw";
 import historySource from "../app/session-history.svelte.ts?raw";
-import modelConfigSource from "../app/model-config.svelte.ts?raw";
+import modelDraftConfigSource from "../app/model-draft-config.svelte.ts?raw";
 import promptSubmitSource from "../app/prompt-submit.ts?raw";
-import runtimeSource from "../app/session-runtime.svelte.ts?raw";
+import runtimeLoadingSource from "../app/session-runtime-loading.ts?raw";
 
 describe("draft-session concurrency guards", () => {
   it("uses a draft-scoped materialization lock instead of the global operation lock", () => {
@@ -24,9 +24,9 @@ describe("draft-session concurrency guards", () => {
   });
 
   it("invalidates stale runtime-load completions when a session is forgotten", () => {
-    expect(runtimeSource).toContain("const loadGenerations = new Map<string, number>()");
-    expect(runtimeSource).toContain("loadGenerations.get(sessionId) !== generation");
-    expect(runtimeSource).toContain(
+    expect(runtimeLoadingSource).toContain("const loadGenerations = new Map<string, number>()");
+    expect(runtimeLoadingSource).toContain("loadGenerations.get(sessionId) !== generation");
+    expect(runtimeLoadingSource).toContain(
       "loadGenerations.set(sessionId, (loadGenerations.get(sessionId) ?? 0) + 1)",
     );
   });
@@ -45,9 +45,9 @@ describe("draft-session concurrency guards", () => {
   });
 
   it("loads and applies model selection on the UI-only draft before materializing a session", () => {
-    expect(modelConfigSource).toContain("const response = await requestClient.draftConfig(requestWorkspace)");
-    expect(modelConfigSource).toContain("draftConfigOptions = response.configOptions");
-    expect(modelConfigSource).toContain("draftConfigOptions = applyLocalModelThinkingSelection(draftConfigOptions, modelRef, thinkingLevel)");
+    expect(modelDraftConfigSource).toContain("const response = await requestClient.draftConfig(requestWorkspace)");
+    expect(modelDraftConfigSource).toContain("configOptions = response.configOptions");
+    expect(modelDraftConfigSource).toContain("configOptions = applyLocalModelThinkingSelection(configOptions, modelRef, thinkingLevel)");
     expect(draftSource).toContain("requestClient.newSession(requestWorkspace, options.draftModelOverride() ?? undefined)");
 
     const activateStart = draftSource.indexOf("function activate(");
