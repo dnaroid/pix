@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import workbenchViewModelSource from "../app/desktop-workbench-view-model.svelte.ts?raw";
+import workbenchBuilderSource from "../app/desktop-workbench-prop-builders.ts?raw";
 import diffSource from "./GitDiffPane.svelte?raw";
 import previewSource from "./PreviewPane.svelte?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
@@ -8,8 +8,8 @@ import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
 describe("desktop editor work surfaces", () => {
   it("renders Preview and Git Diff as top-level workbench tabs instead of modal or nested editor tabs", () => {
     expect(titlebarSource).toContain("<WorkbenchTabs {...workbench} />");
-    expect(workbenchViewModelSource).toContain("preview: activePreview ?");
-    expect(workbenchViewModelSource).toContain("gitDiff: gitDiffPreview ?");
+    expect(workbenchBuilderSource).toContain("preview: activePreview ?");
+    expect(workbenchBuilderSource).toContain("gitDiff: gitDiffPreview ?");
     expect(workbenchSurfaceSource).not.toContain("<WorkspaceEditorTabs");
     expect(workbenchSurfaceSource).toContain("<PreviewPane");
     expect(workbenchSurfaceSource).toContain("<GitDiffPane");

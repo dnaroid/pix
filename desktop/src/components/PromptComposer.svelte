@@ -1,17 +1,6 @@
 <script lang="ts">
-  import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
-  import Eye from "@lucide/svelte/icons/eye";
-  import ListTodo from "@lucide/svelte/icons/list-todo";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
-  import Mic from "@lucide/svelte/icons/mic";
   import Paperclip from "@lucide/svelte/icons/paperclip";
-  import Pause from "@lucide/svelte/icons/pause";
-  import Play from "@lucide/svelte/icons/play";
-  import Square from "@lucide/svelte/icons/square";
-  import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
-  import X from "@lucide/svelte/icons/x";
   import { onDestroy, onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
@@ -59,6 +48,10 @@
     type SlashCommandMatch,
   } from "../lib/slash-commands";
   import AttachmentGrid from "./AttachmentGrid.svelte";
+  import PromptComposerActionsMenu from "./PromptComposerActionsMenu.svelte";
+  import PromptComposerControls from "./PromptComposerControls.svelte";
+  import PromptQuestionnairePanel from "./PromptQuestionnairePanel.svelte";
+  import PromptSlashCommandMenu from "./PromptSlashCommandMenu.svelte";
   import {
     browserDeepgramSupported,
     DeepgramDictationController,
@@ -948,90 +941,30 @@
 
 <div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-1.5"}>
 {#if slashMenuOpen}
-  <div
-    bind:this={slashListbox}
-    class="absolute right-0 bottom-[calc(100%+0.375rem)] left-0 z-30 max-h-72 overflow-y-auto rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-md"
-    id={slashListboxId}
-    role="listbox"
-    aria-label="Slash commands"
-  >
-    {#each slashMatches as match, index (`${match.command.name}:${index}`)}
-      <button
-        class={[
-          "flex w-full items-start gap-3 rounded-md px-2.5 py-2 text-left transition-colors",
-          index === selectedSlashCommand ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
-        ]}
-        type="button"
-        id={`prompt-slash-command-${index}`}
-        data-slash-command-index={index}
-        role="option"
-        aria-selected={index === selectedSlashCommand}
-        tabindex="-1"
-        onmousedown={(event) => event.preventDefault()}
-        onmouseenter={() => selectedSlashCommand = index}
-        onclick={() => void acceptSlashCommand(match, false)}
-      >
-        <span class="min-w-0 flex-1">
-          <span class="flex min-w-0 items-baseline gap-2">
-            <span class="shrink-0 font-mono text-xs font-semibold text-foreground">/{match.command.name}</span>
-            {#if match.inputHint}
-              <span class="truncate font-mono text-[11px] text-muted-foreground">{match.inputHint}</span>
-            {/if}
-          </span>
-          <span class="mt-0.5 block truncate text-[11px] text-muted-foreground">{match.command.description}</span>
-        </span>
-        {#if match.source}
-          <span class="mt-0.5 shrink-0 rounded border border-border/80 px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{match.source}</span>
-        {/if}
-      </button>
-    {/each}
-  </div>
+  <PromptSlashCommandMenu
+    matches={slashMatches}
+    selectedIndex={selectedSlashCommand}
+    bind:listbox={slashListbox}
+    listboxId={slashListboxId}
+    onSelectIndex={(index) => selectedSlashCommand = index}
+    onChoose={(match) => void acceptSlashCommand(match, false)}
+  />
 {/if}
 
 {#if composerMenuOpen && !editorMode && !questionMode}
-  <div
-    bind:this={composerMenu}
-    class="absolute right-3 bottom-[calc(100%+0.375rem)] z-40 w-44 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
-    data-composer-menu
-    role="menu"
-    tabindex="-1"
-    aria-label="Composer actions"
-    onkeydown={handleComposerMenuKeydown}
-  >
-    <button
-      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-      type="button"
-      role="menuitem"
-      tabindex="-1"
-      disabled={!canEnhancePrompt}
-      onclick={() => void enhanceWithVoiceStop()}
-    >
-      <WandSparkles class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>{enhanceCommand.label}</span>
-    </button>
-    <button
-      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-      type="button"
-      role="menuitem"
-      tabindex="-1"
-      disabled={!canCreateTask}
-      onclick={() => void createTaskWithVoiceStop()}
-    >
-      <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>{createTaskCommand.label}</span>
-    </button>
-    <button
-      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-      type="button"
-      role="menuitem"
-      tabindex="-1"
-      disabled={!activeSessionId || !ready || !hasQueueableDraft}
-      onclick={() => void deferWithVoiceStop()}
-    >
-      <Pause class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>{deferCommand.label}</span>
-    </button>
-  </div>
+  <PromptComposerActionsMenu
+    bind:menu={composerMenu}
+    enhanceLabel={enhanceCommand.label}
+    createTaskLabel={createTaskCommand.label}
+    deferLabel={deferCommand.label}
+    canEnhance={canEnhancePrompt}
+    {canCreateTask}
+    canDefer={!!activeSessionId && ready && hasQueueableDraft}
+    onEnhance={() => void enhanceWithVoiceStop()}
+    onCreateTask={() => void createTaskWithVoiceStop()}
+    onDefer={() => void deferWithVoiceStop()}
+    onKeydown={handleComposerMenuKeydown}
+  />
 {/if}
 
 <form
@@ -1044,180 +977,22 @@
   onsubmit={handleSubmit}
 >
   {#if questionMode}
-    <div class="border-b border-border bg-panel px-3 pt-2.5">
-      <div class="mb-2 flex items-center justify-between gap-3">
-        <p class="min-w-0 truncate text-[11px] font-medium text-muted-foreground">{questionMode.message}</p>
-        <button
-          class="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          type="button"
-          aria-label="Cancel questions"
-          title="Cancel questions"
-          onclick={questionMode.onCancel}
-        ><X class="size-3.5" aria-hidden="true" /></button>
-      </div>
-      <div class="flex min-w-0 gap-1 overflow-x-auto" role="tablist" aria-label="Questions">
-        {#each questionMode.questions as question, index}
-          {@const complete = questionDraftIsComplete(questionMode.state.drafts[question.id], question)}
-          <button
-            class={[
-              "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 text-xs font-medium transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-              questionMode.state.activeTab === index
-                ? "border-border bg-panel-strong text-foreground"
-                : "border-transparent text-muted-foreground hover:bg-panel-hover hover:text-foreground",
-            ]}
-            type="button"
-            role="tab"
-            id={`question-composer-tab-${index}`}
-            data-question-tab={index}
-            aria-selected={questionMode.state.activeTab === index}
-            aria-controls="question-composer-panel"
-            tabindex={questionMode.state.activeTab === index ? 0 : -1}
-            onclick={() => selectTab(index)}
-            onkeydown={(event) => handleTabKeydown(event, index)}
-          >
-            <span class="grid size-3 shrink-0 place-items-center" aria-hidden="true">
-              {#if complete}<Check class="size-3 text-primary" strokeWidth={2.25} />{/if}
-            </span>
-            <span>{question.label}</span>
-          </button>
-        {/each}
-        <button
-          class={[
-            "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 text-xs font-medium transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-            previewing
-              ? "border-border bg-panel-strong text-foreground"
-              : "border-transparent text-muted-foreground hover:bg-panel-hover hover:text-foreground",
-          ]}
-          type="button"
-          role="tab"
-          id={`question-composer-tab-${questionMode.questions.length}`}
-          data-question-tab={questionMode.questions.length}
-          aria-selected={previewing}
-          aria-controls="question-composer-panel"
-          tabindex={previewing ? 0 : -1}
-          onclick={() => selectTab(questionMode.questions.length)}
-          onkeydown={(event) => handleTabKeydown(event, questionMode.questions.length)}
-        ><Eye class="size-3" aria-hidden="true" />Preview</button>
-      </div>
-    </div>
-
-    <div
-      id="question-composer-panel"
-      class="max-h-[min(52vh,32rem)] overflow-y-auto px-3 pt-3"
-      role="tabpanel"
-      aria-labelledby={`question-composer-tab-${questionMode.state.activeTab}`}
-    >
-      {#if previewing}
-        <div class="mb-3 flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold text-foreground">Preview answers</p>
-            <p class="mt-0.5 text-xs text-muted-foreground">Review every answer before sending.</p>
-          </div>
-          <span class={[
-            "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-            allQuestionsComplete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
-          ]}>{allQuestionsComplete ? "Ready" : "Incomplete"}</span>
-        </div>
-        <div class="mb-3 divide-y divide-border/70 border-t border-border/70">
-          {#each questionMode.questions as question, index}
-            {@const complete = questionDraftIsComplete(questionMode.state.drafts[question.id], question)}
-            <button
-              class={[
-                "group flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-                complete ? "hover:bg-panel-hover" : "bg-destructive/5 hover:bg-destructive/10",
-              ]}
-              type="button"
-              onclick={() => editAnswer(index)}
-            >
-              <span class={[
-                "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full",
-                complete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
-              ]}>{#if complete}<Check class="size-2.5" strokeWidth={2.4} />{:else}<span class="text-[11px] leading-none">!</span>{/if}</span>
-              <span class="min-w-0 flex-1">
-                <span class="block text-xs font-semibold text-foreground">{question.label}</span>
-                <span class={[
-                  "mt-0.5 block text-xs whitespace-pre-wrap break-words",
-                  complete ? "text-muted-foreground" : "font-medium text-destructive",
-                ]}>{answerLabel(question)}</span>
-              </span>
-              <span class="text-[11px] font-medium text-muted-foreground group-hover:text-foreground">Edit</span>
-            </button>
-          {/each}
-        </div>
-      {:else if currentQuestion && currentDraft}
-        {@const maxSelections = currentQuestion.maxSelections ?? currentQuestion.choices.length + 1}
-        {@const atSelectionLimit = currentQuestion.multiple && currentSelectionCount >= maxSelections}
-        <div class="mb-3 flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-sm leading-relaxed font-medium whitespace-pre-wrap text-foreground">{currentQuestion.prompt}</p>
-            {#if currentQuestion.multiple}
-              <p id="question-selection-hint" class="mt-1 text-[11px] text-muted-foreground" aria-live="polite">
-                Select {currentQuestion.minSelections ?? 1}–{maxSelections} answers · {currentSelectionCount} selected
-              </p>
-            {/if}
-          </div>
-          <span class="mt-0.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">{questionMode.state.activeTab + 1}/{questionMode.questions.length}</span>
-        </div>
-        <div
-          class="mb-3 divide-y divide-border/70 border-t border-border/70"
-          role={currentQuestion.multiple ? "group" : "radiogroup"}
-          aria-label={currentQuestion.label}
-          aria-describedby={currentQuestion.multiple ? "question-selection-hint" : undefined}
-        >
-          {#each currentQuestion.choices as choice, choiceIndex}
-            {@const selected = currentDraft.choiceValues.includes(choice.value)}
-            {@const blocked = atSelectionLimit && !selected}
-            <button
-              class={[
-                "flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-                selected ? "bg-panel-selected" : "hover:bg-panel-hover",
-                blocked && "cursor-not-allowed opacity-45",
-              ]}
-              type="button"
-              role={currentQuestion.multiple ? "checkbox" : "radio"}
-              data-question-choice={choiceIndex}
-              aria-checked={selected}
-              aria-disabled={blocked || undefined}
-              tabindex={selectedChoiceIndex() === choiceIndex ? 0 : -1}
-              onclick={() => chooseChoice(choice.value)}
-              onkeydown={(event) => handleChoiceKeydown(event, choiceIndex)}
-            >
-              <span class={[
-                "mt-0.5 grid size-4 shrink-0 place-items-center border",
-                currentQuestion.multiple ? "rounded-sm" : "rounded-full",
-                selected ? "border-primary" : "border-muted-foreground/50",
-              ]}>{#if selected}{#if currentQuestion.multiple}<Check class="size-3 text-primary" strokeWidth={2.4} />{:else}<span class="size-2 rounded-full bg-primary"></span>{/if}{/if}</span>
-              <span class="min-w-0">
-                <span class="block text-xs font-medium text-foreground">{choice.label}</span>
-                {#if choice.description}<span class="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{choice.description}</span>{/if}
-              </span>
-            </button>
-          {/each}
-          <button
-            class={[
-              "flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-              currentDraft.customSelected ? "bg-panel-selected" : "hover:bg-panel-hover",
-              atSelectionLimit && !currentDraft.customSelected && "cursor-not-allowed opacity-45",
-            ]}
-            type="button"
-            role={currentQuestion.multiple ? "checkbox" : "radio"}
-            data-question-choice={currentQuestion.choices.length}
-            aria-checked={currentDraft.customSelected}
-            aria-disabled={(atSelectionLimit && !currentDraft.customSelected) || undefined}
-            tabindex={selectedChoiceIndex() === currentQuestion.choices.length ? 0 : -1}
-            onclick={chooseCustom}
-            onkeydown={(event) => handleChoiceKeydown(event, currentQuestion.choices.length)}
-          >
-            <span class={[
-              "mt-0.5 grid size-4 shrink-0 place-items-center border",
-              currentQuestion.multiple ? "rounded-sm" : "rounded-full",
-              currentDraft.customSelected ? "border-primary" : "border-muted-foreground/50",
-            ]}>{#if currentDraft.customSelected}{#if currentQuestion.multiple}<Check class="size-3 text-primary" strokeWidth={2.4} />{:else}<span class="size-2 rounded-full bg-primary"></span>{/if}{/if}</span>
-            <span class="text-xs font-medium text-foreground">Something else…</span>
-          </button>
-        </div>
-      {/if}
-    </div>
+    <PromptQuestionnairePanel
+      {questionMode}
+      {previewing}
+      {allQuestionsComplete}
+      {currentQuestion}
+      {currentDraft}
+      {currentSelectionCount}
+      selectedChoiceIndex={selectedChoiceIndex()}
+      {answerLabel}
+      onSelectTab={selectTab}
+      onEditAnswer={editAnswer}
+      onChooseChoice={chooseChoice}
+      onChooseCustom={() => void chooseCustom()}
+      onTabKeydown={handleTabKeydown}
+      onChoiceKeydown={handleChoiceKeydown}
+    />
   {/if}
 
   <div class={questionMode ? "px-3 pt-2 pb-2" : "px-3 pt-2.5 pb-2"}>
@@ -1276,70 +1051,20 @@
           ></textarea>
         </div>
         {#if !editorMode && !questionMode}
-          <div class="relative shrink-0" data-composer-menu>
-            <button
-              bind:this={composerMenuTrigger}
-              class="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              type="button"
-              aria-label="More composer actions"
-              title="More actions"
-              aria-haspopup="menu"
-              aria-expanded={composerMenuOpen}
-              onclick={toggleComposerMenu}
-            >
-              <EllipsisVertical class="h-4 w-4" aria-hidden="true" />
-            </button>
-          </div>
-          <button
-            class={[
-              "grid h-6 w-6 shrink-0 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-              voiceState === "listening"
-                ? "text-destructive hover:bg-destructive/10"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-            ]}
-            type="button"
-            aria-label={voiceState === "listening" ? "Stop voice input" : voiceState === "starting" ? "Connecting voice input" : "Start voice input"}
-            title={voiceState === "listening" ? "Stop voice input" : voiceState === "starting" ? "Connecting to Deepgram…" : voiceSupported ? "Voice input" : "Voice input is unavailable in this WebView"}
-            disabled={voiceState === "idle" && !voiceCanStart}
-            onclick={() => void toggleVoiceInput()}
-          >
-            {#if voiceState === "starting"}
-              <LoaderCircle class="h-4 w-4 animate-spin" aria-hidden="true" />
-            {:else}
-              <Mic class="h-4 w-4" aria-hidden="true" />
-            {/if}
-          </button>
-        {/if}
-        {#if promptRunning && !editorMode && !questionMode}
-          <button
-            class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-            type="button"
-            aria-label={agentControlState === "pause-requested" ? "Pause requested" : "Pause after current turn"}
-            title={agentControlState === "pause-requested" ? "Pause requested" : "Pause after current turn"}
-            disabled={agentControlState === "pause-requested" || agentControlState === "resuming"}
-            onclick={onPause}
-          >
-            <Pause class="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          <button
-            class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            type="button"
-            aria-label="Stop response"
-            title="Stop response"
-            onclick={onCancel}
-          >
-            <Square class="h-3 w-3 fill-current" aria-hidden="true" />
-          </button>
-        {:else if !editorMode && !questionMode && (agentControlState === "paused" || agentControlState === "continuable")}
-          <button
-            class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            type="button"
-            aria-label="Continue response"
-            title="Continue response"
-            onclick={onContinue}
-          >
-            <Play class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
-          </button>
+          <PromptComposerControls
+            bind:menuTrigger={composerMenuTrigger}
+            menuOpen={composerMenuOpen}
+            {voiceState}
+            {voiceSupported}
+            {voiceCanStart}
+            {promptRunning}
+            {agentControlState}
+            onToggleMenu={toggleComposerMenu}
+            onToggleVoice={() => void toggleVoiceInput()}
+            {onPause}
+            {onCancel}
+            {onContinue}
+          />
         {/if}
       </div>
       {#if !editorMode && !questionMode && (voiceInterim || voiceError)}

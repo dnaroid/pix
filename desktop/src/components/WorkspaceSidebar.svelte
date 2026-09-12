@@ -1,28 +1,13 @@
 <script lang="ts">
-  import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import Circle from "@lucide/svelte/icons/circle";
-  import CircleDashed from "@lucide/svelte/icons/circle-dashed";
-  import Clock3 from "@lucide/svelte/icons/clock-3";
-  import Database from "@lucide/svelte/icons/database";
   import ExternalLink from "@lucide/svelte/icons/external-link";
-  import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
-  import GitBranch from "@lucide/svelte/icons/git-branch";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ListTodo from "@lucide/svelte/icons/list-todo";
-  import Pencil from "@lucide/svelte/icons/pencil";
-  import Play from "@lucide/svelte/icons/play";
   import Plus from "@lucide/svelte/icons/plus";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
-  import Search from "@lucide/svelte/icons/search";
-  import ScanSearch from "@lucide/svelte/icons/scan-search";
   import Settings from "@lucide/svelte/icons/settings";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
-  import SquareTerminal from "@lucide/svelte/icons/square-terminal";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
-  import X from "@lucide/svelte/icons/x";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onDestroy, onMount, tick } from "svelte";
   import {
@@ -32,10 +17,8 @@
   } from "../lib/attachments";
   import {
     TASK_STATUSES,
-    TASK_TYPES,
     projectTaskDisplayLabel,
     taskStatusLabel,
-    taskTypeLabel,
     type ProjectTask,
     type ProjectTaskStatus,
     type ProjectTaskType,
@@ -46,7 +29,6 @@
   import type { ProjectTreeEntry } from "../lib/project-tree";
   import {
     isTypeaheadKey,
-    linearFocusIndex,
     menuFocusIndex,
     menuTypeaheadFocusIndex,
     type MenuNavigationItem,
@@ -72,13 +54,14 @@
   import IdxPanel from "./IdxPanel.svelte";
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
-  import PromptComposer from "./PromptComposer.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
-  import ProjectFolderIcon from "./ProjectFolderIcon.svelte";
   import ProjectSettingsDialog from "./ProjectSettingsDialog.svelte";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
-  import SidebarIndicatorDot from "./SidebarIndicatorDot.svelte";
+  import WorkspaceSidebarActivityBar from "./WorkspaceSidebarActivityBar.svelte";
+  import WorkspaceSidebarPlanSelector from "./WorkspaceSidebarPlanSelector.svelte";
+  import WorkspaceSidebarTaskEditor from "./WorkspaceSidebarTaskEditor.svelte";
+  import WorkspaceSidebarTasksPanel from "./WorkspaceSidebarTasksPanel.svelte";
 
   type TaskDraft = {
     title: string;
@@ -109,16 +92,6 @@
     idx: "IDX",
     settings: "Settings",
   };
-  const SIDEBAR_TABS: readonly SidebarTab[] = [
-    "project",
-    "tasks",
-    "git",
-    "registry",
-    "scripts",
-    "idx",
-    "settings",
-  ];
-
   let {
     workspace,
     tasks,
@@ -257,7 +230,6 @@
 
   let collapsed = $state(false);
   let sidebarElement = $state<HTMLElement | null>(null);
-  let activityBar = $state<HTMLElement | null>(null);
   let projectSwitcher = $state<{ close: () => void } | null>(null);
   let projectSwitcherMinimumWidth = $state(MIN_WIDTH);
   let projectSettingsOpen = $state(false);
@@ -680,12 +652,6 @@
     deleteTaskId = null;
   }
 
-  function statusTone(status: ProjectTaskStatus): string {
-    if (status === "done") return "text-tool-success";
-    if (status === "in-progress") return "text-tool-warning";
-    return "text-tool-muted";
-  }
-
   function setTaskStatus(taskId: string, status: ProjectTaskStatus): void {
     const trigger = statusMenuTrigger;
     statusMenuTaskId = null;
@@ -877,34 +843,6 @@
     }
   }
 
-  function isDropPlaceholder(
-    type: ProjectTaskType,
-    targetTaskId: string | null,
-    position: TaskDropPosition,
-  ): boolean {
-    return taskDropTarget?.type === type
-      && taskDropTarget.targetTaskId === targetTaskId
-      && taskDropTarget.position === position;
-  }
-
-  function activityTitle(tab: SidebarTab, label: string): string {
-    const indicator = indicators[tab];
-    return indicator ? `${label} — ${indicator.reason}` : label;
-  }
-
-  function activityLabel(tab: SidebarTab, label: string): string {
-    const indicator = indicators[tab];
-    return indicator ? `${label}, ${indicator.reason}` : label;
-  }
-
-  function handleActivityBarKeydown(event: KeyboardEvent, tab: SidebarTab): void {
-    const currentIndex = SIDEBAR_TABS.indexOf(tab);
-    const nextIndex = linearFocusIndex(currentIndex, event.key, SIDEBAR_TABS.length, "vertical", true);
-    if (nextIndex === null) return;
-    event.preventDefault();
-    activityBar?.querySelectorAll<HTMLButtonElement>("[data-sidebar-tab]")[nextIndex]?.focus();
-  }
-
 </script>
 
 <aside
@@ -916,117 +854,14 @@
   style:max-width="100vw"
   aria-label="Workspace sidebar"
 >
-  <div
-    bind:this={activityBar}
-    class="flex h-full w-10 shrink-0 flex-col items-center border-r border-sidebar-border bg-chrome py-1"
-    role="toolbar"
-    aria-label="Workspace views"
-    aria-orientation="vertical"
-  >
-    <button
-      class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      data-sidebar-tab
-      tabindex={activeTab === "project" ? 0 : -1}
-      title={activityTitle("project", activeTab === "project" && !collapsed ? "Hide Project" : "Project")}
-      aria-label={activityLabel("project", "Project files")}
-      aria-controls="workspace-project-panel"
-      aria-pressed={activeTab === "project" && !collapsed}
-      onkeydown={(event) => handleActivityBarKeydown(event, "project")}
-      onclick={() => selectTab("project")}
-    >
-      {#if workspace}
-        <ProjectFolderIcon project={workspace} color={projectColors.get(workspace)} class="h-5 w-5" />
-      {:else}
-        <Folder class="h-5 w-5" aria-hidden="true" />
-      {/if}
-      <SidebarIndicatorDot indicator={indicators.project} />
-    </button>
-    <button
-      class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      data-sidebar-tab
-      tabindex={activeTab === "tasks" ? 0 : -1}
-      title={activityTitle("tasks", activeTab === "tasks" && !collapsed ? "Hide Tasks" : "Tasks")}
-      aria-label={activityLabel("tasks", "Tasks")}
-      aria-controls="workspace-tasks-panel"
-      aria-pressed={activeTab === "tasks" && !collapsed}
-      onkeydown={(event) => handleActivityBarKeydown(event, "tasks")}
-      onclick={() => selectTab("tasks")}
-    >
-      <ListTodo class="h-5 w-5" aria-hidden="true" />
-      <SidebarIndicatorDot indicator={indicators.tasks} />
-    </button>
-    <button
-      class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      data-sidebar-tab
-      tabindex={activeTab === "git" ? 0 : -1}
-      title={activityTitle("git", activeTab === "git" && !collapsed ? "Hide Source Control" : "Source Control")}
-      aria-label={activityLabel("git", "Source Control")}
-      aria-controls="workspace-git-panel"
-      aria-pressed={activeTab === "git" && !collapsed}
-      onkeydown={(event) => handleActivityBarKeydown(event, "git")}
-      onclick={() => selectTab("git")}
-    >
-      <GitBranch class="h-5 w-5" aria-hidden="true" />
-      <SidebarIndicatorDot indicator={indicators.git} />
-    </button>
-    <button
-      class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      data-sidebar-tab
-      tabindex={activeTab === "registry" ? 0 : -1}
-      title={activityTitle("registry", activeTab === "registry" && !collapsed ? "Hide Registry" : "Registry")}
-      aria-label={activityLabel("registry", "Resource registry")}
-      aria-controls="workspace-registry-panel"
-      aria-pressed={activeTab === "registry" && !collapsed}
-      onkeydown={(event) => handleActivityBarKeydown(event, "registry")}
-      onclick={() => selectTab("registry")}
-    >
-      <Database class="h-5 w-5" aria-hidden="true" />
-      <SidebarIndicatorDot indicator={indicators.registry} />
-    </button>
-    <button
-      class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "scripts" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      data-sidebar-tab
-      tabindex={activeTab === "scripts" ? 0 : -1}
-      title={activityTitle("scripts", activeTab === "scripts" && !collapsed ? "Hide Package Scripts" : "Package Scripts")}
-      aria-label={activityLabel("scripts", "Package scripts and terminals")}
-      aria-controls="workspace-scripts-panel"
-      aria-pressed={activeTab === "scripts" && !collapsed}
-      onkeydown={(event) => handleActivityBarKeydown(event, "scripts")}
-      onclick={() => selectTab("scripts")}
-    ><SquareTerminal class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.scripts} /></button>
-    <button
-      class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "idx" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      data-sidebar-tab
-      tabindex={activeTab === "idx" ? 0 : -1}
-      title={activityTitle("idx", activeTab === "idx" && !collapsed ? "Hide IDX" : "IDX")}
-      aria-label={activityLabel("idx", "IDX repository intelligence")}
-      aria-controls="workspace-idx-panel"
-      aria-pressed={activeTab === "idx" && !collapsed}
-      onkeydown={(event) => handleActivityBarKeydown(event, "idx")}
-      onclick={() => selectTab("idx")}
-    >
-      <ScanSearch class="h-5 w-5" aria-hidden="true" />
-      <SidebarIndicatorDot indicator={indicators.idx} />
-    </button>
-    <button
-      class={["relative mt-auto grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "settings" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
-      type="button"
-      data-sidebar-tab
-      tabindex={activeTab === "settings" ? 0 : -1}
-      title={activityTitle("settings", activeTab === "settings" && !collapsed ? "Hide Settings" : "Settings")}
-      aria-label={activityLabel("settings", "Settings")}
-      aria-controls="workspace-settings-panel"
-      aria-pressed={activeTab === "settings" && !collapsed}
-      onkeydown={(event) => handleActivityBarKeydown(event, "settings")}
-      onclick={() => selectTab("settings")}
-    ><Settings class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.settings} /></button>
-  </div>
+  <WorkspaceSidebarActivityBar
+    {workspace}
+    {projectColors}
+    {indicators}
+    {activeTab}
+    {collapsed}
+    onSelect={selectTab}
+  />
 
   {#if !collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
@@ -1090,181 +925,34 @@
       </div>
 
       {#if activeTab === "tasks"}
-        <section
-          id="workspace-tasks-panel"
-          class="min-h-0 select-none overflow-y-auto p-1.5"
-          aria-label="Tasks"
-          onpointerdown={closeStatusMenuOutside}
-        >
-          <div class="min-h-0">
-            {#if loading}
-              <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RotateCw class="h-4 w-4 animate-spin" aria-hidden="true" />Loading tasks…</div>
-            {:else if storageError}
-              <div class="px-4 py-8 text-center">
-                <ListTodo class="mx-auto mb-2 h-5 w-5 text-tool-error" aria-hidden="true" />
-                <p class="text-xs font-medium">Task file needs attention</p>
-                <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Fix <code class="font-mono">.pi/tasks.jsonc</code>, then try again. Its contents were not replaced.</p>
-                <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-[11px] font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onReload}><RotateCw class="h-3 w-3" aria-hidden="true" />Retry</button>
-              </div>
-            {:else if !workspace}
-              <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p><p class="mt-1 text-[11px] text-muted-foreground">Tasks are stored inside its .pi folder.</p></div>
-            {:else if tasks.length === 0}
-              <div class="px-4 py-8 text-center"><ListTodo class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">No tasks yet</p><p class="mt-1 text-[11px] text-muted-foreground">Add the first project task.</p></div>
-            {:else}
-              <div class="space-y-2.5">
-                {#each TASK_GROUPS as group (group.type)}
-                  {@const groupTasks = tasks.filter((task) => task.type === group.type)}
-                  <section class="space-y-1" aria-label={`${group.label} tasks`} data-task-group={group.type}>
-                    <div class="flex h-5 items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                      <span>{group.label}</span>
-                      <span class="font-mono text-[11px] font-normal opacity-65">{groupTasks.length}</span>
-                    </div>
-
-                    <div
-                      class={[
-                        "min-h-8 divide-y divide-sidebar-border/60 transition-colors",
-                        draggedTaskId && taskDropTarget?.type === group.type ? "bg-panel-hover/40" : "",
-                      ]}
-                      role="list"
-                    >
-                      {#if groupTasks.length === 0 && !isDropPlaceholder(group.type, null, "after")}
-                        <div class="pointer-events-none grid h-8 place-items-center border border-dashed border-sidebar-border/70 text-[11px] text-muted-foreground/55">
-                          Empty
-                        </div>
-                      {/if}
-
-                      {#each groupTasks as task (task.id)}
-                        {@const taskLabel = projectTaskDisplayLabel(task)}
-                        {#if isDropPlaceholder(group.type, task.id, "before")}
-                          <div
-                            data-task-drop-placeholder
-                            class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
-                            style:min-height={`${draggedTaskHeight}px`}
-                            role="presentation"
-                          >Move to {group.label}</div>
-                        {/if}
-
-                        <article
-                          data-task-card
-                          data-task-id={task.id}
-                          class={[
-                            "group relative px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-panel-hover",
-                            draggedTaskId === task.id ? "border border-dashed border-primary/35 bg-primary/5 opacity-25" : "",
-                            revealedTaskId === task.id ? "border-l-2 border-l-primary bg-panel-selected" : "",
-                          ]}
-                          aria-label={taskLabel}
-                        >
-                          <div class="flex min-w-0 items-start gap-1">
-                            <button
-                              class="mt-px grid h-6 w-5 shrink-0 touch-none cursor-grab place-items-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-30"
-                              type="button"
-                              title="Drag to reorder or move between groups"
-                              aria-label={`Drag ${taskLabel} to reorder or change type`}
-                              disabled={busy}
-                              onpointerdown={(event) => startTaskDrag(event, task.id)}
-                              onpointermove={moveTaskDrag}
-                              onpointerup={finishTaskDrag}
-                              onpointercancel={cancelTaskDrag}
-                              onlostpointercapture={cancelTaskDrag}
-                            ><GripVertical class="h-3.5 w-3.5" aria-hidden="true" /></button>
-
-                            <div class="min-w-0 flex-1">
-                              <div class="flex min-w-0 items-start gap-1">
-                                <h3 class="min-w-0 flex-1 break-words pt-1 text-[11px] font-medium leading-4 text-foreground">{taskLabel}</h3>
-                                <div class="flex shrink-0 items-center opacity-65 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                                  <div class="relative" data-task-status-control>
-                                    <button
-                                      class={["grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35", statusTone(task.status)]}
-                                      type="button"
-                                      title={`Status: ${taskStatusLabel(task.status)}`}
-                                      aria-label={`Change status for ${taskLabel}. Current status: ${taskStatusLabel(task.status)}`}
-                                      aria-haspopup="menu"
-                                      aria-expanded={statusMenuTaskId === task.id}
-                                      onclick={(event) => toggleTaskStatusMenu(event, task)}
-                                      disabled={busy}
-                                    >
-                                      {#if task.status === "done"}<CheckCircle2 class="h-3 w-3" aria-hidden="true" />
-                                      {:else if task.status === "in-progress"}<Clock3 class="h-3 w-3" aria-hidden="true" />
-                                      {:else if task.status === "backlog"}<CircleDashed class="h-3 w-3" aria-hidden="true" />
-                                      {:else}<Circle class="h-3 w-3" aria-hidden="true" />{/if}
-                                    </button>
-
-                                    {#if statusMenuTaskId === task.id}
-                                      <div
-                                        bind:this={statusMenu}
-                                        class="absolute top-7 right-0 z-40 w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
-                                        role="menu"
-                                        tabindex="-1"
-                                        aria-label={`Status for ${taskLabel}`}
-                                        onkeydown={handleTaskStatusMenuKeydown}
-                                      >
-                                        {#each TASK_STATUSES as status}
-                                          <button
-                                            class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[11px] leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
-                                            type="button"
-                                            role="menuitemradio"
-                                            tabindex="-1"
-                                            aria-checked={status === task.status}
-                                            onclick={() => setTaskStatus(task.id, status)}
-                                          >
-                                            <span class={["grid h-4 w-4 shrink-0 place-items-center", statusTone(status)]}>
-                                              {#if status === "done"}<CheckCircle2 class="h-3 w-3" aria-hidden="true" />
-                                              {:else if status === "in-progress"}<Clock3 class="h-3 w-3" aria-hidden="true" />
-                                              {:else if status === "backlog"}<CircleDashed class="h-3 w-3" aria-hidden="true" />
-                                              {:else}<Circle class="h-3 w-3" aria-hidden="true" />{/if}
-                                            </span>
-                                            <span class="truncate">{taskStatusLabel(status)}</span>
-                                          </button>
-                                        {/each}
-                                      </div>
-                                    {/if}
-                                  </div>
-                                  <button
-                                    class="grid h-6 w-6 place-items-center rounded-md text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35"
-                                    type="button"
-                                    title={task.sessionId ? "Open session" : "Run task"}
-                                    aria-label={`${task.sessionId ? "Open session for" : "Run"} ${taskLabel}`}
-                                    onclick={() => task.sessionId ? onOpenSession(task) : onRun(task)}
-                                    disabled={!sessionReady || busy}
-                                  >
-                                    {#if activeTaskId === task.id}<RotateCw class="h-3 w-3 animate-spin" aria-hidden="true" />
-                                    {:else if task.sessionId}<Folder class="h-3 w-3" aria-hidden="true" />
-                                    {:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}
-                                  </button>
-                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Edit task" aria-label={`Edit ${taskLabel}`} onclick={() => openEdit(task)} disabled={busy}><Pencil class="h-3 w-3" aria-hidden="true" /></button>
-                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Delete task" aria-label={`Delete ${taskLabel}`} onclick={() => deleteTaskId = task.id} disabled={busy}><Trash2 class="h-3 w-3" aria-hidden="true" /></button>
-                                </div>
-                              </div>
-
-                            </div>
-                          </div>
-                        </article>
-
-                        {#if isDropPlaceholder(group.type, task.id, "after")}
-                          <div
-                            data-task-drop-placeholder
-                            class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
-                            style:min-height={`${draggedTaskHeight}px`}
-                            role="presentation"
-                          >Move to {group.label}</div>
-                        {/if}
-                      {/each}
-
-                      {#if isDropPlaceholder(group.type, null, "after")}
-                        <div
-                          data-task-drop-placeholder
-                          class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
-                          style:min-height={`${draggedTaskHeight}px`}
-                          role="presentation"
-                        >Move to {group.label}</div>
-                      {/if}
-                    </div>
-                  </section>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        </section>
+        <WorkspaceSidebarTasksPanel
+          {workspace}
+          {tasks}
+          {loading}
+          {storageError}
+          {busy}
+          {activeTaskId}
+          {sessionReady}
+          {draggedTaskId}
+          {taskDropTarget}
+          {draggedTaskHeight}
+          {revealedTaskId}
+          {statusMenuTaskId}
+          bind:statusMenu
+          onPanelPointerDown={closeStatusMenuOutside}
+          {onReload}
+          onTaskDragStart={startTaskDrag}
+          onTaskDragMove={moveTaskDrag}
+          onTaskDragFinish={finishTaskDrag}
+          onTaskDragCancel={cancelTaskDrag}
+          onToggleStatusMenu={toggleTaskStatusMenu}
+          onStatusMenuKeydown={handleTaskStatusMenuKeydown}
+          onSetTaskStatus={setTaskStatus}
+          {onRun}
+          {onOpenSession}
+          onEdit={openEdit}
+          onDeleteRequest={(taskId) => deleteTaskId = taskId}
+        />
       {:else if activeTab === "project"}
         <section id="workspace-project-panel" class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden" aria-label="Project">
           <ProjectSwitcher
@@ -1355,58 +1043,16 @@
     </div>
 
     {#if planSelectorOpen}
-      <div
-        class="absolute top-12 right-2 left-14 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
-        role="dialog"
-        aria-label="Choose plan"
-      >
-        <div class="flex h-9 items-center gap-2 border-b border-border px-2.5">
-          <strong class="min-w-0 flex-1 truncate text-[11px] font-semibold">Choose plan</strong>
-          <button
-            class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            type="button"
-            title="Close plan selector"
-            aria-label="Close plan selector"
-            onclick={() => {
-              planSelectorOpen = false;
-              planSelectorQuery = "";
-            }}
-          ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
-        </div>
-
-        <div class="border-b border-border p-2">
-          <div class="relative">
-            <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              bind:this={planSearchInput}
-              class="h-7 w-full rounded-md border border-input bg-background pr-2 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
-              type="search"
-              placeholder="Find plan…"
-              bind:value={planSelectorQuery}
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-        </div>
-
-        <div class="max-h-72 overflow-y-auto p-1.5">
-          {#if visiblePlanChoices.length === 0}
-            <div class="px-2 py-5 text-center text-[11px] text-muted-foreground">No matching plans</div>
-          {:else}
-            {#each visiblePlanChoices as plan (plan)}
-              <button
-                class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-                type="button"
-                title={plan}
-                onclick={() => choosePlan(plan)}
-              >
-                <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span class="min-w-0 flex-1 truncate text-[11px] font-medium">{projectDocumentLabel(plan)}</span>
-              </button>
-            {/each}
-          {/if}
-        </div>
-      </div>
+      <WorkspaceSidebarPlanSelector
+        choices={visiblePlanChoices}
+        bind:query={planSelectorQuery}
+        bind:searchInput={planSearchInput}
+        onClose={() => {
+          planSelectorOpen = false;
+          planSelectorQuery = "";
+        }}
+        onChoose={choosePlan}
+      />
     {/if}
 
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -1451,49 +1097,21 @@
   {/if}
 
   {#if editorOpen && !collapsed}
-    <div
-      class="absolute inset-y-0 right-0 left-12 z-20 grid min-h-0 grid-rows-[36px_minmax(0,1fr)] border-r border-sidebar-border bg-sidebar"
-      role="dialog"
-      aria-modal="true"
-      aria-label={editingTaskId ? "Edit task" : "Add task"}
-    >
-      <div class="flex items-center justify-between border-b border-sidebar-border px-3">
-        <strong class="text-sm font-semibold">{editingTaskId ? "Edit task" : "Add task"}</strong>
-        <button class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" aria-label="Close task editor" onclick={() => editorOpen = false}><X class="h-4 w-4" aria-hidden="true" /></button>
-      </div>
-      <div class="min-h-0 space-y-3 overflow-y-auto p-3">
-        <label class="block text-xs font-medium text-muted-foreground">Title<input class="mt-1 h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring" bind:this={titleInput} bind:value={title} maxlength="200" placeholder={editingTaskId ? "Optional for captured tasks" : undefined} required={!editingTaskId} /></label>
-        <div class="space-y-1">
-          <span class="block text-xs font-medium text-muted-foreground">Description</span>
-          <PromptComposer
-            bind:promptText={description}
-            attachments={editorAttachments}
-            variant="editor"
-            placeholder="Describe the task…"
-            ariaLabel="Task description"
-            activeSessionId={null}
-            ready={!busy}
-            promptRunning={false}
-            dragActive={false}
-            autocompleteEnabled={false}
-            autocompleteDebounceMs={0}
-            onAutocomplete={async () => ""}
-            onSubmit={() => {}}
-            onDefer={() => {}}
-            onCancel={() => {}}
-            onChooseAttachments={chooseEditorAttachments}
-            onPasteAttachments={pasteEditorAttachments}
-            onRemoveAttachment={removeEditorAttachment}
-            onOpenAttachment={onOpenTaskAttachment}
-          />
-        </div>
-        <label class="block text-xs font-medium text-muted-foreground">Type<span class="relative mt-1 block"><select class="h-9 w-full appearance-none rounded-md border border-input bg-background py-0 pr-8 pl-2.5 text-sm text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" bind:value={taskType}>{#each TASK_TYPES as type}<option value={type}>{taskTypeLabel(type)}</option>{/each}</select><ChevronDown class="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></span></label>
-        <div class="flex justify-end gap-2 pt-1">
-          <button class="h-9 rounded-md px-3 text-sm text-muted-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => editorOpen = false}>Cancel</button>
-          <button class="h-9 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={submitEditor} disabled={busy || (!editingTaskId && !title.trim()) || (!!editingTaskId && !title.trim() && !description.trim() && editorAttachments.length === 0)}>{editingTaskId ? "Save" : "Add task"}</button>
-        </div>
-      </div>
-    </div>
+    <WorkspaceSidebarTaskEditor
+      {editingTaskId}
+      {busy}
+      bind:title
+      bind:description
+      {editorAttachments}
+      bind:taskType
+      bind:titleInput
+      onChooseAttachments={chooseEditorAttachments}
+      onPasteAttachments={pasteEditorAttachments}
+      onRemoveAttachment={removeEditorAttachment}
+      onOpenAttachment={onOpenTaskAttachment}
+      onClose={() => editorOpen = false}
+      onSubmit={submitEditor}
+    />
   {/if}
 
   {#if deleteTaskId && !collapsed}

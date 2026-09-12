@@ -4,7 +4,7 @@ import presentationStateSource from "../app/desktop-presentation-state.svelte.ts
 import draftSource from "../app/draft-session.svelte.ts?raw";
 import historySource from "../app/session-history.svelte.ts?raw";
 import promptSubmitSource from "../app/prompt-submit.ts?raw";
-import workbenchViewModelSource from "../app/desktop-workbench-view-model.svelte.ts?raw";
+import workbenchBuilderSource from "../app/desktop-workbench-prop-builders.ts?raw";
 import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
 import composerSource from "./PromptComposer.svelte?raw";
 import source from "./SessionStartView.svelte?raw";
@@ -37,7 +37,7 @@ describe("SessionStartView", () => {
   });
 
   it("disappears as soon as the composer draft is changed", () => {
-    expect(workbenchViewModelSource).toContain("onDraftChange: options.draft.promote");
+    expect(workbenchBuilderSource).toContain("onDraftChange: options.draft.promote");
     expect(composerSource).toContain("onDraftChange();");
   });
 
@@ -49,7 +49,7 @@ describe("SessionStartView", () => {
     expect(draftSource.slice(openStart, materializeStart)).not.toContain(".newSession(");
     expect(draftSource.slice(materializeStart)).toContain("requestClient.newSession(requestWorkspace");
     expect(promptSubmitSource).toContain("sessionId = await options.materializeDraftSession()");
-    expect(workbenchViewModelSource).toContain("draftSession: options.draft.active");
+    expect(workbenchBuilderSource).toContain("draftSession: options.draft.active");
   });
 
   it("recovers old empty-session records without surfacing the unavailable-history error", () => {
