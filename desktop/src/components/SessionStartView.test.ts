@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import appSource from "../App.svelte?raw";
+import presentationStateSource from "../app/desktop-presentation-state.svelte.ts?raw";
+import draftSource from "../app/draft-session.svelte.ts?raw";
+import historySource from "../app/session-history.svelte.ts?raw";
+import promptSubmitSource from "../app/prompt-submit.ts?raw";
+import workbenchViewModelSource from "../app/desktop-workbench-view-model.svelte.ts?raw";
+import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
 import composerSource from "./PromptComposer.svelte?raw";
 import source from "./SessionStartView.svelte?raw";
 
@@ -20,33 +26,34 @@ describe("SessionStartView", () => {
   });
 
   it("is shown only for the UI-only draft tab and excludes sessions already represented by tabs", () => {
-    expect(appSource).toContain("const sessionStartOpen = $derived(");
-    expect(appSource).toContain('const DRAFT_SESSION_TAB_ID = "pix:desktop-draft-session"');
-    expect(appSource).toContain("const titlebarSessions = $derived(");
-    expect(appSource).toContain("const openIds = new Set(tabSessions.map((session) => session.sessionId))");
-    expect(appSource).toContain("sessions.filter((session) => !openIds.has(session.sessionId))");
-    expect(appSource).toContain("<SessionStartView");
+    expect(presentationStateSource).toContain("const sessionStartOpen = $derived(");
+    expect(draftSource).toContain('export const DRAFT_SESSION_TAB_ID = "pix:desktop-draft-session"');
+    expect(presentationStateSource).toContain("const titlebarSessions = $derived(");
+    expect(presentationStateSource).toContain("const openIds = new Set(tabSessions.map((session) => session.sessionId))");
+    expect(presentationStateSource).toContain(
+      "options.sessions.catalog.sessions.filter((session) => !openIds.has(session.sessionId))",
+    );
+    expect(workbenchSurfaceSource).toContain("<SessionStartView {...sessionStart} />");
   });
 
   it("disappears as soon as the composer draft is changed", () => {
-    expect(appSource).toContain("onDraftChange={promoteSessionStart}");
+    expect(workbenchViewModelSource).toContain("onDraftChange: options.draft.promote");
     expect(composerSource).toContain("onDraftChange();");
   });
 
   it("does not create an ACP session until the draft is actually submitted", () => {
-    const openStart = appSource.indexOf("async function openSessionStartTab");
-    const materializeStart = appSource.indexOf("async function materializeDraftSession", openStart);
-    const submitStart = appSource.indexOf("async function submitPrompt", materializeStart);
+    const openStart = draftSource.indexOf("async function openStartTab");
+    const materializeStart = draftSource.indexOf("async function materialize", openStart);
     expect(openStart).toBeGreaterThanOrEqual(0);
     expect(materializeStart).toBeGreaterThan(openStart);
-    expect(appSource.slice(openStart, materializeStart)).not.toContain(".newSession(");
-    expect(appSource.slice(materializeStart, submitStart)).toContain("requestClient.newSession(requestWorkspace)");
-    expect(appSource).toContain("sessionId = await materializeDraftSession()");
-    expect(appSource).toContain("draftSession={draftSessionTabActive}");
+    expect(draftSource.slice(openStart, materializeStart)).not.toContain(".newSession(");
+    expect(draftSource.slice(materializeStart)).toContain("requestClient.newSession(requestWorkspace");
+    expect(promptSubmitSource).toContain("sessionId = await options.materializeDraftSession()");
+    expect(workbenchViewModelSource).toContain("draftSession: options.draft.active");
   });
 
   it("recovers old empty-session records without surfacing the unavailable-history error", () => {
-    expect(appSource).toContain("session history ${sessionId} is unavailable");
+    expect(historySource).toContain("session history ${sessionId} is unavailable");
     expect(appSource).toContain("activateDraftSessionTab({ resetComposer: true })");
     expect(appSource).toContain("requestClient.deleteSession(sessionId).catch(() => undefined)");
   });

@@ -1,61 +1,73 @@
 import { describe, expect, it } from "vitest";
-import appSource from "../App.svelte?raw";
+import attachmentDraftSource from "../app/attachment-drafts.ts?raw";
+import presentationStateSource from "../app/desktop-presentation-state.svelte.ts?raw";
+import draftSource from "../app/draft-session.svelte.ts?raw";
+import promptActionServicesSource from "../app/desktop-prompt-action-services.ts?raw";
+import historySource from "../app/session-history.svelte.ts?raw";
+import modelConfigSource from "../app/model-config.svelte.ts?raw";
+import promptSubmitSource from "../app/prompt-submit.ts?raw";
+import runtimeSource from "../app/session-runtime.svelte.ts?raw";
 
 describe("draft-session concurrency guards", () => {
   it("uses a draft-scoped materialization lock instead of the global operation lock", () => {
-    expect(appSource).toContain("let draftSessionMaterializing = $state(false)");
-    expect(appSource).toContain("const sessionMutationRunning = $derived(operationRunning || draftSessionMaterializing)");
-    const materializeStart = appSource.indexOf("async function materializeDraftSession()");
-    const materializeEnd = appSource.indexOf("const KNOWLEDGE_REFRESH_PROMPT", materializeStart);
-    const materialize = appSource.slice(materializeStart, materializeEnd);
-    expect(materialize).toContain("draftSessionMaterializing = true");
+    expect(draftSource).toContain("let materializing = $state(false)");
+    expect(presentationStateSource).toContain(
+      "const sessionMutationRunning = $derived(options.operationRunning() || options.draft.materializing)",
+    );
+    const materializeStart = draftSource.indexOf("async function materialize()");
+    const materializeEnd = draftSource.indexOf("function deactivate()", materializeStart);
+    const materialize = draftSource.slice(materializeStart, materializeEnd);
+    expect(materialize).toContain("materializing = true");
     expect(materialize).not.toContain("operationRunning = true");
-    expect(materialize).toContain("generation !== draftSessionMaterializationGeneration");
+    expect(materialize).toContain("generation !== materializationGeneration");
     expect(materialize).toContain("void requestClient.closeSession(sessionId).catch(() => undefined)");
   });
 
   it("invalidates stale runtime-load completions when a session is forgotten", () => {
-    expect(appSource).toContain("const runtimeLoadGenerations = new Map<string, number>()");
-    expect(appSource).toContain("runtimeLoadGenerations.get(sessionId) !== generation");
-    expect(appSource).toContain(
-      "runtimeLoadGenerations.set(sessionId, (runtimeLoadGenerations.get(sessionId) ?? 0) + 1)",
+    expect(runtimeSource).toContain("const loadGenerations = new Map<string, number>()");
+    expect(runtimeSource).toContain("loadGenerations.get(sessionId) !== generation");
+    expect(runtimeSource).toContain(
+      "loadGenerations.set(sessionId, (loadGenerations.get(sessionId) ?? 0) + 1)",
     );
   });
 
   it("waits for pending attachment adds before snapshotting and sending the first prompt", () => {
-    expect(appSource).toContain("const attachmentAddQueues = new Map<string, Promise<void>>()");
-    expect(appSource).toContain("async function waitForAttachmentDraftSettled(key: string)");
-    const submitStart = appSource.indexOf("async function submitPrompt()");
-    const snapshot = appSource.indexOf("const text = promptText.trim()", submitStart);
-    const settle = appSource.indexOf("await waitForAttachmentDraftSettled(initialDraftKey)", submitStart);
+    expect(attachmentDraftSource).toContain("const addQueues = new Map<string, Promise<void>>()");
+    expect(attachmentDraftSource).toContain("async function waitForSettled(key: string)");
+    expect(promptActionServicesSource).toContain("waitForAttachmentDraftSettled: options.attachments.waitForSettled");
+    const submitStart = promptSubmitSource.indexOf("async function submit()");
+    const snapshot = promptSubmitSource.indexOf("const text = options.promptText().trim()", submitStart);
+    const settle = promptSubmitSource.indexOf("await options.waitForAttachmentDraftSettled(initialDraftKey)", submitStart);
     expect(settle).toBeGreaterThan(submitStart);
     expect(snapshot).toBeGreaterThan(settle);
-    expect(appSource).toContain("if (initialDraftKey !== attachmentDraftKey) return");
-    expect(appSource).toContain("attachmentAddQueues.clear()");
+    expect(promptSubmitSource).toContain("if (initialDraftKey !== options.attachmentDraftKey()) return");
+    expect(attachmentDraftSource).toContain("addQueues.clear()");
   });
 
   it("loads and applies model selection on the UI-only draft before materializing a session", () => {
-    expect(appSource).toContain("const response = await requestClient.draftConfig(requestWorkspace)");
-    expect(appSource).toContain("draftConfigOptions = response.configOptions");
-    expect(appSource).toContain("draftConfigOptions = applyLocalModelThinkingSelection(draftConfigOptions, modelRef, thinkingLevel)");
-    expect(appSource).toContain("requestClient.newSession(requestWorkspace, draftModelOverride ?? undefined)");
+    expect(modelConfigSource).toContain("const response = await requestClient.draftConfig(requestWorkspace)");
+    expect(modelConfigSource).toContain("draftConfigOptions = response.configOptions");
+    expect(modelConfigSource).toContain("draftConfigOptions = applyLocalModelThinkingSelection(draftConfigOptions, modelRef, thinkingLevel)");
+    expect(draftSource).toContain("requestClient.newSession(requestWorkspace, options.draftModelOverride() ?? undefined)");
 
-    const activateStart = appSource.indexOf("function activateDraftSessionTab(");
-    const activateEnd = appSource.indexOf("async function openSessionStartTab", activateStart);
-    const activateDraft = appSource.slice(activateStart, activateEnd);
-    expect(activateDraft).toContain("void refreshDraftConfig()");
+    const activateStart = draftSource.indexOf("function activate(");
+    const activateEnd = draftSource.indexOf("async function openStartTab", activateStart);
+    const activateDraft = draftSource.slice(activateStart, activateEnd);
+    expect(activateDraft).toContain("void options.refreshDraftConfig()");
     expect(activateDraft).not.toContain("newSession(");
   });
 
   it("does not delete an unavailable-history session until its concurrent runtime load also fails", () => {
-    const historyStart = appSource.indexOf("async function hydrateSessionHistory(");
-    const historyEnd = appSource.indexOf("async function loadDeferredToolResult", historyStart);
-    const history = appSource.slice(historyStart, historyEnd);
+    const historyStart = historySource.indexOf("async function hydrate(");
+    const historyEnd = historySource.indexOf("async function loadDeferredToolResult", historyStart);
+    const history = historySource.slice(historyStart, historyEnd);
     const unavailable = history.indexOf("session history ${sessionId} is unavailable");
-    const awaitRuntime = history.indexOf("await ensureSessionRuntime", unavailable);
-    const deleteSession = history.indexOf("requestClient.deleteSession", unavailable);
+    const awaitRuntime = history.indexOf("await options.ensureRuntime", unavailable);
+    const runtimeReady = history.indexOf("if (options.runtimeReady(sessionId))", awaitRuntime);
+    const recover = history.indexOf("await options.recoverUnavailableSession", runtimeReady);
     expect(unavailable).toBeGreaterThanOrEqual(0);
     expect(awaitRuntime).toBeGreaterThan(unavailable);
-    expect(deleteSession).toBeGreaterThan(awaitRuntime);
+    expect(runtimeReady).toBeGreaterThan(awaitRuntime);
+    expect(recover).toBeGreaterThan(runtimeReady);
   });
 });

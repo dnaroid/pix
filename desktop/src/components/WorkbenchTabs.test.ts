@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import appSource from "../App.svelte?raw";
+import titlebarViewModelSource from "../app/desktop-titlebar-view-model.svelte.ts?raw";
+import sessionTabSource from "../app/session-tab-controller.ts?raw";
+import workbenchControllerSource from "../app/workbench-controller.ts?raw";
+import workbenchModelSource from "../app/workbench-model.ts?raw";
+import titlebarSource from "./DesktopTitlebar.svelte?raw";
 import source from "./WorkbenchTabs.svelte?raw";
 
 describe("WorkbenchTabs desktop interaction", () => {
@@ -13,9 +17,9 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).toContain('tab.kind === "session"');
     expect(source).toContain('tab.kind === "preview"');
     expect(source).toContain("GitCompareArrows");
-    expect(appSource).toContain("<WorkbenchTabs");
-    expect(appSource).toContain("tabs={workbenchTabs}");
-    expect(appSource).not.toContain("<WorkspaceEditorTabs");
+    expect(titlebarSource).toContain("<WorkbenchTabs {...workbench} />");
+    expect(titlebarViewModelSource).toContain("tabs: options.tabs()");
+    expect(titlebarSource).not.toContain("<WorkspaceEditorTabs");
   });
 
   it("keeps pointer close outside the normal Tab sequence and supports Delete plus middle-click close", () => {
@@ -27,18 +31,18 @@ describe("WorkbenchTabs desktop interaction", () => {
   });
 
   it("keeps session-only lifecycle semantics while Preview/Diff are ordinary UI tabs", () => {
-    expect(appSource).toContain('if (tab.kind === "session")');
-    expect(appSource).toContain("closeSessionTab(tab.sessionId, preferredNextSessionId)");
-    expect(appSource).toContain("const wasSelected = activeWorkbenchTabId === id");
-    expect(appSource).toContain("if (closed && wasSelected)");
-    expect(appSource).toContain("previewPane ? previewPane.requestClose()");
-    expect(appSource).toContain("closeGitDiff();");
-    expect(appSource).toContain("if (runningSessionIds.has(sessionId))");
-    expect(appSource).toContain("Closing this tab will stop the active run. Close it?");
+    expect(workbenchControllerSource).toContain('if (tab.kind === "session")');
+    expect(workbenchControllerSource).toContain("options.closeSessionTab(tab.sessionId, preferredNextSessionId)");
+    expect(workbenchControllerSource).toContain("const wasSelected = options.activeTabId() === id");
+    expect(workbenchControllerSource).toContain("if (closed && wasSelected)");
+    expect(workbenchControllerSource).toContain("pane ? pane.requestClose() : (options.closePreview(), true)");
+    expect(workbenchControllerSource).toContain("options.closeGitDiff();");
+    expect(sessionTabSource).toContain("if (options.promptRunning(sessionId))");
+    expect(sessionTabSource).toContain("Closing this tab will stop the active run. Close it?");
   });
 
   it("keeps the sole UI-only draft conversation non-closable", () => {
-    expect(appSource).toContain("closable: !draft || tabSessions.length > 0");
-    expect(appSource).toContain('const draft = session.sessionId === DRAFT_SESSION_TAB_ID');
+    expect(workbenchModelSource).toContain("closable: !draft || options.realSessionCount > 0");
+    expect(workbenchModelSource).toContain("const draft = session.sessionId === options.draftSessionTabId");
   });
 });

@@ -1,0 +1,89 @@
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import { modelThinkingConfigState } from "../lib/model-thinking";
+import {
+  normalizeWorkbenchTab,
+  type WorkbenchTab,
+  type WorkbenchTabId,
+} from "../lib/workbench-tabs";
+
+type DesktopRootEffectsOptions = {
+  statusReady: () => boolean;
+  activeSessionId: () => string | null;
+  activeSessionRuntimeReady: () => boolean;
+  configOptions: () => SessionConfigOption[];
+  refreshRuntimeStatus: (sessionId: string, force: boolean) => void | Promise<void>;
+  attachmentDraftKey: () => string;
+  workspace: () => string;
+  invalidateAttachmentDraft: () => void;
+  invalidatePreviewFileLoads: () => void;
+  resetPreviewForWorkspaceChange: () => void;
+  activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
+  activeWorkbenchTabId: () => WorkbenchTabId | null;
+  setActiveWorkbenchTabId: (id: WorkbenchTabId | null) => void;
+  workbenchTabs: () => readonly WorkbenchTab[];
+};
+
+export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
+  let runtimeStatusActivationKey = "";
+  let previousAttachmentDraftKey: string | null = null;
+  let previousPreviewWorkspace: string | null = null;
+  let previousConversationWorkbenchTabId: WorkbenchTabId | null = null;
+
+  $effect(() => {
+    const sessionId = options.activeSessionId();
+    const modelThinking = modelThinkingConfigState(options.configOptions());
+    const currentModel = modelThinking.currentModel?.ref ?? "";
+    const currentThinking = modelThinking.currentThinking;
+    if (!options.statusReady() || !sessionId || !options.activeSessionRuntimeReady()) {
+      runtimeStatusActivationKey = "";
+      return;
+    }
+    const key = `${sessionId}\0${currentModel}\0${currentThinking}`;
+    if (runtimeStatusActivationKey === key) return;
+    runtimeStatusActivationKey = key;
+    queueMicrotask(() => void options.refreshRuntimeStatus(sessionId, true));
+  });
+
+  $effect(() => {
+    const key = options.attachmentDraftKey();
+    if (previousAttachmentDraftKey !== null && previousAttachmentDraftKey !== key) {
+      options.invalidateAttachmentDraft();
+      options.invalidatePreviewFileLoads();
+    }
+    previousAttachmentDraftKey = key;
+
+    const currentWorkspace = options.workspace();
+    if (previousPreviewWorkspace !== null && previousPreviewWorkspace !== currentWorkspace) {
+      options.resetPreviewForWorkspaceChange();
+    }
+    previousPreviewWorkspace = currentWorkspace;
+  });
+
+  $effect(() => {
+    const conversationTabId = options.activeConversationWorkbenchTabId();
+    if (conversationTabId !== previousConversationWorkbenchTabId) {
+      if (conversationTabId) options.setActiveWorkbenchTabId(conversationTabId);
+      previousConversationWorkbenchTabId = conversationTabId;
+    }
+  });
+
+  $effect(() => {
+    const normalized = normalizeWorkbenchTab(
+      options.activeWorkbenchTabId(),
+      options.workbenchTabs(),
+      options.activeConversationWorkbenchTabId(),
+    );
+    if (normalized !== options.activeWorkbenchTabId()) options.setActiveWorkbenchTabId(normalized);
+  });
+
+  return {
+    retargetAttachmentDraftKey(workspace: string, sessionId: string): void {
+      previousAttachmentDraftKey = `${workspace}\0${sessionId}`;
+    },
+    resetWorkbenchTracking(): void {
+      previousConversationWorkbenchTabId = null;
+    },
+  };
+}
+
+export type DesktopRootEffects = ReturnType<typeof createDesktopRootEffects>;
