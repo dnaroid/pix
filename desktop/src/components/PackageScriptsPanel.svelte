@@ -7,282 +7,48 @@
   import Square from "@lucide/svelte/icons/square";
   import TerminalSquare from "@lucide/svelte/icons/square-terminal";
   import X from "@lucide/svelte/icons/x";
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import {
-    appendTerminalOutput,
-    decodeBase64Bytes,
     filterPackageScripts,
-    PACKAGE_TERMINAL_EXIT_EVENT,
-    PACKAGE_TERMINAL_OUTPUT_EVENT,
     packageTerminalStatusLabel,
-    terminalSnapshotView,
-    type PackageScript,
-    type PackageScriptsSnapshot,
-    type PackageTerminalExitEvent,
-    type PackageTerminalOutputEvent,
-    type PackageTerminalSnapshot,
     type PackageTerminalView,
   } from "../lib/package-scripts";
+  import { createPackageScriptsController } from "./package-scripts-controller.svelte";
   import TerminalView from "./TerminalView.svelte";
 
   let { workspace }: { workspace: string } = $props();
 
-  let snapshot = $state<PackageScriptsSnapshot | undefined>();
-  let terminals = $state<PackageTerminalView[]>([]);
-  let activeTerminalId = $state<string | null>(null);
-  let loading = $state(false);
-  let error = $state<string | null>(null);
   let query = $state("");
-  let startingScript = $state<string | null>(null);
-  let terminalActionId = $state<string | null>(null);
   let terminalView = $state<{
     write: (data: string) => void;
     focus: () => void;
     dimensions: () => { cols: number; rows: number };
   } | null>(null);
-  let loadGeneration = 0;
-  const windowLabel = getCurrentWindow().label;
-  const terminalDecoders = new Map<string, TextDecoder>();
+  const controller = createPackageScriptsController({
+    workspace: () => workspace,
+    terminalView: () => terminalView,
+  });
+  const snapshot = $derived(controller.snapshot);
+  const terminals = $derived(controller.terminals);
+  const activeTerminalId = $derived(controller.activeTerminalId);
+  const activeTerminal = $derived(controller.activeTerminal);
+  const runningCount = $derived(controller.runningCount);
+  const loading = $derived(controller.loading);
+  const error = $derived(controller.error);
+  const startingScript = $derived(controller.startingScript);
+  const terminalActionId = $derived(controller.terminalActionId);
 
   const visibleScripts = $derived(filterPackageScripts(snapshot?.scripts ?? [], query));
-  const activeTerminal = $derived(
-    activeTerminalId ? terminals.find((terminal) => terminal.id === activeTerminalId) : undefined,
-  );
-  const runningCount = $derived(terminals.filter((terminal) => terminal.status === "running").length);
+  const refresh = controller.refresh;
+  const runScript = controller.runScript;
+  const openShellTerminal = controller.openShellTerminal;
+  const writeTerminal = controller.writeTerminal;
+  const resizeTerminal = controller.resizeTerminal;
+  const stopTerminal = controller.stopTerminal;
+  const restartTerminal = controller.restartTerminal;
+  const closeTerminal = controller.closeTerminal;
 
-  $effect(() => {
-    const requestWorkspace = workspace;
-    const generation = ++loadGeneration;
-    queueMicrotask(() => {
-      if (generation === loadGeneration) void loadWorkspace(requestWorkspace, generation);
-    });
-  });
-
-  onMount(() => {
-    let disposed = false;
-    const unlisteners: Array<() => void> = [];
-
-    void listen<PackageTerminalOutputEvent>(PACKAGE_TERMINAL_OUTPUT_EVENT, ({ payload }) => {
-      if (disposed) return;
-      const terminal = terminals.find((candidate) => candidate.id === payload.terminalId);
-      if (!terminal) return;
-      const decoder = terminalDecoders.get(payload.terminalId) ?? new TextDecoder();
-      terminalDecoders.set(payload.terminalId, decoder);
-      const chunk = decoder.decode(decodeBase64Bytes(payload.dataBase64), { stream: true });
-      terminals = terminals.map((candidate) => candidate.id === payload.terminalId
-        ? { ...candidate, output: appendTerminalOutput(candidate.output, chunk) }
-        : candidate);
-      if (payload.terminalId === activeTerminalId) terminalView?.write(chunk);
-    }).then((unlisten) => {
-      if (disposed) unlisten();
-      else unlisteners.push(unlisten);
-    }).catch((caught) => error = errorMessage(caught));
-
-    void listen<PackageTerminalExitEvent>(PACKAGE_TERMINAL_EXIT_EVENT, ({ payload }) => {
-      if (disposed) return;
-      const decoder = terminalDecoders.get(payload.terminalId);
-      const trailing = decoder?.decode() ?? "";
-      terminalDecoders.delete(payload.terminalId);
-      if (trailing && payload.terminalId === activeTerminalId) terminalView?.write(trailing);
-      terminals = terminals.map((candidate) => candidate.id === payload.terminalId
-        ? {
-          ...candidate,
-          output: trailing ? appendTerminalOutput(candidate.output, trailing) : candidate.output,
-          status: payload.status,
-          exitCode: payload.exitCode,
-          signal: payload.signal,
-        }
-        : candidate);
-    }).then((unlisten) => {
-      if (disposed) unlisten();
-      else unlisteners.push(unlisten);
-    }).catch((caught) => error = errorMessage(caught));
-
-    return () => {
-      disposed = true;
-      for (const unlisten of unlisteners) unlisten();
-    };
-  });
-
-  async function loadWorkspace(requestWorkspace: string, generation: number): Promise<void> {
-    if (!requestWorkspace) {
-      snapshot = undefined;
-      terminals = [];
-      activeTerminalId = null;
-      error = null;
-      loading = false;
-      return;
-    }
-    loading = true;
-    error = null;
-    try {
-      const [nextSnapshot, nextTerminals] = await Promise.all([
-        invoke<PackageScriptsSnapshot>("package_scripts", { workspace: requestWorkspace }),
-        invoke<PackageTerminalSnapshot[]>("package_terminal_list", {
-          windowLabel,
-          workspace: requestWorkspace,
-        }),
-      ]);
-      if (generation !== loadGeneration || workspace !== requestWorkspace) return;
-      snapshot = nextSnapshot;
-      terminals = nextTerminals.map(terminalSnapshotView);
-      terminalDecoders.clear();
-      if (!terminals.some((terminal) => terminal.id === activeTerminalId)) {
-        activeTerminalId = lastRunningTerminalId(terminals)
-          ?? terminals.at(-1)?.id
-          ?? null;
-      }
-    } catch (caught) {
-      if (generation !== loadGeneration || workspace !== requestWorkspace) return;
-      error = errorMessage(caught);
-      snapshot = undefined;
-      terminals = [];
-      activeTerminalId = null;
-    } finally {
-      if (generation === loadGeneration) loading = false;
-    }
-  }
-
-  function refresh(): void {
-    const generation = ++loadGeneration;
-    void loadWorkspace(workspace, generation);
-  }
-
-  async function runScript(script: PackageScript): Promise<void> {
-    if (!workspace || startingScript || terminalActionId) return;
-    startingScript = script.name;
-    error = null;
-    try {
-      const size = terminalView?.dimensions() ?? { cols: 80, rows: 24 };
-      const started = await invoke<PackageTerminalSnapshot>("package_terminal_start", {
-        windowLabel,
-        workspace,
-        script: script.name,
-        cols: size.cols,
-        rows: size.rows,
-      });
-      terminals = [...terminals, terminalSnapshotView(started)];
-      terminalDecoders.set(started.id, new TextDecoder());
-      activeTerminalId = started.id;
-      await tick();
-      terminalView?.focus();
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      startingScript = null;
-    }
-  }
-
-  async function openShellTerminal(): Promise<void> {
-    if (!workspace || startingScript || terminalActionId) return;
-    startingScript = "__shell__";
-    error = null;
-    try {
-      const size = terminalView?.dimensions() ?? { cols: 80, rows: 24 };
-      const started = await invoke<PackageTerminalSnapshot>("package_terminal_start_shell", {
-        windowLabel,
-        workspace,
-        cols: size.cols,
-        rows: size.rows,
-      });
-      terminals = [...terminals, terminalSnapshotView(started)];
-      terminalDecoders.set(started.id, new TextDecoder());
-      activeTerminalId = started.id;
-      await tick();
-      terminalView?.focus();
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      startingScript = null;
-    }
-  }
-
-  async function writeTerminal(terminalId: string, data: string): Promise<void> {
-    const terminal = terminals.find((candidate) => candidate.id === terminalId);
-    if (!terminal || terminal.status !== "running") return;
-    try {
-      await invoke("package_terminal_write", { windowLabel, terminalId, data });
-    } catch (caught) {
-      error = errorMessage(caught);
-    }
-  }
-
-  async function resizeTerminal(terminalId: string, cols: number, rows: number): Promise<void> {
-    const terminal = terminals.find((candidate) => candidate.id === terminalId);
-    if (!terminal || terminal.status !== "running") return;
-    try {
-      await invoke("package_terminal_resize", { windowLabel, terminalId, cols, rows });
-    } catch {
-      // Resizing is best-effort while a process may be exiting.
-    }
-  }
-
-  async function stopTerminal(terminal: PackageTerminalView): Promise<void> {
-    if (terminal.status !== "running" || terminalActionId) return;
-    terminalActionId = terminal.id;
-    error = null;
-    try {
-      await invoke("package_terminal_stop", { windowLabel, terminalId: terminal.id });
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      terminalActionId = null;
-    }
-  }
-
-  async function restartTerminal(terminal: PackageTerminalView): Promise<void> {
-    if (terminalActionId || startingScript) return;
-    const script = terminal.kind === "script"
-      ? snapshot?.scripts.find((candidate) => candidate.name === terminal.script)
-      : undefined;
-    if (terminal.kind === "script" && !script) {
-      error = `Script ${terminal.script} is no longer present in package.json.`;
-      return;
-    }
-    terminalActionId = terminal.id;
-    error = null;
-    try {
-      if (terminal.status === "running") {
-        await invoke("package_terminal_stop", { windowLabel, terminalId: terminal.id });
-      }
-      await invoke("package_terminal_forget", { windowLabel, terminalId: terminal.id });
-      terminals = terminals.filter((candidate) => candidate.id !== terminal.id);
-      terminalDecoders.delete(terminal.id);
-      activeTerminalId = terminals.at(-1)?.id ?? null;
-      terminalActionId = null;
-      if (terminal.kind === "shell") await openShellTerminal();
-      else await runScript(script!);
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      terminalActionId = null;
-    }
-  }
-
-  async function closeTerminal(terminal: PackageTerminalView): Promise<void> {
-    if (terminalActionId) return;
-    terminalActionId = terminal.id;
-    error = null;
-    try {
-      if (terminal.status === "running") {
-        await invoke("package_terminal_stop", { windowLabel, terminalId: terminal.id });
-      }
-      await invoke("package_terminal_forget", { windowLabel, terminalId: terminal.id });
-      const index = terminals.findIndex((candidate) => candidate.id === terminal.id);
-      terminals = terminals.filter((candidate) => candidate.id !== terminal.id);
-      terminalDecoders.delete(terminal.id);
-      if (activeTerminalId === terminal.id) {
-        activeTerminalId = terminals[Math.min(index, terminals.length - 1)]?.id ?? terminals.at(-1)?.id ?? null;
-      }
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      terminalActionId = null;
-    }
-  }
+  onMount(controller.start);
 
   function terminalTone(terminal: PackageTerminalView): string {
     if (terminal.status === "running") return "bg-primary";
@@ -291,16 +57,6 @@
     return "bg-muted-foreground/60";
   }
 
-  function lastRunningTerminalId(items: readonly PackageTerminalView[]): string | undefined {
-    for (let index = items.length - 1; index >= 0; index -= 1) {
-      if (items[index]?.status === "running") return items[index]?.id;
-    }
-    return undefined;
-  }
-
-  function errorMessage(caught: unknown): string {
-    return caught instanceof Error ? caught.message : String(caught);
-  }
 </script>
 
 <section class="relative grid min-h-0 min-w-0 w-full max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-sidebar" aria-label="Package scripts">
@@ -384,10 +140,7 @@
               role="tab"
               aria-selected={selected}
               title={`${terminal.script} · ${packageTerminalStatusLabel(terminal)}`}
-              onclick={() => {
-                activeTerminalId = terminal.id;
-                void tick().then(() => terminalView?.focus());
-              }}
+              onclick={() => void controller.selectTerminal(terminal.id)}
             >
               <span class={["h-1.5 w-1.5 shrink-0 rounded-full", terminalTone(terminal)]} aria-hidden="true"></span>
               <span class="min-w-0 flex-1 truncate font-mono text-[10px]">{terminal.script}</span>

@@ -7,12 +7,14 @@
   import FileCode from "@lucide/svelte/icons/file-code";
   import Pencil from "@lucide/svelte/icons/pencil";
   import WrapText from "@lucide/svelte/icons/wrap-text";
-  import { tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import type { PreviewScrollPosition } from "../lib/preview-history";
   import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
   import { highlightCode, languageForFilePath } from "../lib/syntax-highlight";
   import MarkdownText from "./MarkdownText.svelte";
+  import { createPreviewEditorController } from "./preview-editor-controller.svelte";
+  import { createPreviewMarkdownController } from "./preview-markdown-controller.svelte";
+  import { createPreviewScrollController } from "./preview-scroll-controller.svelte";
 
   let {
     attachment,
@@ -64,10 +66,6 @@
 
   let contentScrollElement = $state<HTMLDivElement | undefined>();
   let wrapLines = $state(false);
-  let editing = $state(false);
-  let draft = $state("");
-  let saving = $state(false);
-  const resolvedMarkdownProjectPaths = new Map<string, string>();
 
   const title = $derived(file?.path ?? attachment?.name ?? "Preview");
   const source = $derived(
@@ -75,191 +73,62 @@
   );
   const language = $derived(file ? languageForFilePath(file.path) : undefined);
   const renderAsMarkdown = $derived(language === "markdown" && !lineRange);
-  const canEdit = $derived(Boolean(file && renderAsMarkdown && editable && onSaveProjectFile));
-  const dirty = $derived(Boolean(file && draft !== file.content));
   const highlighted = $derived(
     file && !renderAsMarkdown ? highlightCode(file.content, language) : undefined,
   );
 
-  function projectLinkPath(path: string): string {
-    const normalizedFilePath = file?.path.replaceAll("\\", "/");
-    const directory = normalizedFilePath?.includes("/")
-      ? normalizedFilePath.slice(0, normalizedFilePath.lastIndexOf("/"))
-      : "";
-    return directory ? `${directory}/${path}` : path;
-  }
+  const editorController = createPreviewEditorController({
+    previewId: () => previewId,
+    file: () => file,
+    editable: () => editable,
+    renderAsMarkdown: () => renderAsMarkdown,
+    onSaveProjectFile: () => onSaveProjectFile,
+    onDirtyChange: () => onDirtyChange,
+  });
+  const editorState = editorController.state;
+  const editing = $derived(editorState.editing);
+  const saving = $derived(editorState.saving);
+  const canEdit = $derived(editorController.canEdit);
+  const dirty = $derived(editorController.dirty);
 
-  $effect(() => {
-    previewId;
-    resolvedMarkdownProjectPaths.clear();
-    draft = file?.content ?? "";
-    editing = false;
-    saving = false;
+  const scrollController = createPreviewScrollController({
+    previewId: () => previewId,
+    scrollPosition: () => scrollPosition,
+    lineRange: () => lineRange,
+    file: () => file,
+    highlighted: () => highlighted,
+    element: () => contentScrollElement,
+    editing: () => editorState.editing,
+    onBack: () => onBack,
+    onForward: () => onForward,
+    onScrollPositionChange: () => onScrollPositionChange,
   });
 
-  $effect(() => {
-    onDirtyChange?.(dirty);
+  const markdownController = createPreviewMarkdownController({
+    previewId: () => previewId,
+    file: () => file,
+    onValidateProjectFile: () => onValidateProjectFile,
+    onOpenProjectFile: () => onOpenProjectFile,
+    onOpenLocalFile: () => onOpenLocalFile,
+    rememberScroll: scrollController.remember,
   });
+
+  const restoreScroll = scrollController.restoreScroll;
+  const rememberScroll = scrollController.remember;
+  const handleBack = scrollController.back;
+  const handleForward = scrollController.forward;
+  const projectLinkPath = markdownController.projectLinkPath;
+  const openProjectFromMarkdown = markdownController.openProject;
+  const validateProjectFromMarkdown = markdownController.validateProject;
+  const openLocalFromMarkdown = markdownController.openLocal;
+  const saveEdit = editorController.save;
+  const handleEditorKeydown = editorController.handleKeydown;
 
   export function requestClose(): boolean {
-    if (editing && dirty && !window.confirm("Discard unsaved changes?")) return false;
+    if (!editorController.canClose()) return false;
     onClose();
     return true;
   }
-
-  function restoreScroll(
-    node: HTMLElement,
-    initial: { key: number; position: PreviewScrollPosition },
-  ): { update: (next: { key: number; position: PreviewScrollPosition }) => void; destroy: () => void } {
-    let key = initial.key;
-    let frame = 0;
-
-    function schedule(position: PreviewScrollPosition): void {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        node.scrollLeft = position.left;
-        node.scrollTop = position.top;
-      });
-    }
-
-    schedule(initial.position);
-    return {
-      update(next): void {
-        if (next.key === key) return;
-        key = next.key;
-        schedule(next.position);
-      },
-      destroy(): void {
-        cancelAnimationFrame(frame);
-      },
-    };
-  }
-
-  function rememberScroll(): void {
-    if (!contentScrollElement) return;
-    onScrollPositionChange?.(previewId, {
-      left: contentScrollElement.scrollLeft,
-      top: contentScrollElement.scrollTop,
-    });
-  }
-
-  function handleBack(): void {
-    if (editing) return;
-    rememberScroll();
-    onBack?.();
-  }
-
-  function handleForward(): void {
-    if (editing) return;
-    rememberScroll();
-    onForward?.();
-  }
-
-  async function resolveProjectFromMarkdown(path: string): Promise<string | undefined> {
-    const cached = resolvedMarkdownProjectPaths.get(path);
-    if (cached) return cached;
-    if (!onValidateProjectFile) return undefined;
-
-    // Agent-authored Markdown commonly cites workspace-root paths such as
-    // external/foo.ts even when the current Markdown file lives in specs/.
-    // Try that exact project path first, then preserve normal document-relative
-    // Markdown links as a fallback.
-    const relative = projectLinkPath(path);
-    const candidates = relative === path ? [path] : [path, relative];
-    for (const candidate of candidates) {
-      try {
-        if (!await onValidateProjectFile(candidate)) continue;
-        resolvedMarkdownProjectPaths.set(path, candidate);
-        return candidate;
-      } catch {
-        // Try the next interpretation; validation is intentionally best-effort.
-      }
-    }
-    return undefined;
-  }
-
-  async function openProjectFromMarkdown(path: string, range?: ProjectFileLineRange): Promise<void> {
-    rememberScroll();
-    const resolved = await resolveProjectFromMarkdown(path);
-    if (resolved) await onOpenProjectFile?.(resolved, range);
-  }
-
-  async function validateProjectFromMarkdown(path: string): Promise<boolean> {
-    return Boolean(await resolveProjectFromMarkdown(path));
-  }
-
-  function openLocalFromMarkdown(path: string): void | Promise<void> {
-    rememberScroll();
-    return onOpenLocalFile?.(path);
-  }
-
-  async function saveEdit(): Promise<void> {
-    if (!file || !canEdit || !onSaveProjectFile || saving || !dirty) return;
-    saving = true;
-    try {
-      const saved = await onSaveProjectFile(file.path, draft);
-      if (saved) editing = false;
-    } finally {
-      saving = false;
-    }
-  }
-
-  function handleEditorKeydown(event: KeyboardEvent): void {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      void saveEdit();
-      return;
-    }
-    if (event.key === "Escape" && !event.isComposing) {
-      event.preventDefault();
-      draft = file?.content ?? "";
-      editing = false;
-    }
-  }
-
-  $effect(() => {
-    const requestedPreviewId = previewId;
-    const range = lineRange;
-    const scroll = contentScrollElement;
-    const reveal = Boolean(range && scrollPosition.left === 0 && scrollPosition.top === 0);
-    if (!scroll || !file || !highlighted) return;
-
-    let cancelled = false;
-    let frame = 0;
-    // The source body is injected with {@html}; wait for Svelte's DOM flush and
-    // then one frame so line boxes have final geometry before selecting/revealing.
-    void tick().then(() => {
-      if (cancelled || previewId !== requestedPreviewId) return;
-      frame = requestAnimationFrame(() => {
-        if (cancelled || previewId !== requestedPreviewId) return;
-        const lines = Array.from(scroll.querySelectorAll<HTMLElement>(".preview-code .sh__line"));
-        for (const line of lines) line.classList.remove("preview-range-highlight");
-        if (!range || lines.length === 0) return;
-
-        const startIndex = Math.max(0, Math.min(lines.length - 1, range.startLine - 1));
-        const endIndex = Math.max(startIndex, Math.min(lines.length - 1, range.endLine - 1));
-        for (let index = startIndex; index <= endIndex; index += 1) {
-          lines[index]?.classList.add("preview-range-highlight");
-        }
-
-        if (!reveal) return;
-        const first = lines[startIndex];
-        if (!first) return;
-        const scrollRect = scroll.getBoundingClientRect();
-        const firstRect = first.getBoundingClientRect();
-        const targetTop = scroll.scrollTop
-          + firstRect.top
-          - scrollRect.top
-          - Math.max(24, (scroll.clientHeight - firstRect.height) * 0.35);
-        scroll.scrollTo({ top: Math.max(0, targetTop), behavior: "auto" });
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frame);
-    };
-  });
 
 </script>
 
@@ -326,10 +195,7 @@
             class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
             disabled={saving}
-            onclick={() => {
-              draft = file?.content ?? "";
-              editing = false;
-            }}
+            onclick={editorController.cancel}
           >Cancel</button>
           <button
             class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40"
@@ -341,10 +207,7 @@
           <button
             class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
-            onclick={() => {
-              draft = file?.content ?? "";
-              editing = true;
-            }}
+            onclick={editorController.begin}
           ><Pencil class="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
         {/if}
       {/if}
@@ -364,7 +227,7 @@
       {#if renderAsMarkdown && editing}
         <textarea
           class="min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-          bind:value={draft}
+          bind:value={editorState.draft}
           aria-label={`Edit ${file.path}`}
           spellcheck="false"
           onkeydown={handleEditorKeydown}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import workbenchBuilderSource from "../app/desktop-workbench-prop-builders.ts?raw";
 import diffSource from "./GitDiffPane.svelte?raw";
 import previewSource from "./PreviewPane.svelte?raw";
+import previewEditorControllerSource from "./preview-editor-controller.svelte.ts?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
 import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
 
@@ -19,7 +20,8 @@ describe("desktop editor work surfaces", () => {
 
   it("keeps preview editing state close-aware while using the full editor region", () => {
     expect(previewSource).toContain("export function requestClose()");
-    expect(previewSource).toContain("onDirtyChange?.(dirty)");
+    expect(previewSource).toContain("editorController.canClose()");
+    expect(previewEditorControllerSource).toContain("options.onDirtyChange()?.(dirty())");
     expect(previewSource).not.toContain("Resize preview");
   });
 

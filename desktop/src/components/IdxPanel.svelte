@@ -13,15 +13,8 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Wrench from "@lucide/svelte/icons/wrench";
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
   import {
-    IDX_OPERATION_EXIT_EVENT,
-    IDX_OPERATION_OUTPUT_EVENT,
-    appendIdxLog,
-    idxCombinedOutput,
     idxArchivedPrimaryCount,
     idxCurrentPrimaryCount,
     idxField,
@@ -32,20 +25,19 @@
     idxOperationLabel,
     idxOperationStatusLabel,
     idxOutputSegments,
-    reconcileIdxOperationSnapshot,
-    type IdxCommandResult,
-    type IdxInspectCommand,
-    type IdxMaintenanceKind,
-    type IdxOperationExitEvent,
-    type IdxOperationOutputEvent,
     type IdxOperationSnapshot,
     type IdxOverview,
     type IdxQueryKind,
-    type IdxSearchMode,
   } from "../lib/idx";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import IdxOutput from "./IdxOutput.svelte";
   import TerminalView from "./TerminalView.svelte";
+  import { createIdxPanelRuntimeController } from "./idx-panel-runtime-controller.svelte";
+  import { createIdxPanelQueryController } from "./idx-panel-query-controller.svelte";
+  import {
+    createIdxPanelKnowledgeController,
+    delimitedItems,
+  } from "./idx-panel-knowledge-controller.svelte";
 
   let {
     workspace,
@@ -64,338 +56,57 @@
   } = $props();
 
   type PanelTab = "overview" | "knowledge" | "query";
-  type Classification = "spec" | "spec-like" | "meta-index" | "design-only" | "guide" | "other";
-  type BehaviorType = "as-is" | "change" | "mixed" | "unknown";
-  type Lifecycle = "active" | "proposed" | "historical" | "superseded" | "unknown";
-  type Confidence = "high" | "medium" | "low" | "unknown";
-  type RelationKind = "implements" | "tests" | "related" | "supersedes" | "superseded-by";
-  type RelationAction = "add" | "remove";
-
-  const windowLabel = getCurrentWindow().label;
   let activeTab = $state<PanelTab>("overview");
-  let overview = $state<IdxOverview | undefined>();
-  let operations = $state<IdxOperationSnapshot[]>([]);
-  let loading = $state(false);
-  let loadGeneration = 0;
-  let disposed = false;
-  let overviewRefreshRunning = $state(false);
-  let overviewRefreshQueued = false;
-  let overviewRefreshGeneration = 0;
-  let error = $state<string | null>(null);
-
-  let queryKind = $state<IdxQueryKind>("code");
-  let queryText = $state("");
-  let queryPathPrefix = $state("");
-  let queryRunning = $state(false);
-  let queryResult = $state<IdxCommandResult | undefined>();
-  let codeMode = $state<IdxSearchMode>("hybrid");
-  let codeMaxFiles = $state(5);
-  let codeIncludeContent = $state(false);
-  let knowledgeLimit = $state(5);
-  let contextBudget = $state(1400);
-  let contextMaxSpecs = $state(4);
-  let contextMaxCode = $state(6);
-  let contextMaxTests = $state(4);
-  let includeSecondary = $state(false);
-  let inspectCommand = $state<IdxInspectCommand>("architecture");
-  let inspectTarget = $state("");
-  let inspectDepth = $state(2);
-  let inspectMaxFiles = $state(40);
-  let inspectIncludeBody = $state(false);
-  let inspectShowEdges = $state(false);
-  let inspectTests = $state(false);
-  let inspectRunning = $state(false);
-  let inspectResult = $state<IdxCommandResult | undefined>();
-
-  let knowledgePath = $state("");
-  let classification = $state<Classification>("spec");
-  let behaviorType = $state<BehaviorType>("as-is");
-  let lifecycle = $state<Lifecycle>("active");
-  let confidence = $state<Confidence>("high");
-  let summary = $state("");
-  let topics = $state("");
-  let sourceReviewed = $state(false);
-  let evidenceReviewed = $state(false);
-  let relationKind = $state<RelationKind>("implements");
-  let relationAction = $state<RelationAction>("add");
-  let relationTargets = $state("");
-  let knowledgeAction = $state<string | null>(null);
-  let knowledgeResult = $state<IdxCommandResult | undefined>();
   const operationLinkValidation = new Map<string, Promise<boolean>>();
 
-  const runningOperation = $derived(operations.find((operation) => operation.status === "running"));
-  const latestOperation = $derived(operations.at(-1));
-  const visibleOperation = $derived(runningOperation ?? latestOperation);
+  const runtime = createIdxPanelRuntimeController({
+    workspace: () => workspace,
+    onOverviewChange: (requestWorkspace, nextOverview) => onOverviewChange?.(requestWorkspace, nextOverview),
+  });
+  const overview = $derived(runtime.overview);
+  const loading = $derived(runtime.loading);
+  const overviewRefreshRunning = $derived(runtime.overviewRefreshRunning);
+  const error = $derived(runtime.error);
+  const runningOperation = $derived(runtime.runningOperation);
+  const visibleOperation = $derived(runtime.visibleOperation);
+  const indexReady = $derived(runtime.indexReady);
+
+  const queryController = createIdxPanelQueryController({
+    workspace: () => workspace,
+    indexReady: () => runtime.indexReady,
+    operationRunning: () => Boolean(runtime.runningOperation),
+    setError: runtime.setError,
+  });
+  const queryState = queryController.state;
+  const visibleQueryOutput = $derived(queryController.output);
+
+  const knowledgeController = createIdxPanelKnowledgeController({
+    workspace: () => workspace,
+    indexReady: () => runtime.indexReady,
+    operationRunning: () => Boolean(runtime.runningOperation),
+    refreshOverview: runtime.refreshOverview,
+    setError: runtime.setError,
+    onOpenProjectFile: (path) => onOpenProjectFile(path),
+  });
+  const knowledgeState = knowledgeController.state;
+  const knowledgeOutput = $derived(knowledgeController.output);
+
   const knowledgeIssues = $derived(idxKnowledgeIssues(overview?.wikiStatus));
-  const latestDiscover = $derived([...operations].reverse().find((operation) => operation.kind === "wiki-discover"));
+  const latestDiscover = $derived([...runtime.operations].reverse().find((operation) => operation.kind === "wiki-discover"));
   const discoverCandidates = $derived(idxKnowledgeCandidates(latestDiscover?.output ?? ""));
-  const queryOutput = $derived(idxCombinedOutput(queryResult));
-  const inspectOutput = $derived(idxCombinedOutput(inspectResult));
-  const visibleQueryOutput = $derived(inspectOutput || queryOutput);
-  const knowledgeOutput = $derived(idxCombinedOutput(knowledgeResult));
-  const indexReady = $derived(Boolean(overview?.available && overview.initialized));
   const currentPrimaryCount = $derived(idxCurrentPrimaryCount(overview?.wikiStatus));
   const archivedPrimaryCount = $derived(idxArchivedPrimaryCount(overview?.wikiStatus));
   const knowledgeNeedsAttention = $derived(idxKnowledgeNeedsAttention(overview?.wikiStatus));
 
-  $effect(() => {
-    const requestWorkspace = workspace;
-    const generation = ++loadGeneration;
-    queueMicrotask(() => {
-      if (!disposed && generation === loadGeneration) void loadWorkspace(requestWorkspace, generation);
-    });
-  });
+  const refresh = runtime.refresh;
+  const startOperation = runtime.startOperation;
+  const stopOperation = runtime.stopOperation;
+  const runQuery = queryController.runQuery;
+  const runInspect = queryController.runInspect;
+  const selectKnowledgePath = knowledgeController.selectPath;
+  const runKnowledgeAction = knowledgeController.run;
 
-  onMount(() => {
-    const unlisteners: Array<() => void> = [];
-    const refreshTimer = window.setInterval(() => {
-      if (!loading && !overviewRefreshRunning && !queryRunning && !inspectRunning && !runningOperation) {
-        void refreshOverview();
-      }
-    }, 30_000);
-    void listen<IdxOperationOutputEvent>(IDX_OPERATION_OUTPUT_EVENT, ({ payload }) => {
-      if (disposed) return;
-      operations = operations.map((operation) => operation.id === payload.operationId
-        ? { ...operation, output: appendIdxLog(operation.output, payload.chunk) }
-        : operation);
-    }).then((unlisten) => disposed ? unlisten() : unlisteners.push(unlisten));
-    void listen<IdxOperationExitEvent>(IDX_OPERATION_EXIT_EVENT, ({ payload }) => {
-      if (disposed) return;
-      operations = operations.map((operation) => operation.id === payload.operationId
-        ? { ...operation, status: payload.status, exitCode: payload.exitCode, finishedAtMs: Date.now() }
-        : operation);
-      void refreshOverview();
-    }).then((unlisten) => disposed ? unlisten() : unlisteners.push(unlisten));
-    return () => {
-      disposed = true;
-      loadGeneration += 1;
-      overviewRefreshGeneration += 1;
-      overviewRefreshQueued = false;
-      window.clearInterval(refreshTimer);
-      for (const unlisten of unlisteners) unlisten();
-    };
-  });
-
-  async function loadWorkspace(requestWorkspace: string, generation: number): Promise<void> {
-    if (disposed) return;
-    if (!requestWorkspace) {
-      overview = undefined;
-      onOverviewChange?.(requestWorkspace, undefined);
-      operations = [];
-      loading = false;
-      return;
-    }
-    loading = true;
-    error = null;
-    try {
-      const [nextOverview, nextOperations] = await Promise.all([
-        invoke<IdxOverview>("idx_overview", { workspace: requestWorkspace }),
-        invoke<IdxOperationSnapshot[]>("idx_operation_list", { windowLabel, workspace: requestWorkspace }),
-      ]);
-      if (disposed || generation !== loadGeneration || workspace !== requestWorkspace) return;
-      overview = nextOverview;
-      onOverviewChange?.(requestWorkspace, nextOverview);
-      operations = nextOperations;
-    } catch (caught) {
-      if (disposed || generation !== loadGeneration || workspace !== requestWorkspace) return;
-      error = errorMessage(caught);
-    } finally {
-      if (!disposed && generation === loadGeneration) {
-        loading = false;
-        if (overviewRefreshQueued) {
-          overviewRefreshQueued = false;
-          queueMicrotask(() => void refreshOverview());
-        }
-      }
-    }
-  }
-
-  async function refreshOverview(): Promise<void> {
-    const requestWorkspace = workspace;
-    if (disposed || !requestWorkspace) return;
-    if (loading || overviewRefreshRunning) {
-      overviewRefreshQueued = true;
-      return;
-    }
-    overviewRefreshRunning = true;
-    const generation = ++overviewRefreshGeneration;
-    try {
-      const next = await invoke<IdxOverview>("idx_overview", { workspace: requestWorkspace });
-      if (!disposed && generation === overviewRefreshGeneration && workspace === requestWorkspace) {
-        overview = next;
-        onOverviewChange?.(requestWorkspace, next);
-      }
-    } catch (caught) {
-      if (!disposed && generation === overviewRefreshGeneration && workspace === requestWorkspace) {
-        error = errorMessage(caught);
-      }
-    } finally {
-      overviewRefreshRunning = false;
-      if (overviewRefreshQueued && !disposed) {
-        overviewRefreshQueued = false;
-        queueMicrotask(() => void refreshOverview());
-      }
-    }
-  }
-
-  function refresh(): void {
-    if (loading || overviewRefreshRunning || disposed) return;
-    const generation = ++loadGeneration;
-    void loadWorkspace(workspace, generation);
-  }
-
-  async function startOperation(kind: IdxMaintenanceKind): Promise<void> {
-    if (!workspace || runningOperation) return;
-    const requestWorkspace = workspace;
-    error = null;
-    try {
-      const started = await invoke<IdxOperationSnapshot>("idx_operation_start", {
-        request: { windowLabel, workspace: requestWorkspace, kind },
-      });
-      if (workspace !== requestWorkspace) return;
-      operations = [...operations, started];
-
-      // Output or exit events may beat the start command's IPC response. Reload the
-      // backend record after registration so those early events are not lost.
-      const refreshed = await invoke<IdxOperationSnapshot[]>("idx_operation_list", {
-        windowLabel,
-        workspace: requestWorkspace,
-      });
-      if (workspace !== requestWorkspace) return;
-      const refreshedStarted = refreshed.find((operation) => operation.id === started.id);
-      if (refreshedStarted) {
-        operations = operations.map((operation) => operation.id === started.id
-          ? reconcileIdxOperationSnapshot(operation, refreshedStarted)
-          : operation);
-      }
-    } catch (caught) {
-      if (workspace === requestWorkspace) error = errorMessage(caught);
-    }
-  }
-
-  async function stopOperation(operation: IdxOperationSnapshot): Promise<void> {
-    if (operation.status !== "running") return;
-    try {
-      await invoke("idx_operation_stop", { windowLabel, operationId: operation.id });
-    } catch (caught) {
-      error = errorMessage(caught);
-    }
-  }
-
-  async function runQuery(): Promise<void> {
-    const text = queryText.trim();
-    if (!workspace || !indexReady || !text || queryRunning || runningOperation) return;
-    queryRunning = true;
-    queryResult = undefined;
-    inspectResult = undefined;
-    error = null;
-    const pathPrefix = queryPathPrefix.trim() || undefined;
-    const query = queryKind === "code"
-      ? { kind: "code", query: text, mode: codeMode, maxFiles: codeMaxFiles, pathPrefix, includeContent: codeIncludeContent }
-      : queryKind === "knowledge"
-        ? { kind: "knowledge", query: text, limit: knowledgeLimit, includeSecondary, pathPrefix }
-        : {
-            kind: "context",
-            query: text,
-            budget: contextBudget,
-            maxSpecs: contextMaxSpecs,
-            maxCode: contextMaxCode,
-            maxTests: contextMaxTests,
-            includeSecondary,
-            pathPrefix,
-          };
-    try {
-      queryResult = await invoke<IdxCommandResult>("idx_query", { request: { workspace, query } });
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      queryRunning = false;
-    }
-  }
-
-  async function runInspect(): Promise<void> {
-    if (!workspace || !indexReady || inspectRunning || queryRunning || runningOperation) return;
-    const targetRequired = inspectCommand === "ast" || inspectCommand === "explain" || inspectCommand === "deps";
-    const target = inspectTarget.trim();
-    if (targetRequired && !target) {
-      error = inspectCommand === "explain" ? "Enter a symbol to explain." : "Enter a file or module target.";
-      return;
-    }
-    inspectRunning = true;
-    inspectResult = undefined;
-    queryResult = undefined;
-    error = null;
-    try {
-      inspectResult = await invoke<IdxCommandResult>("idx_inspect", {
-        request: {
-          workspace,
-          command: inspectCommand,
-          target: target || undefined,
-          pathPrefix: queryPathPrefix.trim() || undefined,
-          depth: inspectDepth,
-          maxFiles: inspectMaxFiles,
-          includeBody: inspectIncludeBody,
-          showEdges: inspectShowEdges,
-          tests: inspectTests,
-        },
-      });
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      inspectRunning = false;
-    }
-  }
-
-  function selectKnowledgePath(path: string, open = false): void {
-    knowledgePath = path;
-    sourceReviewed = false;
-    evidenceReviewed = false;
-    if (open) void onOpenProjectFile(path);
-  }
-
-  async function runKnowledgeAction(action: "show" | "record" | "verify" | "relate" | "remove" | "impact"): Promise<void> {
-    if (!workspace || !indexReady || knowledgeAction || runningOperation) return;
-    const path = knowledgePath.trim() || undefined;
-    if (action !== "impact" && !path) {
-      error = "Choose a knowledge document first.";
-      return;
-    }
-    if (action === "remove" && !window.confirm(`Remove IDX knowledge metadata for ${path}?\n\nThe source file will not be deleted.`)) return;
-    knowledgeAction = action;
-    knowledgeResult = undefined;
-    error = null;
-    const request = {
-      workspace,
-      action,
-      path,
-      classification,
-      behaviorType,
-      lifecycle,
-      confidence,
-      summary: summary.trim() || undefined,
-      topics: delimitedItems(topics),
-      sourceReviewed,
-      evidenceReviewed,
-      metadataOnlyConfirmed: action === "remove",
-      relationKind,
-      relationAction,
-      targetPaths: delimitedItems(relationTargets),
-      paths: [],
-      semantic: true,
-    };
-    try {
-      knowledgeResult = await invoke<IdxCommandResult>("idx_knowledge", { request });
-      await refreshOverview();
-    } catch (caught) {
-      error = errorMessage(caught);
-    } finally {
-      knowledgeAction = null;
-    }
-  }
-
-  function delimitedItems(value: string): string[] {
-    return value.split(/(?:\r?\n|,)/u).map((item) => item.trim()).filter(Boolean);
-  }
+  onMount(() => runtime.start(() => queryState.queryRunning || queryState.inspectRunning));
 
   function numberValue(value: number | undefined): string {
     return value === undefined ? "—" : value.toLocaleString("en-US");
@@ -441,9 +152,6 @@
     return links;
   }
 
-  function errorMessage(caught: unknown): string {
-    return caught instanceof Error ? caught.message : String(caught);
-  }
 </script>
 
 <section
@@ -570,7 +278,7 @@
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("wiki-audit")}>Audit</button>
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("wiki-discover")}>Discover</button>
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("wiki-catalog")}>Catalog</button>
-            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={knowledgeAction !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("impact")}>Impact</button>
+            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={knowledgeState.action !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("impact")}>Impact</button>
           </div>
         </section>
       </div>
@@ -585,7 +293,7 @@
               {#each knowledgeIssues as issue (`${issue.status}:${issue.path}`)}
                 <div class={[
                   "group flex min-w-0 items-start gap-2 px-2.5 py-1.5 hover:bg-panel-hover",
-                  knowledgePath === issue.path && "bg-panel-selected",
+                  knowledgeState.path === issue.path && "bg-panel-selected",
                 ]}>
                   <button class="min-w-0 flex-1 cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => selectKnowledgePath(issue.path)}>
                     <div class="flex min-w-0 items-center gap-1.5"><span class="shrink-0 font-mono text-[9px] text-tool-warning">{issue.status}</span><span class="truncate font-mono text-[10px] text-foreground">{issue.path}</span></div>
@@ -616,34 +324,34 @@
           <div class="flex h-8 items-center gap-2 px-2.5"><ShieldCheck class="h-3.5 w-3.5 text-tool-info" aria-hidden="true" /><h3 class="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Maintenance</h3></div>
           <div class="space-y-2 border-t border-sidebar-border/70 bg-sidebar p-2.5">
             <div class="flex gap-1">
-              <input class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Knowledge source path" placeholder="specs/behavior.md" bind:value={knowledgePath} spellcheck="false" />
-              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgePath.trim()} onclick={() => void onOpenProjectFile(knowledgePath.trim())}>Open</button>
-              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgePath.trim() || knowledgeAction !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("show")}>Show</button>
+              <input class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Knowledge source path" placeholder="specs/behavior.md" bind:value={knowledgeState.path} spellcheck="false" />
+              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgeState.path.trim()} onclick={() => void onOpenProjectFile(knowledgeState.path.trim())}>Open</button>
+              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgeState.path.trim() || knowledgeState.action !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("show")}>Show</button>
             </div>
 
             <div class="grid grid-cols-2 gap-1.5">
-              <label class="relative"><span class="sr-only">Classification</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={classification}><option value="spec">spec</option><option value="spec-like">spec-like</option><option value="meta-index">meta-index</option><option value="design-only">design-only</option><option value="guide">guide</option><option value="other">other</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
-              <label class="relative"><span class="sr-only">Confidence</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={confidence}><option value="high">high confidence</option><option value="medium">medium confidence</option><option value="low">low confidence</option><option value="unknown">unknown confidence</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
-              <label class="relative"><span class="sr-only">Behavior type</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={behaviorType}><option value="as-is">as-is</option><option value="change">change</option><option value="mixed">mixed</option><option value="unknown">unknown type</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
-              <label class="relative"><span class="sr-only">Lifecycle</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={lifecycle}><option value="active">active</option><option value="proposed">proposed</option><option value="historical">historical</option><option value="superseded">superseded</option><option value="unknown">unknown lifecycle</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <label class="relative"><span class="sr-only">Classification</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={knowledgeState.classification}><option value="spec">spec</option><option value="spec-like">spec-like</option><option value="meta-index">meta-index</option><option value="design-only">design-only</option><option value="guide">guide</option><option value="other">other</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <label class="relative"><span class="sr-only">Confidence</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={knowledgeState.confidence}><option value="high">high confidence</option><option value="medium">medium confidence</option><option value="low">low confidence</option><option value="unknown">unknown confidence</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <label class="relative"><span class="sr-only">Behavior type</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={knowledgeState.behaviorType}><option value="as-is">as-is</option><option value="change">change</option><option value="mixed">mixed</option><option value="unknown">unknown type</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <label class="relative"><span class="sr-only">Lifecycle</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[10px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={knowledgeState.lifecycle}><option value="active">active</option><option value="proposed">proposed</option><option value="historical">historical</option><option value="superseded">superseded</option><option value="unknown">unknown lifecycle</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
             </div>
-            <input class="h-7 w-full rounded-md border border-input bg-panel-strong px-2 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Knowledge summary" placeholder="Reviewed retrieval summary…" bind:value={summary} />
-            <input class="h-7 w-full rounded-md border border-input bg-panel-strong px-2 font-mono text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Knowledge topics" placeholder="topics, comma separated" bind:value={topics} />
+            <input class="h-7 w-full rounded-md border border-input bg-panel-strong px-2 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Knowledge summary" placeholder="Reviewed retrieval summary…" bind:value={knowledgeState.summary} />
+            <input class="h-7 w-full rounded-md border border-input bg-panel-strong px-2 font-mono text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Knowledge topics" placeholder="topics, comma separated" bind:value={knowledgeState.topics} />
             <div class="flex flex-wrap items-center gap-2 border-t border-sidebar-border/70 pt-2">
-              <label class="inline-flex cursor-pointer items-center gap-1.5 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={sourceReviewed} />Source reviewed</label>
-              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!sourceReviewed || !knowledgePath.trim() || knowledgeAction !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("record")}>Record</button>
-              <label class="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={evidenceReviewed} />Evidence reviewed</label>
-              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!evidenceReviewed || !knowledgePath.trim() || knowledgeAction !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("verify")}>Verify</button>
+              <label class="inline-flex cursor-pointer items-center gap-1.5 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={knowledgeState.sourceReviewed} />Source reviewed</label>
+              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgeState.sourceReviewed || !knowledgeState.path.trim() || knowledgeState.action !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("record")}>Record</button>
+              <label class="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={knowledgeState.evidenceReviewed} />Evidence reviewed</label>
+              <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-[10px] text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgeState.evidenceReviewed || !knowledgeState.path.trim() || knowledgeState.action !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("verify")}>Verify</button>
             </div>
 
             <div class="grid grid-cols-[minmax(0,1fr)_100px_80px_auto] gap-1 border-t border-sidebar-border/70 pt-2">
-              <input class="h-7 min-w-0 rounded-md border border-input bg-panel-strong px-2 font-mono text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Relation target paths" placeholder="src/file.ts" bind:value={relationTargets} />
-              <label class="relative"><span class="sr-only">Relation kind</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={relationKind}><option value="implements">implements</option><option value="tests">tests</option><option value="related">related</option><option value="supersedes">supersedes</option><option value="superseded-by">superseded-by</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
-              <label class="relative"><span class="sr-only">Relation action</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={relationAction}><option value="add">add</option><option value="remove">remove</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
-              <button class="grid h-7 w-7 cursor-pointer place-items-center rounded-md border border-border bg-panel-strong text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Apply relation" aria-label="Apply knowledge relation" disabled={!evidenceReviewed || !knowledgePath.trim() || delimitedItems(relationTargets).length === 0 || knowledgeAction !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("relate")}><Link2 class="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <input class="h-7 min-w-0 rounded-md border border-input bg-panel-strong px-2 font-mono text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Relation target paths" placeholder="src/file.ts" bind:value={knowledgeState.relationTargets} />
+              <label class="relative"><span class="sr-only">Relation kind</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={knowledgeState.relationKind}><option value="implements">implements</option><option value="tests">tests</option><option value="related">related</option><option value="supersedes">supersedes</option><option value="superseded-by">superseded-by</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <label class="relative"><span class="sr-only">Relation action</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={knowledgeState.relationAction}><option value="add">add</option><option value="remove">remove</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <button class="grid h-7 w-7 cursor-pointer place-items-center rounded-md border border-border bg-panel-strong text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Apply relation" aria-label="Apply knowledge relation" disabled={!knowledgeState.evidenceReviewed || !knowledgeState.path.trim() || delimitedItems(knowledgeState.relationTargets).length === 0 || knowledgeState.action !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("relate")}><Link2 class="h-3.5 w-3.5" aria-hidden="true" /></button>
             </div>
             <div class="flex justify-end">
-              <button class="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[9px] text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgePath.trim() || knowledgeAction !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("remove")}><Trash2 class="h-3 w-3" aria-hidden="true" />Remove metadata</button>
+              <button class="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[9px] text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!knowledgeState.path.trim() || knowledgeState.action !== null || Boolean(runningOperation)} onclick={() => void runKnowledgeAction("remove")}><Trash2 class="h-3 w-3" aria-hidden="true" />Remove metadata</button>
             </div>
           </div>
           {#if knowledgeOutput}
@@ -659,58 +367,58 @@
           <div class="flex h-7 items-stretch border-b border-sidebar-border/70" role="tablist" aria-label="Query source">
             {#each [["code", "Code"], ["knowledge", "Knowledge"], ["context", "Context"]] as item}
               {@const kind = item[0] as IdxQueryKind}
-              <button class={["cursor-pointer border-b-2 px-2 text-[10px] focus-visible:outline-2 focus-visible:outline-ring", queryKind === kind ? "border-b-primary text-foreground" : "border-b-transparent text-muted-foreground hover:text-foreground"]} type="button" role="tab" aria-selected={queryKind === kind} onclick={() => queryKind = kind}>{item[1]}</button>
+              <button class={["cursor-pointer border-b-2 px-2 text-[10px] focus-visible:outline-2 focus-visible:outline-ring", queryState.queryKind === kind ? "border-b-primary text-foreground" : "border-b-transparent text-muted-foreground hover:text-foreground"]} type="button" role="tab" aria-selected={queryState.queryKind === kind} onclick={() => queryState.queryKind = kind}>{item[1]}</button>
             {/each}
           </div>
           <div class="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
-            <input class="h-8 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX semantic query" placeholder={queryKind === "context" ? "Describe the behavior or change…" : "Search repository…"} bind:value={queryText} onkeydown={(event) => { if (event.key === "Enter") void runQuery(); }} />
-            <button class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-[10px] font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!queryText.trim() || queryRunning || !indexReady || Boolean(runningOperation)} onclick={() => void runQuery()}>{#if queryRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Run</button>
+            <input class="h-8 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX semantic query" placeholder={queryState.queryKind === "context" ? "Describe the behavior or change…" : "Search repository…"} bind:value={queryState.queryText} onkeydown={(event) => { if (event.key === "Enter") void runQuery(); }} />
+            <button class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-[10px] font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!queryState.queryText.trim() || queryState.queryRunning || !indexReady || Boolean(runningOperation)} onclick={() => void runQuery()}>{#if queryState.queryRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Run</button>
           </div>
           <div class="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
-            <input class="h-7 min-w-40 basis-56 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-[9px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX path prefix" placeholder="path prefix (optional)" bind:value={queryPathPrefix} spellcheck="false" />
-            {#if queryKind === "code"}
-              <label class="relative w-24 shrink-0"><span class="sr-only">Search mode</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={codeMode}><option value="hybrid">hybrid</option><option value="semantic">semantic</option><option value="lexical">lexical</option><option value="symbol">symbol</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
-              <input class="h-7 w-14 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="50" aria-label="Maximum code results" bind:value={codeMaxFiles} />
-              <label class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 px-1 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={codeIncludeContent} />content</label>
-            {:else if queryKind === "knowledge"}
-              <input class="h-7 w-14 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum knowledge results" bind:value={knowledgeLimit} />
-              <label class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 px-1 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={includeSecondary} />secondary</label>
+            <input class="h-7 min-w-40 basis-56 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-[9px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX path prefix" placeholder="path prefix (optional)" bind:value={queryState.queryPathPrefix} spellcheck="false" />
+            {#if queryState.queryKind === "code"}
+              <label class="relative w-24 shrink-0"><span class="sr-only">Search mode</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.codeMode}><option value="hybrid">hybrid</option><option value="semantic">semantic</option><option value="lexical">lexical</option><option value="symbol">symbol</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <input class="h-7 w-14 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="50" aria-label="Maximum code results" bind:value={queryState.codeMaxFiles} />
+              <label class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 px-1 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={queryState.codeIncludeContent} />content</label>
+            {:else if queryState.queryKind === "knowledge"}
+              <input class="h-7 w-14 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum knowledge results" bind:value={queryState.knowledgeLimit} />
+              <label class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 px-1 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={queryState.includeSecondary} />secondary</label>
             {:else}
-              <input class="h-7 w-20 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="200" max="8000" aria-label="Context token budget" bind:value={contextBudget} />
-              <label class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 px-1 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={includeSecondary} />secondary</label>
+              <input class="h-7 w-20 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="200" max="8000" aria-label="Context token budget" bind:value={queryState.contextBudget} />
+              <label class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 px-1 text-[9px] text-muted-foreground"><input type="checkbox" bind:checked={queryState.includeSecondary} />secondary</label>
             {/if}
           </div>
-          {#if queryKind === "context"}
+          {#if queryState.queryKind === "context"}
             <div class="mt-1 flex items-center gap-1.5 font-mono text-[9px] text-muted-foreground">
-              <span>specs</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none" type="number" min="1" max="20" aria-label="Maximum context specs" bind:value={contextMaxSpecs} />
-              <span>code</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none" type="number" min="1" max="30" aria-label="Maximum context code files" bind:value={contextMaxCode} />
-              <span>tests</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none" type="number" min="1" max="20" aria-label="Maximum context tests" bind:value={contextMaxTests} />
+              <span>specs</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none" type="number" min="1" max="20" aria-label="Maximum context specs" bind:value={queryState.contextMaxSpecs} />
+              <span>code</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none" type="number" min="1" max="30" aria-label="Maximum context code files" bind:value={queryState.contextMaxCode} />
+              <span>tests</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none" type="number" min="1" max="20" aria-label="Maximum context tests" bind:value={queryState.contextMaxTests} />
             </div>
           {/if}
           <details class="mt-2 border-t border-sidebar-border/70 pt-1.5">
             <summary class="cursor-pointer select-none text-[9px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Advanced index tools</summary>
             <div class="mt-1.5 grid grid-cols-[118px_minmax(0,1fr)_52px_52px_auto] gap-1">
-              <label class="relative"><span class="sr-only">IDX inspect command</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={inspectCommand}><option value="architecture">architecture</option><option value="structure">structure</option><option value="ast">ast</option><option value="explain">explain</option><option value="deps">deps</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
-              <input class="h-7 min-w-0 rounded-md border border-input bg-panel-strong px-2 font-mono text-[9px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX inspect target" placeholder={inspectCommand === "explain" ? "symbol" : inspectCommand === "ast" || inspectCommand === "deps" ? "path / module" : "target not required"} bind:value={inspectTarget} disabled={inspectCommand === "architecture" || inspectCommand === "structure"} spellcheck="false" />
-              <input class="h-7 rounded-md border border-input bg-panel-strong px-1 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="8" aria-label="IDX inspect depth" bind:value={inspectDepth} />
-              <input class="h-7 rounded-md border border-input bg-panel-strong px-1 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="300" aria-label="IDX inspect result limit" bind:value={inspectMaxFiles} />
-              <button class="grid h-7 w-7 cursor-pointer place-items-center rounded-md border border-border bg-panel-strong text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Run indexed inspection" aria-label="Run indexed inspection" disabled={inspectRunning || queryRunning || Boolean(runningOperation)} onclick={() => void runInspect()}>{#if inspectRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}</button>
+              <label class="relative"><span class="sr-only">IDX inspect command</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.inspectCommand}><option value="architecture">architecture</option><option value="structure">structure</option><option value="ast">ast</option><option value="explain">explain</option><option value="deps">deps</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <input class="h-7 min-w-0 rounded-md border border-input bg-panel-strong px-2 font-mono text-[9px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX inspect target" placeholder={queryState.inspectCommand === "explain" ? "symbol" : queryState.inspectCommand === "ast" || queryState.inspectCommand === "deps" ? "path / module" : "target not required"} bind:value={queryState.inspectTarget} disabled={queryState.inspectCommand === "architecture" || queryState.inspectCommand === "structure"} spellcheck="false" />
+              <input class="h-7 rounded-md border border-input bg-panel-strong px-1 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="8" aria-label="IDX inspect depth" bind:value={queryState.inspectDepth} />
+              <input class="h-7 rounded-md border border-input bg-panel-strong px-1 font-mono text-[9px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="300" aria-label="IDX inspect result limit" bind:value={queryState.inspectMaxFiles} />
+              <button class="grid h-7 w-7 cursor-pointer place-items-center rounded-md border border-border bg-panel-strong text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Run indexed inspection" aria-label="Run indexed inspection" disabled={queryState.inspectRunning || queryState.queryRunning || Boolean(runningOperation)} onclick={() => void runInspect()}>{#if queryState.inspectRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}</button>
             </div>
             <div class="mt-1 flex flex-wrap gap-3 text-[9px] text-muted-foreground">
-              {#if inspectCommand === "explain"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={inspectIncludeBody} />include body</label>{/if}
-              {#if inspectCommand === "deps"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={inspectShowEdges} />show edges</label><label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={inspectTests} />tests</label>{/if}
+              {#if queryState.inspectCommand === "explain"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectIncludeBody} />include body</label>{/if}
+              {#if queryState.inspectCommand === "deps"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectShowEdges} />show edges</label><label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectTests} />tests</label>{/if}
               <span class="font-mono text-muted-foreground/70">depth · limit</span>
             </div>
           </details>
         </section>
         <div class="relative min-h-0 bg-code">
-          {#if (queryRunning || inspectRunning) && !visibleQueryOutput}
-            <div class="absolute inset-0 flex items-center justify-center gap-2 text-[10px] text-muted-foreground"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{inspectRunning ? "Inspecting index…" : "Running semantic query…"}</div>
+          {#if (queryState.queryRunning || queryState.inspectRunning) && !visibleQueryOutput}
+            <div class="absolute inset-0 flex items-center justify-center gap-2 text-[10px] text-muted-foreground"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{queryState.inspectRunning ? "Inspecting index…" : "Running semantic query…"}</div>
           {:else if visibleQueryOutput}
             <div class="h-full overflow-auto p-2.5 text-[10px] leading-4 text-foreground">
               <IdxOutput text={visibleQueryOutput} className="text-[10px] leading-4" {onValidateProjectFile} {onOpenProjectFile} />
             </div>
-            {#if (inspectResult ?? queryResult)?.truncated}<div class="absolute right-2 bottom-2 rounded-md border border-border bg-popover px-1.5 py-0.5 text-[9px] text-tool-warning">output truncated</div>{/if}
+            {#if queryController.activeResult?.truncated}<div class="absolute right-2 bottom-2 rounded-md border border-border bg-popover px-1.5 py-0.5 text-[9px] text-tool-warning">output truncated</div>{/if}
           {:else}
             <div class="absolute inset-0 flex items-center justify-center px-4 text-center"><div class="max-w-72"><Search class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-[11px] font-medium text-foreground">Semantic repository query</p><p class="mt-1 text-[10px] leading-4 text-muted-foreground">Search indexed code, primary knowledge, or build a combined context pack.</p></div></div>
           {/if}

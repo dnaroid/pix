@@ -53,6 +53,8 @@ while project selection/open state remains separate from transient focus.
 ## Related files
 
 - `desktop/src/components/ProjectExplorer.svelte`
+- `desktop/src/components/project-explorer-tree-controller.svelte.ts`
+- `desktop/src/components/project-explorer-drag-controller.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/lib/project-tree.ts`

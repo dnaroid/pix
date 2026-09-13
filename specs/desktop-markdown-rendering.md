@@ -94,8 +94,12 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/external-links.ts`
 - `desktop/src/lib/external-links.test.ts`
 - `desktop/src/components/MarkdownText.svelte`
+- `desktop/src/components/markdown-content-action.ts`
+- `desktop/src/components/markdown-link-action.ts`
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/PreviewPane.svelte`
+- `desktop/src/components/preview-markdown-controller.svelte.ts`
+- `desktop/src/components/preview-scroll-controller.svelte.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/mermaid.ts`
@@ -125,10 +129,11 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 
 ## Evidence
 
-- Confirmed by code: `MarkdownText.svelte`, the `desktop/src/lib/markdown.ts`
-  facade, and its block/inline/link/DCP helper modules render transcript and
-  preview Markdown; `ToolResult.svelte` opts Markdown read results into the same
-  renderer.
+- Confirmed by code: `MarkdownText.svelte` owns the rendered shell while its DOM
+  content/link actions own lazy validation, media/Mermaid hydration, external-link
+  decoration, and delegated link activation. The `desktop/src/lib/markdown.ts`
+  facade and its block/inline/link/DCP helper modules build the safe transcript and
+  preview markup; `ToolResult.svelte` opts Markdown read results into the same renderer.
 - Confirmed by code: `desktop/src/lib/mermaid.ts` uses strict Mermaid security,
   disables HTML labels, and preserves a readable source fallback on failure.
 - Confirmed by tests: `desktop/src/lib/markdown.test.ts` exercises the supported

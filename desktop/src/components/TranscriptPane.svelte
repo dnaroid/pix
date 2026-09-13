@@ -8,15 +8,8 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import PanelTopOpen from "@lucide/svelte/icons/panel-top-open";
   import Undo2 from "@lucide/svelte/icons/undo-2";
-  import { onDestroy, tick } from "svelte";
+  import { onDestroy } from "svelte";
   import type { Attachment } from "../lib/attachments";
-  import { desktopCommandDefinition } from "../lib/desktop-commands";
-  import {
-    isTypeaheadKey,
-    menuFocusIndex,
-    menuTypeaheadFocusIndex,
-    type MenuNavigationItem,
-  } from "../lib/keyboard-navigation";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
   import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
@@ -32,6 +25,11 @@
   import MarkdownText from "./MarkdownText.svelte";
   import ToolResult from "./ToolResult.svelte";
   import ToolStatusIcon from "./ToolStatusIcon.svelte";
+  import {
+    createTranscriptUserMessageMenuController,
+    userMessageMenuCommands,
+    type UserMessageAction,
+  } from "./transcript-user-message-menu-controller.svelte";
 
   let {
     transcript,
@@ -81,37 +79,27 @@
     onUserMessageAction: (message: MessageItem, action: UserMessageAction) => void | Promise<void>;
   } = $props();
 
-  const copyMessageCommand = desktopCommandDefinition("message.copy");
-  const forkMessageCommand = desktopCommandDefinition("message.fork");
-  const forkNewTabCommand = desktopCommandDefinition("message.forkNewTab");
-  const undoMessageCommand = desktopCommandDefinition("message.undo");
-
   let displayItems = $derived(groupTranscriptItems(transcript.items));
-  let activeUserMessageMenu = $state<string | null>(null);
-  let userMessageMenuPosition = $state<{ left: number; top: number } | null>(null);
-  let userMessageMenu = $state<HTMLDivElement | null>(null);
-  let userMessageMenuTrigger: HTMLElement | null = null;
-  let userMessageMenuTypeaheadQuery = "";
-  let userMessageMenuTypeaheadTimer: number | null = null;
-  let canMutateUserMessages = $derived(
-    !!activeSessionId && !promptRunning && !operationRunning && !historyLoading,
-  );
-  let activeUserMessage = $derived.by<MessageItem | null>(() => {
-    if (!activeUserMessageMenu) return null;
-    const item = displayItems.find((candidate) => candidate.id === activeUserMessageMenu);
-    return item?.type === "message" && item.role === "user" ? item : null;
+  const userMessageMenuController = createTranscriptUserMessageMenuController({
+    items: () => displayItems,
+    activeSessionId: () => activeSessionId,
+    promptRunning: () => promptRunning,
+    operationRunning: () => operationRunning,
+    historyLoading: () => historyLoading,
+    onScroll: () => onScroll(),
+    onAction: (message, action) => onUserMessageAction(message, action),
   });
+  const userMessageMenuState = userMessageMenuController.state;
+  const copyMessageCommand = userMessageMenuCommands.copy;
+  const forkMessageCommand = userMessageMenuCommands.fork;
+  const forkNewTabCommand = userMessageMenuCommands.forkNewTab;
+  const undoMessageCommand = userMessageMenuCommands.undo;
+  const activeUserMessageMenu = $derived(userMessageMenuState.activeId);
+  const userMessageMenuPosition = $derived(userMessageMenuState.position);
+  const canMutateUserMessages = $derived(userMessageMenuController.canMutate);
+  const activeUserMessage = $derived(userMessageMenuController.activeMessage);
 
-  type UserMessageAction = "copy" | "fork" | "fork-new-tab" | "undo";
-
-  const USER_MESSAGE_MENU_WIDTH = 192;
-  const USER_MESSAGE_MENU_HEIGHT = 164;
-  const USER_MESSAGE_MENU_GAP = 6;
-  const USER_MESSAGE_MENU_MARGIN = 8;
-
-  onDestroy(() => {
-    if (userMessageMenuTypeaheadTimer !== null) window.clearTimeout(userMessageMenuTypeaheadTimer);
-  });
+  onDestroy(userMessageMenuController.dispose);
 
   function handleToolResultToggle(event: Event, tool: ToolItem): void {
     const details = event.currentTarget as HTMLDetailsElement;
@@ -148,157 +136,14 @@
     return toolGroupPresentationNames(tools);
   }
 
-  function closeUserMessageMenu(restoreFocus = false): void {
-    activeUserMessageMenu = null;
-    userMessageMenuPosition = null;
-    if (restoreFocus) userMessageMenuTrigger?.focus();
-    userMessageMenuTrigger = null;
-  }
-
-  function userMessageMenuItems(): MenuNavigationItem[] {
-    const mutationDisabled = !canMutateUserMessages || !!activeUserMessage?.localOnly;
-    return [
-      { label: copyMessageCommand.label },
-      { label: forkMessageCommand.label, disabled: mutationDisabled },
-      { label: forkNewTabCommand.label, disabled: mutationDisabled },
-      { label: undoMessageCommand.label, disabled: mutationDisabled },
-    ];
-  }
-
-  function userMessageMenuButtons(): HTMLButtonElement[] {
-    return [...(userMessageMenu?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? [])];
-  }
-
-  function focusUserMessageMenuItem(index: number): void {
-    userMessageMenuButtons()[index]?.focus();
-  }
-
-  function focusFirstUserMessageMenuItem(): void {
-    void tick().then(() => {
-      const firstIndex = menuFocusIndex(userMessageMenuItems(), -1, "ArrowDown");
-      if (firstIndex !== null) focusUserMessageMenuItem(firstIndex);
-    });
-  }
-
-  function handleUserMessageMenuKeydown(event: KeyboardEvent): void {
-    const buttons = userMessageMenuButtons();
-    const target = event.target instanceof Element
-      ? event.target.closest<HTMLButtonElement>("[role='menuitem']")
-      : null;
-    const currentIndex = target ? buttons.indexOf(target) : -1;
-    const items = userMessageMenuItems();
-
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeUserMessageMenu(true);
-      return;
-    }
-    if (event.key === "Tab") {
-      closeUserMessageMenu();
-      return;
-    }
-
-    const nextIndex = menuFocusIndex(items, currentIndex, event.key);
-    if (nextIndex !== null) {
-      event.preventDefault();
-      focusUserMessageMenuItem(nextIndex);
-      return;
-    }
-    if (!isTypeaheadKey(event)) return;
-    event.preventDefault();
-    const key = event.key.toLocaleLowerCase();
-    let query = userMessageMenuTypeaheadQuery.length === 1 && userMessageMenuTypeaheadQuery === key
-      ? key
-      : `${userMessageMenuTypeaheadQuery}${key}`;
-    let typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
-    if (typeaheadIndex === null && query.length > 1) {
-      query = key;
-      typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
-    }
-    userMessageMenuTypeaheadQuery = query;
-    if (userMessageMenuTypeaheadTimer !== null) window.clearTimeout(userMessageMenuTypeaheadTimer);
-    userMessageMenuTypeaheadTimer = window.setTimeout(() => {
-      userMessageMenuTypeaheadQuery = "";
-      userMessageMenuTypeaheadTimer = null;
-    }, 700);
-    if (typeaheadIndex !== null) focusUserMessageMenuItem(typeaheadIndex);
-  }
-
-  function clampMenuCoordinate(value: number, min: number, max: number): number {
-    return Math.min(Math.max(value, min), Math.max(min, max));
-  }
-
-  function positionUserMessageMenu(
-    anchorX: number,
-    anchorTop: number,
-    anchorBottom: number,
-    alignRight: boolean,
-  ): void {
-    const maxLeft = window.innerWidth - USER_MESSAGE_MENU_WIDTH - USER_MESSAGE_MENU_MARGIN;
-    const left = clampMenuCoordinate(
-      alignRight ? anchorX - USER_MESSAGE_MENU_WIDTH : anchorX,
-      USER_MESSAGE_MENU_MARGIN,
-      maxLeft,
-    );
-    const belowTop = anchorBottom + USER_MESSAGE_MENU_GAP;
-    const aboveTop = anchorTop - USER_MESSAGE_MENU_GAP - USER_MESSAGE_MENU_HEIGHT;
-    const top = belowTop + USER_MESSAGE_MENU_HEIGHT <= window.innerHeight - USER_MESSAGE_MENU_MARGIN
-      ? belowTop
-      : Math.max(USER_MESSAGE_MENU_MARGIN, aboveTop);
-    userMessageMenuPosition = { left, top };
-  }
-
-  function toggleUserMessageMenu(event: MouseEvent, messageId: string): void {
-    event.preventDefault();
-    event.stopPropagation();
-    if (activeUserMessageMenu === messageId) {
-      closeUserMessageMenu();
-      return;
-    }
-    const trigger = event.currentTarget as HTMLElement;
-    const rect = trigger.getBoundingClientRect();
-    userMessageMenuTrigger = trigger;
-    activeUserMessageMenu = messageId;
-    positionUserMessageMenu(rect.right, rect.top, rect.bottom, true);
-    focusFirstUserMessageMenuItem();
-  }
-
-  function openUserMessageContextMenu(event: MouseEvent, messageId: string): void {
-    event.preventDefault();
-    event.stopPropagation();
-    userMessageMenuTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    activeUserMessageMenu = messageId;
-    positionUserMessageMenu(event.clientX, event.clientY, event.clientY, false);
-    focusFirstUserMessageMenuItem();
-  }
-
-  function handleWindowClick(event: MouseEvent): void {
-    if (!activeUserMessageMenu) return;
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest("[data-user-message-menu]")) closeUserMessageMenu();
-  }
-
-  function handleWindowKeydown(event: KeyboardEvent): void {
-    if (event.key !== "Escape" || !activeUserMessageMenu) return;
-    event.preventDefault();
-    closeUserMessageMenu(true);
-  }
-
-  function handleWindowResize(): void {
-    if (activeUserMessageMenu) closeUserMessageMenu();
-  }
-
-  function handlePaneScroll(): void {
-    if (activeUserMessageMenu) closeUserMessageMenu();
-    onScroll();
-  }
-
-  async function runUserMessageAction(message: MessageItem, action: UserMessageAction): Promise<void> {
-    if (action !== "copy" && !canMutateUserMessages) return;
-    closeUserMessageMenu();
-    await onUserMessageAction(message, action);
-  }
+  const handleUserMessageMenuKeydown = userMessageMenuController.handleMenuKeydown;
+  const toggleUserMessageMenu = userMessageMenuController.toggle;
+  const openUserMessageContextMenu = userMessageMenuController.openContextMenu;
+  const handleWindowClick = userMessageMenuController.handleWindowClick;
+  const handleWindowKeydown = userMessageMenuController.handleWindowKeydown;
+  const handleWindowResize = userMessageMenuController.handleWindowResize;
+  const handlePaneScroll = userMessageMenuController.handlePaneScroll;
+  const runUserMessageAction = userMessageMenuController.runAction;
 </script>
 
 <svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} onresize={handleWindowResize} />
@@ -468,7 +313,7 @@
 
   {#if activeUserMessage && userMessageMenuPosition}
     <div
-      bind:this={userMessageMenu}
+      bind:this={userMessageMenuState.menuElement}
       class="fixed z-[100] max-h-[calc(100vh-1rem)] w-48 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
       style={`left: ${userMessageMenuPosition.left}px; top: ${userMessageMenuPosition.top}px;`}
       role="menu"

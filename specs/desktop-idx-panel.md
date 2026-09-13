@@ -61,6 +61,9 @@ Expose repository intelligence and Spec Wiki maintenance from Pix Desktop withou
 
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/IdxPanel.svelte`
+- `desktop/src/components/idx-panel-runtime-controller.svelte.ts`
+- `desktop/src/components/idx-panel-query-controller.svelte.ts`
+- `desktop/src/components/idx-panel-knowledge-controller.svelte.ts`
 - `desktop/src/components/IdxOutput.svelte`
 - `desktop/src/components/TerminalView.svelte`
 - `desktop/src/components/PreviewPane.svelte`
@@ -78,6 +81,6 @@ Expose repository intelligence and Spec Wiki maintenance from Pix Desktop withou
 
 ## Evidence
 
-- Confirmed by code: `IdxPanel.svelte` owns the typed UI state and invokes only named Tauri commands; `lib.rs` constructs fixed IDX argument vectors, canonicalizes workspaces, clamps limits, and enforces review confirmations.
+- Confirmed by code: `IdxPanel.svelte` owns the declarative typed UI while dedicated panel controllers own generation-guarded runtime/maintenance state, typed query/inspect state, and reviewed knowledge-action state; all invoke only named Tauri commands. `lib.rs` constructs fixed IDX argument vectors, canonicalizes workspaces, clamps limits, and enforces review confirmations.
 - Confirmed by code: maintenance operations stream through `idx://operation-output` / `idx://operation-exit`, are cancellable, and have bounded output/history/timeouts.
 - Confirmed by tests: TypeScript helper tests and Rust IDX tests cover parsing, typed argument construction, safety confirmations, and project-file candidate validation.

@@ -50,6 +50,7 @@ letting each WebView menu behave like an unrelated stack of buttons.
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/components/PromptComposer.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/components/transcript-user-message-menu-controller.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/workspace-sidebar-status-menu-controller.svelte.ts`
 - `desktop/src/components/ProjectSwitcher.svelte`

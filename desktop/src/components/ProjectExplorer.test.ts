@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import explorerSource from "./ProjectExplorer.svelte?raw";
+import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
   it("uses tree semantics with one roving tab stop", () => {
@@ -10,11 +11,11 @@ describe("ProjectExplorer keyboard tree", () => {
   });
 
   it("supports IDE tree navigation and a keyboard route to the external editor", () => {
-    expect(explorerSource).toContain('event.key === "ArrowRight"');
-    expect(explorerSource).toContain('event.key === "ArrowLeft"');
-    expect(explorerSource).toContain("projectTreeParentIndex(rows, index)");
+    expect(treeControllerSource).toContain('event.key === "ArrowRight"');
+    expect(treeControllerSource).toContain('event.key === "ArrowLeft"');
+    expect(treeControllerSource).toContain("projectTreeParentIndex(visibleRows, index)");
     expect(explorerSource).toContain('aria-keyshortcuts="Shift+Enter"');
-    expect(explorerSource).toContain("typeaheadFocusIndex");
+    expect(treeControllerSource).toContain("typeaheadFocusIndex");
   });
 
   it("keeps dotfiles and dotfolders visible but visually muted", () => {
