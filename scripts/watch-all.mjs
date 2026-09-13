@@ -67,6 +67,7 @@ const SUITE_ENTRIES = new Set([
 	"scripts",
 	"index.ts",
 	"package.json",
+	"package-lock.json",
 	"README.md",
 ]);
 const SUITE_IGNORED_ENTRIES = new Set(["node_modules", "dist", "reports", ".pi"]);

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { access, cp, lstat, mkdir, readdir, readlink, realpath, rm, symlink } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readFile, readdir, readlink, realpath, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,7 +141,22 @@ export async function ensurePiToolsSuiteExtensionInstalled(options: PiToolsSuite
 		return { action: "already-installed", sourcePath, targetPath };
 	}
 
+	if (targetStat.isDirectory() && await isLegacyManagedPiToolsSuite(targetPath)) {
+		await rm(targetPath, { recursive: true, force: true });
+		await symlink(sourcePath, targetPath, extensionSymlinkType());
+		return { action: "installed", sourcePath, targetPath };
+	}
+
 	return { action: "existing-kept", sourcePath, targetPath };
+}
+
+async function isLegacyManagedPiToolsSuite(targetPath: string): Promise<boolean> {
+	try {
+		const packageJson = JSON.parse(await readFile(join(targetPath, "package.json"), "utf8")) as { name?: unknown };
+		return packageJson.name === "pi-tools-suite-local";
+	} catch {
+		return false;
+	}
 }
 
 export async function ensureBundledSkillsInstalled(options: BundledSkillsInstallOptions = {}): Promise<BundledSkillsInstallResult> {

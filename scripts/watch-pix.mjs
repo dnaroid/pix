@@ -17,6 +17,7 @@ const SYNCED_ENTRIES = new Set([
 	"scripts",
 	"index.ts",
 	"package.json",
+	"package-lock.json",
 	"README.md",
 ]);
 const SYNC_DEBOUNCE_MS = 150;

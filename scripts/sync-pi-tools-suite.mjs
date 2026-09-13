@@ -2,10 +2,10 @@
 // Mechanized sync of the bundled `pi-tools-suite` extension into the Pi agent
 // extensions directory (~/.pi/agent/extensions/pi-tools-suite by default).
 //
-// Replaces the former manual "copy + cmp/grep + restart" workflow. Only
-// source-bearing entries are mirrored; environment-specific entries
-// (node_modules, test, .git, package-lock.json, .pi, opencode) at the
-// target are preserved.
+// Replaces the former manual "copy + cmp/grep + restart" workflow. Source
+// entries and the dependency lockfile are mirrored. Tests and other
+// environment-specific entries are preserved; production node_modules are
+// reconciled deterministically from the mirrored lockfile.
 //
 // Usage:
 //   node scripts/sync-pi-tools-suite.mjs            # mirror source -> target
@@ -19,6 +19,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	ensurePiToolsSuiteDependencies,
+	piToolsSuiteDependenciesCurrent,
+} from "./pi-tools-suite-dependencies.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
@@ -35,6 +39,7 @@ const MIRROR_ENTRIES = [
 	"scripts",
 	"index.ts",
 	"package.json",
+	"package-lock.json",
 	"README.md",
 ];
 
@@ -187,34 +192,35 @@ async function main() {
 	}
 
 	if (options.check) {
-		// Non-zero exit when drift exists, for use in CI / pre-flight checks.
-		if (additions.length > 0 || updates.length > 0 || deletions.length > 0) process.exitCode = 3;
+		const dependenciesCurrent = await piToolsSuiteDependenciesCurrent(options.source, options.target);
+		if (!dependenciesCurrent) console.error("[sync-pi-tools-suite] production dependencies need installation");
+		// Non-zero exit when source or dependency drift exists, for use in CI / pre-flight checks.
+		if (additions.length > 0 || updates.length > 0 || deletions.length > 0 || !dependenciesCurrent) process.exitCode = 3;
 		return;
 	}
 
 	if (additions.length === 0 && updates.length === 0 && deletions.length === 0) {
-		console.error("[sync-pi-tools-suite] already in sync");
-		return;
-	}
-
-	const sourceEntries = collectSourceFiles(options.source);
-	let mirrored = 0;
-	for (const entry of sourceEntries) {
-		// Only rewrite entries that actually changed to minimize churn.
-		const entryPrefix = `${entry.name}/`;
-		const touched = plan.some((change) => change.status !== "same"
-			&& (change.rel === entry.name || change.rel.startsWith(entryPrefix)));
-		if (!touched) continue;
-		await mirrorEntry(entry, options.target);
-		mirrored += 1;
-		console.error(`[sync-pi-tools-suite] mirrored ${entry.name}`);
-	}
-
-	if (mirrored === 0) {
-		// Fallback: mirror every entry if the per-entry heuristic missed something.
+		console.error("[sync-pi-tools-suite] source already in sync");
+	} else {
+		const sourceEntries = collectSourceFiles(options.source);
+		let mirrored = 0;
 		for (const entry of sourceEntries) {
+			// Only rewrite entries that actually changed to minimize churn.
+			const entryPrefix = `${entry.name}/`;
+			const touched = plan.some((change) => change.status !== "same"
+				&& (change.rel === entry.name || change.rel.startsWith(entryPrefix)));
+			if (!touched) continue;
 			await mirrorEntry(entry, options.target);
+			mirrored += 1;
 			console.error(`[sync-pi-tools-suite] mirrored ${entry.name}`);
+		}
+
+		if (mirrored === 0) {
+			// Fallback: mirror every entry if the per-entry heuristic missed something.
+			for (const entry of sourceEntries) {
+				await mirrorEntry(entry, options.target);
+				console.error(`[sync-pi-tools-suite] mirrored ${entry.name}`);
+			}
 		}
 	}
 
@@ -227,6 +233,7 @@ async function main() {
 		process.exitCode = 4;
 		return;
 	}
+	await ensurePiToolsSuiteDependencies({ sourceRoot: options.source, targetRoot: options.target });
 	console.error("[sync-pi-tools-suite] verified in sync");
 }
 

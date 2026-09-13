@@ -37,6 +37,13 @@ describe("runtime installation helpers", () => {
 			const repeated = await ensurePiToolsSuiteExtensionInstalled({ sourcePath, targetPath });
 			assert.equal(repeated.action, "already-installed");
 
+			const legacyTargetPath = join(root, "legacy", "pi-tools-suite");
+			await mkdir(legacyTargetPath, { recursive: true });
+			await writeFile(join(legacyTargetPath, "package.json"), JSON.stringify({ name: "pi-tools-suite-local" }), "utf8");
+			const migrated = await ensurePiToolsSuiteExtensionInstalled({ sourcePath, targetPath: legacyTargetPath });
+			assert.equal(migrated.action, "installed");
+			assert.equal(await lstat(legacyTargetPath).then((stat) => stat.isSymbolicLink()), true);
+
 			const keptTargetPath = join(root, "kept", "pi-tools-suite");
 			await mkdir(join(root, "kept"), { recursive: true });
 			await writeFile(keptTargetPath, "existing", "utf8");
