@@ -44,4 +44,10 @@ describe("ProjectSwitcher project opening actions", () => {
     expect(switcherSource).toContain("projectNameWidth: name?.scrollWidth ?? 0");
     expect(switcherSource).not.toContain("projectNameWidth: projectParentPath");
   });
+
+  it("closes the menu only when the workspace path actually changes", () => {
+    expect(switcherSource).toContain("let observedWorkspace: string | undefined");
+    expect(switcherSource).toContain("else if (nextWorkspace !== observedWorkspace)");
+    expect(switcherSource).not.toContain("workspace;\n    open = false;");
+  });
 });

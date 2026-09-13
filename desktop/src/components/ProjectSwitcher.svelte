@@ -48,14 +48,20 @@
   let menu = $state<HTMLDivElement | null>(null);
   let menuTypeaheadQuery = "";
   let menuTypeaheadTimer: number | null = null;
+  let observedWorkspace: string | undefined;
 
   onDestroy(() => {
     if (menuTypeaheadTimer !== null) window.clearTimeout(menuTypeaheadTimer);
   });
 
   $effect(() => {
-    workspace;
-    open = false;
+    const nextWorkspace = workspace;
+    if (observedWorkspace === undefined) {
+      observedWorkspace = nextWorkspace;
+    } else if (nextWorkspace !== observedWorkspace) {
+      observedWorkspace = nextWorkspace;
+      open = false;
+    }
     const frame = requestAnimationFrame(reportMinimumWidth);
     return () => cancelAnimationFrame(frame);
   });
