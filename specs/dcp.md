@@ -115,10 +115,19 @@ DCP treats prefix stability as a correctness constraint:
 - `mNNN` assignments are monotonic and never renumbered after rollup/restart;
 - ID metadata is distributed over deterministic user/tool-result carriers and
   is not rebuilt as a moving payload-tail map;
-- a reminder is introduced only on a fresh trailing user carrier. Once
+- a reminder is introduced on a fresh trailing user carrier or a positively
+  fresh trailing tool result produced by a new local call in this epoch. A tool
+  result loses freshness at the first provider **attempt**, even on failure;
+  restart/ownership transitions never infer freshness from unknown exposure. Once
   published, its carrier and rendered bytes are frozen; stronger later pressure
-  does not rewrite it. If there is no cache-safe carrier, reminder creation is
+  or lower usage does not rewrite it. Frozen tool reminders replay from the
+  journal by stable identity and role, without timestamp fallback. If there is
+  no cache-safe carrier, reminder creation is
   deferred rather than synthesizing a disappearing tail message;
+- replaying an exact frozen reminder remains cache-safe even after its tool
+  result loses freshness. Failed sends/retries do not use "reminder unavailable"
+  as a shortcut past automatic-compression patience; hard pressure retains its
+  independent safety override;
 - a normal new user/tool append does not itself authorize retroactive
   dedup/error/age pruning of old provider items;
 - one intentional compression/prune rewrite can rebuild the cache, but ordinary
@@ -163,6 +172,17 @@ old safe range remains unchanged, DCP reuses the prior rejection instead of
 re-running summary preparation on every new tool result. A genuinely new or
 changed source invalidates that memoized rejection.
 
+Compression progress may retain cumulative debt across callbacks so new growth
+is not forgotten, but any one automatic recovery plan is capped by the savings
+required by the **current** budget. Under active progress/capacity pressure,
+raw-tail range planning leaves already-materialized compression blocks in place
+and selects only eligible raw history. This prevents a previously economical
+summary from being folded together with a tiny new tail on every pass. A
+separate automatic consolidation path may periodically merge a **batch of
+physically adjacent block-only `bN` summaries**; it never spans raw messages and
+is still subject to exact full-projection gain checks. Non-pressure/manual
+consolidation can also address `bN` blocks explicitly.
+
 The emergency path protects the current user request, newest live assistant
 group, configured recent pairs, protected tools/files, and results without
 completed provider evidence. If a safe exact summary cannot be prepared and the
@@ -173,8 +193,20 @@ instead of sending the same oversized request indefinitely. An exact
 auto-compression failure at capacity does **not** jump directly to abort: DCP
 first re-evaluates the bounded emergency current-turn body-prune floor and only
 hands off when the post-recovery projection still exceeds input capacity.
+Likewise, a positive partial auto-compression commit is not provider-send
+permission when the request is still above input capacity: the same context pass
+continues through eligible emergency recovery and otherwise fails closed rather
+than sending the oversized projection.
 Blocked handoffs emit a user-visible `progress-blocked` diagnostic containing
 the reason and capacity figures before `ctx.abort()` is invoked.
+
+Provider send has an additional lifecycle fail-closed gate. A journal-backed
+session epoch must complete a provider-ready `context` projection in that same
+epoch before `before_provider_request` may proceed. If a `session_start`,
+compaction, model/session ownership transition, or equivalent lifecycle reset
+occurs after context construction but before provider send, DCP aborts that
+stale send with a diagnostic instead of allowing raw/unprojected session history
+to bypass DCP. A fresh context pass in the new epoch re-enables provider send.
 
 When emergency pressure has no normal compression candidate, DCP can still
 derive same-turn candidates from old, complete assistant tool-call/result pairs.

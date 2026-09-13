@@ -199,6 +199,19 @@ describe("DCP auto-compression projection regressions", () => {
     expect(later).not.toBeNull();
     expect(later!.startId).toBe(`b${block.id}`);
     expect(later!.includedBlockIds).toContain(block.id);
+
+    // Under active budget pressure, auto-recovery must leave economical
+    // existing summaries alone and compress only eligible raw tail growth. The
+    // incident repeatedly tried to fold b3/b4 into a larger replacement whose
+    // projection was bigger than its source, producing non-positive-gain.
+    const recovery = detectCompressionCandidate(replayed, state, config, 0.9, {
+      requiredSavingsTokens: 100,
+      allowCompressionBlocks: false,
+    });
+    expect(recovery).not.toBeNull();
+    expect(recovery!.includedBlockIds).toEqual([]);
+    expect(recovery!.startId).not.toBe(`b${block.id}`);
+
     // No raw message inside the compressed range may be re-addressed.
     for (const id of ["id:u1", "id:a1", "id:r1", "id:a2", "id:r2", "id:a3"]) {
       expect(state.messageIdsByStableId.get(id)).toBeDefined();

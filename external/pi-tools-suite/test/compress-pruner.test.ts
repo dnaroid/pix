@@ -14,6 +14,7 @@ import {
   analyzeEmergencyCurrentTurn,
   applyAnchoredNudges,
   clearDcpNudgeAnchors,
+  detectCompressionBlockConsolidationCandidate,
   detectCompressionCandidate,
   detectEmergencyCompressionCandidate,
   detectMessageCompressionCandidates,
@@ -820,6 +821,59 @@ describe("DCP pruning effectiveness", () => {
     expect(minimal!.messageCount).toBeLessThan(full!.messageCount);
     expect(state.messageMetaSnapshot.get(minimal!.endId)?.toolCallId).toBe("old-call");
     expect(minimal!.reason).toContain("minimal oldest protocol-safe prefix");
+  });
+
+  test("automatic block consolidation requires a batched physically-adjacent block-only range", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        autoCandidates: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          minMessages: 2,
+          minTokens: 0,
+        },
+      } as any,
+    });
+    const blockMessage = (id: number, timestamp: number) => {
+      const message: any = {
+        role: "user",
+        timestamp,
+        content: [{ type: "text", text: `block-${id} summary ${"x".repeat(500)}` }],
+      };
+      Object.defineProperty(message, "_dcpOrigin", { value: "block", enumerable: false });
+      Object.defineProperty(message, "_dcpBlockId", { value: id, enumerable: false });
+      return message;
+    };
+    state.compressionBlocks = Array.from({ length: 8 }, (_, index) => ({
+      id: index + 1,
+      active: true,
+    })) as any;
+    const adjacent = Array.from({ length: 8 }, (_, index) => blockMessage(index + 1, index + 1));
+
+    const candidate = detectCompressionBlockConsolidationCandidate(adjacent, state, cfg, {
+      requiredSavingsTokens: 100,
+    });
+    expect(candidate).toMatchObject({
+      startId: "b1",
+      endId: "b8",
+      messageCount: 8,
+      includedBlockIds: [1, 2, 3, 4, 5, 6, 7, 8],
+    });
+    expect(candidate?.reason).toContain("block-only consolidation");
+
+    const interrupted = [
+      ...adjacent.slice(0, 4),
+      textMessage("assistant", "raw history must not be crossed", 20),
+      ...adjacent.slice(4),
+    ];
+    expect(detectCompressionBlockConsolidationCandidate(interrupted, state, cfg, {
+      requiredSavingsTokens: 100,
+    })).toBeNull();
+    expect(detectCompressionBlockConsolidationCandidate(adjacent.slice(0, 7), state, cfg, {
+      requiredSavingsTokens: 100,
+    })).toBeNull();
   });
 
   test("compression candidates are suppressed below configured context pressure", () => {
@@ -3493,7 +3547,7 @@ describe("DCP pruning effectiveness", () => {
     expect(JSON.stringify(transformed[0])).toBe(JSON.stringify(assistant));
   });
 
-  test("DCP context transform stays quiet below routine context pressure and clears stale anchors", async () => {
+  test("DCP below-threshold projection preserves published reminders and clears only absent carriers", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const nudgeEvents: any[] = [];
     const pi = {
@@ -3531,11 +3585,14 @@ describe("DCP pruning effectiveness", () => {
     const lowResult = await contextHandler?.({ type: "context", messages }, ctx(5)) as { messages: any[] } | undefined;
     const lowRendered = lowResult?.messages.map(contentText).join("\n") ?? "";
     expect(lowRendered).toContain("current request");
-    expect(lowRendered).not.toContain("<dcp-system-reminder>");
-    expect(lowRendered).not.toContain("CONCRETE NEXT ACTION");
+    expect(lowResult?.messages).toEqual(highResult?.messages);
+    expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted"]);
 
     await contextHandler?.({ type: "context", messages }, ctx(70));
-    expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted", "emitted"]);
+    expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted", "reapplied"]);
+    const replaced = [...messages.slice(0, -1), textMessage("user", "different carrier", 4)];
+    const absent = await contextHandler?.({ type: "context", messages: replaced }, ctx(5)) as { messages: any[] };
+    expect(absent.messages.some((message) => contentText(message).includes("<dcp-system-reminder>"))).toBe(false);
   });
 
   test("DCP fresh projection overrides stale-low native usage and aborts an unshrinkable huge paste", async () => {
@@ -3754,7 +3811,10 @@ describe("DCP pruning effectiveness", () => {
         hasUI: false,
         model: { provider: "test-provider", id: "test-model" },
         sessionManager: { getBranch: () => [] },
-        getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
+        // Provider evidence must come from a request that DCP itself considers
+        // safe to send. Use the same raw history on a roomy window first, then
+        // switch to the constrained window below to exercise emergency recovery.
+        getContextUsage: () => ({ tokens: 10_000, contextWindow: 100_000, percent: 10 }),
         ui: { notify() {} },
       };
       const highPressureCtx = {
@@ -3841,7 +3901,9 @@ describe("DCP pruning effectiveness", () => {
       expect(afterTokens).toBeLessThan(beforeTokens);
       expect(rendered).toContain("current-turn context emergency");
       expect(rendered).toContain("raw-long-turn-12");
-      expect(rendered).not.toContain("<dcp-system-reminder>");
+      const freshCarrier = outputMessages.find((message: any) => message.toolCallId === "long-turn-12");
+      expect(contentText(freshCarrier)).toContain("<dcp-system-reminder>");
+      expect(contentText(outputMessages[0])).not.toContain("<dcp-system-reminder>");
 
       await dcpDebugLogDrain();
       const debugEntries = readFileSync(debugPath, "utf8")
@@ -3850,17 +3912,14 @@ describe("DCP pruning effectiveness", () => {
         .map((line) => JSON.parse(line));
       const events = debugEntries.map((entry) => entry.event);
       expect(events).toContain("context.emergency_compression_candidate");
-      expect(events).toContain("context.strong_nudge_without_candidate");
-      expect(events).toContain("context.progress_blocked");
       expect(events).not.toContain("compress.auto_blocked_no_candidate");
       expect(events).toContain("prune.emergency_current_turn");
-      expect(events).toContain("nudge.deferred_for_cache");
-      const blockedIndex = events.indexOf("context.progress_blocked");
+      expect(events).not.toContain("nudge.deferred_for_cache");
       const seenIndex = events.indexOf("provider_payload.tool_results_seen");
       const candidateIndex = events.lastIndexOf("context.emergency_compression_candidate");
-      expect(blockedIndex).toBeGreaterThanOrEqual(0);
-      expect(seenIndex).toBeGreaterThan(blockedIndex);
+      expect(seenIndex).toBeGreaterThanOrEqual(0);
       expect(candidateIndex).toBeGreaterThan(seenIndex);
+      expect(events).not.toContain("provider_payload.blocked_stale_projection");
       const pruneEvent = debugEntries.find((entry) => entry.event === "prune.emergency_current_turn");
       expect(pruneEvent.targetMet || pruneEvent.eligibleExhausted).toBe(true);
       expect(pruneEvent.prunedOutputs).toBeLessThan(pruneEvent.totalPairs);

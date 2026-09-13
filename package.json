@@ -63,6 +63,8 @@
     "test": "mise exec node@24.16.0 -- npm run test:inner",
     "test:inner": "node --import tsx --test \"tests/**/*.test.ts\"",
     "test:tools-suite": "npm --prefix external/pi-tools-suite test",
+    "test:dcp-session-sim": "npm --prefix external/pi-tools-suite run test:dcp-session-sim",
+    "test:dcp-reminder-e2e": "npm --prefix external/pi-tools-suite run test:dcp-reminder-e2e",
     "build:acp": "npm --prefix acp run build",
     "check:acp": "npm --prefix acp run check",
     "dev:desktop": "npm --prefix desktop run dev",

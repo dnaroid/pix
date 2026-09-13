@@ -30,6 +30,7 @@ export {
   markToolPruned,
 } from "./pruner-tools.js";
 export {
+  detectCompressionBlockConsolidationCandidate,
   detectCompressionCandidate,
   detectEmergencyCompressionCandidate,
   detectMessageCompressionCandidates,

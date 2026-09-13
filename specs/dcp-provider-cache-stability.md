@@ -58,10 +58,31 @@ be a byte-stable prefix on ordinary continuations.
    unambiguously correlated successful finalized assistant response can promote
    the attempt. Provider evidence is transient and returns to unknown on
    restart.
-5. A reminder can be introduced only on a fresh trailing user carrier. Once
+   A supported journal epoch may reach this hook only after a provider-ready
+   `context` projection completed in that same epoch. A lifecycle reset between
+   context construction and provider send invalidates the old projection and is
+   aborted/failed before any raw-history payload can be sent.
+5. A reminder can be introduced on a fresh trailing user carrier or a trailing
+   raw tool result positively observed through a local `tool_call` +
+   `tool_result` lifecycle after the epoch's first provider-ready send. Tool-call
+   IDs must be new and unambiguous. The runtime-only freshness grant expires on
+   **any** next provider attempt (including failed, retried, disabled, or
+   ambiguous sends), not on successful completion. Restart, shutdown, model,
+   tree, and compaction transitions discard grants and in-flight provenance;
+   missing provider-seen evidence never creates freshness. Once
    published, both its carrier and rendered text are frozen. Later candidate
-   counts, IDs, or higher urgency do not rewrite that old item. Without a safe
-   carrier, reminder creation is deferred.
+   counts, IDs, higher urgency, lower usage, or loss of a candidate do not rewrite
+   that old item. Tool anchors match exact stable identity and role, never a
+   coincident timestamp. Journal replay restores the frozen tool reminder but
+   never restores eligibility to create a new one. Without a safe carrier,
+   reminder creation is deferred. Intentional compression/pruning may clear it.
+   An existing frozen reminder still counts as deliverable after freshness is
+   consumed, so retries do not bypass completed-response patience by claiming
+   that a cache-safe reminder is unavailable.
+   An exact existing frozen anchor still counts as cache-safe reminder delivery:
+   a retry must not bypass automatic-compression patience merely because the
+   tool result is no longer eligible for a **new** reminder. The hard safety
+   boundary remains independent of patience.
 6. Ordinary context construction replays already committed pruning but does not
    discover new dedup/error/age deletions at each user-turn boundary. Explicit
    sweep/compression or the bounded emergency route are intentional rewrite
@@ -100,6 +121,8 @@ be a byte-stable prefix on ordinary continuations.
   new prefix; subsequent unchanged continuations preserve it.
 - Restart/fork of a supported journal session reuses committed summary and ID
   bytes rather than regenerating them.
+- A lifecycle epoch change cannot bypass DCP by sending a provider payload before
+  a fresh context projection for that epoch has completed.
 - Lazy session loading must not turn historical entry-backed identities into
   new timestamp/tool fallbacks or leave an active exact block unmaterialized.
 - JSONL round-trip of an otherwise unchanged message preserves its canonical
@@ -116,12 +139,23 @@ save cache or context.
 When `autoCompress` is explicitly enabled and hard pressure has a safe exact
 candidate, DCP prefers a summary rewrite. Positive partial recovery may commit
 while retaining remaining recovery debt; it is not rejected solely because one
-block cannot satisfy the whole budget. If no safe summary can be committed, the
+block cannot satisfy the whole budget. If that partial commit still leaves the
+provider projection above input capacity, DCP continues recovery in the same
+context pass and fails closed if it still cannot fit; the partial commit never
+authorizes an oversized provider send. If no safe summary can be committed, the
 bounded emergency body-prune floor can remove only eligible provider-seen old
 results, including when the summary failure occurs after the input-capacity
 budget is already exceeded. The emergency floor is evaluated before aborting
 that oversized request. Both are intentional history rewrites and must return
 to stable-prefix behavior afterward.
+
+The cumulative recovery debt is not allowed to inflate one later plan beyond
+the current budget requirement. While progress/capacity recovery is active,
+raw-tail range candidates keep existing `bN` summaries intact and target
+eligible raw growth, avoiding mixed block+raw summary ladders. To keep the other
+extreme bounded, DCP may separately consolidate a batch of physically adjacent
+block-only summaries. That consolidation never crosses raw history and remains
+an intentional exact rewrite subject to full-projection economics.
 
 If protected/live content itself cannot fit after eligible emergency recovery,
 DCP emits a blocked diagnostic and aborts/hands off rather than inventing a
@@ -170,6 +204,12 @@ Deterministic tests must cover:
 - JSONL round-trip stability for exact v2 membership, including tool-result
   details with runtime-only values;
 - hard-pressure marathon behavior and partial positive recovery;
+- stale recovery debt bounded by the current budget and pressure candidates that
+  preserve existing compression blocks, including journal-replay marathon
+  coverage that repeatedly appends raw tail without forming a `bN -> bN+1`
+  replacement ladder;
+- lifecycle reset between context construction and provider send, proving the
+  stale/raw payload is blocked until a fresh projection completes;
 - cancellation/stale owner/source/config/model faults before publication.
 
 The implementation pass reached a green deterministic DCP suite and green

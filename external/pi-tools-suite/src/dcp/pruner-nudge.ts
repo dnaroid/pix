@@ -32,31 +32,51 @@ function nudgeTypeLabel(type: DcpNudgeType): string {
 
 function isRealAnchorCandidate(msg: any): boolean {
   const role = msg?.role ?? "";
-  if (role !== "user" && role !== "assistant") return false;
+  if (role !== "user" && role !== "toolResult") return false;
   return msg?._dcpOrigin !== "block" && msg?._dcpOrigin !== "dcp-control";
 }
 
-function findAnchorMessage(messages: any[]): { msg: any; index: number; stableId: string; timestamp: number; role: string } | null {
+function findAnchorMessage(messages: any[], freshToolResultIds?: ReadonlySet<string>): { msg: any; index: number; stableId: string; timestamp: number; role: string } | null {
   const stableKeys = stableMessageKeys(messages);
-  // A reminder may only be introduced on a fresh user tail. If assistant/tool
-  // traffic already follows that user message then it has already belonged to
-  // an earlier provider prefix; editing it now would invalidate that prefix.
+  // Only append to a fresh tail; never edit an earlier user/assistant prefix.
+  // Tool-result freshness requires a positive local lifecycle grant, not the
+  // absence of successful provider evidence (which is unknown after restart).
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg?._dcpOrigin === "dcp-control") continue;
-    if (msg?.role !== "user" || !isRealAnchorCandidate(msg) || !Number.isFinite(msg.timestamp)) return null;
+    if (!isRealAnchorCandidate(msg) || !Number.isFinite(msg.timestamp)) return null;
+    if (msg.role === "toolResult") {
+      if (!freshToolResultIds?.has(msg.toolCallId)) return null;
+      // A duplicate/reused call ID is not an unambiguous fresh carrier.
+      if (messages.filter((item) => item?.role === "toolResult" && item.toolCallId === msg.toolCallId).length !== 1) return null;
+    }
     return { msg, index: i, stableId: stableKeys[i]!, timestamp: msg.timestamp, role: msg.role };
   }
 
   return null;
 }
 
-export function hasCacheSafeNudgeCarrier(messages: any[]): boolean {
-  return findAnchorMessage(messages) !== null;
+export function hasCacheSafeNudgeCarrier(
+  messages: any[],
+  freshToolResultIds?: ReadonlySet<string>,
+  anchors: readonly DcpNudgeAnchor[] = [],
+): boolean {
+  if (findAnchorMessage(messages, freshToolResultIds) !== null) return true;
+  // A previously published reminder remains deliverable without editing its
+  // carrier. Losing the grant to create a NEW reminder on a provider attempt
+  // must not make retries bypass the completed-opportunity patience policy.
+  const stableKeys = stableMessageKeys(messages);
+  return anchors.some((anchor) => typeof anchor.renderedReminder === "string" &&
+    anchor.renderedReminder.length > 0 &&
+    messages.some((message, index) => anchorMatchesMessage(anchor, message, stableKeys[index]!)));
 }
 
 function anchorMatchesMessage(anchor: DcpNudgeAnchor, msg: any, stableKey: string): boolean {
-  if (anchor.anchorStableId && stableKey === anchor.anchorStableId) return true;
+  if (!isRealAnchorCandidate(msg) || msg.role !== anchor.anchorRole) return false;
+  if (anchor.anchorStableId) return stableKey === anchor.anchorStableId;
+  // Legacy user anchors may be timestamp-only. Tool anchors must never rebind
+  // to another parallel result that happens to share their timestamp.
+  if (msg.role === "toolResult") return false;
   return msg?.timestamp === anchor.anchorTimestamp;
 }
 
@@ -78,24 +98,8 @@ function appendTextToMessage(msg: any, text: string): void {
     return;
   }
 
-  const textBlock = { type: "text", text: suffix };
-  if (msg.role !== "assistant") {
-    msg.content = [...msg.content, textBlock];
-    return;
-  }
-
-  // Keep provider ordering constraints: assistant text must appear before
-  // toolCall blocks for models that enforce text/thinking/tool_use ordering.
-  const firstToolCallIdx = msg.content.findIndex((block: any) => block?.type === "toolCall");
-  if (firstToolCallIdx === -1) {
-    msg.content = [...msg.content, textBlock];
-  } else {
-    msg.content = [
-      ...msg.content.slice(0, firstToolCallIdx),
-      textBlock,
-      ...msg.content.slice(firstToolCallIdx),
-    ];
-  }
+  // Only user/tool-result carriers reach here. Assistant items are immutable.
+  msg.content = [...msg.content, { type: "text", text: suffix }];
 }
 
 function insertBeforeReminderClose(reminder: string, detail: string): string {
@@ -174,7 +178,7 @@ export function upsertNudgeAnchor(
   messages: any[],
   state: DcpState,
   type: DcpNudgeType,
-  options: { contextPercent?: number; renderedReminder?: string } = {},
+  options: { contextPercent?: number; renderedReminder?: string; freshToolResultIds?: ReadonlySet<string> } = {},
 ): { anchor: DcpNudgeAnchor | null; created: boolean; updated: boolean } {
   const stableKeys = stableMessageKeys(messages);
   let existing: DcpNudgeAnchor | null = null;
@@ -198,11 +202,10 @@ export function upsertNudgeAnchor(
     state.lastNudge = undefined;
   }
 
-  const target = findAnchorMessage(messages);
+  const target = findAnchorMessage(messages, options.freshToolResultIds);
   if (!target) {
-    // Mid-turn reminder creation is deliberately deferred rather than
-    // synthesizing an ephemeral tail message that would disappear on the next
-    // provider continuation and break prefix equality.
+    // No positively fresh carrier: do not synthesize a disappearing tail or
+    // reinterpret unknown historical exposure as permission to edit history.
     return { anchor: null, created: false, updated: false };
   }
 
@@ -263,7 +266,7 @@ export function applyAnchoredNudges(
   const reminder = selected.anchor.renderedReminder ?? render(selected.anchor);
   if (materializedReminder) selected.anchor.renderedReminder = reminder;
   const anchorMessage = messages[selected.index];
-  if (anchorMessage?.role !== "user") {
+  if (!isRealAnchorCandidate(anchorMessage)) {
     state.nudgeAnchors = [];
     state.lastNudge = undefined;
     return { rendered: false, stateChanged: true };

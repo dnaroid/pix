@@ -102,7 +102,16 @@ export interface CompressionCandidateSelectionOptions {
   requiredSavingsTokens?: number;
   /** Conservative estimator margin added to the required source size. */
   estimatorMarginTokens?: number;
+  /**
+   * Whether an automatic candidate may fold already-compressed block
+   * placeholders into a new block. Capacity-recovery plans disable this so an
+   * economical existing summary is not expanded again while rescuing raw tail
+   * growth. Manual/non-pressure consolidation keeps the historical default.
+   */
+  allowCompressionBlocks?: boolean;
 }
+
+const MIN_AUTOMATIC_BLOCK_CONSOLIDATION = 8;
 
 function selectOldestSafePrefix(
   boundaries: CandidateBoundary[],
@@ -176,7 +185,9 @@ export function detectCompressionCandidate(
   if (!settings.enabled) return null;
   if (contextPercent < settings.minContextPercent) return null;
 
-  const boundaries = buildCandidateBoundaries(messages, _state, { allowBlocks: true });
+  const boundaries = buildCandidateBoundaries(messages, _state, {
+    allowBlocks: options?.allowCompressionBlocks ?? true,
+  });
 
   if (boundaries.length < settings.minMessages) return null;
 
@@ -225,6 +236,83 @@ export function detectCompressionCandidate(
 }
 
 /**
+ * Periodically fold a contiguous prefix of already-compressed summaries into
+ * one summary. Raw-tail recovery deliberately excludes bN blocks so it cannot
+ * recreate the incident's b1 -> b2 -> ... ladder; without a separate bounded
+ * consolidation step, however, a marathon turn can accumulate dozens of small
+ * active summaries until summary overhead itself fills the provider window.
+ *
+ * This detector is intentionally block-only: every selected boundary must be a
+ * synthetic block message and physically adjacent in the provider projection.
+ * Requiring a batch of blocks amortizes the intentional prefix rewrite and
+ * prevents one-old-summary-plus-a-tiny-tail recompression on every turn.
+ */
+export function detectCompressionBlockConsolidationCandidate(
+  messages: any[],
+  state: DcpState,
+  config: DcpConfig,
+  options?: CompressionCandidateSelectionOptions,
+): CompressionCandidate | null {
+  const settings = config.compress.autoCandidates;
+  const boundaries = buildCandidateBoundaries(messages, state, { allowBlocks: true });
+  const minimumBlocks = MIN_AUTOMATIC_BLOCK_CONSOLIDATION;
+  const requiredSavings = Math.max(0, Math.floor(options?.requiredSavingsTokens ?? 0));
+  const estimatorMargin = Math.max(0, Math.floor(options?.estimatorMarginTokens ?? 0));
+  const targetSourceTokens = Math.max(settings.minTokens, requiredSavings + estimatorMargin);
+
+  let run: CandidateBoundary[] = [];
+  const chooseRun = (candidateRun: CandidateBoundary[]): CandidateBoundary[] | null => {
+    if (candidateRun.length < minimumBlocks) return null;
+    let selectedTokens = 0;
+    let selectedEnd = minimumBlocks - 1;
+    for (let index = 0; index < candidateRun.length; index++) {
+      selectedTokens += candidateRun[index]!.tokenEstimate;
+      if (index + 1 >= minimumBlocks && selectedTokens >= targetSourceTokens) {
+        selectedEnd = index;
+        break;
+      }
+      selectedEnd = index;
+    }
+    return candidateRun.slice(0, Math.max(minimumBlocks, selectedEnd + 1));
+  };
+
+  for (const boundary of boundaries) {
+    const previous = run.at(-1);
+    const continuesBlockRun = boundary.blockId !== undefined &&
+      (!previous || boundary.messageIndex === previous.messageIndex + 1);
+    if (continuesBlockRun) {
+      run.push(boundary);
+      continue;
+    }
+    const selected = chooseRun(run);
+    if (selected) {
+      const estimatedTokens = selected.reduce((sum, item) => sum + item.tokenEstimate, 0);
+      return {
+        startId: selected[0]!.id,
+        endId: selected[selected.length - 1]!.id,
+        messageCount: selected.length,
+        estimatedTokens,
+        includedBlockIds: selected.map((item) => item.blockId!),
+        reason: `automatic block-only consolidation of ${selected.length} adjacent summaries`,
+      };
+    }
+    run = boundary.blockId !== undefined ? [boundary] : [];
+  }
+
+  const selected = chooseRun(run);
+  if (!selected) return null;
+  const estimatedTokens = selected.reduce((sum, item) => sum + item.tokenEstimate, 0);
+  return {
+    startId: selected[0]!.id,
+    endId: selected[selected.length - 1]!.id,
+    messageCount: selected.length,
+    estimatedTokens,
+    includedBlockIds: selected.map((item) => item.blockId!),
+    reason: `automatic block-only consolidation of ${selected.length} adjacent summaries`,
+  };
+}
+
+/**
  * Emergency-only range candidate for marathon turns.
  *
  * Normal candidates deliberately protect the newest N user turns. That means a
@@ -257,7 +345,9 @@ export function detectEmergencyCompressionCandidate(
   if (!emergencySettings.enabled) return null;
   if (contextPercent <= maxContextPercent) return null;
 
-  const boundaries = buildCandidateBoundaries(messages, state, { allowBlocks: true });
+  const boundaries = buildCandidateBoundaries(messages, state, {
+    allowBlocks: options?.allowCompressionBlocks ?? true,
+  });
   if (boundaries.length < settings.minMessages) return null;
 
   let latestUserIndex = -1;

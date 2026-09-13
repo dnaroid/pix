@@ -27,6 +27,28 @@ export function outstandingCompressionTokens(state: DcpState, input: Compression
   return Math.max(0, previous.remainingTokens + growth + stricterTarget)
 }
 
+/**
+ * Bound one automatic recovery plan to what the *current* budget actually
+ * requires. `compressionProgress.remainingTokens` is deliberately cumulative:
+ * it follows content growth and stricter historical targets across callbacks.
+ * That debt is useful for progress accounting, but feeding the whole stale debt
+ * back into candidate sizing can make a later, much smaller capacity gap select
+ * an uneconomically huge range (and repeatedly fail with non-positive gain).
+ */
+export function compressionPlanningTokens(
+  state: DcpState,
+  input: CompressionProgressInput,
+  remainingTokens: number | undefined = outstandingCompressionTokens(state, input),
+): number {
+  const requested = Math.max(1, Math.ceil(input.requiredTokens))
+  if (
+    remainingTokens === undefined ||
+    remainingTokens <= 0 ||
+    state.compressionProgress?.kind !== input.kind
+  ) return requested
+  return Math.min(remainingTokens, requested)
+}
+
 /** Follow actual projection growth, not context callback/retry count. */
 export function trackCompressionProgress(
   state: DcpState,

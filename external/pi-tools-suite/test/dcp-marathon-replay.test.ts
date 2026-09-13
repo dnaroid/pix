@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { DcpConfig } from "../src/dcp/config.js";
 import { createAutoCompressionBlock } from "../src/dcp/auto-compress.js";
 import { applyPruning, detectEmergencyCompressionCandidate } from "../src/dcp/pruner.js";
+import { compressionPlanningTokens } from "../src/dcp/compression-progress.js";
 import { createState } from "../src/dcp/state.js";
 import { buildDcpJournalDelta, createDcpJournalInit, createDcpJournalMirror, replayDcpJournal } from "../src/dcp/journal.js";
 import { estimateMessageTokens } from "../src/dcp/pruner-metadata.js";
@@ -42,6 +43,7 @@ function replayConfig(): DcpConfig {
         enabled: true,
         patience: 0,
         summarizerModel: [],
+        summarizerFallbackModels: [],
         timeoutMs: 1000,
       },
     },
@@ -199,5 +201,132 @@ describe("DCP marathon replay", () => {
     expect(restartText).toContain("RAW_GROUP_999");
     expect(restartText).not.toContain("RAW_GROUP_0\n");
     expect(projectedTokens(afterRestart)).toBe(previousProjectedTokens);
+  }, 30_000);
+
+  test("journal recovery pressure keeps existing summaries intact instead of recreating the incident rollup ladder", async () => {
+    const cfg = replayConfig();
+    const raw: any[] = [user(
+      "INCIDENT_CONSTRAINT_KEEP_EXISTING_SUMMARY. NEXT_STEP_CONTINUE_RAW_TAIL_ONLY.",
+      1,
+    )];
+    let timestamp = 10;
+    let totalGroups = 0;
+    const appendGroups = (count: number) => {
+      for (let local = 0; local < count; local++) {
+        const index = totalGroups++;
+        const id = `incident-${index}`;
+        raw.push(toolCall(id, timestamp++));
+        raw.push(toolResult(id, `INCIDENT_RAW_GROUP_${index}`, timestamp++));
+      }
+    };
+
+    const initial = createState();
+    appendGroups(40);
+    for (let index = 0; index < 32; index++) initial.providerSeenToolIds.add(`incident-${index}`);
+    const initialProjection = applyPruning(raw, initial, cfg);
+    const firstCandidate = detectEmergencyCompressionCandidate(
+      initialProjection,
+      initial,
+      cfg,
+      0.90,
+      0.65,
+      { requiredSavingsTokens: 8_000, allowCompressionBlocks: false },
+    );
+    expect(firstCandidate).not.toBeNull();
+    const first = await createAutoCompressionBlock({
+      candidate: firstCandidate!,
+      topic: "Incident initial compression",
+      state: initial,
+      config: cfg,
+      messages: initialProjection,
+      requiredGainTokens: 1_000,
+    });
+    expect(first.projectedGain).toBeGreaterThan(0);
+    expect(initial.compressionBlocks.filter((block) => block.active)).toHaveLength(1);
+
+    // The incident happened after DCP moved from a sidecar snapshot to journal
+    // replay, so continue from a journal-restored state rather than from the
+    // original in-memory object.
+    const init = createDcpJournalInit("incident-replay-init", 1);
+    const mirror = createDcpJournalMirror(createState(), init.operationId);
+    const delta = buildDcpJournalDelta(initial, mirror, "incident-replay-first", 2);
+    expect(delta).toBeDefined();
+    const state = createState();
+    replayDcpJournal([
+      { type: "custom", customType: "dcp-journal", data: init },
+      { type: "custom", customType: "dcp-journal", data: delta },
+    ], state);
+
+    const firstBlockId = state.compressionBlocks.find((block) => block.active)?.id;
+    const firstSummaryTokens = state.compressionBlocks.find((block) => block.id === firstBlockId)?.summaryTokenEstimate ?? 0;
+    expect(firstBlockId).toBeDefined();
+
+    const recoverySummaryTokens: number[] = [];
+    for (let cycle = 0; cycle < 6; cycle++) {
+      appendGroups(12);
+      const visibleCutoff = Math.max(0, totalGroups - cfg.strategies.emergencyCurrentTurnPruning.keepRecentToolPairs);
+      for (let index = 0; index < visibleCutoff; index++) state.providerSeenToolIds.add(`incident-${index}`);
+
+      const before = applyPruning(raw, state, cfg);
+      // Reproduce the incident shape: progress accounting can carry a very
+      // large historical debt even though this provider pass only needs a much
+      // smaller amount of recovery.
+      state.compressionProgress = {
+        projectedTokens: projectedTokens(before),
+        observedTokens: 145_000 + cycle * 100,
+        targetHeadroomTokens: 112_000,
+        contextWindow: 272_000,
+        remainingTokens: 120_000 + cycle * 2_000,
+        kind: "emergency",
+      };
+      const progressInput = {
+        projectedTokens: projectedTokens(before) + 200,
+        observedTokens: 145_100 + cycle * 100,
+        targetHeadroomTokens: 112_000,
+        contextWindow: 272_000,
+        requiredTokens: 3_000,
+        kind: "emergency" as const,
+      };
+      const planningTokens = compressionPlanningTokens(state, progressInput);
+      expect(planningTokens).toBe(3_000);
+
+      const candidate = detectEmergencyCompressionCandidate(
+        before,
+        state,
+        cfg,
+        0.90,
+        0.65,
+        { requiredSavingsTokens: planningTokens, allowCompressionBlocks: false },
+      );
+      expect(candidate).not.toBeNull();
+      expect(candidate!.includedBlockIds).toEqual([]);
+      expect(candidate!.startId).not.toBe(`b${firstBlockId}`);
+
+      const result = await createAutoCompressionBlock({
+        candidate: candidate!,
+        topic: `Incident recovery ${cycle + 1}`,
+        state,
+        config: cfg,
+        messages: before,
+        requiredGainTokens: planningTokens,
+        allowPartialGain: true,
+      });
+      expect(result.projectedGain).toBeGreaterThan(0);
+      const created = state.compressionBlocks.find((block) => block.id === result.blockId)!;
+      expect(created.coveredBlockIds).toEqual([]);
+      recoverySummaryTokens.push(created.summaryTokenEstimate);
+
+      const preserved = state.compressionBlocks.find((block) => block.id === firstBlockId);
+      expect(preserved?.active).toBe(true);
+      expect(preserved?.summaryTokenEstimate).toBe(firstSummaryTokens);
+    }
+
+    // The real regression grew one replacement summary from ~19k to ~40k while
+    // each later pass added only a tiny raw tail. Recovery summaries here must
+    // remain local to their raw slice and never form that summary-on-summary
+    // ladder.
+    expect(state.compressionBlocks.filter((block) => block.active).length).toBeGreaterThan(1);
+    expect(Math.max(...recoverySummaryTokens)).toBeLessThan(Math.max(8_000, firstSummaryTokens));
+    expect(state.compressionBlocks.slice(1).every((block) => (block.coveredBlockIds ?? []).length === 0)).toBe(true);
   }, 30_000);
 });

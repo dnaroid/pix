@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/dcp/config.js";
 import dcpModule from "../src/dcp/index.js";
 import { createState } from "../src/dcp/state.js";
-import { resetCompressionProgress, settleCompressionProgress, trackCompressionProgress } from "../src/dcp/compression-progress.js";
+import { compressionPlanningTokens, resetCompressionProgress, settleCompressionProgress, trackCompressionProgress } from "../src/dcp/compression-progress.js";
 import { providerPayloadIncludesReminder } from "../src/dcp/provider-tool-results.js";
 import { decideAutoCompress } from "../src/dcp/auto-compress.js";
 
@@ -15,7 +15,13 @@ async function fixture(options: { auto?: boolean; tokens?: number; manual?: bool
   config.compress.nudgeFrequency = 1;
   config.compress.autoCandidates.minContextPercent = 0.25;
   config.compress.messageMode.minContextPercent = 0.25;
-  config.compress.autoCompress = { enabled: options.auto ?? true, patience: 2, summarizerModel: [], timeoutMs: 5000 };
+  config.compress.autoCompress = {
+    enabled: options.auto ?? true,
+    patience: 2,
+    summarizerModel: [],
+    summarizerFallbackModels: [],
+    timeoutMs: 5000,
+  };
   config.manualMode.enabled = options.manual ?? false;
   const state = createState();
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
@@ -39,13 +45,14 @@ async function fixture(options: { auto?: boolean; tokens?: number; manual?: bool
     { id: "current-request", role: "user", timestamp: 20, content: "Fix the issue without losing the ownership invariants." },
   ];
   let usageTokens = options.tokens ?? 73_900;
+  let abortCount = 0;
   const ctx: any = {
     cwd: "/__dcp_progress_opportunities__",
     model: { provider: "fixture", id: "model", contextWindow: 272_000, maxTokens: 4096 },
     sessionManager: { getBranch: () => [], getSessionId: () => "fixture" },
     getContextUsage: () => ({ tokens: usageTokens, contextWindow: 272_000, percent: usageTokens / 2720 }),
     ui: { notify(message: string) { warnings.push(message); } },
-    abort() {},
+    abort() { abortCount++; },
   };
   async function emit(name: string, event: any = {}) {
     let result: any;
@@ -58,7 +65,8 @@ async function fixture(options: { auto?: boolean; tokens?: number; manual?: bool
     message: { role: "assistant", provider: "fixture", model: "model", content, stopReason, timestamp: 30 },
   });
   return { config, state, messages, ctx, tools, warnings, telemetry, emit, context, request, complete,
-    setUsage(tokens: number) { usageTokens = tokens; } };
+    setUsage(tokens: number) { usageTokens = tokens; },
+    getAbortCount() { return abortCount; } };
 }
 
 describe("DCP bounded actionable opportunities", () => {
@@ -238,5 +246,84 @@ describe("DCP bounded actionable opportunities", () => {
     expect(state.compressionProgress?.remainingTokens).toBe(12_000);
     trackCompressionProgress(state, { ...input, projectedTokens: 99_000, observedTokens: 138_000, targetHeadroomTokens: 120_000 });
     expect(state.compressionProgress?.remainingTokens).toBe(17_000);
+  });
+
+  test("capacity recovery planning is capped by the current budget instead of stale cumulative debt", () => {
+    const state = createState();
+    state.compressionProgress = {
+      projectedTokens: 102_320,
+      observedTokens: 145_008,
+      targetHeadroomTokens: 112_608,
+      contextWindow: 272_000,
+      remainingTokens: 132_411,
+      kind: "emergency",
+    };
+    const current = {
+      projectedTokens: 102_356,
+      observedTokens: 145_030,
+      targetHeadroomTokens: 112_608,
+      contextWindow: 272_000,
+      requiredTokens: 33_080,
+      kind: "emergency" as const,
+    };
+
+    // This reproduces the debt shape from the incident: cumulative progress
+    // accounting rises to ~132k even though the current budget only needs ~33k.
+    expect(compressionPlanningTokens(state, current)).toBe(33_080);
+  });
+
+  test("module pressure recovery preserves an existing summary and compresses only the remaining raw prefix", async () => {
+    const f = await fixture();
+    await f.context();
+    const compress = f.tools.get("compress");
+    expect(compress).toBeDefined();
+    await compress.execute(
+      "seed-summary",
+      {
+        topic: "Seed summary",
+        ranges: [{ startId: "m001", endId: "m003", summary: "Earlier investigation is complete; preserve ownership checks." }],
+      },
+      undefined,
+      undefined,
+      f.ctx,
+    );
+    const seed = f.state.compressionBlocks.find((block) => block.active);
+    expect(seed).toBeDefined();
+    const seedSummary = seed!.summary;
+
+    // Force routine auto-recovery on the next context pass. The remaining raw
+    // history before the current user is large enough to recover without
+    // touching the already-economic seed summary.
+    f.state.consecutiveIgnoredNudges = f.config.compress.autoCompress.patience + 1;
+    f.setUsage(110_000);
+    await f.context();
+
+    const active = f.state.compressionBlocks.filter((block) => block.active);
+    expect(active.length).toBeGreaterThan(1);
+    expect(f.state.compressionBlocks.find((block) => block.id === seed!.id)?.summary).toBe(seedSummary);
+    expect(f.state.compressionBlocks.find((block) => block.id === seed!.id)?.active).toBe(true);
+    const later = f.state.compressionBlocks.filter((block) => block.id !== seed!.id);
+    expect(later.length).toBeGreaterThan(0);
+    expect(later.every((block) => (block.coveredBlockIds ?? []).length === 0)).toBe(true);
+  });
+
+  test("provider send is blocked after a lifecycle reset until the new epoch rebuilds context", async () => {
+    const f = await fixture();
+    const firstProjection = await f.context();
+    await f.request(firstProjection);
+    expect(f.getAbortCount()).toBe(0);
+
+    // Reproduce the observed context -> session_start(startup) -> provider-send
+    // ordering. The stale projection must never let raw history escape.
+    await f.emit("session_start", { reason: "startup" });
+    await f.emit("before_provider_request", { payload: { messages: f.messages } });
+    expect(f.getAbortCount()).toBe(1);
+    expect(f.telemetry.some((event) =>
+      event.event === "progress-blocked" && event.reason === "stale-context-projection"
+    )).toBe(true);
+
+    const rebuilt = await f.context();
+    await f.request(rebuilt);
+    expect(f.getAbortCount()).toBe(1);
   });
 });

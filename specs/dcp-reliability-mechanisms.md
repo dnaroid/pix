@@ -98,6 +98,34 @@ Active implemented contract.
   only when the projected context still cannot fit after eligible recovery and
   emits a user-visible `progress-blocked` diagnostic first. `[confirmed by code,
   dcp/index.ts; confirmed by test/compress-pruner.test.ts]`
+- A successful **partial** auto-compression commit follows the same capacity
+  rule: if its exact provider projection is still above input capacity, DCP
+  continues through same-pass emergency recovery and otherwise aborts instead of
+  treating positive gain as permission to send an oversized request. `[confirmed
+  by code, dcp/index.ts; covered by deterministic session-simulation provider
+  capacity assertions]`
+- Cumulative `compressionProgress.remainingTokens` is progress accounting, not
+  an unbounded sizing target for the next automatic rewrite. Candidate sizing
+  and `requiredGainTokens` are capped by the current budget requirement; under
+  active progress/capacity pressure raw-tail range candidates exclude existing
+  `bN` summaries and recover from eligible raw growth instead of repeatedly
+  recompressing one old summary plus a tiny new tail. A separate automatic
+  block-only consolidation candidate batches physically adjacent summaries so
+  independent summaries cannot themselves accumulate until they fill the
+  provider window; the candidate never spans raw messages. `[confirmed by code,
+  compression-progress.ts, pruner-candidates.ts, dcp/index.ts; confirmed by
+  test/dcp-progress-opportunities.test.ts and
+  test/dcp-auto-compression-projection.test.ts; journal-replay marathon locked by
+  test/dcp-marathon-replay.test.ts; block-only batching locked by
+  test/compress-pruner.test.ts and test/dcp-session-sim-e2e.test.ts]`
+- A provider request is fail-closed across lifecycle epochs. DCP records the
+  session epoch of the last provider-ready `context` projection; if a supported
+  journal session reaches `before_provider_request` after the epoch changed but
+  before a fresh context projection completed, DCP emits
+  `stale-context-projection`/`provider_payload.blocked_stale_projection` and
+  aborts (or throws when abort is unavailable) before raw history can be sent.
+  `[confirmed by code, dcp/index.ts; confirmed by
+  test/dcp-progress-opportunities.test.ts]`
 - Locked by `test/dcp-review-regressions.test.ts` ("net budget recovery
   expands an insufficient prefix under the same safety policy") and
   `test/dcp-auto-compression-projection.test.ts`. `[confirmed by tests]`
@@ -130,6 +158,17 @@ Active implemented contract.
 - Routine candidates pick the **minimal oldest protocol-safe prefix** that
   restores the required budget tokens, always older than the most recent
   `keepRecentTurns` user turns. `[confirmed by code, pruner-candidates.ts:222]`
+- When candidate selection is serving active progress/capacity recovery, it can
+  exclude already-compressed block placeholders while preserving the same
+  retention and provider-evidence rules. Ordinary/non-pressure selection keeps
+  block addressability for deliberate consolidation. `[confirmed by code,
+  pruner-candidates.ts; confirmed by
+  test/dcp-auto-compression-projection.test.ts]`
+- Automatic summary consolidation is a separate candidate class: only a batched
+  run of physically adjacent active block messages is eligible. Any raw message
+  breaks the run, so automatic consolidation cannot silently absorb fresh/raw
+  history while reducing block-wrapper overhead. `[confirmed by code,
+  pruner-candidates.ts; confirmed by test/compress-pruner.test.ts]`
 - Emergency-only ranges exist for marathon single-turn sessions: every tool
   result selected for compression must have completed provider evidence in
   `providerSeenToolIds`; unknown evidence truncates the safe prefix.
@@ -158,6 +197,29 @@ Active implemented contract.
 
 ## Deterministic walls
 
+- `test/dcp-fresh-nudge.test.ts` verifies mid-turn reminder delivery through
+  locally completed fresh tool results, identical serialized Responses prefixes
+  on continuation/retry, failed-send freshness consumption, duplicate-ID refusal,
+  equal-timestamp isolation, lifecycle resets, and lower-usage frozen replay.
+  A frozen exact anchor remains deliverable on retries without a new freshness
+  grant; failed sends cannot trigger the "reminder unavailable" auto-compress
+  shortcut. The same test verifies automatic fallback still runs after actual
+  completed reminder opportunities exhaust patience.
+  Freshness is runtime-only in `src/dcp/fresh-tool-results.ts`; durable anchor
+  publication/replay remains journal schema v1. `test/dcp-session-sim-e2e.test.ts`
+  uses a real SessionManager/journal to verify tool-reminder delivery and restart
+  byte equality, separately from automatic compression. Its report distinguishes
+  reminders projected from provider turns that actually send them.
+- The opt-in `test/prompt-evals/dcp-reminder-e2e.test.ts` feeds the same scene
+  to a real model with alternative tools and no forced `tool_choice`. It requires
+  an actual `compress` tool call and executes it through the registered tool,
+  checking positive context reduction. This is model-choice plus DCP execution
+  coverage, not a full SDK-agent/UI test. It does not retry a behavioral failure.
+  Run `npm run test:dcp-reminder-e2e`; override the model with
+  `DCP_REMINDER_E2E_MODEL=provider/model`. Missing provider/auth configuration is
+  a failing prerequisite when opted in, not a successful or silently skipped
+  model-behavior check. Offline suites skip this live case.
+
 - `test/dcp-transaction-faults.test.ts` — fault boundaries above.
 - `test/dcp-review-regressions.test.ts` — independent-review regressions:
   config-instance isolation, budget recovery under the same policy, physical
@@ -166,6 +228,15 @@ Active implemented contract.
 - `test/dcp-marathon-replay.test.ts`, `test/dcp-lifecycle-marathon.test.ts` —
   long single-turn replays with sequential rollups, restart and fork
   reconciliation.
+- `test/dcp-session-sim-e2e.test.ts` plus
+  `test/support/dcp-session-simulator.ts` — deterministic session-level E2E:
+  real `SessionManager` JSONL/journal plus the real DCP lifecycle hooks, with only
+  the remote model replaced by a scripted provider. It measures raw vs projected
+  token occurrences, peak provider context, active-summary count, block-only vs
+  mixed block+raw rollups, exact-prefix retention, aborts, journal replay, and
+  provider input-capacity violations. This is the efficiency wall for regressions
+  that remain functionally correct but make long sessions progressively more
+  expensive.
 - `test/dcp-shadow-plan.test.ts` — dry-run planning on a detached state clone
   with no persistence or model calls. `[confirmed by tests]`
 
@@ -204,11 +275,15 @@ git history.
 - `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
 - `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
 - `external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts`
+- `external/pi-tools-suite/test/dcp-session-sim-e2e.test.ts`
+- `external/pi-tools-suite/test/support/dcp-session-simulator.ts`
 - `external/pi-tools-suite/test/dcp-shadow-plan.test.ts`
 
 ## Verification
 
 - From `external/pi-tools-suite/`, run the focused DCP wall/replay tests named
-  above and `bun test test` for the full deterministic suite.
+  above, `npm run test:dcp-session-sim` for the session-efficiency wall, and
+  `bun test test` for the full deterministic suite.
 - Canonical from the repo root: `npm run check` and
-  `npm run test:tools-suite`.
+  `npm run test:tools-suite`; the dedicated session-sim entrypoint is
+  `npm run test:dcp-session-sim`.
