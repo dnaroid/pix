@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyEdits, modify } from "jsonc-parser";
 
@@ -19,8 +20,10 @@ const REGISTRY_AGENTS_DIR = "agents";
 const REGISTRY_PROJECTS_DIR = "projects";
 const SKILL_FILE = "SKILL.md";
 const PROJECT_TASKS_FILE = "tasks.jsonc";
+const PROJECT_TASK_ATTACHMENTS_DIR = "task-attachments";
 const PROJECT_PLANS_DIR = "plans";
 const PROJECT_TODO_FILE = "TODO.md";
+const REGISTRY_TASK_ATTACHMENT_SCHEME = "pix-task-attachment:";
 const PROVENANCE_FILE = "registry.json";
 const PROVENANCE_VERSION = 1;
 const SYSTEM_CUSTOM_MESSAGE_TYPE = "pix-system";
@@ -240,6 +243,10 @@ function projectArtifactLocalPath(cwd: string, artifact: ProjectArtifact): strin
 	}
 }
 
+function projectTaskAttachmentsLocalPath(cwd: string): string {
+	return join(cwd, PROJECT_DIR, PROJECT_TASK_ATTACHMENTS_DIR);
+}
+
 function projectArtifactRelativePath(projectKey: string, artifact: ProjectArtifact): string {
 	validateName(projectKey);
 	switch (artifact) {
@@ -247,6 +254,18 @@ function projectArtifactRelativePath(projectKey: string, artifact: ProjectArtifa
 		case "plans": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_PLANS_DIR}`;
 		case "todo": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_TODO_FILE}`;
 	}
+}
+
+function projectTaskAttachmentsRelativePath(projectKey: string): string {
+	validateName(projectKey);
+	return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_TASK_ATTACHMENTS_DIR}`;
+}
+
+function projectArtifactRelativePaths(projectKey: string, artifact: ProjectArtifact): string[] {
+	const primary = projectArtifactRelativePath(projectKey, artifact);
+	return artifact === "tasks"
+		? [primary, projectTaskAttachmentsRelativePath(projectKey)]
+		: [primary];
 }
 
 function projectArtifactDisplayName(artifact: ProjectArtifact): string {
@@ -259,6 +278,10 @@ function projectArtifactDisplayName(artifact: ProjectArtifact): string {
 
 function projectArtifactRegistryPath(cacheDir: string, projectKey: string, artifact: ProjectArtifact): string {
 	return join(cacheDir, ...projectArtifactRelativePath(projectKey, artifact).split("/"));
+}
+
+function projectTaskAttachmentsRegistryPath(cacheDir: string, projectKey: string): string {
+	return join(cacheDir, ...projectTaskAttachmentsRelativePath(projectKey).split("/"));
 }
 
 function canonicalGitRemote(remote: string): string | undefined {
@@ -510,6 +533,22 @@ async function pathRevision(pi: ExtensionAPI, runtime: RegistryRuntime, rel: str
 	return revision || undefined;
 }
 
+async function projectArtifactRevision(
+	pi: ExtensionAPI,
+	runtime: RegistryRuntime,
+	projectKey: string,
+	artifact: ProjectArtifact,
+): Promise<string | undefined> {
+	const result = await runGit(
+		pi,
+		runtime.cacheDir,
+		["log", "-1", "--format=%H", "--", ...projectArtifactRelativePaths(projectKey, artifact)],
+		{ allowFailure: true },
+	);
+	const revision = result.stdout.trim();
+	return revision || undefined;
+}
+
 async function resourceRevision(pi: ExtensionAPI, runtime: RegistryRuntime, type: ResourceType, name: string): Promise<string | undefined> {
 	return pathRevision(pi, runtime, registryResourceRelativePath(type, name));
 }
@@ -664,6 +703,226 @@ async function hashPath(path: string): Promise<string> {
 	}
 	await visit(path, "");
 	return hash.digest("hex");
+}
+
+type TaskBundle = {
+	source: string;
+	attachments: Map<string, string>;
+};
+
+function pathIsWithin(parent: string, child: string): boolean {
+	const rel = relative(parent, child);
+	return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+}
+
+function registryTaskAttachmentMarker(name: string): string {
+	return `[Pix attachment: ${REGISTRY_TASK_ATTACHMENT_SCHEME}${encodeURIComponent(name)}]`;
+}
+
+function registryTaskAttachmentName(encoded: string): string {
+	let name: string;
+	try {
+		name = decodeURIComponent(encoded);
+	} catch {
+		throw new Error(`Invalid registry task attachment name: ${encoded}`);
+	}
+	if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\") || basename(name) !== name) {
+		throw new Error(`Invalid registry task attachment name: ${encoded}`);
+	}
+	return name;
+}
+
+async function readLocalTaskBundle(cwd: string): Promise<TaskBundle> {
+	const tasksPath = projectArtifactLocalPath(cwd, "tasks");
+	const source = await fs.readFile(tasksPath, "utf8");
+	const attachmentsRoot = projectTaskAttachmentsLocalPath(cwd);
+	const attachments = new Map<string, string>();
+	const replacements = new Map<string, string>();
+	const rootExists = await pathExists(attachmentsRoot);
+	let canonicalRoot: string | undefined;
+	if (rootExists) {
+		const rootStat = await fs.lstat(attachmentsRoot);
+		if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+			throw new Error(`Project task attachment storage must be a regular directory: ${attachmentsRoot}`);
+		}
+		const [canonicalCwd, resolvedRoot] = await Promise.all([
+			fs.realpath(cwd),
+			fs.realpath(attachmentsRoot),
+		]);
+		if (!pathIsWithin(canonicalCwd, resolvedRoot)) {
+			throw new Error(`Project task attachment storage resolves outside the project: ${attachmentsRoot}`);
+		}
+		canonicalRoot = resolvedRoot;
+	}
+
+	for (const match of source.matchAll(/\[Pix attachment: (file:\/\/[^\]]+)\]/g)) {
+		const marker = match[0];
+		const uri = match[1];
+		if (!uri || replacements.has(marker)) continue;
+		let candidate: string;
+		try {
+			candidate = fileURLToPath(uri);
+		} catch {
+			continue;
+		}
+		if (!canonicalRoot) continue;
+		const lexicalProjectAttachment = pathIsWithin(attachmentsRoot, candidate);
+
+		let canonicalFile: string;
+		try {
+			canonicalFile = await fs.realpath(candidate);
+		} catch (error) {
+			if (lexicalProjectAttachment) {
+				throw new Error(`Task attachment is missing: ${candidate}. ${error instanceof Error ? error.message : String(error)}`);
+			}
+			continue;
+		}
+		if (!pathIsWithin(canonicalRoot, canonicalFile)) {
+			if (lexicalProjectAttachment) throw new Error(`Task attachment resolves outside project task storage: ${candidate}`);
+			continue;
+		}
+		const stat = await fs.lstat(candidate);
+		if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Task attachment is not a regular file: ${candidate}`);
+		const name = basename(canonicalFile);
+		const previous = attachments.get(name);
+		if (previous && previous !== canonicalFile) {
+			throw new Error(`Task attachments contain duplicate file name "${name}".`);
+		}
+		attachments.set(name, canonicalFile);
+		replacements.set(marker, registryTaskAttachmentMarker(name));
+	}
+
+	let normalizedSource = source;
+	for (const [marker, portableMarker] of replacements) {
+		normalizedSource = normalizedSource.split(marker).join(portableMarker);
+	}
+	return { source: normalizedSource, attachments };
+}
+
+async function readRemoteTaskBundle(runtime: RegistryRuntime, projectKey: string): Promise<TaskBundle> {
+	const tasksPath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, "tasks");
+	const source = await fs.readFile(tasksPath, "utf8");
+	const attachmentsRoot = projectTaskAttachmentsRegistryPath(runtime.cacheDir, projectKey);
+	const attachments = new Map<string, string>();
+	for (const match of source.matchAll(/\[Pix attachment: pix-task-attachment:([^\]]+)\]/g)) {
+		const encoded = match[1];
+		if (!encoded) continue;
+		const name = registryTaskAttachmentName(encoded);
+		if (attachments.has(name)) continue;
+		const filePath = join(attachmentsRoot, name);
+		let stat: import("node:fs").Stats;
+		try {
+			stat = await fs.lstat(filePath);
+		} catch (error) {
+			throw new Error(`Registry task attachment is missing: ${name}. ${error instanceof Error ? error.message : String(error)}`);
+		}
+		if (stat.isSymbolicLink() || !stat.isFile()) {
+			throw new Error(`Registry task attachment is not a regular file: ${name}`);
+		}
+		attachments.set(name, filePath);
+	}
+	return { source, attachments };
+}
+
+async function hashTaskBundle(bundle: TaskBundle): Promise<string> {
+	const hash = createHash("sha256");
+	hash.update("tasks-bundle\0");
+	hash.update(bundle.source);
+	for (const name of [...bundle.attachments.keys()].sort()) {
+		hash.update(`\0attachment\0${name}\0`);
+		hash.update(await fs.readFile(bundle.attachments.get(name)!));
+	}
+	return hash.digest("hex");
+}
+
+async function hashProjectArtifactLocal(cwd: string, artifact: ProjectArtifact): Promise<string> {
+	return artifact === "tasks"
+		? hashTaskBundle(await readLocalTaskBundle(cwd))
+		: hashPath(projectArtifactLocalPath(cwd, artifact));
+}
+
+async function hashProjectArtifactRemote(
+	runtime: RegistryRuntime,
+	projectKey: string,
+	artifact: ProjectArtifact,
+): Promise<string> {
+	return artifact === "tasks"
+		? hashTaskBundle(await readRemoteTaskBundle(runtime, projectKey))
+		: hashPath(projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact));
+}
+
+async function replaceRemoteTaskBundle(cwd: string, runtime: RegistryRuntime, projectKey: string): Promise<void> {
+	const bundle = await readLocalTaskBundle(cwd);
+	const tasksPath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, "tasks");
+	const attachmentsPath = projectTaskAttachmentsRegistryPath(runtime.cacheDir, projectKey);
+	await fs.rm(tasksPath, { recursive: true, force: true });
+	await fs.rm(attachmentsPath, { recursive: true, force: true });
+	await fs.mkdir(dirname(tasksPath), { recursive: true });
+	await fs.writeFile(tasksPath, bundle.source, "utf8");
+	if (bundle.attachments.size === 0) return;
+	await fs.mkdir(attachmentsPath, { recursive: true });
+	for (const name of [...bundle.attachments.keys()].sort()) {
+		await fs.copyFile(bundle.attachments.get(name)!, join(attachmentsPath, name));
+	}
+}
+
+async function replaceLocalTaskBundle(cwd: string, runtime: RegistryRuntime, projectKey: string): Promise<void> {
+	const bundle = await readRemoteTaskBundle(runtime, projectKey);
+	const tasksPath = projectArtifactLocalPath(cwd, "tasks");
+	const attachmentsPath = projectTaskAttachmentsLocalPath(cwd);
+	await fs.mkdir(dirname(tasksPath), { recursive: true });
+
+	let materializedSource = bundle.source;
+	for (const name of bundle.attachments.keys()) {
+		materializedSource = materializedSource
+			.split(registryTaskAttachmentMarker(name))
+			.join(`[Pix attachment: ${pathToFileURL(join(attachmentsPath, name)).href}]`);
+	}
+
+	const stamp = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+	const stagedTasks = join(dirname(tasksPath), `.tasks.registry-${stamp}.tmp`);
+	const stagedAttachments = join(dirname(tasksPath), `.task-attachments.registry-${stamp}.tmp`);
+	const backupTasks = join(dirname(tasksPath), `.tasks.registry-${stamp}.bak`);
+	const backupAttachments = join(dirname(tasksPath), `.task-attachments.registry-${stamp}.bak`);
+	let tasksBackedUp = false;
+	let attachmentsBackedUp = false;
+	let tasksInstalled = false;
+	let attachmentsInstalled = false;
+	try {
+		await fs.writeFile(stagedTasks, materializedSource, "utf8");
+		if (bundle.attachments.size > 0) {
+			await fs.mkdir(stagedAttachments, { recursive: true });
+			for (const name of [...bundle.attachments.keys()].sort()) {
+				await fs.copyFile(bundle.attachments.get(name)!, join(stagedAttachments, name));
+			}
+		}
+
+		if (await pathExists(tasksPath)) {
+			await fs.rename(tasksPath, backupTasks);
+			tasksBackedUp = true;
+		}
+		if (await pathExists(attachmentsPath)) {
+			await fs.rename(attachmentsPath, backupAttachments);
+			attachmentsBackedUp = true;
+		}
+		if (bundle.attachments.size > 0) {
+			await fs.rename(stagedAttachments, attachmentsPath);
+			attachmentsInstalled = true;
+		}
+		await fs.rename(stagedTasks, tasksPath);
+		tasksInstalled = true;
+	} catch (error) {
+		if (tasksInstalled) await fs.rm(tasksPath, { recursive: true, force: true }).catch(() => undefined);
+		if (attachmentsInstalled) await fs.rm(attachmentsPath, { recursive: true, force: true }).catch(() => undefined);
+		if (tasksBackedUp) await fs.rename(backupTasks, tasksPath).catch(() => undefined);
+		if (attachmentsBackedUp) await fs.rename(backupAttachments, attachmentsPath).catch(() => undefined);
+		throw error;
+	} finally {
+		await fs.rm(stagedTasks, { recursive: true, force: true }).catch(() => undefined);
+		await fs.rm(stagedAttachments, { recursive: true, force: true }).catch(() => undefined);
+	}
+	await fs.rm(backupTasks, { recursive: true, force: true }).catch(() => undefined);
+	await fs.rm(backupAttachments, { recursive: true, force: true }).catch(() => undefined);
 }
 
 async function readProvenance(project: ProjectContext): Promise<Provenance> {
@@ -872,10 +1131,9 @@ async function collectProjectStatuses(
 			statuses.push({ artifact, kind: "removed-remote", localExists, remoteExists, provenance: tracked });
 			continue;
 		}
-		const rel = projectArtifactRelativePath(projectKey, artifact);
 		const [localHash, remoteRevision] = await Promise.all([
-			hashPath(localPath),
-			pathRevision(pi, runtime, rel),
+			hashProjectArtifactLocal(cwd, artifact),
+			projectArtifactRevision(pi, runtime, projectKey, artifact),
 		]);
 		const localChanged = localHash !== tracked.hash;
 		const remoteChanged = remoteRevision !== tracked.revision;
@@ -1518,18 +1776,21 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	for (const { artifact, deleteRemote } of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
-		const rel = projectArtifactRelativePath(projectKey, artifact);
 		const tracked = provenance.projectResources[artifact];
 		if (tracked && (tracked.remote !== runtime.remote || tracked.branch !== runtime.branch || tracked.projectKey !== projectKey)) {
 			throw new Error(`${artifact} state is tracked under another registry/branch/project key. Run /${COMMAND} status before pushing.`);
 		}
 		const remoteExists = await pathExists(remotePath);
-		const remoteRevision = remoteExists ? await pathRevision(pi, runtime, rel) : undefined;
+		const remoteRevision = remoteExists
+			? await projectArtifactRevision(pi, runtime, projectKey, artifact)
+			: undefined;
 		if (tracked && remoteRevision && remoteRevision !== tracked.revision) {
 			throw new Error(`${artifact} state changed in the registry since revision ${tracked.revision.slice(0, 8)}. Pull or resolve it before pushing.`);
 		}
-		const localHash = await hashPath(localPath);
-		if (!tracked && remoteExists && (deleteRemote || await hashPath(remotePath) !== localHash)) overwriteConflicts.push(artifact);
+		const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);
+		if (!tracked && remoteExists && (deleteRemote || await hashProjectArtifactRemote(runtime, projectKey, artifact) !== localHash)) {
+			overwriteConflicts.push(artifact);
+		}
 		localHashes.set(artifact, localHash);
 	}
 
@@ -1543,18 +1804,18 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 		if (!confirmed) throw new Error(`Project state push cancelled because remote state already exists for: ${names}.`);
 	}
 
-	const rels: string[] = [];
 	for (const { artifact, deleteRemote } of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
 		if (deleteRemote) await fs.rm(remotePath, { recursive: true, force: true });
+		else if (artifact === "tasks") await replaceRemoteTaskBundle(ctx.cwd, runtime, projectKey);
 		else await replaceResource(localPath, remotePath);
-		rels.push(projectArtifactRelativePath(projectKey, artifact));
 	}
-	await runGit(pi, runtime.cacheDir, ["add", "-A", "--", ...rels]);
-	const changed = (await runGit(pi, runtime.cacheDir, ["status", "--porcelain", "--", ...rels])).stdout.trim();
+	const projectRel = `${REGISTRY_PROJECTS_DIR}/${projectKey}`;
+	await runGit(pi, runtime.cacheDir, ["add", "-A", "--", projectRel]);
+	const changed = (await runGit(pi, runtime.cacheDir, ["status", "--porcelain", "--", projectRel])).stdout.trim();
 	if (changed) {
-		await runGit(pi, runtime.cacheDir, ["commit", "-m", `Sync project state ${projectKey}`, "--", ...rels]);
+		await runGit(pi, runtime.cacheDir, ["commit", "-m", `Sync project state ${projectKey}`, "--", projectRel]);
 		try {
 			await runGit(pi, runtime.cacheDir, ["push", "-u", "origin", runtime.branch], { timeout: 180_000 });
 		} catch (error) {
@@ -1568,8 +1829,7 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 			removedArtifacts.push(artifact);
 			continue;
 		}
-		const rel = projectArtifactRelativePath(projectKey, artifact);
-		const revision = await pathRevision(pi, runtime, rel);
+		const revision = await projectArtifactRevision(pi, runtime, projectKey, artifact);
 		if (!revision) throw new Error(`Cannot determine registry revision for project ${artifact} state.`);
 		await recordProjectProvenance(ctx, runtime, projectKey, artifact, revision, localHashes.get(artifact)!);
 	}
@@ -1599,16 +1859,15 @@ async function pullProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	for (const artifact of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
-		const rel = projectArtifactRelativePath(projectKey, artifact);
 		const tracked = provenance.projectResources[artifact];
 		if (tracked && (tracked.remote !== runtime.remote || tracked.branch !== runtime.branch || tracked.projectKey !== projectKey)) {
 			throw new Error(`${artifact} state is tracked under another registry/branch/project key. Run /${COMMAND} status before pulling.`);
 		}
-		const remoteRevision = await pathRevision(pi, runtime, rel);
+		const remoteRevision = await projectArtifactRevision(pi, runtime, projectKey, artifact);
 		if (!remoteRevision) throw new Error(`Cannot determine registry revision for project ${artifact} state.`);
-		const remoteHash = await hashPath(remotePath);
+		const remoteHash = await hashProjectArtifactRemote(runtime, projectKey, artifact);
 		if (await pathExists(localPath)) {
-			const localHash = await hashPath(localPath);
+			const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);
 			if (tracked && localHash !== tracked.hash) {
 				throw new Error(`Project ${artifact} state has local changes. Push or resolve them before pulling.`);
 			}
@@ -1630,9 +1889,11 @@ async function pullProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	for (const artifact of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
-		await replaceResource(remotePath, localPath);
+		if (artifact === "tasks") await replaceLocalTaskBundle(ctx.cwd, runtime, projectKey);
+		else await replaceResource(remotePath, localPath);
 		const item = metadata.get(artifact)!;
-		await recordProjectProvenance(ctx, runtime, projectKey, artifact, item.remoteRevision, item.remoteHash);
+		const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);
+		await recordProjectProvenance(ctx, runtime, projectKey, artifact, item.remoteRevision, localHash);
 	}
 	notify(ctx, `Pulled ${targets.join(" + ")} for ${projectKey}. Reloading project state…`);
 	await reloadAfterResourceChange(ctx);

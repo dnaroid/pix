@@ -45,10 +45,14 @@ Show image and video attachments in the desktop composer and transcript, while k
   when image prompting is supported.
 - Pasted images use their clipboard bytes. Other pasted files are copied to the Pix cache first so the agent receives a usable local path.
 - A prompt may contain text, attachments, or both.
-- Creating a project task from the composer persists path-backed attachments as
-  task description markers. A pathless image is first materialized into the
-  project's `.pi/task-attachments` storage, then persisted through the same
-  marker format, so task creation never silently drops an attachment.
+- Creating a project task persists attachments into the project's
+  `.pi/task-attachments` storage before writing task description markers. This
+  includes path-backed composer files, so a task never depends on Pix's expiring
+  general attachment cache or on the original selected file remaining in place.
+  Pathless images are materialized into the same storage from their image bytes.
+- Successful task-document writes prune project-owned task attachments that no
+  longer have any task-description marker. Files referenced by another task are
+  retained until that final reference is removed.
 - Loaded sessions replay persisted images as previews. Persisted resource-link markers are restored as file/video attachments when their local paths remain available.
 - Attachment failures leave the composer contents intact and surface the existing error banner.
 
@@ -61,8 +65,11 @@ Show image and video attachments in the desktop composer and transcript, while k
   link in the persisted prompt surface.
 - Resource links are persisted in Pi text as Pix attachment markers containing a file URI.
 - Project-task capture uses the same marker encoding. The Tauri
-  `cache_task_attachment` command provides a workspace-confined path for any
-  pathless composer image before the task document is written.
+  `cache_task_attachment` command persists pathless image bytes and
+  `persist_task_attachment` copies already-approved path-backed files into the
+  workspace-confined task storage before the task document is written.
+- Task attachment garbage collection is workspace-confined to regular files in
+  `.pi/task-attachments` and runs only after `tasks.jsonc` replacement succeeds.
 - The Tauri shell exposes bounded attachment inspection/read/cache commands and an approved-path opener command.
 - Dialog and drop selections are admitted through Tauri's dynamic asset scope, then persisted in Pix's approved attachment registry for session replay.
 
@@ -107,7 +114,9 @@ Show image and video attachments in the desktop composer and transcript, while k
 
 ## Risks / unknowns
 
-- Cached clipboard files expire after seven days, can be removed by the operating system, and then cannot be reopened from old sessions.
+- Cached clipboard files used only by chat expire after seven days and can be
+  removed by the operating system. Project tasks do not retain references to
+  that expiring cache after successful task persistence.
 - A previously approved external path can later point to different contents if another process replaces that file.
 
 ## Evidence
@@ -115,7 +124,8 @@ Show image and video attachments in the desktop composer and transcript, while k
 - Confirmed by code: `desktop/src/app/prompt-payload.ts::buildPromptPayload`
   distinguishes path-backed images from pathless clipboard images; ACP
   materializes the private file-image metadata before prompting Pi.
-- Confirmed by code: composer-to-task capture materializes any pathless image
-  through `cache_task_attachment` before writing task attachment markers.
+- Confirmed by code: composer-to-task capture materializes pathless images
+  through `cache_task_attachment` and copies path-backed files through
+  `persist_task_attachment` before writing task attachment markers.
 - Confirmed by docs: ACP resource links are baseline prompt content; Tauri's asset protocol serves local media and the opener plugin opens paths with the default application.
 - Confirmed by user: files should be added by picker, drag-and-drop, and paste; non-image files should be passed to the agent by local path.

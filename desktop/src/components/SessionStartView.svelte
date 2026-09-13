@@ -40,7 +40,7 @@
     <header class="shrink-0 bg-background px-2.5 pt-2.5 pb-2">
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-xs font-semibold text-foreground">Open a conversation</h2>
-        <span class="text-[10px] text-muted-foreground">or start typing below</span>
+        <span class="text-[11px] text-muted-foreground">or start typing below</span>
       </div>
       <label class="relative mt-2 block">
         <span class="sr-only">Search saved conversations</span>
@@ -63,7 +63,7 @@
           onclick={() => onSelect(session.sessionId)}
         >
           <strong class="min-w-0 truncate text-[11px] font-medium text-foreground">{session.title || "Untitled conversation"}</strong>
-          <small class="shrink-0 font-mono text-[9px] text-muted-foreground">{displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}</small>
+          <small class="shrink-0 font-mono text-[10px] text-muted-foreground">{displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}</small>
         </button>
       {:else}
         <p class="px-3 py-6 text-center text-[11px] text-muted-foreground">

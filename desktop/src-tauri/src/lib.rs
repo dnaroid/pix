@@ -1252,6 +1252,62 @@ async fn cache_task_attachment(
 }
 
 #[tauri::command]
+async fn persist_task_attachment(
+    app: AppHandle,
+    workspace: String,
+    path: String,
+) -> Result<AttachmentFile, String> {
+    run_blocking(move || {
+        let state = app.state::<AttachmentPathState>();
+        let source = state.approved_path(&app, Path::new(&path))?;
+        let source_file = attachment_file(&source)?;
+        if source_file.size > MAX_ATTACHMENT_BYTES {
+            return Err(format!(
+                "{} is too large to persist in a task (maximum 25 MB)",
+                source_file.name,
+            ));
+        }
+
+        let root = canonical_workspace(Path::new(&workspace))?;
+        let project_dir = root.join(".pi");
+        if !project_dir.exists() {
+            fs::create_dir(&project_dir)
+                .map_err(|error| format!("failed to create {}: {error}", project_dir.display()))?;
+        }
+        let project_dir = canonical_project_directory(&root, &project_dir)?;
+        let directory = project_dir.join("task-attachments");
+        if !directory.exists() {
+            fs::create_dir(&directory)
+                .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
+        }
+        let directory = canonical_project_directory(&root, &directory)?;
+
+        if source.starts_with(&directory) {
+            return attachment_file(&source);
+        }
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = ATTACHMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let target = directory.join(format!(
+            "{stamp}-{sequence}-{}",
+            safe_file_name(&source_file.name),
+        ));
+        fs::copy(&source, &target).map_err(|error| {
+            format!(
+                "failed to persist task attachment {}: {error}",
+                source_file.name,
+            )
+        })?;
+        let canonical = state.approve_cached(&app, &target)?;
+        attachment_file(&canonical)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn open_attachment(app: AppHandle, path: String) -> Result<(), String> {
     run_blocking(move || {
         let approved = app
@@ -6517,8 +6573,108 @@ fn write_project_tasks_to(workspace: &Path, document: &ProjectTaskDocument) -> R
     })();
     if write_result.is_err() {
         let _ = fs::remove_file(&temporary);
+    } else if let Err(error) = prune_unreferenced_task_attachments(&root, &directory, &document) {
+        eprintln!("failed to prune project task attachments after task save: {error}");
     }
     write_result
+}
+
+fn prune_unreferenced_task_attachments(
+    root: &Path,
+    project_directory: &Path,
+    document: &ProjectTaskDocument,
+) -> Result<(), String> {
+    let attachments_path = project_directory.join("task-attachments");
+    if !attachments_path.exists() {
+        return Ok(());
+    }
+    let attachments_metadata = fs::symlink_metadata(&attachments_path).map_err(|error| {
+        format!("failed to inspect {}: {error}", attachments_path.display())
+    })?;
+    if attachments_metadata.file_type().is_symlink() || !attachments_metadata.is_dir() {
+        return Err(".pi/task-attachments must be a project-owned directory".to_owned());
+    }
+    let attachments_directory = canonical_project_directory(root, &attachments_path)?;
+    let descriptions = document
+        .tasks
+        .iter()
+        .filter_map(|task| task.description.as_deref())
+        .collect::<Vec<_>>();
+
+    for entry in fs::read_dir(&attachments_directory).map_err(|error| {
+        format!(
+            "failed to inspect {}: {error}",
+            attachments_directory.display(),
+        )
+    })? {
+        let entry = entry.map_err(|error| format!("failed to inspect task attachment: {error}"))?;
+        let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+            format!("failed to inspect {}: {error}", entry.path().display())
+        })?;
+        if !metadata.file_type().is_file() {
+            continue;
+        }
+        let marker = task_attachment_marker(&entry.path());
+        if descriptions.iter().any(|description| description.contains(&marker)) {
+            continue;
+        }
+        fs::remove_file(entry.path()).map_err(|error| {
+            format!("failed to remove orphan task attachment {}: {error}", entry.path().display())
+        })?;
+    }
+    Ok(())
+}
+
+fn task_attachment_marker(path: &Path) -> String {
+    format!("[Pix attachment: {}]", file_uri_from_path(path))
+}
+
+fn file_uri_from_path(path: &Path) -> String {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    if let Some(network_path) = normalized.strip_prefix("//") {
+        let mut parts = network_path.split('/');
+        let host = parts.next().unwrap_or_default();
+        let encoded = parts.map(encode_uri_component).collect::<Vec<_>>().join("/");
+        return format!("file://{host}/{encoded}");
+    }
+    let absolute = if normalized.starts_with('/') {
+        normalized
+    } else {
+        format!("/{normalized}")
+    };
+    let encoded = absolute
+        .split('/')
+        .enumerate()
+        .map(|(index, segment)| {
+            if index == 1 && is_windows_drive_segment(segment) {
+                segment.to_owned()
+            } else {
+                encode_uri_component(segment)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("file://{encoded}")
+}
+
+fn is_windows_drive_segment(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+fn encode_uri_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(*byte, b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')')
+        {
+            encoded.push(*byte as char);
+        } else {
+            use std::fmt::Write as _;
+            let _ = write!(&mut encoded, "%{byte:02X}");
+        }
+    }
+    encoded
 }
 
 fn canonical_workspace(workspace: &Path) -> Result<PathBuf, String> {
@@ -7199,6 +7355,7 @@ pub fn run() {
             read_attachment_base64,
             cache_attachment,
             cache_task_attachment,
+            persist_task_attachment,
             open_attachment,
             open_local_file,
             read_project_file,
@@ -8362,6 +8519,40 @@ mod tests {
         assert!(!workspace.join(".pi/tasks.json").exists());
         let actual = read_project_tasks_from(&workspace, 1024 * 1024).expect("read tasks");
         assert_eq!(actual, expected);
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn task_writes_prune_only_unreferenced_project_owned_attachments() {
+        let workspace = temporary_workspace("task-attachment-prune");
+        let attachments = workspace.join(".pi/task-attachments");
+        fs::create_dir_all(&attachments).expect("create task attachments directory");
+        let kept = attachments.join("100-1-kept.png");
+        let orphan = attachments.join("100-2-orphan.png");
+        fs::write(&kept, b"kept").expect("write kept task attachment");
+        fs::write(&orphan, b"orphan").expect("write orphan task attachment");
+
+        let mut document = sample_task_document();
+        document.tasks[0].description = Some(format!(
+            "Keep this image.\n\n{}",
+            task_attachment_marker(&kept),
+        ));
+        let mut second = document.tasks[0].clone();
+        second.id = "task-2".to_owned();
+        second.title = "Second task".to_owned();
+        document.tasks.push(second);
+
+        write_project_tasks_to(&workspace, &document).expect("write tasks with shared attachment");
+        assert!(kept.is_file());
+        assert!(!orphan.exists());
+
+        document.tasks.remove(0);
+        write_project_tasks_to(&workspace, &document).expect("write after deleting one shared task");
+        assert!(kept.is_file());
+
+        document.tasks.clear();
+        write_project_tasks_to(&workspace, &document).expect("write after deleting last referencing task");
+        assert!(!kept.exists());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

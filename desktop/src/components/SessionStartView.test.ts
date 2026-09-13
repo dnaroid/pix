@@ -22,7 +22,7 @@ describe("SessionStartView", () => {
     expect(source).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(source).toContain("min-h-0 overflow-y-auto");
     expect(source).toContain("grid h-7 w-full grid-cols-[minmax(0,1fr)_auto]");
-    expect(source).toContain("shrink-0 font-mono text-[9px]");
+    expect(source).toContain("shrink-0 font-mono text-[10px]");
   });
 
   it("is shown only for the UI-only draft tab and excludes sessions already represented by tabs", () => {

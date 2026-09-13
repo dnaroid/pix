@@ -151,7 +151,7 @@
             {#if item.description}<small class={["mt-0.5 block truncate text-[11px] text-muted-foreground", picker.command !== "commands" && "font-mono"]}>{item.description}</small>{/if}
           </span>
           {#if item.shortcut}
-            <kbd class="rounded-sm border border-border/70 bg-panel px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">{item.shortcut}</kbd>
+            <kbd class="rounded-sm border border-border/70 bg-panel px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">{item.shortcut}</kbd>
           {:else}
             <span aria-hidden="true"></span>
           {/if}

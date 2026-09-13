@@ -114,7 +114,7 @@
   <div bind:this={root} class="flex min-w-0 items-center gap-1" data-runtime-status>
     <div class="relative shrink-0">
       <button
-        class="flex h-6 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[10px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+        class="flex h-6 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[11px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
         type="button"
         title={contextTitle()}
         aria-label={contextTitle()}
@@ -123,7 +123,7 @@
         aria-controls="runtime-dcp-popover"
         onclick={toggleDcp}
       >
-        <span class="font-sans text-[10px] text-muted-foreground max-[860px]:hidden">Context</span>
+        <span class="font-sans text-[11px] text-muted-foreground max-[860px]:hidden">Context</span>
         <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
         <span class="relative h-1.5 w-10 overflow-hidden rounded-sm bg-border" aria-hidden="true">
           {#if contextTone && contextPercent !== null && contextPercent !== undefined}
@@ -146,7 +146,7 @@
             <div class="min-w-0">
               <div class="text-[11px] font-medium text-foreground">DCP session statistics</div>
               {#if status.context}
-                <div class="mt-0.5 truncate font-mono text-[9px] text-muted-foreground">
+                <div class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
                   Context {status.context.percent === null ? "unknown" : `${Math.round(status.context.percent)}%`}
                   {#if status.context.tokens !== null}
                     · {formatCompactTokens(status.context.tokens)} / {formatCompactTokens(status.context.contextWindow)}
@@ -155,7 +155,7 @@
               {/if}
             </div>
             <button
-              class="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border border-border bg-transparent px-2 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
+              class="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border border-border bg-transparent px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
               type="button"
               title={compressionTitle()}
               aria-label="Compress stale context with DCP"
@@ -174,14 +174,14 @@
           </header>
           <div class="max-h-[min(420px,55vh)] overflow-y-auto px-3 py-2.5">
             {#if dcpBody}
-              <pre class="select-text whitespace-pre-wrap font-mono text-[10px] leading-[1.55] text-muted-foreground">{dcpBody}</pre>
+              <pre class="select-text whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground">{dcpBody}</pre>
             {:else if loadingDcpStats}
-              <div class="flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground" aria-live="polite">
+              <div class="flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground" aria-live="polite">
                 <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
                 <span>Loading DCP telemetry…</span>
               </div>
             {:else}
-              <p class="text-[10px] leading-4 text-muted-foreground">DCP telemetry is not available for this session yet.</p>
+              <p class="text-[11px] leading-4 text-muted-foreground">DCP telemetry is not available for this session yet.</p>
             {/if}
           </div>
         </div>
@@ -190,7 +190,7 @@
 
     {#if status.modelUsage}
       <button
-        class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[10px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-55"
+        class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[11px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-55"
         type="button"
         title="Refresh model usage limits"
         aria-label="Refresh model usage limits"
@@ -198,7 +198,7 @@
         disabled={!canRefreshModelUsage || refreshingModelUsage}
         onclick={onRefreshModelUsage}
       >
-        <span class="font-sans text-[10px] text-muted-foreground max-[900px]:hidden">Usage</span>
+        <span class="font-sans text-[11px] text-muted-foreground max-[900px]:hidden">Usage</span>
         {#if status.modelUsage.accountEmail}
           <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{status.modelUsage.accountEmail}</span>
         {/if}

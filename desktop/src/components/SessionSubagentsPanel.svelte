@@ -56,7 +56,7 @@
       <div>
         {#each runs as run (run.runDir)}
           <section aria-label={`Subagent run ${sessionSubagentRunName(run.runDir)}`}>
-            <h3 class="truncate border-b border-border bg-chrome/45 px-2.5 py-1 font-mono text-[10px] font-medium text-muted-foreground" title={run.runDir}>
+            <h3 class="truncate border-b border-border bg-chrome/45 px-2.5 py-1 font-mono text-[11px] font-medium text-muted-foreground" title={run.runDir}>
               {sessionSubagentRunName(run.runDir)}
             </h3>
             <div>
@@ -72,11 +72,11 @@
                     <div class="min-w-0 flex-1">
                       <div class="flex min-w-0 items-center gap-2">
                         <h4 class="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold leading-4 text-foreground" title={agent.id}>{agent.id}</h4>
-                        <span class={["shrink-0 text-[10px] font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
-                        <span class="shrink-0 font-mono text-[10px] text-muted-foreground">{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
+                        <span class={["shrink-0 text-[11px] font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
+                        <span class="shrink-0 font-mono text-[11px] text-muted-foreground">{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                       </div>
-                      <p class="mt-0.5 line-clamp-2 break-words text-[11px] leading-3.5 text-muted-foreground">{task}</p>
-                      <div class="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <p class="mt-0.5 line-clamp-2 break-words text-[11px] leading-4 text-muted-foreground">{task}</p>
+                      <div class="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
                         <span class="shrink-0 font-mono">{sessionSubagentModelLabel(preview)}</span>
                         {#if agent.lastActivity}
                           <span class="text-muted-foreground/50">·</span>

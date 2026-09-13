@@ -634,7 +634,6 @@ class WatchAllSupervisor {
 			if (this.activeCommand === child) this.activeCommand = undefined;
 		}
 		if (result.code !== 0) {
-			process.stderr.write("\u0007");
 			console.error(formatCommandFailureReport(label, result, outputTail));
 			throw new Error(`${label} failed (${result.signal ?? `exit ${result.code}`})`);
 		}

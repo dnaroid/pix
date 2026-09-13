@@ -12,6 +12,7 @@ import {
 import {
   cachePastedAttachment,
   cachePastedTaskAttachment,
+  persistTaskAttachment,
 } from "./attachment-io";
 
 type AttachmentDraftControllerOptions = {
@@ -59,6 +60,8 @@ export function createAttachmentDraftController(options: AttachmentDraftControll
     current: readonly Attachment[],
     paths: readonly string[],
   ): Promise<Attachment[]> {
+    const workspace = options.workspace();
+    if (!workspace) return [...current];
     const existingPaths = new Set(current.flatMap((attachment) => attachment.path ? [attachment.path] : []));
     const available = MAX_ATTACHMENTS - current.length;
     if (available <= 0) {
@@ -69,7 +72,13 @@ export function createAttachmentDraftController(options: AttachmentDraftControll
     if (candidates.length === 0) return [...current];
     try {
       const files = await invoke<AttachmentFile[]>("inspect_attachments", { paths: candidates });
-      const additions = files.map((file) => attachmentFromFile(file, nextAttachmentId()));
+      const additions: Attachment[] = [];
+      for (const file of files) {
+        additions.push(await persistTaskAttachment(
+          attachmentFromFile(file, nextAttachmentId()),
+          workspace,
+        ));
+      }
       if (candidates.length < paths.length) {
         options.setErrorMessage(`Only the first ${MAX_ATTACHMENTS} files were attached.`);
       }

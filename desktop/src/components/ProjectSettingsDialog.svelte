@@ -87,12 +87,12 @@
     <div class="space-y-4 p-4">
       <div class="min-w-0">
         <div class="truncate text-xs font-medium">{projectName(workspace)}</div>
-        <div class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={workspace}>{workspace}</div>
+        <div class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={workspace}>{workspace}</div>
       </div>
 
       <section class="space-y-2" aria-labelledby="project-color-heading">
         <div>
-          <h2 id="project-color-heading" class="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Identity color</h2>
+          <h2 id="project-color-heading" class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Identity color</h2>
           <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Used by the project folder in the activity bar and project switcher.</p>
         </div>
 
@@ -104,7 +104,7 @@
             onclick={() => custom = false}
           >
             <ProjectFolderIcon project={workspace} class="h-4 w-4 shrink-0" />
-            <span class="min-w-0"><strong class="block text-[11px] font-medium">Automatic</strong><small class="block truncate text-[10px] text-muted-foreground">From project path</small></span>
+            <span class="min-w-0"><strong class="block text-[11px] font-medium">Automatic</strong><small class="block truncate text-[11px] text-muted-foreground">From project path</small></span>
           </button>
           <button
             class={["flex h-10 items-center gap-2 rounded-md border px-2.5 text-left focus-visible:outline-2 focus-visible:outline-ring", custom ? "border-primary/60 bg-panel-selected" : "border-border bg-background hover:bg-accent"]}
@@ -113,7 +113,7 @@
             onclick={chooseCustom}
           >
             <span class="h-4 w-4 shrink-0 rounded-sm border border-border" style:background-color={normalizedColor ?? "#7aa2f7"}></span>
-            <span class="min-w-0"><strong class="block text-[11px] font-medium">Custom</strong><small class="block truncate text-[10px] text-muted-foreground">Workspace override</small></span>
+            <span class="min-w-0"><strong class="block text-[11px] font-medium">Custom</strong><small class="block truncate text-[11px] text-muted-foreground">Workspace override</small></span>
           </button>
         </div>
 
@@ -140,12 +140,12 @@
             </label>
           </div>
           {#if !normalizedColor}
-            <p class="text-[10px] text-tool-error">Use #RGB, #RGBA, #RRGGBB, or #RRGGBBAA.</p>
+            <p class="text-[11px] text-tool-error">Use #RGB, #RGBA, #RRGGBB, or #RRGGBBAA.</p>
           {/if}
         {/if}
       </section>
 
-      <p class="font-mono text-[10px] text-muted-foreground">.pi/workspace.jsonc</p>
+      <p class="font-mono text-[11px] text-muted-foreground">.pi/workspace.jsonc</p>
       {#if error}<p class="rounded-md border border-tool-error/30 bg-tool-error/5 px-2.5 py-2 text-[11px] leading-4 text-tool-error">{error}</p>{/if}
     </div>
 

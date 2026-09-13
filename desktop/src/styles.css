@@ -298,9 +298,11 @@ button, select, textarea, input { letter-spacing: inherit; }
 ) {
   cursor: pointer;
 }
-:focus-visible {
-  outline: none;
-  --tw-ring-shadow: 0 0 #0000;
+@layer base {
+  :focus-visible {
+    outline: none;
+    --tw-ring-shadow: 0 0 #0000;
+  }
 }
 ::selection {
   color: var(--selection-foreground);

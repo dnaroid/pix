@@ -24,8 +24,8 @@
     <header class="flex min-w-0 items-center gap-2 border-b border-code-border bg-panel px-3 py-2 font-mono text-[11px]">
       <FileDiff class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <strong class="min-w-0 flex-1 truncate font-medium text-foreground">{model.path ?? label}</strong>
-      <span class="shrink-0 text-status">+{model.additions}</span>
-      <span class="diff-deletions shrink-0">−{model.deletions}</span>
+      <span class="shrink-0 text-tool-success">+{model.additions}</span>
+      <span class="diff-deletions shrink-0 text-tool-error">−{model.deletions}</span>
     </header>
   {/if}
 
@@ -60,18 +60,18 @@
   }
 
   .diff-row.added {
-    background: color-mix(in srgb, var(--status) 13%, transparent);
-    color: color-mix(in srgb, var(--status) 82%, var(--foreground));
+    background: color-mix(in srgb, var(--tool-success) 13%, transparent);
+    color: color-mix(in srgb, var(--tool-success) 82%, var(--foreground));
   }
 
   .diff-row.removed {
-    background: color-mix(in srgb, var(--primary) 12%, transparent);
-    color: color-mix(in srgb, var(--primary) 78%, var(--foreground));
+    background: color-mix(in srgb, var(--tool-error) 12%, transparent);
+    color: color-mix(in srgb, var(--tool-error) 82%, var(--foreground));
   }
 
   .diff-row.hunk {
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--tool-info) 8%, transparent);
+    color: var(--tool-info);
   }
 
   .diff-row.meta {
@@ -94,6 +94,6 @@
   }
 
   .diff-deletions {
-    color: color-mix(in srgb, var(--primary) 78%, var(--foreground));
+    color: var(--tool-error);
   }
 </style>

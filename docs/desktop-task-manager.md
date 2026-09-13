@@ -56,9 +56,10 @@ agent's session-local todo list.
    controls. Status uses icon, text, and color rather than color alone.
 4. Manual creation through the task editor still requires a non-empty title.
    Tasks start with status `todo` and priority `medium`, and may include
-   description text and attachments. Existing untitled composer-captured tasks
-   may be edited without inventing a title as long as description content or
-   attachments remain.
+   description text and attachments. Newly selected/pasted task attachments are
+   persisted into `.pi/task-attachments` so the task owns its files. Existing
+   untitled composer-captured tasks may be edited without inventing a title as
+   long as description content or attachments remain.
 5. Editing changes title, description, and type. Status is changed separately.
    Existing persisted priority is preserved.
 6. `.pi/tasks.jsonc` is authoritative. Missing `.pi`/task storage produces an
@@ -76,13 +77,17 @@ agent's session-local todo list.
     Voice input is finalized first. The resulting task has an empty persisted
     title, type `feature`, status `todo`, priority `medium`, and stores the
     composer text plus attachment markers in its description. The prompt is not
-    sent to the agent. Pathless composer images are materialized into
-    `.pi/task-attachments` before those markers are written.
+    sent to the agent. Composer attachments are persisted into
+    `.pi/task-attachments` before those markers are written; path-backed files
+    are copied there and pathless images are materialized from their bytes.
 12. After composer task persistence succeeds, Pix expands/selects the Tasks
     sidebar view, scrolls the newly created task into view, highlights it, and
     clears the composer only if the draft is still the exact draft that was
     captured for task creation. A failed save or edits made while the save is in
     flight preserve the composer.
+13. After a task-document write succeeds, Pix prunes regular files from
+    `.pi/task-attachments` that are no longer referenced by any remaining task.
+    Shared attachments stay on disk until the last task reference is removed.
 
 ## Contracts
 
@@ -105,8 +110,13 @@ agent's session-local todo list.
 - Failed persistence restores the previous in-memory task document.
 - Composer task creation never clears a newer draft that changed while task
   persistence was in flight.
-- Composer attachments are persisted through the same task-description marker
-  format used by the task editor, so running the task restores those attachments.
+- Task attachments are persisted through the same task-description marker
+  format used by the task editor, and newly attached files are owned by the
+  project's `.pi/task-attachments` storage so running the task restores them
+  without depending on the expiring chat cache or original source path.
+- Attachment cleanup runs only after the replacement `tasks.jsonc` has been
+  committed successfully. Cleanup is reference-based across the complete task
+  document and never deletes paths outside `.pi/task-attachments`.
 - A task is linked to at most one session.
 - Running/reordering/editing is disabled while conflicting task/session work is
   active.

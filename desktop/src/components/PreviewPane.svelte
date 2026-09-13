@@ -164,7 +164,7 @@
       {/if}
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
       {#if file && lineRange}
-        <span class="shrink-0 rounded border border-tool-warning/30 bg-tool-warning/10 px-1.5 py-0.5 font-mono text-[10px] text-tool-warning">
+        <span class="shrink-0 rounded border border-tool-warning/30 bg-tool-warning/10 px-1.5 py-0.5 font-mono text-[11px] text-tool-warning">
           L{lineRange.startLine}{lineRange.endLine === lineRange.startLine ? "" : `–${lineRange.endLine}`}
         </span>
       {/if}

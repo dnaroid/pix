@@ -51,6 +51,18 @@ async function cacheTaskAttachmentBytes(
   });
 }
 
+export async function persistTaskAttachment(
+  attachment: Attachment,
+  workspace: string,
+): Promise<Attachment> {
+  if (!attachment.path) return attachment;
+  const stored = await invoke<AttachmentFile>("persist_task_attachment", {
+    workspace,
+    path: attachment.path,
+  });
+  return { ...attachment, path: stored.path, size: stored.size };
+}
+
 export async function materializeComposerTaskAttachments(
   attachments: readonly Attachment[],
   workspace: string,
@@ -60,7 +72,7 @@ export async function materializeComposerTaskAttachments(
   const stored: Attachment[] = [];
   for (const attachment of attachments) {
     if (attachment.path) {
-      stored.push(attachment);
+      stored.push(await persistTaskAttachment(attachment, workspace));
       continue;
     }
 

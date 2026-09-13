@@ -244,10 +244,10 @@
     <div class="min-w-0">
       <div class="flex items-center gap-1.5">
         <span class="text-[11px] font-medium text-foreground">{activeKind === "pix" ? "Pix configuration" : "Pi Tools Suite"}</span>
-        {#if active && !active.exists}<span class="rounded border border-border px-1 py-0.5 text-[10px] text-muted-foreground">new file</span>{/if}
-        {#if dirty}<span class="ml-auto text-[10px] font-medium text-tool-warning">Unsaved</span>{/if}
+        {#if active && !active.exists}<span class="rounded border border-border px-1 py-0.5 text-[11px] text-muted-foreground">new file</span>{/if}
+        {#if dirty}<span class="ml-auto text-[11px] font-medium text-tool-warning">Unsaved</span>{/if}
       </div>
-      <div class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={active?.path}>{active?.path ?? "Resolving config path…"}</div>
+      <div class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={active?.path}>{active?.path ?? "Resolving config path…"}</div>
     </div>
     {#if !rawMode}
       <label class="relative block">
@@ -288,7 +288,7 @@
             <section class="py-2" aria-label={section.title}>
               <div class="px-2.5 pb-1.5">
                 <h3 class="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">{section.title}</h3>
-                {#if section.description}<p class="mt-0.5 text-[10px] leading-4 text-muted-foreground/80">{section.description}</p>{/if}
+                {#if section.description}<p class="mt-0.5 text-[11px] leading-4 text-muted-foreground/80">{section.description}</p>{/if}
               </div>
               <div class="divide-y divide-sidebar-border/70 border-y border-sidebar-border/70 bg-panel">
                 {#each section.fields as field (formatSettingsPath(field.path))}
@@ -302,13 +302,13 @@
                         <div class="flex items-baseline gap-1.5">
                           <label class="text-[11px] font-medium text-foreground" for={`setting-${formatSettingsPath(field.path)}`}>{field.label}</label>
                           {#if !hasValue}
-                            <span class="text-[9px] text-muted-foreground/65">
+                            <span class="text-[10px] text-muted-foreground">
                               {defaultValue.exists ? `default · ${formatSettingsDefaultValue(defaultValue.value)}` : "unset"}
                             </span>
                           {/if}
                         </div>
-                        <div class="mt-0.5 font-mono text-[9px] text-muted-foreground/65">{formatSettingsPath(field.path)}</div>
-                        {#if field.description}<p class="mt-1 text-[10px] leading-4 text-muted-foreground">{field.description}</p>{/if}
+                        <div class="mt-0.5 font-mono text-[10px] text-muted-foreground">{formatSettingsPath(field.path)}</div>
+                        {#if field.description}<p class="mt-1 text-[11px] leading-4 text-muted-foreground">{field.description}</p>{/if}
                       </div>
                       {#if hasValue}
                         <button
@@ -402,7 +402,7 @@
                         <textarea
                           id={`setting-${formatSettingsPath(field.path)}`}
                           class={[
-                            "min-h-16 w-full resize-none rounded-md border border-input bg-panel-strong px-2 py-1.5 font-mono text-[10px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:ring-2 focus-visible:ring-ring/30",
+                            "min-h-16 w-full resize-none rounded-md border border-input bg-panel-strong px-2 py-1.5 font-mono text-[11px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:ring-2 focus-visible:ring-ring/30",
                             hasValue ? "text-foreground" : "text-muted-foreground",
                           ]}
                           value={formatSettingValueForList(effectiveValue)}
@@ -414,7 +414,7 @@
                         <textarea
                           id={`setting-${formatSettingsPath(field.path)}`}
                           class={[
-                            "min-h-20 w-full resize-none rounded-md border border-code-border bg-code px-2 py-1.5 font-mono text-[10px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20",
+                            "min-h-20 w-full resize-none rounded-md border border-code-border bg-code px-2 py-1.5 font-mono text-[11px] leading-4 outline-none placeholder:text-muted-foreground/65 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20",
                             hasValue ? "text-foreground" : "text-muted-foreground",
                           ]}
                           value={formatSettingJson(effectiveValue)}
@@ -437,7 +437,7 @@
                             }
                           }}
                         ></textarea>
-                        <div class="mt-1 text-[9px] text-muted-foreground/65">Structured fallback · use raw JSONC mode to preserve comments inside this value.</div>
+                        <div class="mt-1 text-[11px] text-muted-foreground">Structured fallback · use raw JSONC mode to preserve comments inside this value.</div>
                       {/if}
                     </div>
                   </div>
@@ -452,13 +452,13 @@
 
   <div class="border-t border-sidebar-border bg-chrome px-2.5 py-2">
     {#if error}
-      <div class="mb-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2 py-1.5 text-[10px] leading-4 text-tool-error">{error}</div>
+      <div class="mb-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2 py-1.5 text-[11px] leading-4 text-tool-error">{error}</div>
     {/if}
     {#if active && issues.length > 0}
-      <div class="mb-2 flex items-start gap-1.5 text-[10px] leading-4 text-tool-error"><TriangleAlert class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{issues[0]}{issues.length > 1 ? ` · ${issues.length - 1} more` : ""}</span></div>
+      <div class="mb-2 flex items-start gap-1.5 text-[11px] leading-4 text-tool-error"><TriangleAlert class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{issues[0]}{issues.length > 1 ? ` · ${issues.length - 1} more` : ""}</span></div>
     {/if}
     <div class="flex items-center gap-2">
-      <span class="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">Changes may require a new or reloaded session.</span>
+      <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">Changes may require a new or reloaded session.</span>
       <button
         class="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         type="button"

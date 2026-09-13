@@ -66,15 +66,15 @@
               </span>
               <div class="min-w-0 flex-1">
                 <h3 class={["break-words text-[11px] font-medium leading-4 text-foreground", task.status === "completed" && "line-through"]}>
-                  <span class="mr-1 font-mono text-[10px] text-muted-foreground">#{task.id}</span>{task.subject}
+                  <span class="mr-1 font-mono text-[11px] text-muted-foreground">#{task.id}</span>{task.subject}
                 </h3>
                 {#if task.status === "in_progress" && task.activeForm}
-                  <p class="mt-0.5 line-clamp-2 break-words text-[10px] leading-3.5 text-tool-warning">{task.activeForm}</p>
+                  <p class="mt-0.5 line-clamp-2 break-words text-[11px] leading-4 text-tool-warning">{task.activeForm}</p>
                 {:else if task.description}
-                  <p class="mt-0.5 line-clamp-2 break-words text-[10px] leading-3.5 text-muted-foreground">{task.description}</p>
+                  <p class="mt-0.5 line-clamp-2 break-words text-[11px] leading-4 text-muted-foreground">{task.description}</p>
                 {/if}
                 {#if task.thinking || task.owner || task.blockedBy?.length}
-                  <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+                  <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
                     {#if task.thinking}<span class="inline-flex items-center gap-1"><Brain class="h-2.5 w-2.5" aria-hidden="true" />{task.thinking}</span>{/if}
                     {#if task.owner}<span class="inline-flex min-w-0 items-center gap-1"><UserRound class="h-2.5 w-2.5 shrink-0" aria-hidden="true" /><span class="truncate">{task.owner}</span></span>{/if}
                     {#if task.blockedBy?.length}<span class="text-tool-warning">Blocked by {task.blockedBy.map((id) => `#${id}`).join(", ")}</span>{/if}

@@ -341,7 +341,7 @@
             <small class="mt-0.5 block truncate text-[11px] text-muted-foreground">{model.name}</small>
           </span>
           {#if model.current}
-            <span class="shrink-0 text-[10px] font-medium text-muted-foreground">{visibilityMode ? "current · required" : "current"}</span>
+            <span class="shrink-0 text-[11px] font-medium text-muted-foreground">{visibilityMode ? "current · required" : "current"}</span>
           {/if}
         </button>
       {:else}

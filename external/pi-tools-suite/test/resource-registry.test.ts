@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import resourceRegistry, { __test } from "../src/resource-registry/index.js";
 
@@ -534,6 +535,58 @@ describe("resource registry", () => {
 		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
 		expect(h.notices.at(-1)?.message).toContain("has local changes");
 		expect(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8")).toContain("local change");
+	});
+
+	test("syncs task attachments as a portable project bundle and tracks attachment changes", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		const attachments = path.join(project, ".pi", "task-attachments");
+		fs.mkdirSync(attachments, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		const { remote, seed } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("project-key task-assets", h.ctx);
+		const attachmentName = "100-1-shot.png";
+		const attachment = path.join(attachments, attachmentName);
+		fs.writeFileSync(attachment, Buffer.from([1, 2, 3, 4]));
+		const marker = `[Pix attachment: ${pathToFileURL(attachment).href}]`;
+		fs.writeFileSync(
+			path.join(project, ".pi", "tasks.jsonc"),
+			`// portable task bundle\n${JSON.stringify({ version: 1, tasks: [{ id: "task-1", description: marker }] }, null, 2)}\n`,
+		);
+
+		await command.handler("push tasks", h.ctx);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		const remoteTasks = fs.readFileSync(path.join(seed, "projects", "task-assets", "tasks.jsonc"), "utf8");
+		expect(remoteTasks).toContain(`[Pix attachment: pix-task-attachment:${attachmentName}]`);
+		expect(remoteTasks).not.toContain(project);
+		expect(fs.readFileSync(path.join(seed, "projects", "task-assets", "task-attachments", attachmentName))).toEqual(Buffer.from([1, 2, 3, 4]));
+
+		fs.rmSync(path.join(project, ".pi", "tasks.jsonc"));
+		fs.rmSync(attachments, { recursive: true, force: true });
+		await command.handler("pull tasks", h.ctx);
+		const pulledAttachment = path.join(project, ".pi", "task-attachments", attachmentName);
+		const pulledTasks = fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8");
+		expect(fs.readFileSync(pulledAttachment)).toEqual(Buffer.from([1, 2, 3, 4]));
+		expect(pulledTasks).toContain(`[Pix attachment: ${pathToFileURL(pulledAttachment).href}]`);
+		expect(pulledTasks).not.toContain("pix-task-attachment:");
+
+		fs.writeFileSync(pulledAttachment, Buffer.from([9, 8, 7]));
+		await command.handler("status", h.ctx);
+		expect(h.messages.at(-1)?.content).toContain("↑ tasks.jsonc  [PROJECT]  **LOCAL CHANGES**");
+
+		fs.writeFileSync(
+			path.join(project, ".pi", "tasks.jsonc"),
+			`${JSON.stringify({ version: 1, tasks: [{ id: "task-1", description: "No attachment" }] }, null, 2)}\n`,
+		);
+		await command.handler("push tasks", h.ctx);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		expect(fs.existsSync(path.join(seed, "projects", "task-assets", "task-attachments"))).toBe(false);
 	});
 
 	test("treats an empty plans directory as removal of registry plans", async () => {
