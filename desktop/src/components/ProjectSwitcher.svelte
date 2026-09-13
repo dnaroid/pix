@@ -2,7 +2,6 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
-  import Folder from "@lucide/svelte/icons/folder";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import { onDestroy, onMount } from "svelte";
   import {
@@ -41,7 +40,6 @@
 
   let root = $state<HTMLDivElement | null>(null);
   let trigger = $state<HTMLButtonElement | null>(null);
-  let folderSlot = $state<HTMLSpanElement | null>(null);
   let textSlot = $state<HTMLSpanElement | null>(null);
   let chevronSlot = $state<HTMLSpanElement | null>(null);
   let open = $state(false);
@@ -73,23 +71,19 @@
       ? undefined
       : new ResizeObserver(reportMinimumWidth);
     if (trigger) observer?.observe(trigger);
-    if (folderSlot) observer?.observe(folderSlot);
     if (chevronSlot) observer?.observe(chevronSlot);
     void document.fonts?.ready.then(reportMinimumWidth);
     return () => observer?.disconnect();
   });
 
   function reportMinimumWidth(): void {
-    if (!trigger || !folderSlot || !textSlot || !chevronSlot) return;
+    if (!trigger || !textSlot || !chevronSlot) return;
     const style = getComputedStyle(trigger);
     const name = textSlot.querySelector<HTMLElement>("strong");
     const width = projectSwitcherMinimumWidth({
       horizontalPadding: pixelValue(style.paddingLeft) + pixelValue(style.paddingRight),
       gap: pixelValue(style.columnGap || style.gap),
-      fixedWidths: [
-        folderSlot.getBoundingClientRect().width,
-        chevronSlot.getBoundingClientRect().width,
-      ],
+      fixedWidths: [chevronSlot.getBoundingClientRect().width],
       projectNameWidth: name?.scrollWidth ?? 0,
     });
     if (width === reportedMinimumWidth) return;
@@ -230,9 +224,6 @@
     onclick={toggle}
     onkeydown={handleTriggerKeydown}
   >
-    <span bind:this={folderSlot} class="h-4 w-4 shrink-0" aria-hidden="true">
-      <Folder class="h-full w-full text-muted-foreground" aria-hidden="true" />
-    </span>
     <span bind:this={textSlot} class="min-w-0 flex-1">
       <strong class="block truncate text-[11px] font-medium text-foreground">
         {workspace ? projectName(workspace) : "Open project"}

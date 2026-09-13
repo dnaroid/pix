@@ -51,7 +51,8 @@ without blocking desktop interactions.
 - The Project activity-rail icon is neutral and follows the same active/muted
   foreground treatment as the other Activity Bar icons. The active project name
   in the bottom status bar uses the project identity color instead, while its Git
-  branch suffix remains muted. The Project switcher's active row stays neutral;
+  branch suffix remains muted. The Project switcher's active row is text-only
+  before its chevron (no leading folder icon) and stays neutral;
   recent-project folders remain identity-colored so different projects stay easy
   to distinguish.
 - Hovering the compact project/branch identity in the bottom status bar shows

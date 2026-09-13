@@ -29,6 +29,15 @@ describe("ProjectSwitcher project opening actions", () => {
     expect(switcherSource).not.toContain("invoke(");
   });
 
+  it("keeps the active project header text-only before the chevron", () => {
+    const triggerStart = switcherSource.indexOf('bind:this={trigger}');
+    const menuStart = switcherSource.indexOf('{#if open}', triggerStart);
+    const triggerSource = switcherSource.slice(triggerStart, menuStart);
+    expect(triggerSource).not.toContain("ProjectFolderIcon");
+    expect(triggerSource).not.toContain("<Folder");
+    expect(triggerSource).not.toContain("folderSlot");
+  });
+
   it("keeps a visible chevron affordance on the active project row", () => {
     expect(switcherSource).toContain("ChevronDown");
     expect(switcherSource).toContain("border-sidebar-border bg-background/55");
