@@ -15,7 +15,6 @@ external/*/node_modules/
 external/*/.pi/
 external/*/reports/
 external/*/dist/
-CLAUDE.md
 TODO.md
 plans/
 .ruby-lsp/
