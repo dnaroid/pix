@@ -584,6 +584,89 @@ describe("model usage status", () => {
 		});
 	});
 
+	it("aggregates native Antigravity weekly quota across the whole account pool", async () => {
+		const previousClientId = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+		const previousClientSecret = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+		const oldFetch = globalThis.fetch;
+		const now = Date.now();
+		const resetTimes = [
+			now + 3 * 24 * 60 * 60 * 1000,
+			now + 7 * 24 * 60 * 60 * 1000,
+			now + 7 * 24 * 60 * 60 * 1000,
+			now + 6 * 24 * 60 * 60 * 1000,
+			now + 6 * 24 * 60 * 60 * 1000,
+		];
+		const remainingByAccess = new Map([
+			["access-1", 0.2426112],
+			["access-2", 1],
+			["access-3", 1],
+			["access-4", 0],
+			["access-5", 0],
+		]);
+		process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID = "pool-client-id";
+		process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET = "pool-client-secret";
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+			const url = String(input);
+			if (url === "https://oauth2.googleapis.com/token") {
+				const body = new URLSearchParams(String(init?.body ?? ""));
+				const refresh = body.get("refresh_token") ?? "";
+				const index = Number(refresh.replace("refresh-", ""));
+				return Response.json({ access_token: `access-${index}` });
+			}
+			if (url === "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary") {
+				const authorization = new Headers(init?.headers).get("Authorization") ?? "";
+				const access = authorization.replace("Bearer ", "");
+				const remainingFraction = remainingByAccess.get(access);
+				if (remainingFraction === undefined) throw new Error(`Unexpected access token alias: ${access}`);
+				const index = Number(access.replace("access-", "")) - 1;
+				return Response.json({
+					groups: [{
+						buckets: [{
+							bucketId: "gemini-weekly",
+							window: "weekly",
+							remainingFraction,
+							resetTime: new Date(resetTimes[index] ?? resetTimes[0]).toISOString(),
+						}],
+					}],
+				});
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		}) as typeof fetch;
+
+		try {
+			await withPiAuthAsync({
+				antigravity: {
+					type: "oauth",
+					access: "access-1|project-1",
+					expires: now + 60 * 60 * 1000,
+					activeIndex: 0,
+					accounts: [1, 2, 3, 4, 5].map((index) => ({
+						refreshToken: `refresh-${index}`,
+						projectId: `project-${index}`,
+						enabled: true,
+					})),
+				},
+			}, async () => {
+				const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "antigravity-gemini-3.8-flash" } as SessionModel);
+				if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+
+				const status = await queryModelUsageStatus(descriptor);
+
+				assert.equal(status?.accountEmail, "Σ");
+				assert.equal(status?.weekly?.remainingPercent, 45);
+				assert.equal(status?.weekly?.hasKnownWindowDuration, true);
+				assert.equal(status?.hourly, undefined);
+				assert.ok(Math.abs((status?.weekly?.resetAt ?? 0) - resetTimes[0]) < 2_000);
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+			if (previousClientId === undefined) delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+			else process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID = previousClientId;
+			if (previousClientSecret === undefined) delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+			else process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET = previousClientSecret;
+		}
+	});
+
 	it("resolves current versioned Antigravity Flash models from the cached shared Flash quota", async () => {
 		const now = Date.now();
 		const resetAt = now + 2 * 60 * 60 * 1000;
@@ -731,15 +814,22 @@ describe("model usage status", () => {
 				assert.equal(String(init?.body), "client_id=desktop-client-id&refresh_token=refresh-env&grant_type=refresh_token&client_secret=desktop-client-secret");
 				return Response.json({ access_token: "refreshed-access" });
 			}
-			if (url === "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels") {
+			if (url === "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary") {
 				quotaRequests += 1;
-				assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer refreshed-access");
+				const headers = new Headers(init?.headers);
+				assert.equal(headers.get("Authorization"), "Bearer refreshed-access");
+				assert.match(headers.get("User-Agent") ?? "", /^antigravity\/cli\/1\.1\.24 /u);
+				assert.equal(headers.get("Accept-Encoding"), "gzip");
+				assert.equal(String(init?.body), JSON.stringify({ project: "project-env" }));
 				return Response.json({
-					models: {
-						"gemini-3.8-flash": {
-							quotaInfo: { remainingFraction: 0.84, resetTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() },
-						},
-					},
+					groups: [{
+						buckets: [{
+							bucketId: "gemini-weekly",
+							window: "weekly",
+							remainingFraction: 0.84,
+							resetTime: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+						}],
+					}],
 				});
 			}
 			throw new Error(`Unexpected fetch: ${url}`);
@@ -764,7 +854,8 @@ describe("model usage status", () => {
 
 				const status = await queryModelUsageStatus(descriptor);
 
-				assert.equal(status?.hourly?.remainingPercent, 84);
+				assert.equal(status?.weekly?.remainingPercent, 84);
+				assert.equal(status?.hourly, undefined);
 				assert.equal(tokenRequests, 1);
 				assert.equal(quotaRequests, 1);
 			});
@@ -787,7 +878,7 @@ describe("model usage status", () => {
 				tokenRequests += 1;
 				return Response.json({ access_token: "refreshed-access" });
 			}
-			if (url === "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels") {
+			if (url.endsWith("/v1internal:retrieveUserQuotaSummary")) {
 				quotaRequests += 1;
 				const headers = new Headers(init?.headers);
 				assert.equal(String(init?.body), JSON.stringify({ project: "live-project" }));
@@ -796,14 +887,14 @@ describe("model usage status", () => {
 				}
 				assert.equal(headers.get("Authorization"), "Bearer refreshed-access");
 				return Response.json({
-					models: {
-						"gemini-3.8-flash-high": {
-							quotaInfo: {
-								remainingFraction: 0.66,
-								resetTime: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
-							},
-						},
-					},
+					groups: [{
+						buckets: [{
+							bucketId: "gemini-weekly",
+							window: "weekly",
+							remainingFraction: 0.66,
+							resetTime: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+						}],
+					}],
 				});
 			}
 			throw new Error(`Unexpected fetch: ${url}`);
@@ -832,8 +923,9 @@ describe("model usage status", () => {
 
 				const status = await queryModelUsageStatus(descriptor);
 
-				assert.equal(status?.hourly?.remainingPercent, 66);
-				assert.equal(quotaRequests, 2);
+				assert.equal(status?.weekly?.remainingPercent, 66);
+				assert.equal(status?.hourly, undefined);
+				assert.equal(quotaRequests, 3);
 				assert.equal(tokenRequests, 1);
 			});
 		} finally {

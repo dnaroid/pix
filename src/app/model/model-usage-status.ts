@@ -10,15 +10,32 @@ import type { SessionModel } from "../types.js";
 const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const ZAI_QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
 const ZHIPU_QUOTA_URL = "https://bigmodel.cn/api/monitor/usage/quota/limit";
-const GOOGLE_QUOTA_API_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+const GOOGLE_ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com";
+const GOOGLE_ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
+const GOOGLE_ANTIGRAVITY_ENDPOINTS = [GOOGLE_ANTIGRAVITY_ENDPOINT_DAILY, GOOGLE_ANTIGRAVITY_ENDPOINT_PROD] as const;
 const GOOGLE_TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token";
-const GOOGLE_ANTIGRAVITY_USER_AGENT = "antigravity/1.11.9 windows/amd64";
+const GOOGLE_ANTIGRAVITY_CLI_VERSION = "1.1.24";
+const GOOGLE_ANTIGRAVITY_CLI_CHANGE_LIST = "974782877";
 const REQUEST_TIMEOUT_MS = 10_000;
 const DAY_SECONDS = 86_400;
 const HOUR_SECONDS = 3_600;
 const MODEL_USAGE_WARNING_MIN_USED_PERCENT = 5;
 const MODEL_USAGE_WARNING_MIN_ELAPSED_SECONDS = 6 * HOUR_SECONDS;
 const DEFAULT_ANTIGRAVITY_PROJECT_ID = "rising-fact-p41fc";
+
+function normalizeGoogleAntigravityPlatform(platform = process.platform): string {
+	return platform === "win32" ? "windows" : platform || "unknown";
+}
+
+function normalizeGoogleAntigravityArch(arch = process.arch): string {
+	if (arch === "x64") return "amd64";
+	if (arch === "ia32") return "386";
+	return arch || "unknown";
+}
+
+function buildGoogleAntigravityUserAgent(): string {
+	return `antigravity/cli/${GOOGLE_ANTIGRAVITY_CLI_VERSION} (aidev_client; os_type=${normalizeGoogleAntigravityPlatform()}; arch=${normalizeGoogleAntigravityArch()}; cl=${GOOGLE_ANTIGRAVITY_CLI_CHANGE_LIST}; auth_method=consumer)`;
+}
 
 function getPiAuthPath(): string {
 	return process.env.NODE_ENV === "test" && process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
@@ -198,6 +215,7 @@ type AntigravityQuotaAccount = {
 	readonly cachedQuota?: AntigravityCachedQuota;
 	readonly cachedQuotaUpdatedAt?: number;
 	readonly projectId: string;
+	readonly managedProjectId?: string;
 	readonly accountIndex?: number;
 	readonly accountCount?: number;
 	readonly cacheKey: string;
@@ -211,6 +229,26 @@ type GoogleQuotaResponse = {
 		};
 	}>;
 	readonly source?: "cached";
+};
+
+type GoogleQuotaSummaryBucket = {
+	readonly bucketId?: string;
+	readonly window?: "5h" | "weekly" | string;
+	readonly remainingFraction?: number;
+	readonly resetTime?: string;
+};
+
+type GoogleQuotaSummaryResponse = {
+	readonly groups?: readonly {
+		readonly buckets?: readonly GoogleQuotaSummaryBucket[];
+	}[];
+};
+
+type GoogleAntigravityQuotaPool = "gemini" | "non-gemini";
+type GoogleAntigravityModelWindows = {
+	hourly?: ModelUsageLimitWindow;
+	weekly?: ModelUsageLimitWindow;
+	legacy?: ModelUsageLimitWindow;
 };
 
 export function modelUsageDescriptor(model: SessionModel | undefined, thinkingLevel?: string): ModelUsageDescriptor | undefined {
@@ -716,13 +754,87 @@ function googleAntigravityWindowFromResponse(
 	};
 }
 
+function googleAntigravityQuotaPoolForModel(quotaModelKey: string): GoogleAntigravityQuotaPool {
+	return quotaModelKey.toLowerCase().includes("claude") ? "non-gemini" : "gemini";
+}
+
+function googleAntigravityQuotaPoolForBucket(bucketId: string | undefined): GoogleAntigravityQuotaPool | undefined {
+	if (!bucketId) return undefined;
+	if (bucketId.startsWith("gemini-")) return "gemini";
+	if (bucketId.startsWith("3p-")) return "non-gemini";
+	return undefined;
+}
+
+function googleAntigravityWindowFromSummaryBucket(
+	bucket: GoogleQuotaSummaryBucket,
+	now: number,
+	windowSeconds: number,
+): ModelUsageLimitWindow {
+	const remainingFraction = Number.isFinite(bucket.remainingFraction) ? bucket.remainingFraction as number : 0;
+	return {
+		remainingPercent: clampPercent(Math.round(remainingFraction * 100)),
+		resetAt: parseResetTime(bucket.resetTime, now),
+		windowSeconds,
+		hasKnownWindowDuration: true,
+	};
+}
+
+function mostConstrainedGoogleQuotaBucket(buckets: readonly GoogleQuotaSummaryBucket[]): GoogleQuotaSummaryBucket | undefined {
+	return buckets.reduce<GoogleQuotaSummaryBucket | undefined>((best, bucket) => {
+		if (!best) return bucket;
+		const bestRemaining = Number.isFinite(best.remainingFraction) ? best.remainingFraction as number : 0;
+		const nextRemaining = Number.isFinite(bucket.remainingFraction) ? bucket.remainingFraction as number : 0;
+		return nextRemaining < bestRemaining ? bucket : best;
+	}, undefined);
+}
+
+function googleAntigravityWindowsFromQuotaSummary(
+	data: GoogleQuotaSummaryResponse,
+	pool: GoogleAntigravityQuotaPool,
+	now: number,
+): GoogleAntigravityModelWindows {
+	const buckets = (data.groups ?? [])
+		.flatMap((group) => group.buckets ?? [])
+		.filter((bucket) => googleAntigravityQuotaPoolForBucket(bucket.bucketId) === pool);
+	const hourlyBucket = mostConstrainedGoogleQuotaBucket(buckets.filter((bucket) => bucket.window === "5h"));
+	const weeklyBucket = mostConstrainedGoogleQuotaBucket(buckets.filter((bucket) => bucket.window === "weekly"));
+	return {
+		...(hourlyBucket ? { hourly: googleAntigravityWindowFromSummaryBucket(hourlyBucket, now, 5 * HOUR_SECONDS) } : {}),
+		...(weeklyBucket ? { weekly: googleAntigravityWindowFromSummaryBucket(weeklyBucket, now, 7 * DAY_SECONDS) } : {}),
+	};
+}
+
+function aggregateGoogleAntigravityWindows(windows: readonly ModelUsageLimitWindow[]): ModelUsageLimitWindow | undefined {
+	if (windows.length === 0) return undefined;
+	const hasKnownWindowDuration = windows.every((window) => window.hasKnownWindowDuration === true);
+	return {
+		remainingPercent: clampPercent(Math.round(windows.reduce((sum, window) => sum + window.remainingPercent, 0) / windows.length)),
+		resetAt: Math.min(...windows.map((window) => window.resetAt)),
+		windowSeconds: hasKnownWindowDuration
+			? windows[0]?.windowSeconds ?? 0
+			: Math.min(...windows.map((window) => window.windowSeconds)),
+		...(hasKnownWindowDuration ? { hasKnownWindowDuration: true } : {}),
+	};
+}
+
 async function queryGoogleAntigravityModelUsage(
 	descriptor: Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>,
 ): Promise<ModelUsageStatus | undefined> {
 	const now = Date.now();
 	const accounts = await readAllAntigravityQuotaAccounts(descriptor.modelKey);
 	if (accounts.length === 0) return undefined;
-	const windows = (await Promise.all(accounts.map(async (account) => {
+	const pool = googleAntigravityQuotaPoolForModel(descriptor.quotaModelKey);
+	const accountWindows = (await Promise.all(accounts.map(async (account) => {
+		try {
+			const summary = await fetchGoogleAntigravityQuotaSummaryForAccount(account);
+			const summaryWindows = googleAntigravityWindowsFromQuotaSummary(summary, pool, now);
+			if (summaryWindows.hourly || summaryWindows.weekly) return summaryWindows;
+		} catch {
+			// Current Antigravity exposes retrieveUserQuotaSummary, but older or
+			// partially rolled-out backends may not. Fall through to the legacy
+			// per-model quota response before consulting cached provider data.
+		}
+
 		try {
 			const response = await fetchGoogleAntigravityQuotaForAccount(account, now);
 			const liveWindow = googleAntigravityWindowFromResponse(
@@ -731,7 +843,7 @@ async function queryGoogleAntigravityModelUsage(
 				now,
 				descriptor.quotaModelCandidates,
 			);
-			if (liveWindow) return liveWindow;
+			if (liveWindow) return { legacy: liveWindow };
 
 			// Google may successfully return fetchAvailableModels while omitting
 			// the quotaInfo bucket for a current versioned Flash route. Antigravity
@@ -742,7 +854,7 @@ async function queryGoogleAntigravityModelUsage(
 				account.cachedQuotaUpdatedAt,
 				now,
 			);
-			return cachedResponse
+			const cachedWindow = cachedResponse
 				? googleAntigravityWindowFromResponse(
 					cachedResponse,
 					descriptor.quotaModelKey,
@@ -750,21 +862,22 @@ async function queryGoogleAntigravityModelUsage(
 					descriptor.quotaModelCandidates,
 				)
 				: undefined;
+			if (!cachedWindow) return undefined;
+			return { legacy: cachedWindow };
 		} catch {
 			return undefined;
 		}
-	}))).filter((window): window is ModelUsageLimitWindow => window !== undefined);
-	if (windows.length === 0) return undefined;
+	}))).filter((windows): windows is GoogleAntigravityModelWindows => windows !== undefined);
+	if (accountWindows.length === 0) return undefined;
 
-	const resetAt = Math.min(...windows.map((window) => window.resetAt));
-	const windowSeconds = Math.max(0, Math.round((resetAt - now) / 1000));
-	const aggregateWindow = {
-		remainingPercent: clampPercent(Math.round(windows.reduce((sum, window) => sum + window.remainingPercent, 0) / windows.length)),
-		resetAt,
-		windowSeconds,
-	};
-	const weekly = aggregateWindow.windowSeconds >= DAY_SECONDS ? aggregateWindow : undefined;
-	const hourly = weekly ? undefined : aggregateWindow;
+	let hourly = aggregateGoogleAntigravityWindows(accountWindows.map((windows) => windows.hourly).filter((window): window is ModelUsageLimitWindow => window !== undefined));
+	let weekly = aggregateGoogleAntigravityWindows(accountWindows.map((windows) => windows.weekly).filter((window): window is ModelUsageLimitWindow => window !== undefined));
+	const legacy = aggregateGoogleAntigravityWindows(accountWindows.map((windows) => windows.legacy).filter((window): window is ModelUsageLimitWindow => window !== undefined));
+	if (!hourly && !weekly && legacy) {
+		if (legacy.windowSeconds >= DAY_SECONDS) weekly = legacy;
+		else hourly = legacy;
+	}
+	if (!hourly && !weekly) return undefined;
 
 	return {
 		modelKey: descriptor.modelKey,
@@ -876,7 +989,6 @@ function getGoogleOAuthClientCredentials(...sources: unknown[]): GoogleOAuthClie
 	const clientId = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID?.trim();
 	const clientSecret = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET?.trim();
 	if (clientId) return { clientId, ...(clientSecret ? { clientSecret } : {}) };
-	return undefined;
 }
 
 function storedAntigravityAccounts(credential: PiAuthCredential): AntigravityStoredAccount[] {
@@ -913,6 +1025,7 @@ function antigravityQuotaAccount(
 	return {
 		refreshToken,
 		projectId,
+		...(account.managedProjectId ? { managedProjectId: account.managedProjectId } : {}),
 		cacheKey: email ? email.toLowerCase() : shortHash(refreshToken),
 		...(options.accessToken ? { accessToken: options.accessToken } : {}),
 		...(clientCredentials ? { clientId: clientCredentials.clientId } : {}),
@@ -1005,27 +1118,46 @@ function shortHash(value: string): string {
 
 async function fetchGoogleAntigravityQuotaForAccount(account: AntigravityQuotaAccount, now = Date.now()): Promise<GoogleQuotaResponse> {
 	let liveError: unknown;
-	if (account.accessToken) {
-		try {
-			return await fetchGoogleAntigravityQuota(account.accessToken, account.projectId);
-		} catch (error) {
-			liveError = error;
-		}
-	}
-
-	if (account.clientId) {
-		try {
-			const { accessToken } = await refreshGoogleAntigravityAccessToken(account);
-			return await fetchGoogleAntigravityQuota(accessToken, account.projectId);
-		} catch (error) {
-			liveError = error;
-		}
+	try {
+		return await fetchWithGoogleAntigravityAccountAccess(account, (accessToken) => fetchGoogleAntigravityQuota(accessToken, account.projectId));
+	} catch (error) {
+		liveError = error;
 	}
 
 	const cachedResponse = googleQuotaResponseFromCachedQuota(account.cachedQuota, account.cachedQuotaUpdatedAt, now);
 	if (cachedResponse) return cachedResponse;
 	if (liveError) throw liveError;
 
+	throw new Error("Missing Google OAuth client credentials, cannot query live Antigravity quota.");
+}
+
+async function fetchGoogleAntigravityQuotaSummaryForAccount(account: AntigravityQuotaAccount): Promise<GoogleQuotaSummaryResponse> {
+	return await fetchWithGoogleAntigravityAccountAccess(account, (accessToken) => fetchGoogleAntigravityQuotaSummary(accessToken, account));
+}
+
+async function fetchWithGoogleAntigravityAccountAccess<T>(
+	account: AntigravityQuotaAccount,
+	fetcher: (accessToken: string) => Promise<T>,
+): Promise<T> {
+	let lastError: unknown;
+	if (account.accessToken) {
+		try {
+			return await fetcher(account.accessToken);
+		} catch (error) {
+			lastError = error;
+		}
+	}
+
+	if (account.clientId) {
+		try {
+			const { accessToken } = await refreshGoogleAntigravityAccessToken(account);
+			return await fetcher(accessToken);
+		} catch (error) {
+			lastError = error;
+		}
+	}
+
+	if (lastError) throw lastError;
 	throw new Error("Missing Google OAuth client credentials, cannot query live Antigravity quota.");
 }
 
@@ -1054,23 +1186,74 @@ async function refreshGoogleAntigravityAccessToken(account: AntigravityQuotaAcco
 	return { accessToken: data.access_token };
 }
 
-async function fetchGoogleAntigravityQuota(accessToken: string, projectId: string): Promise<GoogleQuotaResponse> {
-	const response = await fetchWithTimeout(GOOGLE_QUOTA_API_URL, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			Authorization: `Bearer ${accessToken}`,
-			"User-Agent": GOOGLE_ANTIGRAVITY_USER_AGENT,
-		},
-		body: JSON.stringify({ project: projectId }),
-	});
+function googleAntigravityQuotaHeaders(accessToken: string): Record<string, string> {
+	return {
+		"User-Agent": buildGoogleAntigravityUserAgent(),
+		Authorization: `Bearer ${accessToken}`,
+		"Content-Type": "application/json",
+		"Accept-Encoding": "gzip",
+	};
+}
 
-	if (!response.ok) {
-		const errorText = await response.text();
-		throw new Error(`Google quota request failed (${response.status}): ${errorText}`);
+async function fetchGoogleAntigravityQuotaSummary(
+	accessToken: string,
+	account: Pick<AntigravityQuotaAccount, "projectId" | "managedProjectId">,
+): Promise<GoogleQuotaSummaryResponse> {
+	const errors: string[] = [];
+	const primaryProjectId = account.managedProjectId || account.projectId;
+	let primaryGot403 = false;
+
+	const tryProject = async (projectId: string): Promise<GoogleQuotaSummaryResponse | undefined> => {
+		for (const endpoint of GOOGLE_ANTIGRAVITY_ENDPOINTS) {
+			const response = await fetchWithTimeout(`${endpoint}/v1internal:retrieveUserQuotaSummary`, {
+				method: "POST",
+				headers: googleAntigravityQuotaHeaders(accessToken),
+				body: JSON.stringify({ project: projectId }),
+			});
+			if (response.ok) return response.json() as Promise<GoogleQuotaSummaryResponse>;
+			if (response.status === 403) primaryGot403 = true;
+			const errorText = await response.text().catch(() => "");
+			errors.push(`retrieveUserQuotaSummary ${response.status} at ${endpoint}${errorText ? `: ${errorText.slice(0, 200)}` : ""}`);
+		}
+		return undefined;
+	};
+
+	const primary = await tryProject(primaryProjectId);
+	if (primary) return primary;
+
+	if (primaryGot403 && account.managedProjectId && account.projectId !== account.managedProjectId) {
+		const fallback = await tryProject(account.projectId);
+		if (fallback) return fallback;
 	}
 
-	return response.json() as Promise<GoogleQuotaResponse>;
+	throw new Error(errors.join("; ") || "Google Antigravity quota summary request failed");
+}
+
+async function fetchGoogleAntigravityQuota(accessToken: string, projectId: string): Promise<GoogleQuotaResponse> {
+	const errors: string[] = [];
+	for (const endpoint of GOOGLE_ANTIGRAVITY_ENDPOINTS) {
+		const url = `${endpoint}/v1internal:fetchAvailableModels`;
+		const response = await fetchWithTimeout(url, {
+			method: "POST",
+			headers: googleAntigravityQuotaHeaders(accessToken),
+			body: JSON.stringify({ project: projectId }),
+		});
+		if (response.ok) return response.json() as Promise<GoogleQuotaResponse>;
+
+		if (response.status === 403 && projectId) {
+			const retry = await fetchWithTimeout(url, {
+				method: "POST",
+				headers: googleAntigravityQuotaHeaders(accessToken),
+				body: JSON.stringify({}),
+			});
+			if (retry.ok) return retry.json() as Promise<GoogleQuotaResponse>;
+		}
+
+		const errorText = await response.text().catch(() => "");
+		errors.push(`fetchAvailableModels ${response.status} at ${endpoint}${errorText ? `: ${errorText.slice(0, 200)}` : ""}`);
+	}
+
+	throw new Error(errors.join("; ") || "Google Antigravity quota request failed");
 }
 
 function parseResetTime(value: string | undefined, now: number): number {
