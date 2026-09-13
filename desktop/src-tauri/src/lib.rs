@@ -781,6 +781,8 @@ struct SidebarRuntimeIndicatorState {
 #[serde(rename_all = "camelCase")]
 struct SidebarRegistryIndicatorState {
     local_changes: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    project_changes: Vec<String>,
     stable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -3289,6 +3291,7 @@ fn sidebar_registry_indicator_state(
         Ok(result) => result,
         Err(error) => SidebarRegistryIndicatorState {
             local_changes: false,
+            project_changes: Vec::new(),
             stable: true,
             error: Some(error),
         },
@@ -3366,43 +3369,52 @@ fn sidebar_registry_indicator_state_inner(
         }
     }
 
-    if !local_changes {
-        for artifact in ["tasks", "plans", "todo"] {
-            let tracked = provenance.project_resources.get(artifact);
-            let path = sidebar_registry_project_artifact_path(root, artifact);
-            let exists = sidebar_registry_project_artifact_exists(&path, artifact, tracked.is_some())?;
-            if tracked.is_none() {
-                if configured_before && exists {
-                    local_changes = true;
-                    break;
-                }
-                continue;
-            }
-            if !exists {
+    let mut project_changes = Vec::new();
+    for artifact in ["tasks", "plans", "todo"] {
+        let tracked = provenance.project_resources.get(artifact);
+        let path = sidebar_registry_project_artifact_path(root, artifact);
+        let exists = sidebar_registry_project_artifact_exists(&path, artifact, tracked.is_some())?;
+        if tracked.is_none() {
+            if configured_before && exists {
                 local_changes = true;
-                break;
+                project_changes.push(artifact.to_owned());
             }
-            let tracked = tracked.expect("tracked project artifact exists");
-            if tracked.hash.is_empty() {
-                return Err(format!("registry provenance for project {artifact} has no content hash"));
-            }
+            continue;
+        }
+        if !exists {
+            local_changes = true;
+            project_changes.push(artifact.to_owned());
+            continue;
+        }
+        let tracked = tracked.expect("tracked project artifact exists");
+        if tracked.hash.is_empty() {
+            return Err(format!("registry provenance for project {artifact} has no content hash"));
+        }
+        let changed = if artifact == "tasks" {
+            sidebar_registry_cached_task_bundle_changed(
+                state,
+                root,
+                &tracked.hash,
+                &mut hash_budget,
+            )?
+        } else {
             let cache_key = format!("project:{artifact}");
-            match sidebar_registry_cached_path_changed(
+            sidebar_registry_cached_path_changed(
                 state,
                 root,
                 &cache_key,
                 &path,
                 &tracked.hash,
                 &mut hash_budget,
-            )? {
-                Some(changed) => {
-                    if changed {
-                        local_changes = true;
-                        break;
-                    }
-                }
-                None => return Ok(SidebarRegistryIndicatorState::default()),
+            )?
+        };
+        match changed {
+            Some(true) => {
+                local_changes = true;
+                project_changes.push(artifact.to_owned());
             }
+            Some(false) => {}
+            None => return Ok(SidebarRegistryIndicatorState::default()),
         }
     }
 
@@ -3426,6 +3438,7 @@ fn sidebar_registry_indicator_state_inner(
 
     Ok(SidebarRegistryIndicatorState {
         local_changes,
+        project_changes,
         stable: true,
         error: None,
     })
@@ -3685,6 +3698,129 @@ fn sidebar_registry_cached_path_changed(
             );
     }
     Ok(Some(changed))
+}
+
+fn sidebar_registry_cached_task_bundle_changed(
+    state: &SidebarIndicatorState,
+    root: &Path,
+    expected_hash: &str,
+    hash_budget: &mut u64,
+) -> Result<Option<bool>, String> {
+    let (fingerprint_before, file_bytes) = sidebar_registry_task_bundle_fingerprint(root)?;
+    let cache_key = "project:tasks";
+    let cached = state
+        .registry_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(root).and_then(|workspace| workspace.entries.get(cache_key)).cloned());
+    if let Some(cached) = cached {
+        if cached.expected_hash == expected_hash && cached.fingerprint == fingerprint_before {
+            let (fingerprint_after, _) = sidebar_registry_task_bundle_fingerprint(root)?;
+            return Ok((fingerprint_before == fingerprint_after).then_some(cached.changed));
+        }
+    }
+
+    if file_bytes > *hash_budget {
+        return Ok(None);
+    }
+    *hash_budget -= file_bytes;
+    let actual_hash = sidebar_registry_hash_task_bundle(root)?;
+    let (fingerprint_after, _) = sidebar_registry_task_bundle_fingerprint(root)?;
+    if fingerprint_before != fingerprint_after {
+        return Ok(None);
+    }
+    let changed = actual_hash != expected_hash;
+    if let Ok(mut cache) = state.registry_cache.lock() {
+        if !cache.contains_key(root) && cache.len() >= 32 {
+            cache.clear();
+        }
+        cache
+            .entry(root.to_path_buf())
+            .or_default()
+            .entries
+            .insert(
+                cache_key.to_owned(),
+                SidebarRegistryCacheEntry {
+                    expected_hash: expected_hash.to_owned(),
+                    fingerprint: fingerprint_after,
+                    changed,
+                },
+            );
+    }
+    Ok(Some(changed))
+}
+
+fn sidebar_registry_task_bundle_fingerprint(root: &Path) -> Result<(u64, u64), String> {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut count = 0usize;
+    let mut bytes = 0u64;
+    let tasks = root.join(".pi/tasks.jsonc");
+    sidebar_registry_fingerprint_visit(&tasks, "tasks.jsonc", &mut count, &mut bytes, &mut hasher)?;
+    let attachments = root.join(".pi/task-attachments");
+    if attachments.exists() {
+        sidebar_registry_fingerprint_visit(
+            &attachments,
+            "task-attachments",
+            &mut count,
+            &mut bytes,
+            &mut hasher,
+        )?;
+    }
+    Ok((hasher.finish(), bytes))
+}
+
+fn sidebar_registry_hash_task_bundle(root: &Path) -> Result<String, String> {
+    let tasks_path = root.join(".pi/tasks.jsonc");
+    let mut source = fs::read_to_string(&tasks_path)
+        .map_err(|error| format!("failed to read {}: {error}", tasks_path.display()))?;
+    let attachments_dir = root.join(".pi/task-attachments");
+    let mut referenced = Vec::<(String, PathBuf)>::new();
+    if attachments_dir.exists() {
+        let metadata = fs::symlink_metadata(&attachments_dir)
+            .map_err(|error| format!("failed to inspect {}: {error}", attachments_dir.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(".pi/task-attachments must be a project-owned directory".to_owned());
+        }
+        let mut entries = fs::read_dir(&attachments_dir)
+            .map_err(|error| format!("failed to read {}: {error}", attachments_dir.display()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to read {}: {error}", attachments_dir.display()))?;
+        entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
+        for entry in entries {
+            let metadata = fs::symlink_metadata(entry.path())
+                .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+            if metadata.file_type().is_symlink() {
+                return Err(format!("task attachment is a symbolic link: {}", entry.path().display()));
+            }
+            if !metadata.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let marker = task_attachment_marker(&entry.path());
+            if !source.contains(&marker) {
+                continue;
+            }
+            let portable = format!(
+                "[Pix attachment: pix-task-attachment:{}]",
+                encode_uri_component(&name),
+            );
+            source = source.replace(&marker, &portable);
+            referenced.push((name, entry.path()));
+        }
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"tasks-bundle\0");
+    hasher.update(source.as_bytes());
+    for (name, path) in referenced {
+        hasher.update(b"\0attachment\0");
+        hasher.update(name.as_bytes());
+        hasher.update(b"\0");
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("failed to read task attachment {}: {error}", path.display()))?;
+        hasher.update(bytes);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn sidebar_registry_tree_fingerprint(path: &Path) -> Result<(u64, u64), String> {
@@ -8020,6 +8156,54 @@ mod tests {
         assert!(configured.stable);
         assert!(configured.local_changes);
         assert!(configured.error.is_none());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn sidebar_registry_indicator_hashes_tasks_with_referenced_attachment_bytes() {
+        let workspace = temporary_workspace("sidebar-registry-task-bundle");
+        let home = temporary_workspace("sidebar-registry-task-bundle-home");
+        let attachments = workspace.join(".pi/task-attachments");
+        fs::create_dir_all(&attachments).expect("create task attachment directory");
+        let attachment = attachments.join("shot one.png");
+        fs::write(&attachment, b"image-v1").expect("write task attachment");
+        let tasks_source = format!(
+            "{{\"version\":1,\"tasks\":[{{\"description\":\"{}\"}}]}}\n",
+            task_attachment_marker(&attachment),
+        );
+        fs::write(workspace.join(".pi/tasks.jsonc"), tasks_source).expect("write task document");
+
+        let hash = sidebar_registry_hash_task_bundle(&workspace).expect("hash task bundle");
+        assert_eq!(
+            hash,
+            "daee961873b60a6249f2090dfb32dd21e1a9437b3ceb65397581a443cf49729d"
+        );
+        fs::write(
+            workspace.join(".pi/registry.json"),
+            format!(
+                "{{\"version\":1,\"resources\":{{}},\"projectResources\":{{\"tasks\":{{\"hash\":\"{hash}\"}}}}}}\n"
+            ),
+        )
+        .expect("write task provenance");
+        let config_dir = home.join(".config/pi");
+        fs::create_dir_all(&config_dir).expect("create config directory");
+        fs::write(
+            config_dir.join("pi-tools-suite.jsonc"),
+            "{ \"resourceRegistry\": { \"remote\": \"git@example.invalid:registry.git\" } }\n",
+        )
+        .expect("write registry config");
+
+        let state = SidebarIndicatorState::default();
+        let clean = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(clean.stable);
+        assert!(!clean.local_changes);
+
+        fs::write(&attachment, b"image-v2-longer").expect("modify task attachment");
+        let changed = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(changed.stable);
+        assert!(changed.local_changes);
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(home).expect("remove temporary home");

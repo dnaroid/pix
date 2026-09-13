@@ -42,17 +42,27 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
     (git?.behind ?? 0) > 0 ? { tone: "info", reason: `Branch is behind upstream by ${git?.behind}` } : undefined,
   );
 
+  const registrySync = inputs.registryBackgroundSync;
+  const registrySyncActive = inputs.registrySnapshot?.configured === true
+    && (registrySync?.phase === "syncing" || registrySync?.phase === "pending");
   indicators.registry = strongestIndicator(
     errorIndicator(inputs.registrySnapshot?.error),
     errorIndicator(poll?.registry.error),
+    errorIndicator(inputs.registrySnapshot?.configured === true && registrySync?.phase === "error" ? registrySync.error : undefined),
     inputs.registrySnapshot?.projectIssue
       ? { tone: "warning", reason: inputs.registrySnapshot.projectIssue }
       : undefined,
-    poll?.registry.localChanges
-      ? { tone: "warning", reason: "Local registry resources need sync" }
-      : undefined,
     registryHasAttention(inputs.registrySnapshot)
       ? { tone: "warning", reason: "Registry has resources that need attention" }
+      : undefined,
+    registrySyncActive && registrySync?.phase === "syncing"
+      ? { tone: "info", reason: "Project changes are syncing in the background", animated: true }
+      : undefined,
+    registrySyncActive && registrySync?.phase === "pending"
+      ? { tone: "info", reason: "Project changes are waiting to sync" }
+      : undefined,
+    !registrySyncActive && poll?.registry.localChanges
+      ? { tone: "warning", reason: "Local registry resources need sync" }
       : undefined,
   );
 

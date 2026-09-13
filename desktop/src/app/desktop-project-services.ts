@@ -1,5 +1,6 @@
 import type { AcpClient } from "../lib/acp-client";
 import type { Attachment } from "../lib/attachments";
+import { PROJECT_TODO_PATH } from "../lib/project-documents";
 import type { TranscriptState } from "../lib/transcript";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
@@ -31,8 +32,10 @@ type DesktopProjectServicesOptions = {
 };
 
 export function createDesktopProjectServices(options: DesktopProjectServicesOptions) {
+  let registry!: ReturnType<typeof createRegistryStore>;
   const tasks = createProjectTasksStore({
     workspace: options.workspace,
+    afterSave: () => registry.scheduleProjectSync("tasks"),
     reportError: options.reportError,
   });
   const projectWorkspace = createProjectWorkspaceStore({
@@ -53,14 +56,13 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     setErrorMessage: (message) => options.setErrorMessage(message),
   });
 
-  let registry!: ReturnType<typeof createRegistryStore>;
   const documents = createProjectDocumentsStore({
     workspace: options.workspace,
     openProjectFile: preview.openProjectFile,
     showEmptyFile: (file) => preview.show({ kind: "file", file }, "replace"),
     afterSave: (file) => {
       preview.replaceCurrentFile(file);
-      if (registry.snapshot && options.activeSessionRuntimeReady() && !options.operationRunning()) registry.refresh();
+      registry.scheduleProjectSync(file.path === PROJECT_TODO_PATH ? "todo" : "plans");
     },
     clearError: options.clearError,
     reportError: options.reportError,

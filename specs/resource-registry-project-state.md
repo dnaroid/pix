@@ -60,6 +60,33 @@ Those portable markers are not written to the local project task file.
 7. The registry Git commit stages the current project's directory in the
    disposable clone. Other project keys and reusable skills/agents are not
    included.
+8. Pix Desktop owns one background project-state sync coordinator. A successful
+   task-document write marks `tasks` dirty; saving `.pi/TODO.md` marks `todo`
+   dirty; saving a file under `.pi/plans/` marks `plans` dirty. The fast sidebar
+   Registry poll also reports project artifacts that changed outside those
+   Desktop save paths, so agent/external edits enter the same coordinator.
+9. Dirty project-state writes are debounced for approximately 900 ms. Repeated
+   writes to one artifact collapse into one push, while more than one dirty
+   artifact collapses into one `push project` operation.
+10. Background sync never takes the Desktop foreground-operation lock. Because
+    the current ACP Registry bridge executes the private action through the
+    owning session, the coordinator waits until that session is runtime-ready,
+    not prompting, not loading history, and not executing another Registry or
+    foreground operation. A blocked sync remains pending and retries on a short
+    idle cadence instead of dropping dirty state. While the actual background
+    Registry RPC is in flight, Registry-panel actions are locally disabled so a
+    manual Registry command cannot overlap it; unrelated Desktop UI remains
+    available.
+11. Dirty state is removed from the current batch before an RPC starts. If the
+    same or another artifact changes while that RPC is in flight, the new dirty
+    state survives and starts another debounced pass after the current pass
+    completes.
+12. Workspace changes reset coordinator state with a generation guard, so a late
+    response from the previous workspace cannot clear or overwrite the new
+    workspace's pending/sync UI state.
+13. A retryable ACP busy race returns to `pending`. Other thrown background-sync
+    failures become an `error` state and retain the dirty artifacts. A later
+    local edit or foreground Registry action can retry that retained state.
 
 ## Compatibility
 
@@ -78,6 +105,14 @@ Those portable markers are not written to the local project task file.
 - Attachment content participates in provenance hashing.
 - A tasks push removes stale remote bundled attachments atomically with the Git
   commit that updates the task document.
+- Every successful Desktop task mutation reaches the background sync coordinator
+  through the centralized task-document save path; failed local persistence never
+  schedules a remote push.
+- Background project sync is coalesced to one in-flight Registry action. It does
+  not force-push through provenance conflicts.
+- The sidebar's cheap Registry task check hashes the same normalized task bundle
+  as Registry provenance, including referenced attachment bytes, so a completed
+  background push can converge back to a clean local indicator.
 
 ## Related files
 
@@ -94,6 +129,12 @@ Those portable markers are not written to the local project task file.
   attachment removal, conflicts, and existing project-state/TUI behavior.
 - Desktop Rust task persistence tests cover reference-based local attachment
   pruning after successful task-document writes.
+- Desktop coordinator tests cover debounce, scope coalescing, busy deferral,
+  changes during an in-flight push, retained error state, and foreground-lock
+  independence.
+- Sidebar tests cover pending/syncing/error presentation and the shared animated
+  indicator. Rust coverage verifies that the fast Registry check uses task
+  attachment bytes when comparing the `tasks` project artifact.
 
 ## Risks / unknowns
 

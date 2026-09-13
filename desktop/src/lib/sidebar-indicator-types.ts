@@ -1,5 +1,6 @@
 import type { IdxOverview } from "./idx";
-import type { RegistrySnapshot } from "./registry";
+import type { RegistryProjectArtifact, RegistrySnapshot } from "./registry";
+import type { RegistryBackgroundSyncState } from "./registry-background-sync";
 
 export type SidebarIndicatorTab =
   | "project"
@@ -15,6 +16,7 @@ export type SidebarIndicatorTone = "info" | "warning" | "error";
 export interface SidebarIndicator {
   readonly tone: SidebarIndicatorTone;
   readonly reason: string;
+  readonly animated?: boolean;
 }
 
 export interface RuntimeIndicatorPoll {
@@ -38,6 +40,7 @@ export interface WorkspaceSidebarIndicatorPoll {
   };
   readonly registry: {
     readonly localChanges: boolean;
+    readonly projectChanges?: readonly RegistryProjectArtifact[];
     readonly stable: boolean;
     readonly error?: string;
   };
@@ -64,6 +67,7 @@ export interface SidebarIndicatorInputs {
   readonly taskStorageSaveError?: string | null;
   readonly activeTaskId?: string | null;
   readonly registrySnapshot?: RegistrySnapshot;
+  readonly registryBackgroundSync?: RegistryBackgroundSyncState;
   readonly settingsPanelError?: string | null;
 }
 

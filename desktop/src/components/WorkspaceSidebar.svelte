@@ -35,6 +35,7 @@
     type RegistryProjectArtifact,
     type RegistrySnapshot,
   } from "../lib/registry";
+  import type { RegistryBackgroundSyncState } from "../lib/registry-background-sync";
   import {
     SidebarIndicatorService,
     sidebarIndicators,
@@ -88,6 +89,7 @@
     activeTaskId,
     sessionReady,
     registrySnapshot,
+    registryBackgroundSync,
     registryLoading,
     registryActionId,
     gitSnapshot,
@@ -124,6 +126,7 @@
     onReload,
     onRegistryRefresh,
     onRegistryAction,
+    onRegistryProjectChange,
     onGitRefresh,
     onGitOpenDiff,
     onGitStage,
@@ -145,6 +148,7 @@
     activeTaskId: string | null;
     sessionReady: boolean;
     registrySnapshot: RegistrySnapshot | undefined;
+    registryBackgroundSync: RegistryBackgroundSyncState;
     registryLoading: boolean;
     registryActionId: string | null;
     gitSnapshot: GitSnapshot | undefined;
@@ -186,6 +190,7 @@
     onReload: () => void;
     onRegistryRefresh: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
+    onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
     onGitRefresh: () => void;
     onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onGitStage: (path?: string) => void;
@@ -240,6 +245,7 @@
   });
   let projectPanelError = $state<string | null>(null);
   let settingsPanelError = $state<string | null>(null);
+  let observedRegistryProjectPollAt = 0;
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
@@ -250,6 +256,7 @@
     taskStorageSaveError: taskStorageIndicatorError,
     activeTaskId,
     registrySnapshot,
+    registryBackgroundSync,
     settingsPanelError,
   }));
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
@@ -318,6 +325,18 @@
     // local-dirty signal instead of waiting for the next fast poll.
     registrySnapshot;
     queueMicrotask(() => indicatorService?.invalidateFast());
+  });
+
+  $effect(() => {
+    const checkedAtMs = indicatorServiceState.poll?.checkedAtMs ?? 0;
+    const projectChanges = indicatorServiceState.poll?.registry.projectChanges ?? [];
+    if (!checkedAtMs || checkedAtMs === observedRegistryProjectPollAt) return;
+    observedRegistryProjectPollAt = checkedAtMs;
+    if (registryBackgroundSync.phase !== "idle" || projectChanges.length === 0) return;
+    const changed = [...new Set(projectChanges)];
+    queueMicrotask(() => {
+      for (const artifact of changed) onRegistryProjectChange(artifact);
+    });
   });
 
   onMount(() => {

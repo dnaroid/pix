@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import sidebarSource from "./WorkspaceSidebar.svelte?raw";
 import activityBarSource from "./WorkspaceSidebarActivityBar.svelte?raw";
+import indicatorDotSource from "./SidebarIndicatorDot.svelte?raw";
 import tasksPanelSource from "./WorkspaceSidebarTasksPanel.svelte?raw";
 import layoutControllerSource from "./workspace-sidebar-layout-controller.svelte.ts?raw";
 import statusMenuControllerSource from "./workspace-sidebar-status-menu-controller.svelte.ts?raw";
+import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?raw";
 
 describe("WorkspaceSidebar project sizing", () => {
   it("uses the switcher's measured minimum in both resize clamping and CSS sizing", () => {
@@ -30,5 +32,18 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(statusMenuControllerSource).toContain("menuFocusIndex(navigationItems, currentIndex, event.key)");
     expect(statusMenuControllerSource).toContain("menuTypeaheadFocusIndex(navigationItems, currentIndex, query)");
     expect(tasksPanelSource).toContain('role="menuitemradio"');
+  });
+
+  it("animates the shared Activity Bar dot only for transient background activity", () => {
+    expect(indicatorDotSource).toContain("indicator.animated");
+    expect(indicatorDotSource).toContain("motion-safe:animate-ping");
+    expect(sidebarViewModelSource).toContain('backgroundSyncState.phase === "syncing" ? "background-sync" : null');
+  });
+
+  it("feeds externally observed project registry changes into background sync", () => {
+    expect(sidebarSource).toContain("indicatorServiceState.poll?.registry.projectChanges");
+    expect(sidebarSource).toContain("checkedAtMs === observedRegistryProjectPollAt");
+    expect(sidebarSource).toContain('registryBackgroundSync.phase !== "idle"');
+    expect(sidebarSource).toContain("onRegistryProjectChange(artifact)");
   });
 });

@@ -88,6 +88,11 @@ agent's session-local todo list.
 13. After a task-document write succeeds, Pix prunes regular files from
     `.pi/task-attachments` that are no longer referenced by any remaining task.
     Shared attachments stay on disk until the last task reference is removed.
+14. Every successful task-document write also marks the Registry `tasks` project
+    artifact dirty for background synchronization. Rapid task mutations are
+    debounced/coalesced; a failed local write never enters the remote sync queue.
+    If the Registry session is busy, the dirty task state remains pending until
+    an idle sync window is available.
 
 ## Contracts
 
@@ -117,6 +122,9 @@ agent's session-local todo list.
 - Attachment cleanup runs only after the replacement `tasks.jsonc` has been
   committed successfully. Cleanup is reference-based across the complete task
   document and never deletes paths outside `.pi/task-attachments`.
+- Create/edit/delete/status/reorder/session-link task mutations all flow through
+  the same save method, so they share the same background Registry scheduling
+  semantics.
 - A task is linked to at most one session.
 - Running/reordering/editing is disabled while conflicting task/session work is
   active.

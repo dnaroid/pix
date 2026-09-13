@@ -18,6 +18,7 @@ export type ProjectTaskDraft = {
 
 type ProjectTasksStoreOptions = {
   workspace: () => string;
+  afterSave?: (workspace: string) => void;
   reportError: (error: unknown) => void;
 };
 
@@ -64,7 +65,9 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
     saveError = null;
     try {
       await invoke("write_project_tasks", { workspace, document: validated });
-      return options.workspace() === workspace;
+      if (options.workspace() !== workspace) return false;
+      options.afterSave?.(workspace);
+      return true;
     } catch (error) {
       if (options.workspace() === workspace) document = previous;
       if (options.workspace() === workspace) {

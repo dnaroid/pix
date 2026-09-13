@@ -120,6 +120,89 @@ describe("sidebar indicators", () => {
     });
   });
 
+  it("shows pending and animated background registry sync ahead of ordinary local dirtiness", () => {
+    const base = {
+      ...inputs({
+        poll: poll({ registry: { localChanges: true, stable: true } }),
+        unseenScriptFailureIds: [],
+        unseenIdxFailureIds: [],
+      }),
+      registrySnapshot: {
+        version: 1 as const,
+        configured: true,
+        branch: "main",
+        checkedAt: "2026-09-13T12:00:00Z",
+        items: [],
+      },
+    };
+
+    const pending = sidebarIndicators({
+      ...base,
+      registryBackgroundSync: { phase: "pending", dirtyScopes: ["tasks"] },
+    });
+    expect(pending.registry).toEqual({
+      tone: "info",
+      reason: "Project changes are waiting to sync",
+    });
+
+    const syncing = sidebarIndicators({
+      ...base,
+      registryBackgroundSync: { phase: "syncing", dirtyScopes: [], activeScope: "tasks" },
+    });
+    expect(syncing.registry).toEqual({
+      tone: "info",
+      reason: "Project changes are syncing in the background",
+      animated: true,
+    });
+  });
+
+  it("keeps registry conflicts and background sync errors above sync activity", () => {
+    const syncingWithConflict = sidebarIndicators({
+      ...inputs({
+        poll: poll(),
+        unseenScriptFailureIds: [],
+        unseenIdxFailureIds: [],
+      }),
+      registrySnapshot: {
+        version: 1,
+        configured: true,
+        branch: "main",
+        checkedAt: "2026-09-13T12:00:00Z",
+        items: [{
+          id: "project:tasks",
+          type: "project",
+          name: "tasks.jsonc",
+          artifact: "tasks",
+          status: "diverged",
+          statusLabel: "Conflict",
+          icon: "file",
+          local: true,
+          remote: true,
+          actions: ["push", "pull"],
+        }],
+      },
+      registryBackgroundSync: { phase: "syncing", dirtyScopes: [], activeScope: "tasks" },
+    });
+    expect(syncingWithConflict.registry?.tone).toBe("warning");
+
+    const failed = sidebarIndicators({
+      ...inputs({
+        poll: poll(),
+        unseenScriptFailureIds: [],
+        unseenIdxFailureIds: [],
+      }),
+      registrySnapshot: {
+        version: 1,
+        configured: true,
+        branch: "main",
+        checkedAt: "2026-09-13T12:00:00Z",
+        items: [],
+      },
+      registryBackgroundSync: { phase: "error", dirtyScopes: ["tasks"], error: "push rejected" },
+    });
+    expect(failed.registry).toEqual({ tone: "error", reason: "push rejected" });
+  });
+
   it("keeps the last registry signal when a filesystem scan races a write", () => {
     const previous = poll({ registry: { localChanges: true, stable: true } });
     const unstable = poll({ registry: { localChanges: false, stable: false }, checkedAtMs: 2 });
