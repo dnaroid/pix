@@ -31,7 +31,7 @@ Remember the user's last applied thinking level independently for each model and
 
 - A valid thinking suffix on a model key is stripped before storage so `provider/model:high` and `provider/model` address the same preference.
 - Invalid values are ignored when the config is loaded.
-- Project `.pi/pix.jsonc` files cannot override `thinkingByModel`; this is a user UI preference shared by TUI and Desktop, matching the ownership model of `visibleModels`.
+- Project `<project>/.pi/pix.jsonc` files cannot override `thinkingByModel`; this is a user UI preference shared by TUI and Desktop, matching the ownership model of `visibleModels`.
 - `defaultModel.thinking` remains the default for creating a new session. `thinkingByModel` is selector memory and does not replace the default-model contract.
 
 ## Selector behavior
@@ -59,7 +59,10 @@ Remember the user's last applied thinking level independently for each model and
 - `src/app/app.ts`
 - `src/app/popup/popup-menu-controller.ts`
 - `src/app/popup/popup-action-controller.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/model-preferences.svelte.ts`
+- `desktop/src/app/model-draft-config.svelte.ts`
+- `desktop/src/app/model-config-actions.ts`
+- `desktop/src/app/model-picker-state.svelte.ts`
 - `desktop/src/components/ModelThinkingPicker.svelte`
 - `desktop/src/lib/model-thinking-preferences.ts`
 - `specs/tui-model-thinking-selector.md`

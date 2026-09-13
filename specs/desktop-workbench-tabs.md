@@ -43,7 +43,11 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 
 ## Related files
 
-- `desktop/src/App.svelte`
+- `desktop/src/app/workbench-model.ts`
+- `desktop/src/app/workbench-controller.ts`
+- `desktop/src/app/desktop-presentation-state.svelte.ts`
+- `desktop/src/app/preview-state.svelte.ts`
+- `desktop/src/app/session-tab-controller.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/components/GitDiffPane.svelte`

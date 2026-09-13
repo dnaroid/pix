@@ -123,9 +123,11 @@ agent's session-local todo list.
 
 ## Related files
 
-- `desktop/src/App.svelte`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/app/project-actions.svelte.ts`
+- `desktop/src/app/desktop-project-action-services.ts`
+- `desktop/src/components/PromptComposerActionsMenu.svelte`
+- `desktop/src/components/WorkspaceSidebarTasksPanel.svelte`
+- `desktop/src/components/WorkspaceSidebarTaskEditor.svelte`
 - `desktop/src/lib/attachments.ts`
 - `desktop/src/lib/attachments.test.ts`
 - `desktop/src/lib/project-tasks.ts`
@@ -155,8 +157,9 @@ agent's session-local todo list.
 
 ## Evidence
 
-- Confirmed by code: `desktop/src/App.svelte`, `PromptComposer.svelte`,
-  `WorkspaceSidebar.svelte`, and `desktop/src/lib/project-tasks.ts` implement the
+- Confirmed by code: `desktop/src/app/project-actions.svelte.ts`,
+  `desktop/src/app/desktop-project-action-services.ts`, the extracted composer/
+  sidebar task surfaces, and `desktop/src/lib/project-tasks.ts` implement the
   current task lifecycle and composer capture action.
 - Confirmed by code: `desktop/src-tauri/src/lib.rs` owns JSONC persistence,
   validation, confinement, atomic replacement, and ignores unsupported sibling

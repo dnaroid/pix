@@ -81,7 +81,10 @@ Add read-only, live views of the active session's execution Plan and Subagents t
 - `desktop/src/components/SessionSubagentsPanel.svelte`
 - `desktop/src/components/SessionTodosPanel.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/App.svelte`
+- `desktop/src/app/session-activity.svelte.ts`
+- `desktop/src/app/desktop-presentation-state.svelte.ts`
+- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
 
 ## Verification
 

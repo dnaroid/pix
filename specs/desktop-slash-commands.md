@@ -73,7 +73,10 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 - `desktop/src/components/SessionSelector.svelte`
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/styles.css`
-- `desktop/src/App.svelte`
+- `desktop/src/app/model-config-actions.ts`
+- `desktop/src/app/conversation-branch-actions.ts`
+- `desktop/src/app/desktop-prompt-action-services.ts`
+- `desktop/src/app/desktop-command-controller.svelte.ts`
 
 ## Verification
 

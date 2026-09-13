@@ -59,7 +59,8 @@ Bring the TUI's context-usage, DCP-session-statistics, and current-model quota s
 - `acp/src/acp/pix-acp-agent.ts`
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/lib/runtime-status.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/session-runtime-status.svelte.ts`
+- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/components/RuntimeStatusBarItems.svelte`
 

@@ -48,7 +48,8 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/lib/autocomplete.ts`
 - `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/App.svelte`
+- `desktop/src/app/autocomplete.svelte.ts`
+- `desktop/src/app/desktop-session-services.ts`
 
 ## Verification
 
@@ -64,4 +65,6 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 
 - Confirmed by code: TUI autocomplete uses `ModelRuntime.streamSimple`, Pix autocomplete config, suffix cleanup, debounce, timeout, and abort/stale-result protection.
 - Confirmed by SDK types: ACP custom request handlers receive an abort signal and `$/cancel_request` aborts it.
-- Confirmed by desktop structure: the composer owns caret, selection, keyboard, resize, and scroll behavior while `App.svelte` owns the ACP client and active-session identity.
+- Confirmed by desktop structure: the composer owns caret, selection, keyboard,
+  resize, and scroll behavior; the autocomplete/session services provide the
+  ACP request and active-session context through the composition root.

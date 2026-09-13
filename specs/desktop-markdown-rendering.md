@@ -92,7 +92,9 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/mermaid.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/preview.svelte.ts`
+- `desktop/src/app/preview-state.svelte.ts`
+- `desktop/src/app/preview-file-io.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/capabilities/default.json`
 - `desktop/src-tauri/tauri.conf.json`

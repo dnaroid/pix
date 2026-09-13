@@ -18,7 +18,7 @@ Keep the Desktop process launched by `npm run watch:all` on the latest successfu
 
 - A Desktop web-source change schedules `web` followed by `native`; the running Desktop is replaced only after both steps succeed.
 - `watch:all` disables Tauri's `beforeBuildCommand` because it has already built the web bundle once in the ordered build plan.
-- `desktop/src-tauri/build.rs` explicitly tracks `../dist/index.html` as a Cargo input. Vite's production entrypoint contains hashed references to the emitted JS/CSS assets, so a successful web rebuild invalidates the native crate even when no Rust source changed.
+- `desktop/src-tauri/build.rs` explicitly tracks the generated `<repo>/desktop/dist/index.html` as a Cargo input. Vite's production entrypoint contains hashed references to the emitted JS/CSS assets, so a successful web rebuild invalidates the native crate even when no Rust source changed.
 - The native rebuild therefore regenerates and recompiles Tauri's embedded asset context before the newly bundled Desktop is launched.
 - A failed web/native build keeps the previous working Desktop process alive; the watcher never restarts into a partially built frontend.
 - Build subprocess output remains streamed to the terminal in real time, but the

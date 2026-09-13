@@ -83,7 +83,10 @@ Show image and video attachments in the desktop composer and transcript, while k
 
 ## Related files
 
-- `desktop/src/App.svelte`
+- `desktop/src/app/attachment-drafts.ts`
+- `desktop/src/app/prompt-payload.ts`
+- `desktop/src/app/prompt-submit.ts`
+- `desktop/src/app/transcript-attachments.ts`
 - `desktop/src/components/PromptComposer.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/attachments.ts`
@@ -106,9 +109,9 @@ Show image and video attachments in the desktop composer and transcript, while k
 
 ## Evidence
 
-- Confirmed by code: `desktop/src/App.svelte::buildPromptPayload` distinguishes
-  path-backed images from pathless clipboard images; ACP materializes the
-  private file-image metadata before prompting Pi.
+- Confirmed by code: `desktop/src/app/prompt-payload.ts::buildPromptPayload`
+  distinguishes path-backed images from pathless clipboard images; ACP
+  materializes the private file-image metadata before prompting Pi.
 - Confirmed by code: composer-to-task capture materializes any pathless image
   through `cache_task_attachment` before writing task attachment markers.
 - Confirmed by docs: ACP resource links are baseline prompt content; Tauri's asset protocol serves local media and the opener plugin opens paths with the default application.

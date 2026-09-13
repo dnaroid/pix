@@ -40,7 +40,7 @@ thinking: medium
 ```
 
 A preset contains a set of available models, not a per-agent matrix. Project
-pools live in `.pi/agents/presets.jsonc`:
+pools live in `<project>/.pi/agents/presets.jsonc`:
 
 ```jsonc
 {
@@ -114,8 +114,8 @@ in one array and are not wrapped in an additional fallback field.
 
 The removed `asyncSubagents` section is no longer part of the public config
 schema and is not read at runtime. Existing legacy files are left untouched but
-have no effect. Migrate role definitions to `.pi/agents/*.md` and custom pools to
-`.pi/agents/presets.jsonc`.
+have no effect. Migrate role definitions to `<project>/.pi/agents/*.md` and
+custom pools to `<project>/.pi/agents/presets.jsonc`.
 
 ## Compact handoff
 

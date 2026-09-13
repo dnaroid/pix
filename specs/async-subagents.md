@@ -74,7 +74,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Concurrency (`core/concurrency.ts`)
 - `createSemaphore(limit)`: `limit ≤ 0` = unlimited. `acquire(signal?)` queues when full, rejects on abort. `[confirmed by code]`
 - Project-scoped semaphores cached in a `PROJECT_SEMAPHORES` Map keyed by resolved cwd; reused if same limit or if active/waiting > 0. `[confirmed by code, tools/spawn.ts ~50-58]`
-- Default max concurrent = 5 (`DEFAULT_MAX_CONCURRENT`); configurable via the top-level `maxConcurrent` field of the subagent config (project `.pi/agents/presets.jsonc` or the builtin presets file) or env `PI_SUBAGENTS_MAX_CONCURRENT` / `ASYNC_SUBAGENTS_MAX_CONCURRENT`. `[confirmed by code, core/config.ts:127,211,673-674]`
+- Default max concurrent = 5 (`DEFAULT_MAX_CONCURRENT`); configurable via the top-level `maxConcurrent` field of the subagent config (project `<project>/.pi/agents/presets.jsonc` or the builtin presets file) or env `PI_SUBAGENTS_MAX_CONCURRENT` / `ASYNC_SUBAGENTS_MAX_CONCURRENT`. `[confirmed by code, core/config.ts:127,211,673-674]`
 
 ### Retry (`core/retry.ts`)
 - `spawnAgentWithRetry()` wraps `spawnAgent` with retry + model-fallback loops. `[confirmed by code]`

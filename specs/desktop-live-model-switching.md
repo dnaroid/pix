@@ -19,7 +19,7 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - Desktop keeps the combined model/thinking picker enabled while the active session is processing a prompt.
 - The same picker is visible on a UI-only New Conversation draft before its first prompt. In that state the selection is staged locally from the sessionless draft config catalogue; it does not require an active session runtime and does not send `session/set_config_option`.
 - The picker remembers thinking independently per model. The current model begins from the actual session/draft thinking; switching to another model restores that model's staged value from the current picker interaction or its persisted user-level `thinkingByModel` preference, then clamps it to the model's supported thinking levels.
-- Applying model/thinking successfully updates the shared user `~/.config/pi/pix.jsonc` `thinkingByModel` map. Cancelling the picker does not persist staged-only changes, and project `.pi/pix.jsonc` cannot override this user preference. See `model-thinking-preferences.md`.
+- Applying model/thinking successfully updates the shared user `~/.config/pi/pix.jsonc` `thinkingByModel` map. Cancelling the picker does not persist staged-only changes, and project `<project>/.pi/pix.jsonc` cannot override this user preference. See `model-thinking-preferences.md`.
 - Applying a new model during an active run sends the normal ACP `session/set_config_option` request immediately; Desktop does not wait for the prompt to finish before issuing it.
 - The ACP adapter applies `model` through Pi's normal `setModel` RPC and `thought_level` through `setThinkingLevel`; there is no ACP idle-only guard around these options.
 - This matches TUI behavior: TUI calls `session.setModel()` while `session.isStreaming` is true. The current in-flight model request is not interrupted; the changed session model is used by subsequent model work according to Pi runtime semantics.
@@ -28,7 +28,11 @@ Keep Desktop model and thinking selection available while the agent is running, 
 
 ## Related files
 
-- `desktop/src/App.svelte`
+- `desktop/src/app/model-config.svelte.ts`
+- `desktop/src/app/model-config-actions.ts`
+- `desktop/src/app/model-draft-config.svelte.ts`
+- `desktop/src/app/model-picker-state.svelte.ts`
+- `desktop/src/app/session-runtime-config.svelte.ts`
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/components/ModelThinkingPicker.svelte`
 - `desktop/src/lib/acp-client.ts`

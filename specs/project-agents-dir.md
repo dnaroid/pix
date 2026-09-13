@@ -20,8 +20,8 @@ Let a project ship its own sub-agent definitions as individual Markdown files
 (Claude Code `.claude/agents/*.md` style). Files live in `<project>/.pi/agents/`;
 each file becomes a `subagentType` available to the `subagents` tool, the LLM
 router, and the parent system-prompt role catalog. Project model-pool presets
-live beside them in `.pi/agents/presets.jsonc`. Bundled built-in roles use the
-same Markdown definition format and parser under
+live beside them in `<project>/.pi/agents/presets.jsonc`. Bundled built-in roles
+use the same Markdown definition format and parser under
 `src/async-subagents/agents/*.md`.
 
 ## Behavior
@@ -30,7 +30,7 @@ same Markdown definition format and parser under
 
 1. From the spawn cwd, walk up towards the filesystem root; the **first**
    `.pi/agents` directory found wins (same walk-up semantics as
-   `findProjectPiToolsSuiteConfig` for `.pi/pi-tools-suite.jsonc`).
+   `findProjectPiToolsSuiteConfig` for `<project>/.pi/pi-tools-suite.jsonc`).
 2. Only top-level `*.md` files (non-recursive) are loaded, dotfiles excluded,
    sorted by filename for deterministic merge order.
 3. Type name = filename without the `.md` extension. Valid names:
@@ -89,13 +89,14 @@ You are a ... role prompt (markdown body).
 Within `loadSubagentConfig` (no caching — re-read per spawn/command call):
 
 1. bundled built-in role definitions and preset defaults;
-2. project `.pi/agents/presets.jsonc` from the nearest discovered agents dir;
+2. project `<project>/.pi/agents/presets.jsonc` from the nearest discovered
+   agents dir;
 3. project `.pi/agents/*.md`, with agent-file fields overriding same-named
    built-in role fields;
 4. environment model, routing, concurrency, result-size, and timeout overrides.
 
 User/global `pi-tools-suite.jsonc`, `$PI_CONFIG_DIR`, project
-`.pi/pi-tools-suite.jsonc`, and the former `ASYNC_SUBAGENTS_CONFIG` /
+`<project>/.pi/pi-tools-suite.jsonc`, and the former `ASYNC_SUBAGENTS_CONFIG` /
 `PI_SUBAGENTS_CONFIG` file path are not part of the current sub-agent profile
 merge pipeline.
 
@@ -124,9 +125,12 @@ merge pipeline.
 - Runtime-only invariants stay in runtime code. All async sub-agents disable
   skill discovery and reject skill injection through `extraArgs`; role files are
   therefore self-contained. As extended by `ui-qa-agent.md`, `ui-qa` additionally
-  receives launcher-owned runner/workspace paths, while the complete QA workflow
-  lives in the body of `agents/ui-qa.md`. Legacy `browser-qa` requests normalize
-  to that canonical role.
+  receives launcher-owned runner/workspace paths. Its top-level
+  `agents/ui-qa.md` body is a thin common contract plus deterministic guide
+  routing; backend-specific browser/TUI/Desktop/auth instructions live in
+  non-role assets under `agents/ui-qa/guides/` and are loaded through the
+  allowlisted UI-QA runner. Legacy `browser-qa` requests normalize to that
+  canonical role.
 
 ## Non-goals
 

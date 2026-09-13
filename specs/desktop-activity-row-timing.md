@@ -29,7 +29,8 @@ Make collapsed Desktop activity rows identify what ran and how long completed ac
 
 ## Related files
 
-- `desktop/src/App.svelte`
+- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
+- `desktop/src/app/session-update-batcher.ts`
 - `desktop/src/lib/transcript.ts`
 - `desktop/src/lib/transcript.test.ts`
 - `desktop/src/components/TranscriptPane.svelte`

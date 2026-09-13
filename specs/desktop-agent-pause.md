@@ -51,8 +51,9 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - `acp/src/acp/pix-acp-agent.ts`
 - `desktop/src/lib/agent-control.ts`
 - `desktop/src/lib/acp-client.ts`
-- `desktop/src/App.svelte`
-- `desktop/src/components/PromptComposer.svelte`
+- `desktop/src/app/prompt-agent-control.svelte.ts`
+- `desktop/src/app/prompt-runtime.svelte.ts`
+- `desktop/src/components/PromptComposerControls.svelte`
 
 ## Verification
 

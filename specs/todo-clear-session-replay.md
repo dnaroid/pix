@@ -22,7 +22,7 @@ Keep todos cleared after pix reloads or resumes the current session branch.
 
 ## Non-goals
 
-- Changing project-level `.pi/todo-plan.json` persistence semantics.
+- Changing project-level `<project>/.pi/todo-plan.json` persistence semantics.
 - Adding todo snapshots to model context or the visible transcript.
 - Rewriting existing session files.
 

@@ -82,7 +82,8 @@ current product non-goals.
   - `acp://stderr` with `{ windowLabel, generation, lines: string[] }` batches
     of diagnostic lines
   - `acp://exit` with the generation and child exit status
-- Rust starts `node ../../acp/dist/main.js` by default. `PIX_ACP_NODE_BINARY`
+- Rust starts Node with the generated `<repo>/acp/dist/main.js` entry by
+  default. `PIX_ACP_NODE_BINARY`
   and `PIX_ACP_ENTRY` may override executable and entry path for development.
 - Webview ↔ adapter payloads follow `@agentclientprotocol/sdk` 1.4.0 types.
 

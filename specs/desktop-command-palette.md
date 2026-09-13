@@ -47,7 +47,8 @@ Give Pix Desktop one reusable command vocabulary for keyboard shortcuts, command
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/lib/workbench-tabs.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/desktop-command-controller.svelte.ts`
+- `desktop/src/app/desktop-command-services.ts`
 
 ## Verification
 

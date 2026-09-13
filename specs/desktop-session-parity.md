@@ -56,7 +56,10 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - `acp/src/acp/pix-acp-agent.ts`
 - `acp/src/acp/session-map.ts`
 - `acp/src/acp/tui-tabs.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/session-catalog.svelte.ts`
+- `desktop/src/app/session-tabs-state.svelte.ts`
+- `desktop/src/app/session-tab-controller.ts`
+- `desktop/src/app/desktop-presentation-state.svelte.ts`
 - `desktop/src/lib/acp-client.ts`
 - `src/app/session/tabs-controller.ts`
 - `specs/tui-session-tabs.md`

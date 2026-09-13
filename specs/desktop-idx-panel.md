@@ -67,7 +67,7 @@ Expose repository intelligence and Spec Wiki maintenance from Pix Desktop withou
 - `desktop/src/lib/idx.ts`
 - `desktop/src/lib/idx.test.ts`
 - `desktop/src/lib/project-files.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification

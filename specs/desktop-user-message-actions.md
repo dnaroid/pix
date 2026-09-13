@@ -19,12 +19,12 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 - A Desktop user message exposes exactly four actions: **Copy message**, **Fork**, **Fork in new tab**, and **Undo changes**. No additional message actions are part of this contract. `[confirmed by code: desktop/src/components/TranscriptPane.svelte]`
 - The menu is available from the user bubble's context menu and from an ellipsis button shown on hover/focus. It renders as a viewport-fixed overlay outside transcript-entry paint containment, flips above the anchor when there is not enough room below, and stays above the composer/chrome instead of being clipped by transcript scrolling. Each of the four actions has a dedicated icon. Opening focuses the first enabled command; ArrowUp/ArrowDown, Home/End, and printable-key type-ahead navigate enabled commands; Escape closes the menu and restores its invoker when available. Tab, transcript scrolling/resizing, or an outside click dismisses it without trapping focus. `[confirmed by code: desktop/src/components/TranscriptPane.svelte]`
 - Copy remains available for renderer-only user rows. Fork and Undo actions require a real Pi user session entry and are disabled while the active session is busy. `[confirmed by code]`
-- Newly submitted Desktop rows are associated with Pi entries by comparing current-branch user entry IDs before and after the serialized prompt. Extension/builtin commands that create no Pi user entry are marked renderer-only. Historical rows resolve against the ordered current branch rather than by message text, so repeated identical prompts remain unambiguous. `[confirmed by code: desktop/src/App.svelte, acp/src/acp/pix-acp-agent.ts]`
+- Newly submitted Desktop rows are associated with Pi entries by comparing current-branch user entry IDs before and after the serialized prompt. Extension/builtin commands that create no Pi user entry are marked renderer-only. Historical rows resolve against the ordered current branch rather than by message text, so repeated identical prompts remain unambiguous. `[confirmed by code: desktop/src/app/prompt-run-lifecycle.svelte.ts, desktop/src/app/user-message-context-actions.ts, acp/src/acp/pix-acp-agent.ts]`
 
 ## Copy and fork behavior
 
 - **Copy message** copies the full selected message. Session-backed rows use the existing ACP host clipboard path; renderer-only rows use the Desktop browser clipboard. `[confirmed by code]`
-- **Fork** forks at the selected Pi user entry and replaces the currently open source session, matching the existing Desktop `/fork` behavior. `[confirmed by code: desktop/src/App.svelte]`
+- **Fork** forks at the selected Pi user entry and replaces the currently open source session, matching the existing Desktop `/fork` behavior. `[confirmed by code: desktop/src/app/conversation-fork-action.ts]`
 - **Fork in new tab** uses the same Pi `session/fork` primitive but keeps the source ACP session/tab open and activates the new fork. `[confirmed by code]`
 
 ## Undo changes contract
@@ -38,7 +38,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 - Undo does **not** run `git reset`, `git restore`, `git checkout`, reset the index, or infer ownership from the repository working tree. The existing shared patch reverter may invoke `git apply --check` / `git apply --reverse` only as a patch-application engine for a previously recorded mutation. `[confirmed by code: src/app/workspace/workspace-undo.ts]`
 - A recorded `Write` is reverted only when the current file content exactly matches the content left by that mutation. A changed file is treated as a conflict and is not overwritten. Patch mutations are similarly checked before application. `[confirmed by code]` `[confirmed by tests: tests/workspace-undo-extension.test.ts, tests/workspace-undo.test.ts]`
 - If earlier mutations in the same undo have already been reverted when a later mutation conflicts, the shared reverter reapplies those earlier mutations so the workspace is not left in a partially undone state. `[confirmed by code]` `[confirmed by tests: tests/workspace-undo.test.ts]`
-- A workspace conflict does not undo the already-completed session rewind. Desktop reports a warning, reloads the rewound transcript, and restores the selected user text into the composer. `[confirmed by code: desktop/src/App.svelte]`
+- A workspace conflict does not undo the already-completed session rewind. Desktop reports a warning, reloads the rewound transcript, and restores the selected user text into the composer. `[confirmed by code: desktop/src/app/user-message-context-actions.ts]`
 
 ## TUI and legacy compatibility
 
@@ -62,7 +62,10 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/desktop-commands.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/conversation-branch-actions.ts`
+- `desktop/src/app/conversation-fork-action.ts`
+- `desktop/src/app/user-message-context-actions.ts`
+- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/lib/transcript.ts`
 - `desktop/src-tauri/src/lib.rs`

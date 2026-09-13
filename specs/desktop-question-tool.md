@@ -72,7 +72,11 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - `acp/src/acp/ui-request-bridge.ts`
 - `desktop/src/lib/question.ts`
 - `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/App.svelte`
+- `desktop/src/components/PromptQuestionnairePanel.svelte`
+- `desktop/src/app/elicitation.svelte.ts`
+- `desktop/src/app/question-images.ts`
+- `desktop/src/app/question-image-state.ts`
+- `desktop/src/app/question-image-ingest.ts`
 
 ## Evidence
 

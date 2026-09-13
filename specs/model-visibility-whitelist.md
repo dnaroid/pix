@@ -25,7 +25,7 @@ Give Pix TUI and Desktop one shared, user-controlled model-picker whitelist whil
 
 - `visibleModels` is an optional array of exact `provider/model` refs. When omitted, both Pix model pickers show every model in their complete available catalog.
 - An explicit whitelist, including `[]`, is authoritative for picker visibility. The current active model is always kept visible so the picker cannot enter an invalid current-selection state.
-- The preference is user-level and shared across TUI and Desktop. Project `.pi/pix.jsonc` files do not override it.
+- The preference is user-level and shared across TUI and Desktop. Project `<project>/.pi/pix.jsonc` files do not override it.
 - TUI builds its picker from the complete `ModelRuntime.getAvailableSnapshot()` rather than `session.scopedModels`; `enabledModels` continues to control SDK session scope/cycling but not picker visibility.
 - TUI `Shift+Tab` toggles `Manage visible models`. Management mode exposes hidden models, `Enter`/mouse click toggles the highlighted model, and the current model cannot be hidden. A clickable `Clear all` action saves `visibleModels: []`, hiding every non-current model. Edits are persisted immediately.
 - Desktop exposes a `Manage` mode in the same model/thinking dialog. It shows the complete ACP model option catalog with visibility checkmarks, saves changes immediately to the same `visibleModels` key, and prevents hiding the current model. `Clear all` saves an empty whitelist; the current model remains visible only through the current-model safety rule. `Shift+Tab` also toggles the mode while focus is in model search.
@@ -43,7 +43,8 @@ Give Pix TUI and Desktop one shared, user-controlled model-picker whitelist whil
 - `src/app/popup/popup-action-controller.ts`
 - `src/app/rendering/popup-menu-renderer.ts`
 - `src/app/input/input-controller.ts`
-- `desktop/src/App.svelte`
+- `desktop/src/app/model-preferences.svelte.ts`
+- `desktop/src/app/desktop-overlays-view-model.svelte.ts`
 - `desktop/src/components/ModelThinkingPicker.svelte`
 - `desktop/src/lib/model-visibility.ts`
 

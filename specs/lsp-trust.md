@@ -25,7 +25,7 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 
 ### Config loading (two layers)
 1. **Global configs (no trust gate)**, in order: `$HOME/.config/pi/pi-tools-suite.jsonc`, then `$PI_CONFIG_DIR/pi-tools-suite.jsonc` if `PI_CONFIG_DIR` is set. `[confirmed by code: config.ts 147-151; config.ts 44-46 getPiToolsSuiteUserConfigPath]`
-2. **Project config (trust-gated)**: `$CWD/.pi/pi-tools-suite.jsonc` found via `findUp` (walks ancestors of `ctx.cwd` up to `/`). `[confirmed by code: config.ts 31; paths.ts findUp]`
+2. **Project config (trust-gated)**: `<project>/.pi/pi-tools-suite.jsonc` found via `findUp` (walks ancestors of `ctx.cwd` up to `/`). `[confirmed by code: config.ts 31; paths.ts findUp]`
 3. Items merged by `id`; project layer can override or disable (`enabled:false`) global servers. `[confirmed by code: config.ts 112-121]`
 
 ### Trust gate (project layer only)
@@ -46,7 +46,7 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 ## Public contracts / inputs / outputs
 
 ### Config locations & format
-- Global: `$HOME/.config/pi/pi-tools-suite.jsonc` (JSONC, `lsp.servers[]`); alt `$PI_CONFIG_DIR/pi-tools-suite.jsonc`; project: `<ancestor-of-cwd>/.pi/pi-tools-suite.jsonc` (via `findUp`). `[confirmed by code]`
+- Global: `$HOME/.config/pi/pi-tools-suite.jsonc` (JSONC, `lsp.servers[]`); alt `$PI_CONFIG_DIR/pi-tools-suite.jsonc`; project: `<project>/.pi/pi-tools-suite.jsonc` at the nearest matching ancestor (via `findUp`). `[confirmed by code]`
 - Schema `{ lsp: { servers: LspServerConfig[] } }`; `LspServerConfig` fields: `id`, `enabled`, `bin`, `args`, `cwd`, `env`, `config`, `include`, `exclude`, `rootMarkers`, `languageIdByExtension`, `startupTimeoutMs`, `diagnosticsWaitMs`, `pullDiagnostics`, `waitForPublishDiagnostics`, `initializationOptions`, `settings`, `maxFileSizeBytes`. `[confirmed by code: types.ts 27-44]`
 
 ### Trust store
@@ -99,7 +99,7 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
   - "persists Trust always decisions and does not cache rejects" — file persistence; rejects re-prompt every time.
   - "loads LSP servers from shared pi-tools-suite config" — global config read from `$HOME/.config/pi/pi-tools-suite.jsonc` (not `$PI_AGENT_DIR/lsp.json`).
   - Execution tests with a real fake LSP server script in temp, configured via **global** config: diagnostics, re-use, crash backoff, multi-root, tsserver/pull/dynamic diagnostics, stubborn-process kill, abort.
-  - **No test exercises the project-config trust gate with a real `.pi/pi-tools-suite.jsonc`** — all tests use `writeGlobalLspConfig`. `[confirmed by tests]`
+  - **No test exercises the project-config trust gate with a real `<project>/.pi/pi-tools-suite.jsonc`** — all tests use `writeGlobalLspConfig`. `[confirmed by tests]`
 
 ## Gaps / risks
 ### Arbitrary command execution

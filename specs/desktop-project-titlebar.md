@@ -120,7 +120,7 @@ without blocking desktop interactions.
 ## Related files
 
 - `desktop/src-tauri/tauri.conf.json`
-- `desktop/src/App.svelte`
+- `desktop/src/app/project-workspace.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/ProjectSwitcher.svelte`
 - `desktop/src/components/ProjectSettingsDialog.svelte`
@@ -149,12 +149,14 @@ without blocking desktop interactions.
 
 ## Evidence
 
-- Confirmed by code: `App.svelte` owns project-color refresh generations and
-  accepts results only for the current generation and current recent-project set.
+- Confirmed by code: `desktop/src/app/project-workspace.svelte.ts` owns
+  project-color refresh/save generations and accepts results only for the
+  current generation, workspace, and recent-project set.
 - Confirmed by code: `ProjectSwitcher.svelte` owns the sidebar interaction state
   but no filesystem or Tauri IPC.
-- Confirmed by code: `ProjectSettingsDialog.svelte` is presentation-only; App owns
-  generation guards/retries and Rust owns confined atomic persistence.
+- Confirmed by code: `ProjectSettingsDialog.svelte` is presentation-only;
+  `project-workspace.svelte.ts` owns generation guards/retries and Rust owns
+  confined atomic persistence.
 - Confirmed by code: `read_project_file` runs project-file reads through the
   Tauri blocking worker path with workspace confinement.
 - Confirmed by installed Tauri schema: `titleBarStyle: "Overlay"` and `hiddenTitle` are supported window options.
