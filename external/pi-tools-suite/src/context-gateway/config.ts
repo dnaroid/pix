@@ -4,6 +4,7 @@ import { parse as parseJsonc } from "jsonc-parser";
 
 import { getPiToolsSuiteUserConfigPath } from "../config.js";
 import type {
+	ContextGatewayAccountingLogConfig,
 	ContextGatewayBudgets,
 	ContextGatewayMode,
 	ContextGatewayResolvedConfig,
@@ -16,6 +17,12 @@ export const DEFAULT_CONTEXT_GATEWAY_BUDGETS: Readonly<ContextGatewayBudgets> = 
 	maxExactReadBytes: 32_768,
 	maxSearchBytes: 8_192,
 	maxSearchMatches: 12,
+});
+
+export const DEFAULT_CONTEXT_GATEWAY_ACCOUNTING_LOG: Readonly<ContextGatewayAccountingLogConfig> = Object.freeze({
+	enabled: true,
+	maxBytes: 5 * 1024 * 1024,
+	maxBackups: 3,
 });
 
 export function contextGatewayBudgetForClass(
@@ -66,6 +73,24 @@ function parseMode(value: unknown): ContextGatewayMode | undefined {
 	return MODES.has(normalized) ? normalized : undefined;
 }
 
+function parseBoolean(value: unknown): boolean | undefined {
+	return typeof value === "boolean" ? value : undefined;
+}
+
+function parseBooleanEnv(value: string): boolean | undefined {
+	const normalized = value.trim().toLowerCase();
+	if (["1", "true", "yes", "on"].includes(normalized)) return true;
+	if (["0", "false", "no", "off"].includes(normalized)) return false;
+	return undefined;
+}
+
+function parsePositiveIntegerEnv(value: string): number | undefined {
+	const normalized = value.trim();
+	if (!/^\d+$/.test(normalized)) return undefined;
+	const parsed = Number(normalized);
+	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function mergeBudget(
 	budgets: ContextGatewayBudgets,
 	issues: string[],
@@ -88,6 +113,7 @@ export function loadContextGatewayConfig(
 ): ContextGatewayResolvedConfig {
 	let mode: ContextGatewayMode = "off";
 	const budgets: ContextGatewayBudgets = { ...DEFAULT_CONTEXT_GATEWAY_BUDGETS };
+	const accountingLog: ContextGatewayAccountingLogConfig = { ...DEFAULT_CONTEXT_GATEWAY_ACCOUNTING_LOG };
 	const issues: string[] = [];
 
 	const layers = [getPiToolsSuiteUserConfigPath(homeDir)];
@@ -108,6 +134,29 @@ export function loadContextGatewayConfig(
 				mergeBudget(budgets, issues, key, section.budgets[key]);
 			}
 		}
+		if (isRecord(section.accountingLog)) {
+			if (Object.prototype.hasOwnProperty.call(section.accountingLog, "enabled")) {
+				const enabled = parseBoolean(section.accountingLog.enabled);
+				if (enabled !== undefined) accountingLog.enabled = enabled;
+				else issues.push(`contextGateway.accountingLog.enabled must be boolean; keeping ${accountingLog.enabled}.`);
+			}
+			const maxBytes = section.accountingLog.maxBytes;
+			if (maxBytes !== undefined) {
+				if (typeof maxBytes === "number" && Number.isSafeInteger(maxBytes) && maxBytes > 0 && maxBytes <= MAX_BYTE_BUDGET) {
+					accountingLog.maxBytes = maxBytes;
+				} else {
+					issues.push(`contextGateway.accountingLog.maxBytes must be an integer in 1..${MAX_BYTE_BUDGET}; keeping ${accountingLog.maxBytes}.`);
+				}
+			}
+			const maxBackups = section.accountingLog.maxBackups;
+			if (maxBackups !== undefined) {
+				if (typeof maxBackups === "number" && Number.isSafeInteger(maxBackups) && maxBackups >= 1 && maxBackups <= 100) {
+					accountingLog.maxBackups = maxBackups;
+				} else {
+					issues.push(`contextGateway.accountingLog.maxBackups must be an integer in 1..100; keeping ${accountingLog.maxBackups}.`);
+				}
+			}
+		}
 	}
 
 	if (env.PI_CONTEXT_GATEWAY_MODE !== undefined) {
@@ -116,5 +165,21 @@ export function loadContextGatewayConfig(
 		else issues.push("PI_CONTEXT_GATEWAY_MODE must be off, observe, or enforce; ignoring it.");
 	}
 
-	return { mode, budgets, issues };
+	if (env.PI_CONTEXT_GATEWAY_ACCOUNTING_LOG_ENABLED !== undefined) {
+		const enabled = parseBooleanEnv(env.PI_CONTEXT_GATEWAY_ACCOUNTING_LOG_ENABLED);
+		if (enabled !== undefined) accountingLog.enabled = enabled;
+		else issues.push("PI_CONTEXT_GATEWAY_ACCOUNTING_LOG_ENABLED must be true or false; ignoring it.");
+	}
+	if (env.PI_CONTEXT_GATEWAY_ACCOUNTING_MAX_BYTES !== undefined) {
+		const maxBytes = parsePositiveIntegerEnv(env.PI_CONTEXT_GATEWAY_ACCOUNTING_MAX_BYTES);
+		if (maxBytes !== undefined && maxBytes <= MAX_BYTE_BUDGET) accountingLog.maxBytes = maxBytes;
+		else issues.push(`PI_CONTEXT_GATEWAY_ACCOUNTING_MAX_BYTES must be an integer in 1..${MAX_BYTE_BUDGET}; ignoring it.`);
+	}
+	if (env.PI_CONTEXT_GATEWAY_ACCOUNTING_MAX_BACKUPS !== undefined) {
+		const maxBackups = parsePositiveIntegerEnv(env.PI_CONTEXT_GATEWAY_ACCOUNTING_MAX_BACKUPS);
+		if (maxBackups !== undefined && maxBackups <= 100) accountingLog.maxBackups = maxBackups;
+		else issues.push("PI_CONTEXT_GATEWAY_ACCOUNTING_MAX_BACKUPS must be an integer in 1..100; ignoring it.");
+	}
+
+	return { mode, budgets, accountingLog, issues };
 }

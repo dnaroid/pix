@@ -10,10 +10,17 @@ export interface ContextGatewayBudgets {
 	maxSearchMatches: number;
 }
 
+export interface ContextGatewayAccountingLogConfig {
+	enabled: boolean;
+	maxBytes: number;
+	maxBackups: number;
+}
+
 /** Parsed layered config. `enforce` is selective and fail-open for unsupported result classes. */
 export interface ContextGatewayResolvedConfig {
 	mode: ContextGatewayMode;
 	budgets: ContextGatewayBudgets;
+	accountingLog: ContextGatewayAccountingLogConfig;
 	issues: string[];
 }
 

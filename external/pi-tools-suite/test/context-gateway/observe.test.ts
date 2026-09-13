@@ -15,6 +15,7 @@ function config(mode: "off" | "observe" | "enforce", maxResultBytes = 8192): Con
 			maxSearchBytes: 8192,
 			maxSearchMatches: 12,
 		},
+		accountingLog: { enabled: false, maxBytes: 5 * 1024 * 1024, maxBackups: 3 },
 		issues: [],
 	};
 }
