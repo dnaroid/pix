@@ -19,6 +19,7 @@ Bring the TUI's context-usage, DCP-session-statistics, and current-model quota s
 - Once an active Desktop session runtime is ready, the status bar shows the current context fill percentage and a compact horizontal fill track.
 - Context color thresholds match the TUI: up to 30% uses success, 31–50% warning, and above 50% error semantics.
 - Clicking the context control opens a non-modal DCP statistics popover above the status bar. It uses the same DCP statistics formatter and session-journal/tool-result data as the TUI.
+- The shared report follows [dcp-statistics.md](./dcp-statistics.md): durable blocks and measured commit gains, dated model/budget snapshots, and recorded reminder attempts/completions are separate. Missing instrumentation or failed full-history reads remain unknown; the former compliance proxy is not shown.
 - DCP telemetry is loaded only when that popover is opened. Periodic/model/context status refreshes never traverse the DCP branch, and an already-loaded DCP snapshot is preserved across those refreshes.
 - The popover opens immediately while its telemetry request is in flight and shows a compact loading state; DCP loading never gates the rest of the workbench.
 - The DCP popover remains technical and compact, uses semantic Desktop popover/chrome tokens, supports text selection, closes on outside pointer interaction or Escape, and does not block the rest of the workbench.

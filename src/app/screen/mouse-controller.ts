@@ -38,7 +38,7 @@ import type {
 	StatusVoiceLanguageTarget,
 	StatusVoiceMicTarget,
 } from "../types.js";
-import { formatDcpStatsToast } from "../rendering/dcp-stats.js";
+import { loadDcpStatsToast } from "../rendering/dcp-stats.js";
 import { detectFileLinks, type RenderedLink } from "./file-links.js";
 import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -617,8 +617,12 @@ export class AppMouseController {
 
 		const session = this.host.runtimeSession();
 		if (!session) return false;
-		const message = formatDcpStatsToast(session);
-		this.host.showToast(message, "info", { variant: "dialog" });
+		const model = session.model;
+		const sessionId = session.sessionManager.getSessionId?.();
+		void loadDcpStatsToast(session).then((message) => {
+			if (this.host.runtimeSession() !== session || session.model !== model || session.sessionManager.getSessionId?.() !== sessionId) return;
+			this.host.showToast(message, "info", { variant: "dialog" });
+		});
 		return true;
 	}
 

@@ -19,14 +19,15 @@ import type { AppScrollController } from "../src/app/screen/scroll-controller.js
 import { APP_ICONS } from "../src/app/icons.js";
 
 describe("AppMouseController", () => {
-	it("shows detailed DCP stats as a dialog toast when context status is clicked", () => {
+	it("shows detailed DCP stats as a dialog toast when context status is clicked", async () => {
 		let toast: { message: string; kind: string; variant?: string; durationMs?: number } | undefined;
+		const session = {
+			getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
+			sessionManager: { getBranch: () => [] },
+		} as never;
 		const controller = new AppMouseController(
 			fakeHost({
-				runtimeSession: () => ({
-					getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
-					sessionManager: { getBranch: () => [] },
-				}) as never,
+				runtimeSession: () => session,
 				showToast: (message, kind, options) => { toast = { message, kind, variant: options?.variant, durationMs: options?.durationMs }; },
 			}),
 			fakePopupMenus(),
@@ -37,10 +38,12 @@ describe("AppMouseController", () => {
 		controller.statusContextTarget = { row: 5, startColumn: 1, endColumn: 6 };
 
 		controller.handleMouse({ button: 0, x: 2, y: 5, released: true });
+		await delay(0);
 
 		assert.equal(toast?.kind, "info");
 		assert.match(toast?.message ?? "", /DCP Session Statistics:/);
-		assert.match(toast?.message ?? "", /Nudge telemetry:/);
+		assert.match(toast?.message ?? "", /History projection \(active branch\)/);
+		assert.match(toast?.message ?? "", /unknown \(not zero\)/);
 		assert.equal(toast?.variant, "dialog");
 		assert.equal(toast?.durationMs, undefined);
 	});

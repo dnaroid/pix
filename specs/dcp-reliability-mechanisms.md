@@ -197,6 +197,15 @@ Active implemented contract.
 
 ## Deterministic walls
 
+- `tests/dcp-lifecycle.integration.test.ts` (repository root) uses the actual
+  lazy manager and DCP runtime, not a tail-only mock: resume, forks before/after
+  a commit, old SDK capacity after model switch, full-read failures, canonical
+  same-timestamp binding, and stale async session loads.
+- `tests/dcp-stats.test.ts` (repository root) verifies the shared report's
+  durable gain metadata and distinct projection/attempt/completion counts.
+  [dcp-statistics.md](./dcp-statistics.md) defines the observability contract;
+  diagnostic counters never restore transient evidence or recovery authority.
+
 - `test/dcp-fresh-nudge.test.ts` verifies mid-turn reminder delivery through
   locally completed fresh tool results, identical serialized Responses prefixes
   on continuation/retry, failed-send freshness consumption, duplicate-ID refusal,

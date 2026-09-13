@@ -1,246 +1,124 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
+import { formatDcpStatsToast, loadDcpStatsToast } from "../src/app/rendering/dcp-stats.js";
+import { collectDcpStatistics, formatDcpStatistics } from "../external/pi-tools-suite/src/dcp/statistics.js";
 
-import { formatDcpStatsToast } from "../src/app/rendering/dcp-stats.js";
-
-describe("formatDcpStatsToast", () => {
-	it("derives durable DCP state from the session journal and combines operation gain with prune gain", () => {
-		const blocks = Array.from({ length: 25 }, (_, index) => ({ id: index + 1, active: index < 12 }));
-		const prunedTools = Array.from({ length: 37 }, (_, index) => ({
-			toolCallId: `tool-${index}`,
-			reason: "manual-sweep",
-			tokenEstimate: index === 0 ? 3_185 : 0,
-		}));
-		const session = fakeSession({
-			usage: { tokens: 206_083, contextWindow: 272_000, percent: 75.7658 },
-			branch: [
-				journalInit("init-1"),
-				journalDelta("delta-1", "init-1", {
-					blocks,
-					prunedTools,
-					manualMode: false,
-					nudgeAnchors: [{ type: "turn" }],
-				}),
-				compressResult({ tokensSaved: 1_300_000, itemCount: 25, totalSummaryTokens: 5_000 }),
-				{ type: "custom", customType: "dcp-nudge", data: { event: "emitted", type: "turn", contextPercent: 75.8, createdAt: 1_700_000_000_000 } },
-				{ type: "custom", customType: "dcp-nudge", data: { event: "cleared", clearedAnchors: 1 } },
-			],
-		});
-
-		const output = formatDcpStatsToast(session as never);
-		assert.match(output, /DCP Session Statistics:/);
-		assert.match(output, /Tokens saved \(estimated\): 1,303,185/);
-		assert.match(output, /Total pruning operations: 62/);
-		assert.match(output, /Compression blocks active: 12 \/ 25 total/);
-		assert.match(output, /Manual mode: off/);
-		assert.match(output, /State source: session journal/);
-		assert.match(output, /Sent: 1 emitted, 0 reapplied, 0 upgraded/);
-		assert.match(output, /Active anchors: 1 \(turn=1, iteration=0, context-soft=0, context-strong=0\)/);
-		assert.match(output, /Context: 75\.8% \(206\.1K\/272K\)/);
-	});
-
-	it("applies later journal block-state/manual/nudge updates without sidecar fallback", () => {
-		const session = fakeSession({
-			usage: { tokens: 10_000, contextWindow: 40_000, percent: 25 },
-			branch: [
-				journalInit("init-1"),
-				journalDelta("delta-1", "init-1", {
-					blocks: [{ id: 1, active: true }, { id: 2, active: true }],
-					prunedTools: [{ toolCallId: "tool-a", reason: "manual-sweep", tokenEstimate: 24 }],
-					manualMode: false,
-				}),
-				journalDelta("delta-2", "delta-1", {
-					blockStates: [{ id: 1, active: false, deactivatedReason: "superseded" }],
-					manualMode: true,
-					nudgeAnchors: [{ type: "iteration" }],
-					lastNudge: { type: "context-strong", createdAt: 1_700_000_123, contextPercent: 0.4 },
-				}),
-				compressResult({ tokensSaved: 99 }),
-			],
-		});
-
-		const output = formatDcpStatsToast(session as never);
-		assert.match(output, /Tokens saved \(estimated\): 123/u);
-		assert.match(output, /Total pruning operations: 3/u);
-		assert.match(output, /Compression blocks active: 1 \/ 2 total/u);
-		assert.match(output, /Manual mode: on/u);
-		assert.match(output, /State source: session journal/u);
-		assert.match(output, /Active anchors: 1 \(turn=0, iteration=1, context-soft=0, context-strong=0\)/u);
-		assert.match(output, /Last nudge: context-strong emitted/u);
-	});
-
-	it("falls back to successful compress tool results when the session has no journal", () => {
-		const session = fakeSession({
-			usage: { tokens: 12_000, contextWindow: 100_000, percent: 12 },
-			branch: [compressResult({ tokensSaved: 12, activeBlocks: 2, totalBlocks: 4 })],
-		});
-
-		const output = formatDcpStatsToast(session as never);
-		assert.match(output, /Tokens saved \(estimated\): 12/u);
-		assert.match(output, /Compression blocks active: 2 \/ 4 total/u);
-		assert.match(output, /Manual mode: unknown/u);
-		assert.match(output, /State source: compress tool results/u);
-	});
-
-	it("uses the configured manual-mode baseline for an init-only journal and lets a journal delta override it", () => {
-		const initOnly = fakeSession({
-			usage: { tokens: 96_100, contextWindow: 272_000, percent: 35.3 },
-			branch: [journalInit("init-1")],
-		});
-		assert.match(formatDcpStatsToast(initOnly as never, { manualModeBaseline: true }), /Manual mode: on/u);
-
-		const overridden = fakeSession({
-			usage: { tokens: 96_100, contextWindow: 272_000, percent: 35.3 },
-			branch: [
-				journalInit("init-1"),
-				journalDelta("delta-1", "init-1", { manualMode: false }),
-			],
-		});
-		assert.match(formatDcpStatsToast(overridden as never, { manualModeBaseline: true }), /Manual mode: off/u);
-	});
-
-	it("uses an injected active branch without synchronously reading the session file", () => {
-		let syncReads = 0;
-		const branch = [
-			journalInit("init-1"),
-			compressResult({ tokensSaved: 321, activeBlocks: 1, totalBlocks: 1 }),
-		];
-		const session = {
-			getContextUsage: () => ({ tokens: 20_000, contextWindow: 200_000, percent: 10 }),
-			sessionManager: {
-				readFullBranchEntriesSync: () => {
-					syncReads += 1;
-					throw new Error("must not read the session file");
-				},
-				getBranch: () => {
-					throw new Error("must use the injected branch");
-				},
-			},
-		};
-
-		const output = formatDcpStatsToast(session as never, { branch, manualModeBaseline: false });
-
-		assert.equal(syncReads, 0);
-		assert.match(output, /Tokens saved \(estimated\): 321/u);
-		assert.match(output, /Context: 10% \(20K\/200K\)/u);
-	});
-
-	it("reads the manual-mode baseline from JSONC and applies matching model overrides", () => {
-		const dir = mkdtempSync(join(tmpdir(), "pix-dcp-stats-config-"));
-		try {
-			const configPath = join(dir, "pi-tools-suite.jsonc");
-			writeFileSync(configPath, `{
-				"dcp": {
-					"manualMode": { "enabled": false },
-					"modelOverrides": {
-						"fixture/*": { "manualMode": { "enabled": true } },
-						"fixture/model-exact": { "manualMode": { "enabled": false } }
-					}
-				}
-			}\n`, "utf8");
-
-			const wildcard = fakeSession({
-				usage: { tokens: 1_000, contextWindow: 10_000, percent: 10 },
-				branch: [journalInit("init-1")],
-				model: { provider: "fixture", id: "model-wildcard" },
-			});
-			assert.match(formatDcpStatsToast(wildcard as never, { configPath }), /Manual mode: on/u);
-
-			const exact = fakeSession({
-				usage: { tokens: 1_000, contextWindow: 10_000, percent: 10 },
-				branch: [journalInit("init-2")],
-				model: { provider: "fixture", id: "model-exact" },
-			});
-			assert.match(formatDcpStatsToast(exact as never, { configPath }), /Manual mode: off/u);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
-	it("counts reapplied reminder deliveries and excludes idempotent compression replays from savings", () => {
-		const session = fakeSession({
-			usage: { tokens: 40_000, contextWindow: 100_000, percent: 40 },
-			branch: [
-				journalInit("init-1"),
-				journalDelta("delta-1", "init-1", { blocks: [{ id: 1, active: true }], manualMode: false }),
-				compressResult({ tokensSaved: 120, activeBlocks: 1, totalBlocks: 1 }),
-				compressResult({ tokensSaved: 120, activeBlocks: 1, totalBlocks: 1, idempotentReplay: true }),
-				{ type: "custom", customType: "dcp-nudge", data: { event: "emitted", type: "turn", createdAt: 1 } },
-				{ type: "custom", customType: "dcp-nudge", data: { event: "reapplied", type: "turn", createdAt: 2 } },
-				{ type: "custom", customType: "dcp-nudge", data: { event: "upgraded", type: "context-soft", createdAt: 3 } },
-			],
-		});
-
-		const output = formatDcpStatsToast(session as never, { manualModeBaseline: false });
-		assert.match(output, /Tokens saved \(estimated\): 120/u);
-		assert.match(output, /Compression blocks active: 1 \/ 1 total/u);
-		assert.match(output, /Sent: 1 emitted, 1 reapplied, 1 upgraded/u);
-		assert.match(output, /By type: turn=2, iteration=0, context-soft=1, context-strong=0/u);
-		assert.match(output, /Compliance proxy: 0 compress-after-nudge \/ 3 nudge events \(0\.0%\)/u);
-		assert.match(output, /Last nudge: context-soft upgraded/u);
-	});
-
-	it("uses the explicit full branch when a lazy tail no longer contains journal init", () => {
-		const fullBranch = [
-			journalInit("init-1"),
-			journalDelta("delta-1", "init-1", {
-				blocks: [{ id: 1, active: true }],
-				manualMode: true,
-			}),
-			compressResult({ tokensSaved: 42 }),
-		];
-		const session = fakeSession({
-			usage: { tokens: 1_000, contextWindow: 10_000, percent: 10 },
-			// Simulate a lazy tail that starts after the journal init.
-			branch: fullBranch.slice(1),
-			fullBranch,
-		});
-
-		const output = formatDcpStatsToast(session as never);
-		assert.match(output, /State source: session journal/u);
-		assert.match(output, /Compression blocks active: 1 \/ 1 total/u);
-		assert.match(output, /Manual mode: on/u);
-	});
+const custom = (customType: string, data: unknown) => ({ type: "custom", customType, data });
+const init = custom("dcp-journal", { schemaVersion: 1, kind: "init", operationId: "init-one", previousOperationId: null });
+const delta = (data: any = {}, operationId = "delta-one", previousOperationId = "init-one") => custom("dcp-journal", {
+  schemaVersion: 1, kind: "delta", operationId, previousOperationId, ...data,
 });
-
-function fakeSession(options: { usage: unknown; branch: unknown[]; fullBranch?: unknown[]; model?: unknown }) {
-	return {
-		getContextUsage: () => options.usage,
-		...(options.model ? { model: options.model } : {}),
-		sessionManager: {
-			getBranch: () => options.branch,
-			...(options.fullBranch ? { readFullBranchEntriesSync: () => options.fullBranch } : {}),
-		},
-	};
+const diag = (event: string, data: any = {}) => custom("dcp-diagnostic", { version: 1, event, epoch: "epoch-a", ...data });
+const model = { provider: "fixture", id: "model", contextWindow: 100_000, maxTokens: 4_000 };
+const snapshot = { model: "fixture/model", contextWindow: 100_000, rawTokens: 50_000, projectedTokens: 20_000,
+  inputCapacityTokens: 96_000, reservedOutputTokens: 4_000, routineTokens: 8_000, strongTokens: 15_000,
+  hardTokens: 82_000, pressure: "strong", reason: "complete", enabled: true, manualMode: false, autoEnabled: true, createdAt: 1_700_000_000_000 };
+const metrics = (operationId: string, kind: string, gain: number) => ({ operationId, kind, beforeTokens: gain + 1_000, afterTokens: 1_000, netGainTokens: gain });
+function session(branch: any[], manager: any = {}) {
+  return { model, getContextUsage: () => ({ tokens: 20_000, contextWindow: 100_000 }), sessionManager: { getBranch: () => branch, ...manager } } as any;
 }
 
-function journalInit(operationId: string) {
-	return {
-		type: "custom",
-		customType: "dcp-journal",
-		data: { schemaVersion: 1, kind: "init", operationId, previousOperationId: null, createdAt: 1 },
-	};
-}
+describe("DCP shared statistics", () => {
+  it("reports actual journal commits, not blocks-as-operations; measures auto gains without tool results", () => {
+    const branch = [init, delta({ blocks: [
+      { id: 1, active: false, summaryTokenEstimate: 80, createdByToolCallId: "call-a", commitMetrics: metrics("manual:call-a", "manual", 500) },
+      { id: 2, active: false, summaryTokenEstimate: 70, createdByToolCallId: "call-a" },
+      { id: 3, active: true, summaryTokenEstimate: 20, autoSummaryRepresentation: "extractive", commitMetrics: metrics("auto:3", "consolidation", 100) },
+      { id: 4, active: true, summaryTokenEstimate: 50, autoSummaryRepresentation: "model", commitMetrics: metrics("auto:4", "auto", 1_000) },
+    ], prunedTools: [{ toolCallId: "p", tokenEstimate: 200 }] })];
+    const stats = collectDcpStatistics({ branch, model });
+    assert.equal(stats.activity.manual.size, 1);
+    assert.equal(stats.activity.auto.size, 1);
+    assert.equal(stats.activity.consolidation.size, 1);
+    assert.equal(stats.measuredGain, 1_600);
+    assert.equal(stats.summaryTokens, 70);
+    const text = formatDcpStatsToast(session(branch));
+    assert.match(text, /Blocks: 2 active \/ 2 retired \/ 4 total/);
+    assert.match(text, /Measured commit gain: 1,600 tokens \(3 measured commits/);
+    assert.doesNotMatch(text, /Compliance proxy|Total pruning operations|Tokens saved \(estimated\)/);
+  });
 
-function journalDelta(operationId: string, previousOperationId: string, fields: Record<string, unknown>) {
-	return {
-		type: "custom",
-		customType: "dcp-journal",
-		data: { schemaVersion: 1, kind: "delta", operationId, previousOperationId, createdAt: 2, ...fields },
-	};
-}
+  it("deduplicates journal replay and separates projection events, attempts and confirmed opportunities", () => {
+    const d = delta({ nudgeAnchors: [{ id: 1, type: "iteration", anchorRole: "toolResult" }] });
+    const branch = [init, d, d, diag("epoch"),
+      custom("dcp-nudge", { event: "emitted", type: "iteration", anchorRole: "toolResult" }),
+      ...Array.from({ length: 9 }, () => custom("dcp-nudge", { event: "reapplied", type: "iteration", anchorRole: "toolResult" })),
+      diag("request", { id: "attempt-1", reminder: true, snapshot }),
+      diag("request", { id: "attempt-2", reminder: true, snapshot }),
+      diag("completion", { id: "attempt-2", reminder: true, ignored: 1 }),
+      diag("completion", { id: "attempt-2", reminder: true, ignored: 1 }),
+      diag("completion", { id: "unrelated", reminder: true, ignored: 100 }),
+    ];
+    const stats = collectDcpStatistics({ branch, model });
+    assert.equal(stats.published, 1); assert.equal(stats.projections, 10);
+    assert.equal(stats.attempts, 2); assert.equal(stats.completed, 1); assert.equal(stats.ignored, 1);
+    const text = formatDcpStatsToast(session(branch));
+    assert.match(text, /routine 8.0% \/ strong 15.0% \/ hard 82.0%/);
+    assert.match(text, /Input capacity: 96,000/);
+    assert.match(text, /iteration\/toolResult/);
+    assert.match(text, /Last DCP request: ~20,000/);
+  });
 
-function compressResult(details: Record<string, unknown>) {
-	return {
-		type: "message",
-		message: {
-			role: "toolResult",
-			toolName: "compress",
-			content: JSON.stringify(details),
-			isError: false,
-		},
-	};
-}
+  it("does not turn missing old instrumentation into zero saved tokens or zero deliveries", () => {
+    const text = formatDcpStatsToast(session([init, delta({ blocks: [{ id: 1, active: true, summaryTokenEstimate: 32 }] })]));
+    assert.match(text, /Measured commit gain: unknown/);
+    assert.match(text, /confirmed completed opportunities: unknown/);
+    assert.match(text, /Provenance unknown: 1 blocks/);
+  });
+
+  it("invalidates last request policy on model changes and runtime epoch transitions", () => {
+    const branch = [init, diag("epoch"), diag("request", { id: "x", snapshot })];
+    const s = session(branch); s.model = { ...model, id: "small", contextWindow: 32_000 };
+    s.getContextUsage = () => ({ tokens: 20_000, contextWindow: 100_000 });
+    const text = formatDcpStatsToast(s);
+    assert.match(text, /20,000 \/ 32,000 \(62.5%/);
+    assert.match(text, /stale \(model\/window changed\)/);
+    assert.doesNotMatch(text, /Input capacity: 96,000/);
+    assert.equal(collectDcpStatistics({ branch, model: { ...model, contextWindow: 32_000 } }).snapshot, undefined);
+    branch.push(diag("epoch", { epoch: "epoch-b" }));
+    assert.equal(collectDcpStatistics({ branch, model }).snapshot, undefined);
+    assert.equal(collectDcpStatistics({ branch, model }).ignored, undefined);
+  });
+
+  it("reads the full branch rather than a lazy cursor; does not fall back after full-read failure", () => {
+    const branch = [init, delta({ blocks: [{ id: 1, active: true, summaryTokenEstimate: 20 }] })];
+    assert.match(formatDcpStatsToast(session([], { readFullBranchEntriesSync: () => branch })), /Blocks: 1 active/);
+    let tailReads = 0;
+    const text = formatDcpStatsToast(session(branch, { readFullBranchEntriesSync() { throw new Error("disk read failed"); }, getBranch() { tailReads++; return branch; } }));
+    assert.equal(tailReads, 0);
+    assert.match(text, /full history could not be read/);
+    assert.match(text, /unknown \(not zero\)/);
+  });
+
+  it("uses the injected active branch for ACP without any synchronous disk traversal", () => {
+    const s = session([], { readFullBranchEntriesSync() { throw new Error("must not be called"); } });
+    const text = formatDcpStatsToast(s, { branch: [init] });
+    assert.match(text, /chain verified/);
+    assert.equal(text, formatDcpStatistics({ branch: [init], model, usage: s.getContextUsage() }));
+  });
+
+  it("loads async full history for the TUI and refuses an obsolete model snapshot", async () => {
+    let syncReads = 0;
+    let finish!: (value: any[]) => void;
+    const pending = new Promise<any[]>((resolve) => { finish = resolve; });
+    const s = session([], { readFullBranchEntries: () => pending,
+      readFullBranchEntriesSync() { syncReads++; throw new Error("not on this path"); } });
+    const loading = loadDcpStatsToast(s);
+    s.model = { ...model, id: "replacement" };
+    finish([init]);
+    assert.match(await loading, /full history could not be read/);
+    assert.equal(syncReads, 0);
+    assert.match(await loadDcpStatsToast(s), /chain verified/);
+  });
+
+  for (const [name, branch] of [
+    ["missing init", [delta()]],
+    ["wrong predecessor", [init, delta({}, "d", "missing")]],
+    ["conflicting duplicate", [init, delta(), delta({ manualMode: true })]],
+    ["unsupported schema", [custom("dcp-journal", { ...init.data as any, schemaVersion: 99 })]],
+  ] as const) it(`marks ${name} unknown instead of returning reassuring zeroes`, () => {
+    const text = formatDcpStatsToast(session([...branch]));
+    assert.match(text, /unknown \(not zero\)/);
+    assert.doesNotMatch(text, /Blocks: 0 active|chain verified/);
+  });
+});

@@ -153,6 +153,15 @@ export interface CompressionBlock {
   active: boolean
   /** Token estimate for the summary text itself */
   summaryTokenEstimate: number
+  /** One record per successful transaction (on its first block), never on retries.
+   * Optional for older journal blocks; absence means unmeasured, not zero gain. */
+  commitMetrics?: {
+    operationId: string
+    kind: "manual" | "auto" | "consolidation"
+    beforeTokens: number
+    afterTokens: number
+    netGainTokens: number
+  }
   /** Wall-clock time the block was created (Date.now()) */
   createdAt: number
   /** Older compression blocks subsumed by this block during roll-up. */

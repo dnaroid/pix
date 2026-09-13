@@ -2,10 +2,11 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import type { AutocompleteItem } from "@earendil-works/pi-tui"
 import type { DcpState } from "./state.js"
 import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
-import type { DcpNudgeType } from "./pruner-types.js"
 import { isToolRecordProtected, markToolPruned } from "./pruner.js"
 import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
+import { readDcpJournalBranch } from "./journal.js"
+import { formatDcpStatistics } from "./statistics.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,127 +35,12 @@ function fmt(n: number): string {
   return n.toLocaleString()
 }
 
-const NUDGE_TYPES: DcpNudgeType[] = ["turn", "iteration", "context-soft", "context-strong"]
-
-function pct(numerator: number, denominator: number): string {
-  if (denominator <= 0) return "n/a"
-  return `${((numerator / denominator) * 100).toFixed(1)}%`
-}
-
-function nudgeLabel(type: DcpNudgeType): string {
-  switch (type) {
-    case "context-strong": return "context-strong"
-    case "context-soft": return "context-soft"
-    case "iteration": return "iteration"
-    case "turn": return "turn"
-  }
-}
-
-function isNudgeType(value: unknown): value is DcpNudgeType {
-  return typeof value === "string" && (NUDGE_TYPES as string[]).includes(value)
-}
-
-function customEntryData(entry: unknown, customType: string): Record<string, unknown> | undefined {
-  const record = entry as { type?: unknown; customType?: unknown; data?: unknown }
-  if (record?.type !== "custom" || record.customType !== customType) return undefined
-  if (!record.data || typeof record.data !== "object" || Array.isArray(record.data)) return undefined
-  return record.data as Record<string, unknown>
-}
-
-function branchEntries(ctx: ExtensionCommandContext): any[] {
-  try {
-    const branch = ctx.sessionManager?.getBranch?.()
-    return Array.isArray(branch) ? branch : []
-  } catch {
-    return []
-  }
-}
-
 async function staleSafe(action: () => void | Promise<void>): Promise<void> {
   try {
     await action()
   } catch (error) {
     ignoreStaleExtensionContextError(error)
   }
-}
-
-interface DcpNudgeStats {
-  emitted: number
-  reapplied: number
-  upgraded: number
-  clearedEvents: number
-  clearedAnchors: number
-  byType: Record<DcpNudgeType, number>
-  activeByType: Record<DcpNudgeType, number>
-  last?: {
-    type: DcpNudgeType
-    event: "emitted" | "reapplied" | "upgraded"
-    createdAt?: number
-    contextPercent?: number | null
-  }
-}
-
-function collectNudgeStats(ctx: ExtensionCommandContext, state: DcpState): DcpNudgeStats {
-  const stats: DcpNudgeStats = {
-    emitted: 0,
-    reapplied: 0,
-    upgraded: 0,
-    clearedEvents: 0,
-    clearedAnchors: 0,
-    byType: { "turn": 0, "iteration": 0, "context-soft": 0, "context-strong": 0 },
-    activeByType: { "turn": 0, "iteration": 0, "context-soft": 0, "context-strong": 0 },
-  }
-
-  for (const anchor of state.nudgeAnchors) {
-    if (isNudgeType(anchor.type)) stats.activeByType[anchor.type]++
-  }
-
-  for (const entry of branchEntries(ctx)) {
-    const data = customEntryData(entry, "dcp-nudge")
-    if (!data) continue
-    const event = data.event
-    if ((event === "emitted" || event === "reapplied" || event === "upgraded") && isNudgeType(data.type)) {
-      if (event === "emitted") stats.emitted++
-      else if (event === "reapplied") stats.reapplied++
-      else stats.upgraded++
-      stats.byType[data.type]++
-      const createdAt = typeof data.createdAt === "number" ? data.createdAt : undefined
-      const rawContextPercent = data.contextPercent
-      let contextPercent: number | null | undefined
-      if (typeof rawContextPercent === "number") contextPercent = rawContextPercent
-      else if (rawContextPercent === null) contextPercent = null
-      if (!stats.last || (createdAt ?? 0) >= (stats.last.createdAt ?? 0)) {
-        stats.last = { type: data.type, event, createdAt, contextPercent }
-      }
-    } else if (event === "cleared") {
-      stats.clearedEvents++
-      stats.clearedAnchors += typeof data.clearedAnchors === "number" ? Math.max(0, data.clearedAnchors) : 0
-    }
-  }
-
-  if (!stats.last && state.lastNudge && isNudgeType(state.lastNudge.type)) {
-    stats.last = {
-      type: state.lastNudge.type,
-      event: "emitted",
-      createdAt: state.lastNudge.createdAt,
-      contextPercent: typeof state.lastNudge.contextPercent === "number"
-        ? state.lastNudge.contextPercent * 100
-        : undefined,
-    }
-  }
-
-  return stats
-}
-
-function formatDate(ts: number | undefined): string {
-  if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return "unknown time"
-  return new Date(ts).toLocaleString()
-}
-
-function formatContextPercent(value: number | null | undefined): string {
-  if (value === null) return "unknown context"
-  if (typeof value !== "number" || !Number.isFinite(value)) return "unknown context"
-  return `${value.toFixed(1)}% context`
 }
 
 function sendChatSystemMessage(pi: ExtensionAPI, customType: string, content: string, details?: Record<string, unknown>): void {
@@ -238,44 +124,16 @@ function handleContext(ctx: ExtensionCommandContext, state: DcpState): void {
 // Stats
 // ---------------------------------------------------------------------------
 
-function handleStats(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: DcpState): void {
-  const activeBlocks = state.compressionBlocks.filter((b) => b.active).length
-  const totalBlocks = state.compressionBlocks.length
-  const nudgeStats = collectNudgeStats(ctx, state)
-  const totalNudgeEvents = nudgeStats.emitted + nudgeStats.reapplied + nudgeStats.upgraded
-  const activeAnchors = state.nudgeAnchors.length
-  const lines: string[] = []
-  lines.push("DCP Session Statistics:")
-  lines.push(`  Tokens saved (estimated): ${fmt(state.tokensSaved)}`)
-  lines.push(`  Total pruning operations: ${fmt(state.totalPruneCount)}`)
-  lines.push(`  Compression blocks active: ${activeBlocks} / ${totalBlocks} total`)
-  lines.push(`  Manual mode: ${state.manualMode ? "on" : "off"}`)
-  lines.push("")
-  lines.push("Nudge telemetry:")
-  lines.push(`  Sent: ${fmt(nudgeStats.emitted)} emitted, ${fmt(nudgeStats.reapplied)} reapplied, ${fmt(nudgeStats.upgraded)} upgraded`)
-  lines.push(
-    `  By type: ${NUDGE_TYPES.map((type) => `${nudgeLabel(type)}=${fmt(nudgeStats.byType[type])}`).join(", ")}`,
-  )
-  lines.push(
-    `  Active anchors: ${fmt(activeAnchors)}${activeAnchors > 0
-      ? ` (${NUDGE_TYPES.map((type) => `${nudgeLabel(type)}=${fmt(nudgeStats.activeByType[type])}`).join(", ")})`
-      : ""}`,
-  )
-  lines.push(`  Cleared after compress: ${fmt(nudgeStats.clearedEvents)} time${nudgeStats.clearedEvents === 1 ? "" : "s"} (${fmt(nudgeStats.clearedAnchors)} anchor${nudgeStats.clearedAnchors === 1 ? "" : "s"})`)
-  lines.push(`  Compliance proxy: ${fmt(nudgeStats.clearedEvents)} compress-after-nudge / ${fmt(totalNudgeEvents)} nudge event${totalNudgeEvents === 1 ? "" : "s"} (${pct(nudgeStats.clearedEvents, totalNudgeEvents)})`)
-  if (nudgeStats.last) {
-    lines.push(
-      `  Last nudge: ${nudgeLabel(nudgeStats.last.type)} ${nudgeStats.last.event} at ${formatDate(nudgeStats.last.createdAt)} (${formatContextPercent(nudgeStats.last.contextPercent)})`,
-    )
-  } else {
-    lines.push("  Last nudge: none recorded")
-  }
-
-  sendChatSystemMessage(pi, DCP_STATS_MESSAGE_TYPE, lines.join("\n"), {
-    generatedAt: new Date().toISOString(),
-    activeAnchors,
-    nudgeEvents: totalNudgeEvents,
-  })
+async function handleStats(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: DcpState): Promise<void> {
+  const epoch = state.sessionEpoch
+  let branch: unknown[] = []
+  let historyStatus: "full" | "unavailable" = "full"
+  try { branch = await readDcpJournalBranch(ctx) }
+  catch { historyStatus = "unavailable" }
+  if (state.sessionEpoch !== epoch) return
+  sendChatSystemMessage(pi, DCP_STATS_MESSAGE_TYPE,
+    formatDcpStatistics({ branch, historyStatus, model: ctx.model, usage: safeGetContextUsage(ctx) }),
+    { generatedAt: new Date().toISOString() })
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +148,7 @@ async function handleSweep(
 ): Promise<void> {
   await ctx.waitForIdle()
 
-  const branch = branchEntries(ctx)
+  const branch = await readDcpJournalBranch(ctx) as any[]
 
   // Build the full set of protected tool names.
   const protectedTools = new Set<string>([
@@ -480,7 +338,7 @@ export function registerCommands(
             break
 
           case "stats":
-            handleStats(pi, ctx, state)
+            await handleStats(pi, ctx, state)
             break
 
           case "doctor":

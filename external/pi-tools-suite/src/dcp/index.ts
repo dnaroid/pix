@@ -62,6 +62,9 @@ import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { safeGetContextUsage } from "../context-usage.js"
 import { FreshToolResultTracker } from "./fresh-tool-results.js"
+import { canonicalMessageHash } from "./conversation-index.js"
+import { randomUUID } from "node:crypto"
+import { dcpRequestSnapshot } from "./diagnostics.js"
 import {
 	collectProviderToolResultEvidence,
 	providerPayloadIncludesToolResult,
@@ -79,17 +82,7 @@ import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransa
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function annotateMessagesWithBranchEntryIds(messages: any[], ctx: ExtensionContext): Promise<void> {
-	let branch: any[] = []
-	try {
-		const manager = ctx.sessionManager as any
-		branch = typeof manager.readFullBranchEntries === "function"
-			? await manager.readFullBranchEntries()
-			: manager.getBranch()
-	} catch {
-		return
-	}
-
+function annotateMessagesWithBranchEntryIds(messages: any[], branch: any[]): void {
 	const entries = branch.filter((entry) => entry?.type === "message" && entry.message)
 	let searchFrom = 0
 	for (const msg of messages) {
@@ -102,6 +95,7 @@ async function annotateMessagesWithBranchEntryIds(messages: any[], ctx: Extensio
 				Number.isFinite(msg?.timestamp) &&
 				entryMsg.timestamp !== msg.timestamp
 			) continue
+			if (canonicalMessageHash(stripStaleDcpMetadataFromMessage(entryMsg)) !== canonicalMessageHash(msg)) continue
 			msg._dcpEntryId = entry.id
 			searchFrom = i + 1
 			break
@@ -172,6 +166,17 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	let latestProviderReminder: string | undefined
 	let autoSummarizerDegraded = false
 	let lastProviderReadyProjectionEpoch: number | undefined
+	let diagnosticEpoch = randomUUID()
+	let diagnosticSnapshot: ReturnType<typeof dcpRequestSnapshot> | undefined
+	const diagnostic = (event: string, data: Record<string, unknown> = {}) => {
+		try { pi.appendEntry("dcp-diagnostic", { version: 1, event, epoch: diagnosticEpoch, ...data }) }
+		catch { /* Diagnostics must never affect a transaction or provider send. */ }
+	}
+	const resetDiagnostics = (reason: string) => {
+		diagnosticEpoch = randomUUID()
+		diagnosticSnapshot = undefined
+		diagnostic("epoch", { reason })
+	}
 	const warnedProgress = new Set<string>()
 	const isJournalSessionSupported = () => journalSupported && journalBlockedReason === undefined
 	const persistJournalState = async (
@@ -196,15 +201,18 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		entry?.type === "message" || entry?.type === "custom_message" || entry?.type === "compaction" || entry?.type === "branch_summary",
 	)
 	const loadJournalState = async (ctx: ExtensionContext, allowInitialize: boolean): Promise<void> => {
+		const epoch = state.sessionEpoch
 		journalMirror = undefined
 		journalSupported = false
-		journalBlockedReason = undefined
+		journalBlockedReason = "DCP journal load in progress"
 		journalPersistent = false
-		const branch = await readDcpJournalBranch(ctx)
 		const manager = ctx.sessionManager as any
 		const persistentSession = (typeof manager.isPersisted === "function" && manager.isPersisted())
 			|| (typeof manager.getSessionFile === "function" && Boolean(manager.getSessionFile()))
 		try {
+			const branch = await readDcpJournalBranch(ctx)
+			if (state.sessionEpoch !== epoch) return
+			journalBlockedReason = undefined
 			const replay = replayDcpJournal(branch, state)
 			if (replay.initialized && replay.lastOperationId) {
 				journalSupported = true
@@ -225,6 +233,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			// compatibility checkpoint from existing history.
 			journalSupported = false
 		} catch (error) {
+			if (state.sessionEpoch !== epoch) return
 			journalBlockedReason = error instanceof Error ? error.message : String(error)
 			journalSupported = false
 			journalMirror = undefined
@@ -264,6 +273,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	}
 	const invalidateOwner = () => {
 			invalidateDcpStateOwner(state)
+			// Successful exposure belongs to the old provider/branch too, not only
+			// the pending attempt. The new owner must establish its own evidence.
+			state.providerSeenToolIds.clear()
 			freshToolResults.reset()
 			providerEvidenceTracker.reset()
 			latestProviderOpportunityAvailable = false
@@ -273,6 +285,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			lastProviderReadyProjectionEpoch = undefined
 			resetCompressionProgress(state)
 			warnedProgress.clear()
+			resetDiagnostics("owner-changed")
 	}
 	pi.on("model_select", invalidateOwner)
 	pi.on("session_tree", async (_event, ctx) => {
@@ -338,7 +351,10 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		autoSummarizerDegraded = false
 		warnedProgress.clear()
 		if (config.manualMode.enabled) state.manualMode = true
+		const startingEpoch = state.sessionEpoch
 		await loadJournalState(ctx, event.reason === "new" || event.reason === "startup")
+		if (state.sessionEpoch !== startingEpoch) return
+		resetDiagnostics(event.reason)
 		writeDcpDebugLog(configForContext(ctx), "session_start.journal", {
 			reason: event.reason,
 			supported: journalSupported,
@@ -453,7 +469,10 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			details: Record<string, unknown> = {},
 			providerReady = true,
 		) => {
+			if (state.sessionEpoch !== contextEpoch) throw new DcpJournalError("DCP projection belongs to a stale owner")
 			lastProviderReadyProjectionEpoch = providerReady ? state.sessionEpoch : undefined
+			diagnosticSnapshot = dcpRequestSnapshot(effectiveConfig, state, ctx.model,
+				safeGetContextUsage(ctx), contextMessages, messages, reason)
 			writeDcpDebugLog(effectiveConfig, "context.result", {
 				reason,
 				inputMessages: event.messages.length,
@@ -487,7 +506,12 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		}
 		latestProviderOpportunityKind = undefined
 		latestProviderReminder = undefined
-		await annotateMessagesWithBranchEntryIds(contextMessages, ctx)
+		// Failed full-history reads must not reassign IDs or expose uncompressed
+		// source. Async work from an old session/model cannot publish a projection.
+		lastProviderReadyProjectionEpoch = undefined
+		const fullBranch = await readDcpJournalBranch(ctx)
+		if (state.sessionEpoch !== contextEpoch) throw new DcpJournalError("DCP context owner changed during history read")
+		annotateMessagesWithBranchEntryIds(contextMessages, fullBranch)
 		const rehydration = rehydrateToolRecordsFromMessages(contextMessages, state)
 		if (rehydration.recordsUpdated > 0) {
 			writeDcpDebugLog(effectiveConfig, "context.rehydrated_tool_records", { ...rehydration }, ctx)
@@ -506,8 +530,14 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		// Manual mode skips routine autonomous nudges and automatic summary
 		// creation. The bounded emergency safety path remains separate, matching
 		// the manual-mode prompt.
-		const nativeUsage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
 		const ctxModel = (ctx as any).model
+		const observedUsage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+		// Model capacity is authoritative even while SDK usage still describes
+		// the preceding model. Keep its token count only as a conservative floor.
+		const modelWindow = Number.isFinite(ctxModel?.contextWindow) && ctxModel.contextWindow > 0 ? ctxModel.contextWindow : undefined
+		const nativeUsage = observedUsage && modelWindow
+			? { ...observedUsage, contextWindow: modelWindow, percent: observedUsage.tokens === null ? null : observedUsage.tokens / modelWindow * 100 }
+			: observedUsage
 		const fallbackContextWindow = nativeUsage?.contextWindow ?? (
 			typeof ctxModel?.contextWindow === "number" && Number.isFinite(ctxModel.contextWindow) && ctxModel.contextWindow > 0
 				? ctxModel.contextWindow
@@ -998,6 +1028,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						}, ctx)
 					} catch (error) {
 						if (state.sessionEpoch !== contextEpoch || ctx.signal?.aborted) return { messages: contextMessages }
+						diagnostic("auto-rejected", { reason: error instanceof AutoCompressionBlockedError ? error.blockedReason : "preparation-failed" })
 						const autoBlockedReason = error instanceof AutoCompressionBlockedError
 							? error.blockedReason
 							: undefined
@@ -1255,6 +1286,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			providerEvidenceTracker.reset()
 			return undefined
 		}
+		if (journalBlockedReason) throw new DcpJournalError(`DCP journal is blocked: ${journalBlockedReason}`)
 		if (isJournalSessionSupported() && lastProviderReadyProjectionEpoch !== state.sessionEpoch) {
 			const message =
 				`DCP blocked a provider request for session epoch ${state.sessionEpoch} because no provider-ready context projection ` +
@@ -1300,6 +1332,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			opportunityAvailable: reminderDelivered,
 			opportunityKind: reminderDelivered ? latestProviderOpportunityKind : undefined,
 		})
+		diagnostic("request", { id: `${diagnosticEpoch}:${pending.lastAttemptId}`, reminder: reminderDelivered, snapshot: diagnosticSnapshot })
 
 		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
 			injected: false,
@@ -1414,6 +1447,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				state.providerSeenToolIds = workingState.providerSeenToolIds
 				state.consecutiveIgnoredStrongNudges = workingState.consecutiveIgnoredStrongNudges
 				state.consecutiveIgnoredNudges = workingState.consecutiveIgnoredNudges
+				diagnostic("completion", { id: `${diagnosticEpoch}:${completion.lastAttemptId}`,
+					reminder: ignoredCompressionOpportunity, ignored: state.consecutiveIgnoredNudges })
 				writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_seen", {
 					attempts: completion.attempts,
 					newlySeenToolResults: newlySeen.length,

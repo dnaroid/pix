@@ -128,6 +128,16 @@ function validateExactBlock(value: unknown): asserts value is CompressionBlock {
       throw new DcpJournalError(`DCP journal block b${value.id} has invalid ${key}`);
     }
   }
+  if (value.commitMetrics !== undefined) {
+    const m = value.commitMetrics;
+    if (!isRecord(m) || typeof m.operationId !== "string" || !m.operationId ||
+      !["manual", "auto", "consolidation"].includes(m.kind as string) ||
+      !finiteNonNegativeInteger(m.beforeTokens) || !finiteNonNegativeInteger(m.afterTokens) ||
+      !finiteNonNegativeInteger(m.netGainTokens) || m.netGainTokens <= 0 ||
+      m.beforeTokens - m.afterTokens !== m.netGainTokens) {
+      throw new DcpJournalError(`DCP journal block b${value.id} has invalid commit metrics`);
+    }
+  }
   for (const key of ["sourceMembers", "mutationMembers"] as const) {
     const members = value[key];
     if (!Array.isArray(members) || members.length === 0) {
@@ -440,11 +450,19 @@ function journalBranch(ctx: ExtensionContext): unknown[] {
 
 export async function readDcpJournalBranch(ctx: ExtensionContext): Promise<unknown[]> {
   const manager = ctx.sessionManager as any;
-  if (typeof manager.readFullBranchEntries === "function") {
-    const entries = await manager.readFullBranchEntries();
-    return Array.isArray(entries) ? entries : [];
+  const sessionId = manager.getSessionId?.();
+  const leafId = manager.getLeafId?.();
+  const entries = typeof manager.readFullBranchEntries === "function"
+    ? await manager.readFullBranchEntries()
+    : manager.getBranch();
+  if (ctx.sessionManager !== manager || manager.getSessionId?.() !== sessionId || manager.getLeafId?.() !== leafId) {
+    throw new DcpJournalError("DCP branch changed during history read; rebuild context");
   }
-  return journalBranch(ctx);
+  if (!Array.isArray(entries)) throw new DcpJournalError("DCP full branch is unavailable");
+  // A presentation cursor is not a complete SDK branch, even if it contains
+  // recent users or journal deltas. Never silently initialize from that tail.
+  if (entries[0]?.parentId != null) throw new DcpJournalError("DCP received an incomplete branch (presentation tail)");
+  return entries;
 }
 
 function restoreLeafAfterAppendFailure(ctx: ExtensionContext, previousLeafId: string | null | undefined): void {

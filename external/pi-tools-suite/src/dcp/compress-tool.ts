@@ -795,6 +795,12 @@ export function registerCompressTool(
         for (const block of workingState.compressionBlocks) {
           if (newBlockIds.includes(block.id)) block.operationRequestHash = requestHash
         }
+        const firstBlock = workingState.compressionBlocks.find((block) => block.id === newBlockIds[0])
+        if (firstBlock) firstBlock.commitMetrics = {
+          operationId: `manual:${_toolCallId}`, kind: "manual",
+          beforeTokens: projection.projectedBeforeTokens,
+          afterTokens: projection.projectedAfterTokens, netGainTokens: projection.netGain,
+        }
         assertCurrent()
         let published = false
         await persistState(ctx, workingState, {

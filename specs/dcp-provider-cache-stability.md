@@ -46,6 +46,9 @@ be a byte-stable prefix on ordinary continuations.
    fallbacks. When a session manager exposes only a lazy presentation tail,
    DCP resolves persisted entry identities from its full-branch reader before
    rebuilding the provider projection.
+   A failed/incomplete full read never falls back to the presentation tail or
+   timestamp-only identity. The read captures the active session/leaf and the
+   context epoch; obsolete async results cannot publish a provider-ready view.
 2. Provider-visible ID metadata is attached only to cloned user, tool-result, or
    bash-result carriers. A carrier publishes its own address and any immediately
    preceding assistant addresses that cannot safely be written into those
@@ -58,6 +61,8 @@ be a byte-stable prefix on ordinary continuations.
    unambiguously correlated successful finalized assistant response can promote
    the attempt. Provider evidence is transient and returns to unknown on
    restart.
+   Model/owner changes also clear the set of previously successful exposures,
+   not just a pending request; old-provider evidence cannot authorize pruning.
    A supported journal epoch may reach this hook only after a provider-ready
    `context` projection completed in that same epoch. A lifecycle reset between
    context construction and provider send invalidates the old projection and is

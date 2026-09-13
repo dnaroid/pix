@@ -2960,6 +2960,8 @@ describe("DCP pruning effectiveness", () => {
       waitForIdle: async () => {},
       sessionManager: {
         getBranch: () => [
+          { type: "custom", customType: "dcp-journal", data: { schemaVersion: 1, kind: "init", operationId: "stats-init", previousOperationId: null } },
+          { type: "custom", customType: "dcp-journal", data: { schemaVersion: 1, kind: "delta", operationId: "stats-delta", previousOperationId: "stats-init", nudgeAnchors: state.nudgeAnchors } },
           {
             type: "custom",
             customType: "dcp-nudge",
@@ -3013,14 +3015,12 @@ describe("DCP pruning effectiveness", () => {
     expect(sentMessages[0]?.details?.kind).toBe("dcp-stats");
     expect(sentMessages[0]?.details?.userVisibleOnly).toBe(true);
     const output = sentMessages[0]?.content ?? "";
-    expect(output).toContain("Nudge telemetry:");
-    expect(output).toContain("Sent: 1 emitted, 1 reapplied, 1 upgraded");
-    expect(output).toContain("turn=1");
-    expect(output).toContain("iteration=2");
+    expect(output).toContain("Reminder delivery");
+    expect(output).toContain("Anchors journaled: 1; projection events: 3 (not sends)");
+    expect(output).toContain("confirmed completed opportunities: unknown");
     expect(output).toContain("Active anchors: 1");
-    expect(output).toContain("Cleared after compress: 1 time (2 anchors)");
-    expect(output).toContain("Compliance proxy: 1 compress-after-nudge / 3 nudge events (33.3%)");
-    expect(output).toContain("Last nudge: iteration reapplied");
+    expect(output).toContain("iteration/user");
+    expect(output).not.toContain("Compliance proxy");
   });
 
   test("DCP context transform hides /dcp stats custom messages from the model", async () => {

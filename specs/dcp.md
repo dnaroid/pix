@@ -53,6 +53,20 @@ sidecar importer, legacy state reader, dual-write mode, `decompress`, or
 Plain `custom` entries are not provider messages. `dcp-journal` must never be
 stored as `custom_message` or copied into a model-facing tool result.
 
+Full-branch reads fail closed on errors, partial cursors and session/leaf changes;
+they do not fall back to a lazy presentation tail. Entry binding disambiguates
+equal-role/equal-timestamp messages using canonical content. Model changes clear
+successful provider exposure as well as pending evidence, and the selected model
+owns input capacity even while SDK usage still reports the previous window.
+Actual lazy-manager resume/fork and async ownership tests are specified in
+[dcp-statistics.md](./dcp-statistics.md).
+
+`/dcp stats`, TUI and Desktop share the read-only statistics formatter. It
+separates dated context snapshots, durable block/commit metrics and recorded
+provider reminder delivery; it never equates context callbacks with sends.
+Optional commit metrics live on the first block of a journaled transaction.
+Scalar `dcp-diagnostic` observations are not projection or recovery authority.
+
 ## Journal contract
 
 The only supported durable format is `dcp-journal`, schema version 1. Operations

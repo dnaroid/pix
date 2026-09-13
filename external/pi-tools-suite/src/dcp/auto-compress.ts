@@ -1116,6 +1116,12 @@ export async function createAutoCompressionBlock(
 	const pressureRelieved = workingState.compressionProgress
 		? settleCompressionProgress(workingState, fullProjectionGain, fullProjectedAfterTokens)
 		: true
+	created.block.commitMetrics = {
+		operationId: `auto:${created.block.id}`,
+		kind: effectiveCandidate.includedBlockIds.length >= 2 && sourceCoverage.itemCount === effectiveCandidate.includedBlockIds.length ? "consolidation" : "auto",
+		beforeTokens: fullProjectedAfterTokens + fullProjectionGain,
+		afterTokens: fullProjectedAfterTokens, netGainTokens: fullProjectionGain,
+	}
 	assertCurrent()
 	let published = false
 	if (options.persistState) await options.persistState(workingState, {
