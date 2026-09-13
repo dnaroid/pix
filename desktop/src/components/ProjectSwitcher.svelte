@@ -2,6 +2,7 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import Folder from "@lucide/svelte/icons/folder";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import { onDestroy, onMount } from "svelte";
   import {
@@ -230,11 +231,7 @@
     onkeydown={handleTriggerKeydown}
   >
     <span bind:this={folderSlot} class="h-4 w-4 shrink-0" aria-hidden="true">
-      <ProjectFolderIcon
-        project={workspace || "workspace"}
-        color={workspace ? projectColors.get(workspace) : undefined}
-        class="h-full w-full"
-      />
+      <Folder class="h-full w-full text-muted-foreground" aria-hidden="true" />
     </span>
     <span bind:this={textSlot} class="min-w-0 flex-1">
       <strong class="block truncate text-[11px] font-medium text-foreground">

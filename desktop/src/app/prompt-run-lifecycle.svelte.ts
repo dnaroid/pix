@@ -7,7 +7,6 @@ type PromptRunLifecycleOptions = Pick<
   | "client"
   | "activeSessionId"
   | "reportError"
-  | "refreshRuntimeStatus"
   | "bindPromptSessionEntry"
   | "finalizeTranscriptActivity"
 > & {
@@ -76,7 +75,6 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
         if (promptRunsBySessionId.get(sessionId) !== tracked) return;
         promptRunsBySessionId.delete(sessionId);
         finishRun(sessionId);
-        queueMicrotask(() => void options.refreshRuntimeStatus(sessionId));
         queueMicrotask(() => void options.flushAutoQueue(sessionId));
       });
     promptRunsBySessionId.set(sessionId, tracked);

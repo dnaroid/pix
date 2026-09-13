@@ -11,7 +11,6 @@
     SidebarIndicatorMap,
     SidebarIndicatorTab,
   } from "../lib/sidebar-indicators";
-  import ProjectFolderIcon from "./ProjectFolderIcon.svelte";
   import SidebarIndicatorDot from "./SidebarIndicatorDot.svelte";
 
   type SidebarTab = SidebarIndicatorTab;
@@ -27,15 +26,11 @@
   ];
 
   let {
-    workspace,
-    projectColors,
     indicators,
     activeTab,
     collapsed,
     onSelect,
   }: {
-    workspace: string;
-    projectColors: ReadonlyMap<string, string>;
     indicators: SidebarIndicatorMap;
     activeTab: SidebarTab;
     collapsed: boolean;
@@ -82,11 +77,7 @@
     onkeydown={(event) => handleKeydown(event, "project")}
     onclick={() => onSelect("project")}
   >
-    {#if workspace}
-      <ProjectFolderIcon project={workspace} color={projectColors.get(workspace)} class="h-5 w-5" />
-    {:else}
-      <Folder class="h-5 w-5" aria-hidden="true" />
-    {/if}
+    <Folder class="h-5 w-5" aria-hidden="true" />
     <SidebarIndicatorDot indicator={indicators.project} />
   </button>
   <button

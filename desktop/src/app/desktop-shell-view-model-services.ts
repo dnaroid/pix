@@ -19,6 +19,9 @@ export function createDesktopShellViewModelServices(options: DesktopViewModelSer
   });
 
   const statusBar = createDesktopStatusBarViewModel({
+    workspace: options.workspace,
+    workspaceBranch: () => options.project.git.statusBranch,
+    workspaceColor: () => options.project.workspace.projectColors.get(options.workspace()),
     status: options.status,
     displayedConfigOptions: options.displayedConfigOptions,
     changingConfig: options.changingConfig,

@@ -23,8 +23,9 @@ describe("ProjectSwitcher project opening actions", () => {
   });
 
   it("renders per-project override colors without owning filesystem IO", () => {
-    expect(switcherSource).toContain("projectColors.get(workspace)");
     expect(switcherSource).toContain("projectColors.get(project)");
+    expect(switcherSource).not.toContain("projectColors.get(workspace)");
+    expect(switcherSource).not.toContain("project-identity-name");
     expect(switcherSource).not.toContain("invoke(");
   });
 

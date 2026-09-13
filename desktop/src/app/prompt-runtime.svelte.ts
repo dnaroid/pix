@@ -13,7 +13,6 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     client: options.client,
     activeSessionId: options.activeSessionId,
     reportError: options.reportError,
-    refreshRuntimeStatus: options.refreshRuntimeStatus,
     bindPromptSessionEntry: options.bindPromptSessionEntry,
     finalizeTranscriptActivity: options.finalizeTranscriptActivity,
     flushAutoQueue: (sessionId) => queue.flushAutoQueue(sessionId),

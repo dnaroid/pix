@@ -19,6 +19,11 @@
 
   let {
     status,
+    workspacePath,
+    workspaceName,
+    workspaceBranch,
+    workspaceHue,
+    workspaceColor,
     configOptions,
     changingConfig,
     promptRunning,
@@ -48,6 +53,11 @@
     onOpenCommandPalette,
   }: {
     status: ConnectionStatus;
+    workspacePath?: string;
+    workspaceName?: string;
+    workspaceBranch?: string;
+    workspaceHue?: number;
+    workspaceColor?: string;
     configOptions: SessionConfigOption[];
     changingConfig: string | null;
     promptRunning: boolean;
@@ -149,9 +159,13 @@
     {/if}
     <RuntimeStatusBarItems
       status={runtimeStatus}
+      {workspacePath}
+      {workspaceName}
+      {workspaceBranch}
+      {workspaceHue}
+      {workspaceColor}
       refreshingModelUsage={modelUsageRefreshing}
       loadingDcpStats={dcpStatsRefreshing}
-      canRefreshModelUsage={canConfigure && changingConfig === null && !promptRunning}
       compressingContext={dcpCompressionRunning}
       compressionAvailable={dcpCompressionAvailable}
       {canCompressContext}

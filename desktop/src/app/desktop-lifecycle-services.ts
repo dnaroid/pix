@@ -41,6 +41,7 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
     activeSessionId: () => options.state.sessionId,
     activeSessionRuntimeReady: () => options.state.runtimeReady,
     refreshRuntimeStatus: options.sessionServices.runtime.refreshStatus,
+    refreshWorkspaceBranch: options.projectServices.git.refreshStatusBranch,
     restoreProjects: () => {
       const restored = options.projectServices.workspace.restore();
       options.setWorkspace(restored.workspace);

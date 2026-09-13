@@ -46,7 +46,6 @@ export function createDesktopPromptServices(options: DesktopPromptServicesOption
     sessionHistoryLoading: options.sessionHistoryLoading,
     setErrorMessage: options.setErrorMessage,
     reportError: options.reportError,
-    refreshRuntimeStatus: options.sessionRuntime.refreshStatus,
     appendQueuedMessage: queue.appendToTranscript,
     bindPromptSessionEntry: (sessionId, transcriptMessageId, sessionEntryId) => {
       const current = options.state.transcriptFor(sessionId);

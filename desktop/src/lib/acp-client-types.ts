@@ -148,6 +148,7 @@ export type ModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
 export interface RuntimeStatus {
   readonly sessionId: string;
   readonly context?: ContextUsageStatus;
+  readonly dcpTokensSaved?: number;
   readonly dcpStats?: string;
   readonly modelUsageRefresh: ModelUsageRefresh;
   readonly modelUsage?: ModelUsageStatus;

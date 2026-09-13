@@ -1398,6 +1398,11 @@ async fn git_status(workspace: String) -> Result<GitSnapshot, String> {
 }
 
 #[tauri::command]
+async fn git_current_branch(workspace: String) -> Result<Option<String>, String> {
+    run_blocking(move || git_current_branch_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
 async fn git_diff(
     workspace: String,
     path: Option<String>,
@@ -2380,6 +2385,16 @@ fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
     snapshot.branches = git_local_branches(&root, &snapshot.branch)?;
     snapshot.remotes = git_remotes(&root)?;
     Ok(snapshot)
+}
+
+fn git_current_branch_from(workspace: &Path) -> Result<Option<String>, String> {
+    let root = canonical_workspace(workspace)?;
+    let output = git_output_raw(&root, &["branch", "--show-current"])?;
+    if !output.status.success() {
+        return Err(git_command_error("Git branch", &output));
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    Ok((!branch.is_empty()).then_some(branch))
 }
 
 fn parse_git_status_porcelain(bytes: &[u8]) -> Result<GitSnapshot, String> {
@@ -7500,6 +7515,7 @@ pub fn run() {
             list_project_directory,
             open_in_external_editor,
             git_status,
+            git_current_branch,
             git_diff,
             git_stage,
             git_unstage,
@@ -8339,6 +8355,10 @@ mod tests {
 
         git_switch_branch_from(&workspace, "feature/source-control", true)
             .expect("create feature branch");
+        assert_eq!(
+            git_current_branch_from(&workspace).expect("read lightweight branch"),
+            Some("feature/source-control".to_owned())
+        );
         assert_eq!(
             git_status_from(&workspace).expect("feature status").branch,
             "feature/source-control"

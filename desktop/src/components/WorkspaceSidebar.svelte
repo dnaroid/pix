@@ -496,8 +496,6 @@
   aria-label="Workspace sidebar"
 >
   <WorkspaceSidebarActivityBar
-    {workspace}
-    {projectColors}
     {indicators}
     {activeTab}
     collapsed={layoutController.collapsed}

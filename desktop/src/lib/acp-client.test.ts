@@ -228,6 +228,7 @@ describe("ACP JSON-RPC client", () => {
     const result = {
       sessionId: "session-1",
       context: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
+      dcpTokensSaved: 12_345,
       dcpStats: "DCP Session Statistics:\nTokens saved (estimated): 12,000",
       modelUsageRefresh: "ready",
       modelUsage: {

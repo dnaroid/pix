@@ -26,19 +26,26 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus {
 
   const context = value.context === undefined ? undefined : parseContextUsageStatus(value.context);
   const modelUsage = value.modelUsage === undefined ? undefined : parseModelUsageStatus(value.modelUsage);
+  if (
+    value.dcpTokensSaved !== undefined
+    && (!isFiniteNumber(value.dcpTokensSaved) || value.dcpTokensSaved < 0)
+  ) {
+    throw new Error("pix/session/runtime_status returned invalid DCP token savings");
+  }
   if (value.modelUsageRefresh === "ready" && !modelUsage) {
     throw new Error("pix/session/runtime_status returned ready without model usage");
   }
   return {
     sessionId: value.sessionId,
     ...(context ? { context } : {}),
+    ...(typeof value.dcpTokensSaved === "number" ? { dcpTokensSaved: Math.round(value.dcpTokensSaved) } : {}),
     ...(typeof value.dcpStats === "string" ? { dcpStats: value.dcpStats } : {}),
     modelUsageRefresh: value.modelUsageRefresh as ModelUsageRefresh,
     ...(modelUsage ? { modelUsage } : {}),
   };
 }
 
-function parseContextUsageStatus(value: unknown): ContextUsageStatus {
+export function parseContextUsageStatus(value: unknown): ContextUsageStatus {
   if (
     !isRecord(value)
     || (value.tokens !== null && !isFiniteNumber(value.tokens))

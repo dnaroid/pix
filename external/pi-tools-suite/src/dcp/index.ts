@@ -78,6 +78,8 @@ import { createBudgetedAutoCompressionBlock } from "./auto-compress-budget.js"
 import { compressionPlanningTokens, outstandingCompressionTokens, resetCompressionProgress, routineRecoveryTokens, trackCompressionProgress } from "./compression-progress.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction, invalidateDcpStateOwner } from "./state-transaction.js"
 
+const PIX_DCP_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.runtime-stats")
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -145,6 +147,10 @@ function withoutAutoSummaryModels(config: ReturnType<typeof loadConfig>): Return
 export default async function dcpModule(pi: ExtensionAPI, dependencies: { config?: ReturnType<typeof loadConfig>; state?: ReturnType<typeof createState> } = {}): Promise<void> {
 	// ── 1. Load config ────────────────────────────────────────────────────────
 	const config = dependencies.config ?? loadConfig()
+	const runtimeGlobals = globalThis as typeof globalThis & Record<symbol, unknown>
+	// Extension reloads may disable DCP. Clear any getter left by the previous
+	// module instance before deciding whether this instance is active.
+	runtimeGlobals[PIX_DCP_RUNTIME_STATS_SYMBOL] = undefined
 	const configForContext = (ctx: unknown) => resolveModelConfig(config, modelKeysFromContext(ctx))
 	const hasEnabledModelOverride = Object.values(config.modelOverrides).some(
 		(override) => override.enabled === true,
@@ -154,6 +160,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = dependencies.state ?? createState()
+	// Pix ACP runs one pi process per session. Expose only this tiny live metric
+	// to the patched RPC session-stats surface; DCP state remains extension-owned.
+	runtimeGlobals[PIX_DCP_RUNTIME_STATS_SYMBOL] = () => ({ tokensSaved: state.tokensSaved })
 	let journalMirror: DcpJournalMirror | undefined
 	let journalSupported = false
 	let journalBlockedReason: string | undefined

@@ -81,6 +81,7 @@ export type DesktopModelUsageRefresh = "skipped" | "ready" | "unavailable" | "fa
 export interface DesktopRuntimeStatusResponse {
 	readonly sessionId: string;
 	readonly context?: DesktopContextUsage;
+	readonly dcpTokensSaved?: number;
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
 }

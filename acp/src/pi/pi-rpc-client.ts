@@ -110,7 +110,10 @@ export interface PiSessionTreeNode {
 }
 
 /** Session statistics exposed by pi's public RPC client. */
-export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>>;
+export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>> & {
+	/** Live DCP estimate injected by Pix's RPC entry when the DCP extension is active. */
+	readonly pixDcpTokensSaved?: number | undefined;
+};
 
 /**
  * Structural subset of pi `AgentMessage` used for session history replay.

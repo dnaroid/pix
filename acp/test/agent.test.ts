@@ -53,7 +53,11 @@ import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
 function piSessionPath(literal: string): string {
 	return resolve(literal);
 }
-import { PIX_SESSION_STATE_METHOD } from "../src/acp/session-state-bridge.js";
+import {
+	PIX_CONTEXT_USAGE_CHANNEL,
+	PIX_DCP_TOKENS_SAVED_CHANNEL,
+	PIX_SESSION_STATE_METHOD,
+} from "../src/acp/session-state-bridge.js";
 import type {
 	AutocompleteCompleterInput,
 	AutocompleteResponse,
@@ -108,6 +112,7 @@ class FakePiClient implements PiClient {
 	readonly exportCalls: (string | undefined)[] = [];
 	readonly commands: PiSlashCommand[] = [];
 	readonly sessionStats: PiSessionStats;
+	getSessionStatsCalls = 0;
 	getCommandsCalls = 0;
 	commandsGate: Promise<void> | undefined;
 	readonly forkCalls: string[] = [];
@@ -298,6 +303,7 @@ class FakePiClient implements PiClient {
 	}
 
 	async getSessionStats(): Promise<PiSessionStats> {
+		this.getSessionStatsCalls += 1;
 		return this.sessionStats;
 	}
 
@@ -1241,6 +1247,7 @@ test("Pix Desktop runtime status exposes pi context usage without refreshing mod
 		const pi = clients[0]!;
 		Object.assign(pi.sessionStats, {
 			contextUsage: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
+			pixDcpTokensSaved: 12_345,
 		});
 
 		const response = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
@@ -1250,10 +1257,133 @@ test("Pix Desktop runtime status exposes pi context usage without refreshing mod
 
 		assert.equal(response.sessionId, session.sessionId);
 		assert.deepEqual(response.context, { tokens: 128_000, contextWindow: 200_000, percent: 64 });
+		assert.equal(response.dcpTokensSaved, 12_345);
 		assert.equal(response.modelUsageRefresh, "skipped");
 		assert.equal(response.modelUsage, undefined);
 		assert.equal(pi.getTreeCalls, 0, "periodic runtime status must not traverse the DCP session tree");
 	});
+});
+
+test("Pix Desktop pushes context usage on message and compaction boundaries without polling stream deltas", async () => {
+	type ContextNotification = { sessionId: string; channel: string; data: unknown };
+	const notifications: ContextNotification[] = [];
+	const savingsNotifications: ContextNotification[] = [];
+	const { adapter, clients } = createTestAdapter();
+
+	await connect(
+		adapter,
+		async (cx) => {
+			const session = await cx.buildSession("/tmp/runtime-context-push").start();
+			const pi = clients[0]!;
+
+			pi.emit({
+				type: "message_update",
+				usage: {
+					input: 100,
+					output: 10,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 110,
+					cost: { input: 0, output: 0, total: 0 },
+				},
+				assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "streaming" },
+			} as PiEvent);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			assert.equal(pi.getSessionStatsCalls, 0, "streaming deltas must not poll context stats");
+			assert.equal(notifications.length, 0);
+
+			Object.assign(pi.sessionStats, {
+				contextUsage: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
+				pixDcpTokensSaved: 12_345,
+			});
+			pi.emit({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "done" }],
+					stopReason: "stop",
+					usage: {
+						input: 100_000,
+						output: 28_000,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 128_000,
+						cost: { input: 0, output: 0, total: 0 },
+					},
+				},
+			} as PiEvent);
+			await waitFor(() => notifications.length === 1);
+			await waitFor(() => savingsNotifications.length === 1);
+			assert.equal(pi.getSessionStatsCalls, 1);
+			assert.deepEqual(notifications[0], {
+				sessionId: session.sessionId,
+				channel: PIX_CONTEXT_USAGE_CHANNEL,
+				data: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
+			});
+			assert.deepEqual(savingsNotifications[0], {
+				sessionId: session.sessionId,
+				channel: PIX_DCP_TOKENS_SAVED_CHANNEL,
+				data: 12_345,
+			});
+
+			Object.assign(pi.sessionStats, {
+				contextUsage: { tokens: null, contextWindow: 200_000, percent: null },
+				pixDcpTokensSaved: 18_000,
+			});
+			pi.emit({
+				type: "compaction_end",
+				reason: "manual",
+				result: { summary: "compact", tokensBefore: 128_000, estimatedTokensAfter: 20_000 },
+				aborted: false,
+				willRetry: false,
+			} as PiEvent);
+			await waitFor(() => notifications.length === 2);
+			await waitFor(() => savingsNotifications.length === 2);
+			assert.equal(pi.getSessionStatsCalls, 2);
+			assert.deepEqual(notifications[1], {
+				sessionId: session.sessionId,
+				channel: PIX_CONTEXT_USAGE_CHANNEL,
+				data: { tokens: null, contextWindow: 200_000, percent: null },
+			});
+			assert.equal(savingsNotifications[1]?.data, 18_000);
+
+			pi.promptHandledWithoutRun = true;
+			Object.assign(pi.sessionStats, {
+				contextUsage: { tokens: 40_000, contextWindow: 200_000, percent: 20 },
+				pixDcpTokensSaved: 24_000,
+			});
+			await cx.request("session/prompt", {
+				sessionId: session.sessionId,
+				prompt: [{ type: "text", text: "/dcp sweep" }],
+			});
+			await waitFor(() => notifications.length === 3);
+			await waitFor(() => savingsNotifications.length === 3);
+			assert.equal(pi.getSessionStatsCalls, 3, "extension-handled slash commands get one boundary snapshot");
+			assert.deepEqual(notifications[2], {
+				sessionId: session.sessionId,
+				channel: PIX_CONTEXT_USAGE_CHANNEL,
+				data: { tokens: 40_000, contextWindow: 200_000, percent: 20 },
+			});
+			assert.equal(savingsNotifications[2]?.data, 24_000);
+		},
+		(app) => {
+			const customNotifications = app as unknown as {
+				onNotification(
+					method: string,
+					parser: (params: unknown) => ContextNotification,
+					handler: (ctx: { params: ContextNotification }) => void,
+				): void;
+			};
+			customNotifications.onNotification(
+				PIX_SESSION_STATE_METHOD,
+				(params) => params as ContextNotification,
+				(ctx) => {
+					if (ctx.params.channel === PIX_CONTEXT_USAGE_CHANNEL) notifications.push(ctx.params);
+					if (ctx.params.channel === PIX_DCP_TOKENS_SAVED_CHANNEL) savingsNotifications.push(ctx.params);
+				},
+			);
+		},
+	);
 });
 
 test("Pix Desktop loads DCP statistics only through the on-demand DCP request", async () => {

@@ -39,6 +39,7 @@ export function createSessionRuntimeStore(options: SessionRuntimeStoreOptions) {
     forget,
     invalidatePrewarm: loading.invalidatePrewarm,
     schedulePrewarm: loading.schedulePrewarm,
+    handleSessionState: status.handleSessionState,
     refreshStatus: status.refreshStatus,
     refreshDcpStats: status.refreshDcpStats,
     configChangeInProgress: config.configChangeInProgress,

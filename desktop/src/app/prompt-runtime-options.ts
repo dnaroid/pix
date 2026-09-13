@@ -8,7 +8,6 @@ export type PromptRuntimeOptions = {
   sessionHistoryLoading: () => boolean;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
-  refreshRuntimeStatus: (sessionId: string) => void | Promise<void>;
   appendQueuedMessage: (sessionId: string, message: QueuedUserMessage) => string;
   bindPromptSessionEntry: (
     sessionId: string,

@@ -1,11 +1,19 @@
-import type { RuntimeStatus } from "../lib/acp-client";
+import type { ContextUsageStatus, RuntimeStatus } from "../lib/acp-client";
+import { parseContextUsageStatus } from "../lib/acp-response-parsers";
 import {
   EMPTY_RUNTIME_STATUS_GENERATIONS,
   beginRuntimeStatusRefresh,
   isLatestRuntimeStatusRefresh,
+  mergePushedContextUsage,
+  mergePushedDcpTokensSaved,
   mergeRuntimeStatusResponse,
   type RuntimeStatusGenerations,
 } from "../lib/runtime-status";
+import {
+  PIX_CONTEXT_USAGE_CHANNEL,
+  PIX_DCP_TOKENS_SAVED_CHANNEL,
+  type SessionStateNotification,
+} from "../lib/session-state";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
 
 type SessionRuntimeStatusOptions = Pick<SessionRuntimeStoreOptions, "client"> & {
@@ -61,6 +69,64 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         modelUsageRefreshing = next;
       }
     }
+  }
+
+  function handleSessionState(notification: SessionStateNotification): boolean {
+    if (notification.channel === PIX_DCP_TOKENS_SAVED_CHANNEL) {
+      if (!options.isReady(notification.sessionId)) return true;
+      let tokensSaved: number | undefined;
+      if (notification.data !== null) {
+        if (
+          typeof notification.data !== "number"
+          || !Number.isFinite(notification.data)
+          || notification.data < 0
+        ) return true;
+        tokensSaved = Math.round(notification.data);
+      }
+      // This scalar is sampled at the same model boundary as context usage.
+      // Advance the snapshot generation as well so an older runtime_status
+      // request cannot overwrite the newer saved-token estimate.
+      const generation = beginRuntimeStatusRefresh(
+        statusGenerationsBySession.get(notification.sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
+        false,
+      );
+      statusGenerationsBySession.set(notification.sessionId, generation.generations);
+      const nextStatuses = new Map(statuses);
+      nextStatuses.set(
+        notification.sessionId,
+        mergePushedDcpTokensSaved(statuses.get(notification.sessionId), notification.sessionId, tokensSaved),
+      );
+      statuses = nextStatuses;
+      return true;
+    }
+    if (notification.channel !== PIX_CONTEXT_USAGE_CHANNEL) return false;
+    if (!options.isReady(notification.sessionId)) return true;
+
+    let context: ContextUsageStatus | undefined;
+    if (notification.data !== null) {
+      try {
+        context = parseContextUsageStatus(notification.data);
+      } catch {
+        return true;
+      }
+    }
+
+    // A pushed context snapshot is newer than any runtime-status request that
+    // started before this notification. Advance only the snapshot generation;
+    // an in-flight quota refresh may still merge its quota fields later.
+    const generation = beginRuntimeStatusRefresh(
+      statusGenerationsBySession.get(notification.sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
+      false,
+    );
+    statusGenerationsBySession.set(notification.sessionId, generation.generations);
+
+    const nextStatuses = new Map(statuses);
+    nextStatuses.set(
+      notification.sessionId,
+      mergePushedContextUsage(statuses.get(notification.sessionId), notification.sessionId, context),
+    );
+    statuses = nextStatuses;
+    return true;
   }
 
   async function refreshDcpStats(sessionId: string): Promise<void> {
@@ -130,6 +196,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     get statuses() { return statuses; },
     get modelUsageRefreshing() { return modelUsageRefreshing; },
     get dcpStatsRefreshing() { return dcpStatsRefreshing; },
+    handleSessionState,
     refreshStatus,
     refreshDcpStats,
     forget,

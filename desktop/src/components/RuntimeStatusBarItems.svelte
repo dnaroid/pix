@@ -17,9 +17,13 @@
 
   let {
     status,
+    workspacePath,
+    workspaceName,
+    workspaceBranch,
+    workspaceHue,
+    workspaceColor,
     refreshingModelUsage = false,
     loadingDcpStats = false,
-    canRefreshModelUsage = true,
     compressingContext = false,
     compressionAvailable = true,
     canCompressContext = true,
@@ -28,9 +32,13 @@
     onCompressContext,
   }: {
     status?: RuntimeStatus;
+    workspacePath?: string;
+    workspaceName?: string;
+    workspaceBranch?: string;
+    workspaceHue?: number;
+    workspaceColor?: string;
     refreshingModelUsage?: boolean;
     loadingDcpStats?: boolean;
-    canRefreshModelUsage?: boolean;
     compressingContext?: boolean;
     compressionAvailable?: boolean;
     canCompressContext?: boolean;
@@ -72,9 +80,13 @@
 
   function contextTitle(): string {
     const context = status?.context;
-    if (!context) return "Context usage unavailable";
-    if (context.tokens === null || context.percent === null) return `Context usage unknown · window ${formatCompactTokens(context.contextWindow)}`;
-    return `Context ${Math.round(context.percent)}% · ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens · click for DCP statistics`;
+    const saved = status?.dcpTokensSaved;
+    const savings = saved === undefined
+      ? ""
+      : ` · DCP saved ~${Math.round(saved).toLocaleString("en-US")} tokens`;
+    if (!context) return `Context usage unavailable${savings}`;
+    if (context.tokens === null || context.percent === null) return `Context usage unknown · window ${formatCompactTokens(context.contextWindow)}${savings}`;
+    return `Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens${savings} · click for DCP statistics`;
   }
 
   function toneTextClass(tone: UsageTone): string {
@@ -188,14 +200,30 @@
       {/if}
     </div>
 
+    {#if workspaceName}
+      <div
+        class="flex min-w-0 max-w-[260px] items-center gap-1 px-1.5 font-mono text-[11px]"
+        title={workspacePath ?? workspaceName}
+        data-runtime-workspace
+      >
+        <span
+          class="runtime-workspace-name min-w-0 truncate"
+          style:--runtime-workspace-hue={workspaceHue}
+          style:--runtime-workspace-color={workspaceColor}
+        >{workspaceName}</span>
+        {#if workspaceBranch}
+          <span class="max-w-36 shrink truncate text-muted-foreground">({workspaceBranch})</span>
+        {/if}
+      </div>
+    {/if}
+
     {#if status.modelUsage}
       <button
-        class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[11px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-55"
+        class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[11px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
         type="button"
         title="Refresh model usage limits"
         aria-label="Refresh model usage limits"
         aria-busy={refreshingModelUsage}
-        disabled={!canRefreshModelUsage || refreshingModelUsage}
         onclick={onRefreshModelUsage}
       >
         <span class="font-sans text-[11px] text-muted-foreground max-[900px]:hidden">Usage</span>
@@ -226,3 +254,15 @@
     {/if}
   </div>
 {/if}
+
+<style>
+  .runtime-workspace-name {
+    color: var(--runtime-workspace-color, oklch(0.62 0.15 var(--runtime-workspace-hue)));
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .runtime-workspace-name {
+      color: var(--runtime-workspace-color, oklch(0.74 0.13 var(--runtime-workspace-hue)));
+    }
+  }
+</style>

@@ -28,6 +28,12 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(activityBarSource).toContain("h-10 w-10 place-items-center");
   });
 
+  it("keeps the Activity Bar project icon neutral", () => {
+    expect(activityBarSource).toContain('<Folder class="h-5 w-5" aria-hidden="true" />');
+    expect(activityBarSource).not.toContain("ProjectFolderIcon");
+    expect(activityBarSource).not.toContain("projectColors");
+  });
+
   it("uses the shared menu navigation contract for task status", () => {
     expect(statusMenuControllerSource).toContain("menuFocusIndex(navigationItems, currentIndex, event.key)");
     expect(statusMenuControllerSource).toContain("menuTypeaheadFocusIndex(navigationItems, currentIndex, query)");

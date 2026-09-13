@@ -18,3 +18,10 @@ test("Pix RPC installs the pause hook before starting a normal prompt", async ()
 		"pause hook must be installed before AgentSession captures shouldStopAfterTurn for the run",
 	);
 });
+
+test("Pix RPC exposes live DCP token savings through session stats", async () => {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	assert.match(source, /Symbol\.for\("pix\.dcp\.runtime-stats"\)/u);
+	assert.match(source, /AgentSession\.prototype\.getSessionStats = function pixGetSessionStats/u);
+	assert.match(source, /pixDcpTokensSaved/u);
+});

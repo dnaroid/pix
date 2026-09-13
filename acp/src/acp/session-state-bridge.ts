@@ -2,6 +2,8 @@ import type { RpcExtensionUIRequest } from "@earendil-works/pi-coding-agent";
 
 export const RPC_SESSION_STATE_WIDGET_KEY = "pix.session-state";
 export const PIX_SESSION_STATE_METHOD = "pix/session-state";
+export const PIX_CONTEXT_USAGE_CHANNEL = "context-usage";
+export const PIX_DCP_TOKENS_SAVED_CHANNEL = "dcp-tokens-saved";
 
 export interface SessionStateEnvelope {
 	readonly channel: string;

@@ -1,6 +1,12 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { modelThinkingConfigState } from "../lib/model-thinking";
 import {
+  createSessionInspectorActivityTracker,
+  syncSessionInspectorActivity,
+} from "../lib/session-inspector-activity-policy";
+import type { SessionSubagentSnapshot } from "../lib/session-subagents";
+import type { SessionTodoSnapshot } from "../lib/session-todos";
+import {
   normalizeWorkbenchTab,
   type WorkbenchTab,
   type WorkbenchTabId,
@@ -21,6 +27,9 @@ type DesktopRootEffectsOptions = {
   activeWorkbenchTabId: () => WorkbenchTabId | null;
   setActiveWorkbenchTabId: (id: WorkbenchTabId | null) => void;
   workbenchTabs: () => readonly WorkbenchTab[];
+  activeTodoSnapshot: () => SessionTodoSnapshot | undefined;
+  activeSubagentSnapshot: () => SessionSubagentSnapshot | undefined;
+  setSessionInspectorOpen: (open: boolean) => void;
 };
 
 export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
@@ -28,6 +37,7 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
   let previousAttachmentDraftKey: string | null = null;
   let previousPreviewWorkspace: string | null = null;
   let previousConversationWorkbenchTabId: WorkbenchTabId | null = null;
+  const inspectorActivityTracker = createSessionInspectorActivityTracker();
 
   $effect(() => {
     const sessionId = options.activeSessionId();
@@ -57,6 +67,16 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
       options.resetPreviewForWorkspaceChange();
     }
     previousPreviewWorkspace = currentWorkspace;
+  });
+
+  $effect(() => {
+    syncSessionInspectorActivity(
+      inspectorActivityTracker,
+      options.activeSessionId(),
+      options.activeTodoSnapshot(),
+      options.activeSubagentSnapshot(),
+      options.setSessionInspectorOpen,
+    );
   });
 
   $effect(() => {

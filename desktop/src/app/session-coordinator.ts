@@ -63,6 +63,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
   }
 
   function handleState(notification: SessionStateNotification): void {
+    if (options.runtime.handleSessionState(notification)) return;
     const agentControlState = agentControlStateFromSessionState(notification);
     if (agentControlState) {
       options.prompts.setAgentState(notification.sessionId, agentControlState);

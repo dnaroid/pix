@@ -48,9 +48,17 @@ without blocking desktop interactions.
   disabled current-window actions are skipped without being hidden. Opening the
   menu closes the conversation selector, and top-level session/workspace actions
   can close it through the sidebar component handle.
-- The project activity-rail folder and project-switcher folders use a stable
-  fallback hue derived from the normalized full project path rather than only
-  its basename. Windows drive and UNC identities are compared case-insensitively.
+- The Project activity-rail icon is neutral and follows the same active/muted
+  foreground treatment as the other Activity Bar icons. The active project name
+  in the bottom status bar uses the project identity color instead, while its Git
+  branch suffix remains muted. The Project switcher's active row stays neutral;
+  recent-project folders remain identity-colored so different projects stay easy
+  to distinguish.
+- Hovering the compact project/branch identity in the bottom status bar shows
+  the full active workspace path.
+- The status-bar project name and recent-project folders use a stable fallback hue
+  derived from the normalized full project path rather than only its basename.
+  Windows drive and UNC identities are compared case-insensitively.
 - A project may override the fallback identity color in `.pi/workspace.jsonc`:
 
   ```jsonc
@@ -121,12 +129,15 @@ without blocking desktop interactions.
 
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/app/project-workspace.svelte.ts`
+- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
 - `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
 - `desktop/src/components/workspace-sidebar-project-settings-controller.svelte.ts`
 - `desktop/src/components/ProjectSwitcher.svelte`
 - `desktop/src/components/ProjectSettingsDialog.svelte`
 - `desktop/src/components/ProjectFolderIcon.svelte`
+- `desktop/src/components/RuntimeStatusBarItems.svelte`
 - `desktop/src/lib/recent-projects.ts`
 - `desktop/src/lib/project-colors.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
@@ -144,6 +155,11 @@ without blocking desktop interactions.
 - `desktop/src/components/ProjectSettingsDialog.test.ts` covers the settings
   entry point, automatic/custom controls, native color picker, and presentation/
   persistence separation.
+- `desktop/src/components/WorkspaceSidebar.test.ts` verifies that the Activity
+  Bar project icon stays neutral, `ProjectSwitcher.test.ts` verifies that the
+  active Project-switcher row stays neutral, and
+  `DesktopVisualRegressions.test.ts` verifies that the status-bar project label
+  owns the identity color while the Git branch remains muted.
 - Rust tests in `desktop/src-tauri/src/lib.rs` cover atomic workspace-config
   replacement and stale compare-and-swap rejection.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and
@@ -156,6 +172,10 @@ without blocking desktop interactions.
   current generation, workspace, and recent-project set.
 - Confirmed by code: `ProjectSwitcher.svelte` owns the sidebar interaction state
   but no filesystem or Tauri IPC.
+- Confirmed by code: `desktop-status-bar-view-model.svelte.ts` passes the active
+  project's custom color plus deterministic full-path hue to
+  `RuntimeStatusBarItems.svelte`; only the project-name span consumes that color,
+  while the Git branch suffix keeps the normal muted status treatment.
 - Confirmed by code: `ProjectSettingsDialog.svelte` is presentation-only;
   `project-workspace.svelte.ts` owns generation guards/retries and Rust owns
   confined atomic persistence.

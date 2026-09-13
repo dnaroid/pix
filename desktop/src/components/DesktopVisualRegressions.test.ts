@@ -8,6 +8,7 @@ import diffViewSource from "./DiffView.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
 import idxSource from "./IdxPanel.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
+import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
@@ -60,6 +61,27 @@ describe("desktop visual regressions", () => {
     );
     expect(statusSource).not.toContain('>Session</span>');
     expect(statusSource).toContain('sessionActivityOpen ? "text-foreground" : activityToneClass()');
+  });
+
+  it("keeps project and Git branch between context and usage status chrome", () => {
+    const context = runtimeStatusSource.indexOf("title={contextTitle()}");
+    const workspace = runtimeStatusSource.indexOf("data-runtime-workspace");
+    const usage = runtimeStatusSource.indexOf('title="Refresh model usage limits"');
+    expect(context).toBeGreaterThanOrEqual(0);
+    expect(workspace).toBeGreaterThan(context);
+    expect(usage).toBeGreaterThan(workspace);
+    expect(runtimeStatusSource).toContain("({workspaceBranch})");
+    expect(runtimeStatusSource).toContain("runtime-workspace-name");
+    expect(runtimeStatusSource).toContain("--runtime-workspace-color");
+    expect(runtimeStatusSource).toContain('text-muted-foreground">({workspaceBranch})');
+    expect(runtimeStatusSource).toContain("title={workspacePath ?? workspaceName}");
+  });
+
+  it("shows absolute context and live DCP token savings in the hover title without repeating percent", () => {
+    expect(runtimeStatusSource).toContain("status?.dcpTokensSaved");
+    expect(runtimeStatusSource).toContain("DCP saved ~");
+    expect(runtimeStatusSource).toContain("Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens");
+    expect(runtimeStatusSource).not.toContain("Context ${Math.round(context.percent)}%");
   });
 
   it("keeps the model and thinking selector available while a prompt is running", () => {

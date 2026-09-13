@@ -82,7 +82,7 @@ export function parseRecentProjects(serialized: string | null, selectedPath?: st
   }
 }
 
-/** Stable hue used only as a visual identity for a project's folder icon. */
+/** Stable hue used as the project's fallback visual identity color. */
 export function projectFolderHue(path: string): number {
   let identity = path.replaceAll("\\", "/").normalize("NFKC");
   if (identity.length > 1 && !/^[A-Za-z]:\/$/u.test(identity)) identity = identity.replace(/\/+$/u, "");

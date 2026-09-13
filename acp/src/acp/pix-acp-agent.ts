@@ -225,6 +225,8 @@ import {
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
 import { cancelledResponse, fromElicitationResponse, toElicitationRequest } from "./ui-request-bridge.js";
 import {
+	PIX_CONTEXT_USAGE_CHANNEL,
+	PIX_DCP_TOKENS_SAVED_CHANNEL,
 	PIX_SESSION_STATE_METHOD,
 	sessionStateEnvelopeFromUiRequest,
 	type PixSessionStateNotification,
@@ -295,6 +297,7 @@ interface AgentSessionState {
 	readonly workspaceUndoResults: Map<string, WorkspaceUndoBridgeResult>;
 	contextInventory: ContextInventoryState | undefined;
 	contextInventoryNoticeReason: "reload" | "model_select" | undefined;
+	contextUsagePushGeneration: number;
 }
 
 interface PendingDesktopNewSession {
@@ -1467,6 +1470,7 @@ export class PixAcpAgent {
 			workspaceUndoResults: new Map(),
 			contextInventory: undefined,
 			contextInventoryNoticeReason: undefined,
+			contextUsagePushGeneration: 0,
 		};
 		// Register routing before start so session_start extension state emitted
 		// during RPC startup is delivered instead of being dropped.
@@ -1650,7 +1654,46 @@ export class PixAcpAgent {
 				}
 			}
 		}
+		if (
+			event.type === "message_end"
+			|| (event.type === "compaction_end" && !event.aborted && event.result)
+		) {
+			this.scheduleContextUsagePush(session);
+		}
 		this.dispatchSessionEvent(session, event);
+	}
+
+	private scheduleContextUsagePush(session: AgentSessionState): void {
+		const generation = ++session.contextUsagePushGeneration;
+		queueMicrotask(() => void this.pushContextUsage(session, generation));
+	}
+
+	private async pushContextUsage(session: AgentSessionState, generation: number): Promise<void> {
+		if (
+			this.sessions.get(session.acpSessionId) !== session
+			|| session.contextUsagePushGeneration !== generation
+		) return;
+
+		try {
+			const stats = await session.pi.getSessionStats();
+			if (
+				this.sessions.get(session.acpSessionId) !== session
+				|| session.contextUsagePushGeneration !== generation
+			) return;
+			await session.client.notify(PIX_SESSION_STATE_METHOD, {
+				sessionId: session.acpSessionId,
+				channel: PIX_CONTEXT_USAGE_CHANNEL,
+				data: stats.contextUsage ?? null,
+			});
+			await session.client.notify(PIX_SESSION_STATE_METHOD, {
+				sessionId: session.acpSessionId,
+				channel: PIX_DCP_TOKENS_SAVED_CHANNEL,
+				data: dcpTokensSavedFromStats(stats) ?? null,
+			});
+		} catch (error) {
+			if (this.sessions.get(session.acpSessionId) !== session) return;
+			this.options.logger.warn(`context usage push failed: ${stringifyUnknown(error)}`);
+		}
 	}
 
 	/**
@@ -1872,10 +1915,12 @@ export class PixAcpAgent {
 		const modelUsage = params.refreshModelUsage
 			? await this.querySessionModelUsage(session.acpSessionId, state)
 			: { refresh: "skipped" as const };
+		const dcpTokensSaved = dcpTokensSavedFromStats(stats);
 
 		return {
 			sessionId: session.acpSessionId,
 			...(stats.contextUsage ? { context: stats.contextUsage } : {}),
+			...(dcpTokensSaved !== undefined ? { dcpTokensSaved } : {}),
 			modelUsageRefresh: modelUsage.refresh,
 			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
 		};
@@ -2130,6 +2175,11 @@ export class PixAcpAgent {
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
 			await this.consumeContextInventoryNotice(session);
 			await this.notifyAvailableCommands(session);
+			// Some extension commands mutate the live context entirely in input
+			// preflight and therefore never emit agent/message lifecycle events.
+			// Publish one boundary snapshot for those commands instead of restoring
+			// the old Desktop-wide post-prompt runtime_status poll.
+			if (!run.started) this.scheduleContextUsagePush(session);
 		}
 		return { stopReason };
 	}
@@ -2782,6 +2832,13 @@ type SharedModelUsageModule = {
 type SharedDcpStatsModule = {
 	formatDcpStatsToast?: (session: unknown, options?: { branch?: readonly unknown[] }) => string;
 };
+
+function dcpTokensSavedFromStats(stats: PiSessionStats): number | undefined {
+	const value = stats.pixDcpTokensSaved;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? Math.round(value)
+		: undefined;
+}
 
 type ModelUsageRefreshResult =
 	| { readonly refresh: "ready"; readonly status: DesktopModelUsageStatus }

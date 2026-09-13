@@ -36,6 +36,10 @@ The report separates these quantities:
   create a second measurement. Gains from old unmeasured blocks are unknown,
   not inferred as zero. A sum of measured deltas is not current context savings
   or saved billing.
+- The Desktop context-hover `DCP saved ~N tokens` value is intentionally a
+  different live runtime metric: the extension's `state.tokensSaved` estimate,
+  also used by `/dcp context`. It is not derived from `measuredGain`, does not
+  change this durable report's accounting, and is not a billing claim.
 - Journaled anchors and context projection events, versus recorded provider
   attempts containing reminders and correlated successful completed
   opportunities. Failed attempts may count as attempts, never as successful

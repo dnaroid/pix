@@ -1,4 +1,4 @@
-import type { ModelUsageLimitWindow, RuntimeStatus } from "./acp-client";
+import type { ContextUsageStatus, ModelUsageLimitWindow, RuntimeStatus } from "./acp-client";
 
 export type UsageTone = "success" | "warning" | "error";
 
@@ -122,6 +122,40 @@ export function mergeRuntimeStatusResponse(
     modelUsageRefresh,
     ...(dcpStats ? { dcpStats } : {}),
     ...(modelUsage ? { modelUsage } : {}),
+  };
+}
+
+export function mergePushedContextUsage(
+  previous: RuntimeStatus | undefined,
+  sessionId: string,
+  context: ContextUsageStatus | undefined,
+): RuntimeStatus {
+  const base: RuntimeStatus = previous ?? {
+    sessionId,
+    modelUsageRefresh: "skipped",
+  };
+  const { context: _previousContext, ...withoutContext } = base;
+  return {
+    ...withoutContext,
+    sessionId,
+    ...(context ? { context } : {}),
+  };
+}
+
+export function mergePushedDcpTokensSaved(
+  previous: RuntimeStatus | undefined,
+  sessionId: string,
+  tokensSaved: number | undefined,
+): RuntimeStatus {
+  const base: RuntimeStatus = previous ?? {
+    sessionId,
+    modelUsageRefresh: "skipped",
+  };
+  const { dcpTokensSaved: _previousTokensSaved, ...withoutTokensSaved } = base;
+  return {
+    ...withoutTokensSaved,
+    sessionId,
+    ...(tokensSaved !== undefined ? { dcpTokensSaved: tokensSaved } : {}),
   };
 }
 

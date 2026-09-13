@@ -1,11 +1,13 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const RUNTIME_STATUS_REFRESH_MS = 5 * 60_000;
+const GIT_BRANCH_REFRESH_MS = 30_000;
 
 type DesktopLifecycleOptions = {
   activeSessionId: () => string | null;
   activeSessionRuntimeReady: () => boolean;
   refreshRuntimeStatus: (sessionId: string, force?: boolean) => void | Promise<void>;
+  refreshWorkspaceBranch: () => void | Promise<void>;
   restoreProjects: () => void;
   refreshProjectColors: () => void;
   restoreSessionInspector: () => void;
@@ -35,12 +37,18 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
         void options.refreshRuntimeStatus(sessionId, true);
       }
     }, RUNTIME_STATUS_REFRESH_MS);
+    const gitBranchTimer = window.setInterval(() => {
+      if (options.workspace()) void options.refreshWorkspaceBranch();
+    }, GIT_BRANCH_REFRESH_MS);
 
     options.restoreProjects();
     options.refreshProjectColors();
     options.restoreSessionInspector();
     const workspace = options.workspace();
-    if (workspace) options.loadWorkspaceData(workspace);
+    if (workspace) {
+      options.loadWorkspaceData(workspace);
+      void options.refreshWorkspaceBranch();
+    }
 
     void getCurrentWindow().onDragDropEvent(({ payload }) => {
       if (payload.type === "enter" || payload.type === "over") {
@@ -72,6 +80,7 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
     return () => {
       disposed = true;
       window.clearInterval(runtimeStatusTimer);
+      window.clearInterval(gitBranchTimer);
       unlistenDragDrop?.();
       options.disposeSessionUpdates();
       options.disposeTranscriptScroll();

@@ -8,6 +8,8 @@ import {
   formatCompactTokens,
   formatResetDuration,
   isLatestRuntimeStatusRefresh,
+  mergePushedContextUsage,
+  mergePushedDcpTokensSaved,
   mergeRuntimeStatusResponse,
   modelUsageTone,
   modelUsageWindowWillExhaustBeforeReset,
@@ -124,6 +126,102 @@ describe("desktop runtime status helpers", () => {
 
     expect(merged.dcpStats).toBe(previous.dcpStats);
     expect(merged.context?.percent).toBe(2);
+  });
+
+  it("merges pushed context without disturbing quota or DCP state", () => {
+    const previous: RuntimeStatus = {
+      ...snapshotOnlyStatus,
+      dcpTokensSaved: 12_345,
+      dcpStats: "DCP Session Statistics:\nTokens saved: 123",
+      modelUsageRefresh: "ready",
+      modelUsage: freshQuotaUsage,
+    };
+    const pushed = mergePushedContextUsage(previous, "session-1", {
+      tokens: 128_000,
+      contextWindow: 200_000,
+      percent: 64,
+    });
+
+    expect(pushed.context).toEqual({ tokens: 128_000, contextWindow: 200_000, percent: 64 });
+    expect(pushed.dcpTokensSaved).toBe(12_345);
+    expect(pushed.dcpStats).toBe(previous.dcpStats);
+    expect(pushed.modelUsageRefresh).toBe("ready");
+    expect(pushed.modelUsage).toEqual(freshQuotaUsage);
+
+    const cleared = mergePushedContextUsage(pushed, "session-1", undefined);
+    expect(cleared.context).toBeUndefined();
+    expect(cleared.dcpTokensSaved).toBe(12_345);
+    expect(cleared.dcpStats).toBe(previous.dcpStats);
+    expect(cleared.modelUsage).toEqual(freshQuotaUsage);
+  });
+
+  it("merges pushed DCP savings without disturbing context, quota, or DCP detail text", () => {
+    const previous: RuntimeStatus = {
+      ...snapshotOnlyStatus,
+      context: { tokens: 64_000, contextWindow: 200_000, percent: 32 },
+      dcpStats: "DCP Session Statistics:\nMeasured commit gain: 10,000 tokens",
+      modelUsageRefresh: "ready",
+      modelUsage: freshQuotaUsage,
+    };
+    const pushed = mergePushedDcpTokensSaved(previous, "session-1", 24_680);
+    expect(pushed.dcpTokensSaved).toBe(24_680);
+    expect(pushed.context?.percent).toBe(32);
+    expect(pushed.dcpStats).toBe(previous.dcpStats);
+    expect(pushed.modelUsage).toEqual(freshQuotaUsage);
+
+    const cleared = mergePushedDcpTokensSaved(pushed, "session-1", undefined);
+    expect(cleared.dcpTokensSaved).toBeUndefined();
+    expect(cleared.context?.percent).toBe(32);
+  });
+
+  it("keeps pushed context when an older quota request settles afterward", () => {
+    const quotaRequest = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, true);
+    const pushedGeneration = beginRuntimeStatusRefresh(quotaRequest.generations, false);
+    const pushed = mergePushedContextUsage(undefined, "session-1", {
+      tokens: 128_000,
+      contextWindow: 200_000,
+      percent: 64,
+    });
+
+    const merged = mergeRuntimeStatusResponse(
+      pushed,
+      {
+        ...quotaReadyStatus,
+        context: { tokens: 80_000, contextWindow: 200_000, percent: 40 },
+      },
+      isLatestRuntimeStatusRefresh(
+        pushedGeneration.generations,
+        quotaRequest.snapshotGeneration,
+        quotaRequest.quotaGeneration,
+      ),
+    );
+
+    expect(merged.context?.percent).toBe(64);
+    expect(merged.modelUsage).toEqual(freshQuotaUsage);
+    expect(merged.modelUsageRefresh).toBe("ready");
+  });
+
+  it("keeps pushed DCP savings when an older quota request settles afterward", () => {
+    const quotaRequest = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, true);
+    const pushedGeneration = beginRuntimeStatusRefresh(quotaRequest.generations, false);
+    const pushed = mergePushedDcpTokensSaved(undefined, "session-1", 24_680);
+
+    const merged = mergeRuntimeStatusResponse(
+      pushed,
+      {
+        ...quotaReadyStatus,
+        dcpTokensSaved: 10_000,
+      },
+      isLatestRuntimeStatusRefresh(
+        pushedGeneration.generations,
+        quotaRequest.snapshotGeneration,
+        quotaRequest.quotaGeneration,
+      ),
+    );
+
+    expect(merged.dcpTokensSaved).toBe(24_680);
+    expect(merged.modelUsage).toEqual(freshQuotaUsage);
+    expect(merged.modelUsageRefresh).toBe("ready");
   });
 
   it("still supersedes an older in-flight quota refresh once a newer quota refresh starts", () => {

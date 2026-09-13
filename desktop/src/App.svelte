@@ -535,6 +535,9 @@
     activeWorkbenchTabId: () => activeWorkbenchTabId,
     setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
     workbenchTabs: () => workbenchTabs,
+    activeTodoSnapshot: () => presentationState.activeTodoSnapshot,
+    activeSubagentSnapshot: () => presentationState.activeSubagentSnapshot,
+    setSessionInspectorOpen,
   });
   const viewModels = createDesktopViewModelServices({
     platform: desktopShortcutPlatform,

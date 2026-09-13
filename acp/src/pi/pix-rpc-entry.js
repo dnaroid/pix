@@ -10,6 +10,22 @@ const { AgentSession } = await import("@earendil-works/pi-coding-agent");
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
+const PIX_DCP_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.runtime-stats");
+
+const originalGetSessionStats = AgentSession.prototype.getSessionStats;
+AgentSession.prototype.getSessionStats = function pixGetSessionStats() {
+	const stats = originalGetSessionStats.call(this);
+	try {
+		const getter = globalThis[PIX_DCP_RUNTIME_STATS_SYMBOL];
+		if (typeof getter !== "function") return stats;
+		const runtimeStats = getter();
+		const tokensSaved = runtimeStats?.tokensSaved;
+		if (typeof tokensSaved !== "number" || !Number.isFinite(tokensSaved) || tokensSaved < 0) return stats;
+		return { ...stats, pixDcpTokensSaved: Math.round(tokensSaved) };
+	} catch {
+		return stats;
+	}
+};
 
 /** @type {WeakMap<AgentSession, {
  *   state: "idle" | "pause-requested" | "paused" | "resuming";
