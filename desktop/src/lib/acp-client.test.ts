@@ -309,6 +309,24 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("can page older lazy session history with the server cursor", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const history = client.sessionHistory("session-1", false, "4096");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/history",
+      params: { sessionId: "session-1", cursor: "4096" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { updates: [], deferredToolCallIds: [], cursor: "2048" },
+    });
+    await expect(history).resolves.toEqual({ updates: [], deferredToolCallIds: [], cursor: "2048" });
+    await client.dispose();
+  });
+
   it("handles streamed updates and form elicitation requests", async () => {
     const transport = new FakeTransport();
     const onSessionUpdate = vi.fn();

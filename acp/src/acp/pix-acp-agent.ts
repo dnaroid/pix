@@ -217,6 +217,7 @@ import {
 import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
 import {
 	readPersistedHistoryTail,
+	readPersistedHistoryBefore,
 	readPersistedImage,
 	readPersistedToolResult,
 	type PersistedImageRef,
@@ -228,6 +229,7 @@ import {
 	deferredToolResultUpdate,
 	replaySessionHistory,
 	type DeferredImageResult,
+	type DeferredSessionHistory,
 	type DeferredToolResult,
 } from "./session-replay.js";
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
@@ -1015,17 +1017,28 @@ export class PixAcpAgent {
 		if (!record?.piSessionPath && !session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		const cwd = session?.cwd ?? record!.cwd;
 		const context = { sessionId: params.sessionId, cwd };
-		const persisted = !params.full && record?.piSessionPath
-			? await readPersistedHistoryTail(record.piSessionPath)
-			: undefined;
-		const history = persisted
-			? deferredSessionHistoryFromMessages(persisted.messages, context)
-			: session
-				? await deferredSessionHistory(session.pi, context)
-				: undefined;
+		let persisted: Awaited<ReturnType<typeof readPersistedHistoryTail>>;
+		if (!params.full && record?.piSessionPath) {
+			persisted = params.cursor
+				? await readPersistedHistoryBefore(record.piSessionPath, params.cursor)
+				: await readPersistedHistoryTail(record.piSessionPath);
+		}
+
+		let history: DeferredSessionHistory | undefined;
+		if (persisted) {
+			history = deferredSessionHistoryFromMessages(
+				persisted.messages,
+				context,
+				params.cursor ? persisted.replayKeys : undefined,
+			);
+		} else if (!params.cursor && session) {
+			history = await deferredSessionHistory(session.pi, context);
+		}
 		if (!history) throw new RequestError(ERROR_SERVER, `session history ${params.sessionId} is unavailable`);
 
-		const deferred = new Map<string, DesktopDeferredToolResult>();
+		const deferred = params.cursor
+			? new Map(this.desktopDeferredToolResults.get(params.sessionId) ?? [])
+			: new Map<string, DesktopDeferredToolResult>();
 		for (const [toolCallId, result] of history.toolResults) {
 			const persistedRef = persisted?.toolResultRefs.get(toolCallId);
 			deferred.set(toolCallId, {
@@ -1034,7 +1047,9 @@ export class PixAcpAgent {
 			});
 		}
 		this.desktopDeferredToolResults.set(params.sessionId, deferred);
-		const deferredImages = new Map<string, DesktopDeferredImage>();
+		const deferredImages = params.cursor
+			? new Map(this.desktopDeferredImages.get(params.sessionId) ?? [])
+			: new Map<string, DesktopDeferredImage>();
 		for (const [imageId, result] of history.images) {
 			const persistedRef = result.persistedImageId
 				? persisted?.imageRefs.get(result.persistedImageId)
@@ -1045,6 +1060,7 @@ export class PixAcpAgent {
 		return {
 			updates: history.updates,
 			deferredToolCallIds: [...history.toolResults.keys()],
+			...(persisted?.cursor ? { cursor: persisted.cursor } : {}),
 		};
 	}
 

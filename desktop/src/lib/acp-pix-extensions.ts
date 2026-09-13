@@ -33,8 +33,15 @@ export class AcpPixExtensions {
     return this.request("pix/session/draft_config", { cwd });
   }
 
-  async sessionHistory(sessionId: string, full = false): Promise<LazySessionHistory> {
-    const response = await this.request<unknown>("pix/session/history", full ? { sessionId, full: true } : { sessionId }, null);
+  async sessionHistory(sessionId: string, full = false, cursor?: string): Promise<LazySessionHistory> {
+    let params: { sessionId: string; full?: true; cursor?: string } = { sessionId };
+    if (full) params = { sessionId, full: true };
+    else if (cursor) params = { sessionId, cursor };
+    const response = await this.request<unknown>(
+      "pix/session/history",
+      params,
+      null,
+    );
     if (!isRecord(response) || !Array.isArray(response.updates) || !Array.isArray(response.deferredToolCallIds)) {
       throw new Error("pix/session/history returned an invalid response");
     }
@@ -50,7 +57,14 @@ export class AcpPixExtensions {
       if (typeof toolCallId !== "string") throw new Error("pix/session/history returned an invalid deferred tool id");
       deferredToolCallIds.push(toolCallId);
     }
-    return { updates, deferredToolCallIds };
+    if (response.cursor !== undefined && typeof response.cursor !== "string") {
+      throw new Error("pix/session/history returned an invalid cursor");
+    }
+    return {
+      updates,
+      deferredToolCallIds,
+      ...(typeof response.cursor === "string" ? { cursor: response.cursor } : {}),
+    };
   }
 
   async toolResult(sessionId: string, toolCallId: string): Promise<SessionUpdate> {

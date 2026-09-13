@@ -18,6 +18,7 @@ type ConversationNavigationOptions = {
   workspace: () => string;
   transcript: () => TranscriptState;
   setTranscript: (sessionId: string, transcript: TranscriptState) => void;
+  markHistoryFullyLoaded: (sessionId: string) => void;
   setPicker: (picker: CommandPickerState | null) => void;
   scrollToEntry: (entryId: string) => void;
   appendSystemMessage: (text: string) => void;
@@ -91,6 +92,7 @@ export function createConversationNavigation(options: ConversationNavigationOpti
         ) return;
         let loaded = applySessionUpdates(emptyTranscript, history.updates);
         loaded = markDeferredToolResults(loaded, history.deferredToolCallIds);
+        options.markHistoryFullyLoaded(sessionId);
         const systemItems = state.items.filter((item) => item.type === "message" && item.role === "system");
         state = systemItems.length > 0 ? { items: [...loaded.items, ...systemItems] } : loaded;
         options.setTranscript(sessionId, state);

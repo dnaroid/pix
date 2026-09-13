@@ -114,6 +114,7 @@ export interface QueueState {
 export interface LazySessionHistory {
   readonly updates: readonly SessionUpdate[];
   readonly deferredToolCallIds: readonly string[];
+  readonly cursor?: string;
 }
 
 export interface AgentControlStatus {

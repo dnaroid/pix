@@ -8,7 +8,7 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import PanelTopOpen from "@lucide/svelte/icons/panel-top-open";
   import Undo2 from "@lucide/svelte/icons/undo-2";
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { isUserBashTool, toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
@@ -43,6 +43,7 @@
     showScrollToBottom,
     onScroll,
     onScrollToBottom,
+    onLoadOlderHistory,
     onChooseWorkspace,
     onOpenAttachment,
     onPrepareAttachment,
@@ -66,6 +67,7 @@
     showScrollToBottom: boolean;
     onScroll: () => void;
     onScrollToBottom: () => void;
+    onLoadOlderHistory: () => Promise<boolean>;
     onChooseWorkspace: () => void;
     onOpenAttachment: (attachment: Attachment) => void;
     onPrepareAttachment: (attachment: Attachment) => Promise<void>;
@@ -152,12 +154,78 @@
   const handleWindowResize = userMessageMenuController.handleWindowResize;
   const handlePaneScroll = userMessageMenuController.handlePaneScroll;
   const runUserMessageAction = userMessageMenuController.runAction;
+
+  const OLDER_HISTORY_THRESHOLD_PX = 96;
+  let olderHistoryLoadPending = false;
+
+  function viewportAnchor(): { id: string; top: number } | null {
+    if (!pane) return null;
+    const paneTop = pane.getBoundingClientRect().top;
+    for (const entry of pane.querySelectorAll<HTMLElement>("[data-transcript-entry-id]")) {
+      const rect = entry.getBoundingClientRect();
+      if (rect.bottom < paneTop) continue;
+      const id = entry.dataset.transcriptEntryId;
+      if (id) return { id, top: rect.top };
+    }
+    return null;
+  }
+
+  async function loadOlderHistoryAtTop(): Promise<void> {
+    if (!pane || olderHistoryLoadPending || pane.scrollTop > OLDER_HISTORY_THRESHOLD_PX) return;
+    const requestSessionId = activeSessionId;
+    if (!requestSessionId) return;
+
+    olderHistoryLoadPending = true;
+    const anchor = viewportAnchor();
+    const previousScrollHeight = pane.scrollHeight;
+    const previousScrollTop = pane.scrollTop;
+    let loadedOlderHistory = false;
+    try {
+      const loaded = await onLoadOlderHistory();
+      if (!loaded || requestSessionId !== activeSessionId) return;
+      loadedOlderHistory = true;
+      await tick();
+      if (!pane || requestSessionId !== activeSessionId) return;
+
+      const anchorTarget = anchor
+        ? pane.querySelector<HTMLElement>(`[data-transcript-entry-id="${CSS.escape(anchor.id)}"]`)
+        : null;
+      if (anchorTarget && anchor) {
+        pane.scrollTop += anchorTarget.getBoundingClientRect().top - anchor.top;
+      } else {
+        pane.scrollTop = previousScrollTop + Math.max(0, pane.scrollHeight - previousScrollHeight);
+      }
+    } finally {
+      olderHistoryLoadPending = false;
+      if (
+        loadedOlderHistory
+        && pane
+        && requestSessionId === activeSessionId
+        && pane.scrollTop <= OLDER_HISTORY_THRESHOLD_PX
+      ) {
+        void tick().then(() => loadOlderHistoryAtTop());
+      }
+    }
+  }
+
+  function handleTranscriptPaneScroll(): void {
+    handlePaneScroll();
+    void loadOlderHistoryAtTop();
+  }
+
+  $effect(() => {
+    const sessionId = activeSessionId;
+    const itemCount = transcript.items.length;
+    const loading = historyLoading;
+    if (!sessionId || loading || itemCount === 0) return;
+    void tick().then(() => loadOlderHistoryAtTop());
+  });
 </script>
 
 <svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} onresize={handleWindowResize} />
 
 <div class="relative row-start-2 min-h-0 min-w-0">
-  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={handlePaneScroll}>
+  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={handleTranscriptPaneScroll}>
   {#if !activeSessionId}
     <section class="grid h-full place-items-center content-center p-10 text-center">
       {#if workspace}

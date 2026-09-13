@@ -105,6 +105,7 @@ export function createUserMessageContextActions(
       ) return;
       let loaded = applySessionUpdates(emptyTranscript, history.updates);
       loaded = markDeferredToolResults(loaded, history.deferredToolCallIds);
+      options.markHistoryFullyLoaded(sessionId);
       const summary = result.status === "warning"
         ? `Session rewound, but workspace revert had conflicts.\n\n${result.warning ?? "Some recorded mutations could not be reverted safely."}`
         : `Undid changes from entry ${entryId}. Reverted ${result.revertedChanges ?? 0} recorded command${result.revertedChanges === 1 ? "" : "s"} across ${result.changedFiles ?? 0} file${result.changedFiles === 1 ? "" : "s"}.`;

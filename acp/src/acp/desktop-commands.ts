@@ -100,6 +100,7 @@ export interface DesktopDcpStatsResponse {
 
 export interface DesktopSessionHistoryRequest extends DesktopSessionRequest {
 	readonly full?: boolean;
+	readonly cursor?: string;
 }
 
 export interface DesktopResumePathRequest extends DesktopSessionRequest {
@@ -160,6 +161,7 @@ export interface DesktopUserMessageActionResponse {
 export interface DesktopSessionHistoryResponse {
 	readonly updates: readonly SessionUpdate[];
 	readonly deferredToolCallIds: readonly string[];
+	readonly cursor?: string;
 }
 
 export interface DesktopToolResultRequest extends DesktopSessionRequest {
@@ -301,10 +303,19 @@ export function parseDesktopRuntimeStatusRequest(value: unknown): DesktopRuntime
 
 export function parseDesktopSessionHistoryRequest(value: unknown): DesktopSessionHistoryRequest {
 	const session = parseDesktopSessionRequest(value);
-	if (!isRecord(value) || (value.full !== undefined && typeof value.full !== "boolean")) {
-		throw new RequestError(ERROR_INVALID_PARAMS, "pix/session/history full must be a boolean when provided");
+	if (
+		!isRecord(value)
+		|| (value.full !== undefined && typeof value.full !== "boolean")
+		|| (value.cursor !== undefined && (typeof value.cursor !== "string" || !/^\d+$/u.test(value.cursor)))
+		|| (value.full === true && value.cursor !== undefined)
+	) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/session/history accepts either full=true or a numeric history cursor");
 	}
-	return value.full === undefined ? session : { ...session, full: value.full };
+	return {
+		...session,
+		...(value.full === undefined ? {} : { full: value.full }),
+		...(value.cursor === undefined ? {} : { cursor: value.cursor }),
+	};
 }
 
 export function parseDesktopDraftConfigRequest(value: unknown): DesktopDraftConfigRequest {

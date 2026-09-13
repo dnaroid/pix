@@ -153,6 +153,7 @@ export function buildWorkbenchConversationProps(
       showScrollToBottom: !options.transcriptScroll.followsLatest,
       onScroll: options.transcriptScroll.handleScroll,
       onScrollToBottom: options.transcriptScroll.jumpToLatest,
+      onLoadOlderHistory: options.history.loadOlder,
       onChooseWorkspace: () => void options.workspaceController.choose(),
       onOpenAttachment: (attachment) => void options.preview.activateAttachment(attachment),
       onPrepareAttachment: options.transcriptAttachments.prepare,

@@ -72,7 +72,7 @@ export async function replaySessionHistory(
 		} else if (message.role === "assistant") {
 			for (const notification of assistantPartNotifications(
 				context,
-				index,
+				`replay-${index}`,
 				content as readonly PiMessagePart[] | undefined,
 				true,
 				assistantPersistedTiming(message),
@@ -105,6 +105,7 @@ export async function deferredSessionHistory(
 export function deferredSessionHistoryFromMessages(
 	messages: readonly PiAgentMessage[],
 	context: TranslateContext,
+	replayKeys?: readonly string[],
 ): DeferredSessionHistory {
 	const updates: SessionUpdate[] = [];
 	const toolInputs = new Map<string, unknown>();
@@ -112,7 +113,7 @@ export function deferredSessionHistoryFromMessages(
 	const images = new Map<string, DeferredImageResult>();
 
 	for (const [index, message] of messages.entries()) {
-		const messageId = `replay-${index}`;
+		const messageId = replayKeys?.[index] ? `replay-entry:${replayKeys[index]}` : `replay-${index}`;
 		const content = (message as { content?: unknown }).content;
 		if (message.role === "user") {
 			if (typeof content === "string") {
@@ -141,7 +142,7 @@ export function deferredSessionHistoryFromMessages(
 		} else if (message.role === "assistant") {
 			for (const notification of assistantPartNotifications(
 				context,
-				index,
+				messageId,
 				content as readonly PiMessagePart[] | undefined,
 				false,
 				assistantPersistedTiming(message),
@@ -172,7 +173,7 @@ export function deferredSessionHistoryFromMessages(
 				...(toolInputs.has(toolCallId) ? { rawInput: toolInputs.get(toolCallId) } : {}),
 			});
 		} else if (message.role === "bashExecution") {
-			updates.push(...(replayBashExecutionUpdates(message, index) ?? []));
+			updates.push(...(replayBashExecutionUpdates(message, messageId) ?? []));
 		}
 	}
 
@@ -204,7 +205,7 @@ export function deferredToolResultUpdate(
  */
 function assistantPartNotifications(
 	context: TranslateContext,
-	index: number,
+	messageId: string,
 	content: readonly PiMessagePart[] | undefined,
 	includeRawInput = true,
 	persistedTiming?: ActivityTimingMeta,
@@ -228,7 +229,7 @@ function assistantPartNotifications(
 		if (joined) {
 			notifications.push(chunk(
 				context.sessionId,
-				`replay-${index}:text:${textRun++}`,
+				`${messageId}:text:${textRun++}`,
 				"agent_message_chunk",
 				{ type: "text", text: joined },
 			));
@@ -245,7 +246,7 @@ function assistantPartNotifications(
 			// the collapsed "thinking" service row.
 			notifications.push(chunk(
 				context.sessionId,
-				`replay-${index}:thinking:${partIndex}`,
+				`${messageId}:thinking:${partIndex}`,
 				"agent_thought_chunk",
 				{ type: "text", text: thinking || "\u200B" },
 				thinkingTiming,

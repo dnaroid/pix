@@ -52,7 +52,7 @@ export function bashExecutionErrorUpdate(toolCallId: string, error: unknown, end
 }
 
 /** Translate pi's persisted `bashExecution` message into Desktop tool rows. */
-export function replayBashExecutionUpdates(message: PiAgentMessage, index: number): SessionUpdate[] | undefined {
+export function replayBashExecutionUpdates(message: PiAgentMessage, replayId: number | string): SessionUpdate[] | undefined {
 	if (message.role !== "bashExecution") return undefined;
 	const record = message as PiAgentMessage & {
 		readonly command?: unknown;
@@ -78,7 +78,7 @@ export function replayBashExecutionUpdates(message: PiAgentMessage, index: numbe
 		truncated: record.truncated,
 		...(typeof record.fullOutputPath === "string" ? { fullOutputPath: record.fullOutputPath } : {}),
 	};
-	const toolCallId = `replay-${index}:bash`;
+	const toolCallId = `${typeof replayId === "number" ? `replay-${replayId}` : replayId}:bash`;
 	const endedAtMs = finiteTimestamp(message.persistedAtMs) ?? finiteTimestamp(message.timestamp);
 	return [
 		bashExecutionStartUpdate(toolCallId, record.command, record.excludeFromContext === true),

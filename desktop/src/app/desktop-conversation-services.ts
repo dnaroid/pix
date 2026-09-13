@@ -87,6 +87,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
     beginHistoryLoad: options.sessions.history.begin,
     hydrateHistory: options.sessions.history.hydrate,
     cancelHistoryLoad: options.sessions.history.cancel,
+    markHistoryFullyLoaded: options.sessions.history.markFullyLoaded,
     markSourceClosed: options.sessions.tabs.markClosedUnique,
     ensureProvisionalSession: options.sessions.catalog.ensureProvisional,
     showSessionTab: options.sessions.tabs.show,
@@ -108,6 +109,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
     workspace: options.workspace,
     transcript: () => options.state.transcript,
     setTranscript: options.state.setActiveTranscriptForSession,
+    markHistoryFullyLoaded: options.sessions.history.markFullyLoaded,
     setPicker: options.setCommandPicker,
     scrollToEntry: options.scrollToEntry,
     appendSystemMessage: (text) => {

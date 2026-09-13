@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	DEFERRED_PERSISTED_IMAGE_PREFIX,
+	readPersistedHistoryBefore,
 	readPersistedHistoryTail,
 	readPersistedImage,
 	readPersistedToolResult,
@@ -101,4 +102,46 @@ test("persisted history tail defers user image bodies until requested", async ()
 	assert.ok(ref);
 	const hydrated = await readPersistedImage(ref);
 	assert.deepEqual(hydrated, { data: imageData, mimeType: "image/png" });
+});
+
+test("persisted history cursor pages older turns without splitting the first visible turn", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pix-history-cursor-"));
+	const sessionPath = join(dir, "session.jsonl");
+	const lines: unknown[] = [
+		{ type: "session", version: 3, id: "s1", timestamp: "2026-09-06T00:00:00.000Z", cwd: "/repo" },
+	];
+	for (let index = 0; index < 6; index += 1) {
+		lines.push(
+			{
+				type: "message",
+				id: `u${index}`,
+				parentId: index === 0 ? null : `a${index - 1}`,
+				timestamp: `2026-09-06T00:00:${String(index * 2 + 1).padStart(2, "0")}.000Z`,
+				message: { role: "user", content: `user ${index}` },
+			},
+			{
+				type: "message",
+				id: `a${index}`,
+				parentId: `u${index}`,
+				timestamp: `2026-09-06T00:00:${String(index * 2 + 2).padStart(2, "0")}.000Z`,
+				message: { role: "assistant", content: [{ type: "text", text: `assistant ${index}` }] },
+			},
+		);
+	}
+	await writeFile(sessionPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+
+	const tail = await readPersistedHistoryTail(sessionPath, 3);
+	assert.ok(tail?.cursor);
+	assert.deepEqual(tail.replayKeys, ["u4", "a4", "u5", "a5"]);
+	assert.equal(tail.messages[0]?.role, "user", "the visible page starts at a user-turn boundary");
+
+	const older = await readPersistedHistoryBefore(sessionPath, tail.cursor, 3);
+	assert.ok(older?.cursor);
+	assert.deepEqual(older.replayKeys, ["u2", "a2", "u3", "a3"]);
+	assert.equal(older.messages[0]?.role, "user");
+
+	const oldest = await readPersistedHistoryBefore(sessionPath, older.cursor, 3);
+	assert.ok(oldest);
+	assert.equal(oldest.cursor, undefined);
+	assert.deepEqual(oldest.replayKeys, ["u0", "a0", "u1", "a1"]);
 });

@@ -135,8 +135,8 @@ export class AcpClient {
     });
   }
 
-  sessionHistory(sessionId: string, full = false): Promise<LazySessionHistory> {
-    return this.pix.sessionHistory(sessionId, full);
+  sessionHistory(sessionId: string, full = false, cursor?: string): Promise<LazySessionHistory> {
+    return this.pix.sessionHistory(sessionId, full, cursor);
   }
 
   toolResult(sessionId: string, toolCallId: string): Promise<SessionUpdate> {

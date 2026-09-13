@@ -25,6 +25,7 @@ export type ConversationBranchActionsOptions = {
     generation: number,
   ) => Promise<void>;
   cancelHistoryLoad: () => void;
+  markHistoryFullyLoaded: (sessionId: string) => void;
   markSourceClosed: (sessionId: string) => void;
   ensureProvisionalSession: (sessionId: string, workspace: string) => void;
   showSessionTab: (sessionId: string) => void;

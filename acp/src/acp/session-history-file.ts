@@ -22,13 +22,16 @@ export const DEFERRED_PERSISTED_IMAGE_PREFIX = "pix-deferred-image:";
 
 export interface PersistedHistoryTail {
 	readonly messages: readonly PiAgentMessage[];
+	readonly replayKeys: readonly string[];
 	readonly toolResultRefs: ReadonlyMap<string, PersistedToolResultRef>;
 	readonly imageRefs: ReadonlyMap<string, PersistedImageRef>;
+	readonly cursor?: string;
 }
 
 interface ParsedTailEntry {
 	readonly offset: number;
 	readonly byteLength: number;
+	readonly entryId?: string;
 	readonly persistedAtMs?: number;
 	readonly message?: PiAgentMessage;
 	readonly imageRefs?: ReadonlyMap<string, PersistedImageRef>;
@@ -49,21 +52,102 @@ export async function readPersistedHistoryTail(
 ): Promise<PersistedHistoryTail | undefined> {
 	const size = await stat(sessionPath).then((result) => result.size).catch(() => undefined);
 	if (size === undefined) return undefined;
-	if (size <= 0) return { messages: [], toolResultRefs: new Map(), imageRefs: new Map() };
+	if (size <= 0) return emptyPersistedHistory();
+	return await readPersistedHistoryWindow(sessionPath, size, limit);
+}
+
+/** Read the history page immediately preceding an opaque cursor returned by a previous read. */
+export async function readPersistedHistoryBefore(
+	sessionPath: string,
+	cursor: string,
+	limit = DEFAULT_TAIL_ENTRY_COUNT,
+): Promise<PersistedHistoryTail | undefined> {
+	const size = await stat(sessionPath).then((result) => result.size).catch(() => undefined);
+	if (size === undefined) return undefined;
+	const endOffset = parseHistoryCursor(cursor, size);
+	if (endOffset === undefined) return undefined;
+	if (endOffset <= 0) return emptyPersistedHistory();
+	return await readPersistedHistoryWindow(sessionPath, endOffset, limit);
+}
+
+function parseHistoryCursor(cursor: string, size: number): number | undefined {
+	if (!/^\d+$/u.test(cursor)) return undefined;
+	const value = Number(cursor);
+	if (!Number.isSafeInteger(value) || value < 0 || value > size) return undefined;
+	return value;
+}
+
+async function readPersistedHistoryWindow(
+	sessionPath: string,
+	endOffset: number,
+	limit: number,
+): Promise<PersistedHistoryTail> {
+	if (endOffset <= 0) return emptyPersistedHistory();
 
 	const targetCount = Math.max(1, Math.floor(limit));
-	let byteCount = Math.min(size, INITIAL_TAIL_BYTES);
-	const maxBytes = Math.min(size, MAX_TAIL_BYTES);
+	let byteCount = Math.min(endOffset, INITIAL_TAIL_BYTES);
+	const maxBytes = Math.min(endOffset, MAX_TAIL_BYTES);
 	let parsed: ParsedTailEntry[] = [];
+	let windowStartOffset = endOffset;
 
 	while (byteCount <= maxBytes) {
-		parsed = await readTailEntries(sessionPath, size, byteCount);
-		if (parsed.length >= targetCount || byteCount >= maxBytes || byteCount >= size) break;
-		byteCount = Math.min(size, Math.max(byteCount + 1, byteCount * 2));
+		const result = await readTailEntries(sessionPath, endOffset, byteCount);
+		parsed = result.entries;
+		windowStartOffset = result.windowStartOffset;
+		const selection = selectHistoryPage(parsed, targetCount);
+		if (
+			(selection.selected.length >= targetCount && selection.turnBoundaryComplete)
+			|| byteCount >= maxBytes
+			|| byteCount >= endOffset
+		) {
+			return persistedHistoryFromEntries(
+				sessionPath,
+				selection.selected,
+				windowStartOffset > 0 || parsed.length > selection.selected.length,
+			);
+		}
+		byteCount = Math.min(endOffset, Math.max(byteCount + 1, byteCount * 2));
 	}
 
-	const selected = parsed.slice(-targetCount);
+	const selection = selectHistoryPage(parsed, targetCount);
+	return persistedHistoryFromEntries(
+		sessionPath,
+		selection.selected,
+		windowStartOffset > 0 || parsed.length > selection.selected.length,
+	);
+}
+
+function emptyPersistedHistory(): PersistedHistoryTail {
+	return { messages: [], replayKeys: [], toolResultRefs: new Map(), imageRefs: new Map() };
+}
+
+function selectHistoryPage(parsed: readonly ParsedTailEntry[], targetCount: number): {
+	selected: readonly ParsedTailEntry[];
+	turnBoundaryComplete: boolean;
+} {
+	let start = Math.max(0, parsed.length - targetCount);
+	const firstVisible = parsed.slice(start).find((entry) => entry.message || entry.toolResult);
+	const role = firstVisible?.toolResult ? "toolResult" : firstVisible?.message?.role;
+	if (role !== "assistant" && role !== "toolResult") {
+		return { selected: parsed.slice(start), turnBoundaryComplete: true };
+	}
+
+	for (let index = start - 1; index >= 0; index -= 1) {
+		const entry = parsed[index];
+		if (entry?.message?.role !== "user") continue;
+		start = index;
+		return { selected: parsed.slice(start), turnBoundaryComplete: true };
+	}
+	return { selected: parsed.slice(start), turnBoundaryComplete: false };
+}
+
+function persistedHistoryFromEntries(
+	sessionPath: string,
+	selected: readonly ParsedTailEntry[],
+	hasOlder: boolean,
+): PersistedHistoryTail {
 	const messages: PiAgentMessage[] = [];
+	const replayKeys: string[] = [];
 	const toolResultRefs = new Map<string, PersistedToolResultRef>();
 	const imageRefs = new Map<string, PersistedImageRef>();
 	for (const entry of selected) {
@@ -75,6 +159,7 @@ export async function readPersistedHistoryTail(
 				content: [],
 				...(entry.persistedAtMs !== undefined ? { persistedAtMs: entry.persistedAtMs } : {}),
 			} as unknown as PiAgentMessage);
+			replayKeys.push(entry.entryId ?? `offset-${entry.offset}`);
 			toolResultRefs.set(entry.toolResult.toolCallId, {
 				sessionPath,
 				offset: entry.offset,
@@ -84,12 +169,20 @@ export async function readPersistedHistoryTail(
 			messages.push(entry.persistedAtMs === undefined
 				? entry.message
 				: { ...entry.message, persistedAtMs: entry.persistedAtMs });
+			replayKeys.push(entry.entryId ?? `offset-${entry.offset}`);
 			for (const [imageId, imageRef] of entry.imageRefs ?? []) {
 				imageRefs.set(imageId, { ...imageRef, sessionPath });
 			}
 		}
 	}
-	return { messages, toolResultRefs, imageRefs };
+	const cursorOffset = selected[0]?.offset;
+	return {
+		messages,
+		replayKeys,
+		toolResultRefs,
+		imageRefs,
+		...(hasOlder && cursorOffset !== undefined && cursorOffset > 0 ? { cursor: String(cursorOffset) } : {}),
+	};
 }
 
 /** Materialize one previously deferred tool-result line only on expansion. */
@@ -130,11 +223,15 @@ export async function readPersistedImage(ref: PersistedImageRef): Promise<{ data
 	}
 }
 
-async function readTailEntries(sessionPath: string, size: number, byteCount: number): Promise<ParsedTailEntry[]> {
+async function readTailEntries(
+	sessionPath: string,
+	endOffset: number,
+	byteCount: number,
+): Promise<{ entries: ParsedTailEntry[]; windowStartOffset: number }> {
 	let file: Awaited<ReturnType<typeof open>> | undefined;
 	try {
-		const start = Math.max(0, size - byteCount);
-		const buffer = Buffer.alloc(size - start);
+		const start = Math.max(0, endOffset - byteCount);
+		const buffer = Buffer.alloc(endOffset - start);
 		file = await open(sessionPath, "r");
 		await file.read(buffer, 0, buffer.length, start);
 
@@ -143,9 +240,13 @@ async function readTailEntries(sessionPath: string, size: number, byteCount: num
 			const firstNewline = buffer.indexOf(10);
 			parseStart = firstNewline >= 0 ? firstNewline + 1 : buffer.length;
 		}
-		return parseEntryLines(buffer.subarray(parseStart), start + parseStart);
+		const windowStartOffset = start + parseStart;
+		return {
+			entries: parseEntryLines(buffer.subarray(parseStart), windowStartOffset),
+			windowStartOffset,
+		};
 	} catch {
-		return [];
+		return { entries: [], windowStartOffset: endOffset };
 	} finally {
 		await file?.close();
 	}
@@ -175,7 +276,7 @@ function parseEntryLine(lineBuffer: Buffer, offset: number, byteLength: number):
 		try {
 			const parsed = JSON.parse(line) as unknown;
 			if (!isRecord(parsed) || parsed.type === "session" || typeof parsed.id !== "string") return undefined;
-			return { offset, byteLength };
+			return { offset, byteLength, entryId: parsed.id };
 		} catch {
 			return undefined;
 		}
@@ -183,10 +284,12 @@ function parseEntryLine(lineBuffer: Buffer, offset: number, byteLength: number):
 
 	if (looksLikeToolResult(line)) {
 		const toolCallId = jsonStringField(line, "toolCallId");
+		const entryId = jsonStringField(line, "id");
 		if (!toolCallId) return undefined;
 		return {
 			offset,
 			byteLength,
+			...(entryId ? { entryId } : {}),
 			...persistedAtFromJsonLine(line),
 			toolResult: { toolCallId, isError: /"isError"\s*:\s*true/u.test(line) },
 		};
@@ -198,6 +301,7 @@ function parseEntryLine(lineBuffer: Buffer, offset: number, byteLength: number):
 		return {
 			offset,
 			byteLength,
+			...(typeof parsed.id === "string" ? { entryId: parsed.id } : {}),
 			...persistedAtFromValue(parsed.timestamp),
 			message: parsed.message as unknown as PiAgentMessage,
 		};
@@ -249,6 +353,7 @@ function compactUserMessageWithoutImageBodies(
 		return {
 			offset,
 			byteLength,
+			...(typeof parsed.id === "string" ? { entryId: parsed.id } : {}),
 			...persistedAtFromValue(parsed.timestamp),
 			message: parsed.message as unknown as PiAgentMessage,
 			imageRefs,

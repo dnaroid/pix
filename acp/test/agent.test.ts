@@ -2237,6 +2237,50 @@ test("desktop history is readable directly from JSONL while the pi runtime is cl
 	});
 });
 
+test("desktop history cursor reads older persisted pages without starting a pi runtime", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const store = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+		const record = await store.get(sessionId);
+		assert.ok(record);
+		const sessionPath = join(dirname(harness.sessionMapPath), "cursor-history.jsonl");
+		const lines = [
+			JSON.stringify({ type: "session", version: 3, id: "pi-cursor", timestamp: "2026-09-06T00:00:00.000Z", cwd: "/tmp/proj" }),
+			...Array.from({ length: 185 }, (_, index) => JSON.stringify({
+				type: "message",
+				id: `u${index}`,
+				parentId: index === 0 ? null : `u${index - 1}`,
+				timestamp: "2026-09-06T00:00:01.000Z",
+				message: { role: "user", content: `message ${index}` },
+			})),
+		];
+		await writeFile(sessionPath, `${lines.join("\n")}\n`, "utf8");
+		await store.put({ ...record, piSessionPath: sessionPath, piSessionId: "pi-cursor" });
+		await cx.request("session/close", { sessionId });
+		assert.equal(harness.adapter.getSession(sessionId), undefined);
+
+		const tail = await cx.request(PIX_SESSION_HISTORY_METHOD, { sessionId }) as {
+			updates: Array<Record<string, unknown>>;
+			cursor?: string;
+		};
+		assert.equal(tail.updates.length, 180);
+		assert.ok(tail.cursor);
+		assert.equal(tail.updates[0]?.messageId, "replay-0");
+
+		const older = await cx.request(PIX_SESSION_HISTORY_METHOD, { sessionId, cursor: tail.cursor }) as {
+			updates: Array<Record<string, unknown>>;
+			cursor?: string;
+		};
+		assert.equal(older.updates.length, 5);
+		assert.equal(older.cursor, undefined);
+		assert.equal(older.updates[0]?.messageId, "replay-entry:u0");
+		assert.equal((older.updates[0]?.content as { text?: string } | undefined)?.text, "message 0");
+		assert.equal(harness.clients.length, 1, "cursor history reads must stay on the persisted JSONL path");
+	});
+});
+
 test("concurrent loads for one session are serialized and stop the replaced process", async () => {
 	const { adapter, clients } = createTestAdapter();
 	await connect(adapter, async (cx) => {

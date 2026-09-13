@@ -1,4 +1,5 @@
 import type { AcpClient } from "../lib/acp-client";
+import type { LazySessionHistory } from "../lib/acp-client-types";
 import {
   applyDeferredToolResult,
   applySessionUpdates,
@@ -28,6 +29,8 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   let loading = $state(false);
   let generation = 0;
   const loadingToolResults = new Set<string>();
+  const olderCursorBySessionId = new Map<string, string>();
+  const loadingOlderSessionIds = new Set<string>();
 
   function begin(): number {
     loading = true;
@@ -38,6 +41,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     generation += 1;
     loading = false;
     loadingToolResults.clear();
+    loadingOlderSessionIds.clear();
   }
 
   function isCurrent(
@@ -58,11 +62,14 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     requestWorkspace: string,
     requestGeneration: number,
   ): Promise<void> {
+    olderCursorBySessionId.delete(sessionId);
     try {
       const history = await requestClient.sessionHistory(sessionId);
       if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
       let loadedTranscript = applySessionUpdates(emptyTranscript, history.updates);
       loadedTranscript = markDeferredToolResults(loadedTranscript, history.deferredToolCallIds);
+      if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
+      else olderCursorBySessionId.delete(sessionId);
 
       const currentItems = options.state.transcript.items;
       const nextTranscript = currentItems.length === 0
@@ -91,6 +98,48 @@ export function createSessionHistory(options: SessionHistoryOptions) {
       options.reportError(error);
     } finally {
       if (isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) loading = false;
+    }
+  }
+
+  async function loadOlder(): Promise<boolean> {
+    const requestClient = options.client();
+    const sessionId = options.state.sessionId;
+    const requestWorkspace = options.workspace();
+    const requestGeneration = generation;
+    if (!requestClient || !sessionId || loading || loadingOlderSessionIds.has(sessionId)) return false;
+
+    let cursor: string | undefined = olderCursorBySessionId.get(sessionId);
+    if (!cursor) return false;
+    loadingOlderSessionIds.add(sessionId);
+    try {
+      while (cursor) {
+        const history: LazySessionHistory = await requestClient.sessionHistory(sessionId, false, cursor);
+        if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return false;
+
+        const previousCursor: string = cursor;
+        cursor = history.cursor;
+        if (cursor) olderCursorBySessionId.set(sessionId, cursor);
+        else olderCursorBySessionId.delete(sessionId);
+
+        let olderTranscript = applySessionUpdates(emptyTranscript, history.updates);
+        olderTranscript = markDeferredToolResults(olderTranscript, history.deferredToolCallIds);
+        if (olderTranscript.items.length === 0) {
+          if (!cursor || cursor === previousCursor) return false;
+          continue;
+        }
+
+        const currentTranscript = options.state.transcript;
+        const nextTranscript = { items: [...olderTranscript.items, ...currentTranscript.items] };
+        options.state.setTranscript(nextTranscript);
+        options.state.setSessionTranscript(sessionId, nextTranscript);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      if (isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) options.reportError(error);
+      return false;
+    } finally {
+      loadingOlderSessionIds.delete(sessionId);
     }
   }
 
@@ -124,8 +173,13 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     }
   }
 
+  function markFullyLoaded(sessionId = options.state.sessionId): void {
+    if (sessionId) olderCursorBySessionId.delete(sessionId);
+  }
+
   function reset(): void {
     cancel();
+    olderCursorBySessionId.clear();
   }
 
   return {
@@ -135,7 +189,9 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     cancel,
     isCurrent,
     hydrate,
+    loadOlder,
     loadDeferredToolResult,
+    markFullyLoaded,
     reset,
   };
 }
