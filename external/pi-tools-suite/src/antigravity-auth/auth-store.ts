@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from "@cortexkit/antigravity-auth-core";
 import { DEFAULT_PROJECT_ID, PROVIDER_ID } from "./constants";
 import type { GoogleOAuthClientCredentials, OpencodeAntigravityAccount, OpencodeAntigravityImportResult, OpencodeAntigravityStorage, PiAuthCredential, PiAuthData } from "./types";
 
@@ -113,7 +114,7 @@ export function getGoogleOAuthClientCredentials(...sources: Array<unknown>): Goo
 	const clientId = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
 	const clientSecret = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
 	if (clientId) return { clientId, ...(clientSecret ? { clientSecret } : {}) };
-	return undefined;
+	return { clientId: ANTIGRAVITY_CLIENT_ID, clientSecret: ANTIGRAVITY_CLIENT_SECRET };
 }
 
 export function clampAccountIndex(index: unknown, accountCount: number): number {

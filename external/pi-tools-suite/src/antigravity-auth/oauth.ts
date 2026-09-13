@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { DEFAULT_PROJECT_ID, LOAD_ENDPOINTS, REDIRECT_URI, SCOPES, TOKEN_EXPIRY_SKEW_MS, PROVIDER_ID } from "./constants";
 import { accountFromCredential, clampAccountIndex, encodeApiKey, findMatchingAccountIndex, getAccountProjectId, getAccountRefreshToken, getGoogleOAuthClientCredentials, getPiAuthPath, getStoredAccounts, joinRefresh, readJsonFile, splitRefresh, writeJsonFileSecure } from "./auth-store";
-import { getAntigravityHeaders } from "./headers";
+import { getAntigravityBootstrapHeaders, getAntigravityHeaders, getAntigravityLoadCodeAssistMetadata } from "./headers";
 import { notifyAntigravityLoginFailure } from "./status";
 import type { AntigravityAddAccountResult, AntigravityFailoverCredential, AntigravityLoginCallbacks, GoogleOAuthClientCredentials, OpencodeAntigravityAccount, PiAuthCredential, PiAuthData, RefreshedAntigravityAccount } from "./types";
 
@@ -33,12 +33,7 @@ function assertGoogleOAuthCredentialsConfigured(credentials?: GoogleOAuthClientC
 }
 
 async function fetchProjectId(accessToken: string): Promise<string | undefined> {
-	const headers = {
-		Authorization: `Bearer ${accessToken}`,
-		"Content-Type": "application/json",
-		...getAntigravityHeaders("gemini-cli"),
-		"Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
-	};
+	const headers = getAntigravityBootstrapHeaders(accessToken);
 
 	for (const endpoint of LOAD_ENDPOINTS) {
 		try {
@@ -46,11 +41,7 @@ async function fetchProjectId(accessToken: string): Promise<string | undefined> 
 				method: "POST",
 				headers,
 				body: JSON.stringify({
-					metadata: {
-						ideType: "ANTIGRAVITY",
-						platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
-						pluginType: "GEMINI",
-					},
+					metadata: getAntigravityLoadCodeAssistMetadata(),
 				}),
 			});
 			if (!response.ok) continue;
@@ -130,6 +121,7 @@ export async function loginAntigravity(callbacks: AntigravityLoginCallbacks, opt
 			headers: {
 				"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
 				Accept: "*/*",
+				"Accept-Encoding": "gzip, deflate, br",
 				"User-Agent": getAntigravityHeaders("gemini-cli")["User-Agent"],
 			},
 			body: new URLSearchParams({
@@ -235,11 +227,7 @@ async function refreshAccountToken(
 	const response = await fetch("https://oauth2.googleapis.com/token", {
 		method: "POST",
 		signal,
-		headers: {
-			"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-			Accept: "*/*",
-			"User-Agent": getAntigravityHeaders("gemini-cli")["User-Agent"],
-		},
+		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
 			client_id: clientCredentials.clientId,
 			...(clientCredentials.clientSecret ? { client_secret: clientCredentials.clientSecret } : {}),

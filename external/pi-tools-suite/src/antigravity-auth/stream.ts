@@ -71,13 +71,25 @@ async function sendAntigravityRequest(
 		const headers = new Headers({
 			Authorization: `Bearer ${apiKey}`,
 			"Content-Type": "application/json",
-			Accept: "text/event-stream",
+			...(headerStyle === "antigravity" ? { "Accept-Encoding": "gzip" } : { Accept: "text/event-stream" }),
 			...getAntigravityHeaders(headerStyle),
 			...requestHeaders,
 		});
 		for (const [name, value] of Object.entries(options?.headers ?? {})) {
 			if (value === null) headers.delete(name);
 			else headers.set(name, value);
+		}
+		if (headerStyle === "antigravity") {
+			// Match native agy content traffic and prevent host/provider headers from
+			// leaking into the Cloud Code proxy. x-goog-user-project in particular is
+			// known to turn otherwise valid requests into 403 responses.
+			headers.set("User-Agent", getAntigravityHeaders("antigravity")["User-Agent"]);
+			headers.set("Accept-Encoding", "gzip");
+			headers.delete("X-Goog-Api-Client");
+			headers.delete("Client-Metadata");
+			headers.delete("X-Goog-User-Project");
+			headers.delete("anthropic-beta");
+			headers.delete("Accept");
 		}
 		response = await fetch(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
 			method: "POST",

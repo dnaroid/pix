@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from "@cortexkit/antigravity-auth-core";
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const originalNodeEnv = process.env.NODE_ENV;
@@ -203,9 +204,11 @@ describe.serial("Antigravity account rotation", () => {
 		const agentDir = tempDir();
 		writeJson(path.join(agentDir, "auth.json"), { antigravity: antigravityCredential() });
 		let requestHeaders: Headers | undefined;
+		let requestUrl = "";
 		(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
 			if (url.includes("/v1internal:streamGenerateContent")) {
+				requestUrl = url;
 				requestHeaders = new Headers(init?.headers);
 				return new Response('data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}\n\n', {
 					status: 200,
@@ -217,12 +220,60 @@ describe.serial("Antigravity account rotation", () => {
 
 		const { provider, model } = await loadProvider(agentDir);
 		const result = await runSimpleStream(provider, model, {
-			headers: { "Content-Type": null, "X-Test-Header": "present" },
+			headers: {
+				"Content-Type": null,
+				"X-Test-Header": "present",
+				"X-Goog-User-Project": "must-not-leak",
+				"X-Goog-Api-Client": "old-client",
+				"Client-Metadata": "old-metadata",
+				"anthropic-beta": "old-thinking-header",
+			},
 		});
 
 		expect(result.stopReason).toBe("stop");
+		expect(requestUrl).toStartWith("https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent");
 		expect(requestHeaders?.has("Content-Type")).toBeFalse();
 		expect(requestHeaders?.get("X-Test-Header")).toBe("present");
+		expect(requestHeaders?.get("User-Agent")).toBe(
+			`antigravity/cli/1.1.24 (aidev_client; os_type=${process.platform === "win32" ? "windows" : process.platform}; arch=${process.arch === "x64" ? "amd64" : process.arch === "ia32" ? "386" : process.arch}; cl=974782877; auth_method=consumer)`,
+		);
+		expect(requestHeaders?.get("Accept-Encoding")).toBe("gzip");
+		expect(requestHeaders?.has("Accept")).toBeFalse();
+		expect(requestHeaders?.has("X-Goog-User-Project")).toBeFalse();
+		expect(requestHeaders?.has("X-Goog-Api-Client")).toBeFalse();
+		expect(requestHeaders?.has("Client-Metadata")).toBeFalse();
+		expect(requestHeaders?.has("anthropic-beta")).toBeFalse();
+	});
+
+	test.serial("falls back to the native Antigravity OAuth client when auth.json has no client metadata", async () => {
+		const { getGoogleOAuthClientCredentials } = await import("../src/antigravity-auth/auth-store.js");
+		delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+		delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+
+		expect(getGoogleOAuthClientCredentials()).toEqual({
+			clientId: ANTIGRAVITY_CLIENT_ID,
+			clientSecret: ANTIGRAVITY_CLIENT_SECRET,
+		});
+	});
+
+	test.serial("uses the native agy bootstrap shape for project discovery", async () => {
+		const { LOAD_ENDPOINTS, STREAM_ENDPOINTS } = await import("../src/antigravity-auth/constants.js");
+		const { getAntigravityBootstrapHeaders, getAntigravityLoadCodeAssistMetadata } = await import("../src/antigravity-auth/headers.js");
+		const headers = new Headers(getAntigravityBootstrapHeaders("access-token"));
+
+		expect(LOAD_ENDPOINTS).toEqual([
+			"https://daily-cloudcode-pa.googleapis.com",
+			"https://cloudcode-pa.googleapis.com",
+		]);
+		expect(STREAM_ENDPOINTS).toEqual(LOAD_ENDPOINTS);
+		expect(headers.get("Authorization")).toBe("Bearer access-token");
+		expect(headers.get("Content-Type")).toBe("application/json");
+		expect(headers.get("Accept-Encoding")).toBe("gzip");
+		expect(headers.get("User-Agent")).toContain("antigravity/cli/1.1.24");
+		expect(headers.has("X-Goog-Api-Client")).toBeFalse();
+		expect(headers.has("Client-Metadata")).toBeFalse();
+		expect(headers.has("X-Goog-User-Project")).toBeFalse();
+		expect(getAntigravityLoadCodeAssistMetadata()).toEqual({ ideType: "ANTIGRAVITY" });
 	});
 
 	test.serial("uses Antigravity OAuth client credentials from the environment when auth.json has only accounts", async () => {
@@ -482,7 +533,7 @@ describe("Antigravity model catalog and live route mapping", () => {
 		const payload = await buildAntigravityPayload("antigravity-claude-sonnet-4-6-thinking", { reasoning: "medium" });
 		expect(payloadModel(payload)).toBe("claude-sonnet-4-6");
 		expect(payloadThinkingConfig(payload)).toEqual({ thinking_budget: 16384, include_thoughts: true });
-		expect(extraHeadersForPayload(payload)).toEqual({ "anthropic-beta": "interleaved-thinking-2025-05-14" });
+		expect(extraHeadersForPayload(payload)).toEqual({});
 	});
 
 	test.serial("keeps the dedicated Opus thinking route and legacy Antigravity routes", async () => {
@@ -491,7 +542,7 @@ describe("Antigravity model catalog and live route mapping", () => {
 		const opus = await buildAntigravityPayload("antigravity-claude-opus-4-6-thinking", { reasoning: "low" });
 		expect(payloadModel(opus)).toBe("claude-opus-4-6-thinking");
 		expect(payloadThinkingConfig(opus)).toEqual({ thinking_budget: 8192, include_thoughts: true });
-		expect(extraHeadersForPayload(opus)).toEqual({ "anthropic-beta": "interleaved-thinking-2025-05-14" });
+		expect(extraHeadersForPayload(opus)).toEqual({});
 
 		const legacyFlash = await buildAntigravityPayload("antigravity-gemini-3-flash", { reasoning: "medium" });
 		expect(payloadModel(legacyFlash)).toBe("gemini-3-flash");

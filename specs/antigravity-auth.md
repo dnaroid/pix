@@ -24,7 +24,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 ## Current behavior
 
 ### Provider registration & lifecycle
-- Registers provider id `antigravity`, API id `antigravity-unified-gateway`, base URL `ENDPOINT_DAILY` (`https://daily-cloudcode-pa.sandbox.googleapis.com`). `[confirmed by code: index.ts, constants.ts]`
+- Registers provider id `antigravity`, API id `antigravity-unified-gateway`, base URL `ENDPOINT_DAILY` (`https://daily-cloudcode-pa.googleapis.com`), matching the native agy CLI 1.1.24 daily endpoint used by cortexkit 2.2.1. `[confirmed by code: index.ts, constants.ts]`
 - Registers an `oauth` adapter: `login = loginAntigravity`, `refreshToken = refreshAntigravityToken`, `getApiKey = (c) => c.access`, `modifyModels` attaches `antigravityProjectId` from the access token (or effective project id). `[confirmed by code: index.ts]`
 - Registers commands: `/antigravity-add-account`, `/antigravity-account`, `/antigravity-status` (alias). `[confirmed by code: index.ts]`
 - Listens to `message_end`; when an assistant message has `provider === "antigravity"`, `stopReason === "error"`, and an error message, it surfaces a provider-failure notification (deduped per model+message within 60s). `[confirmed by code: index.ts, status.ts]`
@@ -36,12 +36,12 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 - Default project id is a hardcoded constant `DEFAULT_PROJECT_ID = "rising-fact-p41fc"`. `[confirmed by code: constants.ts]`
 
 ### Login (OAuth Authorization Code + PKCE) — `loginAntigravity`
-1. Reads Google OAuth client credentials (clientId, optional clientSecret) from stored auth, multiple key aliases, or env `PI_ANTIGRAVITY_GOOGLE_CLIENT_ID` / `PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET`. Throws if no clientId. `[confirmed by code: auth-store.ts getGoogleOAuthClientCredentials, oauth.ts assertGoogleOAuthCredentialsConfigured]`
+1. Reads Google OAuth client credentials (clientId, optional clientSecret) from stored auth, multiple key aliases, or env `PI_ANTIGRAVITY_GOOGLE_CLIENT_ID` / `PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET`; when none are configured it falls back to the public OAuth client id/secret shipped by the native Antigravity-compatible cortexkit core. `[confirmed by code: auth-store.ts getGoogleOAuthClientCredentials, constants.ts]`
 2. Generates PKCE verifier/challenge (`randomBytes(32)` → base64url; challenge = sha256). `[confirmed by code: oauth.ts]`
 3. Builds Google auth URL (`accounts.google.com/o/oauth2/v2/auth`, redirect `http://localhost:51121/oauth-callback`, scopes incl. `cloud-platform`, `userinfo.email/profile`, `cclog`, `experimentsandconfigs`, `access_type=offline`, `prompt=consent`). State = base64url JSON `{verifier}`. `[confirmed by code: oauth.ts, constants.ts]`
 4. Asks the user to paste the full `localhost:51121/oauth-callback` URL (or `code#state`). Parses code+state, **verifies state verifier matches** (CSRF guard). `[confirmed by code: oauth.ts]`
 5. Token exchange at `oauth2.googleapis.com/token`; requires a `refresh_token` in the response or throws. `[confirmed by code: oauth.ts]`
-6. Fetches `projectId` (POST to each `LOAD_ENDPOINTS` `/v1internal:loadCodeAssist`) and user email (`googleapis.com/oauth2/v1/userinfo`) in parallel. Falls back to `DEFAULT_PROJECT_ID`. `[confirmed by code: oauth.ts, constants.ts]`
+6. Fetches `projectId` (POST to each `LOAD_ENDPOINTS` `/v1internal:loadCodeAssist`) and user email (`googleapis.com/oauth2/v1/userinfo`) in parallel. The project probe uses the native agy bootstrap shape: agy CLI User-Agent, bearer auth, JSON content type, `Accept-Encoding: gzip`, and body metadata `{ideType:"ANTIGRAVITY"}`. Falls back to `DEFAULT_PROJECT_ID`. `[confirmed by code: oauth.ts, headers.ts, constants.ts]`
 
 ### Add account — `addAntigravityAccount`
 - Logs in, builds an account object, dedupes against stored accounts by **email (case-insensitive) then refreshToken** (`findMatchingAccountIndex`), updates-in-place or pushes new. `[confirmed by code: auth-store.ts, oauth.ts]`
@@ -55,7 +55,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 
 ### Streaming + failover — `streamAntigravity`
 - Resolves an API key: uses stored `access` if not expired, else calls `refreshStoredAntigravityCredential`; throws `No Antigravity OAuth account found in Pi auth: <path>` otherwise. `[confirmed by code: stream.ts resolveAntigravityApiKey]`
-- Sends `POST {endpoint}/v1internal:streamGenerateContent?alt=sse` with `Authorization: Bearer <access>` and Antigravity headers. Endpoint list: `gemini-cli` models use `[ENDPOINT_PROD]`; others use `STREAM_ENDPOINTS` (daily, autopush, prod), trying next endpoint only on non-failover 404/5xx. `[confirmed by code: stream.ts, constants.ts]`
+- Sends `POST {endpoint}/v1internal:streamGenerateContent?alt=sse`. Antigravity-style content requests are normalized to the captured agy CLI 1.1.24 identity: bearer auth, JSON content type, `Accept-Encoding: gzip`, and `User-Agent: antigravity/cli/1.1.24 (...)`; legacy `X-Goog-Api-Client`, `Client-Metadata`, `X-Goog-User-Project`, `anthropic-beta`, and `Accept` are stripped even when injected through host options. Endpoint list: `gemini-cli` models use `[ENDPOINT_PROD]`; others use `STREAM_ENDPOINTS` (daily, prod), trying next endpoint only on non-failover 404/5xx. `[confirmed by code: stream.ts, headers.ts, constants.ts; confirmed by tests]`
 - On a **failover-candidate** response (HTTP 429; body containing `quota_exhausted`/`resource_exhausted`/`rate limit`/etc.; or `model_capacity_exhausted`/`overloaded`/`busy`; or 5xx with `unavailable`/`try again`/`busy`): calls `refreshNextFailoverCredential`, switches `access` + `project`, emits a `switch` status, and retries. `[confirmed by code: stream.ts isFailoverCandidate/isLimitFailoverCandidate]`
 - When all accounts are tried **and** the failure was a *limit* (quota/rate) failure, the error includes marker `ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED model=<id> status=<n>`. Non-limit capacity failures (e.g. plain 503) report `Antigravity request failed (<status>)` without the all-exhausted marker. `[confirmed by code: stream.ts; confirmed by tests]`
 - Parses SSE (`data:` frames), maps text/thinking/functionCall parts, computes usage/cost, maps stop reasons (`STOP`→stop, `MAX_TOKENS`→length). `[confirmed by code: stream.ts]`
@@ -72,12 +72,11 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
   - GPT-OSS: `gpt-oss-120b-medium` with **no** thinkingConfig (effort "medium" is baked into the route).
   - Sonnet 4.6 Thinking: base route `claude-sonnet-4-6` (the `-thinking` suffix is stripped) with Claude-style `thinking_budget`/`include_thoughts`; Opus keeps the dedicated `claude-opus-4-6-thinking` route.
   - All new flash/pro routes send numeric `thinkingBudget` + `includeThoughts: true`; no thinking config is attached to any image route. `[confirmed by code: payload.ts; confirmed by tests]`
-- `extraHeadersForPayload` adds `anthropic-beta: interleaved-thinking-2025-05-14` for Claude payloads whose model name contains `thinking` **or** whose `generationConfig.thinkingConfig` carries a `thinking_budget` (needed since the Sonnet route name no longer contains "thinking"). `[confirmed by code: payload.ts]`
+- `extraHeadersForPayload` intentionally returns no extra content headers. Claude thinking remains encoded in `generationConfig`; the old `anthropic-beta` header is not emitted because native agy content traffic does not send it. `[confirmed by code: payload.ts, stream.ts; confirmed by tests]`
 - `isGemini3Model` treats `gemini-pro-agent` as a Gemini-3 route so functionCall history gets the `skip_thought_signature_validator` sentinel. `[confirmed by code: payload.ts]`
 
 ### Quota keys (host `src/app/model/model-usage-status.ts`)
 - `resolveAntigravityQuotaModelKey` maps catalog models to Google quota buckets: `antigravity-gemini-3.{5..8}-flash` → `gemini-3.{5..8}-flash`; Sonnet (incl. thinking) → `claude-sonnet-4-6`; Opus thinking → `claude-opus-4-6-thinking`; 3.1 Pro → `gemini-3.1-pro-low`; legacy aliases (`gemini-3-flash`, `gemini-2.5-flash`, `G3`/`G3 Flash`/`G3-pro` shorthands) unchanged. GPT-OSS has no Google-side bucket (descriptor → undefined → no quota widget). The account report additionally lists `G3.5`–`G3.8 Flash` windows, rendered only when the quota API returns those buckets. `[confirmed by code: model-usage-status.ts; confirmed by tests]`
-
 
 ### Import from opencode — `importOpencodeAntigravityAccount`
 - Reads opencode `antigravity-accounts.json` (path from `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` / `~/.config/opencode`), selects by index/email or active index, and writes into pi auth. `[confirmed by code: auth-store.ts]`
@@ -109,7 +108,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 ## Side effects
 
 - Writes `~/.pi/agent/auth.json` (0o600) on login, add-account, every refresh (rotation + stored refresh + failover), and opencode import. `[confirmed by code]`
-- Outbound network to: `accounts.google.com`, `oauth2.googleapis.com`, `googleapis.com/oauth2/v1/userinfo`, and the Antigravity `cloudcode-pa` endpoints (prod/daily/autopush). `[confirmed by code: oauth.ts, stream.ts, constants.ts]`
+- Outbound network to: `accounts.google.com`, `oauth2.googleapis.com`, `googleapis.com/oauth2/v1/userinfo`, and the Antigravity `cloudcode-pa` endpoints (daily/prod). The autopush constant remains only as a legacy/debugging value and is not in request fallback lists. `[confirmed by code: oauth.ts, stream.ts, constants.ts]`
 - Emits UI/session status messages and provider-failure notifications. `[confirmed by code: status.ts]`
 
 ## Related files
@@ -131,7 +130,8 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
   - OAuth client credentials preserved across refresh.
   - SDK cancellation propagates into OAuth refresh.
   - Nullable header deletion markers are removed before raw fetch.
-  - Client credentials resolved from env when `auth.json` has only accounts.
+  - Content requests use the native agy CLI 1.1.24 User-Agent + current daily endpoint and strip stale/problematic proxy headers including `x-goog-user-project`.
+  - Client credentials resolve from env when `auth.json` has only accounts, and otherwise fall back to the native/public Antigravity OAuth client.
   - A stream that ends without a finish reason fails instead of returning a partial success.
   - No-account turn surfaces an error notification (deduped to one).
   - Opencode accounts are **not** auto-imported at request time (no fetch).
@@ -148,9 +148,10 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 - **Token contents in plaintext JSON**; if a refresh token rotates (Google sometimes returns a new one), the old one is overwritten — there is no backup/rotation audit. `[inferred]`
 - **Coverage remains incomplete** for multi-endpoint fallback ordering and the
   `importOpencodeAntigravityAccount` overwrite/already-imported branches.
-  Streaming now has focused successful/error-path coverage, including header
-  normalization and missing-finish-reason failure, but not every SSE frame
-  combination. `[confirmed by tests; inferred re: remaining combinations]`
+  Streaming now has focused successful/error-path coverage, including current
+  agy wire-header normalization and missing-finish-reason failure, but not every
+  SSE frame combination. `[confirmed by tests; inferred re: remaining combinations]`
+- **A Google `403 SUBSCRIPTION_REQUIRED` is not a quota/capacity failure** and therefore does not rotate accounts or endpoints. Updated wire compatibility can remove false 403s caused by stale request identity/headers, but a genuine license failure still requires a licensed account or re-authentication. `[confirmed by code: stream.ts; inferred from provider error semantics]`
 - **What happens when Google revokes a refresh token** (returns an error on refresh) is not specially handled beyond throwing; it will keep failing every turn until the user re-adds. `[inferred]`
 
 ## Suggested verification

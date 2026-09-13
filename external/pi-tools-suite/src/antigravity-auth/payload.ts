@@ -481,15 +481,8 @@ export function buildPayload(model: AntigravityModel, context: Context, options?
 }
 
 export function extraHeadersForPayload(payload: Record<string, unknown>): Record<string, string> {
-	const model = typeof payload.model === "string" ? payload.model.toLowerCase() : "";
-	// Sonnet thinking routes to the base claude-sonnet-4-6 model name, so also
-	// detect thinking via the Claude-style thinking_budget in the payload.
-	const generationConfig = (payload.request as { generationConfig?: { thinkingConfig?: Record<string, unknown> } } | undefined)?.generationConfig;
-	const thinkingConfig = generationConfig?.thinkingConfig;
-	const claudeThinking = model.includes("claude")
-		&& (model.includes("thinking") || (thinkingConfig !== undefined && "thinking_budget" in thinkingConfig));
-	if (claudeThinking) {
-		return { "anthropic-beta": "interleaved-thinking-2025-05-14" };
-	}
+	void payload;
+	// Native agy CLI content requests do not send anthropic-beta or the old
+	// Cloud SDK metadata headers. Thinking is encoded in generationConfig only.
 	return {};
 }
