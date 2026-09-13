@@ -80,6 +80,13 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 ## Related files
 
 - `desktop/src/lib/markdown.ts`
+- `desktop/src/lib/markdown-blocks.ts`
+- `desktop/src/lib/markdown-context.ts`
+- `desktop/src/lib/markdown-dcp.ts`
+- `desktop/src/lib/markdown-escape.ts`
+- `desktop/src/lib/markdown-fences.ts`
+- `desktop/src/lib/markdown-inline.ts`
+- `desktop/src/lib/markdown-links.ts`
 - `desktop/src/lib/markdown.test.ts`
 - `desktop/src/lib/preview-history.ts`
 - `desktop/src/lib/preview-history.test.ts`
@@ -118,9 +125,10 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 
 ## Evidence
 
-- Confirmed by code: `MarkdownText.svelte` and `desktop/src/lib/markdown.ts`
-  render transcript and preview Markdown; `ToolResult.svelte` opts Markdown read
-  results into the same renderer.
+- Confirmed by code: `MarkdownText.svelte`, the `desktop/src/lib/markdown.ts`
+  facade, and its block/inline/link/DCP helper modules render transcript and
+  preview Markdown; `ToolResult.svelte` opts Markdown read results into the same
+  renderer.
 - Confirmed by code: `desktop/src/lib/mermaid.ts` uses strict Mermaid security,
   disables HTML labels, and preserves a readable source fallback on failure.
 - Confirmed by tests: `desktop/src/lib/markdown.test.ts` exercises the supported

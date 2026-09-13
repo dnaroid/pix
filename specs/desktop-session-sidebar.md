@@ -72,6 +72,7 @@ Add read-only, live views of the active session's execution Plan and Subagents t
 - `acp/src/acp/session-state-bridge.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 - `desktop/src/lib/acp-client.ts`
+- `desktop/src/lib/acp-client-types.ts`
 - `desktop/src/lib/session-todos.ts`
 - `desktop/src/lib/session-subagents.ts`
 - `desktop/src/lib/session-activity.ts`

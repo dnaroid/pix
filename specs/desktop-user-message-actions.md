@@ -67,7 +67,12 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 - `desktop/src/app/user-message-context-actions.ts`
 - `desktop/src/app/prompt-run-lifecycle.svelte.ts`
 - `desktop/src/lib/acp-client.ts`
+- `desktop/src/lib/acp-client-types.ts`
+- `desktop/src/lib/acp-pix-extensions.ts`
 - `desktop/src/lib/transcript.ts`
+- `desktop/src/lib/transcript-local.ts`
+- `desktop/src/lib/transcript-reducer.ts`
+- `desktop/src/lib/transcript-types.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/src/acp/pix-acp-agent.ts`

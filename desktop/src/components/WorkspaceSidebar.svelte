@@ -9,16 +9,14 @@
   import Settings from "@lucide/svelte/icons/settings";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { onDestroy, onMount, tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import {
     extractAttachmentMarkers,
     textWithAttachmentMarkers,
     type Attachment,
   } from "../lib/attachments";
   import {
-    TASK_STATUSES,
     projectTaskDisplayLabel,
-    taskStatusLabel,
     type ProjectTask,
     type ProjectTaskStatus,
     type ProjectTaskType,
@@ -27,12 +25,6 @@
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
-  import {
-    isTypeaheadKey,
-    menuFocusIndex,
-    menuTypeaheadFocusIndex,
-    type MenuNavigationItem,
-  } from "../lib/keyboard-navigation";
   import {
     PROJECT_TODO_PATH,
     projectDocumentLabel,
@@ -60,6 +52,13 @@
   import SettingsPanel from "./SettingsPanel.svelte";
   import WorkspaceSidebarActivityBar from "./WorkspaceSidebarActivityBar.svelte";
   import WorkspaceSidebarPlanSelector from "./WorkspaceSidebarPlanSelector.svelte";
+  import { createWorkspaceSidebarLayoutController } from "./workspace-sidebar-layout-controller.svelte";
+  import { createWorkspaceSidebarProjectSettingsController } from "./workspace-sidebar-project-settings-controller.svelte";
+  import { createWorkspaceSidebarStatusMenuController } from "./workspace-sidebar-status-menu-controller.svelte";
+  import {
+    createWorkspaceSidebarTaskDragController,
+    type WorkspaceSidebarTaskDropPosition,
+  } from "./workspace-sidebar-task-drag-controller.svelte";
   import WorkspaceSidebarTaskEditor from "./WorkspaceSidebarTaskEditor.svelte";
   import WorkspaceSidebarTasksPanel from "./WorkspaceSidebarTasksPanel.svelte";
 
@@ -70,19 +69,6 @@
   };
 
   type SidebarTab = SidebarIndicatorTab;
-  type TaskDropPosition = "before" | "after";
-  type TaskDropTarget = {
-    type: ProjectTaskType;
-    targetTaskId: string | null;
-    position: TaskDropPosition;
-  };
-
-  const TASK_GROUPS: readonly { type: ProjectTaskType; label: string }[] = [
-    { type: "bug", label: "Bug" },
-    { type: "feature", label: "Feature" },
-    { type: "improvement", label: "Improve" },
-  ];
-
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
     tasks: "Tasks",
     project: "Project",
@@ -182,7 +168,7 @@
       taskId: string,
       targetType: ProjectTaskType,
       targetTaskId: string | null,
-      position: TaskDropPosition,
+      position: WorkspaceSidebarTaskDropPosition,
     ) => void;
     onRun: (task: ProjectTask) => void;
     onOpenSession: (task: ProjectTask) => void;
@@ -213,31 +199,17 @@
     onRefreshKnowledge: () => void;
   } = $props();
 
-  const ACTIVITY_BAR_WIDTH = 40;
-  const DEFAULT_WIDTH = 296;
-  const MIN_WIDTH = 236;
-  const REGISTRY_MIN_WIDTH = 344;
-  const SETTINGS_MIN_WIDTH = 360;
-  const SCRIPTS_MIN_WIDTH = 400;
-  const IDX_MIN_WIDTH = 420;
-  const DEFAULT_MAX_WIDTH = 420;
-  const SCRIPTS_MAX_WIDTH = 720;
-  const IDX_MAX_WIDTH = 760;
-  const MIN_MAIN_WORKSPACE_WIDTH = 280;
-  const WIDTH_KEY = "pix.desktop.taskSidebarWidth";
-  const COLLAPSED_KEY = "pix.desktop.taskSidebarCollapsed";
   const ACTIVE_TAB_KEY = "pix.desktop.workspaceSidebarTab";
 
-  let collapsed = $state(false);
   let sidebarElement = $state<HTMLElement | null>(null);
   let projectSwitcher = $state<{ close: () => void } | null>(null);
-  let projectSwitcherMinimumWidth = $state(MIN_WIDTH);
-  let projectSettingsOpen = $state(false);
-  let projectSettingsSaving = $state(false);
-  let projectSettingsError = $state<string | null>(null);
-  let sidebarWidth = $state(DEFAULT_WIDTH);
   let activeTab = $state<SidebarTab>("tasks");
-  let viewportWidth = $state(1240);
+  const layoutController = createWorkspaceSidebarLayoutController({ activeTab: () => activeTab });
+  const projectSettingsController = createWorkspaceSidebarProjectSettingsController({
+    workspace: () => workspace,
+    closeProjectSwitcher: () => projectSwitcher?.close(),
+    saveProjectColor: (color) => onSaveProjectColor(color),
+  });
   let editorOpen = $state(false);
   let editingTaskId = $state<string | null>(null);
   let deleteTaskId = $state<string | null>(null);
@@ -245,32 +217,21 @@
   let description = $state("");
   let editorAttachments = $state<Attachment[]>([]);
   let taskType = $state<ProjectTaskType>("feature");
-  let statusMenuTaskId = $state<string | null>(null);
   let statusMenu = $state<HTMLDivElement | null>(null);
-  let statusMenuTrigger: HTMLButtonElement | null = null;
-  let statusMenuTypeaheadQuery = "";
-  let statusMenuTypeaheadTimer: number | null = null;
+  const statusMenuController = createWorkspaceSidebarStatusMenuController({
+    menu: () => statusMenu,
+    onStatusChange: (taskId, status) => onStatusChange(taskId, status),
+  });
   let revealedTaskId = $state<string | null>(null);
   let planSelectorOpen = $state(false);
   let planSelectorQuery = $state("");
   let planSearchInput = $state<HTMLInputElement | null>(null);
   let projectTreeRefreshKey = $state(0);
-  let draggedTaskId = $state<string | null>(null);
-  let taskDropTarget = $state<TaskDropTarget | null>(null);
-  let draggedTaskHeight = $state(44);
-  let draggedTaskWidth = $state(0);
-  let dragPointerId = $state<number | null>(null);
-  let dragClientX = $state(0);
-  let dragClientY = $state(0);
-  let dragOffsetX = $state(0);
-  let dragOffsetY = $state(0);
-  let resizePointerId = $state<number | null>(null);
-  let resizeStartX = 0;
-  let resizeStartWidth = 0;
-  let previousDocumentUserSelect: string | null = null;
-  let previousDocumentCursor: string | null = null;
-  let previousTaskDragUserSelect: string | null = null;
-  let previousTaskDragCursor: string | null = null;
+  const taskDragController = createWorkspaceSidebarTaskDragController({
+    busy: () => busy,
+    closeStatusMenu: () => statusMenuController.close(),
+    onReorder: (taskId, targetType, targetTaskId, position) => onReorder(taskId, targetType, targetTaskId, position),
+  });
   let titleInput = $state<HTMLInputElement | null>(null);
   let indicatorService: SidebarIndicatorService | undefined;
   let indicatorServiceState = $state<SidebarIndicatorServiceState>({
@@ -291,16 +252,8 @@
     registrySnapshot,
     settingsPanelError,
   }));
-  const activeMinWidth = $derived(sidebarMinWidth(activeTab));
-  const activeMaxWidth = $derived(Math.min(
-    sidebarMaxWidth(activeTab),
-    Math.max(activeMinWidth, viewportWidth - ACTIVITY_BAR_WIDTH - MIN_MAIN_WORKSPACE_WIDTH),
-  ));
-  const expandedSidebarWidth = $derived(clampWidth(sidebarWidth, activeMinWidth, activeMaxWidth));
-  const renderedSidebarWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : expandedSidebarWidth));
-  const renderedSidebarMinWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : activeMinWidth));
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
-  const draggedTask = $derived(draggedTaskId ? tasks.find((task) => task.id === draggedTaskId) : undefined);
+  const draggedTask = $derived(taskDragController.taskId ? tasks.find((task) => task.id === taskDragController.taskId) : undefined);
   const visiblePlanChoices = $derived.by(() => {
     if (!planSelectorQuery.trim()) return projectDocuments.plans;
     return fuzzySearch(
@@ -312,10 +265,6 @@
       planSelectorQuery,
       { minScorePerCharacter: 4 },
     ).map((match) => match.value);
-  });
-
-  onDestroy(() => {
-    if (statusMenuTypeaheadTimer !== null) window.clearTimeout(statusMenuTypeaheadTimer);
   });
 
   function openRegistryProjectArtifact(artifact: RegistryProjectArtifact): void {
@@ -345,39 +294,12 @@
   $effect(() => {
     const requestWorkspace = workspace;
     projectPanelError = null;
-    projectSettingsOpen = false;
-    projectSettingsSaving = false;
-    projectSettingsError = null;
+    projectSettingsController.reset();
     indicatorService?.setWorkspace(requestWorkspace);
   });
 
-  function openProjectSettings(): void {
-    if (!workspace) return;
-    projectSwitcher?.close();
-    projectSettingsError = null;
-    projectSettingsOpen = true;
-  }
-
-  async function saveProjectSettings(color: string | undefined): Promise<void> {
-    if (!workspace || projectSettingsSaving) return;
-    const requestWorkspace = workspace;
-    projectSettingsSaving = true;
-    projectSettingsError = null;
-    try {
-      const error = await onSaveProjectColor(color);
-      if (workspace !== requestWorkspace) return;
-      if (error) {
-        projectSettingsError = error;
-        return;
-      }
-      projectSettingsOpen = false;
-    } finally {
-      if (workspace === requestWorkspace) projectSettingsSaving = false;
-    }
-  }
-
   $effect(() => {
-    const viewedTab = collapsed ? undefined : activeTab;
+    const viewedTab = layoutController.collapsed ? undefined : activeTab;
     indicatorService?.setViewedTab(viewedTab);
   });
 
@@ -399,47 +321,28 @@
   });
 
   onMount(() => {
-    const updateViewportWidth = () => {
-      viewportWidth = window.innerWidth;
-    };
-    updateViewportWidth();
-    window.addEventListener("resize", updateViewportWidth);
     try {
-      collapsed = localStorage.getItem(COLLAPSED_KEY) === "true";
       const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
       if (isSidebarTab(savedTab)) activeTab = savedTab;
-      const savedWidth = localStorage.getItem(WIDTH_KEY);
-      if (savedWidth !== null) {
-        const parsedWidth = Number(savedWidth);
-        if (Number.isFinite(parsedWidth)) sidebarWidth = clampWidth(parsedWidth, activeMinWidth, activeMaxWidth);
-      }
     } catch {
       // Keep the defaults when webview storage is unavailable.
     }
+    const cleanupLayout = layoutController.mount();
     indicatorService = new SidebarIndicatorService(
       getCurrentWindow().label,
       (state) => indicatorServiceState = state,
     );
-    indicatorService.setViewedTab(collapsed ? undefined : activeTab);
+    indicatorService.setViewedTab(layoutController.collapsed ? undefined : activeTab);
     indicatorService.start(workspace);
 
     return () => {
-      window.removeEventListener("resize", updateViewportWidth);
+      cleanupLayout();
+      statusMenuController.dispose();
+      taskDragController.dispose();
       indicatorService?.destroy();
       indicatorService = undefined;
-      setDocumentResizeState(false);
-      setDocumentTaskDragState(false);
     };
   });
-
-  function setCollapsed(next: boolean): void {
-    collapsed = next;
-    try {
-      localStorage.setItem(COLLAPSED_KEY, String(next));
-    } catch {
-      // Persistence is a convenience, not a requirement for sidebar use.
-    }
-  }
 
   function isSidebarTab(value: string | null): value is SidebarTab {
     return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "idx" || value === "settings";
@@ -455,14 +358,14 @@
   }
 
   function selectTab(tab: SidebarTab): void {
-    statusMenuTaskId = null;
+    statusMenuController.close();
     revealedTaskId = null;
     planSelectorOpen = false;
     planSelectorQuery = "";
-    if (activeTab === tab && !collapsed) {
+    if (activeTab === tab && !layoutController.collapsed) {
       editorOpen = false;
       deleteTaskId = null;
-      setCollapsed(true);
+      layoutController.setCollapsed(true);
       return;
     }
 
@@ -471,18 +374,18 @@
       deleteTaskId = null;
     }
     setActiveTab(tab);
-    if (collapsed) setCollapsed(false);
+    if (layoutController.collapsed) layoutController.setCollapsed(false);
   }
 
   /** Open the project Tasks view for actions initiated outside the sidebar. */
   export async function openTasksPanel(taskId?: string): Promise<void> {
-    statusMenuTaskId = null;
+    statusMenuController.close();
     planSelectorOpen = false;
     planSelectorQuery = "";
     editorOpen = false;
     deleteTaskId = null;
     setActiveTab("tasks");
-    if (collapsed) setCollapsed(false);
+    if (layoutController.collapsed) layoutController.setCollapsed(false);
     revealedTaskId = taskId ?? null;
     if (!taskId) return;
     await tick();
@@ -496,98 +399,8 @@
     projectSwitcher?.close();
   }
 
-  function startResize(event: PointerEvent): void {
-    if (collapsed || event.button !== 0) return;
-    event.preventDefault();
-    resizePointerId = event.pointerId;
-    resizeStartX = event.clientX;
-    resizeStartWidth = expandedSidebarWidth;
-    setDocumentResizeState(true);
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  }
-
-  function resize(event: PointerEvent): void {
-    if (event.pointerId !== resizePointerId) return;
-    const candidate = resizeStartWidth + event.clientX - resizeStartX;
-    if (candidate <= activeMinWidth && sidebarWidth < activeMinWidth) return;
-    sidebarWidth = clampWidth(candidate, activeMinWidth, activeMaxWidth);
-  }
-
-  function finishResize(event: PointerEvent): void {
-    if (event.pointerId !== resizePointerId) return;
-    resizePointerId = null;
-    setDocumentResizeState(false);
-    try {
-      localStorage.setItem(WIDTH_KEY, String(sidebarWidth));
-    } catch {
-      // Keep the in-memory width when persistence is unavailable.
-    }
-  }
-
-  function setDocumentResizeState(active: boolean): void {
-    const root = document.documentElement;
-    if (active) {
-      if (previousDocumentUserSelect === null) previousDocumentUserSelect = root.style.userSelect;
-      if (previousDocumentCursor === null) previousDocumentCursor = root.style.cursor;
-      root.style.userSelect = "none";
-      root.style.cursor = "col-resize";
-      return;
-    }
-
-    if (previousDocumentUserSelect !== null) {
-      root.style.userSelect = previousDocumentUserSelect;
-      previousDocumentUserSelect = null;
-    }
-    if (previousDocumentCursor !== null) {
-      root.style.cursor = previousDocumentCursor;
-      previousDocumentCursor = null;
-    }
-  }
-
-  function resizeWithKeyboard(event: KeyboardEvent): void {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home") return;
-    event.preventDefault();
-    if (event.key === "Home") {
-      sidebarWidth = DEFAULT_WIDTH;
-    } else if (event.key === "ArrowLeft" && sidebarWidth < activeMinWidth) {
-      return;
-    } else {
-      const baseWidth = Math.max(sidebarWidth, activeMinWidth);
-      sidebarWidth = clampWidth(baseWidth + (event.key === "ArrowLeft" ? -12 : 12), activeMinWidth, activeMaxWidth);
-    }
-    try {
-      localStorage.setItem(WIDTH_KEY, String(sidebarWidth));
-    } catch {
-      // Keep the in-memory width when persistence is unavailable.
-    }
-  }
-
-  function sidebarMinWidth(tab: SidebarTab): number {
-    if (tab === "project") return Math.max(MIN_WIDTH, projectSwitcherMinimumWidth);
-    if (tab === "registry") return REGISTRY_MIN_WIDTH;
-    if (tab === "settings") return SETTINGS_MIN_WIDTH;
-    if (tab === "scripts") return SCRIPTS_MIN_WIDTH;
-    if (tab === "idx") return IDX_MIN_WIDTH;
-    return MIN_WIDTH;
-  }
-
-  function setProjectSwitcherMinimumWidth(width: number): void {
-    if (!Number.isFinite(width)) return;
-    projectSwitcherMinimumWidth = Math.max(MIN_WIDTH, Math.ceil(width));
-  }
-
-  function sidebarMaxWidth(tab: SidebarTab): number {
-    if (tab === "scripts") return SCRIPTS_MAX_WIDTH;
-    if (tab === "idx") return IDX_MAX_WIDTH;
-    return DEFAULT_MAX_WIDTH;
-  }
-
-  function clampWidth(width: number, minimum = MIN_WIDTH, maximum = DEFAULT_MAX_WIDTH): number {
-    return Math.min(maximum, Math.max(minimum, width));
-  }
-
   function openCreate(): void {
-    statusMenuTaskId = null;
+    statusMenuController.close();
     editingTaskId = null;
     title = "";
     description = "";
@@ -598,7 +411,7 @@
   }
 
   function openEdit(task: ProjectTask): void {
-    statusMenuTaskId = null;
+    statusMenuController.close();
     editingTaskId = task.id;
     title = task.title;
     const parsedDescription = extractAttachmentMarkers(task.description ?? "", `task-editor:${task.id}`);
@@ -652,205 +465,14 @@
     deleteTaskId = null;
   }
 
-  function setTaskStatus(taskId: string, status: ProjectTaskStatus): void {
-    const trigger = statusMenuTrigger;
-    statusMenuTaskId = null;
-    statusMenuTrigger = null;
-    onStatusChange(taskId, status);
-    void tick().then(() => trigger?.focus());
-  }
-
-  function taskStatusMenuItems(): MenuNavigationItem[] {
-    return TASK_STATUSES.map((status) => ({ label: taskStatusLabel(status) }));
-  }
-
-  function taskStatusMenuButtons(): HTMLButtonElement[] {
-    return [...(statusMenu?.querySelectorAll<HTMLButtonElement>("[role='menuitemradio']") ?? [])];
-  }
-
-  function focusTaskStatusMenuItem(index: number): void {
-    taskStatusMenuButtons()[index]?.focus();
-  }
-
-  function closeTaskStatusMenu(restoreFocus = false): void {
-    const trigger = statusMenuTrigger;
-    statusMenuTaskId = null;
-    statusMenuTrigger = null;
-    if (restoreFocus) void tick().then(() => trigger?.focus());
-  }
-
-  function toggleTaskStatusMenu(event: MouseEvent, task: ProjectTask): void {
-    const trigger = event.currentTarget as HTMLButtonElement;
-    if (statusMenuTaskId === task.id) {
-      closeTaskStatusMenu();
-      return;
-    }
-    statusMenuTrigger = trigger;
-    statusMenuTaskId = task.id;
-    const selectedIndex = Math.max(0, TASK_STATUSES.indexOf(task.status));
-    void tick().then(() => focusTaskStatusMenuItem(selectedIndex));
-  }
-
-  function handleTaskStatusMenuKeydown(event: KeyboardEvent): void {
-    const buttons = taskStatusMenuButtons();
-    const target = event.target instanceof Element
-      ? event.target.closest<HTMLButtonElement>("[role='menuitemradio']")
-      : null;
-    const currentIndex = target ? buttons.indexOf(target) : -1;
-    const items = taskStatusMenuItems();
-
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeTaskStatusMenu(true);
-      return;
-    }
-    if (event.key === "Tab") {
-      closeTaskStatusMenu();
-      return;
-    }
-    const nextIndex = menuFocusIndex(items, currentIndex, event.key);
-    if (nextIndex !== null) {
-      event.preventDefault();
-      focusTaskStatusMenuItem(nextIndex);
-      return;
-    }
-    if (!isTypeaheadKey(event)) return;
-    event.preventDefault();
-    const key = event.key.toLocaleLowerCase();
-    let query = statusMenuTypeaheadQuery.length === 1 && statusMenuTypeaheadQuery === key
-      ? key
-      : `${statusMenuTypeaheadQuery}${key}`;
-    let typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
-    if (typeaheadIndex === null && query.length > 1) {
-      query = key;
-      typeaheadIndex = menuTypeaheadFocusIndex(items, currentIndex, query);
-    }
-    statusMenuTypeaheadQuery = query;
-    if (statusMenuTypeaheadTimer !== null) window.clearTimeout(statusMenuTypeaheadTimer);
-    statusMenuTypeaheadTimer = window.setTimeout(() => {
-      statusMenuTypeaheadQuery = "";
-      statusMenuTypeaheadTimer = null;
-    }, 700);
-    if (typeaheadIndex !== null) focusTaskStatusMenuItem(typeaheadIndex);
-  }
-
-  function closeStatusMenuOutside(event: PointerEvent): void {
-    if (!statusMenuTaskId) return;
-    const target = event.target as HTMLElement | null;
-    if (!target?.closest("[data-task-status-control]")) closeTaskStatusMenu();
-  }
-
-  function startTaskDrag(event: PointerEvent, taskId: string): void {
-    if (busy || event.button !== 0) return;
-    statusMenuTaskId = null;
-    const handle = event.currentTarget as HTMLElement;
-    const card = handle.closest<HTMLElement>("[data-task-card]");
-    if (!card) return;
-    event.preventDefault();
-    const bounds = card.getBoundingClientRect();
-    draggedTaskHeight = Math.max(36, Math.round(bounds.height));
-    draggedTaskWidth = Math.round(bounds.width);
-    dragPointerId = event.pointerId;
-    dragOffsetX = event.clientX - bounds.left;
-    dragOffsetY = event.clientY - bounds.top;
-    dragClientX = event.clientX;
-    dragClientY = event.clientY;
-    draggedTaskId = taskId;
-    taskDropTarget = null;
-    setDocumentTaskDragState(true);
-    handle.setPointerCapture(event.pointerId);
-  }
-
-  function moveTaskDrag(event: PointerEvent): void {
-    if (event.pointerId !== dragPointerId || !draggedTaskId) return;
-    event.preventDefault();
-    dragClientX = event.clientX;
-    dragClientY = event.clientY;
-    const hit = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
-    if (hit?.closest("[data-task-drop-placeholder]") && taskDropTarget) return;
-    taskDropTarget = taskDropTargetAt(event.clientX, event.clientY);
-  }
-
-  function taskDropTargetAt(clientX: number, clientY: number): TaskDropTarget | null {
-    const groups = [...document.querySelectorAll<HTMLElement>("[data-task-group]")];
-    const group = groups.find((candidate) => {
-      const bounds = candidate.getBoundingClientRect();
-      return clientX >= bounds.left - 12
-        && clientX <= bounds.right + 12
-        && clientY >= bounds.top
-        && clientY <= bounds.bottom;
-    });
-    if (!group) return null;
-
-    const type = group.dataset.taskGroup as ProjectTaskType | undefined;
-    if (!type || !TASK_GROUPS.some((candidate) => candidate.type === type)) return null;
-    const cards = [...group.querySelectorAll<HTMLElement>("[data-task-card]")]
-      .filter((card) => card.dataset.taskId !== draggedTaskId);
-    if (cards.length === 0) return { type, targetTaskId: null, position: "after" };
-
-    for (const card of cards) {
-      const taskId = card.dataset.taskId;
-      if (!taskId) continue;
-      const bounds = card.getBoundingClientRect();
-      if (clientY < bounds.top + bounds.height / 2) {
-        return { type, targetTaskId: taskId, position: "before" };
-      }
-    }
-
-    const lastTaskId = cards.at(-1)?.dataset.taskId;
-    return lastTaskId ? { type, targetTaskId: lastTaskId, position: "after" } : null;
-  }
-
-  function finishTaskDrag(event: PointerEvent): void {
-    if (event.pointerId !== dragPointerId) return;
-    const taskId = draggedTaskId;
-    const target = taskDropTarget;
-    clearTaskDrag();
-    if (!taskId || !target) return;
-    onReorder(taskId, target.type, target.targetTaskId, target.position);
-  }
-
-  function cancelTaskDrag(event: PointerEvent): void {
-    if (event.pointerId !== dragPointerId) return;
-    clearTaskDrag();
-  }
-
-  function clearTaskDrag(): void {
-    draggedTaskId = null;
-    taskDropTarget = null;
-    dragPointerId = null;
-    setDocumentTaskDragState(false);
-  }
-
-  function setDocumentTaskDragState(active: boolean): void {
-    const root = document.documentElement;
-    if (active) {
-      if (previousTaskDragUserSelect === null) previousTaskDragUserSelect = root.style.userSelect;
-      if (previousTaskDragCursor === null) previousTaskDragCursor = root.style.cursor;
-      root.style.userSelect = "none";
-      root.style.cursor = "grabbing";
-      return;
-    }
-
-    if (previousTaskDragUserSelect !== null) {
-      root.style.userSelect = previousTaskDragUserSelect;
-      previousTaskDragUserSelect = null;
-    }
-    if (previousTaskDragCursor !== null) {
-      root.style.cursor = previousTaskDragCursor;
-      previousTaskDragCursor = null;
-    }
-  }
-
 </script>
 
 <aside
   bind:this={sidebarElement}
   class="relative flex min-h-0 shrink-0 bg-sidebar text-sidebar-foreground"
-  class:select-none={resizePointerId !== null}
-  style:width={`${renderedSidebarWidth}px`}
-  style:min-width={`${renderedSidebarMinWidth}px`}
+  class:select-none={layoutController.resizing}
+  style:width={`${layoutController.renderedWidth}px`}
+  style:min-width={`${layoutController.renderedMinWidth}px`}
   style:max-width="100vw"
   aria-label="Workspace sidebar"
 >
@@ -859,11 +481,11 @@
     {projectColors}
     {indicators}
     {activeTab}
-    {collapsed}
+    collapsed={layoutController.collapsed}
     onSelect={selectTab}
   />
 
-  {#if !collapsed}
+  {#if !layoutController.collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
       <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome px-3">
         <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide">{activeTabTitle}</strong>
@@ -882,7 +504,7 @@
               type="button"
               title="Project settings"
               aria-label="Project settings"
-              onclick={openProjectSettings}
+              onclick={projectSettingsController.show}
               disabled={!workspace}
             ><SlidersHorizontal class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
@@ -933,21 +555,21 @@
           {busy}
           {activeTaskId}
           {sessionReady}
-          {draggedTaskId}
-          {taskDropTarget}
-          {draggedTaskHeight}
+          draggedTaskId={taskDragController.taskId}
+          taskDropTarget={taskDragController.dropTarget}
+          draggedTaskHeight={taskDragController.height}
           {revealedTaskId}
-          {statusMenuTaskId}
+          statusMenuTaskId={statusMenuController.taskId}
           bind:statusMenu
-          onPanelPointerDown={closeStatusMenuOutside}
+          onPanelPointerDown={statusMenuController.closeOutside}
           {onReload}
-          onTaskDragStart={startTaskDrag}
-          onTaskDragMove={moveTaskDrag}
-          onTaskDragFinish={finishTaskDrag}
-          onTaskDragCancel={cancelTaskDrag}
-          onToggleStatusMenu={toggleTaskStatusMenu}
-          onStatusMenuKeydown={handleTaskStatusMenuKeydown}
-          onSetTaskStatus={setTaskStatus}
+          onTaskDragStart={taskDragController.start}
+          onTaskDragMove={taskDragController.move}
+          onTaskDragFinish={taskDragController.finish}
+          onTaskDragCancel={taskDragController.cancel}
+          onToggleStatusMenu={statusMenuController.toggle}
+          onStatusMenuKeydown={statusMenuController.handleKeydown}
+          onSetTaskStatus={statusMenuController.setStatus}
           {onRun}
           {onOpenSession}
           onEdit={openEdit}
@@ -962,7 +584,7 @@
             {projectColors}
             currentWindowDisabled={projectSwitchDisabled}
             onOpen={onProjectSwitcherOpen}
-            onMinimumWidthChange={setProjectSwitcherMinimumWidth}
+            onMinimumWidthChange={layoutController.setProjectSwitcherMinimumWidth}
             {onSelectProject}
             {onOpenProjectInNewWindow}
             {onChooseWorkspace}
@@ -1062,27 +684,27 @@
       role="separator"
       aria-label="Resize workspace sidebar"
       aria-orientation="vertical"
-      aria-valuemin={activeMinWidth}
-      aria-valuemax={activeMaxWidth}
-      aria-valuenow={expandedSidebarWidth}
+      aria-valuemin={layoutController.activeMinWidth}
+      aria-valuemax={layoutController.activeMaxWidth}
+      aria-valuenow={layoutController.expandedWidth}
       tabindex="0"
-      onpointerdown={startResize}
-      onpointermove={resize}
-      onpointerup={finishResize}
-      onpointercancel={finishResize}
-      onlostpointercapture={finishResize}
-      onkeydown={resizeWithKeyboard}
-      ondblclick={() => sidebarWidth = DEFAULT_WIDTH}
+      onpointerdown={layoutController.startResize}
+      onpointermove={layoutController.resize}
+      onpointerup={layoutController.finishResize}
+      onpointercancel={layoutController.finishResize}
+      onlostpointercapture={layoutController.finishResize}
+      onkeydown={layoutController.resizeWithKeyboard}
+      ondblclick={layoutController.resetWidth}
     ></div>
   {/if}
 
-  {#if draggedTask && dragPointerId !== null}
+  {#if draggedTask && taskDragController.pointerId !== null}
     <div
       class="pointer-events-none fixed z-50 select-none rounded-md border border-chat-user-border bg-popover px-1.5 py-1.5 text-popover-foreground shadow-md"
-      style:left={`${dragClientX - dragOffsetX}px`}
-      style:top={`${dragClientY - dragOffsetY}px`}
-      style:width={`${draggedTaskWidth}px`}
-      style:min-height={`${draggedTaskHeight}px`}
+      style:left={`${taskDragController.clientX - taskDragController.offsetX}px`}
+      style:top={`${taskDragController.clientY - taskDragController.offsetY}px`}
+      style:width={`${taskDragController.width}px`}
+      style:min-height={`${taskDragController.height}px`}
       aria-hidden="true"
     >
       <div class="flex min-w-0 items-start gap-1">
@@ -1096,7 +718,7 @@
     </div>
   {/if}
 
-  {#if editorOpen && !collapsed}
+  {#if editorOpen && !layoutController.collapsed}
     <WorkspaceSidebarTaskEditor
       {editingTaskId}
       {busy}
@@ -1114,7 +736,7 @@
     />
   {/if}
 
-  {#if deleteTaskId && !collapsed}
+  {#if deleteTaskId && !layoutController.collapsed}
     {@const deleteTask = tasks.find((task) => task.id === deleteTaskId)}
     <div
       class="absolute inset-y-0 right-0 left-12 z-30 grid place-items-center border-r border-sidebar-border bg-overlay p-4"
@@ -1133,18 +755,14 @@
     </div>
   {/if}
 
-  {#if projectSettingsOpen && workspace}
+  {#if projectSettingsController.open && workspace}
     <ProjectSettingsDialog
       {workspace}
       color={projectColors.get(workspace)}
-      saving={projectSettingsSaving}
-      error={projectSettingsError}
-      onSave={(color) => void saveProjectSettings(color)}
-      onClose={() => {
-        if (projectSettingsSaving) return;
-        projectSettingsOpen = false;
-        projectSettingsError = null;
-      }}
+      saving={projectSettingsController.saving}
+      error={projectSettingsController.error}
+      onSave={(color) => void projectSettingsController.save(color)}
+      onClose={projectSettingsController.close}
     />
   {/if}
 </aside>

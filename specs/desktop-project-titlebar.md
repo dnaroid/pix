@@ -122,6 +122,8 @@ without blocking desktop interactions.
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/app/project-workspace.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
+- `desktop/src/components/workspace-sidebar-project-settings-controller.svelte.ts`
 - `desktop/src/components/ProjectSwitcher.svelte`
 - `desktop/src/components/ProjectSettingsDialog.svelte`
 - `desktop/src/components/ProjectFolderIcon.svelte`

@@ -36,6 +36,7 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/components/ModelThinkingPicker.svelte`
 - `desktop/src/lib/acp-client.ts`
+- `desktop/src/lib/acp-pix-extensions.ts`
 - `desktop/src/lib/model-thinking.ts`
 - `desktop/src/lib/model-thinking-preferences.ts`
 - `src/config.ts`

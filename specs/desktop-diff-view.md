@@ -44,6 +44,9 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 
 - `desktop/src/lib/diff.ts`
 - `desktop/src/lib/transcript.ts`
+- `desktop/src/lib/transcript-content.ts`
+- `desktop/src/lib/transcript-reducer.ts`
+- `desktop/src/lib/transcript-types.ts`
 - `desktop/src/components/DiffView.svelte`
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/TranscriptPane.svelte`

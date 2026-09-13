@@ -46,8 +46,11 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 - `acp/src/acp/autocomplete.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 - `desktop/src/lib/acp-client.ts`
+- `desktop/src/lib/acp-json-rpc.ts`
+- `desktop/src/lib/acp-pix-extensions.ts`
 - `desktop/src/lib/autocomplete.ts`
 - `desktop/src/components/PromptComposer.svelte`
+- `desktop/src/components/prompt-composer-textarea-controller.svelte.ts`
 - `desktop/src/app/autocomplete.svelte.ts`
 - `desktop/src/app/desktop-session-services.ts`
 

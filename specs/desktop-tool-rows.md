@@ -52,6 +52,11 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - `acp/src/acp/event-translator.ts`
 - `acp/src/acp/session-replay.ts`
 - `desktop/src/lib/transcript.ts`
+- `desktop/src/lib/transcript-content.ts`
+- `desktop/src/lib/transcript-deferred.ts`
+- `desktop/src/lib/transcript-presentation.ts`
+- `desktop/src/lib/transcript-reducer.ts`
+- `desktop/src/lib/transcript-types.ts`
 - `desktop/src/lib/tool-presentation.ts`
 - `desktop/src/lib/tool-output.ts`
 - `desktop/src/components/TranscriptPane.svelte`

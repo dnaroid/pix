@@ -91,6 +91,9 @@ Show image and video attachments in the desktop composer and transcript, while k
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/attachments.ts`
 - `desktop/src/lib/transcript.ts`
+- `desktop/src/lib/transcript-content.ts`
+- `desktop/src/lib/transcript-local.ts`
+- `desktop/src/lib/transcript-types.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `acp/src/acp/session-replay.ts`
 - `acp/src/acp/pix-acp-agent.ts`

@@ -299,6 +299,8 @@ undo configuration.
 - `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
 - `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
 - `external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts`
+- `desktop/src/lib/markdown-dcp.ts`
+- `desktop/src/lib/markdown-fences.ts`
 
 ## Verification
 

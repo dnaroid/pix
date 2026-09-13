@@ -126,6 +126,9 @@ agent's session-local todo list.
 - `desktop/src/app/project-actions.svelte.ts`
 - `desktop/src/app/desktop-project-action-services.ts`
 - `desktop/src/components/PromptComposerActionsMenu.svelte`
+- `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
+- `desktop/src/components/workspace-sidebar-task-drag-controller.svelte.ts`
 - `desktop/src/components/WorkspaceSidebarTasksPanel.svelte`
 - `desktop/src/components/WorkspaceSidebarTaskEditor.svelte`
 - `desktop/src/lib/attachments.ts`

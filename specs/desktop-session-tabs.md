@@ -55,6 +55,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/lib/session-tabs.ts`
 - `desktop/src/lib/model-thinking.ts`
 - `desktop/src/lib/acp-client.ts`
+- `desktop/src/lib/acp-pix-extensions.ts`
 - `desktop/src/app/draft-session.svelte.ts`
 - `desktop/src/app/session-tab-controller.ts`
 - `desktop/src/app/session-tab-selection.ts`

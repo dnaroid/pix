@@ -101,6 +101,9 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - `desktop/src/components/ProjectExplorer.svelte`
 - `desktop/src/components/SettingsPanel.svelte`
 - `desktop/src/lib/sidebar-indicators.ts`
+- `desktop/src/lib/sidebar-indicator-types.ts`
+- `desktop/src/lib/sidebar-indicator-policy.ts`
+- `desktop/src/lib/sidebar-indicator-service.ts`
 - `desktop/src/lib/sidebar-indicators.test.ts`
 - `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
 - `desktop/src-tauri/src/lib.rs`
