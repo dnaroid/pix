@@ -50,6 +50,10 @@
 
   onMount(controller.start);
 
+  export async function openTerminal(command: string): Promise<void> {
+    await controller.openShellTerminal(command);
+  }
+
   function terminalTone(terminal: PackageTerminalView): string {
     if (terminal.status === "running") return "bg-primary";
     if (terminal.status === "failed" || (terminal.status === "exited" && terminal.exitCode !== 0)) return "bg-tool-error";

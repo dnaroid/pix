@@ -23,6 +23,7 @@ import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
+	PIX_BASH_METHOD,
 	PIX_AGENT_CONTROL_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -66,6 +67,7 @@ import { SessionMapStore } from "../src/acp/session-map.js";
 import type { Logger } from "../src/logging.js";
 import type {
 	PiAgentMessage,
+	PiBashResult,
 	PiClient,
 	PiCompactionResult,
 	PiEvent,
@@ -96,6 +98,7 @@ class FakePiClient implements PiClient {
 	static readonly sessionFiles = new Map<string, PiAgentMessage[]>();
 
 	readonly promptCalls: { message: string; images?: PiImageContent[] }[] = [];
+	readonly bashCalls: { command: string; excludeFromContext: boolean }[] = [];
 	readonly steerCalls: string[] = [];
 	readonly followUpCalls: string[] = [];
 	readonly queuedSteering: string[] = [];
@@ -139,6 +142,13 @@ class FakePiClient implements PiClient {
 	startGate: Promise<void> | undefined;
 	readonly eventsOnStart: PiEvent[] = [];
 	promptHook: ((message: string) => void | Promise<void>) | undefined;
+	bashGate: Promise<void> | undefined;
+	bashResult: PiBashResult = {
+		output: "command output",
+		exitCode: 0,
+		cancelled: false,
+		truncated: false,
+	};
 	pauseHook: (() => void | Promise<void>) | undefined;
 	continueHook: (() => void | Promise<void>) | undefined;
 	treeState: { tree: PiSessionTreeNode[]; leafId: string | null } = { tree: [], leafId: null };
@@ -198,6 +208,12 @@ class FakePiClient implements PiClient {
 		this.promptCalls.push({ message, images });
 		await this.promptHook?.(message);
 		if (!this.promptHandledWithoutRun) this.state = { ...this.state, isStreaming: true };
+	}
+
+	async bash(command: string, excludeFromContext = false): Promise<PiBashResult> {
+		this.bashCalls.push({ command, excludeFromContext });
+		await this.bashGate;
+		return this.bashResult;
 	}
 
 	async pause(): Promise<void> {
@@ -2552,6 +2568,74 @@ test("Desktop user-message copy and undo use the selected Pi entry id without mo
 		});
 		assert.match(pi.promptCalls.at(-1)?.message ?? "", /^\/__pix-workspace-undo /u);
 	});
+});
+
+test("Pix Desktop bash bridge forwards context flags even while an agent turn is running", async () => {
+	const harness = createTestAdapter();
+	const notifications: SessionNotification[] = [];
+
+	await connectAs(
+		harness.adapter,
+		"pix-desktop",
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/bash-mode", mcpServers: [] }) as { sessionId: string };
+			const pi = harness.clients[0]!;
+			const running = cx.request("session/prompt", {
+				sessionId: created.sessionId,
+				prompt: [{ type: "text", text: "keep working" }],
+			});
+			await waitFor(() => pi.promptCalls.length === 1);
+			pi.emit({ type: "agent_start" });
+
+			await cx.request(PIX_BASH_METHOD, {
+				sessionId: created.sessionId,
+				command: "pwd",
+				excludeFromContext: false,
+				displayText: "!pwd",
+			});
+			await cx.request(PIX_BASH_METHOD, {
+				sessionId: created.sessionId,
+				command: "git status",
+				excludeFromContext: true,
+				displayText: "!!git status",
+			});
+
+			assert.deepEqual(pi.bashCalls, [
+				{ command: "pwd", excludeFromContext: false },
+				{ command: "git status", excludeFromContext: true },
+			]);
+
+			pi.emit({
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [], stopReason: "stop" }],
+				willRetry: false,
+			} as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+			await running;
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+		},
+	);
+
+	const bashStarts = notifications
+		.map((notification) => notification.update)
+		.filter((update) => update.sessionUpdate === "tool_call" && update.name === "bash") as Array<SessionNotification["update"] & {
+			title: string;
+			rawInput?: unknown;
+		}>;
+	assert.equal(bashStarts.length, 2);
+	assert.equal(bashStarts[0]?.title, "Bash: pwd");
+	assert.equal(bashStarts[1]?.title, "Bash (no context): git status");
+	assert.deepEqual(bashStarts[1]?.rawInput, { command: "git status", excludeFromContext: true });
+
+	const bashResults = notifications
+		.map((notification) => notification.update)
+		.filter((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId?.startsWith("pix-bash:")) as Array<SessionNotification["update"] & {
+			status: string;
+		}>;
+	assert.equal(bashResults.length, 2);
+	assert.equal(bashResults.every((update) => update.status === "completed"), true);
 });
 
 test("Pix Desktop deferred queue persists and edit returns the paused message", async () => {

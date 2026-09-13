@@ -56,6 +56,7 @@
   } | null>(null);
   let workspaceSidebar = $state<{
     openTasksPanel: (taskId?: string) => Promise<void>;
+    openTerminal: (command: string) => Promise<void>;
     closeProjectSwitcher: () => void;
   } | null>(null);
   let localMessageId = 0;
@@ -411,6 +412,7 @@
     requestLocalTextInput: (message, title) => elicitationStore.requestLocalTextInput(message, title),
     navigation: conversationNavigation,
     forkConversation,
+    openInteractiveTerminal: async (command) => { await workspaceSidebar?.openTerminal(command); },
     closeProjectSelector: () => workspaceSidebar?.closeProjectSwitcher(),
     applyModelSlashCommand: modelConfig.applyModelSlashCommand,
     applyThinkingSlashCommand: modelConfig.applyThinkingSlashCommand,

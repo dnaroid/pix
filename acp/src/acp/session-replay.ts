@@ -13,6 +13,7 @@ import type { SessionNotification, SessionUpdate, ToolCallContent, ToolKind } fr
 import { toolKind, toolLocations, toolTitle, type TranslateContext } from "./event-translator.js";
 import type { PiAgentMessage, PiClient, PiMessagePart } from "../pi/pi-rpc-client.js";
 import { DEFERRED_PERSISTED_IMAGE_PREFIX } from "./session-history-file.js";
+import { replayBashExecutionUpdates } from "./bash-execution.js";
 
 export const DEFERRED_IMAGE_URI_PREFIX = "pix-deferred-image:";
 const PIX_ACTIVITY_TIMING_META_KEY = "pix.activityTiming";
@@ -81,6 +82,10 @@ export async function replaySessionHistory(
 		} else if (message.role === "toolResult") {
 			const notification = toolResultNotification(context, message);
 			if (notification) await notify(notification);
+		} else if (message.role === "bashExecution") {
+			for (const update of replayBashExecutionUpdates(message, index) ?? []) {
+				await notify({ sessionId: context.sessionId, update });
+			}
 		}
 	}
 }
@@ -166,6 +171,8 @@ export function deferredSessionHistoryFromMessages(
 				message,
 				...(toolInputs.has(toolCallId) ? { rawInput: toolInputs.get(toolCallId) } : {}),
 			});
+		} else if (message.role === "bashExecution") {
+			updates.push(...(replayBashExecutionUpdates(message, index) ?? []));
 		}
 	}
 

@@ -167,6 +167,10 @@ export class AcpClient {
     return this.pix.dcpStats(sessionId);
   }
 
+  bash(sessionId: string, command: string, excludeFromContext: boolean, displayText: string): Promise<void> {
+    return this.pix.bash(sessionId, command, excludeFromContext, displayText);
+  }
+
   userMessageAction(
     sessionId: string,
     entryId: string,

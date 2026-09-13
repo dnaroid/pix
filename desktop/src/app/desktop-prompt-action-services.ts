@@ -46,6 +46,7 @@ type DesktopPromptActionServicesOptions = {
   requestLocalTextInput: (message: string, title: string) => Promise<string | undefined>;
   navigation: ConversationNavigationRef;
   forkConversation: (entryId?: string) => Promise<void>;
+  openInteractiveTerminal: (command: string) => void | Promise<void>;
   closeProjectSelector: () => void;
   applyModelSlashCommand: (value: string) => void | Promise<void>;
   applyThinkingSlashCommand: (level: string) => void | Promise<void>;
@@ -109,6 +110,7 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     showDesktopHotkeys: options.navigation.showHotkeys,
     reloadResources: options.conversation.reloadResources,
     forkConversation: options.forkConversation,
+    openInteractiveTerminal: options.openInteractiveTerminal,
     closeProjectSelector: options.closeProjectSelector,
     closeSessionSelector: options.transitions.sessionTabs.closeSessionSelector,
     applyModelSlashCommand: options.applyModelSlashCommand,

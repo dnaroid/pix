@@ -42,6 +42,13 @@ export function toolGroupPresentationNames(tools: readonly ToolHeaderSource[]): 
   return [...new Set(tools.map((tool) => toolPresentation(tool).name))].join(", ");
 }
 
+/** True only for Desktop one-shot user bash rows (`!`), not ordinary model bash tools. */
+export function isUserBashTool(tool: ToolHeaderSource): boolean {
+  if (toolPresentation(tool).name !== "bash") return false;
+  const args = asRecord(tool.rawInput);
+  return typeof args?.excludeFromContext === "boolean";
+}
+
 export function toolTone(toolName: string): ToolTone {
   const name = normalizedName(toolName);
   if (["apply_patch", "edit", "multiedit", "write", "ast_apply"].includes(name)) return "mutation";

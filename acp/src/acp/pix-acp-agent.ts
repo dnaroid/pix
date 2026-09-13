@@ -111,6 +111,7 @@ import {
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
+	PIX_BASH_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_IMPORT_SESSION_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -129,6 +130,7 @@ import {
 	PIX_USER_MESSAGE_ACTION_METHOD,
 	parseDesktopEnhancePromptRequest,
 	parseDesktopDraftConfigRequest,
+	parseDesktopBashRequest,
 	parseDesktopAgentControlRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopImportSessionRequest,
@@ -150,6 +152,7 @@ import {
 	type DesktopDcpStatsResponse,
 	type DesktopDraftConfigRequest,
 	type DesktopDraftConfigResponse,
+	type DesktopBashRequest,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
 	type DesktopImportSessionRequest,
@@ -178,6 +181,11 @@ import {
 	type DesktopUserMessageActionResponse,
 	type ForkMessagesResponse,
 } from "./desktop-commands.js";
+import {
+	bashExecutionErrorUpdate,
+	bashExecutionResultUpdate,
+	bashExecutionStartUpdate,
+} from "./bash-execution.js";
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
 import { EventTranslator } from "./event-translator.js";
 import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
@@ -284,6 +292,7 @@ interface AgentSessionState {
 	activeRun: ActiveRun | undefined;
 	agentControlState: DesktopAgentControlState;
 	builtinRunning: boolean;
+	bashRunning: boolean;
 	queueSessionPath: string | undefined;
 	queueRevision: number;
 	steeringQueue: string[];
@@ -464,6 +473,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_DRAFT_CONFIG_METHOD, parseDesktopDraftConfigRequest, (ctx) =>
 				this.desktopDraftConfig(ctx.params),
+			)
+			.onRequest(PIX_BASH_METHOD, parseDesktopBashRequest, (ctx) =>
+				this.desktopBash(ctx.params),
 			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
 				this.autocomplete(ctx.params, ctx.signal),
@@ -715,6 +727,43 @@ export class PixAcpAgent {
 	private async desktopRequestHistory(params: DesktopSessionRequest): Promise<DesktopRequestHistoryResponse> {
 		if (!this.sessions.has(params.sessionId)) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		return { entries: await readRequestHistoryEntries() };
+	}
+
+	private async desktopBash(params: DesktopBashRequest): Promise<Record<string, never>> {
+		const session = this.requireDesktopSession(params.sessionId);
+		if (session.bashRunning) {
+			throw new RequestError(ERROR_SERVER, "a bash command is already running");
+		}
+
+		const toolCallId = `pix-bash:${randomUUID()}`;
+		const notifyUpdate = async (update: SessionNotification["update"]): Promise<void> => {
+			await session.client.notify("session/update", { sessionId: session.acpSessionId, update }).catch((error: unknown) => {
+				this.options.logger.warn(`session/update failed: ${stringifyUnknown(error)}`);
+			});
+		};
+
+		session.bashRunning = true;
+		if (this.clientName === "pix-desktop") {
+			void queueRequestHistoryEntry(params.displayText).catch(() => undefined);
+		}
+		await notifyUpdate(bashExecutionStartUpdate(
+			toolCallId,
+			params.command,
+			params.excludeFromContext,
+			Date.now(),
+		));
+
+		try {
+			const result = await session.pi.bash(params.command, params.excludeFromContext);
+			await notifyUpdate(bashExecutionResultUpdate(toolCallId, result, Date.now()));
+			await this.sessionMap.touch(session.acpSessionId);
+			return {};
+		} catch (error) {
+			await notifyUpdate(bashExecutionErrorUpdate(toolCallId, error, Date.now()));
+			throw new RequestError(ERROR_SERVER, `bash command failed: ${stringifyUnknown(error)}`);
+		} finally {
+			session.bashRunning = false;
+		}
 	}
 
 	private async desktopQueueState(params: DesktopSessionRequest): Promise<DesktopQueueStateResponse> {
@@ -1458,6 +1507,7 @@ export class PixAcpAgent {
 			activeRun: undefined,
 			agentControlState: "idle",
 			builtinRunning: false,
+			bashRunning: false,
 			queueSessionPath: undefined,
 			queueRevision: 0,
 			steeringQueue: [],

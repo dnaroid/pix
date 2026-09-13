@@ -38,12 +38,18 @@ export function createPackageScriptsController(options: PackageScriptsController
   let startingScript = $state<string | null>(null);
   let terminalActionId = $state<string | null>(null);
   let loadGeneration = 0;
+  let workspaceLoad: Promise<void> | undefined;
 
   $effect(() => {
     const requestWorkspace = options.workspace();
     const generation = ++loadGeneration;
     queueMicrotask(() => {
-      if (generation === loadGeneration) void loadWorkspace(requestWorkspace, generation);
+      if (generation !== loadGeneration) return;
+      const pending = loadWorkspace(requestWorkspace, generation);
+      workspaceLoad = pending;
+      void pending.finally(() => {
+        if (workspaceLoad === pending) workspaceLoad = undefined;
+      });
     });
   });
 
@@ -87,7 +93,11 @@ export function createPackageScriptsController(options: PackageScriptsController
 
   function refresh(): void {
     const generation = ++loadGeneration;
-    void loadWorkspace(options.workspace(), generation);
+    const pending = loadWorkspace(options.workspace(), generation);
+    workspaceLoad = pending;
+    void pending.finally(() => {
+      if (workspaceLoad === pending) workspaceLoad = undefined;
+    });
   }
 
   async function runScript(script: PackageScript): Promise<void> {
@@ -116,7 +126,9 @@ export function createPackageScriptsController(options: PackageScriptsController
     }
   }
 
-  async function openShellTerminal(): Promise<void> {
+  async function openShellTerminal(initialCommand?: string): Promise<void> {
+    await tick();
+    await workspaceLoad;
     const workspace = options.workspace();
     if (!workspace || startingScript || terminalActionId) return;
     startingScript = "__shell__";
@@ -134,6 +146,9 @@ export function createPackageScriptsController(options: PackageScriptsController
       activeTerminalId = started.id;
       await tick();
       options.terminalView()?.focus();
+      if (initialCommand?.trim()) {
+        await writeTerminal(started.id, `${initialCommand}\r`);
+      }
     } catch (caught) {
       error = errorMessage(caught);
     } finally {

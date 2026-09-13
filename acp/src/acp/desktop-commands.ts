@@ -25,6 +25,7 @@ export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
 export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
 export const PIX_DCP_STATS_METHOD = "pix/session/dcp_stats";
 export const PIX_DRAFT_CONFIG_METHOD = "pix/session/draft_config";
+export const PIX_BASH_METHOD = "pix/session/bash";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -36,6 +37,12 @@ export interface DesktopDraftConfigRequest {
 
 export interface DesktopDraftConfigResponse {
 	readonly configOptions: SessionConfigOption[];
+}
+
+export interface DesktopBashRequest extends DesktopSessionRequest {
+	readonly command: string;
+	readonly excludeFromContext: boolean;
+	readonly displayText: string;
 }
 
 export type DesktopAgentControlAction = "state" | "pause" | "continue";
@@ -259,6 +266,29 @@ export function parseDesktopAgentControlRequest(value: unknown): DesktopAgentCon
 		throw new RequestError(ERROR_INVALID_PARAMS, "agent control request requires action state, pause, or continue");
 	}
 	return { ...session, action: value.action };
+}
+
+export function parseDesktopBashRequest(value: unknown): DesktopBashRequest {
+	const session = parseDesktopSessionRequest(value);
+	if (
+		!isRecord(value)
+		|| typeof value.command !== "string"
+		|| value.command.trim().length === 0
+		|| typeof value.excludeFromContext !== "boolean"
+		|| typeof value.displayText !== "string"
+		|| value.displayText.trim().length === 0
+	) {
+		throw new RequestError(
+			ERROR_INVALID_PARAMS,
+			"pix/session/bash requires command, excludeFromContext, and displayText",
+		);
+	}
+	return {
+		...session,
+		command: value.command.trim(),
+		excludeFromContext: value.excludeFromContext,
+		displayText: value.displayText,
+	};
 }
 
 export function parseDesktopRuntimeStatusRequest(value: unknown): DesktopRuntimeStatusRequest {

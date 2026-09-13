@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toolGroupPresentationNames, toolPresentation, toolTone } from "./tool-presentation";
+import { isUserBashTool, toolGroupPresentationNames, toolPresentation, toolTone } from "./tool-presentation";
 
 describe("toolPresentation", () => {
   it("formats read paths and ranges like the TUI", () => {
@@ -47,6 +47,27 @@ describe("toolPresentation", () => {
       { name: "todo", kind: "other", title: "Todo again" },
       { name: "repo_knowledge", kind: "other", title: "Repo knowledge" },
     ])).toBe("todo, repo_knowledge");
+  });
+
+  it("distinguishes Desktop one-shot user bash rows from model bash tools", () => {
+    expect(isUserBashTool({
+      name: "bash",
+      kind: "execute",
+      title: "Bash: pwd",
+      rawInput: { command: "pwd", excludeFromContext: false },
+    })).toBe(true);
+    expect(isUserBashTool({
+      name: "bash",
+      kind: "execute",
+      title: "Bash (no context): git status",
+      rawInput: { command: "git status", excludeFromContext: true },
+    })).toBe(true);
+    expect(isUserBashTool({
+      name: "bash",
+      kind: "execute",
+      title: "Bash: npm test",
+      rawInput: { command: "npm test" },
+    })).toBe(false);
   });
 });
 

@@ -33,6 +33,47 @@ test("replayed failed mutations retain failed status", async () => {
 	assert.equal(result.update.status, "failed");
 });
 
+test("desktop history replays persisted Pi bash executions as execution rows", () => {
+	const messages = [
+		{
+			role: "bashExecution",
+			command: "pwd",
+			output: "/repo\n",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+			timestamp: 1_000,
+		},
+		{
+			role: "bashExecution",
+			command: "git status",
+			output: "fatal: not a git repository\n",
+			exitCode: 128,
+			cancelled: false,
+			truncated: false,
+			excludeFromContext: true,
+			timestamp: 2_000,
+		},
+	] as unknown as PiAgentMessage[];
+
+	const history = deferredSessionHistoryFromMessages(messages, { sessionId: "session-bash", cwd: "/repo" });
+	const starts = history.updates.filter((update) => update.sessionUpdate === "tool_call") as Array<SessionNotification["update"] & {
+		title: string;
+		rawInput?: unknown;
+	}>;
+	const results = history.updates.filter((update) => update.sessionUpdate === "tool_call_update") as Array<SessionNotification["update"] & {
+		status: string;
+		content?: unknown;
+	}>;
+
+	assert.equal(starts.length, 2);
+	assert.equal(starts[0]?.title, "Bash: pwd");
+	assert.equal(starts[1]?.title, "Bash (no context): git status");
+	assert.deepEqual(starts[1]?.rawInput, { command: "git status", excludeFromContext: true });
+	assert.deepEqual(results.map((update) => update.status), ["completed", "failed"]);
+	assert.equal(JSON.stringify(results[1]?.content).includes("exit 128"), true);
+});
+
 test("desktop lazy tool hydration preserves normalized details, images, and status without mutating history", () => {
 	const messages = [
 		{

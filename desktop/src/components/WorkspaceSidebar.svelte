@@ -208,6 +208,7 @@
 
   let sidebarElement = $state<HTMLElement | null>(null);
   let projectSwitcher = $state<{ close: () => void } | null>(null);
+  let packageScriptsPanel = $state<{ openTerminal: (command: string) => Promise<void> } | null>(null);
   let activeTab = $state<SidebarTab>("tasks");
   const layoutController = createWorkspaceSidebarLayoutController({ activeTab: () => activeTab });
   const projectSettingsController = createWorkspaceSidebarProjectSettingsController({
@@ -411,6 +412,19 @@
     const taskCard = [...(sidebarElement?.querySelectorAll<HTMLElement>("[data-task-card]") ?? [])]
       .find((card) => card.dataset.taskId === taskId);
     taskCard?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Open an interactive workspace shell and submit one command into it. */
+  export async function openTerminal(command: string): Promise<void> {
+    statusMenuController.close();
+    planSelectorOpen = false;
+    planSelectorQuery = "";
+    editorOpen = false;
+    deleteTaskId = null;
+    setActiveTab("scripts");
+    if (layoutController.collapsed) layoutController.setCollapsed(false);
+    await tick();
+    await packageScriptsPanel?.openTerminal(command);
   }
 
   /** Close the project picker when another top-level interaction takes focus. */
@@ -659,7 +673,7 @@
         </div>
       {:else if activeTab === "scripts"}
         <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Package Scripts">
-          <PackageScriptsPanel {workspace} />
+          <PackageScriptsPanel bind:this={packageScriptsPanel} {workspace} />
         </div>
       {:else if activeTab === "idx"}
         <div id="workspace-idx-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="IDX">

@@ -97,6 +97,20 @@ export class AcpPixExtensions {
     return { sessionId: response.sessionId, ...(typeof response.dcpStats === "string" ? { dcpStats: response.dcpStats } : {}) };
   }
 
+  async bash(
+    sessionId: string,
+    command: string,
+    excludeFromContext: boolean,
+    displayText: string,
+  ): Promise<void> {
+    await this.request("pix/session/bash", {
+      sessionId,
+      command,
+      excludeFromContext,
+      displayText,
+    }, null);
+  }
+
   async userMessageAction(sessionId: string, entryId: string, action: UserMessageAction): Promise<UserMessageActionResult> {
     const response = await this.request<unknown>("pix/session/user_message_action", { sessionId, entryId, action }, null);
     if (!isRecord(response) || (response.status !== "ok" && response.status !== "warning" && response.status !== "cancelled")) {

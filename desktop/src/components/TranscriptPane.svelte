@@ -11,7 +11,7 @@
   import { onDestroy } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import type { ProjectFileLineRange } from "../lib/project-files";
-  import { toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
+  import { isUserBashTool, toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
   import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
   import {
     formatTranscriptDuration,
@@ -112,6 +112,14 @@
     for (const tool of tools) {
       if (tool.deferredResult && !tool.resultLoading) onLoadToolResult(tool.toolCallId);
     }
+  }
+
+  function autoOpenBangDetails(node: HTMLDetailsElement, enabled: boolean): void {
+    if (enabled) node.open = true;
+  }
+
+  function containsUserBash(tools: readonly ToolItem[]): boolean {
+    return tools.some((tool) => isUserBashTool(tool));
   }
 
   function isServiceItem(item: TranscriptDisplayItem | undefined): boolean {
@@ -236,7 +244,7 @@
           {@const groupAttention = toolGroupAttention(item.tools)}
           {@const groupNames = toolGroupNames(item.tools)}
           {@const groupDuration = item.durationMs === undefined ? undefined : formatTranscriptDuration(item.durationMs)}
-          <details class={[
+          <details use:autoOpenBangDetails={containsUserBash(item.tools)} class={[
             "transcript-entry group w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80",
             gapClass,
             item.status === "failed" && "text-destructive",
@@ -255,7 +263,11 @@
                 {@const attention = toolLspAttention(tool)}
                 <section>
                   {#if tool.deferredResult || tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
-                    <details class="group/result" ontoggle={(event) => handleToolResultToggle(event, tool)}>
+                    <details
+                      use:autoOpenBangDetails={isUserBashTool(tool)}
+                      class="group/result"
+                      ontoggle={(event) => handleToolResultToggle(event, tool)}
+                    >
                       <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                         <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                         <ToolStatusIcon status={tool.status} {attention} class="h-3 w-3 opacity-80" />

@@ -95,6 +95,9 @@ export interface PiCompactionResult {
 	readonly estimatedTokensAfter?: number | undefined;
 }
 
+/** Result of a user `!` / `!!` shell execution through pi RPC. */
+export type PiBashResult = Awaited<ReturnType<RpcClient["bash"]>>;
+
 /** Runtime slash command discovered by pi (extension, prompt, or skill). */
 export interface PiSlashCommand {
 	readonly name: string;
@@ -165,6 +168,7 @@ export interface PiClient {
 	 */
 	onExit(listener: (error: Error) => void): () => void;
 	prompt(message: string, images?: PiImageContent[]): Promise<void>;
+	bash(command: string, excludeFromContext?: boolean): Promise<PiBashResult>;
 	/** Request a graceful stop at the next agent turn boundary. */
 	pause(): Promise<void>;
 	/** Continue an idle agent whose transcript ends at a resumable boundary. */
@@ -300,6 +304,21 @@ export class PiRpcClient implements PiClient {
 
 	prompt(message: string, images?: PiImageContent[]): Promise<void> {
 		return this.requireClient().prompt(message, images);
+	}
+
+	async bash(command: string, excludeFromContext = false): Promise<PiBashResult> {
+		const client = this.requireClient();
+		if (!excludeFromContext) return client.bash(command);
+
+		// The raw pi RPC protocol already supports excludeFromContext on bash,
+		// matching the TUI's `!!` behavior, but the pinned RpcClient.bash()
+		// wrapper does not expose that option yet.
+		const rawClient = client as unknown as {
+			send(command: { type: "bash"; command: string; excludeFromContext: boolean }): Promise<unknown>;
+			getData<T>(response: unknown): T;
+		};
+		const response = await rawClient.send({ type: "bash", command, excludeFromContext: true });
+		return rawClient.getData<PiBashResult>(response);
 	}
 
 	pause(): Promise<void> {

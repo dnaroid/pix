@@ -4,6 +4,7 @@ import type { AcpClient } from "../lib/acp-client";
 import type { Attachment } from "../lib/attachments";
 import { commandPickerState, type CommandPickerState } from "../lib/command-interactions";
 import { parseDesktopSlashCommand } from "../lib/slash-commands";
+import { parseDesktopTerminalCommand } from "../lib/terminal-commands";
 import { buildPromptPayload } from "./prompt-payload";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 
@@ -41,6 +42,7 @@ type PromptSubmitOptions = {
   showDesktopHotkeys: () => void;
   reloadResources: (options?: { echo?: boolean }) => Promise<void>;
   forkConversation: (entryId?: string) => Promise<void>;
+  openInteractiveTerminal: (command: string) => void | Promise<void>;
   closeProjectSelector: () => void;
   closeSessionSelector: () => void;
   applyModelSlashCommand: (value: string) => void | Promise<void>;
@@ -67,7 +69,7 @@ type PromptSubmitOptions = {
 
 export function createPromptSubmit(options: PromptSubmitOptions) {
   async function submit(): Promise<void> {
-    if (!options.client() || options.sessionMutationRunning() || options.sessionHistoryLoading()) return;
+    if (options.sessionMutationRunning() || options.sessionHistoryLoading()) return;
     const initialDraftKey = options.attachmentDraftKey();
     await options.waitForAttachmentDraftSettled(initialDraftKey);
     if (initialDraftKey !== options.attachmentDraftKey()) return;
@@ -77,11 +79,30 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     let draftKey = options.attachmentDraftKey();
     let draftGeneration = options.attachmentGeneration();
     if (
-      !options.client()
-      || (!text && attachments.length === 0)
+      (!text && attachments.length === 0)
       || options.sessionMutationRunning()
       || options.sessionHistoryLoading()
     ) return;
+
+    const terminalCommand = parseDesktopTerminalCommand(text);
+    if (terminalCommand && attachments.length > 0) {
+      options.reportError(new Error("Terminal commands cannot include attachments."));
+      return;
+    }
+
+    if (terminalCommand?.kind === "interactive") {
+      options.setErrorMessage(null);
+      try {
+        options.setPromptText("");
+        options.invalidateAttachmentDraft();
+        await options.openInteractiveTerminal(terminalCommand.command);
+      } catch (error) {
+        options.reportError(error);
+      }
+      return;
+    }
+
+    if (!options.client()) return;
 
     const desktopCommand = parseDesktopSlashCommand(text, attachments.length > 0);
     if (desktopCommand) {
@@ -181,6 +202,26 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       draftGeneration = options.attachmentGeneration();
     }
     if (!options.activeSessionRuntimeReady()) return;
+
+    if (terminalCommand?.kind === "chat") {
+      options.setErrorMessage(null);
+      try {
+        options.setPromptText("");
+        options.invalidateAttachmentDraft();
+        const requestClient = options.client();
+        if (!requestClient) return;
+        await requestClient.bash(
+          sessionId,
+          terminalCommand.command,
+          false,
+          text,
+        );
+        void options.refreshSessions();
+      } catch (error) {
+        options.reportError(error);
+      }
+      return;
+    }
 
     if (options.promptRunning()) {
       if (text.startsWith("/")) {
