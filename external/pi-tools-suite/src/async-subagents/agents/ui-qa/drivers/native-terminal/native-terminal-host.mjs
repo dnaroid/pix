@@ -4,7 +4,7 @@ import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { createMacosWindowEvidenceController, probeDesktopBackend } from "../../backends/desktop.mjs";
+import { createWindowEvidenceController, probeDesktopBackend } from "../../backends/desktop.mjs";
 
 export const NATIVE_TERMINAL_PRESENTATION = "native-terminal";
 
@@ -21,31 +21,22 @@ export async function probeNativeTerminalBackend(context) {
 		"stableFrame", "visibleTextAssertions", "cursorAssertions", "processState", "terminalCapture",
 		"terminalRecording", "ownedCleanup",
 	];
-	if (process.platform !== "darwin") {
-		return {
-			available: false,
-			platformDriver: process.platform === "win32" ? "windows-terminal-window-planned" : "linux-terminal-window-planned",
-			supportedCapabilities,
-			missingCapabilities: ["windowScreenshot", "windowVideo"],
-			reason: `native-terminal presentation is not implemented on ${process.platform}`,
-			remediation: "use presentation=pty when pixel fidelity is not required, or add a native terminal-window driver for this platform",
-		};
-	}
 	const provider = selectNativeTerminalProvider();
 	if (!provider) {
+		const blocker = nativeTerminalProviderBlocker(process.platform);
 		return {
 			available: false,
-			platformDriver: "macos-native-terminal-window",
+			platformDriver: blocker.platformDriver,
 			supportedCapabilities,
 			missingCapabilities: ["nativeTerminalWindow", "windowScreenshot", "windowVideo"],
-			reason: "no supported native terminal host is available",
-			remediation: "install iTerm2, restore the system Terminal application, or use presentation=pty when pixel fidelity is not required",
+			reason: blocker.reason,
+			remediation: blocker.remediation,
 		};
 	}
 	if (!fs.existsSync(BRIDGE_CLIENT)) {
 		return {
 			available: false,
-			platformDriver: "macos-terminal-window",
+			platformDriver: provider.platformDriver,
 			supportedCapabilities,
 			missingCapabilities: ["nativeTerminalWindow", "windowScreenshot", "windowVideo"],
 			reason: "the bundled native-terminal bridge client is unavailable",
@@ -67,10 +58,10 @@ export async function probeNativeTerminalBackend(context) {
 		missingCapabilities: [...missing, "terminalResize"],
 		reason: desktop.available && screenshot
 			? `PTY control plus a runner-owned ${provider.displayName} mirror and exact-window capture are available for pixel-faithful terminal QA`
-			: desktop.reason ?? "native-terminal presentation requires macOS Accessibility and Screen Recording permissions",
-		remediation: desktop.available && !screenshot
-			? "grant Screen Recording permission to the terminal/Pi host, then rerun"
-			: desktop.remediation,
+			: desktop.reason ?? `native-terminal presentation requires ${provider.displayName} plus desktop accessibility and exact-window screenshot capabilities`,
+		remediation: desktop.remediation ?? (desktop.available && !screenshot
+			? nativeTerminalScreenshotRemediation(process.platform)
+			: undefined),
 	};
 }
 
@@ -78,34 +69,41 @@ export async function startNativeTerminalDisplay(context, observations, artifact
 	const provider = selectNativeTerminalProvider();
 	if (!provider) throw new Error("no supported native terminal host is available");
 	const token = randomBytes(32).toString("hex");
+	const title = `Pi UI QA ${String(context.runId).slice(0, 72)} ${randomBytes(6).toString("hex")}`;
 	const bridge = await createBridge(token);
 	const commandFile = path.join(context.workspaceDir, `native-terminal-${context.runId}.command`);
 	let host;
 	let evidence;
 	try {
-		const command = nativeTerminalBridgeShellCommand({ nodePath: process.execPath, bridgePath: BRIDGE_CLIENT, port: bridge.port, token });
+		const command = provider.launchKind === "macos-shell"
+			? nativeTerminalBridgeShellCommand({ nodePath: process.execPath, bridgePath: BRIDGE_CLIENT, port: bridge.port, token, title })
+			: undefined;
 		if (provider.commandFile) {
 			fs.writeFileSync(commandFile, nativeTerminalBridgeCommandFile({ command }), { encoding: "utf8", mode: 0o700, flag: "wx" });
 			fs.chmodSync(commandFile, 0o700);
 		}
-		host = launchNativeTerminalProvider(provider, command, commandFile);
+		host = launchNativeTerminalProvider(provider, { command, commandFile, nodePath: process.execPath, bridgePath: BRIDGE_CLIENT, port: bridge.port, token, title });
 		if (!host.pid) throw new Error("native terminal host launch did not return a process id");
 		const handshake = await bridge.waitForHandshake(15_000);
 		if (provider.requireDescendantBridge && !isDescendantProcess(handshake.pid, host.pid)) {
 			throw new Error("native terminal bridge did not originate from the runner-owned terminal process");
 		}
-		const selector = ["--pid", String(host.pid)];
-		evidence = await createMacosWindowEvidenceController({ context, selector, observations, artifacts });
+		const selector = provider.evidenceSelector === "pid"
+			? ["--pid", String(host.pid)]
+			: ["--title", title];
+		evidence = await createWindowEvidenceController({ context, selector, observations, artifacts });
 		observations.push({
 			action: "nativeTerminalHost",
 			presentation: NATIVE_TERMINAL_PRESENTATION,
 			provider: provider.id,
 			pid: host.pid,
+			launcherPid: host.pid,
 			platformDriver: provider.platformDriver,
+			windowTitle: provider.evidenceSelector === "title" ? title : undefined,
 			cols: handshake.cols,
 			rows: handshake.rows,
 		});
-		context.progress("tui_native_terminal_ready", { pid: host.pid, cols: handshake.cols, rows: handshake.rows });
+		context.progress("tui_native_terminal_ready", { pid: host.pid, provider: provider.id, cols: handshake.cols, rows: handshake.rows });
 		return nativeDisplayHandle({ bridge, evidence, host, commandFile, handshake });
 	} catch (error) {
 		await evidence?.finish().catch(() => {});
@@ -116,10 +114,13 @@ export async function startNativeTerminalDisplay(context, observations, artifact
 	}
 }
 
-export function nativeTerminalBridgeShellCommand({ nodePath, bridgePath, port, token }) {
+export function nativeTerminalBridgeShellCommand(options) {
+	const { nodePath, bridgePath, port, token } = options;
+	const title = options.title;
 	if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("native-terminal bridge port is invalid");
 	if (!/^[a-f0-9]{32,128}$/.test(token)) throw new Error("native-terminal bridge token is invalid");
-	return `exec ${shellQuoteTrustedPath(nodePath)} ${shellQuoteTrustedPath(bridgePath)} --port ${port} --token ${token}`;
+	const titleArgument = title === undefined ? "" : ` --title ${shellQuoteTrustedTitle(title)}`;
+	return `exec ${shellQuoteTrustedPath(nodePath)} ${shellQuoteTrustedPath(bridgePath)} --port ${port} --token ${token}${titleArgument}`;
 }
 
 export function nativeTerminalBridgeCommandFile({ command }) {
@@ -129,39 +130,121 @@ export function nativeTerminalBridgeCommandFile({ command }) {
 	return `#!/bin/zsh\n${command}\n`;
 }
 
-export function chooseNativeTerminalProvider({ itermAvailable, terminalAvailable }) {
-	if (itermAvailable) {
+export function chooseNativeTerminalProvider(options = {}) {
+	const platform = options.platform ?? process.platform;
+	if (platform === "darwin" && options.itermAvailable) {
 		return {
 			id: "iterm2",
 			displayName: "iTerm2",
-			executable: ITERM2_EXECUTABLE,
+			executable: options.itermExecutable ?? ITERM2_EXECUTABLE,
 			platformDriver: "macos-iterm2-window",
+			launchKind: "macos-shell",
 			commandFile: false,
 			requireDescendantBridge: false,
+			evidenceSelector: "pid",
 		};
 	}
-	if (terminalAvailable) {
+	if (platform === "darwin" && options.terminalAvailable) {
 		return {
 			id: "terminal-app",
 			displayName: "Terminal.app",
-			executable: MACOS_TERMINAL_EXECUTABLE,
+			executable: options.terminalExecutable ?? MACOS_TERMINAL_EXECUTABLE,
 			platformDriver: "macos-terminal-window",
+			launchKind: "macos-shell",
 			commandFile: true,
 			requireDescendantBridge: true,
+			evidenceSelector: "pid",
 		};
+	}
+	if (platform === "win32" && options.windowsTerminalAvailable) {
+		return {
+			id: "windows-terminal",
+			displayName: "Windows Terminal",
+			executable: options.windowsTerminalExecutable ?? "wt.exe",
+			platformDriver: "windows-terminal-window",
+			launchKind: "direct",
+			commandFile: false,
+			requireDescendantBridge: false,
+			evidenceSelector: "title",
+		};
+	}
+	if (platform === "linux") {
+		const candidates = [
+			["kittyAvailable", "kittyExecutable", "kitty", "kitty", "kitty", "linux-kitty-window"],
+			["alacrittyAvailable", "alacrittyExecutable", "alacritty", "alacritty", "Alacritty", "linux-alacritty-window"],
+			["gnomeTerminalAvailable", "gnomeTerminalExecutable", "gnome-terminal", "gnome-terminal", "GNOME Terminal", "linux-gnome-terminal-window"],
+			["konsoleAvailable", "konsoleExecutable", "konsole", "konsole", "Konsole", "linux-konsole-window"],
+			["xtermAvailable", "xtermExecutable", "xterm", "xterm", "xterm", "linux-xterm-window"],
+		];
+		for (const [availableKey, executableKey, fallbackExecutable, id, displayName, platformDriver] of candidates) {
+			if (!options[availableKey]) continue;
+			return {
+				id,
+				displayName,
+				executable: options[executableKey] ?? fallbackExecutable,
+				platformDriver,
+				launchKind: "direct",
+				commandFile: false,
+				requireDescendantBridge: false,
+				evidenceSelector: "title",
+			};
+		}
 	}
 	return null;
 }
 
 function selectNativeTerminalProvider() {
-	return chooseNativeTerminalProvider({
-		itermAvailable: fs.existsSync(ITERM2_EXECUTABLE),
-		terminalAvailable: fs.existsSync(MACOS_TERMINAL_EXECUTABLE),
-	});
+	if (process.platform === "darwin") {
+		return chooseNativeTerminalProvider({
+			platform: "darwin",
+			itermAvailable: fs.existsSync(ITERM2_EXECUTABLE),
+			terminalAvailable: fs.existsSync(MACOS_TERMINAL_EXECUTABLE),
+		});
+	}
+	if (process.platform === "win32") {
+		const executable = findExecutable(["wt.exe", "wt"]);
+		return chooseNativeTerminalProvider({
+			platform: "win32",
+			windowsTerminalAvailable: Boolean(executable),
+			windowsTerminalExecutable: executable,
+		});
+	}
+	if (process.platform === "linux") {
+		if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return null;
+		const kitty = findExecutable(["kitty"]);
+		const alacritty = findExecutable(["alacritty"]);
+		const gnomeTerminal = findExecutable(["gnome-terminal"]);
+		const konsole = findExecutable(["konsole"]);
+		const xterm = findExecutable(["xterm"]);
+		return chooseNativeTerminalProvider({
+			platform: "linux",
+			kittyAvailable: Boolean(kitty), kittyExecutable: kitty,
+			alacrittyAvailable: Boolean(alacritty), alacrittyExecutable: alacritty,
+			gnomeTerminalAvailable: Boolean(gnomeTerminal), gnomeTerminalExecutable: gnomeTerminal,
+			konsoleAvailable: Boolean(konsole), konsoleExecutable: konsole,
+			xtermAvailable: Boolean(xterm), xtermExecutable: xterm,
+		});
+	}
+	return null;
 }
 
-function launchNativeTerminalProvider(provider, command, commandFile) {
-	const args = provider.commandFile ? [commandFile] : [`--command=${command}`];
+export function nativeTerminalProviderLaunchArgs(provider, launch) {
+	const { nodePath, bridgePath, port, token, title, command, commandFile } = launch;
+	if (provider.launchKind === "macos-shell") return provider.commandFile ? [commandFile] : [`--command=${command}`];
+	const bridgeArgs = [bridgePath, "--port", String(port), "--token", token, "--title", title];
+	if (provider.id === "windows-terminal") {
+		return ["-w", "new", "new-tab", "--title", title, "--suppressApplicationTitle", nodePath, ...bridgeArgs];
+	}
+	if (provider.id === "kitty") return ["--title", title, nodePath, ...bridgeArgs];
+	if (provider.id === "alacritty") return ["--title", title, "-e", nodePath, ...bridgeArgs];
+	if (provider.id === "gnome-terminal") return ["--wait", "--window", `--title=${title}`, "--", nodePath, ...bridgeArgs];
+	if (provider.id === "konsole") return ["--nofork", "-p", `tabtitle=${title}`, "-e", nodePath, ...bridgeArgs];
+	if (provider.id === "xterm") return ["-T", title, "-e", nodePath, ...bridgeArgs];
+	throw new Error(`unsupported native terminal provider: ${provider.id}`);
+}
+
+function launchNativeTerminalProvider(provider, launch) {
+	const args = nativeTerminalProviderLaunchArgs(provider, launch);
 	return spawn(provider.executable, args, { stdio: "ignore", detached: false, windowsHide: true });
 }
 
@@ -314,11 +397,79 @@ function removeCommandFile(commandFile) {
 	try { fs.rmSync(commandFile, { force: true }); } catch { /* best effort */ }
 }
 
+function nativeTerminalProviderBlocker(platform) {
+	if (platform === "darwin") {
+		return {
+			platformDriver: "macos-native-terminal-window",
+			reason: "no supported native terminal host is available on macOS",
+			remediation: "install iTerm2, restore the system Terminal application, or use presentation=pty when pixel fidelity is not required",
+		};
+	}
+	if (platform === "win32") {
+		return {
+			platformDriver: "windows-terminal-window",
+			reason: "Windows Terminal (wt.exe) is unavailable",
+			remediation: "install or repair Windows Terminal, or use presentation=pty when pixel fidelity is not required",
+		};
+	}
+	if (platform === "linux") {
+		return {
+			platformDriver: "linux-native-terminal-window",
+			reason: process.env.DISPLAY || process.env.WAYLAND_DISPLAY
+				? "no supported Linux terminal emulator is available"
+				: "no graphical Linux session is available for native-terminal presentation",
+			remediation: process.env.DISPLAY || process.env.WAYLAND_DISPLAY
+				? "install kitty, Alacritty, GNOME Terminal, Konsole, or xterm; otherwise use presentation=pty when pixel fidelity is not required"
+				: "run in an X11/Wayland graphical session with a supported terminal emulator, or use presentation=pty when pixel fidelity is not required",
+		};
+	}
+	return {
+		platformDriver: `${platform}-native-terminal-unsupported`,
+		reason: `native-terminal presentation is not implemented on ${platform}`,
+		remediation: "use presentation=pty when pixel fidelity is not required, or add a native terminal-window driver for this platform",
+	};
+}
+
+function nativeTerminalScreenshotRemediation(platform) {
+	if (platform === "darwin") return "grant Screen Recording permission to the terminal/Pi host, then rerun";
+	if (platform === "linux") return "install a supported exact-window screenshot producer (gnome-screenshot or scrot) and ensure AT-SPI can focus the terminal window, then rerun";
+	if (platform === "win32") return "repair the bundled Windows UI Automation screenshot capability, then rerun";
+	return "provide exact-window screenshot capability for the selected platform driver, then rerun";
+}
+
 function shellQuoteTrustedPath(value) {
 	if (typeof value !== "string" || value.length < 1 || value.includes("\n") || value.includes("\r") || value.includes(String.fromCharCode(0))) {
 		throw new Error("native-terminal bridge path is invalid");
 	}
 	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function shellQuoteTrustedTitle(value) {
+	if (typeof value !== "string" || value.length < 1 || value.length > 120 || /[\x00-\x1f\x7f]/.test(value)) {
+		throw new Error("native-terminal bridge title is invalid");
+	}
+	return shellQuoteTrustedPath(value);
+}
+
+function findExecutable(candidates) {
+	const directories = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+	const windowsExtensions = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+	for (const candidate of candidates) {
+		const hasExtension = path.extname(candidate).length > 0;
+		const extensions = process.platform === "win32" && !hasExtension ? windowsExtensions : [""];
+		for (const directory of directories) {
+			for (const extension of extensions) {
+				const resolved = path.join(directory, `${candidate}${extension}`);
+				try {
+					const stat = fs.statSync(resolved);
+					if (!stat.isFile()) continue;
+					if (process.platform !== "win32") fs.accessSync(resolved, fs.constants.X_OK);
+					return resolved;
+				} catch { /* continue */ }
+			}
+		}
+	}
+	return undefined;
 }
 
 function boundedInteger(value, min, max, label) {

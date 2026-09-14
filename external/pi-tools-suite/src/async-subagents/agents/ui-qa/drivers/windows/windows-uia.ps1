@@ -73,7 +73,7 @@ public static class UiQaWin32 {
                 Key(0, ch, KEYEVENTF_UNICODE),
                 Key(0, ch, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP),
             };
-            if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) != inputs.Length)
+            if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) != (uint)inputs.Length)
                 throw new InvalidOperationException("SendInput failed while typing text");
         }
     }
@@ -85,7 +85,7 @@ public static class UiQaWin32 {
         inputs.Add(Key(key, 0, KEYEVENTF_KEYUP));
         for (int i = modifiers.Length - 1; i >= 0; i--) inputs.Add(Key(modifiers[i], 0, KEYEVENTF_KEYUP));
         var value = inputs.ToArray();
-        if (SendInput((uint)value.Length, value, Marshal.SizeOf(typeof(INPUT))) != value.Length)
+        if (SendInput((uint)value.Length, value, Marshal.SizeOf(typeof(INPUT))) != (uint)value.Length)
             throw new InvalidOperationException("SendInput failed while sending key chord");
     }
 
@@ -127,7 +127,7 @@ function Parse-Options([string[]]$Values) {
         $key = $Values[$index]
         if (-not $key.StartsWith("--")) { Fail "unexpected argument: $key" }
         $name = $key.Substring(2)
-        if ($name -eq "all") {
+        if ($name -in @("all", "print-pid")) {
             $result[$name] = $true
             $index += 1
             continue
@@ -174,7 +174,10 @@ function Element-Attributes([System.Windows.Automation.AutomationElement]$Elemen
         } else {
             $toggle = $null
             if ($Element.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$toggle)) {
-                $attributes.value = ([System.Windows.Automation.TogglePattern]$toggle).Current.ToggleState.ToString()
+                $toggleState = ([System.Windows.Automation.TogglePattern]$toggle).Current.ToggleState
+                if ($toggleState -eq [System.Windows.Automation.ToggleState]::On) { $attributes.value = "1" }
+                elseif ($toggleState -eq [System.Windows.Automation.ToggleState]::Off) { $attributes.value = "0" }
+                else { $attributes.value = "mixed" }
             }
         }
     }
@@ -231,7 +234,7 @@ function Get-DescendantPids([int]$OwnerPid) {
     } catch {
         # Exact owner PID remains a safe fallback if WMI/CIM is unavailable.
     }
-    return $wanted
+    return ,$wanted
 }
 
 function Find-AppWindow($Options) {
@@ -251,7 +254,7 @@ function Find-AppWindow($Options) {
     $title = if ($Options.ContainsKey("title")) { [string]$Options.title } else { $null }
     foreach ($root in $roots) {
         if ($pids -and -not $pids.Contains([int]$root.Current.ProcessId)) { continue }
-        if ($title -and $root.Current.Name -ne $title) { continue }
+        if ($title -and $root.Current.Name.IndexOf($title, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
         if ($name) {
             $processName = ""
             try { $processName = (Get-Process -Id $root.Current.ProcessId -ErrorAction Stop).ProcessName } catch {}
@@ -315,7 +318,7 @@ function Find-Element([System.Windows.Automation.AutomationElement]$Window, $Opt
         return $current
     }
     $match = Require-Option $Options "match"
-    $role = if ($Options.ContainsKey("role")) { ([string]$Options.role).Replace("AX", "") } else { $null }
+    $role = if ($Options.ContainsKey("role")) { ([string]$Options.role).Replace("AX", "").Replace(" ", "") } else { $null }
     $occurrence = if ($Options.ContainsKey("occurrence")) { [int]$Options.occurrence } else { 1 }
     $seen = 0
     foreach ($record in (Walk-Tree $Window 20 1000)) {
@@ -324,7 +327,7 @@ function Find-Element([System.Windows.Automation.AutomationElement]$Window, $Opt
         $attributes = Element-Attributes $element
         $text = @($attributes.title, $attributes.description, $attributes.identifier, $attributes.help, $attributes.value) -join " "
         if ($text.IndexOf($match, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
-        if ($role -and (Control-Role $element) -ne $role) { continue }
+        if ($role -and (Control-Role $element).Replace(" ", "") -ne $role) { continue }
         $seen += 1
         if ($seen -eq $occurrence) { return $element }
     }
@@ -337,7 +340,7 @@ function Format-InspectRecord($Record) {
     $parts.Add([string]$Record.role)
     foreach ($entry in $Record.attributes.GetEnumerator()) {
         if ($null -eq $entry.Value -or [string]::IsNullOrEmpty([string]$entry.Value)) { continue }
-        $safe = ([string]$entry.Value).Replace("`r", " ").Replace("`n", " ").Replace('"', '\"')
+        $safe = ([string]$entry.Value).Replace("`r", " ").Replace("`n", " ").Replace([string][char]34, ('\' + [char]34))
         $parts.Add("$($entry.Key)=`"$safe`"")
     }
     $frame = $Record.frame
@@ -363,9 +366,9 @@ function Invoke-Element([System.Windows.Automation.AutomationElement]$Element) {
 
 function Key-Code([string]$Name) {
     $map = @{
-        enter=0x0D; return=0x0D; escape=0x1B; esc=0x1B; tab=0x09; backspace=0x08;
-        delete=0x2E; left=0x25; up=0x26; right=0x27; down=0x28; home=0x24; end=0x23;
-        pageup=0x21; pagedown=0x22; space=0x20
+        "enter"=0x0D; "return"=0x0D; "escape"=0x1B; "esc"=0x1B; "tab"=0x09; "backspace"=0x08;
+        "delete"=0x2E; "left"=0x25; "up"=0x26; "right"=0x27; "down"=0x28; "home"=0x24; "end"=0x23;
+        "pageup"=0x21; "pagedown"=0x22; "space"=0x20
     }
     $lower = $Name.ToLowerInvariant()
     if ($map.ContainsKey($lower)) { return [ushort]$map[$lower] }
@@ -420,12 +423,14 @@ switch ($command) {
     }
     "describe" {
         $element = Find-Element $window $options
-        (Element-Record $element (if ($options.ContainsKey("path")) { [string]$options.path } else { "match" })) | ConvertTo-Json -Compress -Depth 5
+        $pathValue = if ($options.ContainsKey("path")) { [string]$options.path } else { "match" }
+        (Element-Record $element $pathValue) | ConvertTo-Json -Compress -Depth 5
     }
     "screenshot" {
         $out = Require-Option $options "out"
         $directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($out))
         if (-not [IO.Directory]::Exists($directory)) { Fail "screenshot output directory does not exist" }
+        Focus-Window $window
         [UiQaWin32]::CaptureWindow([IntPtr]$window.Current.NativeWindowHandle, $out)
     }
     "click" { Invoke-Element (Find-Element $window $options) }
@@ -442,7 +447,7 @@ switch ($command) {
     }
     "key" {
         Focus-Window $window
-        $mods = if ($options.ContainsKey("modifiers")) { Modifier-Codes ([string]$options.modifiers) } else { [ushort[]]@() }
+        $mods = if ($options.ContainsKey("modifiers")) { [ushort[]]@(Modifier-Codes ([string]$options.modifiers)) } else { [ushort[]]@() }
         [UiQaWin32]::SendKeyChord((Key-Code (Require-Option $options "key")), $mods)
     }
     default { Fail "unsupported command: $command" }

@@ -608,31 +608,29 @@ describe.serial("subagent type config", () => {
 		const instructions = config.types["ui-qa"].promptAppend!;
 		expect(instructions).not.toContain("playwright-cli");
 		expect(instructions).not.toMatch(/SKILL\.md|references\//);
-		expect(instructions).toMatch(/user-visible acceptance contract, not an execution\s+plan/);
+		expect(instructions).toContain("actual user-facing surface requested by the task");
 		// The bundled role is a thin common contract plus a deterministic
 		// guide-routing workflow; backend specifics load via `guide` at runtime.
-		expect(instructions.length).toBeLessThan(8_000);
+		expect(instructions.length).toBeLessThan(5_000);
 		expect(instructions).toContain("PI_UI_QA_RUNNER");
 		expect(instructions).toContain('guide --backend browser');
 		expect(instructions).toContain('guide --backend tui');
 		expect(instructions).toContain('guide --backend desktop');
-		expect(instructions).toContain('guide --backend browser --topic auth');
+		expect(instructions).toContain("selection.guide");
 		expect(instructions).toContain("probe --flow");
 		expect(instructions).toContain("run --flow");
 		expect(instructions).toContain("$PI_SUBAGENT_AGENT_DIR/ui-qa/");
 		expect(instructions).toContain("chmod 600");
-		expect(instructions).toMatch(/no\s+safe deterministic control\s+path/);
-		expect(instructions).toContain("return `BLOCKED`");
-		expect(instructions).toContain(".pi/qa_auth.jsonc");
-		expect(instructions).toMatch(/If\s+—\s+and only if\s+—\s+a browser task actually requires authentication/);
+		expect(instructions).toMatch(/safe deterministic control path/);
+		expect(instructions).toMatch(/return\s+`BLOCKED`/);
 		// Backend-specific guidance must live only in the backend guides.
-		for (const section of ["## Flow contract", "### Form-auth scaffolding", "### Scaffold safety and edge cases", "### Choose resilient locators", "### Diagnose failures without weakening the test", "## Detailed scenario-design guidance", "expectResponse", "snapshotAccessibility", "waitForStable", "asciicast", "pseudo-terminal"]) {
+		for (const section of ["Playwright", "Chrome DevTools", "native-terminal", "iTerm2", "Windows Terminal", "AT-SPI", "ScreenCaptureKit", "expectResponse", "snapshotAccessibility", "waitForStable", "asciicast", "pseudo-terminal", ".pi/qa_auth.jsonc"]) {
 			expect(instructions).not.toContain(section);
 		}
-		// The base prompt must not embed the browser action vocabulary or the
-		// auth scaffold command; those belong to browser/browser-auth guides.
+		// The base prompt must not embed provider action/auth vocabulary.
 		expect(instructions).not.toContain("assertDOMMetric");
 		expect(instructions).not.toContain("auth scaffold");
+		expect(instructions).not.toContain("PI_BROWSER_QA_RUNNER");
 		expect(generatePrompt(resolved.task)).toContain(instructions);
 		expect(generatePrompt(resolved.task)).toContain("verify the browser bug");
 		const parentCatalog = buildSubagentCatalogPrompt(config)!;
@@ -667,7 +665,11 @@ describe.serial("subagent type config", () => {
 	test.serial("ships the ui-qa progressive-disclosure guides in the package/sync payload without new roles", () => {
 		const definitionsDir = getBuiltinSubagentDefinitionsDir();
 		const guidesDir = path.join(definitionsDir, "ui-qa", "guides");
-		const guides = ["browser.md", "browser-auth.md", "tui.md", "desktop.md"];
+		const guides = [
+			"browser.md", "browser-auth.md", "browser-playwright.md", "browser-chrome-devtools.md",
+			"tui.md", "tui-pty.md", "tui-native-terminal.md",
+			"desktop.md", "desktop-macos.md", "desktop-windows.md", "desktop-linux.md",
+		];
 		for (const guide of guides) {
 			const file = path.join(guidesDir, guide);
 			expect(fs.existsSync(file)).toBe(true);
@@ -1537,10 +1539,10 @@ setTimeout(() => {}, 2000);
 				if (qa) {
 					expect(payload.message).toContain('node "$PI_UI_QA_RUNNER"');
 					expect(payload.message).toContain("guide --backend browser");
-					// The thin prompt routes via the unified runner; the browser
-					// backend env is present but its direct invocation lives in
-					// the auth guide, not the base prompt.
-					expect(payload.message).toContain("PI_BROWSER_QA_RUNNER");
+					// The thin prompt knows only the unified progressive router;
+					// provider-specific runner details live in routed guides.
+					expect(payload.message).toContain("selection.guide");
+					expect(payload.message).not.toContain("PI_BROWSER_QA_RUNNER");
 					expect(payload.message).not.toContain('node "$PI_BROWSER_QA_RUNNER"');
 					expect(payload.message).not.toContain("## Detailed scenario-design guidance");
 					 expect(payload.runner).toBe(getBrowserQaRunnerPath());

@@ -19,7 +19,22 @@ const GUIDE_FILES = {
 	tui: "tui.md",
 	desktop: "desktop.md",
 };
-const GUIDE_AUTH_FILE = "browser-auth.md";
+const GUIDE_TOPIC_FILES = {
+	browser: {
+		auth: "browser-auth.md",
+		playwright: "browser-playwright.md",
+		"chrome-devtools": "browser-chrome-devtools.md",
+	},
+	tui: {
+		pty: "tui-pty.md",
+		"native-terminal": "tui-native-terminal.md",
+	},
+	desktop: {
+		"macos-accessibility": "desktop-macos.md",
+		"windows-uia": "desktop-windows.md",
+		"linux-at-spi": "desktop-linux.md",
+	},
+};
 const MAX_GUIDE_BYTES = 256 * 1024;
 const FLOW_RELATIVE = "flows";
 const EVIDENCE_RELATIVE = "evidence";
@@ -165,7 +180,9 @@ async function main() {
  */
 function runGuideCommand(rawArgs) {
 	const options = parseGuideArgs(rawArgs);
-	const fileName = options.topic === "auth" ? GUIDE_AUTH_FILE : GUIDE_FILES[options.backend];
+	const fileName = options.topic === undefined
+		? GUIDE_FILES[options.backend]
+		: GUIDE_TOPIC_FILES[options.backend][options.topic];
 	const guidesDir = fileURLToPath(new URL(GUIDES_DIR_RELATIVE_URL, import.meta.url));
 	const guidePath = path.join(guidesDir, fileName);
 	// The allowlisted name cannot traverse, but keep the containment, symlink,
@@ -196,8 +213,9 @@ function parseGuideArgs(values) {
 		throw new UiQaError("FAILED", `unknown guide backend: ${options.backend}`);
 	}
 	if (options.topic !== undefined) {
-		if (options.topic !== "auth") throw new UiQaError("FAILED", `unknown guide topic: ${options.topic}`);
-		if (options.backend !== "browser") throw new UiQaError("FAILED", "--topic auth is available only for --backend browser");
+		if (!Object.hasOwn(GUIDE_TOPIC_FILES[options.backend], options.topic)) {
+			throw new UiQaError("FAILED", `unknown guide topic for ${options.backend}: ${options.topic}`);
+		}
 	}
 	return options;
 }
@@ -229,6 +247,9 @@ async function selectBackend(context) {
 		candidateBackends,
 		selectedBackend: detectedTargetKind,
 		platformDriver: selected.platformDriver,
+		guide: typeof selected.guideTopic === "string"
+			? { backend: detectedTargetKind, topic: selected.guideTopic }
+			: undefined,
 		supportedCapabilities: stringArray(selected.supportedCapabilities),
 		missingCapabilities: stringArray(selected.missingCapabilities),
 		whySelected: selected.reason ?? `target descriptor matches the ${detectedTargetKind} backend`,
@@ -244,6 +265,7 @@ function publicSelection(selection) {
 		candidateBackends: selection.candidateBackends,
 		selectedBackend: selection.selectedBackend,
 		...(selection.platformDriver ? { platformDriver: selection.platformDriver } : {}),
+		...(selection.guide ? { guide: selection.guide } : {}),
 		supportedCapabilities: selection.supportedCapabilities,
 		missingCapabilities: selection.missingCapabilities,
 		whySelected: selection.whySelected,

@@ -589,41 +589,44 @@ AGENTS.md before approving anything; cite file paths first.
 The built-in `ui-qa` role runs on `zai/glm-5.3-flash`, with
 `openai-codex/gpt-5.6-luna` as its fallback. Its Markdown body
 (`src/async-subagents/agents/ui-qa.md`) is a deliberately thin common contract:
-test the real user-facing target, classify the backend, load exactly one
-backend guide, run through the unified runner, and keep deterministic
+test the real user-facing target, classify only the top-level backend, route
+through on-demand guides, run through the unified runner, and keep deterministic
 assertions as the oracle with bounded execution, owned cleanup, and private
-evidence. The normal profile loader appends that body to the QA child's task
-prompt; the parent and LLM router receive only the short `description`. There
-is no additional QA skill to discover or read.
+evidence. Provider/presentation/platform details are intentionally absent from
+the initial role body. The normal profile loader appends that body to the QA
+child's task prompt; the parent and LLM router receive only the short
+`description`. There is no additional QA skill to discover or read.
 
 Backend specifics use progressive disclosure through bundled guides under
-`src/async-subagents/agents/ui-qa/guides/` (`browser.md`, `tui.md`,
-`desktop.md`, plus the explicit `browser-auth.md`). Before any UI action the
-child loads exactly the matching guide read-only via the runner:
+`src/async-subagents/agents/ui-qa/guides/`. `browser.md`, `tui.md`, and
+`desktop.md` are compact routers; backend-scoped detail topics cover the actual
+browser provider, TUI presentation, desktop platform driver, and explicit
+browser-auth workflow. The child loads the matching base guide, then only the
+routed detail topic read-only via the runner:
 
 ```sh
 node "$PI_UI_QA_RUNNER" guide --backend browser   # or: tui | desktop
-node "$PI_UI_QA_RUNNER" guide --backend browser --topic auth   # only when auth is actually required
+node "$PI_UI_QA_RUNNER" guide --backend browser --topic playwright
+# other examples: chrome-devtools, tui/native-terminal, desktop/windows-uia
 ```
 
-The command resolves the guide from a fixed allowlist bundled with the suite
-(never a model-composed path), rejects unknown backends/topics/options and
-extra arguments, bounds guide size, and prints only the requested document, so
-browser runs never receive TUI/desktop instructions and vice versa.
+The command resolves the guide from a backend-scoped fixed allowlist bundled
+with the suite (never a model-composed path), rejects unknown/cross-backend
+topics/options and extra arguments, bounds guide size, and prints only the
+requested document. `probe` returns authoritative
+`selection.guide = {backend, topic}`; the child reconciles that route before
+`run`.
 
 `ui-qa` authors one private declarative flow and invokes the capability-first
 runner supplied in `PI_UI_QA_RUNNER`. The runner selects exactly one backend
 from the target descriptor and reports candidate capabilities plus its selection
-rationale. Browser targets delegate to the trusted Playwright backend described
-below. Terminal/TUI targets run through a real PTY plus a headless ANSI/VT
-terminal model. Native macOS targets use the bundled Accessibility/CGWindow
-driver for semantic actions, state assertions, captures, and screenshots. TUI
-runs automatically retain a bounded asciicast v2 replay. On macOS 12.3+ with
-Screen Recording permission, desktop runs automatically retain a silent H.264
-video of only the correlated application window, capped at 30 seconds with no
-display/region fallback. Video is best-effort supporting evidence and does not
-replace deterministic assertions. Unsupported platforms or missing required
-control permissions return `BLOCKED`. QA does not
+rationale. Browser routing selects the trusted Playwright backend or the
+capability-probed Chrome DevTools provider. TUI routing selects PTY semantics or
+the native-terminal mirror. Desktop routing selects the capability-probed macOS
+Accessibility, Windows UI Automation, or Linux AT-SPI implementation. Evidence
+capabilities remain platform-specific and never replace deterministic
+assertions. Unsupported platforms or missing required control permissions
+return `BLOCKED`. QA does not
 install GUI automation dependencies, change OS privacy/accessibility settings,
 disable sandboxing, or operate unrelated user windows. Static or mock checks do
 not substitute for the requested UI.

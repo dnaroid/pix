@@ -2,17 +2,81 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	CHROME_DEVTOOLS_DRIVER,
+	CHROME_DEVTOOLS_ONLY_ACTIONS,
+	chromeDevtoolsRequiredByFlow,
+	probeChromeDevtoolsProvider,
+	runChromeDevtoolsProvider,
+} from "../drivers/chrome-devtools/chrome-devtools-provider.mjs";
 
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
 const INSTALLED_BROWSER_RUNNER = fileURLToPath(new URL("../browser/scripts/browser-qa-runner.mjs", import.meta.url));
+const PLAYWRIGHT_DRIVER = "playwright-trusted-runner";
+
+export function resolveBrowserDriver(flow) {
+	const target = isObject(flow?.target) ? flow.target : {};
+	const requested = target.browserDriver ?? "auto";
+	if (!["auto", "playwright", "chrome-devtools"].includes(requested)) {
+		throw new Error("target.browserDriver must be auto, playwright, or chrome-devtools");
+	}
+	if (requested !== "auto") return requested;
+	if (typeof target.profile === "string") return "playwright";
+	if (target.devtools !== undefined) return "chrome-devtools";
+	return chromeDevtoolsRequiredByFlow(flow) ? "chrome-devtools" : "playwright";
+}
 
 export async function probeBrowserBackend(context = {}) {
+	const driver = resolveBrowserDriver(context.flow);
+	const target = isObject(context.flow?.target) ? context.flow.target : {};
+	if (driver === "chrome-devtools") {
+		if (typeof target.profile === "string") {
+			return {
+				available: false,
+				guideTopic: "chrome-devtools",
+				platformDriver: CHROME_DEVTOOLS_DRIVER,
+				supportedCapabilities: [],
+				missingCapabilities: ["trustedAuthentication"],
+				reason: "target.profile authentication is owned by the trusted Playwright provider and cannot be delegated to Chrome DevTools",
+				remediation: "use target.browserDriver `playwright` for QA credential profiles, or remove target.profile when the scenario does not require trusted authentication",
+			};
+		}
+		return { ...(await probeChromeDevtoolsProvider(context)), guideTopic: "chrome-devtools" };
+	}
+	if (target.devtools !== undefined) {
+		return {
+			available: false,
+			guideTopic: "playwright",
+			platformDriver: PLAYWRIGHT_DRIVER,
+			supportedCapabilities: [],
+			missingCapabilities: ["chromeDevtoolsOptions"],
+			reason: "target.devtools options cannot be applied by the Playwright provider",
+			remediation: typeof target.profile === "string"
+				? "remove target.devtools when using target.profile; trusted authentication is Playwright-owned"
+				: "use target.browserDriver `chrome-devtools`, or leave it as `auto` so target.devtools selects Chrome DevTools",
+		};
+	}
+	const devtoolsOnly = Array.isArray(context.flow?.steps)
+		? [...new Set(context.flow.steps.map((step) => step?.action).filter((action) => CHROME_DEVTOOLS_ONLY_ACTIONS.has(action)))]
+		: [];
+	if (devtoolsOnly.length > 0) {
+		return {
+			available: false,
+			guideTopic: "playwright",
+			platformDriver: PLAYWRIGHT_DRIVER,
+			supportedCapabilities: [],
+			missingCapabilities: devtoolsOnly.map((action) => `action:${action}`),
+			reason: `the Playwright provider does not implement these DevTools-only actions: ${devtoolsOnly.join(", ")}`,
+			remediation: "use target.browserDriver `chrome-devtools`, or leave it as `auto` so DevTools-only actions select the Chrome DevTools provider",
+		};
+	}
 	const runner = context.browserRunnerPath ?? INSTALLED_BROWSER_RUNNER;
 	const available = fs.existsSync(runner) && fs.statSync(runner).isFile();
 	return {
 		available,
-		platformDriver: "playwright-trusted-runner",
+		guideTopic: "playwright",
+		platformDriver: PLAYWRIGHT_DRIVER,
 		supportedCapabilities: [
 			"navigate", "semanticLocators", "pointerInput", "keyboardInput", "domState", "deterministicAssertions",
 			"screenshot", "video", "trace", "downloads", "originIsolation", "trustedAuthentication", "ownedCleanup",
@@ -25,11 +89,14 @@ export async function probeBrowserBackend(context = {}) {
 
 export async function runBrowserBackend(context) {
 	const config = validateBrowserFlow(context.flow);
+	if (config.browserDriver === "chrome-devtools") {
+		return runChromeDevtoolsProvider(context, config);
+	}
 	const generatedFlow = createAdapterFlow(context, config.flow);
 	const args = ["run", "--flow", generatedFlow, "--run-id", context.runId];
 	if (config.profile) args.push("--profile", config.profile);
 	if (config.baseUrl) args.push("--base-url", config.baseUrl);
-	for (const origin of config.allowedOrigins) args.push("--allow-origin", origin);
+	for (const origin of config.additionalAllowedOrigins) args.push("--allow-origin", origin);
 	const remaining = Math.max(100, Math.min(100_000, context.deadline - Date.now()));
 	args.push("--runner-timeout-ms", String(remaining));
 	context.progress("browser_adapter_started", { authenticated: Boolean(config.profile), allowedOriginCount: config.allowedOrigins.length });
@@ -68,7 +135,7 @@ function validateBrowserFlow(flow) {
 	assertKnownFields(flow, new Set(["version", "target", "steps", "viewport", "environment", "timeoutMs"]), "browser flow");
 	const target = flow.target;
 	if (!isObject(target)) throw new Error("browser flow requires target");
-	assertKnownFields(target, new Set(["kind", "url", "baseUrl", "profile", "allowedOrigins"]), "browser target");
+	assertKnownFields(target, new Set(["kind", "url", "baseUrl", "profile", "allowedOrigins", "browserDriver", "devtools"]), "browser target");
 	const rawUrl = target.url ?? target.baseUrl;
 	const baseUrl = rawUrl === undefined ? undefined : normalizeHttpUrl(rawUrl, "target.url/baseUrl");
 	const profile = target.profile === undefined ? undefined : safeName(target.profile, "target.profile");
@@ -77,13 +144,61 @@ function validateBrowserFlow(flow) {
 		// A profile may still use an explicit target URL, but the legacy runner owns its allowlist check.
 	}
 	const allowedOrigins = target.allowedOrigins === undefined ? [] : normalizeOrigins(target.allowedOrigins);
+	const effectiveAllowedOrigins = [...new Set([
+		...(baseUrl ? [new URL(baseUrl).origin] : []),
+		...allowedOrigins,
+	])];
+	const browserDriver = resolveBrowserDriver(flow);
+	const devtools = validateDevtoolsOptions(target.devtools);
+	if (browserDriver === "chrome-devtools" && profile) throw new Error("Chrome DevTools browser provider does not accept target.profile authentication");
+	if (browserDriver === "playwright" && target.devtools !== undefined) throw new Error("target.devtools options require browserDriver chrome-devtools or auto without target.profile");
+	if (profile && target.devtools !== undefined) throw new Error("target.profile cannot be combined with target.devtools; trusted authentication is owned by the Playwright provider");
 	if (!Array.isArray(flow.steps) || flow.steps.length < 1 || flow.steps.length > 100) throw new Error("browser flow requires 1..100 steps");
 	for (const [index, step] of flow.steps.entries()) {
 		if (!isObject(step) || typeof step.action !== "string") throw new Error(`browser step ${index + 1} must define an action`);
 	}
 	const adapter = { steps: flow.steps };
 	for (const key of ["viewport", "environment", "timeoutMs"]) if (flow[key] !== undefined) adapter[key] = flow[key];
-	return { baseUrl, profile, allowedOrigins, flow: adapter };
+	return {
+		baseUrl,
+		profile,
+		allowedOrigins: effectiveAllowedOrigins,
+		additionalAllowedOrigins: allowedOrigins,
+		browserDriver,
+		devtools,
+		flow: adapter,
+		originalFlow: flow,
+	};
+}
+
+function validateDevtoolsOptions(value) {
+	if (value === undefined) return {};
+	if (!isObject(value)) throw new Error("target.devtools must be an object");
+	assertKnownFields(value, new Set(["headless", "browserUrl", "reuseExistingBrowserSession"]), "target.devtools");
+	const result = {};
+	if (value.headless !== undefined) {
+		if (typeof value.headless !== "boolean") throw new Error("target.devtools.headless must be boolean");
+		result.headless = value.headless;
+	}
+	if (value.browserUrl !== undefined) result.browserUrl = normalizeLoopbackBrowserUrl(value.browserUrl);
+	if (value.reuseExistingBrowserSession !== undefined) {
+		if (typeof value.reuseExistingBrowserSession !== "boolean") throw new Error("target.devtools.reuseExistingBrowserSession must be boolean");
+		if (value.reuseExistingBrowserSession && !result.browserUrl) throw new Error("target.devtools.reuseExistingBrowserSession requires target.devtools.browserUrl");
+		result.reuseExistingBrowserSession = value.reuseExistingBrowserSession;
+	}
+	return result;
+}
+
+function normalizeLoopbackBrowserUrl(value) {
+	if (typeof value !== "string" || value.length > 500) throw new Error("target.devtools.browserUrl must be a bounded loopback URL");
+	let url;
+	try { url = new URL(value); } catch { throw new Error("target.devtools.browserUrl is not a valid URL"); }
+	if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+		throw new Error("target.devtools.browserUrl must be an exact credential-free http loopback origin");
+	}
+	const host = url.hostname.toLowerCase();
+	if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(host)) throw new Error("target.devtools.browserUrl must use localhost/loopback");
+	return url.origin;
 }
 
 function createAdapterFlow(context, flow) {

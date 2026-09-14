@@ -54,9 +54,12 @@ const NATIVE_TERMINAL_ACTIONS = new Set([
 
 export async function probeTuiBackend(context = {}) {
 	const presentation = resolveTuiPresentation(context.flow);
-	if (presentation === NATIVE_TERMINAL_PRESENTATION) return probeNativeTerminalBackend(context);
+	if (presentation === NATIVE_TERMINAL_PRESENTATION) {
+		return { ...(await probeNativeTerminalBackend(context)), guideTopic: "native-terminal" };
+	}
 	return {
 		available: true,
+		guideTopic: "pty",
 		platformDriver: process.platform === "win32" ? "conpty+xterm" : "forkpty+xterm",
 		supportedCapabilities: [
 			"launch", "ptyInput", "terminalResize", "screenState", "ansiVt", "alternateScreen",

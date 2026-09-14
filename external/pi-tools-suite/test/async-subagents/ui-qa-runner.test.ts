@@ -3,13 +3,16 @@ import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
+import { probeBrowserBackend, resolveBrowserDriver, runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
 import { desktopEvidenceName, desktopPlatformContract, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
 import { resolveTuiPresentation, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
-import { chooseNativeTerminalProvider, nativeTerminalBridgeCommandFile, nativeTerminalBridgeShellCommand } from "../../src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs";
+import { CHROME_DEVTOOLS_DRIVER, chromeDevtoolsStartArgs, probeChromeDevtoolsProvider } from "../../src/async-subagents/agents/ui-qa/drivers/chrome-devtools/chrome-devtools-provider.mjs";
+import { chooseNativeTerminalProvider, nativeTerminalBridgeCommandFile, nativeTerminalBridgeShellCommand, nativeTerminalProviderLaunchArgs } from "../../src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs";
 
 const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
 const macosDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift");
+const windowsDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/windows/windows-uia.ps1");
+const linuxDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/linux/linux-atspi.py");
 const nodeExecutable = fs.realpathSync(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
 const tempDirs: string[] = [];
 const children: Array<ReturnType<typeof spawn>> = [];
@@ -134,7 +137,7 @@ describe("ui-qa guide routing", () => {
 		// TUI/desktop instructions.
 		expect(browserGuide.stdout).not.toContain("QA_AUTH_UPDATE_REQUIRED");
 		expect(browserGuide.stdout).not.toContain("--success-selector");
-		expect(browserGuide.stdout).not.toContain("snapshotAccessibility");
+		expect(browserGuide.stdout).not.toContain("target.application");
 		expect(browserGuide.stdout).not.toContain("waitForStable");
 		const auth = invokeGuide(["--backend", "browser", "--topic", "auth"]);
 		expect(auth.status).toBe(0);
@@ -146,13 +149,46 @@ describe("ui-qa guide routing", () => {
 		expect(invokeGuide(["--backend", "tui"]).stdout).not.toContain("qa_auth.jsonc");
 	});
 
+	test("serves provider and platform detail guides only through backend-scoped topics", () => {
+		for (const [backend, topic, file] of [
+			["browser", "playwright", "browser-playwright.md"],
+			["browser", "chrome-devtools", "browser-chrome-devtools.md"],
+			["tui", "pty", "tui-pty.md"],
+			["tui", "native-terminal", "tui-native-terminal.md"],
+			["desktop", "macos-accessibility", "desktop-macos.md"],
+			["desktop", "windows-uia", "desktop-windows.md"],
+			["desktop", "linux-at-spi", "desktop-linux.md"],
+		] as const) {
+			const result = invokeGuide(["--backend", backend, "--topic", topic]);
+			expect(result.status).toBe(0);
+			expect(result.stderr).toBe("");
+			expect(result.stdout).toBe(fs.readFileSync(guidePath(file), "utf8"));
+		}
+	});
+
+	test("keeps base guides thin and provider details isolated", () => {
+		const browser = invokeGuide(["--backend", "browser"]).stdout;
+		const tui = invokeGuide(["--backend", "tui"]).stdout;
+		const desktop = invokeGuide(["--backend", "desktop"]).stdout;
+		expect(browser).not.toContain("--javascriptEvaluation=false");
+		expect(browser).not.toContain("take_heapsnapshot");
+		expect(browser).not.toContain("expectDialog");
+		expect(tui).not.toContain("iTerm2");
+		expect(tui).not.toContain("Alacritty");
+		expect(desktop).not.toContain("ScreenCaptureKit");
+		expect(desktop).not.toContain("PrintWindow");
+		expect(desktop).not.toContain("pyatspi");
+	});
+
 	test("rejects unknown backends, topics, options, and extra arguments", () => {
 		const rejections: Array<[string[], RegExp]> = [
 			[["--backend", "web"], /unknown guide backend/],
 			[["--backend", "../ui-qa/guides/browser"], /unknown guide backend/],
-			[["--backend", "browser", "--topic", "locators"], /unknown guide topic/],
-			[["--backend", "browser", "--topic", "../../../etc/passwd"], /unknown guide topic/],
-			[["--backend", "tui", "--topic", "auth"], /only for --backend browser/],
+			[["--backend", "browser", "--topic", "locators"], /unknown guide topic for browser/],
+			[["--backend", "browser", "--topic", "../../../etc/passwd"], /unknown guide topic for browser/],
+			[["--backend", "tui", "--topic", "auth"], /unknown guide topic for tui/],
+			[["--backend", "browser", "--topic", "native-terminal"], /unknown guide topic for browser/],
+			[["--backend", "desktop", "--topic", "playwright"], /unknown guide topic for desktop/],
 			[["--backend"], /invalid guide argument/],
 			[["--backend", "browser", "--flow", "x.jsonc"], /unknown guide option/],
 			[["--backend", "browser", "extra"], /invalid guide argument/],
@@ -180,7 +216,11 @@ describe("ui-qa guide routing", () => {
 	});
 
 	test("keeps every bundled guide within the bounded guide size", () => {
-		for (const file of ["browser.md", "browser-auth.md", "tui.md", "desktop.md"]) {
+		for (const file of [
+			"browser.md", "browser-auth.md", "browser-playwright.md", "browser-chrome-devtools.md",
+			"tui.md", "tui-pty.md", "tui-native-terminal.md",
+			"desktop.md", "desktop-macos.md", "desktop-windows.md", "desktop-linux.md",
+		]) {
 			expect(fs.statSync(guidePath(file)).size).toBeLessThanOrEqual(256 * 1024);
 		}
 	});
@@ -202,8 +242,183 @@ describe("capability-first UI QA runner", () => {
 		expect(result.payload.status).toBe("AVAILABLE");
 		expect(result.payload.selection.detectedTargetKind).toBe("browser");
 		expect(result.payload.selection.selectedBackend).toBe("browser");
+		expect(result.payload.selection.guide).toEqual({ backend: "browser", topic: "playwright" });
 		expect(result.payload.selection.whySelected).toContain("browser");
 		expectUnifiedArtifacts(result.payload);
+	});
+
+	test("selects Playwright or Chrome DevTools by browser capability rather than project identity", async () => {
+		const ordinary = {
+			target: { url: "https://example.test/" },
+			steps: [{ action: "assertVisible", locator: { role: "heading", name: "Example" } }],
+		};
+		const devtools = {
+			target: { url: "https://example.test/" },
+			steps: [{ action: "assertNoConsoleErrors" }],
+		};
+		const authenticated = {
+			target: { profile: "staging-admin" },
+			steps: [{ action: "assertVisible", locator: { testId: "account" } }],
+		};
+		expect(resolveBrowserDriver(ordinary)).toBe("playwright");
+		expect(resolveBrowserDriver(devtools)).toBe("chrome-devtools");
+		expect(resolveBrowserDriver(authenticated)).toBe("playwright");
+		expect(resolveBrowserDriver({ ...ordinary, target: { ...ordinary.target, devtools: { headless: false } } })).toBe("chrome-devtools");
+		expect(resolveBrowserDriver({ ...ordinary, target: { ...ordinary.target, browserDriver: "chrome-devtools" } })).toBe("chrome-devtools");
+		expect(resolveBrowserDriver({ ...devtools, target: { ...devtools.target, browserDriver: "playwright" } })).toBe("playwright");
+
+		const explicitPlaywright = await probeBrowserBackend({
+			flow: { ...devtools, target: { ...devtools.target, browserDriver: "playwright" } },
+			browserRunnerPath: path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs"),
+		});
+		expect(explicitPlaywright.available).toBe(false);
+		expect(explicitPlaywright.platformDriver).toBe("playwright-trusted-runner");
+		expect(explicitPlaywright.missingCapabilities).toContain("action:assertNoConsoleErrors");
+
+		const authWithDevtools = await probeBrowserBackend({
+			flow: { ...authenticated, target: { ...authenticated.target, devtools: { headless: false } } },
+			browserRunnerPath: path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs"),
+		});
+		expect(authWithDevtools.available).toBe(false);
+		expect(authWithDevtools.missingCapabilities).toContain("chromeDevtoolsOptions");
+	});
+
+	test("starts Chrome DevTools with a per-run fail-closed security policy", () => {
+		const args = chromeDevtoolsStartArgs({
+			sessionId: "deadbeef",
+			evidenceDir: "/tmp/ui qa evidence",
+			allowedOrigins: ["https://example.test", "http://127.0.0.1:4312"],
+			devtools: {},
+		});
+		expect(args).toContain("--sessionId");
+		expect(args).toContain("deadbeef");
+		expect(args).toContain("--redactNetworkHeaders=true");
+		expect(args).toContain("--usageStatistics=false");
+		expect(args).toContain("--performanceCrux=false");
+		expect(args).toContain("--pageIdRouting=true");
+		expect(args).toContain("--javascriptEvaluation=false");
+		expect(args).toContain("--categoryExtensions=false");
+		expect(args).toContain("--categoryPwa=false");
+		expect(args).toContain("--experimentalVision=false");
+		expect(args).toContain("--isolated=true");
+		expect(args).toContain("--headless=true");
+		expect(args).toContain("--workspace=/tmp/ui qa evidence");
+		expect(args).toContain("--allowedUrlPattern=https://example.test/*");
+		expect(args).toContain("--allowedUrlPattern=http://127.0.0.1:4312/*");
+		expect(args.join(" ")).not.toContain("Cookie");
+		expect(args.join(" ")).not.toContain("Authorization");
+	});
+
+	test("rejects non-loopback Chrome DevTools attach endpoints", async () => {
+		const { project, agentDir } = createProject();
+		await expect(runBrowserBackend({
+			flow: {
+				target: {
+					url: "https://example.test/",
+					browserDriver: "chrome-devtools",
+					devtools: { browserUrl: "http://example.test:9222" },
+				},
+				steps: [{ action: "assertNoConsoleErrors" }],
+			},
+			projectRoot: project,
+			agentDir,
+			runId: "remote-attach-rejected",
+			deadline: Date.now() + 10_000,
+			progress() {},
+		})).rejects.toThrow(/loopback/);
+	});
+
+	test("runs Chrome DevTools through an isolated owned daemon and stops only that session", async () => {
+		if (process.platform === "win32") return;
+		const { project, agentDir } = createProject();
+		const evidenceDir = path.join(project, "devtools-evidence");
+		fs.mkdirSync(evidenceDir, { mode: 0o700 });
+		const fakeCli = writeProjectFile(project, "fake-chrome-devtools.mjs", `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const here = path.dirname(fileURLToPath(import.meta.url));
+const log = path.join(here, "fake-chrome-devtools.log");
+const argv = process.argv.slice(2);
+fs.appendFileSync(log, JSON.stringify(argv) + "\\n");
+if (argv[0] === "--version") { console.log("1.9.0"); process.exit(0); }
+const command = argv[0];
+const page = { id: 7, url: "https://example.test/", title: "Example", selected: true, isolatedContext: "owned" };
+const snapshot = {
+  id: "1_0", role: "RootWebArea", name: "Example",
+  children: [
+    { id: "1_1", role: "heading", name: "Example Domain" },
+    { id: "1_2", role: "button", name: "Continue" }
+  ]
+};
+if (command === "start" || command === "stop" || command === "close_page") process.exit(0);
+if (command === "new_page" || command === "list_pages") console.log(JSON.stringify({ pages: [page] }));
+else if (command === "take_snapshot") console.log(JSON.stringify({ snapshot }));
+else if (command === "list_console_messages") console.log(JSON.stringify({ consoleMessages: [] }));
+else if (command === "performance_start_trace") {
+  const outputIndex = argv.indexOf("--filePath");
+  if (outputIndex < 0) process.exit(2);
+  fs.writeFileSync(argv[outputIndex + 1], "raw trace with https://example.test/?token=secret");
+  console.log(JSON.stringify({
+    traceSummary: "URL: https://example.test/?token=secret\\nCPU throttling: 1x\\n  - LCP: 217 ms\\n  - CLS: 0.03\\n",
+    traceInsights: [{ insightName: "LCPBreakdown" }, { insightName: "RenderBlocking" }]
+  }));
+}
+else { console.error("unsupported fake command: " + command); process.exit(1); }
+`);
+		const probe = await probeChromeDevtoolsProvider({
+			chromeDevtoolsPath: fakeCli,
+			flow: { target: { url: "https://example.test/" }, steps: [{ action: "assertNoConsoleErrors" }] },
+		});
+		expect(probe.available).toBe(true);
+		expect(probe.platformDriver).toBe(CHROME_DEVTOOLS_DRIVER);
+
+		const result = await runBrowserBackend({
+			flow: {
+				target: { url: "https://example.test/", browserDriver: "chrome-devtools" },
+				steps: [
+					{ action: "assertText", locator: { role: "heading", name: "Example Domain", exact: true }, includes: "Example Domain" },
+					{ action: "assertNoConsoleErrors" },
+					{ action: "snapshotAccessibility", name: "owned-page" },
+					{ action: "performanceTrace", name: "owned-performance" },
+				],
+			},
+			projectRoot: project,
+			agentDir,
+			runId: "devtools-owned",
+			evidenceDir,
+			deadline: Date.now() + 20_000,
+			chromeDevtoolsPath: fakeCli,
+			artifact(value: string) {
+				const file = path.resolve(evidenceDir, value);
+				return { path: file, uri: `file://${file}` };
+			},
+			progress() {},
+		});
+		expect(result.status).toBe("PASSED");
+		expect(result.assertions).toHaveLength(2);
+		expect(result.artifacts.accessibilitySnapshots.some((entry: any) => entry.path.endsWith("owned-page.accessibility.json"))).toBe(true);
+		const performance = result.artifacts.traces.find((entry: any) => entry.path.endsWith("owned-performance.json"));
+		expect(performance).toBeDefined();
+		if (!performance) throw new Error("expected sanitized performance evidence");
+		expect(fs.existsSync(path.join(evidenceDir, "owned-performance.raw.json"))).toBe(false);
+		const performanceSummary = fs.readFileSync(performance.path, "utf8");
+		expect(performanceSummary).not.toContain("token=secret");
+		expect(performanceSummary).toContain('"lcpMs": 217');
+		expect(performanceSummary).toContain('"cls": 0.03');
+		expect(performanceSummary).toContain("LCPBreakdown");
+		const calls = fs.readFileSync(path.join(project, "fake-chrome-devtools.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		const start = calls.find((entry) => entry[0] === "start");
+		const stop = calls.find((entry) => entry[0] === "stop");
+		expect(start).toBeDefined();
+		expect(stop).toBeDefined();
+		const sessionFlag = start.indexOf("--sessionId");
+		expect(sessionFlag).toBeGreaterThanOrEqual(0);
+		const sessionId = start[sessionFlag + 1];
+		expect(sessionId).toMatch(/^[a-f0-9]{32}$/);
+		expect(stop).toContain(sessionId);
+		expect(start).toContain("--javascriptEvaluation=false");
+		expect(start).toContain("--redactNetworkHeaders=true");
 	});
 
 	test("preserves the browser backend's bounded in-memory upload flow size", () => {
@@ -286,6 +501,7 @@ process.stdin.on("data", (data) => {
 		expect(result.status).toBe(0);
 		expect(result.payload.status).toBe("PASSED");
 		expect(result.payload.selection.selectedBackend).toBe("tui");
+		expect(result.payload.selection.guide).toEqual({ backend: "tui", topic: "pty" });
 		expect(result.payload.assertions.every((entry: any) => entry.passed)).toBe(true);
 		expect(result.payload.artifacts.terminalCaptures.length).toBeGreaterThanOrEqual(5);
 		const snapshot = JSON.parse(fs.readFileSync(result.payload.artifacts.terminalCaptures.find((entry: any) => entry.path.endsWith("accepted.screen.json")).path, "utf8"));
@@ -302,6 +518,7 @@ process.stdin.on("data", (data) => {
 		expect(result.status).toBe(0);
 		expect(result.payload.status).toBe("AVAILABLE");
 		expect(result.payload.selection.selectedBackend).toBe("tui");
+		expect(result.payload.selection.guide).toEqual({ backend: "tui", topic: "pty" });
 		expect(result.payload.selection.supportedCapabilities).toContain("terminalRecording");
 		expect(result.payload.selection.missingCapabilities).not.toContain("terminalRecording");
 	});
@@ -320,21 +537,24 @@ process.stdin.on("data", (data) => {
 		});
 		const result = invoke(project, agentDir, ["probe", "--flow", "native-terminal-probe.jsonc", "--runner-timeout-ms", "30000"], 40_000);
 		expect(result.payload.selection.selectedBackend).toBe("tui");
+		expect(result.payload.selection.guide).toEqual({ backend: "tui", topic: "native-terminal" });
 		const tui = result.payload.selection.candidateBackends.find((entry: any) => entry.backend === "tui");
 		expect(tui.eligible).toBe(true);
 		if (process.platform === "darwin") {
 			expect(["macos-iterm2-window", "macos-terminal-window"]).toContain(tui.platformDriver);
+		} else if (process.platform === "win32") {
+			expect(["windows-terminal-window"]).toContain(tui.platformDriver);
+		} else if (process.platform === "linux") {
+			expect(tui.platformDriver).toMatch(/^linux-/);
+		}
+		if (result.payload.status === "AVAILABLE") {
+			expect(result.status).toBe(0);
 			expect(result.payload.selection.supportedCapabilities).toContain("nativeTerminalWindow");
-			if (result.payload.status === "AVAILABLE") {
-				expect(result.status).toBe(0);
-				expect(result.payload.selection.supportedCapabilities).toContain("windowScreenshot");
-			} else {
-				expect(result.status).toBe(2);
-				expect(result.payload.status).toBe("BLOCKED");
-			}
+			expect(result.payload.selection.supportedCapabilities).toContain("windowScreenshot");
 		} else {
 			expect(result.status).toBe(2);
 			expect(result.payload.status).toBe("BLOCKED");
+			expect(result.payload.blockedHandoff).toBeDefined();
 		}
 	});
 
@@ -355,18 +575,47 @@ process.stdin.on("data", (data) => {
 		expect(commandFile).toBe(`#!/bin/zsh\n${command}\n`);
 	});
 
-	test("native-terminal prefers iTerm2 when available and falls back to Terminal.app", () => {
-		expect(chooseNativeTerminalProvider({ itermAvailable: true, terminalAvailable: true })).toMatchObject({
+	test("native-terminal selects native hosts by platform capability rather than project identity", () => {
+		expect(chooseNativeTerminalProvider({ platform: "darwin", itermAvailable: true, terminalAvailable: true })).toMatchObject({
 			id: "iterm2",
 			platformDriver: "macos-iterm2-window",
 			commandFile: false,
 		});
-		expect(chooseNativeTerminalProvider({ itermAvailable: false, terminalAvailable: true })).toMatchObject({
+		expect(chooseNativeTerminalProvider({ platform: "darwin", itermAvailable: false, terminalAvailable: true })).toMatchObject({
 			id: "terminal-app",
 			platformDriver: "macos-terminal-window",
 			commandFile: true,
 		});
-		expect(chooseNativeTerminalProvider({ itermAvailable: false, terminalAvailable: false })).toBeNull();
+		expect(chooseNativeTerminalProvider({ platform: "win32", windowsTerminalAvailable: true, windowsTerminalExecutable: "C:\\wt.exe" })).toMatchObject({
+			id: "windows-terminal",
+			platformDriver: "windows-terminal-window",
+			evidenceSelector: "title",
+		});
+		expect(chooseNativeTerminalProvider({ platform: "linux", kittyAvailable: true, alacrittyAvailable: true })).toMatchObject({
+			id: "kitty",
+			platformDriver: "linux-kitty-window",
+		});
+		expect(chooseNativeTerminalProvider({ platform: "linux", gnomeTerminalAvailable: true })).toMatchObject({
+			id: "gnome-terminal",
+			platformDriver: "linux-gnome-terminal-window",
+		});
+		expect(chooseNativeTerminalProvider({ platform: "linux" })).toBeNull();
+	});
+
+	test("native-terminal direct providers launch only the trusted bridge and a unique evidence title", () => {
+		const token = "a".repeat(64);
+		const title = "Pi UI QA cross-platform deadbeef";
+		const common = { nodePath: "/runtime/node", bridgePath: "/trusted/bridge-client.mjs", port: 4242, token, title };
+		const windows = chooseNativeTerminalProvider({ platform: "win32", windowsTerminalAvailable: true, windowsTerminalExecutable: "C:\\wt.exe" });
+		const linux = chooseNativeTerminalProvider({ platform: "linux", alacrittyAvailable: true, alacrittyExecutable: "/usr/bin/alacritty" });
+		for (const provider of [windows, linux]) {
+			const args = nativeTerminalProviderLaunchArgs(provider, common);
+			expect(args).toContain(title);
+			expect(args).toContain("/runtime/node");
+			expect(args).toContain("/trusted/bridge-client.mjs");
+			expect(args).toContain(token);
+			expect(args.join(" ")).not.toContain("target-app");
+		}
 	});
 
 	test("native-terminal keeps PTY semantic oracles but rejects dishonest PTY-only resizing", () => {
@@ -387,6 +636,7 @@ process.stdin.on("data", (data) => {
 		expect(() => nativeTerminalBridgeShellCommand({ nodePath: "/node", bridgePath: "/bridge", port: 0, token: "a".repeat(64) })).toThrow(/port/);
 		expect(() => nativeTerminalBridgeShellCommand({ nodePath: "/node", bridgePath: "/bridge", port: 4242, token: "not-secret" })).toThrow(/token/);
 		expect(() => nativeTerminalBridgeShellCommand({ nodePath: "/bad\nnode", bridgePath: "/bridge", port: 4242, token: "a".repeat(64) })).toThrow(/path/);
+		expect(() => nativeTerminalBridgeShellCommand({ nodePath: "/node", bridgePath: "/bridge", port: 4242, token: "a".repeat(64), title: "bad\ntitle" })).toThrow(/title/);
 		expect(() => nativeTerminalBridgeCommandFile({ command: "node arbitrary-target.mjs" })).toThrow(/command/);
 	});
 
@@ -633,14 +883,15 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 	test("returns deterministic desktop platform capabilities and structured blockers", () => {
 		const windows = desktopPlatformContract("win32");
 		const linux = desktopPlatformContract("linux");
-		expect(windows.available).toBe(false);
-		expect(windows.platformDriver).toBe("windows-uia-planned");
-		expect(windows.reason).toContain("not implemented");
-		expect(windows.remediation).toContain("Windows UI Automation");
-		expect(linux.available).toBe(false);
-		expect(linux.platformDriver).toBe("linux-at-spi-planned");
-		expect(linux.missingCapabilities).toContain("semanticAccessibility");
-		expect(linux.missingCapabilities).toContain("windowVideo");
+		const unsupported = desktopPlatformContract("freebsd");
+		expect(windows.available).toBe(true);
+		expect(windows.platformDriver).toBe("windows-uia");
+		expect(windows.reason).toContain("UI Automation");
+		expect(linux.available).toBe(true);
+		expect(linux.platformDriver).toBe("linux-at-spi");
+		expect(linux.reason).toContain("AT-SPI");
+		expect(unsupported.available).toBe(false);
+		expect(unsupported.missingCapabilities).toContain("semanticAccessibility");
 
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeFlow(uiWorkspace, "desktop.jsonc", { target: { application: { name: "Nonexistent UI QA Fixture" } } });
@@ -648,6 +899,17 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		const second = invoke(project, agentDir, ["probe", "--flow", "desktop.jsonc", "--runner-timeout-ms", "30000"], 40_000);
 		expect(first.payload.selection.selectedBackend).toBe("desktop");
 		expect(second.payload.selection.selectedBackend).toBe("desktop");
+		const expectedDesktopTopic = process.platform === "darwin"
+			? "macos-accessibility"
+			: process.platform === "win32"
+				? "windows-uia"
+				: process.platform === "linux"
+					? "linux-at-spi"
+					: undefined;
+		if (expectedDesktopTopic) {
+			expect(first.payload.selection.guide).toEqual({ backend: "desktop", topic: expectedDesktopTopic });
+			expect(second.payload.selection.guide).toEqual({ backend: "desktop", topic: expectedDesktopTopic });
+		}
 		expect(second.payload.status).toBe(first.payload.status);
 		expect(second.payload.selection.supportedCapabilities).toEqual(first.payload.selection.supportedCapabilities);
 		// Exact-window video additionally requires ScreenCaptureKit, so it may be
@@ -669,14 +931,17 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 			target: { application: { name: "Unavailable UI QA target" } },
 			steps: [{ action: "waitForWindow" }],
 		});
-		// On macOS this removes xcrun/swiftc from discovery; on other platforms the
-		// desktop backend is already unsupported. Either way the runner must return
-		// the same parent-facing BLOCKED handoff shape without attempting remediation.
+		// Removing PATH removes the required trusted helper runtime/toolchain on each
+		// supported desktop platform. The runner must return the same parent-facing
+		// BLOCKED handoff shape without attempting remediation.
+		const blockedEnvironment: Record<string, string> = process.platform === "win32"
+			? { PATH: "", SystemRoot: "C:\\__pi_ui_qa_missing__", WINDIR: "C:\\__pi_ui_qa_missing__" }
+			: { PATH: "" };
 		for (const args of [
 			["probe", "--flow", "blocked-desktop.jsonc", "--runner-timeout-ms", "30000"],
 			["run", "--flow", "blocked-desktop.jsonc", "--run-id", "blocked-handoff", "--runner-timeout-ms", "30000"],
 		]) {
-			const result = invoke(project, agentDir, args, 40_000, { PATH: "" });
+			const result = invoke(project, agentDir, args, 40_000, blockedEnvironment);
 			expect(result.status).toBe(2);
 			expect(result.payload.status).toBe("BLOCKED");
 			expect(result.payload.selection.selectedBackend).toBe("desktop");
@@ -695,17 +960,36 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 	});
 
 	test("gates desktop capture steps on honestly probed capabilities", () => {
-		const full = ["windowScreenshot", "windowVideo"];
+		const full = ["windowScreenshot", "windowVideo", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions"];
 		expect(validateDesktopStepCapabilities({ action: "screenshot", name: "shot" }, full)).toBeDefined();
+		expect(validateDesktopStepCapabilities({ action: "activate" }, full)).toBeDefined();
+		expect(validateDesktopStepCapabilities({ action: "inputText" }, full)).toBeDefined();
 		// Screenshot-only producers still reject every capture-shape step.
 		expect(() => validateDesktopStepCapabilities({ action: "screenshot" }, [])).toThrow(/windowScreenshot/);
 		expect(() => validateDesktopStepCapabilities({ action: "capture" }, [])).toThrow(/windowScreenshot/);
+		expect(() => validateDesktopStepCapabilities({ action: "activate" }, [])).toThrow(/semanticActivation/);
+		expect(() => validateDesktopStepCapabilities({ action: "setValue" }, [])).toThrow(/valueInput/);
+		expect(() => validateDesktopStepCapabilities({ action: "inputText" }, [])).toThrow(/keyboardInput/);
 	});
 
-	test("uses process-group selectors for POSIX launches and PID selectors on Windows", () => {
+	test("uses process-group selectors for POSIX launches and owned process-tree roots on Windows", () => {
 		expect(launchedApplicationSelector({ pid: 4242 }, "darwin")).toEqual(["--pgid", "4242"]);
 		expect(launchedApplicationSelector({ pid: 4242 }, "linux")).toEqual(["--pgid", "4242"]);
-		expect(launchedApplicationSelector({ pid: 4242 }, "win32")).toEqual(["--pid", "4242"]);
+		expect(launchedApplicationSelector({ pid: 4242 }, "win32")).toEqual(["--owner-pid", "4242"]);
+	});
+
+	test("bundles capability-probed Windows UIA and Linux AT-SPI desktop helpers without shell evaluation", () => {
+		const windows = fs.readFileSync(windowsDesktopDriverSource, "utf8");
+		const linux = fs.readFileSync(linuxDesktopDriverSource, "utf8");
+		expect(windows).toContain("uia=available");
+		expect(windows).toContain("screenshot=available");
+		expect(windows).toContain('"owner-pid"');
+		expect(windows).toContain('"screenshot"');
+		expect(windows).not.toContain("Invoke-Expression");
+		expect(linux).toContain("atspi=available");
+		expect(linux).toContain("keyboard_input=");
+		expect(linux).toContain("pyatspi.Registry");
+		expect(linux).not.toContain("shell=True");
 	});
 
 	test("scales independent-window video to fill its Retina output surface", () => {

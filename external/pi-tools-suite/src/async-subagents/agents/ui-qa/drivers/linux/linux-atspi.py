@@ -132,9 +132,20 @@ def accessible_attributes(accessible) -> dict[str, str]:
         except Exception:
             try:
                 value_iface = accessible.queryValue()
-                attributes["value"] = str(value_iface.currentValue)
+                numeric = float(value_iface.currentValue)
+                attributes["value"] = str(int(numeric)) if numeric.is_integer() else str(numeric)
             except Exception:
                 pass
+
+    if "value" not in attributes and hasattr(pyatspi, "STATE_CHECKED"):
+        try:
+            states = accessible.getState()
+            if states.contains(pyatspi.STATE_CHECKED):
+                attributes["value"] = "1"
+            elif normalize_role(role_name(accessible)) in {"checkbox", "checkmenuitem"}:
+                attributes["value"] = "0"
+        except Exception:
+            pass
 
     attributes["enabled"] = str(state_contains(accessible, pyatspi.STATE_ENABLED)).lower()
     attributes["focused"] = str(state_contains(accessible, pyatspi.STATE_FOCUSED)).lower()
@@ -224,7 +235,7 @@ def find_window(options: dict[str, object]):
                 window_name = str(window.name or "")
             except Exception:
                 window_name = ""
-            if requested_title and window_name != requested_title:
+            if requested_title and requested_title.lower() not in window_name.lower():
                 continue
             if requested_app and requested_app not in app_name.lower() and requested_app not in window_name.lower():
                 continue
@@ -348,6 +359,24 @@ def xdotool() -> str | None:
     return shutil.which("xdotool")
 
 
+def keyboard_backend_available() -> bool:
+    tool = xdotool()
+    if tool is None:
+        return False
+    try:
+        result = subprocess.run(
+            [tool, "getactivewindow"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=3,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def screenshot_backend() -> tuple[str, str] | None:
     executable = shutil.which("gnome-screenshot")
     if executable:
@@ -427,7 +456,7 @@ if command == "doctor":
     except Exception as error:
         fail(f"AT-SPI registry is unavailable: {error}")
     print("atspi=available")
-    print(f'keyboard_input={"available" if xdotool() else "unavailable"}')
+    print(f'keyboard_input={"available" if keyboard_backend_available() else "unavailable"}')
     backend = screenshot_backend()
     print(f'screenshot={"available" if backend else "unavailable"}')
     if backend:

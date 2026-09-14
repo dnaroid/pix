@@ -39,21 +39,23 @@ export async function probeDesktopBackend(context = {}) {
 	const supportedCapabilities = ["launch", "attach", "dialogs", "boundedActions", "ownedCleanup"];
 	const platform = desktopPlatformContract(process.platform);
 	if (!platform.available) return { ...platform, supportedCapabilities };
+	const guideTopic = platform.platformDriver;
 	if (context.shallow) {
 		// Shallow probes are used only for non-selected backends. They describe the
 		// bundled platform driver without executing host-specific prerequisites or
 		// claiming permission/dependency-gated capabilities.
 		return {
 			available: true,
+			guideTopic,
 			platformDriver: platform.platformDriver,
 			supportedCapabilities,
 			missingCapabilities: [],
 			reason: platform.reason,
 		};
 	}
-	if (process.platform === "darwin") return probeMacosDesktopBackend(context, supportedCapabilities);
-	if (process.platform === "win32") return probeWindowsDesktopBackend(context, supportedCapabilities);
-	if (process.platform === "linux") return probeLinuxDesktopBackend(context, supportedCapabilities);
+	if (process.platform === "darwin") return { ...(await probeMacosDesktopBackend(context, supportedCapabilities)), guideTopic };
+	if (process.platform === "win32") return { ...(await probeWindowsDesktopBackend(context, supportedCapabilities)), guideTopic };
+	if (process.platform === "linux") return { ...(await probeLinuxDesktopBackend(context, supportedCapabilities)), guideTopic };
 	return { ...platform, supportedCapabilities };
 }
 
@@ -230,6 +232,7 @@ export async function runDesktopBackend(context) {
 	const artifacts = emptyArtifacts();
 	let recorder;
 	let launched;
+	let ownedGuiPid;
 	let selector = application.selector;
 	let failure;
 	try {
@@ -237,6 +240,13 @@ export async function runDesktopBackend(context) {
 			launched = launchApplication(application.launch, context);
 			selector = application.selector ?? launchedApplicationSelector(launched);
 			observations.push({ action: "launch", pid: launched.pid, argv0: application.launch.argv[0] });
+			if (process.platform === "win32") {
+				const output = await helperCall(helper, ["wait-window", ...selector, "--timeout", "15", "--print-pid"], context, 20_000);
+				const parsed = Number(output.trim());
+				if (!Number.isInteger(parsed) || parsed <= 0) throw new Error("Windows UI Automation helper did not return the correlated GUI process id");
+				ownedGuiPid = parsed;
+				observations.push({ action: "correlateOwnedGui", pid: ownedGuiPid, ownerPid: launched.pid });
+			}
 		}
 		if (!selector) throw new Error("desktop target requires an app selector or a launch contract");
 		if (probe.supportedCapabilities.includes("windowVideo")) {
@@ -280,7 +290,7 @@ export async function runDesktopBackend(context) {
 				await captureScreenshot({ context, helper, selector, name: "failure", artifacts }).catch(() => {});
 			}
 		}
-		if (launched) await terminateOwnedProcessTree(launched);
+		if (launched) await terminateOwnedProcessTree(launched, ownedGuiPid ? [ownedGuiPid] : []);
 	}
 	return {
 		status: failure ? "FAILED" : "PASSED",
@@ -545,11 +555,13 @@ function launchApplication(launch, context) {
 // A detached POSIX launch is a session/process-group leader. Package managers
 // commonly exit after handing the actual GUI process to a descendant, so PID
 // lookup of that wrapper is not a reliable application selector. The group is
-// both the launch ownership boundary and the selector boundary for macOS.
-// Windows has no equivalent process-group lookup in its planned driver yet.
+// both the launch ownership boundary and the selector boundary on POSIX.
+// Windows uses the owned launcher PID as a process-tree root; the UIA helper
+// resolves descendants instead of mistaking a short-lived package wrapper for
+// the actual GUI process.
 export function launchedApplicationSelector(launched, platform = process.platform) {
 	if (!launched?.pid) throw new Error("desktop launch did not return a process id");
-	return platform === "win32" ? ["--pid", String(launched.pid)] : ["--pgid", String(launched.pid)];
+	return platform === "win32" ? ["--owner-pid", String(launched.pid)] : ["--pgid", String(launched.pid)];
 }
 
 function launchEnvironment(extra) {
@@ -568,7 +580,10 @@ async function ensureDesktopHelper(context) {
 		if (!powershell) throw new Error("Windows PowerShell/pwsh is unavailable");
 		return {
 			file: powershell,
-			argsPrefix: ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", WINDOWS_DRIVER_SOURCE],
+			// Process-scoped execution-policy bypass is limited to this immutable
+			// bundled helper path; it does not modify user/machine policy or execute
+			// model-provided script text.
+			argsPrefix: ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", WINDOWS_DRIVER_SOURCE],
 			label: "Windows UI Automation helper",
 			supportsWindowVideo: false,
 		};
@@ -803,15 +818,22 @@ function runOwnedProcess(file, args, options) {
 	});
 }
 
-export async function terminateOwnedProcessTree(child) {
+export async function terminateOwnedProcessTree(child, correlatedPids = []) {
 	if (!child.pid) return;
 	if (process.platform === "win32") {
-		killOwnedPid(child.pid, "SIGTERM");
-		await Promise.race([
-			new Promise((resolve) => child.once("close", resolve)),
-			new Promise((resolve) => setTimeout(resolve, CLEANUP_TIMEOUT_MS)),
-		]);
-		if (isPidAlive(child.pid)) killOwnedPid(child.pid, "SIGKILL");
+		const ownedRoots = [...new Set([child.pid, ...correlatedPids].filter((pid) => Number.isInteger(pid) && pid > 0))];
+		for (const pid of ownedRoots) {
+			await runOwnedProcess("taskkill.exe", ["/PID", String(pid), "/T"], {
+				cwd: process.cwd(),
+				timeoutMs: CLEANUP_TIMEOUT_MS,
+			}).catch(() => {});
+			if (isPidAlive(pid)) {
+				await runOwnedProcess("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+					cwd: process.cwd(),
+					timeoutMs: CLEANUP_TIMEOUT_MS,
+				}).catch(() => {});
+			}
+		}
 		return;
 	}
 

@@ -1,72 +1,54 @@
-# Native desktop backend guide
+# Native desktop backend router
 
-Load this guide only after the common UI QA contract selected the native
-desktop backend. Use `$PI_SUBAGENT_AGENT_DIR/ui-qa/` for the declarative flow
-and runner-owned evidence. Never edit application source, tests, snapshots, or
-persistent user settings merely to make UI automation possible.
+Load this guide only after the common UI-QA role classified the requested
+surface as `desktop`. Use the unified runner and its semantic desktop driver;
+do not choose a platform automation stack yourself.
 
-The bundled macOS backend exposes semantic accessibility actions; other
-unsupported platform drivers return `BLOCKED`. Do not install GUI automation
-packages, disable sandboxing, change OS accessibility/privacy settings, or take
-control of unrelated user windows.
+## Route by probe result
 
-## Flow contract
+Desktop routing is capability-probed from the actual host. Write the common
+flow, run `probe`, then load exactly the topic returned in `selection.guide`:
 
-Set `target.application` to exactly one of `pid`, `name`, `bundleId`, or a
-bounded project-local `launch` contract. Supported steps are:
+```sh
+node "$PI_UI_QA_RUNNER" guide --backend desktop --topic macos-accessibility
+node "$PI_UI_QA_RUNNER" guide --backend desktop --topic windows-uia
+node "$PI_UI_QA_RUNNER" guide --backend desktop --topic linux-at-spi
+```
 
-- windows: `waitForWindow`, `activateWindow`, `activate`
-- inspection: `snapshotAccessibility`
-- input: `setValue`, `inputText`, `pressKey`
-- assertions: `waitForText`, `assertText`, `assertState`
-- evidence: `screenshot`, `capture`
+Do not infer this topic from a project name or merely from the OS label. The
+probe also verifies runtime dependencies/permissions. If it returns `BLOCKED`,
+relay `blockedHandoff` and stop instead of installing automation packages,
+changing privacy/accessibility settings, or substituting another surface.
 
-Launch environments may set only `CI`, `NO_COLOR`, `FORCE_COLOR`, `LANG`,
-`LC_ALL`, `TERM`, `TZ`, and `PI_UI_QA_*` variables. The runner always sets
-`PI_UI_QA=1` itself. On POSIX, launch contracts own a detached process group:
-package-manager wrappers such as `npm`, `pnpm`, or `yarn` may exit after
-starting the GUI descendant, and the runner targets and cleans that descendant
-through the owned group. Do not daemonize the application or move it into a
-different session/process group.
+Before `run`, the loaded topic must equal the authoritative `selection.guide`.
 
-Semantic element selectors use `path` or `name`, with optional `role` and
-`occurrence`. Identify the actual application and the smallest user flow that
-proves the requested behavior; inspect only enough project metadata or source
-to find that launch path and a stable automation surface.
+## Common desktop flow
 
-Input must be user-equivalent: accessibility/app-driver actions against
-identifiable controls and windows. Prefer stable names, labels, roles, test
-ids, window titles, and application-owned IDs over screen coordinates.
-Coordinate-only input is a last resort and must be paired with a postcondition
-that proves the intended target was affected.
+Set `target.application` to exactly one supported identity/launch contract. The
+detail guide documents any platform-specific identity restrictions. Common
+steps are:
 
-## Oracles and evidence
+- window/control: `waitForWindow`, `activateWindow`, `activate`;
+- inspection: `snapshotAccessibility`;
+- input: `setValue`, `inputText`, `pressKey`;
+- assertions: `waitForText`, `assertText`, `assertState`;
+- evidence: `screenshot`, `capture`.
 
-Assert a deterministic product-visible result. Desktop oracles should prefer
-accessibility/app-driver state, window/dialog state, visible copy,
-enabled/checked/value state, or another explicit application result. A
-screenshot alone is evidence, not the only pass/fail oracle.
+Semantic selectors use `path` or `name`, with optional `role` and `occurrence`.
+Prefer stable application-owned names/roles/labels/IDs over coordinates.
 
-Repeated `snapshotAccessibility`, `screenshot`, or `capture` steps may omit
-`name`; the runner assigns a collision-free action-and-step filename. Supply a
-unique `name` only when a stable human-readable artifact label is useful.
+Launch contracts must remain runner-owned and bounded. The runner permits only
+the documented safe environment subset plus `PI_UI_QA_*` bootstrap variables
+and injects `PI_UI_QA=1`. Do not daemonize the app or deliberately move it
+outside the ownership boundary.
 
-Supported macOS runs automatically publish a silent exact-window video; no
-extra flow action is required. The recording explains chronology but never
-replaces a deterministic assertion. Treat an unavailable best-effort recording
-as a reported evidence limitation, not by itself as a product failure. If
-screenshots are present, inspect at least one representative PNG with the
-`read` tool before claiming visual QA; record the inspected path and concrete
-findings. If image reading or screenshot capture is unavailable, report that
-limitation separately from deterministic functional assertions.
+## Oracles, evidence, cleanup
 
-Report `PASS`, `FAIL`, or `BLOCKED`, the concrete oracle(s), launch/control
-path, and every retained evidence file—including the window video—as a
-clickable Markdown link plus absolute path. For a failure, state expected
-versus observed behavior without rewriting the acceptance criterion.
+Prefer accessibility/app-driver state, window/dialog state, visible copy, and
+enabled/checked/value state as deterministic oracles. Screenshots/videos are
+supporting evidence. Repeated evidence actions may omit names; the runner gives
+them collision-free filenames.
 
-## Cleanup
-
-Let the runner clean up only the app/driver process it launched. Attached
-applications are not runner-owned and must not be terminated. Never broadly
-kill by app name when that could terminate an unrelated user session.
+Inspect representative screenshots before visual claims. Let the runner clean
+up only processes/windows it launched. Attached applications are externally
+owned and must not be terminated; never broadly kill by application name.
