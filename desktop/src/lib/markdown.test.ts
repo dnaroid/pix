@@ -223,10 +223,14 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain('class="markdown-media-frame" data-local-file=');
   });
 
-  it("keeps non-media file URLs as validation candidates without weakening project path rules", () => {
-    const html = renderMarkdown("[Trace](file:///tmp/qa-shots/run.trace.zip)");
+  it("keeps non-media file and directory URLs as validation candidates without weakening project path rules", () => {
+    const html = renderMarkdown([
+      "[Trace](file:///tmp/qa-shots/run.trace.zip)",
+      "[Evidence directory](file:///tmp/qa-shots/final-run)",
+    ].join("\n"));
 
     expect(html).toContain('data-local-file-candidate="/tmp/qa-shots/run.trace.zip"');
+    expect(html).toContain('data-local-file-candidate="/tmp/qa-shots/final-run"');
     expect(html).not.toContain("data-local-media");
     expect(normalizeLocalFileDestination("file:///tmp/result.png")).toBe("/tmp/result.png");
     expect(normalizeLocalFileDestination("file:///tmp/result%20one.png#preview")).toBe("/tmp/result one.png");

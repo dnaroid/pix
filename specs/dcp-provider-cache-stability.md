@@ -49,6 +49,12 @@ be a byte-stable prefix on ordinary continuations.
    A failed/incomplete full read never falls back to the presentation tail or
    timestamp-only identity. The read captures the active session/leaf and the
    context epoch; obsolete async results cannot publish a provider-ready view.
+   If the lazy read races only with descendant appends on that same branch, DCP
+   retries to a stable leaf before publication; a real branch/owner change still
+   fails closed.
+   The lazy presentation tail may contain off-branch records. Retry lineage is
+   proven by immutable `parentId` links, not positions or ID membership in that
+   tail; see the [lazy-tail retry invariant](./dcp-statistics.md#lazy-tail-retry-invariant).
 2. Provider-visible ID metadata is attached only to cloned user, tool-result, or
    bash-result carriers. A carrier publishes its own address and any immediately
    preceding assistant addresses that cannot safely be written into those

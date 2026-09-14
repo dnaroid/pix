@@ -28,6 +28,39 @@ type ProjectWorkspaceStoreOptions = {
   reportError: (error: unknown) => void;
 };
 
+type WorkspaceRestore = {
+  workspace: string;
+  recentProjects: string[];
+  activeSessionIds: Map<string, string>;
+};
+
+export function restoreProjectWorkspace(
+  locationUrl: string,
+  storage: Pick<Storage, "getItem">,
+): WorkspaceRestore {
+  const windowWorkspace = workspaceFromLocation(locationUrl);
+  try {
+    const saved = storage.getItem(WORKSPACE_STORAGE_KEY);
+    const validSaved = saved && isAbsoluteProjectPath(saved) ? saved : undefined;
+    const initialWorkspace = windowWorkspace ?? validSaved;
+    return {
+      workspace: initialWorkspace ?? "",
+      recentProjects: parseRecentProjects(
+        storage.getItem(RECENT_PROJECTS_STORAGE_KEY),
+        initialWorkspace,
+      ),
+      activeSessionIds: parseActiveSessionIds(storage.getItem(ACTIVE_SESSIONS_STORAGE_KEY)),
+    };
+  } catch {
+    // The URL is independent of localStorage and must retain its startup precedence.
+    return {
+      workspace: windowWorkspace ?? "",
+      recentProjects: buildRecentProjects([], windowWorkspace),
+      activeSessionIds: new Map(),
+    };
+  }
+}
+
 export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOptions) {
   let recentProjects = $state<string[]>([]);
   let projectColors = $state<Map<string, string>>(new Map());
@@ -46,20 +79,9 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
   }
 
   function restore(): { workspace: string; activeSessionIds: Map<string, string> } {
-    try {
-      const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-      const validSaved = saved && isAbsoluteProjectPath(saved) ? saved : undefined;
-      const windowWorkspace = workspaceFromLocation(window.location.href);
-      const initialWorkspace = windowWorkspace ?? validSaved;
-      recentProjects = parseRecentProjects(localStorage.getItem(RECENT_PROJECTS_STORAGE_KEY), initialWorkspace);
-      return {
-        workspace: initialWorkspace ?? "",
-        activeSessionIds: parseActiveSessionIds(localStorage.getItem(ACTIVE_SESSIONS_STORAGE_KEY)),
-      };
-    } catch {
-      recentProjects = [];
-      return { workspace: "", activeSessionIds: new Map() };
-    }
+    const restored = restoreProjectWorkspace(window.location.href, localStorage);
+    recentProjects = restored.recentProjects;
+    return restored;
   }
 
   function refreshColors(paths: readonly string[]): void {

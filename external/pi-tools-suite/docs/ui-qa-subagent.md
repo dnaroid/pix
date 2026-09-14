@@ -114,9 +114,16 @@ confirmed runtime image support.
 - The launcher creates a private `ui-qa/` workspace under the owning agent
   directory. Native/TUI transcripts, captures, screenshots, videos, and small
   temporary driver artifacts stay there and are removed with the sub-agent run.
+- Repeated unnamed Desktop evidence steps receive collision-free filenames
+  based on their action and step index. Explicit names remain available when a
+  stable human-readable artifact label is useful.
 - Terminal/TUI verification is selected from `target.command` and drives the
   shipping interactive program through the bundled PTY plus headless ANSI/VT
-  backend. Non-interactive stdout from another CLI path is not a TUI verification.
+  backend. The target may use its normal explicit project/session arguments to
+  open deterministic state before assertions. Non-interactive stdout from
+  another CLI path is not a TUI verification.
+  PTY input is asynchronous, so flows wait for the expected text or a stable
+  frame after `sendText`/`sendKeys` before asserting the resulting screen.
 - Native desktop verification is selected from `target.application`. The
   bundled macOS accessibility/window backend is used when its required
   permissions are already available; unsupported platforms or missing
@@ -140,6 +147,10 @@ confirmed runtime image support.
   result is `BLOCKED`; static tests are not promoted to UI QA evidence.
 - Cleanup is ownership-scoped: terminate only the PTY/session/app/driver process
   created by the run, never all processes with a matching application name.
+  POSIX desktop launch contracts correlate and clean up the complete detached
+  process group, so a package-manager wrapper may hand off to its GUI descendant
+  without making that app unreachable or leaving it running. Windows remains
+  PID-based until its native driver provides an equivalent group primitive.
 
 ## Unified capability-first runner contract
 
@@ -158,9 +169,11 @@ confirmed runtime image support.
   helper for semantic window/control actions, state assertions, accessibility
   snapshots, screenshots, and automatic exact-window ScreenCaptureKit video.
   Explicit PID lookup must observe GUI processes that register after the helper
-  starts. Unsupported platforms or missing required control capabilities return
-  a structured `BLOCKED` result; unavailable best-effort video is reported as an
-  observation without replacing deterministic assertions.
+  starts. Runner-owned POSIX launches use process-group lookup to find the GUI
+  descendant behind package-manager wrappers. Unsupported platforms or missing
+  required control capabilities return a structured `BLOCKED` result;
+  unavailable best-effort video is reported as an observation without replacing
+  deterministic assertions.
 - Results normalize selection rationale, assertions, observations, and typed
   artifact groups across all backends. Every runner/app/helper process has a
   bounded deadline and cleanup is limited to processes launched by that run.

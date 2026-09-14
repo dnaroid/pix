@@ -8,3 +8,8 @@
   cancellation, teardown, and shared mutable state.
 - Add deterministic tests for dangerous concurrency/lifecycle cases when the
   change is race-prone.
+- Before changing DCP full-history reads or retry validation, read
+  `specs/dcp-statistics.md#lazy-tail-retry-invariant`. Lazy `getBranch()` is a
+  partial JSONL presentation tail, not pure ancestry. Keep both the positive
+  real-lazy startup/append regression and the negative fork-lineage checks;
+  positional comparison or ID membership alone must not replace parent-link proof.

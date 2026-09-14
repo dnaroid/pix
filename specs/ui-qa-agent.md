@@ -83,6 +83,22 @@ evidence and never replaces deterministic assertions. Launch contracts, private
 paths, deadlines, and owned-process cleanup are enforced by the runner rather
 than by model instructions alone.
 
+POSIX desktop launch contracts are correlated and cleaned up by their owned
+detached process group, not only by the launcher PID. This lets package-manager
+wrappers hand off to the real GUI descendant without making that descendant
+invisible to accessibility automation or leaving it behind after QA. Windows
+retains PID-based selection until its native driver provides an equivalent
+group primitive. Launch environments allow bounded `PI_UI_QA_*` bootstrap
+variables in addition to the generic environment allowlist; the runner always
+supplies `PI_UI_QA=1`. TUI targets may use their ordinary explicit project and
+session arguments to open deterministic state inside the real PTY before
+assertions. Because PTY input and application rendering are asynchronous, TUI
+flows wait for the expected text or a stable frame after input before asserting
+the resulting screen.
+Repeated unnamed Desktop evidence steps receive collision-free filenames based
+on their action and step index, while explicit names remain available for stable
+human-readable labels.
+
 Profile merge semantics are unchanged: model-only overrides retain the body,
 task prompt additions follow it, and a task `promptOverride` still receives
 the profile's appended instructions. Explicit profile `promptAppend` can

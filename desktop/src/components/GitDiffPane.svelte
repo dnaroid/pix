@@ -1,7 +1,10 @@
 <script lang="ts">
+  import Check from "@lucide/svelte/icons/check";
+  import Copy from "@lucide/svelte/icons/copy";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Wrench from "@lucide/svelte/icons/wrench";
+  import { onDestroy } from "svelte";
   import { gitReviewHasFindings, type GitDiff } from "../lib/git";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import MarkdownText from "./MarkdownText.svelte";
@@ -18,6 +21,7 @@
     onOpenProjectFile,
     onOpenLocalFile,
     onReview,
+    onCopyPrompt,
     onResolve,
   }: {
     diff: GitDiff;
@@ -31,6 +35,7 @@
     onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onReview: () => void;
+    onCopyPrompt: () => boolean | Promise<boolean>;
     onResolve: () => void;
   } = $props();
 
@@ -38,6 +43,25 @@
   const scopeLabel = $derived(diff.scope === "staged" ? "Staged" : diff.scope === "unstaged" ? "Working Tree" : "All Changes");
   const lines = $derived(diff.content.split("\n"));
   const hasReviewFindings = $derived(gitReviewHasFindings(review));
+  const copyPromptDisabled = $derived(!canResolve || reviewLoading || resolveLoading);
+  let copyPromptConfirmed = $state(false);
+  let copyPromptResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function copyPrompt(): Promise<void> {
+    if (copyPromptDisabled) return;
+    const copied = await onCopyPrompt();
+    if (!copied) return;
+    copyPromptConfirmed = true;
+    if (copyPromptResetTimer) clearTimeout(copyPromptResetTimer);
+    copyPromptResetTimer = setTimeout(() => {
+      copyPromptConfirmed = false;
+      copyPromptResetTimer = undefined;
+    }, 1_600);
+  }
+
+  onDestroy(() => {
+    if (copyPromptResetTimer) clearTimeout(copyPromptResetTimer);
+  });
 
   function lineTone(line: string): string {
     if (line.startsWith("+++ ") || line.startsWith("--- ")) return "text-muted-foreground";
@@ -74,7 +98,18 @@
           <div class="flex items-center gap-2 text-[11px] text-muted-foreground"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Reviewing changes…</div>
         {:else if review}
           {#if hasReviewFindings}
-            <div class="mb-2 flex justify-end">
+            <div class="mb-2 flex justify-end gap-2">
+              <button
+                class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[11px] font-medium text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+                type="button"
+                disabled={copyPromptDisabled}
+                title={copyPromptConfirmed ? "Prompt copied to clipboard" : "Copy the exact prompt that Resolve in new session would send"}
+                onclick={copyPrompt}
+                aria-live="polite"
+              >
+                {#if copyPromptConfirmed}<Check class="h-3.5 w-3.5" aria-hidden="true" />{:else}<Copy class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+                {copyPromptConfirmed ? "Copied" : "Copy prompt"}
+              </button>
               <button
                 class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
                 type="button"

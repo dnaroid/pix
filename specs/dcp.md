@@ -53,13 +53,23 @@ sidecar importer, legacy state reader, dual-write mode, `decompress`, or
 Plain `custom` entries are not provider messages. `dcp-journal` must never be
 stored as `custom_message` or copied into a model-facing tool result.
 
-Full-branch reads fail closed on errors, partial cursors and session/leaf changes;
-they do not fall back to a lazy presentation tail. Entry binding disambiguates
-equal-role/equal-timestamp messages using canonical content. Model changes clear
-successful provider exposure as well as pending evidence, and the selected model
-owns input capacity even while SDK usage still reports the previous window.
-Actual lazy-manager resume/fork and async ownership tests are specified in
-[dcp-statistics.md](./dcp-statistics.md).
+Full-branch reads fail closed on errors, partial cursors and real session/branch
+changes; they do not fall back to a lazy presentation tail. A bounded retry is
+allowed when an async lazy-history read races only with descendant appends on
+the same active branch, so a normal leaf advance cannot permanently block DCP.
+The completed read must itself match that current lineage through the captured
+leaf; a snapshot from a transient fork cannot authorize the retry.
+Lazy `getBranch()` is a presentation/file tail, not necessarily that ancestry:
+it can omit older ancestors and include abandoned side branches. Retry proof
+walks `parentId` from the current leaf and checks the full read's immutable
+parent links; it never compares tail positions or publishes merged tail data.
+See the counterexample, required tests and prohibited shortcuts in the
+[lazy-tail retry invariant](./dcp-statistics.md#lazy-tail-retry-invariant).
+Entry binding disambiguates equal-role/equal-timestamp messages using canonical
+content. Model changes clear successful provider exposure as well as pending
+evidence, and the selected model owns input capacity even while SDK usage still
+reports the previous window. Actual lazy-manager resume/fork and async ownership
+tests are specified in [dcp-statistics.md](./dcp-statistics.md).
 
 `/dcp stats`, TUI and Desktop share the read-only statistics formatter. It
 separates dated context snapshots, durable block/commit metrics and recorded

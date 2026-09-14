@@ -61,8 +61,9 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   inline playback controls and their caption opens the viewer.
 - `file://` media is accepted only after decoding to an absolute existing regular
   file. The backend canonicalizes it and grants scoped asset access only for a
-  supported image/video extension. Non-media `file://` artifacts remain explicit
-  clickable links and use the OS opener only after a user action.
+  supported image/video extension. Existing non-media `file://` files and
+  directories remain explicit clickable links and use the OS opener only after a
+  user action. Missing paths remain ordinary text.
 - Missing, disallowed, or unrenderable local media keeps a readable fallback and
   actionable caption; a media load failure does not replace the whole transcript
   with a global error.

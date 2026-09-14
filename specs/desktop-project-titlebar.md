@@ -42,6 +42,15 @@ without blocking desktop interactions.
 - Recent projects persist locally under `pix.desktop.recentProjects`; malformed,
   relative, and duplicate entries are ignored. `pix.desktop.workspace` remains
   the persisted active project and is folded into the recent list on startup.
+- A valid `workspace` URL query is the startup workspace source of truth and
+  takes precedence over persisted local storage. If local storage is unavailable,
+  that URL workspace remains selected.
+- UI-QA may opt into an initial workspace only with `PI_UI_QA=1` and an absolute,
+  existing-directory `PI_UI_QA_WORKSPACE`. Desktop validates that value and
+  navigates the initial main webview URL with one percent-encoded `workspace`
+  query value; an invalid supplied QA value fails startup clearly, while an
+  omitted value leaves the configured initial URL unchanged. Normal launches do
+  not read or alter their initial URL for this override.
 - Escape and outside-click dismiss the project menu. Escape restores focus to
   the project-switcher trigger. ArrowUp/ArrowDown plus Home/End navigate enabled
   project commands, printable-key type-ahead searches visible menu labels, and
@@ -141,6 +150,7 @@ without blocking desktop interactions.
 - `desktop/src/components/RuntimeStatusBarItems.svelte`
 - `desktop/src/lib/recent-projects.ts`
 - `desktop/src/lib/project-colors.ts`
+- `desktop/src/app/project-workspace.test.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src-tauri/src/lib.rs`
 
@@ -148,6 +158,9 @@ without blocking desktop interactions.
 
 - `desktop/src/lib/recent-projects.test.ts` covers normalized full-path fallback
   identity.
+- `desktop/src/app/project-workspace.test.ts` covers URL precedence over stale
+  storage and retaining the URL workspace when storage fails; Rust tests cover
+  QA workspace validation and URL query encoding/replacement.
 - `desktop/src/lib/project-colors.test.ts` covers JSONC override parsing and
   fallback behavior.
 - `desktop/src/components/ProjectSwitcher.test.ts` covers current/new-window

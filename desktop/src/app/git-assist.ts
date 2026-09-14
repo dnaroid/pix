@@ -31,6 +31,13 @@ type GitAssistOptions = {
 };
 
 export function createGitAssist(options: GitAssistOptions) {
+  function currentResolutionPrompt(): string | undefined {
+    const diff = options.git.diffPreview;
+    const review = options.git.diffReview;
+    if (!diff || !review || !gitReviewHasFindings(review)) return undefined;
+    return gitReviewResolutionPrompt(diff, review);
+  }
+
   async function reviewDiff(path: string | undefined, scope: GitDiffScope): Promise<void> {
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
@@ -125,20 +132,16 @@ export function createGitAssist(options: GitAssistOptions) {
   async function resolveReviewInNewSession(): Promise<void> {
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
-    const diff = options.git.diffPreview;
-    const review = options.git.diffReview;
+    const prompt = currentResolutionPrompt();
     if (
       !requestClient
       || !requestWorkspace
-      || !diff
-      || !gitReviewHasFindings(review)
-      || !review
+      || !prompt
       || options.git.resolveRunning
       || options.operationRunning()
       || !options.statusReady()
     ) return;
 
-    const prompt = gitReviewResolutionPrompt(diff, review);
     options.git.setResolveRunning(true);
     options.git.setError(null);
     let createdSessionId: string | undefined;
@@ -193,5 +196,23 @@ export function createGitAssist(options: GitAssistOptions) {
     }
   }
 
-  return { reviewDiff, generateCommitMessage, resolveReviewInNewSession };
+  async function copyReviewResolutionPrompt(): Promise<boolean> {
+    const prompt = currentResolutionPrompt();
+    if (
+      !prompt
+      || options.git.resolveRunning
+      || options.git.llmActionId?.startsWith("review:") === true
+      || options.operationRunning()
+      || !options.statusReady()
+    ) return false;
+    try {
+      await navigator.clipboard.writeText(prompt);
+      return true;
+    } catch (error) {
+      options.reportError(error);
+      return false;
+    }
+  }
+
+  return { reviewDiff, generateCommitMessage, resolveReviewInNewSession, copyReviewResolutionPrompt };
 }

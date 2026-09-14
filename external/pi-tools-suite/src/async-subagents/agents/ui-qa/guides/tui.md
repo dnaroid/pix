@@ -32,6 +32,12 @@ requested behavior. Inspect only enough project metadata or source to find that
 launch path and a stable automation surface. Input must be user-equivalent:
 real keys through the PTY, never direct memory or signal manipulation.
 
+`sendText` and `sendKeys` enqueue input into the PTY; application rendering may
+complete on a later event-loop turn. After input that should change the screen,
+use `waitForText` or `waitForStable` before an `assertText`, `assertCursor`, or
+capture. Immediate assertions are appropriate only when intentionally checking
+the current frame.
+
 ## Oracles and evidence
 
 Assert a deterministic product-visible result. TUI oracles may include visible

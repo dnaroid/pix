@@ -18,6 +18,15 @@ describe("desktop editor work surfaces", () => {
     expect(diffSource).not.toContain("<dialog");
   });
 
+  it("exposes a copy action for the exact Git review resolution prompt", () => {
+    expect(diffSource).toContain("Copy prompt");
+    expect(diffSource).toContain('copyPromptConfirmed ? "Copied" : "Copy prompt"');
+    expect(diffSource).toContain('aria-live="polite"');
+    expect(diffSource).toContain("const copyPromptDisabled = $derived(!canResolve || reviewLoading || resolveLoading)");
+    expect(diffSource).toContain("disabled={copyPromptDisabled}");
+    expect(workbenchBuilderSource).toContain("gitAssist.copyReviewResolutionPrompt()");
+  });
+
   it("keeps preview editing state close-aware while using the full editor region", () => {
     expect(previewSource).toContain("export function requestClose()");
     expect(previewSource).toContain("editorController.canClose()");

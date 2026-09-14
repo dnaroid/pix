@@ -98,8 +98,18 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ### Registry (`core/registry.ts`)
 - **Location**: `<cwd>/.pi/subagents/registry.json`, `{version:1, latestRunId?, latestRunDir?, runs:{}, agents:{}}`. `[confirmed by code]`
+- **Concurrent writers**: run recording and cleanup removal take a project-local
+  exclusive `registry.json.lock` (owner pid/token). They retry for at most two
+  seconds, reclaim a lock whose owner process is dead or whose lock is older
+  than 30 seconds (including PID reuse and malformed owner metadata), then
+  read-modify-write while holding the lock.
+  Registry replacement is same-directory temp-file + rename, so readers see
+  either the previous complete JSON or the replacement, never a truncated write.
+  `[confirmed by code and core.test.ts]`
 - `resolveSubagentRunDir`: provided runDir → registry `latestRunDir` → scan `.pi/subagents/` by mtime. `[confirmed by code]`
-- `loadSubagentRegistry` catches parse errors and returns an empty registry (silently losing history). `[confirmed by code]`
+- `loadSubagentRegistry` still treats unreadable or malformed registry content as
+  empty so resolution safely falls back to directory scanning; normal registry
+  writers cannot create that state because replacement is atomic. `[confirmed by code]`
 
 ### Cleanup (`core/cleanup.ts`) / Stop (`core/stop.ts`, `core/process.ts`)
 - `findCleanupCandidates(runRoot, days=7, keep=20)`: only dirs where **all** agents have `exit_code` files, older than `days` by mtime, skipping the newest `keep`. `[confirmed by code]`
@@ -124,6 +134,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ```
 <cwd>/.pi/subagents/
   registry.json
+  registry.json.lock  (transient while updating)
   <YYYY-MM-DDTHH-MM-SS>[-slug]/
     prompts/<agentId>.md
     <agentId>/
@@ -143,6 +154,8 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - Agent IDs match `/^[A-Za-z0-9._-]+$/` and must not contain `..`. `[confirmed by code, paths.ts ~36-43]`
 - `exit_code` is a numeric string or literal `"stopped"`. `[confirmed by code]`
 - Registry `version` is always 1. `[confirmed by code]`
+- Concurrent `recordSubagentRun` and registry cleanup updates preserve unrelated
+  run and agent mappings. `[confirmed by code and core.test.ts]`
 - Sub-agents never receive the `subagents` tool → recursive spawning is impossible. `[confirmed by code, tool-guard.ts]`
 - Semaphore is project-wide (keyed by resolved cwd). `[confirmed by code]`
 - `ui-qa` tests the requested user-facing surface through the capability-first
@@ -212,8 +225,10 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ## Gaps / risks
 1. **pid-check race**: `process.kill(pid,0)` is point-in-time; a process exiting
    between checks flips status on the next poll, not immediately. `[inferred]`
-2. **Registry corruption silently loses history** (`loadSubagentRegistry`
-   returns an empty registry on parse failure). `[confirmed by code]`
+2. **Externally corrupted registry fallback**: malformed registry content still
+   loads as empty and therefore loses registry history until the next write,
+   although normal writers use atomic replacement and cannot expose partial JSON.
+   `[confirmed by code]`
 3. **`model_fallback_from`/`model_fallback_to` are diagnostic metadata** and are
    not a durable source for later routing decisions. `[confirmed by code]`
 4. **Polling minimum interval is bounded in code**, so very short waits cannot

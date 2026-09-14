@@ -1781,7 +1781,7 @@ async fn package_terminal_stop_workspace(
 
 #[tauri::command]
 async fn local_file_exists(path: String) -> Result<bool, String> {
-    run_blocking(move || Ok(resolve_local_file_path(Path::new(&path)).is_ok())).await
+    run_blocking(move || Ok(resolve_local_open_path(Path::new(&path)).is_ok())).await
 }
 
 #[tauri::command]
@@ -1832,10 +1832,10 @@ async fn resolve_local_media(app: AppHandle, path: String) -> Result<AttachmentF
 #[tauri::command]
 async fn open_local_file(app: AppHandle, path: String) -> Result<(), String> {
     run_blocking(move || {
-        let file_path = resolve_local_file_path(Path::new(&path))?;
+        let file_path = resolve_local_open_path(Path::new(&path))?;
         app.opener()
             .open_path(file_path.to_string_lossy(), None::<&str>)
-            .map_err(|error| format!("failed to open local file: {error}"))
+            .map_err(|error| format!("failed to open local path: {error}"))
     })
     .await
 }
@@ -1866,15 +1866,28 @@ fn resolve_local_media_from(path: &Path) -> Result<AttachmentFile, String> {
 }
 
 fn resolve_local_file_path(path: &Path) -> Result<PathBuf, String> {
-    if !path.is_absolute() {
-        return Err("local file path must be absolute".to_owned());
-    }
-    let canonical = fs::canonicalize(path)
-        .map_err(|error| format!("failed to resolve local file {}: {error}", path.display()))?;
+    let canonical = resolve_local_open_path(path)?;
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?;
     if !metadata.is_file() {
         return Err(format!("{} is not a file", canonical.display()));
+    }
+    Ok(canonical)
+}
+
+fn resolve_local_open_path(path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute() {
+        return Err("local path must be absolute".to_owned());
+    }
+    let canonical = fs::canonicalize(path)
+        .map_err(|error| format!("failed to resolve local path {}: {error}", path.display()))?;
+    let metadata = fs::metadata(&canonical)
+        .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?;
+    if !metadata.is_file() && !metadata.is_dir() {
+        return Err(format!(
+            "{} is not a file or directory",
+            canonical.display()
+        ));
     }
     Ok(canonical)
 }
@@ -7477,6 +7490,71 @@ fn exit_payload(
     }
 }
 
+const UI_QA_ENV: &str = "PI_UI_QA";
+const UI_QA_WORKSPACE_ENV: &str = "PI_UI_QA_WORKSPACE";
+
+/// Returns the QA-only workspace override after validating it can be opened as a project.
+///
+/// This deliberately only activates for the exact runner opt-in, so developer and production
+/// launches retain their configured initial URL.
+fn ui_qa_workspace_from_values(
+    ui_qa: Option<&str>,
+    workspace: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    if ui_qa != Some("1") {
+        return Ok(None);
+    }
+
+    let Some(workspace) = workspace else {
+        return Ok(None);
+    };
+    if !workspace.is_absolute() {
+        return Err(format!(
+            "{UI_QA_WORKSPACE_ENV} must be an absolute directory"
+        ));
+    }
+    let workspace = workspace.canonicalize().map_err(|error| {
+        format!(
+            "{UI_QA_WORKSPACE_ENV} must name an existing directory: {} ({error})",
+            workspace.display()
+        )
+    })?;
+    if !workspace.is_dir() {
+        return Err(format!(
+            "{UI_QA_WORKSPACE_ENV} must name an existing directory: {}",
+            workspace.display()
+        ));
+    }
+    Ok(Some(workspace))
+}
+
+fn ui_qa_workspace_from_environment() -> Result<Option<PathBuf>, String> {
+    let ui_qa = env::var(UI_QA_ENV).ok();
+    let workspace = env::var_os(UI_QA_WORKSPACE_ENV).map(PathBuf::from);
+    ui_qa_workspace_from_values(ui_qa.as_deref(), workspace.as_deref())
+}
+
+fn ui_qa_workspace_url(current_url: &tauri::Url, workspace: &Path) -> Result<tauri::Url, String> {
+    let workspace = workspace
+        .to_str()
+        .ok_or_else(|| format!("{UI_QA_WORKSPACE_ENV} must be valid UTF-8"))?;
+    let mut url = current_url.clone();
+    let existing_pairs = url
+        .query_pairs()
+        .filter(|(key, _)| key != "workspace")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    {
+        let mut query = url.query_pairs_mut();
+        query.clear();
+        for (key, value) in existing_pairs {
+            query.append_pair(&key, &value);
+        }
+        query.append_pair("workspace", workspace);
+    }
+    Ok(url)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -7488,6 +7566,16 @@ pub fn run() {
         .manage(IdxOperationState::default())
         .setup(|app| {
             app.manage(AttachmentPathState::new(app.handle()));
+            if let Some(workspace) =
+                ui_qa_workspace_from_environment().map_err(std::io::Error::other)?
+            {
+                let main_window = app
+                    .get_webview_window("main")
+                    .ok_or_else(|| std::io::Error::other("failed to find the main Pix window"))?;
+                let url = main_window.url()?;
+                let url = ui_qa_workspace_url(&url, &workspace).map_err(std::io::Error::other)?;
+                main_window.navigate(url)?;
+            }
             Ok(())
         })
         .plugin(
@@ -7680,6 +7768,59 @@ mod tests {
             env::temp_dir().join(format!("pix-desktop-{name}-{}-{stamp}", std::process::id()));
         fs::create_dir_all(&path).expect("create temporary workspace");
         path
+    }
+
+    #[test]
+    fn ui_qa_workspace_override_requires_an_existing_absolute_directory() {
+        let workspace = temporary_workspace("ui-qa-workspace");
+        let file = workspace.join("not-a-directory");
+        fs::write(&file, "not a workspace").expect("write file");
+
+        assert_eq!(
+            ui_qa_workspace_from_values(Some("0"), None).expect("non-QA launch"),
+            None
+        );
+        assert_eq!(
+            ui_qa_workspace_from_values(Some("1"), None).expect("QA launch without override"),
+            None
+        );
+        assert!(ui_qa_workspace_from_values(Some("1"), Some(Path::new("relative"))).is_err());
+        assert!(ui_qa_workspace_from_values(Some("1"), Some(&file)).is_err());
+        assert_eq!(
+            ui_qa_workspace_from_values(Some("1"), Some(&workspace)).expect("QA workspace"),
+            Some(workspace.canonicalize().expect("canonical workspace"))
+        );
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn ui_qa_workspace_url_percent_encodes_and_replaces_workspace_query() {
+        let current =
+            tauri::Url::parse("http://127.0.0.1:1420/?debug=1&workspace=%2Fstale%2Fworkspace#old")
+                .expect("parse current URL");
+        let url = ui_qa_workspace_url(&current, Path::new("/projects/pix next"))
+            .expect("add QA workspace");
+
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "workspace")
+                .map(|(_, value)| value),
+            Some("/projects/pix next".into())
+        );
+        assert_eq!(
+            url.query_pairs()
+                .filter(|(key, _)| key == "workspace")
+                .count(),
+            1
+        );
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "debug")
+                .map(|(_, value)| value),
+            Some("1".into())
+        );
+        assert!(url.as_str().contains("workspace=%2Fprojects%2Fpix+next"));
     }
 
     #[test]
@@ -8623,6 +8764,27 @@ mod tests {
         assert!(!home_file_exists_from(&home, Path::new("~/missing.jsonc")));
         assert!(!home_file_exists_from(&home, Path::new("~/../secret.txt")));
         fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn resolves_existing_absolute_files_and_directories_for_local_links() {
+        let directory = temporary_workspace("local-link-path");
+        let file_path = directory.join("artifact.log");
+        fs::write(&file_path, "complete\n").expect("write local artifact");
+
+        assert_eq!(
+            resolve_local_open_path(&file_path).expect("resolve local file link"),
+            fs::canonicalize(&file_path).expect("canonical local file")
+        );
+        assert_eq!(
+            resolve_local_open_path(&directory).expect("resolve local directory link"),
+            fs::canonicalize(&directory).expect("canonical local directory")
+        );
+        assert!(resolve_local_open_path(Path::new("relative/artifact.log")).is_err());
+        assert!(resolve_local_open_path(&directory.join("missing.log")).is_err());
+        assert!(resolve_local_file_path(&directory).is_err());
+
+        fs::remove_dir_all(directory).expect("remove temporary workspace");
     }
 
     #[test]

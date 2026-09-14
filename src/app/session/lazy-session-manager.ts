@@ -148,6 +148,11 @@ class LazySessionManager implements SessionManagerFacade {
 		return this.hydrated?.getEntries() ?? [...this.entries];
 	}
 
+	// Before hydration this is a presentation/file tail, NOT selected ancestry:
+	// it can omit old ancestors and contain abandoned side-branch entries.
+	// Lineage-sensitive callers must use readFullBranchEntries(); retry proofs
+	// must follow parentId, never compare positions in this cache. See
+	// specs/dcp-statistics.md#lazy-tail-retry-invariant and its regression tests.
 	getBranch(fromId?: string): SessionEntry[] {
 		if (this.hydrated) return this.hydrated.getBranch(fromId);
 		if (fromId === undefined) return [...this.entries];

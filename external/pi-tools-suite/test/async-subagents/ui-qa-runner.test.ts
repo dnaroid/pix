@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
-import { desktopPlatformContract, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
+import { desktopEvidenceName, desktopPlatformContract, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
 
 const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
 const nodeExecutable = fs.realpathSync(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
@@ -76,6 +76,15 @@ function expectUnifiedArtifacts(payload: any) {
 function readAsciicast(file: string) {
 	const lines = fs.readFileSync(file, "utf8").trim().split("\n");
 	return { header: JSON.parse(lines[0]), events: lines.slice(1).map((line) => JSON.parse(line)) };
+}
+
+async function waitUntil(check: () => boolean, timeout = 5_000) {
+	const deadline = Date.now() + timeout;
+	while (Date.now() < deadline) {
+		if (check()) return;
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+	throw new Error("timed out waiting for expected process state");
 }
 
 /** Invoke `guide` from an arbitrary cwd without launcher-provided env. */
@@ -175,6 +184,13 @@ describe("ui-qa guide routing", () => {
 });
 
 describe("capability-first UI QA runner", () => {
+	test("gives repeated unnamed desktop evidence steps collision-free filenames", () => {
+		expect(desktopEvidenceName(undefined, 1, "snapshot")).toBe("snapshot-2");
+		expect(desktopEvidenceName(undefined, 6, "snapshot")).toBe("snapshot-7");
+		expect(desktopEvidenceName(undefined, 5, "screenshot")).toBe("screenshot-6");
+		expect(desktopEvidenceName("after-toggle", 6, "snapshot")).toBe("after-toggle");
+	});
+
 	test("selects the browser backend for a URL without launching Playwright", () => {
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeFlow(uiWorkspace, "browser.jsonc", { version: 1, target: { url: "https://example.test/path" } });
@@ -566,5 +582,44 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		// Screenshot-only producers still reject every capture-shape step.
 		expect(() => validateDesktopStepCapabilities({ action: "screenshot" }, [])).toThrow(/windowScreenshot/);
 		expect(() => validateDesktopStepCapabilities({ action: "capture" }, [])).toThrow(/windowScreenshot/);
+	});
+
+	test("uses process-group selectors for POSIX launches and PID selectors on Windows", () => {
+		expect(launchedApplicationSelector({ pid: 4242 }, "darwin")).toEqual(["--pgid", "4242"]);
+		expect(launchedApplicationSelector({ pid: 4242 }, "linux")).toEqual(["--pgid", "4242"]);
+		expect(launchedApplicationSelector({ pid: 4242 }, "win32")).toEqual(["--pid", "4242"]);
+	});
+
+	test("targets and cleans a package-wrapper GUI descendant through its owned POSIX group", async () => {
+		if (process.platform === "win32") return;
+		const { project } = createProject();
+		const descendantPidFile = path.join(project, "descendant.pid");
+		writeProjectFile(project, "package-wrapper.mjs", `
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+fs.writeFileSync(process.argv[2], String(child.pid));
+process.exit(0);
+`);
+		const wrapper = spawn(nodeExecutable, ["package-wrapper.mjs", descendantPidFile], {
+			cwd: project,
+			detached: true,
+			stdio: "ignore",
+		});
+		try {
+			await waitUntil(() => fs.existsSync(descendantPidFile));
+			const descendantPid = Number(fs.readFileSync(descendantPidFile, "utf8"));
+			expect(descendantPid).toBeGreaterThan(0);
+			if (wrapper.exitCode === null && wrapper.signalCode === null) await new Promise<void>((resolve) => wrapper.once("exit", () => resolve()));
+			expect(launchedApplicationSelector(wrapper)).toEqual(["--pgid", String(wrapper.pid)]);
+			expect(() => process.kill(descendantPid, 0)).not.toThrow();
+			expect(() => process.kill(-wrapper.pid!, 0)).not.toThrow();
+			await terminateOwnedProcessTree(wrapper);
+			await waitUntil(() => {
+				try { process.kill(descendantPid, 0); return false; } catch { return true; }
+			});
+		} finally {
+			await terminateOwnedProcessTree(wrapper);
+		}
 	});
 });

@@ -128,7 +128,7 @@ export async function runDesktopBackend(context) {
 	try {
 		if (application.launch) {
 			launched = launchApplication(application.launch, context);
-			selector = application.selector ?? ["--pid", String(launched.pid)];
+			selector = application.selector ?? launchedApplicationSelector(launched);
 			observations.push({ action: "launch", pid: launched.pid, argv0: application.launch.argv[0] });
 		}
 		if (!selector) throw new Error("desktop target requires an app selector or a launch contract");
@@ -191,7 +191,7 @@ export async function runDesktopBackend(context) {
 }
 
 async function executeStep(options) {
-	const { context, helper, selector, step, assertions, observations, artifacts } = options;
+	const { context, helper, selector, step, index, assertions, observations, artifacts } = options;
 	const timeoutMs = stepTimeout(step, context);
 	switch (step.action) {
 		case "waitForWindow":
@@ -203,7 +203,7 @@ async function executeStep(options) {
 			observations.push({ action: step.action, focused: true });
 			return;
 		case "snapshotAccessibility":
-			await captureAccessibility({ context, helper, selector, name: captureName(step.name, "snapshot"), artifacts, depth: boundedInt(step.depth, 10, 1, 20, "depth"), limit: boundedInt(step.limit, 100, 1, 500, "limit"), timeoutMs });
+			await captureAccessibility({ context, helper, selector, name: desktopEvidenceName(step.name, index, "snapshot"), artifacts, depth: boundedInt(step.depth, 10, 1, 20, "depth"), limit: boundedInt(step.limit, 100, 1, 500, "limit"), timeoutMs });
 			return;
 		case "activate":
 			await helperCall(helper, ["click", ...selector, ...elementSelectorArgs(step.selector)], context, timeoutMs);
@@ -256,10 +256,10 @@ async function executeStep(options) {
 			return;
 		}
 		case "screenshot":
-			await captureScreenshot({ context, helper, selector, name: captureName(step.name, "screenshot"), artifacts, timeoutMs });
+			await captureScreenshot({ context, helper, selector, name: desktopEvidenceName(step.name, index, "screenshot"), artifacts, timeoutMs });
 			return;
 		case "capture": {
-			const name = captureName(step.name, "capture");
+			const name = desktopEvidenceName(step.name, index, "capture");
 			await captureAccessibility({ context, helper, selector, name, artifacts, depth: boundedInt(step.depth, 10, 1, 20, "depth"), limit: boundedInt(step.limit, 100, 1, 500, "limit"), timeoutMs });
 			if (probeHasScreenshot(context)) await captureScreenshot({ context, helper, selector, name, artifacts, timeoutMs });
 			return;
@@ -391,6 +391,16 @@ function launchApplication(launch, context) {
 	child.once("close", () => stream.end());
 	if (!child.pid) throw new Error("desktop launch did not return a process id");
 	return child;
+}
+
+// A detached POSIX launch is a session/process-group leader. Package managers
+// commonly exit after handing the actual GUI process to a descendant, so PID
+// lookup of that wrapper is not a reliable application selector. The group is
+// both the launch ownership boundary and the selector boundary for macOS.
+// Windows has no equivalent process-group lookup in its planned driver yet.
+export function launchedApplicationSelector(launched, platform = process.platform) {
+	if (!launched?.pid) throw new Error("desktop launch did not return a process id");
+	return platform === "win32" ? ["--pid", String(launched.pid)] : ["--pgid", String(launched.pid)];
 }
 
 function launchEnvironment(extra) {
@@ -613,14 +623,37 @@ function runOwnedProcess(file, args, options) {
 	});
 }
 
-async function terminateOwnedProcessTree(child) {
+export async function terminateOwnedProcessTree(child) {
 	if (!child.pid) return;
-	killOwnedPid(child.pid, "SIGTERM");
-	await Promise.race([
-		new Promise((resolve) => child.once("close", resolve)),
-		new Promise((resolve) => setTimeout(resolve, CLEANUP_TIMEOUT_MS)),
-	]);
-	if (isPidAlive(child.pid)) killOwnedPid(child.pid, "SIGKILL");
+	if (process.platform === "win32") {
+		killOwnedPid(child.pid, "SIGTERM");
+		await Promise.race([
+			new Promise((resolve) => child.once("close", resolve)),
+			new Promise((resolve) => setTimeout(resolve, CLEANUP_TIMEOUT_MS)),
+		]);
+		if (isPidAlive(child.pid)) killOwnedPid(child.pid, "SIGKILL");
+		return;
+	}
+
+	// Do not use the wrapper's liveness as the cleanup condition: npm/pnpm and
+	// similar launchers can exit while their GUI child remains in this owned
+	// group. SIGTERM gives the group a bounded graceful shutdown; SIGKILL is
+	// sent to the same group if any member survives the grace period.
+	const pgid = child.pid;
+	killOwnedProcessGroup(pgid, "SIGTERM");
+	const deadline = Date.now() + CLEANUP_TIMEOUT_MS;
+	while (isOwnedProcessGroupAlive(pgid) && Date.now() < deadline) await sleep(Math.min(50, deadline - Date.now()));
+	if (isOwnedProcessGroupAlive(pgid)) killOwnedProcessGroup(pgid, "SIGKILL");
+}
+
+function killOwnedProcessGroup(pgid, signal) {
+	if (!Number.isInteger(pgid) || pgid <= 0) return;
+	try { process.kill(-pgid, signal); } catch { /* group already exited */ }
+}
+
+function isOwnedProcessGroupAlive(pgid) {
+	if (!Number.isInteger(pgid) || pgid <= 0) return false;
+	try { process.kill(-pgid, 0); return true; } catch { return false; }
 }
 
 function killOwnedPid(pid, signal) {
@@ -712,6 +745,11 @@ function captureName(value, fallback) {
 	const name = requireBoundedString(value, "capture name", 80);
 	if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("capture name must contain only letters, digits, underscore, or dash");
 	return name;
+}
+
+export function desktopEvidenceName(value, zeroBasedStepIndex, fallback) {
+	if (!Number.isInteger(zeroBasedStepIndex) || zeroBasedStepIndex < 0) throw new Error("step index must be a non-negative integer");
+	return captureName(value, `${fallback}-${zeroBasedStepIndex + 1}`);
 }
 
 function assertKnownFields(value, allowed, label) {

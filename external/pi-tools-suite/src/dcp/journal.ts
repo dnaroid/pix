@@ -448,21 +448,125 @@ function journalBranch(ctx: ExtensionContext): unknown[] {
   }
 }
 
+function indexBranchParents(entries: readonly unknown[], requireFullChain: boolean): Map<string, string | null> | undefined {
+  const parents = new Map<string, string | null>();
+  let previousId: string | null = null;
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.id !== "string" || !entry.id
+      || parents.has(entry.id)) return undefined;
+    let parentId: string | null = null;
+    if (entry.parentId !== null) {
+      if (typeof entry.parentId !== "string" || !entry.parentId) return undefined;
+      parentId = entry.parentId;
+    }
+    if (requireFullChain && parentId !== previousId) return undefined;
+    parents.set(entry.id, parentId);
+    previousId = entry.id;
+  }
+  return parents;
+}
+
+/**
+ * getBranch() on Pix's lazy manager is a JSONL presentation tail: it may omit
+ * older ancestors AND interleave abandoned branches. Do not "simplify" this
+ * into a positional prefix/suffix comparison or an ID-membership test.
+ *
+ * Walk parentId from the captured current leaf. Only the full read may supply
+ * ancestors missing from the tail; overlapping IDs must have identical parents
+ * (SDK entry identities/parent links are immutable). Both the old leaf and the
+ * read tip must lie on that walk. A side-branch tip merely present in the tail
+ * is not evidence. Missing links/cycles/conflicts deny the retry.
+ *
+ * This proves permission to re-read, NOT a publishable merged snapshot. Never
+ * return the tail/union as history or hydrate synchronously to validate it.
+ * Contract + counterexample: specs/dcp-statistics.md#lazy-tail-retry-invariant.
+ */
+function readSnapshotFollowsCurrentBranch(
+  entries: readonly unknown[],
+  currentEntries: readonly unknown[],
+  previousLeafId: string,
+  currentLeafId: string,
+): boolean {
+  const readParents = indexBranchParents(entries, true);
+  const currentParents = indexBranchParents(currentEntries, false);
+  if (!readParents?.has(previousLeafId) || !currentParents?.has(currentLeafId)) return false;
+
+  const readTipId = (entries.at(-1) as { id: string }).id;
+  const visited = new Set<string>();
+  let cursor: string | null = currentLeafId;
+  let reachedPrevious = false;
+  let reachedReadTip = false;
+  while (cursor !== null) {
+    if (visited.has(cursor)) return false;
+    visited.add(cursor);
+    const currentParent = currentParents.get(cursor);
+    const readParent = readParents.get(cursor);
+    if (currentParent !== undefined && readParent !== undefined && currentParent !== readParent) return false;
+    // An absent old ancestor may be supplied by the full read, but a missing
+    // new descendant cannot be guessed. Null is a root, not a missing value.
+    const parent = currentParent !== undefined ? currentParent : readParent;
+    if (parent === undefined) return false;
+    reachedPrevious ||= cursor === previousLeafId;
+    reachedReadTip ||= cursor === readTipId;
+    cursor = parent;
+  }
+  return reachedPrevious && reachedReadTip;
+}
+
 export async function readDcpJournalBranch(ctx: ExtensionContext): Promise<unknown[]> {
   const manager = ctx.sessionManager as any;
   const sessionId = manager.getSessionId?.();
-  const leafId = manager.getLeafId?.();
-  const entries = typeof manager.readFullBranchEntries === "function"
-    ? await manager.readFullBranchEntries()
-    : manager.getBranch();
-  if (ctx.sessionManager !== manager || manager.getSessionId?.() !== sessionId || manager.getLeafId?.() !== leafId) {
-    throw new DcpJournalError("DCP branch changed during history read; rebuild context");
+  const hasLeafIdentity = typeof manager.getLeafId === "function";
+  const readFullBranch = typeof manager.readFullBranchEntries === "function"
+    ? () => manager.readFullBranchEntries()
+    : undefined;
+
+  // Lazy full-history reads yield to the event loop. A normal append on the
+  // same active branch (for example, tool results arriving while a reloaded
+  // runtime is replaying its journal) advances the leaf without changing the
+  // branch owner. Retry that transient race so startup does not permanently
+  // block DCP. A real branch move/fork, owner replacement, or a branch that
+  // keeps moving still fails closed.
+  const maxAttempts = readFullBranch ? 3 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const leafId = manager.getLeafId?.();
+    const entries = readFullBranch ? await readFullBranch() : manager.getBranch();
+    if (ctx.sessionManager !== manager || manager.getSessionId?.() !== sessionId) {
+      throw new DcpJournalError("DCP branch changed during history read; rebuild context");
+    }
+    if (!Array.isArray(entries)) throw new DcpJournalError("DCP full branch is unavailable");
+    // A presentation cursor is not a complete SDK branch, even if it contains
+    // recent users or journal deltas. Never silently initialize from that tail.
+    if (entries[0]?.parentId != null) throw new DcpJournalError("DCP received an incomplete branch (presentation tail)");
+
+    const currentLeafId = manager.getLeafId?.();
+    if (currentLeafId === leafId) {
+      if (hasLeafIdentity) {
+        const readLeafId = entries.at(-1)?.id;
+        if ((leafId == null && entries.length > 0) || (leafId != null && readLeafId !== leafId)) {
+          throw new DcpJournalError("DCP branch changed during history read; rebuild context");
+        }
+      }
+      return entries;
+    }
+
+    let sameBranchAdvance = false;
+    if (leafId && currentLeafId) {
+      try {
+        const currentEntries = manager.getBranch();
+        sameBranchAdvance = Array.isArray(currentEntries)
+          && manager.getLeafId?.() === currentLeafId
+          && readSnapshotFollowsCurrentBranch(entries, currentEntries, leafId, currentLeafId);
+      } catch {
+        sameBranchAdvance = false;
+      }
+    }
+    if (!sameBranchAdvance || attempt === maxAttempts - 1) {
+      throw new DcpJournalError("DCP branch changed during history read; rebuild context");
+    }
   }
-  if (!Array.isArray(entries)) throw new DcpJournalError("DCP full branch is unavailable");
-  // A presentation cursor is not a complete SDK branch, even if it contains
-  // recent users or journal deltas. Never silently initialize from that tail.
-  if (entries[0]?.parentId != null) throw new DcpJournalError("DCP received an incomplete branch (presentation tail)");
-  return entries;
+
+  throw new DcpJournalError("DCP branch changed during history read; rebuild context");
 }
 
 function restoreLeafAfterAppendFailure(ctx: ExtensionContext, previousLeafId: string | null | undefined): void {

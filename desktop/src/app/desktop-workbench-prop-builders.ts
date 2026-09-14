@@ -258,6 +258,7 @@ export function buildWorkbenchEditorProps(
       onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),
       onOpenLocalFile: (path) => void options.preview.openLocalFile(path),
       onReview: () => void options.gitAssist.reviewDiff(gitDiffPreview.path, gitDiffPreview.scope),
+      onCopyPrompt: () => options.gitAssist.copyReviewResolutionPrompt(),
       onResolve: () => void options.gitAssist.resolveReviewInNewSession(),
     } : null,
     gitDiffVisible: options.activeWorkbenchTabId() === "git-diff",

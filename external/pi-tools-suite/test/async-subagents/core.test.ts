@@ -128,6 +128,34 @@ async function withTimeout<T>(promise: Promise<T>, message: string, timeoutMs = 
 	]);
 }
 
+function spawnRegistryWriter(scriptPath: string, cwd: string, runDir: string, agentId: string): {
+	ready: Promise<void>;
+	done: Promise<void>;
+	recorded: () => boolean;
+} {
+	const child = spawnChild(process.execPath, [scriptPath, cwd, runDir, agentId], { stdio: ["ignore", "pipe", "pipe"] });
+	let hasRecorded = false;
+	let resolveReady!: () => void;
+	let rejectReady!: (error: Error) => void;
+	const ready = new Promise<void>((resolve, reject) => {
+		resolveReady = resolve;
+		rejectReady = reject;
+	});
+	const done = new Promise<void>((resolve, reject) => {
+		child.once("error", reject);
+		child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Registry writer exited with ${code}.`)));
+	});
+	child.stdout?.on("data", (chunk: Buffer) => {
+		for (const line of chunk.toString().split("\n")) {
+			if (line === "ready") resolveReady();
+			if (line === "recorded") hasRecorded = true;
+		}
+	});
+	child.stderr?.on("data", (chunk: Buffer) => rejectReady(new Error(chunk.toString())));
+	done.catch(rejectReady);
+	return { ready, done, recorded: () => hasRecorded };
+}
+
 afterEach(() => {
 	process.argv[1] = originalArgv1;
 	if (originalAsyncSubagentsModel === undefined) delete process.env.ASYNC_SUBAGENTS_MODEL;
@@ -219,6 +247,73 @@ describe.serial("core paths", () => {
 		createAgent(scannedRun, "manual-agent");
 		expect(resolveSubagentAgentRunDir(cwd, "manual-agent")).toBe(scannedRun);
 		expect(() => resolveSubagentAgentRunDir(cwd, "missing-agent")).toThrow('agent "missing-agent" was not found');
+	});
+
+	test.serial("serializes concurrent registry writers and atomically preserves every mapping", async () => {
+		const cwd = tempDir();
+		const registryPath = getSubagentRegistryPath(cwd);
+		const lockPath = `${registryPath}.lock`;
+		const startPath = path.join(cwd, "start-registry-writers");
+		const writerPath = path.join(cwd, "registry-writer.mjs");
+		const registryModuleUrl = new URL("../../src/async-subagents/core/registry.ts", import.meta.url).href;
+		writeFile(writerPath, `
+import * as fs from "node:fs";
+import { recordSubagentRun } from ${JSON.stringify(registryModuleUrl)};
+const [cwd, runDir, agentId] = process.argv.slice(2);
+const startPath = ${JSON.stringify(startPath)};
+process.stdout.write("ready\\n");
+while (!fs.existsSync(startPath)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+recordSubagentRun(cwd, runDir, [agentId]);
+process.stdout.write("recorded\\n");
+`);
+		writeFile(lockPath, JSON.stringify({ pid: process.pid, token: "test-lock-holder" }));
+		const writers = Array.from({ length: 6 }, (_, index) => {
+			const runDir = path.join(cwd, ".pi", "subagents", `concurrent-${index}`);
+			createAgent(runDir, `agent-${index}`);
+			return spawnRegistryWriter(writerPath, cwd, runDir, `agent-${index}`);
+		});
+		await withTimeout(Promise.all(writers.map((writer) => writer.ready)), "Registry writers did not start");
+		writeFile(startPath);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(writers.some((writer) => writer.recorded())).toBe(false);
+		fs.rmSync(lockPath);
+		await withTimeout(Promise.all(writers.map((writer) => writer.done)), "Registry writers did not finish");
+
+		const registry = loadSubagentRegistry(cwd);
+		for (let index = 0; index < writers.length; index++) {
+			expect(registry.runs[`concurrent-${index}`]?.runDir).toBe(path.join(cwd, ".pi", "subagents", `concurrent-${index}`));
+			expect(registry.agents[`agent-${index}`]?.runId).toBe(`concurrent-${index}`);
+		}
+		expect(() => JSON.parse(fs.readFileSync(registryPath, "utf-8"))).not.toThrow();
+		expect(fs.readdirSync(path.dirname(registryPath)).some((name) => name.includes(".tmp"))).toBe(false);
+	});
+
+	test.serial("recovers a dead registry lock owner", () => {
+		const cwd = tempDir();
+		const runDir = path.join(cwd, ".pi", "subagents", "stale-lock-run");
+		createAgent(runDir, "stale-agent");
+		const lockPath = `${getSubagentRegistryPath(cwd)}.lock`;
+		writeFile(lockPath, JSON.stringify({ pid: 2_147_483_647, token: "dead-owner" }));
+
+		recordSubagentRun(cwd, runDir, ["stale-agent"]);
+
+		expect(loadSubagentRegistry(cwd).agents["stale-agent"]?.runDir).toBe(runDir);
+		expect(fs.existsSync(lockPath)).toBe(false);
+	});
+
+	test.serial("recovers an expired registry lock when its pid has been reused", () => {
+		const cwd = tempDir();
+		const runDir = path.join(cwd, ".pi", "subagents", "reused-pid-lock-run");
+		createAgent(runDir, "reused-pid-agent");
+		const lockPath = `${getSubagentRegistryPath(cwd)}.lock`;
+		writeFile(lockPath, JSON.stringify({ pid: process.pid, token: "expired-live-owner" }));
+		const expiredAt = new Date(Date.now() - 31_000);
+		fs.utimesSync(lockPath, expiredAt, expiredAt);
+
+		recordSubagentRun(cwd, runDir, ["reused-pid-agent"]);
+
+		expect(loadSubagentRegistry(cwd).agents["reused-pid-agent"]?.runDir).toBe(runDir);
+		expect(fs.existsSync(lockPath)).toBe(false);
 	});
 });
 

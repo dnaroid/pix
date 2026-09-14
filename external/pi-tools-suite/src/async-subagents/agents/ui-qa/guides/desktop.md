@@ -21,6 +21,14 @@ bounded project-local `launch` contract. Supported steps are:
 - assertions: `waitForText`, `assertText`, `assertState`
 - evidence: `screenshot`, `capture`
 
+Launch environments may set only `CI`, `NO_COLOR`, `FORCE_COLOR`, `LANG`,
+`LC_ALL`, `TERM`, `TZ`, and `PI_UI_QA_*` variables. The runner always sets
+`PI_UI_QA=1` itself. On POSIX, launch contracts own a detached process group:
+package-manager wrappers such as `npm`, `pnpm`, or `yarn` may exit after
+starting the GUI descendant, and the runner targets and cleans that descendant
+through the owned group. Do not daemonize the application or move it into a
+different session/process group.
+
 Semantic element selectors use `path` or `name`, with optional `role` and
 `occurrence`. Identify the actual application and the smallest user flow that
 proves the requested behavior; inspect only enough project metadata or source
@@ -38,6 +46,10 @@ Assert a deterministic product-visible result. Desktop oracles should prefer
 accessibility/app-driver state, window/dialog state, visible copy,
 enabled/checked/value state, or another explicit application result. A
 screenshot alone is evidence, not the only pass/fail oracle.
+
+Repeated `snapshotAccessibility`, `screenshot`, or `capture` steps may omit
+`name`; the runner assigns a collision-free action-and-step filename. Supply a
+unique `name` only when a stable human-readable artifact label is useful.
 
 Supported macOS runs automatically publish a silent exact-window video; no
 extra flow action is required. The recording explains chronology but never

@@ -4,6 +4,15 @@ import { getRunRoot, hasAgentPrompt, hasLaunchedAgentPrompt, isDir, resolveRunDi
 
 export const SUBAGENT_REGISTRY_FILE = "registry.json";
 
+const REGISTRY_LOCK_RETRY_MS = 10;
+const REGISTRY_LOCK_TIMEOUT_MS = 2_000;
+const REGISTRY_LOCK_STALE_MS = 30_000;
+
+interface RegistryLockOwner {
+	pid: number;
+	token: string;
+}
+
 export interface SubagentRegistryRun {
 	runId: string;
 	runDir: string;
@@ -62,45 +71,44 @@ export function loadSubagentRegistry(cwd: string): SubagentRegistry {
 
 export function saveSubagentRegistry(cwd: string, registry: SubagentRegistry): void {
 	const registryPath = getSubagentRegistryPath(cwd);
-	fs.mkdirSync(path.dirname(registryPath), { recursive: true });
-	fs.writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf-8");
+	withRegistryLock(registryPath, () => writeRegistryAtomically(registryPath, registry));
 }
 
 export function recordSubagentRun(cwd: string, runDir: string, agentIds: string[]): SubagentRegistry {
-	const registry = loadSubagentRegistry(cwd);
-	const resolvedRunDir = path.resolve(runDir);
-	const runId = path.basename(resolvedRunDir);
-	const now = new Date().toISOString();
-	const uniqueAgentIds = [...new Set(agentIds.filter((id) => id.trim().length > 0))];
-	const previous = registry.runs[runId];
-	registry.runs[runId] = {
-		runId,
-		runDir: resolvedRunDir,
-		agentIds: uniqueAgentIds,
-		createdAt: previous?.createdAt ?? now,
-		updatedAt: now,
-	};
-	registry.latestRunId = runId;
-	registry.latestRunDir = resolvedRunDir;
-	for (const agentId of uniqueAgentIds) {
-		registry.agents[agentId] = { agentId, runId, runDir: resolvedRunDir, updatedAt: now };
-	}
-	saveSubagentRegistry(cwd, registry);
-	return registry;
+	return updateSubagentRegistry(cwd, (registry) => {
+		const resolvedRunDir = path.resolve(runDir);
+		const runId = path.basename(resolvedRunDir);
+		const now = new Date().toISOString();
+		const uniqueAgentIds = [...new Set(agentIds.filter((id) => id.trim().length > 0))];
+		const previous = registry.runs[runId];
+		registry.runs[runId] = {
+			runId,
+			runDir: resolvedRunDir,
+			agentIds: uniqueAgentIds,
+			createdAt: previous?.createdAt ?? now,
+			updatedAt: now,
+		};
+		registry.latestRunId = runId;
+		registry.latestRunDir = resolvedRunDir;
+		for (const agentId of uniqueAgentIds) {
+			registry.agents[agentId] = { agentId, runId, runDir: resolvedRunDir, updatedAt: now };
+		}
+		return registry;
+	});
 }
 
 export function removeSubagentRunsFromRegistry(cwd: string, runDirs: string[]): SubagentRegistry {
-	const registry = loadSubagentRegistry(cwd);
-	const removed = new Set(runDirs.map((runDir) => normalizePath(runDir)));
-	for (const [runId, run] of Object.entries(registry.runs)) {
-		if (removed.has(normalizePath(run.runDir))) delete registry.runs[runId];
-	}
-	for (const [agentId, agent] of Object.entries(registry.agents)) {
-		if (removed.has(normalizePath(agent.runDir))) delete registry.agents[agentId];
-	}
-	refreshLatestRun(registry);
-	saveSubagentRegistry(cwd, registry);
-	return registry;
+	return updateSubagentRegistry(cwd, (registry) => {
+		const removed = new Set(runDirs.map((runDir) => normalizePath(runDir)));
+		for (const [runId, run] of Object.entries(registry.runs)) {
+			if (removed.has(normalizePath(run.runDir))) delete registry.runs[runId];
+		}
+		for (const [agentId, agent] of Object.entries(registry.agents)) {
+			if (removed.has(normalizePath(agent.runDir))) delete registry.agents[agentId];
+		}
+		refreshLatestRun(registry);
+		return registry;
+	});
 }
 
 export function resolveSubagentRunDir(cwd: string, runDir?: string): string {
@@ -155,6 +163,123 @@ function refreshLatestRun(registry: SubagentRegistry): void {
 	}
 	delete registry.latestRunId;
 	delete registry.latestRunDir;
+}
+
+function updateSubagentRegistry(cwd: string, update: (registry: SubagentRegistry) => SubagentRegistry): SubagentRegistry {
+	const registryPath = getSubagentRegistryPath(cwd);
+	return withRegistryLock(registryPath, () => {
+		const registry = loadSubagentRegistry(cwd);
+		const updated = update(registry);
+		writeRegistryAtomically(registryPath, updated);
+		return updated;
+	});
+}
+
+function withRegistryLock<T>(registryPath: string, operation: () => T): T {
+	fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+	const lockPath = `${registryPath}.lock`;
+	const owner = registryLockOwner();
+	const deadline = Date.now() + REGISTRY_LOCK_TIMEOUT_MS;
+	while (!createRegistryLock(lockPath, owner)) {
+		recoverStaleRegistryLock(lockPath, owner);
+		if (Date.now() >= deadline) {
+			throw new Error(`Timed out waiting for sub-agent registry lock at ${lockPath}.`);
+		}
+		sleep(REGISTRY_LOCK_RETRY_MS);
+	}
+	try {
+		return operation();
+	} finally {
+		releaseRegistryLock(lockPath, owner);
+	}
+}
+
+function writeRegistryAtomically(registryPath: string, registry: SubagentRegistry): void {
+	const temporaryPath = `${registryPath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+	try {
+		fs.writeFileSync(temporaryPath, `${JSON.stringify(registry, null, 2)}\n`, { encoding: "utf-8", mode: 0o600, flag: "wx" });
+		fs.renameSync(temporaryPath, registryPath);
+	} finally {
+		fs.rmSync(temporaryPath, { force: true });
+	}
+}
+
+function registryLockOwner(): RegistryLockOwner {
+	return { pid: process.pid, token: `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}` };
+}
+
+function createRegistryLock(lockPath: string, owner: RegistryLockOwner): boolean {
+	try {
+		fs.writeFileSync(lockPath, JSON.stringify(owner), { encoding: "utf-8", mode: 0o600, flag: "wx" });
+		return true;
+	} catch (error) {
+		if (errorCode(error) === "EEXIST") return false;
+		throw error;
+	}
+}
+
+function recoverStaleRegistryLock(lockPath: string, owner: RegistryLockOwner): void {
+	let lockStat: fs.Stats;
+	try {
+		lockStat = fs.statSync(lockPath);
+	} catch (error) {
+		if (errorCode(error) === "ENOENT") return;
+		throw error;
+	}
+	const existingOwner = readRegistryLockOwner(lockPath);
+	const lockAgeMs = Date.now() - lockStat.mtimeMs;
+	if (lockAgeMs <= REGISTRY_LOCK_STALE_MS && existingOwner && isProcessAlive(existingOwner.pid)) return;
+	if (lockAgeMs <= REGISTRY_LOCK_STALE_MS && !existingOwner) return;
+
+	const quarantinePath = `${lockPath}.stale-${owner.token}`;
+	try {
+		fs.renameSync(lockPath, quarantinePath);
+	} catch (error) {
+		if (errorCode(error) === "ENOENT") return;
+		throw error;
+	}
+	try {
+		const movedStat = fs.statSync(quarantinePath);
+		if (movedStat.dev !== lockStat.dev || movedStat.ino !== lockStat.ino) return;
+		fs.rmSync(quarantinePath, { force: true });
+	} finally {
+		if (fs.existsSync(quarantinePath) && !fs.existsSync(lockPath)) {
+			fs.renameSync(quarantinePath, lockPath);
+		}
+	}
+}
+
+function releaseRegistryLock(lockPath: string, owner: RegistryLockOwner): void {
+	if (readRegistryLockOwner(lockPath)?.token === owner.token) fs.rmSync(lockPath, { force: true });
+}
+
+function readRegistryLockOwner(lockPath: string): RegistryLockOwner | undefined {
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(lockPath, "utf-8"));
+		if (!isRecord(parsed) || typeof parsed.pid !== "number" || !Number.isInteger(parsed.pid) || parsed.pid <= 0 || typeof parsed.token !== "string") return undefined;
+		return { pid: parsed.pid, token: parsed.token };
+	} catch {
+		return undefined;
+	}
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return errorCode(error) !== "ESRCH";
+	}
+}
+
+function errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+		? error.code
+		: undefined;
+}
+
+function sleep(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function looksLikeRunDir(runDir: string): boolean {
