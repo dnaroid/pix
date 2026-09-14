@@ -35,5 +35,7 @@ export function dcpRequestSnapshot(config: DcpConfig, state: DcpState, model: an
     reservedOutputTokens: budget?.reservedOutputTokens, routineTokens, strongTokens: budget?.softHeadroomTokens,
     hardTokens: budget?.hardHeadroomTokens, enabled: config.enabled, manualMode: state.manualMode,
     autoEnabled: config.compress.autoCompress.enabled, ignored: state.consecutiveIgnoredNudges,
+    routineProjectedTokens: budget?.projectedBeforeTokens ?? projectedTokens,
+    routineUsageAdjustmentTokens: 0,
     pressure, reason, createdAt: Date.now() };
 }

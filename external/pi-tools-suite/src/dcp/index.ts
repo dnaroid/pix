@@ -62,6 +62,7 @@ import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { safeGetContextUsage } from "../context-usage.js"
 import { FreshToolResultTracker } from "./fresh-tool-results.js"
+import { RoutinePressureTracker } from "./routine-pressure.js"
 import { canonicalMessageHash } from "./conversation-index.js"
 import { randomUUID } from "node:crypto"
 import { dcpRequestSnapshot } from "./diagnostics.js"
@@ -169,6 +170,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	let journalPersistent = false
 	const providerEvidenceTracker = new ProviderEvidenceTracker()
 	const freshToolResults = new FreshToolResultTracker()
+	const routinePressureTracker = new RoutinePressureTracker()
 	let providerEvidenceCommitQueue = Promise.resolve()
 	let latestProviderOpportunityAvailable = false
 	let latestProviderOpportunityKind: "routine" | "emergency" | undefined
@@ -282,6 +284,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	}
 	const invalidateOwner = () => {
 			invalidateDcpStateOwner(state)
+			routinePressureTracker.reset()
 			// Successful exposure belongs to the old provider/branch too, not only
 			// the pending attempt. The new owner must establish its own evidence.
 			state.providerSeenToolIds.clear()
@@ -351,6 +354,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	// ── 5. session_start: restore state from session entries ──────────────────
 	pi.on("session_start", async (event, ctx) => {
 		resetState(state)
+		routinePressureTracker.reset()
 		freshToolResults.reset()
 		lastProviderReadyProjectionEpoch = undefined
 		providerEvidenceTracker.reset()
@@ -383,6 +387,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	// Journal operations are committed at the mutation boundary; shutdown does
 	// not write a full runtime snapshot.
 	pi.on("session_shutdown", async () => {
+		routinePressureTracker.reset()
 		freshToolResults.reset()
 		journalMirror = undefined
 		journalSupported = false
@@ -472,6 +477,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		const contextMessages = event.messages
 			.filter((message: any) => !isUserVisibleOnlyMessage(message) && !isDcpControlPlaneMessage(message))
 			.map((message: any) => stripStaleDcpMetadataFromMessage(message))
+		const rawContextTokens = contextMessages.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
+		const pressureOwner = JSON.stringify([contextEpoch, ...modelKeysFromContext(ctx), ctx.model?.contextWindow, ctx.model?.maxTokens])
 		const finishContext = (
 			reason: string,
 			messages: any[],
@@ -480,8 +487,19 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		) => {
 			if (state.sessionEpoch !== contextEpoch) throw new DcpJournalError("DCP projection belongs to a stale owner")
 			lastProviderReadyProjectionEpoch = providerReady ? state.sessionEpoch : undefined
+			const observedUsage = safeGetContextUsage(ctx)
 			diagnosticSnapshot = dcpRequestSnapshot(effectiveConfig, state, ctx.model,
-				safeGetContextUsage(ctx), contextMessages, messages, reason)
+				observedUsage, contextMessages, messages, reason)
+			const routine = routinePressureTracker.estimate(pressureOwner,
+				normalizeDcpContextUsage(observedUsage)?.tokens,
+				contextMessages, rawContextTokens, diagnosticSnapshot.projectedTokens, state.compressionBlocks)
+			diagnosticSnapshot.routineProjectedTokens = routine.projectedTokens
+			diagnosticSnapshot.routineUsageAdjustmentTokens = routine.adjustmentTokens
+			if (diagnosticSnapshot.pressure === "routine" && routine.projectedTokens <= (diagnosticSnapshot.routineTokens ?? 0)) {
+				diagnosticSnapshot.pressure = "below routine threshold"
+			}
+			if (providerReady) routinePressureTracker.prepare(pressureOwner, rawContextTokens,
+				diagnosticSnapshot.projectedTokens, state.compressionBlocks)
 			writeDcpDebugLog(effectiveConfig, "context.result", {
 				reason,
 				inputMessages: event.messages.length,
@@ -501,6 +519,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		}, ctx)
 		latestProviderOpportunityAvailable = false
 		if (!effectiveConfig.enabled) {
+			routinePressureTracker.reset()
 			writeDcpDebugLog(effectiveConfig, "context.disabled", {
 				inputMessages: event.messages.length,
 				filteredMessages: contextMessages.length,
@@ -601,15 +620,21 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				estimatorMarginTokens,
 			})
 			thresholds.maxContextPercent = budget.softHeadroomTokens / usage.contextWindow
-			const contextPercent = budget.projectedBeforeTokens / usage.contextWindow
+			const budgetContextPercent = budget.projectedBeforeTokens / usage.contextWindow
 			const nativePressure = emergencyPressureState(
-				contextPercent,
+				budgetContextPercent,
 				thresholds.maxContextPercent,
 				emergencySettings.hardContextPercent,
 			)
 			const hardEmergencyReached = nativePressure.hardEmergencyReached || budget.hardPressure
 			const contextLimitReached = nativePressure.contextLimitReached || budget.pressured
 			const emergencyPressureReached = nativePressure.emergencyPressureReached || budget.pressured
+			const routinePressure = routinePressureTracker.estimate(pressureOwner, nativeUsage?.tokens,
+				contextMessages, rawContextTokens, repoProjectedTokens, state.compressionBlocks)
+			// Correct only routine policy. Capacity, strong pressure and emergency
+			// recovery retain the unadjusted conservative provider-native floor.
+			const policyTokens = emergencyPressureReached ? budget.projectedBeforeTokens : routinePressure.projectedTokens
+			const contextPercent = policyTokens / usage.contextWindow
 			const routineNudgesAllowed = contextPercent > thresholds.minContextPercent
 			if (!budget.capacityExceeded && state.progressRecovery) state.progressRecovery = undefined
 			if (!emergencyPressureReached && !routineNudgesAllowed) {
@@ -662,10 +687,10 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 			const requestedRecoveryTokens = emergencyPressureReached
 				? budget.requiredSavingsTokens
-				: routineRecoveryTokens(budget.projectedBeforeTokens, usage.contextWindow, thresholds.minContextPercent)
+				: routineRecoveryTokens(policyTokens, usage.contextWindow, thresholds.minContextPercent)
 			const progressInput = {
 				projectedTokens: repoProjectedTokens,
-				observedTokens: budget.projectedBeforeTokens,
+				observedTokens: policyTokens,
 				contextWindow: usage.contextWindow,
 				requiredTokens: requestedRecoveryTokens,
 				kind: emergencyPressureReached ? "emergency" as const : "routine" as const,
@@ -1213,7 +1238,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							anchorResult.created ? "emitted" : "upgraded",
 							nudgeType,
 							anchorResult.anchor,
-							usage,
+							{ ...usage, tokens: policyTokens, percent: contextPercent * 100 },
 							toolCallsSinceLastUser,
 						)
 						await persistJournalState(ctx, state)
@@ -1229,7 +1254,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							"reapplied",
 							anchorResult.anchor.type,
 							anchorResult.anchor,
-							usage,
+							{ ...usage, tokens: policyTokens, percent: contextPercent * 100 },
 							toolCallsSinceLastUser,
 						)
 					}
@@ -1341,6 +1366,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			opportunityAvailable: reminderDelivered,
 			opportunityKind: reminderDelivered ? latestProviderOpportunityKind : undefined,
 		})
+		routinePressureTracker.beforeRequest()
 		diagnostic("request", { id: `${diagnosticEpoch}:${pending.lastAttemptId}`, reminder: reminderDelivered, snapshot: diagnosticSnapshot })
 
 		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
@@ -1395,6 +1421,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			model: typeof message.model === "string" ? message.model : undefined,
 			stopReason: typeof message.stopReason === "string" ? message.stopReason : undefined,
 		})
+		routinePressureTracker.complete(message, completion.status === "promote")
 		latestProviderOpportunityAvailable = false
 
 		if (completion.status !== "promote") {

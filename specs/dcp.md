@@ -169,6 +169,23 @@ provider-native usage, so a stale low provider sample cannot hide newly appended
 content. Capacity reserves provider output space before applying policy
 thresholds; hard-capacity pressure is distinct from the routine soft threshold.
 
+Routine reminders additionally account for an intentional compression performed
+after the latest measured provider response. Runtime-only calibration binds the
+raw/projected token delta of a sent request to its correlated successful assistant
+usage. While that exact assistant is still the SDK usage source, a newly applied
+compression may subtract only the additional estimated raw/projected savings from
+routine pressure. Already-accounted compression is not subtracted again; provider
+overhead and newly appended content remain, with the fresh local projection as a
+floor. This is not a cooldown and does not alter model-specific thresholds.
+
+The calibration is discarded on session/model/compaction ownership changes and
+restart, and is replaced by the next correlated measured response. Missing,
+ambiguous or mismatched usage falls back to the conservative estimate. Strong
+pressure, input capacity and emergency recovery continue to use the unadjusted
+provider-native floor. No Context Gateway runtime or recovery service is needed.
+Request diagnostics expose `routineProjectedTokens` and
+`routineUsageAdjustmentTokens` separately from raw/projected history counts.
+
 Routine context construction only replays already committed pruning decisions.
 It does not discover new retroactive dedup/error/age deletions at each user
 turn. `/dcp sweep` is an explicit rewrite boundary.
