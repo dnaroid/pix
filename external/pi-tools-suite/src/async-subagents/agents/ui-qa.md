@@ -54,14 +54,29 @@ copy, or edit credential values from `.pi/qa_auth.jsonc` yourself.
 Write one declarative JSONC flow under
 `$PI_SUBAGENT_AGENT_DIR/ui-qa/flows/` declaring exactly one target:
 `target.url`/`target.baseUrl` for browser, `target.command.argv` for TUI, or
-`target.application` for desktop. Keep the flow private (`chmod 600
+`target.application` for desktop. For every new terminal flow, explicitly set
+`target.command.presentation` from the user-facing surface rather than relying
+on the compatibility default. Use `"native-terminal"` for a structured or
+full-screen TUI (panels, alternate-screen interaction, colors, glyphs, menus,
+focus/layout, mouse-like navigation) so visual evidence comes from a real
+terminal window. Reserve `"pty"` for line-oriented CLI/plain-terminal programs
+or deliberately protocol-focused checks where terminal text/cursor/process/
+resize/ANSI semantics are the product surface and pixel rendering is not.
+Determine that category from the task and discovered capabilities/behavior,
+never from a project/app name or repository-specific heuristic. The runner still
+accepts omitted presentation as `"pty"` only for backward compatibility. If a
+TUI needs native visual fidelity and that capability is unavailable, return
+`BLOCKED` rather than silently substituting the headless PTY renderer.
+
+Keep the flow private (`chmod 600
 <flow.jsonc>` on POSIX) before invoking the runner. Then run a bounded
 capability preflight and, if the backend is available, execute the same flow
 once:
 
 ```sh
 node "$PI_UI_QA_RUNNER" probe --flow <flow.jsonc> --runner-timeout-ms 30000
-node "$PI_UI_QA_RUNNER" run --flow <flow.jsonc> --run-id <safe-id> --runner-timeout-ms 60000
+node "$PI_UI_QA_RUNNER" run --flow <flow.jsonc> --run-id <safe-id> \
+  --runner-timeout-ms 60000
 ```
 
 The runner owns backend selection, bounded launch/control, evidence paths, and

@@ -117,28 +117,55 @@ confirmed runtime image support.
 - Repeated unnamed Desktop evidence steps receive collision-free filenames
   based on their action and step index. Explicit names remain available when a
   stable human-readable artifact label is useful.
-- Terminal/TUI verification is selected from `target.command` and drives the
-  shipping interactive program through the bundled PTY plus headless ANSI/VT
-  backend. The target may use its normal explicit project/session arguments to
-  open deterministic state before assertions. Non-interactive stdout from
-  another CLI path is not a TUI verification.
-  PTY input is asynchronous, so flows wait for the expected text or a stable
-  frame after `sendText`/`sendKeys` before asserting the resulting screen.
+- Terminal/TUI verification is selected from `target.command`, with an explicit
+  presentation contract that is independent of project/app identity.
+  New QA flows choose presentation explicitly by surface category: `pty` is for
+  line-oriented/plain terminal/CLI programs or protocol-focused semantic tests,
+  while `native-terminal` is the normal presentation for structured/full-screen
+  TUIs. Omitted presentation remains a `pty` compatibility default for older
+  flows only. Native-terminal covers real-window colors, fonts/glyphs, special
+  symbols, wrapping, clipping, menus/focus, and pixel geometry.
+  The target still runs in the runner-owned PTY used for deterministic input and
+  semantic assertions; the runner mirrors that same raw PTY byte stream through
+  a private authenticated local bridge into a fresh owned native terminal host,
+  whose real window supplies screenshots/video. The bridge bootstrap never
+  contains the target argv/cwd/env. On macOS the native-terminal provider is
+  discovered from the environment, not from the project: installed iTerm2 is
+  preferred so evidence uses its configured colors/font/glyph rendering, with
+  Terminal.app as the built-in fallback.
+  Selection is based on required capabilities/evidence, never a repository-
+  specific heuristic. If pixel fidelity is required but native-terminal control
+  is unavailable, the result is `BLOCKED`; the runner does not silently
+  substitute a headless replay.
+- The target in either TUI presentation may use its normal explicit
+  project/session arguments to open deterministic state before assertions.
+  Non-interactive stdout from another CLI path is not TUI verification.
+  Automated input in both presentations goes to the same owned PTY, and native-
+  terminal host stdin/protocol responses are bridged back to it; flows wait for
+  expected text or a stable frame after `sendText`/`sendKeys` before asserting
+  or capturing the resulting state.
 - Native desktop verification is selected from `target.application`. The
   bundled macOS accessibility/window backend is used when its required
   permissions are already available; unsupported platforms or missing
   capabilities return `BLOCKED`. The agent must not install UI automation
   dependencies, change OS privacy/accessibility permissions, disable sandboxing,
   or operate unrelated user windows.
-- TUI runs automatically retain a bounded asciicast v2 replay in
+- PTY-presentation runs automatically retain a bounded asciicast v2 replay in
   `artifacts.videos`. It is generated from timestamped PTY output and resize
-  events, capped at 1 MiB, and identified as a terminal replay rather than a
-  pixel video.
+  events, capped at 1 MiB, and is explicitly terminal-state replay rather than
+  pixel evidence. Native-terminal presentation instead retains real-window
+  screenshots and, when exact-window capture is available, a bounded MP4 from
+  the owned native terminal host; its asciicast/headless captures remain
+  diagnostic-only and are never promoted as proof of colors/glyphs/window
+  geometry.
 - When macOS 12.3+ ScreenCaptureKit and Screen Recording permission are
   available, desktop runs automatically retain a silent H.264 MP4 of only the
-  correlated application window. Recording is capped at 30 seconds, has no
-  display/region fallback, and is best-effort: an unavailable video is a
-  structured observation rather than an assertion failure.
+  correlated application window. Independent-window capture scales to fill the
+  Retina encoder surface so the application occupies the complete video frame
+  rather than a top-left subset with unused canvas. Recording is capped at 30
+  seconds, has no display/region fallback, and is best-effort: an unavailable
+  video is reported as a structured observation rather than an assertion
+  failure.
 - Pass/fail requires a deterministic product-visible oracle such as terminal
   content/state, accessibility/app-driver control state, window/dialog state,
   visible copy, enabled/checked/value state, or another explicit application
@@ -251,6 +278,8 @@ confirmed runtime image support.
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/bridge-client.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
 - `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
@@ -282,10 +311,12 @@ confirmed runtime image support.
    selection, all auth modes, fail-closed origins, path/mode hardening, private
    empty-template creation only on an explicit auth request, non-executable
    flows, and successful redacted evidence creation.
-5. Native/TUI evidence, including bounded TUI replay and exact-window desktop
-   video when available, lives under the owning agent's `ui-qa/` workspace and
-   browser flows/evidence under its browser-backend `browser-qa/` workspace;
-   deleting the run removes both while persistent auth config/state remains.
+5. Native/TUI evidence, including bounded PTY replay, native-terminal real-
+   window screenshots/video when requested and available, and exact-window
+   desktop video when available, lives under the owning agent's `ui-qa/`
+   workspace; browser flows/evidence remain under its browser-backend
+   `browser-qa/` workspace. Deleting the run removes both while persistent auth
+   config/state remains.
 6. Runner tests prove that network activity and visible loading indicators are
    awaited, persistent loading fails the flow, visible actions retain a stable
    500 ms video interval, and context-wide click/drag video visualization is
@@ -298,12 +329,16 @@ confirmed runtime image support.
 9. TUI/native instructions require a real PTY/app driver, deterministic
    product-visible oracles, scoped cleanup, and a `BLOCKED` result when safe
    automation is unavailable rather than substituting source/unit tests.
+   Pixel-sensitive TUI tasks select native-terminal presentation by capability
+   need rather than app identity; the target still runs in one owned PTY while
+   a private bridge mirrors its bytes into an owned real terminal window.
 10. Suite tests/typecheck, host checks, and suite sync pass.
-11. Unified runner tests cover deterministic backend selection, real PTY screen
-    state and scoped cleanup, unsafe launch/path rejection, timeout bounds, and
-    platform blockers; the opt-in macOS E2E launches a real AppKit window,
-    semantically activates its control, and retains accessibility, screenshot,
-    and automatic exact-window video evidence.
+11. Unified runner tests cover deterministic backend/presentation selection,
+    real PTY screen state and scoped cleanup, native-terminal bridge bootstrap
+    isolation, unsafe launch/path rejection, timeout bounds, and platform
+    blockers; the opt-in macOS E2E launches a real AppKit window, semantically
+    activates its control, and retains accessibility, screenshot, and automatic
+    exact-window video evidence.
 
 ## Real-browser regression test
 

@@ -5,8 +5,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
 import { desktopEvidenceName, desktopPlatformContract, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
+import { resolveTuiPresentation, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
+import { chooseNativeTerminalProvider, nativeTerminalBridgeCommandFile, nativeTerminalBridgeShellCommand } from "../../src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs";
 
 const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
+const macosDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift");
 const nodeExecutable = fs.realpathSync(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
 const tempDirs: string[] = [];
 const children: Array<ReturnType<typeof spawn>> = [];
@@ -303,6 +306,90 @@ process.stdin.on("data", (data) => {
 		expect(result.payload.selection.missingCapabilities).not.toContain("terminalRecording");
 	});
 
+	test("keeps PTY presentation as the backward-compatible default and makes native terminal explicit", () => {
+		expect(resolveTuiPresentation({ target: { command: { argv: ["node", "fixture.mjs"] } } })).toBe("pty");
+		expect(resolveTuiPresentation({ target: { command: { argv: ["node", "fixture.mjs"], presentation: "native-terminal" } } })).toBe("native-terminal");
+		expect(() => resolveTuiPresentation({ target: { command: { argv: ["node", "fixture.mjs"], presentation: "project-specific" } } })).toThrow(/presentation/);
+	});
+
+	test("routes explicit native-terminal presentation through the generic TUI backend", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "fixture.mjs", "setInterval(() => {}, 1000);\n");
+		writeFlow(uiWorkspace, "native-terminal-probe.jsonc", {
+			target: { command: { argv: [nodeExecutable, "fixture.mjs"], presentation: "native-terminal" } },
+		});
+		const result = invoke(project, agentDir, ["probe", "--flow", "native-terminal-probe.jsonc", "--runner-timeout-ms", "30000"], 40_000);
+		expect(result.payload.selection.selectedBackend).toBe("tui");
+		const tui = result.payload.selection.candidateBackends.find((entry: any) => entry.backend === "tui");
+		expect(tui.eligible).toBe(true);
+		if (process.platform === "darwin") {
+			expect(["macos-iterm2-window", "macos-terminal-window"]).toContain(tui.platformDriver);
+			expect(result.payload.selection.supportedCapabilities).toContain("nativeTerminalWindow");
+			if (result.payload.status === "AVAILABLE") {
+				expect(result.status).toBe(0);
+				expect(result.payload.selection.supportedCapabilities).toContain("windowScreenshot");
+			} else {
+				expect(result.status).toBe(2);
+				expect(result.payload.status).toBe("BLOCKED");
+			}
+		} else {
+			expect(result.status).toBe(2);
+			expect(result.payload.status).toBe("BLOCKED");
+		}
+	});
+
+	test("native-terminal bootstrap contains only the trusted bridge command, never target argv", () => {
+		const command = nativeTerminalBridgeShellCommand({
+			nodePath: "/opt/runtime/node",
+			bridgePath: "/opt/ui qa/bridge-client.mjs",
+			port: 4242,
+			token: "a".repeat(64),
+		});
+		const commandFile = nativeTerminalBridgeCommandFile({ command });
+		expect(command).toStartWith("exec ");
+		expect(command).toContain("'/opt/runtime/node'");
+		expect(command).toContain("'/opt/ui qa/bridge-client.mjs'");
+		expect(command).toContain("--port 4242 --token");
+		expect(command).not.toContain("app.mjs");
+		expect(command).not.toContain("project");
+		expect(commandFile).toBe(`#!/bin/zsh\n${command}\n`);
+	});
+
+	test("native-terminal prefers iTerm2 when available and falls back to Terminal.app", () => {
+		expect(chooseNativeTerminalProvider({ itermAvailable: true, terminalAvailable: true })).toMatchObject({
+			id: "iterm2",
+			platformDriver: "macos-iterm2-window",
+			commandFile: false,
+		});
+		expect(chooseNativeTerminalProvider({ itermAvailable: false, terminalAvailable: true })).toMatchObject({
+			id: "terminal-app",
+			platformDriver: "macos-terminal-window",
+			commandFile: true,
+		});
+		expect(chooseNativeTerminalProvider({ itermAvailable: false, terminalAvailable: false })).toBeNull();
+	});
+
+	test("native-terminal keeps PTY semantic oracles but rejects dishonest PTY-only resizing", () => {
+		const allowed = [
+			{ action: "waitForText", text: "Ready" },
+			{ action: "sendText", text: "hello" },
+			{ action: "sendKeys", keys: ["enter"] },
+			{ action: "assertCursor", row: 1, column: 1 },
+			{ action: "assertProcessRunning" },
+			{ action: "assertProcessExited", exitCode: 0 },
+			{ action: "capture", name: "visual" },
+		];
+		expect(validateNativeTerminalSteps(allowed)).toBe(allowed);
+		expect(() => validateNativeTerminalSteps([{ action: "resize", cols: 80, rows: 24 }])).toThrow(/PTY-only/);
+	});
+
+	test("native-terminal bridge bootstrap validates its fixed transport parameters", () => {
+		expect(() => nativeTerminalBridgeShellCommand({ nodePath: "/node", bridgePath: "/bridge", port: 0, token: "a".repeat(64) })).toThrow(/port/);
+		expect(() => nativeTerminalBridgeShellCommand({ nodePath: "/node", bridgePath: "/bridge", port: 4242, token: "not-secret" })).toThrow(/token/);
+		expect(() => nativeTerminalBridgeShellCommand({ nodePath: "/bad\nnode", bridgePath: "/bridge", port: 4242, token: "a".repeat(64) })).toThrow(/path/);
+		expect(() => nativeTerminalBridgeCommandFile({ command: "node arbitrary-target.mjs" })).toThrow(/command/);
+	});
+
 	test("records a bounded asciicast v2 terminal video under the evidence directory", () => {
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeProjectFile(project, "fixture.mjs", `
@@ -588,6 +675,17 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		expect(launchedApplicationSelector({ pid: 4242 }, "darwin")).toEqual(["--pgid", "4242"]);
 		expect(launchedApplicationSelector({ pid: 4242 }, "linux")).toEqual(["--pgid", "4242"]);
 		expect(launchedApplicationSelector({ pid: 4242 }, "win32")).toEqual(["--pid", "4242"]);
+	});
+
+	test("scales independent-window video to fill its Retina output surface", () => {
+		const source = fs.readFileSync(macosDesktopDriverSource, "utf8");
+		const start = source.indexOf("func recordWindowVideo");
+		const end = source.indexOf("private func evenPixel", start);
+		expect(start).toBeGreaterThanOrEqual(0);
+		expect(end).toBeGreaterThan(start);
+		const recorder = source.slice(start, end);
+		expect(recorder).toContain("SCContentFilter(desktopIndependentWindow: target)");
+		expect(recorder).toContain("configuration.scalesToFit = true");
 	});
 
 	test("targets and cleans a package-wrapper GUI descendant through its owned POSIX group", async () => {

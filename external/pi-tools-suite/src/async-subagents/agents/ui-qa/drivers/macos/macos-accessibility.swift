@@ -836,6 +836,11 @@ func recordWindowVideo(app: NSRunningApplication, window: AXUIElement, arguments
     let configuration = SCStreamConfiguration()
     configuration.width = pixelWidth
     configuration.height = pixelHeight
+    // Independent-window streams do not scale up by default. Our encoder
+    // surface is Retina-sized, so without scalesToFit the 1x window surface is
+    // left in the top-left corner with unused space around it. Fill the exact
+    // window output surface while preserving the source aspect ratio.
+    configuration.scalesToFit = true
     configuration.minimumFrameInterval = CMTime(value: 1, timescale: 15)
     configuration.showsCursor = false
 

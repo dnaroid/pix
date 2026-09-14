@@ -164,15 +164,7 @@ export async function runDesktopBackend(context) {
 		// concurrently with the remaining flow and are stopped and finalized
 		// here, and their outcome is always a structured observation that can
 		// never fail deterministic UI assertions.
-		if (recorder) {
-			const outcome = await recorder.stop().catch((error) => ({ name: recorder.name, status: "unavailable", reason: safeReason(error) }));
-			if (outcome.status === "recorded") {
-				artifacts.videos.push(outcome.artifact);
-				observations.push({ action: "windowVideo", name: outcome.name, status: "recorded", durationMs: outcome.durationMs, bytes: outcome.bytes });
-			} else {
-				observations.push({ action: "windowVideo", name: outcome.name, status: "unavailable", reason: outcome.reason });
-			}
-		}
+		await finalizeWindowRecorder(recorder, artifacts, observations);
 		if (failure && selector) {
 			await captureAccessibility({ context, helper, selector, name: "failure", artifacts, depth: 10, limit: 100 }).catch(() => {});
 			if (probe.details?.screenRecording) {
@@ -188,6 +180,38 @@ export async function runDesktopBackend(context) {
 		observations,
 		artifacts,
 	};
+}
+
+export async function createMacosWindowEvidenceController({ context, selector, observations, artifacts }) {
+	const helper = await ensureMacosHelper(context);
+	const recorder = context.selection?.supportedCapabilities?.includes("windowVideo")
+		? await startWindowVideoRecorder({ context, helper, selector, observations })
+		: null;
+	let finished = false;
+	return {
+		async capture(name, options = {}) {
+			const depth = boundedInt(options.depth, 10, 1, 20, "depth");
+			const limit = boundedInt(options.limit, 100, 1, 500, "limit");
+			await captureAccessibility({ context, helper, selector, name, artifacts, depth, limit });
+			if (probeHasScreenshot(context)) await captureScreenshot({ context, helper, selector, name, artifacts });
+		},
+		async finish() {
+			if (finished) return;
+			finished = true;
+			await finalizeWindowRecorder(recorder, artifacts, observations);
+		},
+	};
+}
+
+async function finalizeWindowRecorder(recorder, artifacts, observations) {
+	if (!recorder) return;
+	const outcome = await recorder.stop().catch((error) => ({ name: recorder.name, status: "unavailable", reason: safeReason(error) }));
+	if (outcome.status === "recorded") {
+		artifacts.videos.push(outcome.artifact);
+		observations.push({ action: "windowVideo", name: outcome.name, status: "recorded", durationMs: outcome.durationMs, bytes: outcome.bytes });
+	} else {
+		observations.push({ action: "windowVideo", name: outcome.name, status: "unavailable", reason: outcome.reason });
+	}
 }
 
 async function executeStep(options) {
@@ -477,7 +501,7 @@ async function startWindowVideoRecorder({ context, helper, selector, observation
 			observations.push({ action: "windowVideo", name, status: "unavailable", reason: "not enough runner time remains to record window video" });
 			return null;
 		}
-		await helperCall(helper, ["wait-window", ...selector, "--timeout", "5"], context, 10_000);
+		await helperCall(helper, ["wait-window", ...selector, "--timeout", "10"], context, 15_000);
 		const filename = `${name}.mp4`;
 		const target = path.join(context.evidenceDir, filename);
 		const child = spawn(helper, ["record-window", ...selector, "--out", target, "--duration", String(durationMs / 1000)], {

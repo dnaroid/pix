@@ -78,8 +78,11 @@ and typed artifact links. TUI runs use a real PTY plus ANSI/VT screen model and
 automatically retain a bounded asciicast v2 replay. macOS desktop runs use the
 bundled Accessibility/CGWindow helper and, when ScreenCaptureKit plus Screen
 Recording permission are available, automatically retain a silent, bounded
-video of only the correlated application window. Video remains best-effort
-evidence and never replaces deterministic assertions. Launch contracts, private
+video of only the correlated application window. Independent-window capture
+scales to fill the Retina encoder surface, so the application occupies the
+complete video frame rather than a top-left subset with unused canvas. Video
+remains best-effort evidence and never replaces deterministic assertions.
+Launch contracts, private
 paths, deadlines, and owned-process cleanup are enforced by the runner rather
 than by model instructions alone.
 
@@ -108,9 +111,22 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 ## Preserved contracts
 
 - Only the trusted runner owns browser execution and credential handling.
-- Native/TUI QA exercises the actual shipping UI through a PTY or deterministic
-  app/platform driver; unavailable safe automation produces `BLOCKED` rather
-  than a static-check substitute.
+- Native/TUI QA exercises the actual shipping UI through a deterministic
+  presentation selected by required capabilities, never by project identity.
+  New role-authored flows explicitly use PTY/headless ANSI presentation for
+  line-oriented/plain-terminal or protocol-focused targets, and use native-
+  terminal presentation by default for structured/full-screen TUIs. The runner
+  keeps omitted presentation as PTY only for backward compatibility. Native-
+  terminal still controls one
+  runner-owned PTY target and uses that same PTY for deterministic text/cursor/
+  process oracles, but mirrors its exact byte stream through a private trusted
+  bridge into a fresh owned terminal window whose real pixels are captured. No
+  target argv/cwd/env is embedded into that terminal bootstrap. On macOS the
+  host provider is environment-selected (prefer installed iTerm2, fall back to
+  Terminal.app), never selected by project identity. If exact visual
+  terminal evidence is required and the native-window capability is unavailable,
+  the result is `BLOCKED`; a headless replay cannot substitute for pixel
+  evidence.
 - The actual requested target is tested; static checks or invented mock pages
   cannot substitute for requested UI QA.
 - Public QA does not require credentials or create an auth file.
@@ -128,6 +144,8 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/bridge-client.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
 - `external/pi-tools-suite/src/async-subagents/core/config.ts`
