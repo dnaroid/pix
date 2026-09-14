@@ -301,19 +301,37 @@ process.stdout.write("recorded\\n");
 		expect(fs.existsSync(lockPath)).toBe(false);
 	});
 
-	test.serial("recovers an expired registry lock when its pid has been reused", () => {
+	test.serial("does not reclaim an expired registry lock from the same live process", async () => {
 		const cwd = tempDir();
-		const runDir = path.join(cwd, ".pi", "subagents", "reused-pid-lock-run");
-		createAgent(runDir, "reused-pid-agent");
-		const lockPath = `${getSubagentRegistryPath(cwd)}.lock`;
-		writeFile(lockPath, JSON.stringify({ pid: process.pid, token: "expired-live-owner" }));
+		const registryPath = getSubagentRegistryPath(cwd);
+		const lockPath = `${registryPath}.lock`;
+		const startPath = path.join(cwd, "start-live-lock-writer");
+		const writerPath = path.join(cwd, "live-lock-writer.mjs");
+		const runDir = path.join(cwd, ".pi", "subagents", "live-lock-run");
+		createAgent(runDir, "live-lock-agent");
+		const registryModuleUrl = new URL("../../src/async-subagents/core/registry.ts", import.meta.url).href;
+		writeFile(writerPath, `
+import * as fs from "node:fs";
+import { recordSubagentRun } from ${JSON.stringify(registryModuleUrl)};
+const [cwd, runDir] = process.argv.slice(2);
+const startPath = ${JSON.stringify(startPath)};
+process.stdout.write("ready\\n");
+while (!fs.existsSync(startPath)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+recordSubagentRun(cwd, runDir, ["live-lock-agent"]);
+process.stdout.write("recorded\\n");
+`);
+		writeFile(lockPath, JSON.stringify({ pid: process.pid, token: "live-owner" }));
 		const expiredAt = new Date(Date.now() - 31_000);
 		fs.utimesSync(lockPath, expiredAt, expiredAt);
-
-		recordSubagentRun(cwd, runDir, ["reused-pid-agent"]);
-
-		expect(loadSubagentRegistry(cwd).agents["reused-pid-agent"]?.runDir).toBe(runDir);
-		expect(fs.existsSync(lockPath)).toBe(false);
+		const writer = spawnRegistryWriter(writerPath, cwd, runDir, "unused-agent-id");
+		await withTimeout(writer.ready, "Registry writer did not start");
+		writeFile(startPath);
+		await new Promise((resolve) => setTimeout(resolve, 75));
+		expect(writer.recorded()).toBe(false);
+		expect(fs.existsSync(lockPath)).toBe(true);
+		fs.rmSync(lockPath);
+		await withTimeout(writer.done, "Registry writer did not finish after live lock release");
+		expect(loadSubagentRegistry(cwd).agents["live-lock-agent"]?.runDir).toBe(runDir);
 	});
 });
 

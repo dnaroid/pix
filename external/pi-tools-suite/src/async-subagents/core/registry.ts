@@ -228,8 +228,8 @@ function recoverStaleRegistryLock(lockPath: string, owner: RegistryLockOwner): v
 	}
 	const existingOwner = readRegistryLockOwner(lockPath);
 	const lockAgeMs = Date.now() - lockStat.mtimeMs;
-	if (lockAgeMs <= REGISTRY_LOCK_STALE_MS && existingOwner && isProcessAlive(existingOwner.pid)) return;
-	if (lockAgeMs <= REGISTRY_LOCK_STALE_MS && !existingOwner) return;
+	if (existingOwner && isProcessAlive(existingOwner.pid)) return;
+	if (!existingOwner && lockAgeMs <= REGISTRY_LOCK_STALE_MS) return;
 
 	const quarantinePath = `${lockPath}.stale-${owner.token}`;
 	try {

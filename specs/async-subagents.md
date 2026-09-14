@@ -100,8 +100,10 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - **Location**: `<cwd>/.pi/subagents/registry.json`, `{version:1, latestRunId?, latestRunDir?, runs:{}, agents:{}}`. `[confirmed by code]`
 - **Concurrent writers**: run recording and cleanup removal take a project-local
   exclusive `registry.json.lock` (owner pid/token). They retry for at most two
-  seconds, reclaim a lock whose owner process is dead or whose lock is older
-  than 30 seconds (including PID reuse and malformed owner metadata), then
+  seconds and reclaim a lock whose owner process is dead. A parseable lock whose
+  PID is still alive is never reclaimed solely because of lock age; this fails
+  closed on PID reuse rather than risking concurrent writers. Malformed owner
+  metadata must remain unchanged for 30 seconds before recovery. Writers then
   read-modify-write while holding the lock.
   Registry replacement is same-directory temp-file + rename, so readers see
   either the previous complete JSON or the replacement, never a truncated write.
