@@ -252,7 +252,11 @@ struct IdxQueryRequest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
 enum IdxQuery {
     Code {
         query: String,
@@ -1568,12 +1572,7 @@ async fn workspace_sidebar_indicator_poll(
         .home_dir()
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
     run_blocking(move || {
-        workspace_sidebar_indicator_poll_from(
-            &app,
-            &window_label,
-            Path::new(&workspace),
-            &home,
-        )
+        workspace_sidebar_indicator_poll_from(&app, &window_label, Path::new(&workspace), &home)
     })
     .await
 }
@@ -1589,7 +1588,13 @@ async fn idx_query(request: IdxQueryRequest) -> Result<IdxCommandResult, String>
         let root = canonical_workspace(Path::new(&request.workspace))?;
         let executable = idx_executable()?;
         let args = idx_query_args(&request.query)?;
-        run_idx_command(&executable, &root, &args, IDX_QUERY_TIMEOUT, MAX_IDX_OUTPUT_BYTES)
+        run_idx_command(
+            &executable,
+            &root,
+            &args,
+            IDX_QUERY_TIMEOUT,
+            MAX_IDX_OUTPUT_BYTES,
+        )
     })
     .await
 }
@@ -1603,7 +1608,13 @@ async fn idx_inspect(request: IdxInspectRequest) -> Result<IdxCommandResult, Str
         }
         let executable = idx_executable()?;
         let args = idx_inspect_args(&request)?;
-        run_idx_command(&executable, &root, &args, IDX_QUERY_TIMEOUT, MAX_IDX_OUTPUT_BYTES)
+        run_idx_command(
+            &executable,
+            &root,
+            &args,
+            IDX_QUERY_TIMEOUT,
+            MAX_IDX_OUTPUT_BYTES,
+        )
     })
     .await
 }
@@ -1617,7 +1628,13 @@ async fn idx_knowledge(request: IdxKnowledgeRequest) -> Result<IdxCommandResult,
         }
         let executable = idx_executable()?;
         let args = idx_knowledge_args(&request)?;
-        run_idx_command(&executable, &root, &args, IDX_QUERY_TIMEOUT, MAX_IDX_OUTPUT_BYTES)
+        run_idx_command(
+            &executable,
+            &root,
+            &args,
+            IDX_QUERY_TIMEOUT,
+            MAX_IDX_OUTPUT_BYTES,
+        )
     })
     .await
 }
@@ -2127,7 +2144,9 @@ fn write_project_workspace_config_from(
             .write(true)
             .create_new(true)
             .open(&temporary)
-            .map_err(|error| format!("failed to create workspace config temporary file: {error}"))?;
+            .map_err(|error| {
+                format!("failed to create workspace config temporary file: {error}")
+            })?;
         file.write_all(content.as_bytes())
             .map_err(|error| format!("failed to write .pi/workspace.jsonc: {error}"))?;
         file.sync_all()
@@ -2140,7 +2159,11 @@ fn write_project_workspace_config_from(
         let _ = fs::remove_file(&temporary);
     }
     write_result?;
-    read_project_file_from(&root, Path::new(".pi/workspace.jsonc"), MAX_WORKSPACE_CONFIG_BYTES)
+    read_project_file_from(
+        &root,
+        Path::new(".pi/workspace.jsonc"),
+        MAX_WORKSPACE_CONFIG_BYTES,
+    )
 }
 
 fn write_project_workspace_config_if_unchanged_from(
@@ -3279,7 +3302,10 @@ fn workspace_sidebar_indicator_poll_from(
             return Ok(WorkspaceSidebarIndicatorPoll {
                 project: SidebarProjectIndicatorState { error: Some(error) },
                 git: SidebarGitIndicatorState::default(),
-                registry: SidebarRegistryIndicatorState { stable: true, ..SidebarRegistryIndicatorState::default() },
+                registry: SidebarRegistryIndicatorState {
+                    stable: true,
+                    ..SidebarRegistryIndicatorState::default()
+                },
                 scripts: SidebarRuntimeIndicatorState::default(),
                 idx: SidebarRuntimeIndicatorState::default(),
                 settings,
@@ -3293,11 +3319,8 @@ fn workspace_sidebar_indicator_poll_from(
             .err()
             .map(|error| format!("failed to read project directory: {error}")),
     };
-    let registry = sidebar_registry_indicator_state(
-        app.state::<SidebarIndicatorState>().inner(),
-        &root,
-        home,
-    );
+    let registry =
+        sidebar_registry_indicator_state(app.state::<SidebarIndicatorState>().inner(), &root, home);
 
     Ok(WorkspaceSidebarIndicatorPoll {
         project,
@@ -3338,24 +3361,22 @@ fn sidebar_registry_indicator_state_inner(
     let pi_dir = root.join(".pi");
     let surface_before = sidebar_registry_surface_stamp(&pi_dir)?;
     let provenance_path = pi_dir.join("registry.json");
-    let (provenance, provenance_stamp) = match sidebar_read_stable_file(
-        &provenance_path,
-        MAX_SIDEBAR_REGISTRY_PROVENANCE_BYTES,
-    )? {
-        SidebarStableFileRead::Missing => (SidebarRegistryProvenance::default(), None),
-        SidebarStableFileRead::Changed => return Ok(SidebarRegistryIndicatorState::default()),
-        SidebarStableFileRead::Stable(bytes, stamp) => {
-            let provenance = serde_json::from_slice::<SidebarRegistryProvenance>(&bytes)
-                .map_err(|error| format!("invalid .pi/registry.json: {error}"))?;
-            if provenance.version != 1 {
-                return Err(format!(
-                    "unsupported .pi/registry.json version {}",
-                    provenance.version
-                ));
+    let (provenance, provenance_stamp) =
+        match sidebar_read_stable_file(&provenance_path, MAX_SIDEBAR_REGISTRY_PROVENANCE_BYTES)? {
+            SidebarStableFileRead::Missing => (SidebarRegistryProvenance::default(), None),
+            SidebarStableFileRead::Changed => return Ok(SidebarRegistryIndicatorState::default()),
+            SidebarStableFileRead::Stable(bytes, stamp) => {
+                let provenance = serde_json::from_slice::<SidebarRegistryProvenance>(&bytes)
+                    .map_err(|error| format!("invalid .pi/registry.json: {error}"))?;
+                if provenance.version != 1 {
+                    return Err(format!(
+                        "unsupported .pi/registry.json version {}",
+                        provenance.version
+                    ));
+                }
+                (provenance, Some(stamp))
             }
-            (provenance, Some(stamp))
-        }
-    };
+        };
 
     let local_resources = sidebar_registry_local_resources(root)?;
     let mut hash_budget = MAX_SIDEBAR_REGISTRY_HASH_BYTES;
@@ -3416,7 +3437,9 @@ fn sidebar_registry_indicator_state_inner(
         }
         let tracked = tracked.expect("tracked project artifact exists");
         if tracked.hash.is_empty() {
-            return Err(format!("registry provenance for project {artifact} has no content hash"));
+            return Err(format!(
+                "registry provenance for project {artifact} has no content hash"
+            ));
         }
         let changed = if artifact == "tasks" {
             sidebar_registry_cached_task_bundle_changed(
@@ -3520,7 +3543,10 @@ fn sidebar_registry_remote_override(path: &Path) -> Result<SidebarRegistryRemote
         Ok(value) => value,
         Err(_) => return Ok(SidebarRegistryRemoteOverride::Absent),
     };
-    let Some(registry) = value.get("resourceRegistry").and_then(serde_json::Value::as_object) else {
+    let Some(registry) = value
+        .get("resourceRegistry")
+        .and_then(serde_json::Value::as_object)
+    else {
         return Ok(SidebarRegistryRemoteOverride::Absent);
     };
     if !registry.contains_key("remote") {
@@ -3535,7 +3561,16 @@ fn sidebar_registry_remote_override(path: &Path) -> Result<SidebarRegistryRemote
     Ok(SidebarRegistryRemoteOverride::Present(remote))
 }
 
-fn sidebar_registry_surface_stamp(pi_dir: &Path) -> Result<(Option<SidebarFileStamp>, Option<SidebarFileStamp>, Option<SidebarFileStamp>), String> {
+fn sidebar_registry_surface_stamp(
+    pi_dir: &Path,
+) -> Result<
+    (
+        Option<SidebarFileStamp>,
+        Option<SidebarFileStamp>,
+        Option<SidebarFileStamp>,
+    ),
+    String,
+> {
     Ok((
         sidebar_path_stamp(pi_dir)?,
         sidebar_path_stamp(&pi_dir.join("skills"))?,
@@ -3659,8 +3694,8 @@ fn sidebar_registry_has_trackable_file(path: &Path, count: &mut usize) -> Result
     if !metadata.is_dir() {
         return Ok(true);
     }
-    for entry in fs::read_dir(path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+    for entry in
+        fs::read_dir(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?
     {
         let entry = entry.map_err(|error| format!("failed to read {}: {error}", path.display()))?;
         if entry.file_name().to_string_lossy() == ".DS_Store" {
@@ -3686,11 +3721,12 @@ fn sidebar_registry_cached_path_changed(
     hash_budget: &mut u64,
 ) -> Result<Option<bool>, String> {
     let (fingerprint_before, file_bytes) = sidebar_registry_tree_fingerprint(path)?;
-    let cached = state
-        .registry_cache
-        .lock()
-        .ok()
-        .and_then(|cache| cache.get(root).and_then(|workspace| workspace.entries.get(cache_key)).cloned());
+    let cached = state.registry_cache.lock().ok().and_then(|cache| {
+        cache
+            .get(root)
+            .and_then(|workspace| workspace.entries.get(cache_key))
+            .cloned()
+    });
     if let Some(cached) = cached {
         if cached.expected_hash == expected_hash && cached.fingerprint == fingerprint_before {
             let (fingerprint_after, _) = sidebar_registry_tree_fingerprint(path)?;
@@ -3712,18 +3748,14 @@ fn sidebar_registry_cached_path_changed(
         if !cache.contains_key(root) && cache.len() >= 32 {
             cache.clear();
         }
-        cache
-            .entry(root.to_path_buf())
-            .or_default()
-            .entries
-            .insert(
-                cache_key.to_owned(),
-                SidebarRegistryCacheEntry {
-                    expected_hash: expected_hash.to_owned(),
-                    fingerprint: fingerprint_after,
-                    changed,
-                },
-            );
+        cache.entry(root.to_path_buf()).or_default().entries.insert(
+            cache_key.to_owned(),
+            SidebarRegistryCacheEntry {
+                expected_hash: expected_hash.to_owned(),
+                fingerprint: fingerprint_after,
+                changed,
+            },
+        );
     }
     Ok(Some(changed))
 }
@@ -3736,11 +3768,12 @@ fn sidebar_registry_cached_task_bundle_changed(
 ) -> Result<Option<bool>, String> {
     let (fingerprint_before, file_bytes) = sidebar_registry_task_bundle_fingerprint(root)?;
     let cache_key = "project:tasks";
-    let cached = state
-        .registry_cache
-        .lock()
-        .ok()
-        .and_then(|cache| cache.get(root).and_then(|workspace| workspace.entries.get(cache_key)).cloned());
+    let cached = state.registry_cache.lock().ok().and_then(|cache| {
+        cache
+            .get(root)
+            .and_then(|workspace| workspace.entries.get(cache_key))
+            .cloned()
+    });
     if let Some(cached) = cached {
         if cached.expected_hash == expected_hash && cached.fingerprint == fingerprint_before {
             let (fingerprint_after, _) = sidebar_registry_task_bundle_fingerprint(root)?;
@@ -3762,18 +3795,14 @@ fn sidebar_registry_cached_task_bundle_changed(
         if !cache.contains_key(root) && cache.len() >= 32 {
             cache.clear();
         }
-        cache
-            .entry(root.to_path_buf())
-            .or_default()
-            .entries
-            .insert(
-                cache_key.to_owned(),
-                SidebarRegistryCacheEntry {
-                    expected_hash: expected_hash.to_owned(),
-                    fingerprint: fingerprint_after,
-                    changed,
-                },
-            );
+        cache.entry(root.to_path_buf()).or_default().entries.insert(
+            cache_key.to_owned(),
+            SidebarRegistryCacheEntry {
+                expected_hash: expected_hash.to_owned(),
+                fingerprint: fingerprint_after,
+                changed,
+            },
+        );
     }
     Ok(Some(changed))
 }
@@ -3815,10 +3844,14 @@ fn sidebar_registry_hash_task_bundle(root: &Path) -> Result<String, String> {
             .map_err(|error| format!("failed to read {}: {error}", attachments_dir.display()))?;
         entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
         for entry in entries {
-            let metadata = fs::symlink_metadata(entry.path())
-                .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!("failed to inspect {}: {error}", entry.path().display())
+            })?;
             if metadata.file_type().is_symlink() {
-                return Err(format!("task attachment is a symbolic link: {}", entry.path().display()));
+                return Err(format!(
+                    "task attachment is a symbolic link: {}",
+                    entry.path().display()
+                ));
             }
             if !metadata.is_file() {
                 continue;
@@ -3844,8 +3877,9 @@ fn sidebar_registry_hash_task_bundle(root: &Path) -> Result<String, String> {
         hasher.update(b"\0attachment\0");
         hasher.update(name.as_bytes());
         hasher.update(b"\0");
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("failed to read task attachment {}: {error}", path.display()))?;
+        let bytes = fs::read(&path).map_err(|error| {
+            format!("failed to read task attachment {}: {error}", path.display())
+        })?;
         hasher.update(bytes);
     }
     Ok(format!("{:x}", hasher.finalize()))
@@ -3876,7 +3910,9 @@ fn sidebar_registry_fingerprint_visit(
     metadata.len().hash(hasher);
     sidebar_modified_ns(&metadata).hash(hasher);
     if metadata.file_type().is_symlink() {
-        return Err(format!("registry resource contains a symbolic link: {relative}"));
+        return Err(format!(
+            "registry resource contains a symbolic link: {relative}"
+        ));
     }
     if metadata.is_file() {
         *bytes = bytes.saturating_add(metadata.len());
@@ -3884,7 +3920,9 @@ fn sidebar_registry_fingerprint_visit(
         return Ok(());
     }
     if !metadata.is_dir() {
-        return Err(format!("registry resource contains an unsupported entry: {relative}"));
+        return Err(format!(
+            "registry resource contains an unsupported entry: {relative}"
+        ));
     }
     2u8.hash(hasher);
     let mut entries = fs::read_dir(path)
@@ -3927,12 +3965,16 @@ fn sidebar_registry_hash_visit(
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
     if metadata.file_type().is_symlink() {
-        return Err(format!("registry resource contains a symbolic link: {relative}"));
+        return Err(format!(
+            "registry resource contains a symbolic link: {relative}"
+        ));
     }
     if metadata.is_file() {
         *bytes = bytes.saturating_add(metadata.len());
         if *bytes > MAX_SIDEBAR_REGISTRY_HASH_BYTES {
-            return Err("registry resource is too large to hash in the indicator service".to_owned());
+            return Err(
+                "registry resource is too large to hash in the indicator service".to_owned(),
+            );
         }
         hasher.update(b"file\0");
         hasher.update(relative.as_bytes());
@@ -3952,7 +3994,9 @@ fn sidebar_registry_hash_visit(
         return Ok(());
     }
     if !metadata.is_dir() {
-        return Err(format!("registry resource contains an unsupported entry: {relative}"));
+        return Err(format!(
+            "registry resource contains an unsupported entry: {relative}"
+        ));
     }
     hasher.update(b"dir\0");
     hasher.update(relative.as_bytes());
@@ -3982,9 +4026,13 @@ fn sidebar_read_stable_file(path: &Path, max_bytes: u64) -> Result<SidebarStable
     if before.len > max_bytes {
         return Err(format!("{} is too large to inspect", path.display()));
     }
-    let bytes = fs::read(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let bytes =
+        fs::read(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     if bytes.len() as u64 > max_bytes {
-        return Err(format!("{} grew too large while being inspected", path.display()));
+        return Err(format!(
+            "{} grew too large while being inspected",
+            path.display()
+        ));
     }
     let Some(after) = sidebar_file_stamp(path)? else {
         return Ok(SidebarStableFileRead::Changed);
@@ -4104,7 +4152,8 @@ fn sidebar_git_status_output(root: &Path) -> Result<std::process::Output, String
         .stderr
         .take()
         .ok_or_else(|| "Git indicator stderr pipe is unavailable".to_owned())?;
-    let stdout_thread = thread::spawn(move || read_bounded_idx_stream(stdout, MAX_SIDEBAR_GIT_OUTPUT_BYTES));
+    let stdout_thread =
+        thread::spawn(move || read_bounded_idx_stream(stdout, MAX_SIDEBAR_GIT_OUTPUT_BYTES));
     let stderr_thread = thread::spawn(move || read_bounded_idx_stream(stderr, 256 * 1024));
     let deadline = Instant::now() + SIDEBAR_GIT_TIMEOUT;
     let status = loop {
@@ -4123,7 +4172,9 @@ fn sidebar_git_status_output(root: &Path) -> Result<std::process::Output, String
                 let _ = child.wait();
                 let _ = stdout_thread.join();
                 let _ = stderr_thread.join();
-                return Err(format!("failed while waiting for Git indicator status: {error}"));
+                return Err(format!(
+                    "failed while waiting for Git indicator status: {error}"
+                ));
             }
         }
     };
@@ -4204,9 +4255,10 @@ fn sidebar_scripts_indicator_state(
     };
     let mut running_ids = Vec::new();
     let mut failed_ids = Vec::new();
-    for (id, session) in sessions.iter().filter(|(_, session)| {
-        session.window_label == window_label && session.workspace == root
-    }) {
+    for (id, session) in sessions
+        .iter()
+        .filter(|(_, session)| session.window_label == window_label && session.workspace == root)
+    {
         if session.status == PackageTerminalStatus::Running {
             running_ids.push(id.clone());
         } else if session.status == PackageTerminalStatus::Failed
@@ -4304,7 +4356,9 @@ fn sidebar_settings_indicator_state(home: &Path) -> SidebarSettingsIndicatorStat
         };
         match serde_json::from_str::<serde_json::Value>(&normalized) {
             Ok(value) if value.is_object() => {
-                if let Ok(schema) = serde_json::from_str::<serde_json::Value>(user_config_schema(kind)) {
+                if let Ok(schema) =
+                    serde_json::from_str::<serde_json::Value>(user_config_schema(kind))
+                {
                     if let Some(issue) = sidebar_settings_schema_issue(&value, &schema, "$", 24) {
                         errors.push(format!("{label}: {issue}"));
                     }
@@ -4339,21 +4393,37 @@ fn sidebar_settings_schema_issue(
             return Some(format!("{location} has an unsupported value"));
         }
     }
-    if let Some(branches) = schema_object.get("anyOf").and_then(serde_json::Value::as_array) {
+    if let Some(branches) = schema_object
+        .get("anyOf")
+        .and_then(serde_json::Value::as_array)
+    {
         if !branches.iter().any(|branch| {
             sidebar_settings_schema_issue(value, branch, location, depth - 1).is_none()
         }) {
-            return Some(format!("{location} does not match any allowed value or type"));
+            return Some(format!(
+                "{location} does not match any allowed value or type"
+            ));
         }
         return None;
     }
 
-    match schema_object.get("type").and_then(serde_json::Value::as_str) {
-        Some("object") if !value.is_object() => return Some(format!("{location} must be an object")),
+    match schema_object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("object") if !value.is_object() => {
+            return Some(format!("{location} must be an object"))
+        }
         Some("array") if !value.is_array() => return Some(format!("{location} must be an array")),
-        Some("string") if !value.is_string() => return Some(format!("{location} must be a string")),
-        Some("boolean") if !value.is_boolean() => return Some(format!("{location} must be a boolean")),
-        Some("number") if !value.is_number() => return Some(format!("{location} must be a number")),
+        Some("string") if !value.is_string() => {
+            return Some(format!("{location} must be a string"))
+        }
+        Some("boolean") if !value.is_boolean() => {
+            return Some(format!("{location} must be a boolean"))
+        }
+        Some("number") if !value.is_number() => {
+            return Some(format!("{location} must be a number"))
+        }
         Some("integer") if value.as_i64().is_none() && value.as_u64().is_none() => {
             return Some(format!("{location} must be an integer"));
         }
@@ -4361,12 +4431,18 @@ fn sidebar_settings_schema_issue(
     }
 
     if let Some(number) = value.as_f64() {
-        if let Some(minimum) = schema_object.get("minimum").and_then(serde_json::Value::as_f64) {
+        if let Some(minimum) = schema_object
+            .get("minimum")
+            .and_then(serde_json::Value::as_f64)
+        {
             if number < minimum {
                 return Some(format!("{location} must be >= {minimum}"));
             }
         }
-        if let Some(maximum) = schema_object.get("maximum").and_then(serde_json::Value::as_f64) {
+        if let Some(maximum) = schema_object
+            .get("maximum")
+            .and_then(serde_json::Value::as_f64)
+        {
             if number > maximum {
                 return Some(format!("{location} must be <= {maximum}"));
             }
@@ -4374,30 +4450,34 @@ fn sidebar_settings_schema_issue(
     }
 
     if let Some(object) = value.as_object() {
-        if let Some(required) = schema_object.get("required").and_then(serde_json::Value::as_array) {
+        if let Some(required) = schema_object
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+        {
             for key in required.iter().filter_map(serde_json::Value::as_str) {
                 if !object.contains_key(key) {
                     return Some(format!("{location}.{key} is required"));
                 }
             }
         }
-        let properties = schema_object.get("properties").and_then(serde_json::Value::as_object);
+        let properties = schema_object
+            .get("properties")
+            .and_then(serde_json::Value::as_object);
         let wildcard = schema_object
             .get("patternProperties")
             .and_then(serde_json::Value::as_object)
             .and_then(|patterns| patterns.get("^.*$"));
         for (key, child_value) in object {
-            let child_schema = properties.and_then(|properties| properties.get(key)).or(wildcard);
+            let child_schema = properties
+                .and_then(|properties| properties.get(key))
+                .or(wildcard);
             let Some(child_schema) = child_schema else {
                 continue;
             };
             let child_location = format!("{location}.{key}");
-            if let Some(issue) = sidebar_settings_schema_issue(
-                child_value,
-                child_schema,
-                &child_location,
-                depth - 1,
-            ) {
+            if let Some(issue) =
+                sidebar_settings_schema_issue(child_value, child_schema, &child_location, depth - 1)
+            {
                 return Some(issue);
             }
         }
@@ -4405,12 +4485,9 @@ fn sidebar_settings_schema_issue(
         if let Some(items) = schema_object.get("items") {
             for (index, child) in array.iter().enumerate() {
                 let child_location = format!("{location}[{index}]");
-                if let Some(issue) = sidebar_settings_schema_issue(
-                    child,
-                    items,
-                    &child_location,
-                    depth - 1,
-                ) {
+                if let Some(issue) =
+                    sidebar_settings_schema_issue(child, items, &child_location, depth - 1)
+                {
                     return Some(issue);
                 }
             }
@@ -4514,7 +4591,10 @@ fn run_idx_command(
                 let _ = child.wait();
                 let _ = stdout_thread.join();
                 let _ = stderr_thread.join();
-                return Err(format!("failed while waiting for idx {}: {error}", args.join(" ")));
+                return Err(format!(
+                    "failed while waiting for idx {}: {error}",
+                    args.join(" ")
+                ));
             }
         }
     };
@@ -4630,7 +4710,12 @@ fn idx_overview_from(workspace: &Path) -> Result<IdxOverview, String> {
     let wiki_result = run_idx_command(
         &executable,
         &root,
-        &["wiki".to_owned(), "status".to_owned(), "--candidate-limit".to_owned(), "50".to_owned()],
+        &[
+            "wiki".to_owned(),
+            "status".to_owned(),
+            "--candidate-limit".to_owned(),
+            "50".to_owned(),
+        ],
         IDX_COMMAND_TIMEOUT,
         128 * 1024,
     );
@@ -4731,7 +4816,12 @@ fn parse_idx_index_status(raw: &str) -> IdxParsedStatus {
 
 fn parse_idx_wiki_status(raw: &str) -> IdxParsedStatus {
     let mut fields = BTreeMap::new();
-    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()).take(1) {
+    for line in raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(1)
+    {
         for segment in line.split('|').map(str::trim) {
             let Some((key, value)) = segment.split_once(':') else {
                 continue;
@@ -4772,12 +4862,18 @@ fn non_empty_idx_argument(value: &str, label: &str, max_chars: usize) -> Result<
         return Err(format!("{label} cannot be empty"));
     }
     if trimmed.chars().count() > max_chars || trimmed.contains('\0') {
-        return Err(format!("{label} is too long or contains invalid characters"));
+        return Err(format!(
+            "{label} is too long or contains invalid characters"
+        ));
     }
     Ok(trimmed.to_owned())
 }
 
-fn optional_idx_argument(value: &Option<String>, label: &str, max_chars: usize) -> Result<Option<String>, String> {
+fn optional_idx_argument(
+    value: &Option<String>,
+    label: &str,
+    max_chars: usize,
+) -> Result<Option<String>, String> {
     value
         .as_deref()
         .map(|value| non_empty_idx_argument(value, label, max_chars))
@@ -4917,7 +5013,11 @@ fn idx_inspect_args(request: &IdxInspectRequest) -> Result<Vec<String>, String> 
                 )?,
             ];
             if request.include_body == Some(true) {
-                args.extend(["--include-body".to_owned(), "--body-lines".to_owned(), "80".to_owned()]);
+                args.extend([
+                    "--include-body".to_owned(),
+                    "--body-lines".to_owned(),
+                    "80".to_owned(),
+                ]);
             } else {
                 args.push("--signature-only".to_owned());
             }
@@ -4961,14 +5061,25 @@ fn idx_knowledge_args(request: &IdxKnowledgeRequest) -> Result<Vec<String>, Stri
         ]),
         IdxKnowledgeAction::Record => {
             if request.source_reviewed != Some(true) {
-                return Err("record requires sourceReviewed=true after reading and classifying the source".to_owned());
+                return Err(
+                    "record requires sourceReviewed=true after reading and classifying the source"
+                        .to_owned(),
+                );
             }
             let classification = validated_idx_choice(
                 request.classification.as_deref(),
                 "classification",
-                &["spec", "spec-like", "meta-index", "design-only", "guide", "other"],
+                &[
+                    "spec",
+                    "spec-like",
+                    "meta-index",
+                    "design-only",
+                    "guide",
+                    "other",
+                ],
             )?;
-            let source_path = path()?.ok_or_else(|| "record requires a knowledge path".to_owned())?;
+            let source_path =
+                path()?.ok_or_else(|| "record requires a knowledge path".to_owned())?;
             let mut args = vec![
                 "wiki".to_owned(),
                 "record".to_owned(),
@@ -4988,7 +5099,12 @@ fn idx_knowledge_args(request: &IdxKnowledgeRequest) -> Result<Vec<String>, Stri
                     "lifecycle",
                     &["active", "proposed", "historical", "superseded", "unknown"],
                 )?;
-                args.extend(["--type".to_owned(), behavior.to_owned(), "--lifecycle".to_owned(), lifecycle.to_owned()]);
+                args.extend([
+                    "--type".to_owned(),
+                    behavior.to_owned(),
+                    "--lifecycle".to_owned(),
+                    lifecycle.to_owned(),
+                ]);
             }
             if let Some(confidence) = request.confidence.as_deref() {
                 let confidence = validated_idx_choice(
@@ -5019,20 +5135,31 @@ fn idx_knowledge_args(request: &IdxKnowledgeRequest) -> Result<Vec<String>, Stri
         }
         IdxKnowledgeAction::Relate => {
             if request.evidence_reviewed != Some(true) {
-                return Err("relate requires evidenceReviewed=true after reviewing concrete evidence".to_owned());
+                return Err(
+                    "relate requires evidenceReviewed=true after reviewing concrete evidence"
+                        .to_owned(),
+                );
             }
-            let source_path = path()?.ok_or_else(|| "relate requires a knowledge path".to_owned())?;
+            let source_path =
+                path()?.ok_or_else(|| "relate requires a knowledge path".to_owned())?;
             let relation_kind = validated_idx_choice(
                 request.relation_kind.as_deref(),
                 "relation kind",
-                &["implements", "tests", "related", "supersedes", "superseded-by"],
+                &[
+                    "implements",
+                    "tests",
+                    "related",
+                    "supersedes",
+                    "superseded-by",
+                ],
             )?;
             let relation_action = validated_idx_choice(
                 request.relation_action.as_deref(),
                 "relation action",
                 &["add", "remove"],
             )?;
-            let targets = normalized_idx_strings(request.target_paths.as_deref(), "target path", 2_048, 30)?;
+            let targets =
+                normalized_idx_strings(request.target_paths.as_deref(), "target path", 2_048, 30)?;
             if targets.is_empty() {
                 return Err("relate requires at least one target path".to_owned());
             }
@@ -5072,7 +5199,8 @@ fn idx_knowledge_args(request: &IdxKnowledgeRequest) -> Result<Vec<String>, Stri
             ])
         }
         IdxKnowledgeAction::Impact => {
-            let paths = normalized_idx_strings(request.paths.as_deref(), "changed path", 2_048, 100)?;
+            let paths =
+                normalized_idx_strings(request.paths.as_deref(), "changed path", 2_048, 100)?;
             let mut args = vec!["wiki".to_owned(), "impact".to_owned()];
             args.extend(paths);
             if let Some(base) = optional_idx_argument(&request.base, "git base", 256)? {
@@ -5126,7 +5254,9 @@ fn idx_operation_args(kind: IdxMaintenanceKind) -> Vec<String> {
         IdxMaintenanceKind::Index => vec!["index".to_owned()],
         IdxMaintenanceKind::FullIndex => vec!["index".to_owned(), "--full".to_owned()],
         IdxMaintenanceKind::DryRun => vec!["index".to_owned(), "--dry-run".to_owned()],
-        IdxMaintenanceKind::Doctor => vec!["doctor".to_owned(), "--force".to_owned(), ".".to_owned()],
+        IdxMaintenanceKind::Doctor => {
+            vec!["doctor".to_owned(), "--force".to_owned(), ".".to_owned()]
+        }
         IdxMaintenanceKind::WikiAudit => vec![
             "wiki".to_owned(),
             "audit".to_owned(),
@@ -5170,14 +5300,19 @@ fn idx_operation_snapshots(
         .map_err(|_| "IDX operation state is poisoned".to_owned())?;
     let mut snapshots = operations
         .iter()
-        .filter(|(_, operation)| operation.window_label == window_label && operation.workspace == workspace)
+        .filter(|(_, operation)| {
+            operation.window_label == window_label && operation.workspace == workspace
+        })
         .map(|(id, operation)| idx_operation_snapshot(id, operation))
         .collect::<Vec<_>>();
     snapshots.sort_by_key(|snapshot| snapshot.started_at_ms);
     Ok(snapshots)
 }
 
-fn prune_idx_operation_history(operations: &mut HashMap<String, IdxOperationRecord>, window_label: &str) {
+fn prune_idx_operation_history(
+    operations: &mut HashMap<String, IdxOperationRecord>,
+    window_label: &str,
+) {
     let count = operations
         .values()
         .filter(|operation| operation.window_label == window_label)
@@ -5187,7 +5322,10 @@ fn prune_idx_operation_history(operations: &mut HashMap<String, IdxOperationReco
     }
     let mut completed = operations
         .iter()
-        .filter(|(_, operation)| operation.window_label == window_label && operation.status != IdxOperationStatus::Running)
+        .filter(|(_, operation)| {
+            operation.window_label == window_label
+                && operation.status != IdxOperationStatus::Running
+        })
         .map(|(id, operation)| (id.clone(), operation.started_at_ms))
         .collect::<Vec<_>>();
     completed.sort_by_key(|(_, started_at_ms)| *started_at_ms);
@@ -5197,7 +5335,10 @@ fn prune_idx_operation_history(operations: &mut HashMap<String, IdxOperationReco
     }
 }
 
-fn start_idx_operation(app: AppHandle, request: IdxOperationRequest) -> Result<IdxOperationSnapshot, String> {
+fn start_idx_operation(
+    app: AppHandle,
+    request: IdxOperationRequest,
+) -> Result<IdxOperationSnapshot, String> {
     let root = canonical_workspace(Path::new(&request.workspace))?;
     if request.kind != IdxMaintenanceKind::Init && !root.join(".indexer-cli").is_dir() {
         return Err("this project is not indexed yet; initialize IDX first".to_owned());
@@ -5261,17 +5402,23 @@ fn start_idx_operation(app: AppHandle, request: IdxOperationRequest) -> Result<I
         // need that mutex to make progress.
         force_kill_idx_process(process_id, &mut child);
         let _ = child.wait();
-        return Err("another IDX maintenance operation is already running for this project".to_owned());
+        return Err(
+            "another IDX maintenance operation is already running for this project".to_owned(),
+        );
     }
 
     let stdout_app = app.clone();
     let stdout_id = id.clone();
     let stdout_window = request.window_label.clone();
-    thread::spawn(move || stream_idx_operation_output(stdout_app, stdout_window, stdout_id, "stdout", stdout));
+    thread::spawn(move || {
+        stream_idx_operation_output(stdout_app, stdout_window, stdout_id, "stdout", stdout)
+    });
     let stderr_app = app.clone();
     let stderr_id = id.clone();
     let stderr_window = request.window_label.clone();
-    thread::spawn(move || stream_idx_operation_output(stderr_app, stderr_window, stderr_id, "stderr", stderr));
+    thread::spawn(move || {
+        stream_idx_operation_output(stderr_app, stderr_window, stderr_id, "stderr", stderr)
+    });
     let supervisor_app = app.clone();
     let supervisor_id = id.clone();
     let supervisor_window = request.window_label.clone();
@@ -5410,7 +5557,11 @@ fn supervise_idx_operation(
     }
 }
 
-fn stop_idx_operation(app: &AppHandle, window_label: &str, operation_id: &str) -> Result<(), String> {
+fn stop_idx_operation(
+    app: &AppHandle,
+    window_label: &str,
+    operation_id: &str,
+) -> Result<(), String> {
     let (stop_tx, exited) = {
         let state = app.state::<IdxOperationState>();
         let operations = state
@@ -5474,7 +5625,8 @@ fn stop_idx_operations_for_window(app: &AppHandle, window_label: &str) {
         operations
             .iter()
             .filter(|(_, operation)| {
-                operation.window_label == window_label && operation.status == IdxOperationStatus::Running
+                operation.window_label == window_label
+                    && operation.status == IdxOperationStatus::Running
             })
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>()
@@ -6752,9 +6904,8 @@ fn prune_unreferenced_task_attachments(
     if !attachments_path.exists() {
         return Ok(());
     }
-    let attachments_metadata = fs::symlink_metadata(&attachments_path).map_err(|error| {
-        format!("failed to inspect {}: {error}", attachments_path.display())
-    })?;
+    let attachments_metadata = fs::symlink_metadata(&attachments_path)
+        .map_err(|error| format!("failed to inspect {}: {error}", attachments_path.display()))?;
     if attachments_metadata.file_type().is_symlink() || !attachments_metadata.is_dir() {
         return Err(".pi/task-attachments must be a project-owned directory".to_owned());
     }
@@ -6772,18 +6923,23 @@ fn prune_unreferenced_task_attachments(
         )
     })? {
         let entry = entry.map_err(|error| format!("failed to inspect task attachment: {error}"))?;
-        let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
-            format!("failed to inspect {}: {error}", entry.path().display())
-        })?;
+        let metadata = fs::symlink_metadata(entry.path())
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
         if !metadata.file_type().is_file() {
             continue;
         }
         let marker = task_attachment_marker(&entry.path());
-        if descriptions.iter().any(|description| description.contains(&marker)) {
+        if descriptions
+            .iter()
+            .any(|description| description.contains(&marker))
+        {
             continue;
         }
         fs::remove_file(entry.path()).map_err(|error| {
-            format!("failed to remove orphan task attachment {}: {error}", entry.path().display())
+            format!(
+                "failed to remove orphan task attachment {}: {error}",
+                entry.path().display()
+            )
         })?;
     }
     Ok(())
@@ -6798,7 +6954,10 @@ fn file_uri_from_path(path: &Path) -> String {
     if let Some(network_path) = normalized.strip_prefix("//") {
         let mut parts = network_path.split('/');
         let host = parts.next().unwrap_or_default();
-        let encoded = parts.map(encode_uri_component).collect::<Vec<_>>().join("/");
+        let encoded = parts
+            .map(encode_uri_component)
+            .collect::<Vec<_>>()
+            .join("/");
         return format!("file://{host}/{encoded}");
     }
     let absolute = if normalized.starts_with('/') {
@@ -6830,7 +6989,10 @@ fn encode_uri_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.as_bytes() {
         if byte.is_ascii_alphanumeric()
-            || matches!(*byte, b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')')
+            || matches!(
+                *byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            )
         {
             encoded.push(*byte as char);
         } else {
@@ -7135,7 +7297,10 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         .arg(&entry)
         .env("PIX_ACP_QUESTION_EXTENSION", &question_extension)
         .env("PIX_ACP_SESSION_TITLE_EXTENSION", &session_title_extension)
-        .env("PIX_ACP_WORKSPACE_UNDO_EXTENSION", &workspace_undo_extension)
+        .env(
+            "PIX_ACP_WORKSPACE_UNDO_EXTENSION",
+            &workspace_undo_extension,
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -7907,8 +8072,14 @@ mod tests {
             "Snapshot: abc-123 (completed)\nCreated: 1789035207186  |  Git ref: deadbeef\nFiles: 743  |  Symbols: 7949  |  Chunks: 451  |  Dependencies: 3512\nLanguages: typescript: 690, svelte: 29\n",
         );
         assert_eq!(index.state.as_deref(), Some("completed"));
-        assert_eq!(index.fields.get("snapshot").map(String::as_str), Some("abc-123"));
-        assert_eq!(index.fields.get("gitRef").map(String::as_str), Some("deadbeef"));
+        assert_eq!(
+            index.fields.get("snapshot").map(String::as_str),
+            Some("abc-123")
+        );
+        assert_eq!(
+            index.fields.get("gitRef").map(String::as_str),
+            Some("deadbeef")
+        );
         assert_eq!(index.fields.get("files").map(String::as_str), Some("743"));
 
         let wiki = parse_idx_wiki_status(
@@ -7918,8 +8089,14 @@ mod tests {
             wiki.fields.get("primarySpecs").map(String::as_str),
             Some("44 (43 current/proposed)")
         );
-        assert_eq!(wiki.fields.get("needsReview").map(String::as_str), Some("7"));
-        assert_eq!(wiki.fields.get("unresolvedRefs").map(String::as_str), Some("8"));
+        assert_eq!(
+            wiki.fields.get("needsReview").map(String::as_str),
+            Some("7")
+        );
+        assert_eq!(
+            wiki.fields.get("unresolvedRefs").map(String::as_str),
+            Some("8")
+        );
     }
 
     #[test]
@@ -8638,7 +8815,8 @@ mod tests {
     #[test]
     fn conditional_user_config_write_rejects_stale_snapshots() {
         let home = temporary_workspace("user-settings-config-cas");
-        let initial = read_user_config_from(&home, UserConfigKind::Pix).expect("read initial config");
+        let initial =
+            read_user_config_from(&home, UserConfigKind::Pix).expect("read initial config");
 
         let first = write_user_config_if_unchanged_from(
             &home,
@@ -8689,8 +8867,7 @@ mod tests {
         assert_eq!(config.model, "nova-3");
         assert_eq!(config.language, "ru");
 
-        fs::write(&path, "{ \"dictation\": { \"apiKey\": \"\" } }\n")
-            .expect("clear config key");
+        fs::write(&path, "{ \"dictation\": { \"apiKey\": \"\" } }\n").expect("clear config key");
         let fallback = resolve_deepgram_runtime_config(&home, Some("dg-env-key".to_owned()))
             .expect("resolve env fallback");
         assert_eq!(fallback.api_key, "dg-env-key");
@@ -8714,8 +8891,11 @@ mod tests {
         let path = user_config_path(&home, UserConfigKind::Pix);
         fs::create_dir_all(path.parent().expect("config parent")).expect("create config directory");
 
-        fs::write(&path, "{\n  // valid JSONC\n  \"ignoreContextFiles\": true,\n}\n")
-            .expect("write valid config");
+        fs::write(
+            &path,
+            "{\n  // valid JSONC\n  \"ignoreContextFiles\": true,\n}\n",
+        )
+        .expect("write valid config");
         assert!(sidebar_settings_indicator_state(&home).errors.is_empty());
 
         fs::write(&path, "{ \"ignoreContextFiles\": \"yes\" }\n")
@@ -8913,11 +9093,13 @@ mod tests {
         assert!(!orphan.exists());
 
         document.tasks.remove(0);
-        write_project_tasks_to(&workspace, &document).expect("write after deleting one shared task");
+        write_project_tasks_to(&workspace, &document)
+            .expect("write after deleting one shared task");
         assert!(kept.is_file());
 
         document.tasks.clear();
-        write_project_tasks_to(&workspace, &document).expect("write after deleting last referencing task");
+        write_project_tasks_to(&workspace, &document)
+            .expect("write after deleting last referencing task");
         assert!(!kept.exists());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
@@ -8979,7 +9161,8 @@ mod tests {
         fs::create_dir(workspace.join(".pi")).expect("create .pi directory");
         fs::write(
             workspace.join(".pi/tasks.json"),
-            serde_json::to_vec_pretty(&sample_task_document()).expect("encode unsupported task document"),
+            serde_json::to_vec_pretty(&sample_task_document())
+                .expect("encode unsupported task document"),
         )
         .expect("write unsupported task document");
 

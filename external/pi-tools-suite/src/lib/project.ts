@@ -43,15 +43,27 @@ export function hasIndexedProjectRoot(cwd: string = process.cwd()): boolean {
 
 export function commandAvailable(command: string, env: NodeJS.ProcessEnv = process.env): boolean {
 	const value = command.trim();
-	if (!value || value.includes(path.sep)) return false;
+	if (!value || value.includes("/") || value.includes("\\")) return false;
 	const pathValue = env.PATH ?? "";
+	const candidates = process.platform === "win32"
+		? [
+			value,
+			...(env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+				.split(";")
+				.map((extension) => extension.trim())
+				.filter(Boolean)
+				.map((extension) => `${value}${extension.startsWith(".") ? extension : `.${extension}`}`),
+		]
+		: [value];
 	for (const directory of pathValue.split(path.delimiter)) {
 		if (!directory) continue;
-		try {
-			accessSync(path.join(directory, value), constants.X_OK);
-			return true;
-		} catch {
-			// Continue through PATH without spawning a process or blocking on shell lookup.
+		for (const candidate of candidates) {
+			try {
+				accessSync(path.join(directory, candidate), constants.X_OK);
+				return true;
+			} catch {
+				// Continue through PATH without spawning a process or blocking on shell lookup.
+			}
 		}
 	}
 	return false;

@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import repoDiscoveryExtension from "../../src/repo-discovery/index.js";
+import { installFakeIdxOnPath } from "../support/fake-idx.js";
 
 function manyLines(head: string, tail: string, count = 2_100): string {
 	const middle = Array.from({ length: count }, (_, index) => `line-${String(index + 1).padStart(4, "0")}-payload`);
@@ -103,6 +104,7 @@ describe("context gateway P00: pre-truncation capture capabilities", () => {
 	test("repo_search/repo_ast/repo_structure truncate inside the suite wrapper without a full-output handle", async () => {
 		const projectRoot = mkdtempSync(join(tmpdir(), "context-gateway-p00-repo-"));
 		mkdirSync(join(projectRoot, ".indexer-cli"));
+		const restorePath = installFakeIdxOnPath(projectRoot);
 		const head = "P00_REPO_HEAD";
 		const tail = "P00_REPO_TAIL_OUTSIDE_RESULT";
 		const source = manyLines(head, tail, 30);
@@ -117,31 +119,35 @@ describe("context gateway P00: pre-truncation capture capabilities", () => {
 				return { stdout: source, stderr: "", code: 0 };
 			},
 		};
-		repoDiscoveryExtension(pi as any, { profile: "baseline", cwd: projectRoot });
+		try {
+			repoDiscoveryExtension(pi as any, { profile: "baseline", cwd: projectRoot });
 
-		const cases = [
-			{ name: "repo_search", params: { target: "context gateway", maxLines: 2, maxBytes: 200 } },
-			{ name: "repo_ast", params: { target: "src/app.ts", maxLines: 2, maxBytes: 200 } },
-			{ name: "repo_structure", params: { maxLines: 2, maxBytes: 200 } },
-		];
-		for (const item of cases) {
-			const tool = tools.get(item.name);
-			expect(tool, `${item.name} should be registered in an indexed project`).toBeTruthy();
-			const result = await tool.execute(
-				`call-${item.name}`,
-				item.params,
-				undefined,
-				undefined,
-				{ cwd: projectRoot },
-			);
-			expect(result.details?.truncation?.truncated).toBe(true);
-			expect(JSON.stringify(result)).toContain(head);
-			expect(JSON.stringify(result)).not.toContain(tail);
-			expect(result.details?.fullOutputPath).toBeUndefined();
+			const cases = [
+				{ name: "repo_search", params: { target: "context gateway", maxLines: 2, maxBytes: 200 } },
+				{ name: "repo_ast", params: { target: "src/app.ts", maxLines: 2, maxBytes: 200 } },
+				{ name: "repo_structure", params: { maxLines: 2, maxBytes: 200 } },
+			];
+			for (const item of cases) {
+				const tool = tools.get(item.name);
+				expect(tool, `${item.name} should be registered in an indexed project`).toBeTruthy();
+				const result = await tool.execute(
+					`call-${item.name}`,
+					item.params,
+					undefined,
+					undefined,
+					{ cwd: projectRoot },
+				);
+				expect(result.details?.truncation?.truncated).toBe(true);
+				expect(JSON.stringify(result)).toContain(head);
+				expect(JSON.stringify(result)).not.toContain(tail);
+				expect(result.details?.fullOutputPath).toBeUndefined();
+			}
+			expect(execCalls).toHaveLength(3);
+			expect(execCalls.every((call) => call.command === "idx")).toBe(true);
+		} finally {
+			restorePath();
+			rmSync(projectRoot, { recursive: true, force: true });
 		}
-		expect(execCalls).toHaveLength(3);
-		expect(execCalls.every((call) => call.command === "idx")).toBe(true);
-		rmSync(projectRoot, { recursive: true, force: true });
 	});
 
 	test("ast_grep truncates its delivered head but preserves the complete output in its temp artifact", async () => {

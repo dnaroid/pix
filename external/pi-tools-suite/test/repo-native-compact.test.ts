@@ -11,6 +11,7 @@ import {
 	NATIVE_COMPACT_OUTPUT_LIMITS,
 	truncateNativeCompactOutput,
 } from "../src/repo-discovery/native-compact.js";
+import { installFakeIdxOnPath } from "./support/fake-idx.js";
 
 type RegisteredTool = {
 	name: string;
@@ -195,6 +196,7 @@ describe("repo discovery Native Compact wrapper integration", () => {
 	test("baseline keeps historical schema/default argv while native compact adds its explicit override", async () => {
 		const projectRoot = tempDir("repo-native-wrapper-");
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
+		const restorePath = installFakeIdxOnPath(projectRoot);
 		try {
 			const baselineTools: RegisteredTool[] = [];
 			const baselineCalls: string[][] = [];
@@ -236,6 +238,7 @@ describe("repo discovery Native Compact wrapper integration", () => {
 			expect(Buffer.byteLength(result.content[0]!.text, "utf8")).toBeLessThanOrEqual(NATIVE_COMPACT_OUTPUT_LIMITS.compact.maxBytes);
 			expect(result.content[0]!.text.split("\n").length).toBeLessThanOrEqual(NATIVE_COMPACT_OUTPUT_LIMITS.compact.maxLines);
 		} finally {
+			restorePath();
 			rmSync(projectRoot, { recursive: true, force: true });
 		}
 	});
@@ -243,6 +246,7 @@ describe("repo discovery Native Compact wrapper integration", () => {
 	test("refuses a policy violation before idx and records only safe policy metadata", async () => {
 		const projectRoot = tempDir("repo-native-refusal-");
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
+		const restorePath = installFakeIdxOnPath(projectRoot);
 		const calls: string[][] = [];
 		try {
 			const tools: RegisteredTool[] = [];
@@ -268,6 +272,7 @@ describe("repo discovery Native Compact wrapper integration", () => {
 			expect(policyJson).not.toContain("max-files");
 			expect(result.details?.nativePolicy).toMatchObject({ refused: true, reason: "duplicate-flag" });
 		} finally {
+			restorePath();
 			rmSync(projectRoot, { recursive: true, force: true });
 		}
 	});

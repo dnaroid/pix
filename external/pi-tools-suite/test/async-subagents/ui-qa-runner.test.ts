@@ -13,7 +13,11 @@ const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/u
 const macosDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift");
 const windowsDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/windows/windows-uia.ps1");
 const linuxDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/linux/linux-atspi.py");
-const nodeExecutable = fs.realpathSync(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
+const nodeLocator = process.platform === "win32" ? ["where.exe", ["node.exe"]] : ["which", ["node"]];
+const nodeLookup = spawnSync(nodeLocator[0]!, nodeLocator[1]!, { encoding: "utf8" });
+const nodePath = nodeLookup.stdout.split(/\r?\n/u).map((line) => line.trim()).find(Boolean);
+if (nodeLookup.status !== 0 || !nodePath) throw new Error(`Unable to locate Node.js: ${nodeLookup.stderr.trim()}`);
+const nodeExecutable = fs.realpathSync(nodePath);
 const tempDirs: string[] = [];
 const children: Array<ReturnType<typeof spawn>> = [];
 

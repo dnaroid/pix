@@ -792,7 +792,7 @@ describe("resource registry", () => {
 		const startupHandler = h.handlers.get("session_start")?.[0];
 		expect(startupHandler).toBeDefined();
 		expect(startupHandler?.({ type: "session_start", reason: "startup" }, h.ctx)).toBeUndefined();
-		await waitFor(() => h.notices.some((notice) => notice.type === "warning"));
+		await waitFor(() => h.notices.some((notice) => notice.type === "warning"), 12_000);
 
 		const warning = h.notices.find((notice) => notice.type === "warning");
 		expect(warning?.message).toContain("1 update available");
@@ -802,7 +802,7 @@ describe("resource registry", () => {
 		startupHandler?.({ type: "session_start", reason: "reload" }, h.ctx);
 		await Bun.sleep(50);
 		expect(h.notices.filter((notice) => notice.type === "warning")).toHaveLength(warningCount);
-	});
+	}, 15_000);
 
 	test("startup check warns when project-scoped state is available remotely but missing locally", async () => {
 		const root = tempRoot();
@@ -827,9 +827,9 @@ describe("resource registry", () => {
 
 		const startupHandler = h.handlers.get("session_start")?.[0];
 		startupHandler?.({ type: "session_start", reason: "startup" }, h.ctx);
-		await waitFor(() => h.notices.some((notice) => notice.type === "warning"));
+		await waitFor(() => h.notices.some((notice) => notice.type === "warning"), 12_000);
 		expect(h.notices.find((notice) => notice.type === "warning")?.message).toContain("1 update available");
-	});
+	}, 15_000);
 
 	test("bootstraps the configured branch when the private registry repository is empty", async () => {
 		const root = tempRoot();

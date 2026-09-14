@@ -5,6 +5,7 @@ import path from "node:path";
 
 import repoDiscoveryExtension, { truncateOutput } from "../src/repo-discovery/index.js";
 import { REPO_DISCOVERY_TOOLS, REPO_KNOWLEDGE_TOOL_DESCRIPTION } from "../src/tool-descriptions.js";
+import { installFakeIdxOnPath } from "./support/fake-idx.js";
 
 type RegisteredTool = {
 	name: string;
@@ -33,6 +34,7 @@ describe("repo discovery output truncation", () => {
 	test("registered repo tools expose economy guidance without changing execution defaults", async () => {
 		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-discovery-guidance-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
+		const restorePath = installFakeIdxOnPath(projectRoot);
 		const tools: RegisteredTool[] = [];
 		const calls: Array<{ command: string; args: string[] }> = [];
 		try {
@@ -70,6 +72,7 @@ describe("repo discovery output truncation", () => {
 				{ command: "idx", args: ["search", "session persistence", "--include-content", "--max-files", "1"] },
 			]);
 		} finally {
+			restorePath();
 			rmSync(projectRoot, { recursive: true, force: true });
 		}
 	});
@@ -88,18 +91,18 @@ describe("repo discovery output truncation", () => {
 			} as never, { profile: "baseline", cwd: projectRoot });
 			expect(unavailable).toEqual([]);
 
-			const binDir = path.join(projectRoot, "bin");
-			mkdirSync(binDir);
-			const idxPath = path.join(binDir, "idx");
-			writeFileSync(idxPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-			process.env.PATH = binDir;
-			const available: RegisteredTool[] = [];
-			repoDiscoveryExtension({
-				registerCommand: () => undefined,
-				registerTool: (tool: RegisteredTool) => available.push(tool),
-				exec: async () => ({ stdout: "", stderr: "", code: 0 }),
-			} as never, { profile: "baseline", cwd: projectRoot });
-			expect(available.map((tool) => tool.name)).toContain("repo_knowledge");
+			const restorePath = installFakeIdxOnPath(projectRoot);
+			try {
+				const available: RegisteredTool[] = [];
+				repoDiscoveryExtension({
+					registerCommand: () => undefined,
+					registerTool: (tool: RegisteredTool) => available.push(tool),
+					exec: async () => ({ stdout: "", stderr: "", code: 0 }),
+				} as never, { profile: "baseline", cwd: projectRoot });
+				expect(available.map((tool) => tool.name)).toContain("repo_knowledge");
+			} finally {
+				restorePath();
+			}
 		} finally {
 			process.env.PATH = previousPath;
 			rmSync(projectRoot, { recursive: true, force: true });
@@ -207,6 +210,7 @@ describe("repo discovery output truncation", () => {
 	test("repo_* tool results keep top lines when truncated", async () => {
 		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-discovery-test-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
+		const restorePath = installFakeIdxOnPath(projectRoot);
 
 		try {
 			const tools: RegisteredTool[] = [];
@@ -225,6 +229,7 @@ describe("repo discovery output truncation", () => {
 			expect(text).toContain("top\nmiddle\n\n[Output truncated from the bottom:");
 			expect(text).not.toContain("\nbottom");
 		} finally {
+			restorePath();
 			rmSync(projectRoot, { recursive: true, force: true });
 		}
 	});

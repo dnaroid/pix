@@ -10,6 +10,7 @@ import {
 import { registerAstGrepTool } from "../../src/ast-grep/tool.js";
 import repoDiscoveryExtension from "../../src/repo-discovery/index.js";
 import { applyNativeCompactPolicy } from "../../src/repo-discovery/native-compact.js";
+import { installFakeIdxOnPath } from "../support/fake-idx.js";
 
 function tempDir(prefix: string): string {
 	return mkdtempSync(path.join(tmpdir(), prefix));
@@ -81,6 +82,7 @@ describe("P01-R native recovery contracts", () => {
 	test("repo structure/AST native cursors are passed to new executions and do not imply a stable historical index", async () => {
 		const root = tempDir("p01r-repo-cursor-");
 		mkdirSync(path.join(root, ".indexer-cli"));
+		const restorePath = installFakeIdxOnPath(root);
 		const tools = new Map<string, any>();
 		const calls: string[][] = [];
 		let indexVersion = "index-A";
@@ -115,6 +117,7 @@ describe("P01-R native recovery contracts", () => {
 			expect(applyNativeCompactPolicy({ command: "structure", args: ["--cursor", "9007199254740992"] }).ok).toBe(false);
 			expect(applyNativeCompactPolicy({ command: "search", args: ["--cursor", "1"] }).ok).toBe(false);
 		} finally {
+			restorePath();
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

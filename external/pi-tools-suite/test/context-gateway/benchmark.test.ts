@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import repoDiscoveryExtension from "../../src/repo-discovery/index.js";
+import { installFakeIdxOnPath } from "../support/fake-idx.js";
 
 type Arm = "baseline" | "prompt-compact" | "native-compact";
 
@@ -194,6 +195,7 @@ const SCENARIOS: Scenario[] = [
 async function runScenario(arm: Arm, scenario: Scenario): Promise<ArmResult> {
 	const projectRoot = tempDir(`context-gateway-benchmark-${arm}-`);
 	mkdirSync(path.join(projectRoot, ".indexer-cli"));
+	const restorePath = installFakeIdxOnPath(projectRoot);
 	const tools = new Map<string, RegisteredTool>();
 	let activeScenario = scenario;
 
@@ -247,6 +249,7 @@ async function runScenario(arm: Arm, scenario: Scenario): Promise<ArmResult> {
 			texts,
 		};
 	} finally {
+		restorePath();
 		rmSync(projectRoot, { recursive: true, force: true });
 	}
 }
