@@ -6,6 +6,7 @@ const args = parseArgs(process.argv.slice(2));
 const socket = net.createConnection({ host: "127.0.0.1", port: args.port });
 
 socket.once("connect", () => {
+	if (args.title) process.stdout.write(`\u001b]0;${args.title}\u0007`);
 	const handshake = {
 		token: args.token,
 		pid: process.pid,
@@ -37,7 +38,11 @@ function parseArgs(values) {
 	const port = Number(result.port);
 	if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("native terminal bridge requires a valid --port");
 	if (!/^[a-f0-9]{32,128}$/.test(result.token ?? "")) throw new Error("native terminal bridge requires a valid --token");
-	return { port, token: result.token };
+	const title = result.title;
+	if (title !== undefined && (title.length < 1 || title.length > 120 || /[\x00-\x1f\x7f]/.test(title))) {
+		throw new Error("native terminal bridge requires a safe bounded --title");
+	}
+	return { port, token: result.token, title };
 }
 
 function boundedDimension(value, fallback) {

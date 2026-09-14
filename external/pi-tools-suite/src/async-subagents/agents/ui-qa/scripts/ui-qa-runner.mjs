@@ -28,6 +28,7 @@ const EVIDENCE_RELATIVE = "evidence";
 // payloads up to the legacy runner's 16 MiB flow limit.
 const MAX_FLOW_BYTES = 16 * 1024 * 1024;
 const MAX_STEPS = 100;
+const DEFAULT_BLOCKED_REMEDIATION = "report this blocker to the parent agent; no safe automatic remediation is defined";
 const DEFAULT_RUNNER_TIMEOUT_MS = 90_000;
 const MAX_RUNNER_TIMEOUT_MS = 100_000;
 // Backends may spend up to five seconds escalating owned children from SIGTERM
@@ -227,6 +228,7 @@ async function selectBackend(context) {
 		detectedTargetKind,
 		candidateBackends,
 		selectedBackend: detectedTargetKind,
+		platformDriver: selected.platformDriver,
 		supportedCapabilities: stringArray(selected.supportedCapabilities),
 		missingCapabilities: stringArray(selected.missingCapabilities),
 		whySelected: selected.reason ?? `target descriptor matches the ${detectedTargetKind} backend`,
@@ -241,6 +243,7 @@ function publicSelection(selection) {
 		detectedTargetKind: selection.detectedTargetKind,
 		candidateBackends: selection.candidateBackends,
 		selectedBackend: selection.selectedBackend,
+		...(selection.platformDriver ? { platformDriver: selection.platformDriver } : {}),
 		supportedCapabilities: selection.supportedCapabilities,
 		missingCapabilities: selection.missingCapabilities,
 		whySelected: selection.whySelected,
@@ -387,8 +390,13 @@ function createProgress(workspaceDir) {
 
 function normalizeResult(value) {
 	const artifacts = isObject(value.artifacts) ? value.artifacts : {};
+	const normalizedValue = value.status === "BLOCKED" && !nonEmptyString(value.remediation)
+		? { ...value, remediation: DEFAULT_BLOCKED_REMEDIATION }
+		: value;
+	const blockedHandoff = buildBlockedHandoff(normalizedValue);
 	return {
-		...value,
+		...normalizedValue,
+		...(blockedHandoff ? { blockedHandoff } : {}),
 		artifacts: {
 			screenshots: artifactArray(artifacts.screenshots),
 			videos: artifactArray(artifacts.videos),
@@ -400,6 +408,31 @@ function normalizeResult(value) {
 		},
 		assertions: Array.isArray(value.assertions) ? value.assertions : [],
 		observations: Array.isArray(value.observations) ? value.observations : [],
+	};
+}
+
+function buildBlockedHandoff(value) {
+	if (value.status !== "BLOCKED") return null;
+	const selection = isObject(value.selection) ? value.selection : {};
+	const candidates = Array.isArray(selection.candidateBackends) ? selection.candidateBackends : [];
+	const selectedCandidate = candidates.find((entry) => isObject(entry) && entry.backend === selection.selectedBackend);
+	const reason = nonEmptyString(value.reason)
+		? value.reason
+		: (nonEmptyString(selection.whySelected)
+			? selection.whySelected
+			: "UI QA is blocked by an unavailable required capability or environment prerequisite");
+	const remediation = nonEmptyString(value.remediation) ? value.remediation : DEFAULT_BLOCKED_REMEDIATION;
+	const platformDriver = nonEmptyString(selection.platformDriver)
+		? selection.platformDriver
+		: (nonEmptyString(selectedCandidate?.platformDriver) ? selectedCandidate.platformDriver : undefined);
+	return {
+		...(nonEmptyString(selection.selectedBackend) ? { backend: selection.selectedBackend } : {}),
+		...(platformDriver ? { platformDriver } : {}),
+		missingCapabilities: stringArray(selection.missingCapabilities),
+		reason,
+		remediation,
+		manualActionRequired: true,
+		automaticRemediationAttempted: false,
 	};
 }
 
@@ -465,6 +498,10 @@ function assertNoSymlinkComponents(root, target, label) {
 
 function stringArray(value) {
 	return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+
+function nonEmptyString(value) {
+	return typeof value === "string" && value.trim().length > 0;
 }
 
 function safeReason(error) {

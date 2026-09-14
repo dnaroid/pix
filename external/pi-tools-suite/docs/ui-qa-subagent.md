@@ -202,8 +202,15 @@ confirmed runtime image support.
   unavailable best-effort video is reported as an observation without replacing
   deterministic assertions.
 - Results normalize selection rationale, assertions, observations, and typed
-  artifact groups across all backends. Every runner/app/helper process has a
-  bounded deadline and cleanup is limited to processes launched by that run.
+  artifact groups across all backends. `BLOCKED` additionally normalizes a
+  parent-facing `blockedHandoff` containing the selected backend/platform
+  driver, missing capabilities, concrete reason, remediation string,
+  `manualActionRequired: true`, and
+  `automaticRemediationAttempted: false`. This handoff is the installation/
+  permission/platform-repair reference for the parent; the QA child relays it
+  and never performs those environment changes itself. Every runner/app/helper
+  process has a bounded deadline and cleanup is limited to processes launched by
+  that run.
 
 ## Browser backend execution contract
 

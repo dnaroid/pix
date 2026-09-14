@@ -81,7 +81,12 @@ node "$PI_UI_QA_RUNNER" run --flow <flow.jsonc> --run-id <safe-id> \
 
 The runner owns backend selection, bounded launch/control, evidence paths, and
 cleanup. `BLOCKED` is the correct result when the target or a required
-capability is unavailable. Report `selection.selectedBackend`, `whySelected`,
+capability is unavailable. Every runner `BLOCKED` result includes a structured
+`blockedHandoff` with the selected backend/platform driver, missing
+capabilities, concrete reason, remediation reference, and explicit confirmation
+that QA did not attempt automatic remediation. Relay that handoff to the parent
+agent without inventing extra installation commands or silently applying the
+remediation yourself. Report `selection.selectedBackend`, `whySelected`,
 deterministic assertions, and every returned artifact link.
 
 ## Invariants for every backend
@@ -98,6 +103,10 @@ deterministic assertions, and every returned artifact link.
 - Interactions must be user-equivalent and runner-owned. Never kill unrelated
   user processes, disable sandboxing, install automation packages, or edit
   application source, tests, or persistent user settings to make QA possible.
+- For `BLOCKED`, preserve the runner's `blockedHandoff` fields in the parent
+  report. If remediation requires installation, OS permissions, platform
+  support, or suite repair, state that action as the next step and stop; do not
+  perform it from the QA child.
 - Evidence stays private to this agent directory and is removed with the run.
   Report every retained artifact as a clickable Markdown link plus absolute
   path — on failed runs too — and inspect representative screenshots with the

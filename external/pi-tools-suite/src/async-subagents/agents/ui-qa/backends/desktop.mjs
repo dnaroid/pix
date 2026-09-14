@@ -4,7 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DRIVER_SOURCE = fileURLToPath(new URL("../drivers/macos/macos-accessibility.swift", import.meta.url));
+const MACOS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/macos/macos-accessibility.swift", import.meta.url));
+const WINDOWS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/windows/windows-uia.ps1", import.meta.url));
+const LINUX_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/linux/linux-atspi.py", import.meta.url));
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const CLEANUP_TIMEOUT_MS = 5_000;
 const SAFE_ENV = new Set(["CI", "NO_COLOR", "FORCE_COLOR", "LANG", "LC_ALL", "TERM", "TZ"]);
@@ -38,19 +40,27 @@ export async function probeDesktopBackend(context = {}) {
 	const platform = desktopPlatformContract(process.platform);
 	if (!platform.available) return { ...platform, supportedCapabilities };
 	if (context.shallow) {
-		// The shallow probe never measures Screen Recording permission, so it must
-		// not advertise permission-gated capabilities such as windowVideo.
+		// Shallow probes are used only for non-selected backends. They describe the
+		// bundled platform driver without executing host-specific prerequisites or
+		// claiming permission/dependency-gated capabilities.
 		return {
 			available: true,
-			platformDriver: "macos-accessibility",
-			supportedCapabilities: [...supportedCapabilities, "semanticAccessibility", "accessibilitySnapshot", "windowScreenshot"],
+			platformDriver: platform.platformDriver,
+			supportedCapabilities,
 			missingCapabilities: [],
-			reason: "macOS has a bundled Accessibility/CGWindow driver",
+			reason: platform.reason,
 		};
 	}
+	if (process.platform === "darwin") return probeMacosDesktopBackend(context, supportedCapabilities);
+	if (process.platform === "win32") return probeWindowsDesktopBackend(context, supportedCapabilities);
+	if (process.platform === "linux") return probeLinuxDesktopBackend(context, supportedCapabilities);
+	return { ...platform, supportedCapabilities };
+}
+
+async function probeMacosDesktopBackend(context, supportedCapabilities) {
 	try {
-		const helper = await ensureMacosHelper(context);
-		const doctor = await runOwnedProcess(helper, ["doctor"], {
+		const helper = await ensureDesktopHelper(context);
+		const doctor = await runHelperProcess(helper, ["doctor"], {
 			cwd: context.projectRoot,
 			timeoutMs: remainingTimeout(context, 30_000),
 		});
@@ -62,8 +72,8 @@ export async function probeDesktopBackend(context = {}) {
 		const sck = /(?:^|\n)sck=available(?:\n|$)/.test(doctor.stdout);
 		const supported = [...supportedCapabilities];
 		const missing = [];
-		if (accessibility) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "stateAssertions");
-		else missing.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "stateAssertions");
+		if (accessibility) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
+		else missing.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
 		if (screenRecording) supported.push("windowScreenshot");
 		else missing.push("windowScreenshot");
 		if (screenRecording && sck) supported.push("windowVideo");
@@ -91,6 +101,89 @@ export async function probeDesktopBackend(context = {}) {
 	}
 }
 
+async function probeWindowsDesktopBackend(context, supportedCapabilities) {
+	try {
+		const helper = await ensureDesktopHelper(context);
+		const doctor = await runHelperProcess(helper, ["doctor"], {
+			cwd: context.projectRoot,
+			timeoutMs: remainingTimeout(context, 15_000),
+		});
+		if (doctor.code !== 0) throw new Error(doctor.stderr || `driver doctor exited ${doctor.code}`);
+		const uia = /(?:^|\n)uia=available(?:\n|$)/.test(doctor.stdout);
+		const screenshot = /(?:^|\n)screenshot=available(?:\n|$)/.test(doctor.stdout);
+		const supported = [...supportedCapabilities];
+		const missing = [];
+		if (uia) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
+		else missing.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
+		if (screenshot) supported.push("windowScreenshot");
+		else missing.push("windowScreenshot");
+		missing.push("windowVideo");
+		return {
+			available: uia,
+			platformDriver: "windows-uia",
+			supportedCapabilities: supported,
+			missingCapabilities: missing,
+			reason: uia
+				? "Windows UI Automation is available through the bundled trusted helper"
+				: "Windows UI Automation could not be initialized by the bundled trusted helper",
+			remediation: uia ? undefined : "enable Windows UI Automation for the current desktop session, or repair Windows PowerShell/.NET UIAutomation assemblies, then rerun",
+			details: { uia, screenshot, windowVideo: false },
+		};
+	} catch (error) {
+		return {
+			available: false,
+			platformDriver: "windows-uia",
+			supportedCapabilities,
+			missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions", "windowScreenshot", "windowVideo"],
+			reason: `Windows UI Automation driver is unavailable: ${safeReason(error)}`,
+			remediation: "restore Windows PowerShell 5+ (or compatible pwsh) with .NET UIAutomation assemblies, then rerun UI QA",
+		};
+	}
+}
+
+async function probeLinuxDesktopBackend(context, supportedCapabilities) {
+	try {
+		const helper = await ensureDesktopHelper(context);
+		const doctor = await runHelperProcess(helper, ["doctor"], {
+			cwd: context.projectRoot,
+			timeoutMs: remainingTimeout(context, 15_000),
+		});
+		if (doctor.code !== 0) throw new Error(doctor.stderr || `driver doctor exited ${doctor.code}`);
+		const atspi = /(?:^|\n)atspi=available(?:\n|$)/.test(doctor.stdout);
+		const screenshot = /(?:^|\n)screenshot=available(?:\n|$)/.test(doctor.stdout);
+		const keyboard = /(?:^|\n)keyboard_input=available(?:\n|$)/.test(doctor.stdout);
+		const supported = [...supportedCapabilities];
+		const missing = [];
+		if (atspi) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "stateAssertions");
+		else missing.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "stateAssertions");
+		if (keyboard) supported.push("keyboardInput");
+		else missing.push("keyboardInput");
+		if (screenshot) supported.push("windowScreenshot");
+		else missing.push("windowScreenshot");
+		missing.push("windowVideo");
+		return {
+			available: atspi,
+			platformDriver: "linux-at-spi",
+			supportedCapabilities: supported,
+			missingCapabilities: missing,
+			reason: atspi
+				? "Linux AT-SPI is available through the bundled trusted helper"
+				: "Linux AT-SPI could not be initialized in the current graphical session",
+			remediation: atspi ? undefined : "install/enable Python 3 AT-SPI bindings (python3-pyatspi) and ensure the graphical session accessibility bus is available, then rerun",
+			details: { atspi, screenshot, keyboard, windowVideo: false },
+		};
+	} catch (error) {
+		return {
+			available: false,
+			platformDriver: "linux-at-spi",
+			supportedCapabilities,
+			missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions", "windowScreenshot", "windowVideo"],
+			reason: `Linux AT-SPI driver is unavailable: ${safeReason(error)}`,
+			remediation: "install Python 3 plus AT-SPI bindings (python3-pyatspi); for keyboard input install xdotool, and for Wayland screenshots provide a supported screenshot utility such as gnome-screenshot",
+		};
+	}
+}
+
 export function desktopPlatformContract(platform) {
 	if (platform === "darwin") {
 		return {
@@ -100,14 +193,28 @@ export function desktopPlatformContract(platform) {
 			reason: "macOS has a bundled Accessibility/CGWindow driver",
 		};
 	}
+	if (platform === "win32") {
+		return {
+			available: true,
+			platformDriver: "windows-uia",
+			missingCapabilities: [],
+			reason: "Windows has a bundled UI Automation helper",
+		};
+	}
+	if (platform === "linux") {
+		return {
+			available: true,
+			platformDriver: "linux-at-spi",
+			missingCapabilities: [],
+			reason: "Linux has a bundled AT-SPI helper with runtime dependency probing",
+		};
+	}
 	return {
 		available: false,
-		platformDriver: platform === "win32" ? "windows-uia-planned" : "linux-at-spi-planned",
+		platformDriver: `${platform}-desktop-unsupported`,
 		missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "windowScreenshot", "windowVideo"],
 		reason: `the bundled desktop accessibility driver is not implemented on ${platform}`,
-		remediation: platform === "win32"
-			? "run on macOS for the bundled driver or add the Windows UI Automation platform driver"
-			: "run on macOS for the bundled driver or add the Linux AT-SPI platform driver",
+		remediation: "run UI QA on macOS, Windows, or Linux, or add a platform accessibility driver for this operating system",
 	};
 }
 
@@ -117,7 +224,7 @@ export async function runDesktopBackend(context) {
 	const flow = context.flow;
 	const application = validateApplication(flow.target.application, context.projectRoot);
 	const steps = validateSteps(flow.steps, probe);
-	const helper = await ensureMacosHelper(context);
+	const helper = await ensureDesktopHelper(context);
 	const assertions = [];
 	const observations = [];
 	const artifacts = emptyArtifacts();
@@ -138,7 +245,9 @@ export async function runDesktopBackend(context) {
 			observations.push({
 				action: "windowVideo",
 				status: "unavailable",
-				reason: "exact-window recording requires macOS 12.3+ and Screen Recording permission",
+				reason: process.platform === "darwin"
+					? "exact-window recording requires macOS 12.3+ and Screen Recording permission"
+					: `exact-window video recording is not implemented by the ${probe.platformDriver} driver`,
 			});
 		}
 		for (let index = 0; index < steps.length; index += 1) {
@@ -167,7 +276,7 @@ export async function runDesktopBackend(context) {
 		await finalizeWindowRecorder(recorder, artifacts, observations);
 		if (failure && selector) {
 			await captureAccessibility({ context, helper, selector, name: "failure", artifacts, depth: 10, limit: 100 }).catch(() => {});
-			if (probe.details?.screenRecording) {
+			if (probe.supportedCapabilities.includes("windowScreenshot")) {
 				await captureScreenshot({ context, helper, selector, name: "failure", artifacts }).catch(() => {});
 			}
 		}
@@ -182,8 +291,8 @@ export async function runDesktopBackend(context) {
 	};
 }
 
-export async function createMacosWindowEvidenceController({ context, selector, observations, artifacts }) {
-	const helper = await ensureMacosHelper(context);
+export async function createWindowEvidenceController({ context, selector, observations, artifacts }) {
+	const helper = await ensureDesktopHelper(context);
 	const recorder = context.selection?.supportedCapabilities?.includes("windowVideo")
 		? await startWindowVideoRecorder({ context, helper, selector, observations })
 		: null;
@@ -202,6 +311,9 @@ export async function createMacosWindowEvidenceController({ context, selector, o
 		},
 	};
 }
+
+// Compatibility export for the original macOS-native-terminal integration.
+export const createMacosWindowEvidenceController = createWindowEvidenceController;
 
 async function finalizeWindowRecorder(recorder, artifacts, observations) {
 	if (!recorder) return;
@@ -303,7 +415,10 @@ function validateApplication(value, projectRoot) {
 		selectors.push(["--pid", String(value.pid)]);
 	}
 	if (value.name !== undefined) selectors.push(["--app", requireBoundedString(value.name, "target.application.name", 200)]);
-	if (value.bundleId !== undefined) selectors.push(["--bundle-id", requireBoundedString(value.bundleId, "target.application.bundleId", 200)]);
+	if (value.bundleId !== undefined) {
+		if (process.platform !== "darwin") throw new Error("target.application.bundleId is supported only by the macOS desktop driver");
+		selectors.push(["--bundle-id", requireBoundedString(value.bundleId, "target.application.bundleId", 200)]);
+	}
 	if (selectors.length > 1) throw new Error("target.application must use only one of pid, name, or bundleId");
 	const launch = value.launch === undefined ? undefined : validateLaunch(value.launch, projectRoot);
 	if (launch && selectors.length > 0) throw new Error("target.application.launch cannot be combined with pid, name, or bundleId");
@@ -385,7 +500,17 @@ function validateSteps(steps, probe) {
 // the probed producer actually supports on this host.
 export function validateDesktopStepCapabilities(step, supportedCapabilities) {
 	if ((step.action === "screenshot" || step.action === "capture") && !supportedCapabilities.includes("windowScreenshot")) {
-		throw new Error("desktop flow requires windowScreenshot, but macOS Screen Recording permission is missing");
+		throw new Error("desktop flow requires windowScreenshot, but the selected desktop driver does not currently provide it");
+	}
+	const required = {
+		activate: "semanticActivation",
+		setValue: "valueInput",
+		inputText: "keyboardInput",
+		pressKey: "keyboardInput",
+		assertState: "stateAssertions",
+	}[step.action];
+	if (required && !supportedCapabilities.includes(required)) {
+		throw new Error(`desktop action ${step.action} requires ${required}, but the selected desktop driver does not currently provide it`);
 	}
 	return step;
 }
@@ -435,32 +560,62 @@ function launchEnvironment(extra) {
 	return { ...result, ...extra, PI_UI_QA: "1" };
 }
 
+async function ensureDesktopHelper(context) {
+	if (process.platform === "darwin") return ensureMacosHelper(context);
+	if (process.platform === "win32") {
+		if (!fs.existsSync(WINDOWS_DRIVER_SOURCE)) throw new Error("bundled Windows UI Automation helper source is missing");
+		const powershell = findWindowsPowerShell();
+		if (!powershell) throw new Error("Windows PowerShell/pwsh is unavailable");
+		return {
+			file: powershell,
+			argsPrefix: ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", WINDOWS_DRIVER_SOURCE],
+			label: "Windows UI Automation helper",
+			supportsWindowVideo: false,
+		};
+	}
+	if (process.platform === "linux") {
+		if (!fs.existsSync(LINUX_DRIVER_SOURCE)) throw new Error("bundled Linux AT-SPI helper source is missing");
+		const python = findExecutable(["python3", "python"]);
+		if (!python) throw new Error("Python 3 is unavailable");
+		return {
+			file: python,
+			argsPrefix: [LINUX_DRIVER_SOURCE],
+			label: "Linux AT-SPI helper",
+			supportsWindowVideo: false,
+		};
+	}
+	throw new Error(`desktop helper is unavailable on ${process.platform}`);
+}
+
 async function ensureMacosHelper(context) {
-	if (process.platform !== "darwin") throw new Error("macOS accessibility helper requested on another platform");
-	if (!fs.existsSync(DRIVER_SOURCE)) throw new Error("bundled macOS accessibility helper source is missing");
+	if (!fs.existsSync(MACOS_DRIVER_SOURCE)) throw new Error("bundled macOS accessibility helper source is missing");
 	const helpersDir = path.join(context.workspaceDir, "helpers");
 	createPrivateDirectory(context.workspaceDir, helpersDir);
-	const digest = createHash("sha256").update(fs.readFileSync(DRIVER_SOURCE)).digest("hex").slice(0, 16);
+	const digest = createHash("sha256").update(fs.readFileSync(MACOS_DRIVER_SOURCE)).digest("hex").slice(0, 16);
 	const binary = path.join(helpersDir, `macos-accessibility-${digest}`);
 	if (fs.existsSync(binary)) {
 		const stat = fs.lstatSync(binary);
 		if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("macOS helper cache entry is not a regular file");
-		return binary;
+		return { file: binary, argsPrefix: [], label: "macOS accessibility helper", supportsWindowVideo: true };
 	}
 	const temporary = `${binary}.${process.pid}.tmp`;
-	const result = await runOwnedProcess("xcrun", ["swiftc", "-O", DRIVER_SOURCE, "-o", temporary], {
+	const result = await runOwnedProcess("xcrun", ["swiftc", "-O", MACOS_DRIVER_SOURCE, "-o", temporary], {
 		cwd: context.workspaceDir,
 		timeoutMs: remainingTimeout(context, 60_000),
 	});
 	if (result.code !== 0) throw new Error(result.stderr || `swiftc exited ${result.code}`);
 	fs.chmodSync(temporary, 0o700);
 	fs.renameSync(temporary, binary);
-	return binary;
+	return { file: binary, argsPrefix: [], label: "macOS accessibility helper", supportsWindowVideo: true };
+}
+
+function runHelperProcess(helper, args, options) {
+	return runOwnedProcess(helper.file, [...helper.argsPrefix, ...args], options);
 }
 
 async function helperCall(helper, args, context, timeoutMs) {
-	const result = await runOwnedProcess(helper, args, { cwd: context.projectRoot, timeoutMs: Math.min(timeoutMs, remainingTimeout(context, timeoutMs)) });
-	if (result.code !== 0) throw new Error(result.stderr || `macOS accessibility helper exited ${result.code}`);
+	const result = await runHelperProcess(helper, args, { cwd: context.projectRoot, timeoutMs: Math.min(timeoutMs, remainingTimeout(context, timeoutMs)) });
+	if (result.code !== 0) throw new Error(result.stderr || `${helper.label} exited ${result.code}`);
 	return result.stdout.trim();
 }
 
@@ -470,7 +625,7 @@ async function inspect(helper, selector, context, timeoutMs, depth = 12, limit =
 
 async function describe(helper, selector, elementSelector, context, timeoutMs) {
 	const output = await helperCall(helper, ["describe", ...selector, ...elementSelectorArgs(elementSelector)], context, timeoutMs);
-	try { return JSON.parse(output); } catch { throw new Error("macOS accessibility driver returned an invalid semantic record"); }
+	try { return JSON.parse(output); } catch { throw new Error("desktop accessibility driver returned an invalid semantic record"); }
 }
 
 async function captureAccessibility({ context, helper, selector, name, artifacts, depth, limit, timeoutMs = 15_000 }) {
@@ -495,6 +650,7 @@ async function captureScreenshot({ context, helper, selector, name, artifacts, t
 async function startWindowVideoRecorder({ context, helper, selector, observations }) {
 	const name = "window";
 	try {
+		if (!helper.supportsWindowVideo) throw new Error(`${helper.label} does not implement exact-window video recording`);
 		const remaining = Math.max(0, context.deadline - Date.now());
 		const durationMs = Math.min(MAX_RECORD_DURATION_MS, remaining - RECORD_RUNNER_MARGIN_MS);
 		if (durationMs < 500) {
@@ -504,7 +660,7 @@ async function startWindowVideoRecorder({ context, helper, selector, observation
 		await helperCall(helper, ["wait-window", ...selector, "--timeout", "10"], context, 15_000);
 		const filename = `${name}.mp4`;
 		const target = path.join(context.evidenceDir, filename);
-		const child = spawn(helper, ["record-window", ...selector, "--out", target, "--duration", String(durationMs / 1000)], {
+		const child = spawn(helper.file, [...helper.argsPrefix, "record-window", ...selector, "--out", target, "--duration", String(durationMs / 1000)], {
 			cwd: context.projectRoot,
 			env: launchEnvironment({}),
 			stdio: ["ignore", "pipe", "pipe"],
@@ -788,6 +944,50 @@ function requireBoundedString(value, label, maxLength) {
 function writePrivate(file, content) {
 	fs.writeFileSync(file, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
 	if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+}
+
+function findWindowsPowerShell() {
+	const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+	const fixed = systemRoot
+		? path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+		: undefined;
+	if (fixed && fs.existsSync(fixed)) return fixed;
+	return findExecutable(["powershell.exe", "pwsh.exe", "powershell", "pwsh"]);
+}
+
+function findExecutable(candidates) {
+	const pathValue = process.env.PATH ?? "";
+	const directories = pathValue.split(path.delimiter).filter(Boolean);
+	const windowsExtensions = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+		.split(";")
+		.filter(Boolean);
+	for (const candidate of candidates) {
+		if (path.isAbsolute(candidate)) {
+			if (isExecutableFile(candidate)) return candidate;
+			continue;
+		}
+		const hasExtension = path.extname(candidate).length > 0;
+		const extensions = process.platform === "win32" && !hasExtension ? windowsExtensions : [""];
+		for (const directory of directories) {
+			for (const extension of extensions) {
+				const resolved = path.join(directory, `${candidate}${extension}`);
+				if (isExecutableFile(resolved)) return resolved;
+			}
+		}
+	}
+	return undefined;
+}
+
+function isExecutableFile(file) {
+	try {
+		const stat = fs.statSync(file);
+		if (!stat.isFile()) return false;
+		if (process.platform === "win32") return true;
+		fs.accessSync(file, fs.constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function probeHasScreenshot(context) {

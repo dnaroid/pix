@@ -54,10 +54,10 @@ function writeFlow(uiWorkspace: string, name: string, value: unknown) {
 	return file;
 }
 
-function invoke(project: string, agentDir: string, args: string[], timeout = 20_000) {
+function invoke(project: string, agentDir: string, args: string[], timeout = 20_000, envOverrides: Record<string, string> = {}) {
 	const result = spawnSync(nodeExecutable, [runner, ...args], {
 		cwd: project,
-		env: { ...process.env, PI_SUBAGENT_AGENT_DIR: agentDir },
+		env: { ...process.env, ...envOverrides, PI_SUBAGENT_AGENT_DIR: agentDir },
 		encoding: "utf8",
 		timeout,
 		maxBuffer: 2 * 1024 * 1024,
@@ -661,6 +661,37 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 			expect(first.payload.remediation).toBeString();
 		}
 		expectUnifiedArtifacts(first.payload);
+	});
+
+	test("returns a parent-ready remediation handoff when a required backend is blocked", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeFlow(uiWorkspace, "blocked-desktop.jsonc", {
+			target: { application: { name: "Unavailable UI QA target" } },
+			steps: [{ action: "waitForWindow" }],
+		});
+		// On macOS this removes xcrun/swiftc from discovery; on other platforms the
+		// desktop backend is already unsupported. Either way the runner must return
+		// the same parent-facing BLOCKED handoff shape without attempting remediation.
+		for (const args of [
+			["probe", "--flow", "blocked-desktop.jsonc", "--runner-timeout-ms", "30000"],
+			["run", "--flow", "blocked-desktop.jsonc", "--run-id", "blocked-handoff", "--runner-timeout-ms", "30000"],
+		]) {
+			const result = invoke(project, agentDir, args, 40_000, { PATH: "" });
+			expect(result.status).toBe(2);
+			expect(result.payload.status).toBe("BLOCKED");
+			expect(result.payload.selection.selectedBackend).toBe("desktop");
+			expect(result.payload.selection.platformDriver).toBeString();
+			expect(result.payload.blockedHandoff).toEqual({
+				backend: "desktop",
+				platformDriver: result.payload.selection.platformDriver,
+				missingCapabilities: result.payload.selection.missingCapabilities,
+				reason: result.payload.reason,
+				remediation: result.payload.remediation,
+				manualActionRequired: true,
+				automaticRemediationAttempted: false,
+			});
+			expect(result.payload.remediation).toBeString();
+		}
 	});
 
 	test("gates desktop capture steps on honestly probed capabilities", () => {

@@ -74,8 +74,14 @@ the existing runner path/privacy validation succeeds without weakening it.
 
 The unified runner selects exactly one backend from the flow target, reports
 candidate capabilities and rationale, and normalizes assertions, observations,
-and typed artifact links. TUI runs use a real PTY plus ANSI/VT screen model and
-automatically retain a bounded asciicast v2 replay. macOS desktop runs use the
+typed artifact links. `BLOCKED` results additionally carry a normalized
+`blockedHandoff`: selected backend/platform driver, missing capabilities,
+reason, remediation, `manualActionRequired: true`, and
+`automaticRemediationAttempted: false`. This gives the parent agent a stable
+environment-repair/install/permission handoff without granting the QA child
+permission to modify the host. TUI runs use a real PTY plus ANSI/VT screen model
+and automatically retain a bounded asciicast v2 replay. macOS desktop runs use
+the
 bundled Accessibility/CGWindow helper and, when ScreenCaptureKit plus Screen
 Recording permission are available, automatically retain a silent, bounded
 video of only the correlated application window. Independent-window capture
@@ -136,6 +142,10 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - Deterministic assertions, screenshot inspection, automatic bounded video
   evidence, redacted statuses, artifact links, bounded execution, and
   agent-local cleanup are preserved.
+- A blocked preflight/run always exposes the parent-ready `blockedHandoff` and a
+  non-empty remediation string. The QA child relays those fields and stops; it
+  does not install automation dependencies, grant OS permissions, or invent a
+  different fallback surface.
 
 ## Related files
 
