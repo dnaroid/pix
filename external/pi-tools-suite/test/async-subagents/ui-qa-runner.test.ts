@@ -79,6 +79,20 @@ function invoke(project: string, agentDir: string, args: string[], timeout = 20_
 	return { ...result, payload };
 }
 
+function expectRunnerStatus(result: ReturnType<typeof invoke>, expected: number): void {
+	if (result.status === expected) return;
+	throw new Error(JSON.stringify({
+		expectedStatus: expected,
+		actualStatus: result.status,
+		signal: result.signal,
+		error: result.error?.message,
+		stderr: result.stderr?.trim(),
+		payloadStatus: result.payload?.status,
+		reason: result.payload?.reason,
+		observations: result.payload?.observations,
+	}, null, 2));
+}
+
 function expectUnifiedArtifacts(payload: any) {
 	expect(Object.keys(payload.artifacts).sort()).toEqual([
 		"accessibilitySnapshots", "downloads", "observations", "screenshots", "terminalCaptures", "traces", "videos",
@@ -244,7 +258,7 @@ describe("capability-first UI QA runner", () => {
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeFlow(uiWorkspace, "browser.jsonc", { version: 1, target: { url: "https://example.test/path" } });
 		const result = invoke(project, agentDir, ["probe", "--flow", "browser.jsonc"]);
-		expect(result.status).toBe(0);
+		expectRunnerStatus(result, 0);
 		expect(result.payload.status).toBe("AVAILABLE");
 		expect(result.payload.selection.detectedTargetKind).toBe("browser");
 		expect(result.payload.selection.selectedBackend).toBe("browser");
@@ -439,7 +453,7 @@ else { console.error("unsupported fake command: " + command); process.exit(1); }
 			}],
 		});
 		const result = invoke(project, agentDir, ["probe", "--flow", "browser-upload.jsonc"], 30_000);
-		expect(result.status).toBe(0);
+		expectRunnerStatus(result, 0);
 		expect(result.payload.status).toBe("AVAILABLE");
 		expect(result.payload.selection.selectedBackend).toBe("browser");
 	});
@@ -504,7 +518,7 @@ process.stdin.on("data", (data) => {
 			],
 		});
 		const result = invoke(project, agentDir, ["run", "--flow", "tui.jsonc", "--run-id", "interactive", "--runner-timeout-ms", "10000"]);
-		expect(result.status).toBe(0);
+		expectRunnerStatus(result, 0);
 		expect(result.payload.status).toBe("PASSED");
 		expect(result.payload.selection.selectedBackend).toBe("tui");
 		expect(result.payload.selection.guide).toEqual({ backend: "tui", topic: "pty" });
@@ -521,7 +535,7 @@ process.stdin.on("data", (data) => {
 		writeProjectFile(project, "fixture.mjs", "setInterval(() => {}, 1000);\n");
 		writeFlow(uiWorkspace, "tui-capabilities.jsonc", { target: { command: { argv: [nodeExecutable, "fixture.mjs"] } } });
 		const result = invoke(project, agentDir, ["probe", "--flow", "tui-capabilities.jsonc"]);
-		expect(result.status).toBe(0);
+		expectRunnerStatus(result, 0);
 		expect(result.payload.status).toBe("AVAILABLE");
 		expect(result.payload.selection.selectedBackend).toBe("tui");
 		expect(result.payload.selection.guide).toEqual({ backend: "tui", topic: "pty" });
@@ -668,7 +682,8 @@ process.stdin.on("data", (data) => {
 			],
 		});
 		const result = invoke(project, agentDir, ["run", "--flow", "recording.jsonc", "--run-id", "recording", "--runner-timeout-ms", "10000"]);
-		expect(result.status).toBe(0);
+		expectRunnerStatus(result, 0);
+		expectRunnerStatus(result, 0);
 		expect(result.payload.status).toBe("PASSED");
 		expect(result.payload.selection.supportedCapabilities).toContain("terminalRecording");
 		expect(result.payload.artifacts.videos).toHaveLength(1);
@@ -851,7 +866,7 @@ setInterval(() => {}, 1000);
 			steps: [{ action: "waitForText", text: "1" }, { action: "waitForStable", settleMs: 100, timeoutMs: 150 }],
 		});
 		const action = invoke(project, agentDir, ["run", "--flow", "action-timeout.jsonc", "--run-id", "action-timeout", "--runner-timeout-ms", "2000"]);
-		expect(action.status).toBe(1);
+		expectRunnerStatus(action, 1);
 		expect(action.payload.reason).toContain("did not settle");
 
 		writeFlow(uiWorkspace, "runner-timeout.jsonc", {
@@ -859,7 +874,7 @@ setInterval(() => {}, 1000);
 			steps: [{ action: "waitForText", text: "1" }, { action: "waitForStable", settleMs: 100, timeoutMs: 30000 }],
 		});
 		const overall = invoke(project, agentDir, ["run", "--flow", "runner-timeout.jsonc", "--run-id", "runner-timeout", "--runner-timeout-ms", "100"]);
-		expect(overall.status).toBe(124);
+		expectRunnerStatus(overall, 124);
 		expect(overall.payload.timedOut).toBe(true);
 	});
 
@@ -878,7 +893,7 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		});
 		const started = Date.now();
 		const result = invoke(project, agentDir, ["run", "--flow", "resistant.jsonc", "--run-id", "resistant", "--runner-timeout-ms", "100"], 12_000);
-		expect(result.status).toBe(124);
+		expectRunnerStatus(result, 124);
 		expect(result.payload.timedOut).toBe(true);
 		expect(Date.now() - started).toBeLessThan(8_000);
 		const pid = result.payload.observations?.find((entry: any) => entry.action === "launch")?.pid;

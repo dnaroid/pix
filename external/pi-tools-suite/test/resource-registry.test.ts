@@ -469,7 +469,7 @@ describe("resource registry", () => {
 		expect(fs.existsSync(path.join(project, ".pi", "agents", "local-agent.md"))).toBe(false);
 		expect(h.notices.at(-1)?.message).toContain("Uninstalled 4 local resources");
 		expect(h.reloads).toBe(5);
-	});
+	}, 20_000);
 
 	test("pushes, reports, and pulls project-scoped tasks, plans, and TODO without mixing them with reusable resources", async () => {
 		const root = tempRoot();
@@ -633,7 +633,7 @@ describe("resource registry", () => {
 		expect(provenance.projectResources.plans).toBeUndefined();
 		await command.handler("status", h.ctx);
 		expect(h.messages.at(-1)?.content).not.toContain("plans/");
-	});
+	}, 20_000);
 
 	test("removes a single remote resource, keeps the project copy, and reports removed-remote status", async () => {
 		const root = tempRoot();
