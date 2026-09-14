@@ -1955,6 +1955,9 @@ export class PixAcpAgent {
 			run.resolve = resolve;
 			run.reject = reject;
 		});
+		// pi can exit while continue() is still in flight. Attach a rejection
+		// handler immediately; the awaited promise below still observes the error.
+		void settled.catch(() => {});
 		try {
 			await session.pi.continue();
 		} catch (error) {
@@ -2193,6 +2196,10 @@ export class PixAcpAgent {
 			run.resolve = resolve;
 			run.reject = reject;
 		});
+		// onExit can reject the run before prompt() reaches the final await (for
+		// example while session metadata is being synchronized). Handle that
+		// rejection immediately so Node never reports it as transiently unhandled.
+		void settled.catch(() => {});
 
 		try {
 			await session.pi.prompt(input.text, input.images.length > 0 ? input.images : undefined);
@@ -2896,7 +2903,12 @@ type SharedModelUsageModule = {
 };
 
 type SharedDcpStatsModule = {
-	formatDcpStatsToast?: (session: unknown, options?: { branch?: readonly unknown[] }) => string;
+	formatDcpStatistics?: (input: {
+		branch?: readonly unknown[];
+		historyStatus?: "full" | "unavailable";
+		model?: PiSessionState["model"];
+		usage?: PiSessionStats["contextUsage"];
+	}) => string;
 };
 
 function dcpTokensSavedFromStats(stats: PiSessionStats): number | undefined {
@@ -2947,14 +2959,16 @@ async function formatPixDcpStats(
 	branch: readonly Record<string, unknown>[],
 ): Promise<string | undefined> {
 	try {
-		const moduleUrl = new URL("../../../dist/app/rendering/dcp-stats.js", import.meta.url).href;
+		const moduleUrl = new URL("../../../external/pi-tools-suite/src/dcp/statistics.js", import.meta.url).href;
 		const dcp = await import(moduleUrl) as SharedDcpStatsModule;
-		if (!dcp.formatDcpStatsToast) return undefined;
-		const text = dcp.formatDcpStatsToast({
+		if (!dcp.formatDcpStatistics) return undefined;
+		const historyStatus = branch.length > 0 && branch[0]?.parentId != null ? "unavailable" : "full";
+		const text = dcp.formatDcpStatistics({
+			branch: historyStatus === "full" ? branch : [],
+			historyStatus,
 			model: state.model,
-			sessionManager: { getBranch: () => branch },
-			getContextUsage: () => stats.contextUsage,
-		}, { branch }).trim();
+			usage: stats.contextUsage,
+		}).trim();
 		return text || undefined;
 	} catch {
 		return undefined;
