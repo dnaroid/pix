@@ -97,31 +97,53 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       }
     },
     "modelOverrides": {
+      // DCP policy reviewed 2026-09-14. Engineering starting points, not
+      // provider-certified optima. Keep candidate/message availability aligned
+      // with each model's routine compression threshold.
       "openai-codex/gpt-5*": {
         "compress": {
           "minContextPercent": "26%",
-          "maxContextPercent": "46%"
+          "maxContextPercent": "46%",
+          "autoCandidates": { "minContextPercent": 0.26 },
+          "messageMode": { "minContextPercent": 0.26 }
         }
       },
       "openai-codex/gpt-5.4-mini": {
         "compress": {
           "minContextPercent": "20%",
-          "maxContextPercent": "38%"
+          "maxContextPercent": "38%",
+          "autoCandidates": { "minContextPercent": 0.20 },
+          "messageMode": { "minContextPercent": 0.20 }
+        }
+      },
+      "openai-codex/gpt-6-astra": {
+        "compress": {
+          "minContextPercent": "26%",
+          "maxContextPercent": "46%",
+          "autoCandidates": { "minContextPercent": 0.26 },
+          "messageMode": { "minContextPercent": 0.26 }
         }
       },
       "zai/*": {
         "compress": {
           "minContextPercent": "16%",
-          "maxContextPercent": "30%"
+          "maxContextPercent": "30%",
+          "autoCandidates": { "minContextPercent": 0.16 },
+          "messageMode": { "minContextPercent": 0.16 }
         }
       },
-      // glm-5.3 reports a ~1M-token window. Even zai/* 16%/30% = 160K/300K is
-      // above the ~15% (~150K) point where long sessions degrade, and an
-      // observed 14h/273K-token session never crossed 16%. Lower ONLY glm-5.3
-      // within the zai family: 8%/15% (~80K/150K) so nudging starts early and
-      // auto-compress fires at the observed degradation point. Other zai/*
+      // GLM-5.3 and GLM-5.3-Flash expose ~1M-token windows. Use 8%/15%
+      // (~80K/~150K) as a conservative long-session policy while other zai/*
       // models keep 16%/30%.
       "zai/glm-5.3": {
+        "compress": {
+          "minContextPercent": "8%",
+          "maxContextPercent": "15%",
+          "autoCandidates": { "minContextPercent": 0.08 },
+          "messageMode": { "minContextPercent": 0.08 }
+        }
+      },
+      "zai/glm-5.3-flash": {
         "compress": {
           "minContextPercent": "8%",
           "maxContextPercent": "15%",
@@ -132,31 +154,57 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "antigravity/*sonnet*": {
         "compress": {
           "minContextPercent": "22%",
-          "maxContextPercent": "40%"
+          "maxContextPercent": "40%",
+          "autoCandidates": { "minContextPercent": 0.22 },
+          "messageMode": { "minContextPercent": 0.22 }
         }
       },
       "antigravity/gemini-3.1-pro*": {
         "compress": {
           "minContextPercent": "24%",
-          "maxContextPercent": "42%"
+          "maxContextPercent": "42%",
+          "autoCandidates": { "minContextPercent": 0.24 },
+          "messageMode": { "minContextPercent": 0.24 }
         }
       },
       "antigravity/gemini-3-flash*": {
         "compress": {
           "minContextPercent": "18%",
-          "maxContextPercent": "34%"
+          "maxContextPercent": "34%",
+          "autoCandidates": { "minContextPercent": 0.18 },
+          "messageMode": { "minContextPercent": 0.18 }
         }
       },
       "antigravity/gemini-2.5-flash*": {
         "compress": {
           "minContextPercent": "18%",
-          "maxContextPercent": "32%"
+          "maxContextPercent": "32%",
+          "autoCandidates": { "minContextPercent": 0.18 },
+          "messageMode": { "minContextPercent": 0.18 }
         }
       },
       "antigravity/antigravity-claude-opus-4-6-thinking": {
         "compress": {
           "minContextPercent": "26%",
-          "maxContextPercent": "44%"
+          "maxContextPercent": "44%",
+          "autoCandidates": { "minContextPercent": 0.26 },
+          "messageMode": { "minContextPercent": 0.26 }
+        }
+      },
+      "antigravity/antigravity-gemini-3.1-pro": {
+        "compress": {
+          "minContextPercent": "24%",
+          "maxContextPercent": "42%",
+          "autoCandidates": { "minContextPercent": 0.24 },
+          "messageMode": { "minContextPercent": 0.24 }
+        }
+      },
+      "antigravity/antigravity-gemini-3.8-flash": {
+        "compress": {
+          "minContextPercent": "18%",
+          "maxContextPercent": "34%",
+          "autoCandidates": { "minContextPercent": 0.18 },
+          "messageMode": { "minContextPercent": 0.18 }
         }
       }
     },

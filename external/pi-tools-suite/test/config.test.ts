@@ -193,11 +193,45 @@ describe("pi-tools-suite config", () => {
 			lsp?: { servers?: Array<{ id?: string }> };
 			repoDiscovery?: { profile?: string };
 			resourceRegistry?: { remote?: string; branch?: string; projectKey?: string };
+			dcp?: {
+				modelOverrides?: Record<string, {
+					compress?: {
+						minContextPercent?: string;
+						maxContextPercent?: string;
+						autoCandidates?: { minContextPercent?: number };
+						messageMode?: { minContextPercent?: number };
+					};
+				}>;
+			};
 		};
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
 		expect(parsed.repoDiscovery?.profile).toBe("baseline");
 		expect(parsed.resourceRegistry).toEqual({ branch: "main" });
+		expect(parsed.dcp?.modelOverrides?.["openai-codex/gpt-6-astra"]?.compress).toEqual({
+			minContextPercent: "26%",
+			maxContextPercent: "46%",
+			autoCandidates: { minContextPercent: 0.26 },
+			messageMode: { minContextPercent: 0.26 },
+		});
+		expect(parsed.dcp?.modelOverrides?.["zai/glm-5.3-flash"]?.compress).toEqual({
+			minContextPercent: "8%",
+			maxContextPercent: "15%",
+			autoCandidates: { minContextPercent: 0.08 },
+			messageMode: { minContextPercent: 0.08 },
+		});
+		expect(parsed.dcp?.modelOverrides?.["antigravity/antigravity-gemini-3.1-pro"]?.compress).toEqual({
+			minContextPercent: "24%",
+			maxContextPercent: "42%",
+			autoCandidates: { minContextPercent: 0.24 },
+			messageMode: { minContextPercent: 0.24 },
+		});
+		expect(parsed.dcp?.modelOverrides?.["antigravity/antigravity-gemini-3.8-flash"]?.compress).toEqual({
+			minContextPercent: "18%",
+			maxContextPercent: "34%",
+			autoCandidates: { minContextPercent: 0.18 },
+			messageMode: { minContextPercent: 0.18 },
+		});
 		expect(content).toContain('//   "id": "python"');
 		expect(content).toContain('//   "id": "markdown"');
 	});
