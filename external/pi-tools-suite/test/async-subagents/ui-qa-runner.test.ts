@@ -13,8 +13,10 @@ const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/u
 const macosDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift");
 const windowsDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/windows/windows-uia.ps1");
 const linuxDesktopDriverSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/linux/linux-atspi.py");
-const nodeLocator = process.platform === "win32" ? ["where.exe", ["node.exe"]] : ["which", ["node"]];
-const nodeLookup = spawnSync(nodeLocator[0]!, nodeLocator[1]!, { encoding: "utf8" });
+const nodeLocator = process.platform === "win32"
+	? { command: "where.exe", args: ["node.exe"] }
+	: { command: "which", args: ["node"] };
+const nodeLookup = spawnSync(nodeLocator.command, nodeLocator.args, { encoding: "utf8" });
 const nodePath = nodeLookup.stdout.split(/\r?\n/u).map((line) => line.trim()).find(Boolean);
 if (nodeLookup.status !== 0 || !nodePath) throw new Error(`Unable to locate Node.js: ${nodeLookup.stderr.trim()}`);
 const nodeExecutable = fs.realpathSync(nodePath);
@@ -212,7 +214,7 @@ describe("ui-qa guide routing", () => {
 		tempDirs.push(project);
 		const spaced = path.join(project, "space dir name");
 		fs.mkdirSync(spaced, { recursive: true });
-		for (const cwd of [project, spaced, "/tmp"]) {
+		for (const cwd of [project, spaced, os.tmpdir()]) {
 			const result = invokeGuide(["--backend", "desktop"], cwd);
 			expect(result.status).toBe(0);
 			expect(result.stdout).toBe(fs.readFileSync(guidePath("desktop.md"), "utf8"));
@@ -677,7 +679,7 @@ process.stdin.on("data", (data) => {
 		expect(video.path.startsWith(path.join(project, ".pi", "subagents", "run", "qa", "ui-qa", "evidence", "recording"))).toBe(true);
 		const stat = fs.statSync(video.path);
 		expect(stat.isFile()).toBe(true);
-		expect(stat.mode & 0o777).toBe(0o600);
+		if (process.platform !== "win32") expect(stat.mode & 0o777).toBe(0o600);
 		const { header, events } = readAsciicast(video.path);
 		expect(header.version).toBe(2);
 		expect(header.width).toBe(40);
@@ -930,6 +932,12 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 	});
 
 	test("returns a parent-ready remediation handoff when a required backend is blocked", () => {
+		// Windows needs a valid SystemRoot to start Node itself, while the same
+		// SystemRoot also exposes the trusted PowerShell UIA helper. Forcing it to
+		// a fake path crashes the runner before it can report a structured blocker,
+		// so exercise the deterministic forced-block path on POSIX. Windows still
+		// covers its real probe contract and blocked shape when the helper is absent.
+		if (process.platform === "win32") return;
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeFlow(uiWorkspace, "blocked-desktop.jsonc", {
 			target: { application: { name: "Unavailable UI QA target" } },
@@ -938,9 +946,7 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		// Removing PATH removes the required trusted helper runtime/toolchain on each
 		// supported desktop platform. The runner must return the same parent-facing
 		// BLOCKED handoff shape without attempting remediation.
-		const blockedEnvironment: Record<string, string> = process.platform === "win32"
-			? { PATH: "", SystemRoot: "C:\\__pi_ui_qa_missing__", WINDIR: "C:\\__pi_ui_qa_missing__" }
-			: { PATH: "" };
+		const blockedEnvironment: Record<string, string> = { PATH: "" };
 		for (const args of [
 			["probe", "--flow", "blocked-desktop.jsonc", "--runner-timeout-ms", "30000"],
 			["run", "--flow", "blocked-desktop.jsonc", "--run-id", "blocked-handoff", "--runner-timeout-ms", "30000"],

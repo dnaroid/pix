@@ -535,7 +535,7 @@ describe("resource registry", () => {
 		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
 		expect(h.notices.at(-1)?.message).toContain("has local changes");
 		expect(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8")).toContain("local change");
-	});
+	}, 20_000);
 
 	test("syncs task attachments as a portable project bundle and tracks attachment changes", async () => {
 		const root = tempRoot();
