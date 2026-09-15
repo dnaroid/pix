@@ -16,6 +16,7 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 
 - Tests must assert explicit bytes, counts, states, or observable ownership conditions instead of assuming a runner completes enough work during a short wall-clock interval.
 - Timers are appropriate only when timeout behavior itself is under test; elapsed time must not stand in for output volume, process progress, or cleanup completion.
+- Real Git/filesystem integration tests may use an explicit generous harness timeout for slow Windows runners; that timeout is only a deadlock safety ceiling, never a performance assertion.
 - Process-cleanup tests wait for an observable owned-process condition when teardown completion matters.
 - Local reproduction of configuration-sensitive suite tests uses an isolated `HOME` so user Pix/pi-tools-suite configuration cannot change the tested defaults.
 - CRLF/LF differences are normalized unless line endings themselves are the behavior under test.

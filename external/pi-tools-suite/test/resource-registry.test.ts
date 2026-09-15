@@ -404,7 +404,7 @@ describe("resource registry", () => {
 		expect(fs.readFileSync(path.join(seed, "agents", "architect.md"), "utf8")).toContain("Architecture review");
 		expect(h.notices.at(-1)?.message).toContain("Pushed agent \"architect\"");
 		expect(h.reloads).toBe(4);
-	});
+	}, 20_000);
 
 	test("supports all for bulk install, update, push, remote remove, and local uninstall across skills and agents", async () => {
 		const root = tempRoot();
