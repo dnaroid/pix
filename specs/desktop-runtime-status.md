@@ -31,6 +31,8 @@ Bring the TUI's context-usage, DCP-session-statistics, and current-model quota s
 - Clicking the model-limit control forces a fresh quota request. Normal model-quota refresh happens when the active runtime/model changes and every five minutes.
 - The model-limit `Usage` control remains enabled while a prompt is running and while a quota refresh is already in flight. Overlapping refreshes are handled by the existing Desktop generation guards and ACP single-flight provider query rather than by disabling the status-bar control.
 - Between the context and model-limit controls, Desktop shows the same workspace identity as the TUI: the project directory basename followed by the current Git branch in parentheses. The project name uses the configured/deterministic project identity color, the branch remains muted, and detached HEAD omits the branch label. Hovering that project/branch identity shows the full workspace path. Desktop refreshes this branch through a lightweight local Git command on workspace activation/switch and every 30 seconds, matching the TUI branch-cache cadence without running the full Source Control status query.
+- A UI-only New Conversation draft has no runtime context/DCP state, but its status bar still shows the workspace project/branch identity. It also shows quota windows for the draft's currently staged model/thinking selection when that provider exposes usage data.
+- Draft quota is loaded through the existing sessionless draft-config path and never allocates an ACP/Pi session. Changing the staged model or thinking level invalidates the previous draft quota and starts a best-effort refresh for the new route; an explicit refresh keeps the last successful snapshot visible until its replacement settles.
 - Antigravity quota refresh is also keyed by the active thinking level because legacy per-model fallback can route current versioned Gemini Flash models to tier-specific Google model keys (for example `gemini-3.8-flash-high` for `xhigh`). Changing thinking therefore refreshes quota immediately instead of waiting for the periodic poll.
 - Antigravity live quota lookup now prefers `retrieveUserQuotaSummary` on the current native agy transport (`daily-cloudcode-pa.googleapis.com` then prod, agy CLI 1.1.24 User-Agent, gzip). The explicit Google `5h` and `weekly` buckets are mapped directly to status-bar windows instead of inferring a window type from time remaining until reset.
 - For multi-account Antigravity auth, the `Σ` status is the mean remaining quota across every account that returned the same explicit window; its countdown uses the nearest reset in that pool. This keeps account rotation capacity visible instead of reporting only the currently active account.
@@ -57,6 +59,7 @@ Bring the TUI's context-usage, DCP-session-statistics, and current-model quota s
 - Manual compression reuses the DCP extension's `/dcp compress` entrypoint; no additional Desktop-only compression protocol is introduced.
 - Model quota refresh reuses the shared Pix model-usage module, including provider auth/refresh behavior.
 - The response marks model-usage refresh as `skipped`, `ready`, `unavailable`, or `failed` so Desktop can distinguish stale-preserving transient failures from unsupported/unavailable quota data.
+- The private sessionless `pix/session/draft_config` request may additionally carry the staged `modelRef`, `thinkingLevel`, and `refreshModelUsage=true`. Its response returns the same model-usage refresh/status shape used by runtime status while remaining workspace-scoped and sessionless.
 
 ## Related files
 
@@ -89,6 +92,7 @@ Bring the TUI's context-usage, DCP-session-statistics, and current-model quota s
 - ACP tests cover on-demand DCP loading, assert periodic runtime status never asks Pi for the session tree, and verify that two concurrent quota refresh requests for one session/model/thinking route execute one provider query.
 - ACP tests assert that `/dcp compress` remains extension-owned and never falls through to native Pi context compaction.
 - Desktop ACP-client tests cover independent runtime-status and DCP request shapes plus response validation for context, DCP text, and quota windows.
+- Desktop/ACP draft-config tests cover selected-model/thinking quota requests without a session id, and source-level status-bar coverage keeps project/branch plus draft quota visible without rendering fake context chrome.
 - Desktop helper tests cover TUI threshold parity, reset formatting, compact token formatting, and projected-exhaustion warning behavior.
 - Desktop helper tests cover the refresh-generation race: a non-quota snapshot refresh that settles first must not discard a successful in-flight quota refresh, while a newer quota refresh still supersedes an older in-flight one.
 - Desktop helper tests cover pushed-context and pushed-DCP-savings merging; an updated scalar must preserve context, quota and lazily loaded DCP detail text.

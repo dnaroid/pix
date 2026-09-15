@@ -14,6 +14,7 @@ import {
   type WorkbenchTab,
   type WorkbenchTabId,
 } from "../lib/workbench-tabs";
+import { sessionIsFork } from "../lib/session-tabs";
 
 export function workbenchTabLabel(value: string): string {
   const normalized = value.replaceAll("\\", "/").replace(/\/$/u, "");
@@ -56,6 +57,7 @@ export function buildSessionWorkbenchTabs(options: {
       runtimeActive: session.sessionId === options.activeConversationTabId,
       running,
       draft,
+      fork: sessionIsFork(session),
       activityTone: sessionActivityTone(activity, running, needsInput),
       activityLabel,
       pulsing: running || (activity?.activeSubagents ?? 0) > 0,

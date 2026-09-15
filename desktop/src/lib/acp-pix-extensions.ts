@@ -6,6 +6,7 @@ import type {
   AgentControlStatus,
   AutocompleteSettings,
   DcpStatsStatus,
+  DraftSessionConfig,
   ForkMessage,
   LazySessionHistory,
   LazySessionImage,
@@ -37,8 +38,29 @@ function isStopReason(value: unknown): value is NonNullable<AgentControlStatus["
 export class AcpPixExtensions {
   constructor(private readonly request: AcpRequest) {}
 
-  draftConfig(cwd: string): Promise<{ configOptions: SessionConfigOption[] }> {
-    return this.request("pix/session/draft_config", { cwd });
+  async draftConfig(
+    cwd: string,
+    selection?: DraftSessionConfig,
+    refreshModelUsage = false,
+  ): Promise<{ configOptions: SessionConfigOption[]; modelUsageRefresh: RuntimeStatus["modelUsageRefresh"]; modelUsage?: RuntimeStatus["modelUsage"] }> {
+    const response = await this.request<unknown>("pix/session/draft_config", {
+      cwd,
+      ...(selection ? { modelRef: selection.modelRef, thinkingLevel: selection.thinkingLevel } : {}),
+      ...(refreshModelUsage ? { refreshModelUsage: true } : {}),
+    });
+    if (!isRecord(response) || !Array.isArray(response.configOptions)) {
+      throw new Error("pix/session/draft_config returned an invalid response");
+    }
+    const runtime = parseRuntimeStatus({
+      ...response,
+      sessionId: "draft",
+      modelUsageRefresh: response.modelUsageRefresh ?? "skipped",
+    });
+    return {
+      configOptions: response.configOptions as SessionConfigOption[],
+      modelUsageRefresh: runtime.modelUsageRefresh,
+      ...(runtime.modelUsage ? { modelUsage: runtime.modelUsage } : {}),
+    };
   }
 
   async sessionHistory(sessionId: string, full = false, cursor?: string): Promise<LazySessionHistory> {

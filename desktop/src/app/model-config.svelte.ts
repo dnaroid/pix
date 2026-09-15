@@ -11,9 +11,12 @@ export function createModelConfig(options: ModelConfigOptions) {
   return {
     get draftConfigOptions() { return draft.configOptions; },
     get draftModelOverride() { return draft.modelOverride; },
+    get draftRuntimeStatus() { return draft.runtimeStatus; },
+    get draftModelUsageRefreshing() { return draft.modelUsageRefreshing; },
     get pickerOpen() { return picker.open; },
     get pickerDraft() { return picker.draft; },
     refreshDraftConfig: draft.refresh,
+    refreshDraftModelUsage: draft.refreshUsage,
     resetDraft: draft.reset,
     openPicker: picker.show,
     closePicker: picker.close,

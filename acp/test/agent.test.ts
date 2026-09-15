@@ -1056,6 +1056,7 @@ test("session/list reconciles native Pi sessions and reports ordered TUI tabs", 
 				nativeSession("native-a", { path: firstPath, name: "Native title" }),
 				nativeSession("native-b", {
 					path: secondPath,
+					parentSessionPath: firstPath,
 					modified: new Date("2025-02-01T00:00:00.000Z"),
 				}),
 			];
@@ -1075,6 +1076,8 @@ test("session/list reconciles native Pi sessions and reports ordered TUI tabs", 
 	const listed = await connect(harness.adapter, (cx) => cx.request("session/list", { cwd: "/tmp/proj" }));
 	assert.deepEqual(requestedCwds, ["/tmp/proj"]);
 	assert.deepEqual(listed.sessions.map((session) => session.sessionId), ["native-b", "existing-acp-id"]);
+	assert.deepEqual(listed.sessions[0]?._meta, { "pix.isFork": true });
+	assert.equal(listed.sessions[1]?._meta, undefined);
 	assert.equal(listed.sessions[1]?.title, "Native title");
 	assert.deepEqual(listed._meta?.["pix.tabs"], {
 		sessionIds: ["native-b", "existing-acp-id"],
@@ -1083,6 +1086,7 @@ test("session/list reconciles native Pi sessions and reports ordered TUI tabs", 
 
 	assert.equal((await map.get("existing-acp-id"))?.piSessionId, "native-a");
 	assert.equal((await map.get("native-b"))?.piSessionPath, secondPath);
+	assert.equal((await map.get("native-b"))?.parentSessionPath, firstPath);
 	await connect(harness.adapter, (cx) => cx.request("session/load", {
 		sessionId: "native-b",
 		cwd: "/tmp/proj",

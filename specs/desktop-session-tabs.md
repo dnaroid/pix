@@ -17,6 +17,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 ## Behavior
 
 - Visible conversation sessions remain selected and ordered by the existing `buildTabSessions` / Desktop-TUI parity rules. The unified workbench chrome does not change session membership or backend synchronization.
+- A persisted fork session is identified from Pi's native parent-session metadata. ACP exposes only a boolean `pix.isFork` session-list metadata flag to Desktop, and its workbench tab renders a branch icon beside the title, matching the TUI fork marker semantics without exposing the parent path.
 - Conversation tabs are `kind: "session"` members of `WorkbenchTabs`. Preview and Git Diff may appear between them visually, but those UI-only tabs never enter the session id arrays used by `buildTabSessions`, restore metadata, saved-session selection, or ACP/TUI synchronization.
 - The active conversation runtime and the selected workbench surface are distinct concepts. While Preview/Git Diff is selected, the current session remains the underlying active runtime and keeps its activity/status state. Selecting a conversation tab activates/loads that session and selects the shared `conversation-workspace` panel.
 - The unified workbench tablist owns Left/Right, Home/End, Delete, and middle-click behavior across every visible tab. Arrow/Home/End move focus only; Enter/Space activate through native button behavior.
@@ -28,6 +29,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - A UI-only draft also exposes the same combined model/thinking selector as a real conversation. Desktop obtains draft config options through a read-only, workspace-scoped ACP request that does not create a session-map record or Pi RPC session. Changing model/thinking in the draft updates only draft-local UI state and does not call `session/set_config_option` or `session/new`.
 - The embedded selector fills the available transcript height down to the composer. Its heading/search area remains fixed while only the saved-session list scrolls, and each saved conversation occupies one dense row with title and timestamp on the same line.
 - The embedded selector omits sessions already represented by open conversation tabs. Preview/Diff are irrelevant to this filter because they are not sessions.
+- Saved-session selection surfaces mark sessions carrying Pix fork metadata with the same branch/fork affordance used by conversation tabs, so forks stay visually distinguishable both in the titlebar picker and in the draft's embedded selector.
 - The embedded selector has no separate **New conversation** row. Typing, path insertion, voice insertion, or adding an attachment marks the draft as edited and removes the selector immediately, but still does **not** create an ACP session.
 - The first real prompt submission from the draft creates the ACP session lazily, carrying any staged draft model/thinking selection as a one-session startup override, waits for that runtime to become ready, retargets the unsent attachment draft to the new id, replaces the synthetic conversation tab with the real session tab, and only then sends the prompt. The staged selection must not mutate the persisted global/project default model. Any Preview/Diff placement anchored to the draft is retargeted to the real session id rather than entering session persistence.
 - First-prompt materialization uses a draft-scoped busy state instead of the global Desktop operation lock. The composer and session/workspace mutation controls are temporarily disabled while the runtime is starting, but unrelated Preview/Diff workbench navigation remains responsive.
@@ -71,6 +73,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 
 - `desktop/src/lib/session-tabs.test.ts` covers session membership/restoration/replacement independently of UI-only workbench tabs.
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed workbench ordering without changing session identity.
+- `desktop/src/app/workbench-model.test.ts` covers fork metadata propagation into workbench session tabs.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers unified roving tab semantics and kind-specific close dispatch.
 - Desktop draft/concurrency and ACP-client coverage verifies that draft config is loaded without `session/new`, a staged model selection is kept local, and the override is carried only when first-prompt materialization happens.
 - `npm --prefix desktop test`

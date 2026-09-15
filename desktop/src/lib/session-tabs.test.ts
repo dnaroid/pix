@@ -6,6 +6,7 @@ import {
   parseActiveSessionIds,
   replaceSessionTab,
   restoredTabSessionIds,
+  sessionIsFork,
   serializeActiveSessionIds,
   startupSessionId,
 } from "./session-tabs";
@@ -25,6 +26,13 @@ describe("restoredTabSessionIds", () => {
 
   it("returns null when talking to an adapter without Pix tab metadata", () => {
     expect(restoredTabSessionIds({ sessions: [] })).toBeNull();
+  });
+});
+
+describe("sessionIsFork", () => {
+  it("reads the Pix fork marker from session-list metadata", () => {
+    expect(sessionIsFork({ sessionId: "fork", cwd: "/tmp/project", _meta: { "pix.isFork": true } })).toBe(true);
+    expect(sessionIsFork({ sessionId: "regular", cwd: "/tmp/project" })).toBe(false);
   });
 });
 

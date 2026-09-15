@@ -32,6 +32,8 @@ export interface SessionMapRecord {
 	piSessionId: string;
 	/** Working directory the session was created with. */
 	cwd: string;
+	/** Path to the parent Pi session when this session is a fork. */
+	parentSessionPath?: string | undefined;
 	title?: string | undefined;
 	/** ISO 8601 timestamp of the last activity. */
 	updatedAt: string;
@@ -242,6 +244,7 @@ function sameRecord(left: SessionMapRecord, right: SessionMapRecord): boolean {
 		&& resolve(left.piSessionPath) === resolve(right.piSessionPath)
 		&& left.piSessionId === right.piSessionId
 		&& left.cwd === right.cwd
+		&& left.parentSessionPath === right.parentSessionPath
 		&& left.title === right.title
 		&& left.updatedAt === right.updatedAt;
 }

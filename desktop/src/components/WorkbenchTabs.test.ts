@@ -15,8 +15,11 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).toContain('linearFocusIndex(index, event.key, tabs.length, "horizontal", true)');
     expect(source).toContain('data-workbench-tab-id={tab.id}');
     expect(source).toContain('tab.kind === "session"');
+    expect(source).toContain("tab.fork");
+    expect(source).toContain("GitFork");
     expect(source).toContain('tab.kind === "preview"');
     expect(source).toContain("GitCompareArrows");
+    expect(source).toContain("text-left text-xs text-muted-foreground");
     expect(titlebarSource).toContain("<WorkbenchTabs {...workbench} />");
     expect(titlebarViewModelSource).toContain("tabs: options.tabs()");
     expect(titlebarSource).not.toContain("<WorkspaceEditorTabs");

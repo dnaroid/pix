@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import commandSource from "../app/desktop-command-controller.svelte.ts?raw";
+import statusBarViewModelSource from "../app/desktop-status-bar-view-model.svelte.ts?raw";
+import modelDraftConfigSource from "../app/model-draft-config.svelte.ts?raw";
 import overlaysViewModelSource from "../app/desktop-overlays-view-model.svelte.ts?raw";
 import modelConfigActionsSource from "../app/model-config-actions.ts?raw";
 import modelPickerStateSource from "../app/model-picker-state.svelte.ts?raw";
@@ -75,6 +77,16 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("--runtime-workspace-color");
     expect(runtimeStatusSource).toContain('text-muted-foreground">({workspaceBranch})');
     expect(runtimeStatusSource).toContain("title={workspacePath ?? workspaceName}");
+    expect(runtimeStatusSource).toContain("{#if status || workspaceName}");
+  });
+
+  it("keeps workspace identity and selected-model limits visible for UI-only drafts", () => {
+    expect(statusBarViewModelSource).toContain("runtimeStatus = options.modelConfig.draftRuntimeStatus");
+    expect(statusBarViewModelSource).toContain("modelUsageRefreshing = options.modelConfig.draftModelUsageRefreshing");
+    expect(statusBarViewModelSource).toContain("options.modelConfig.refreshDraftModelUsage()");
+    expect(modelDraftConfigSource).toContain("void refreshUsage(modelRef, state.currentThinking, true)");
+    expect(modelDraftConfigSource).not.toContain("refreshModelUsage: true");
+    expect(modelDraftConfigSource).toContain("}, true);");
   });
 
   it("shows absolute context and live DCP token savings in the hover title without repeating percent", () => {

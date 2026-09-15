@@ -17,7 +17,19 @@ test("desktop draft config is workspace-scoped and does not require a session id
 	assert.deepEqual(parseDesktopDraftConfigRequest({ cwd: "/workspace", sessionId: "ignored" }), {
 		cwd: "/workspace",
 	});
+	assert.deepEqual(parseDesktopDraftConfigRequest({
+		cwd: "/workspace",
+		modelRef: "openai-codex/gpt-5.6-sol",
+		thinkingLevel: "high",
+		refreshModelUsage: true,
+	}), {
+		cwd: "/workspace",
+		modelRef: "openai-codex/gpt-5.6-sol",
+		thinkingLevel: "high",
+		refreshModelUsage: true,
+	});
 	assert.throws(() => parseDesktopDraftConfigRequest({ cwd: "" }));
+	assert.throws(() => parseDesktopDraftConfigRequest({ cwd: "/workspace", refreshModelUsage: "yes" }));
 	assert.throws(() => parseDesktopDraftConfigRequest({}));
 });
 

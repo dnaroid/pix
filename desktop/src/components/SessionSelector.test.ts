@@ -10,4 +10,9 @@ describe("SessionSelector opening and outside dismissal", () => {
   it("lets the titlebar picker button own its open/close toggle", () => {
     expect(source).toContain('target.closest("[data-session-picker]")');
   });
+
+  it("marks forked saved conversations with the branch icon", () => {
+    expect(source).toContain("sessionIsFork(session)");
+    expect(source).toContain("GitFork");
+  });
 });

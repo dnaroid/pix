@@ -22,6 +22,7 @@ function session(sessionId: string): WorkbenchSessionTab {
     runtimeActive: sessionId === "a",
     running: false,
     draft: false,
+    fork: false,
     activityTone: "idle",
     activityLabel: "Session idle",
     pulsing: false,

@@ -39,10 +39,15 @@ export interface DesktopSessionRequest {
 
 export interface DesktopDraftConfigRequest {
 	readonly cwd: string;
+	readonly modelRef?: string;
+	readonly thinkingLevel?: string;
+	readonly refreshModelUsage?: boolean;
 }
 
 export interface DesktopDraftConfigResponse {
 	readonly configOptions: SessionConfigOption[];
+	readonly modelUsageRefresh: DesktopModelUsageRefresh;
+	readonly modelUsage?: DesktopModelUsageStatus;
 }
 
 export interface DesktopBashRequest extends DesktopSessionRequest {
@@ -326,10 +331,25 @@ export function parseDesktopSessionHistoryRequest(value: unknown): DesktopSessio
 }
 
 export function parseDesktopDraftConfigRequest(value: unknown): DesktopDraftConfigRequest {
-	if (!isRecord(value) || typeof value.cwd !== "string" || value.cwd.trim().length === 0) {
-		throw new RequestError(ERROR_INVALID_PARAMS, "pix/session/draft_config requires a non-empty string cwd field");
+	if (
+		!isRecord(value)
+		|| typeof value.cwd !== "string"
+		|| value.cwd.trim().length === 0
+		|| (value.modelRef !== undefined && (typeof value.modelRef !== "string" || value.modelRef.trim().length === 0))
+		|| (value.thinkingLevel !== undefined && (typeof value.thinkingLevel !== "string" || value.thinkingLevel.trim().length === 0))
+		|| (value.refreshModelUsage !== undefined && typeof value.refreshModelUsage !== "boolean")
+	) {
+		throw new RequestError(
+			ERROR_INVALID_PARAMS,
+			"pix/session/draft_config requires cwd and optional modelRef, thinkingLevel, and refreshModelUsage",
+		);
 	}
-	return { cwd: value.cwd };
+	return {
+		cwd: value.cwd,
+		...(value.modelRef === undefined ? {} : { modelRef: value.modelRef }),
+		...(value.thinkingLevel === undefined ? {} : { thinkingLevel: value.thinkingLevel }),
+		...(value.refreshModelUsage === undefined ? {} : { refreshModelUsage: value.refreshModelUsage }),
+	};
 }
 
 export function parseDesktopResumePathRequest(value: unknown): DesktopResumePathRequest {

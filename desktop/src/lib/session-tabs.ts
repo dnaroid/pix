@@ -1,7 +1,13 @@
 import type { ListSessionsResponse, SessionInfo } from "@agentclientprotocol/sdk";
 
 const PIX_TABS_META_KEY = "pix.tabs";
+const PIX_IS_FORK_META_KEY = "pix.isFork";
 export const ACTIVE_SESSIONS_STORAGE_KEY = "pix.desktop.activeSessions";
+
+/** Pix session-list metadata mirrors Pi's parent-session fork marker without exposing the parent path. */
+export function sessionIsFork(session: SessionInfo): boolean {
+  return session._meta?.[PIX_IS_FORK_META_KEY] === true;
+}
 
 /** Read the ordered TUI tab ids from Pix's namespaced ACP response metadata. */
 export function restoredTabSessionIds(response: ListSessionsResponse): string[] | null {

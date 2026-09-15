@@ -17,6 +17,7 @@ export interface WorkbenchSessionTab extends WorkbenchTabBase {
   readonly runtimeActive: boolean;
   readonly running: boolean;
   readonly draft: boolean;
+  readonly fork: boolean;
   readonly activityTone: SessionActivityTone;
   readonly activityLabel: string;
   readonly pulsing: boolean;

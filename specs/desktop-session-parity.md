@@ -18,6 +18,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 
 - Reconcile native Pi JSONL sessions into the ACP session map during `session/list`.
 - Preserve existing ACP session IDs for already-mapped Pi session files.
+- Preserve whether a native session is a fork so Desktop can match the TUI tab marker.
 - Report the TUI tab snapshot through ACP metadata.
 - Keep Desktop's saved-session chooser separate from restored/open tab membership.
 
@@ -32,6 +33,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - A project-scoped `session/list` includes native sessions created by either TUI or Desktop.
 - A discovered native session is persisted in the ACP map so `session/load` can open it later.
 - Reconciliation deduplicates by resolved Pi session path and retains an existing ACP ID when present.
+- Reconciliation persists the native parent-session path internally when present. `session/list` exposes only a boolean `pix.isFork` flag in that session's namespaced ACP metadata; Desktop does not receive the parent path.
 - The response carries ordered TUI open-tab session IDs in namespaced ACP metadata.
 - Desktop uses the returned sessions as the source for saved-session discovery. The titlebar still contains only restored TUI tabs, Desktop-opened tabs, and the active session.
 - Desktop and TUI both use UI-only draft tabs for new conversations. A draft is

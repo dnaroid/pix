@@ -1361,6 +1361,7 @@ export class PixAcpAgent {
 		const sessions: SessionInfo[] = records.map((record) => {
 			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt };
 			if (record.title !== undefined) info.title = record.title;
+			if (record.parentSessionPath !== undefined) info._meta = { "pix.isFork": true };
 			return info;
 		});
 		if (!params.cwd) return { sessions };
@@ -2033,31 +2034,56 @@ export class PixAcpAgent {
 		const configured = this.loadDefaultModel(params.cwd);
 		let current: PiModel | undefined;
 		let selectedDefault = configured;
-		for (const candidate of defaultModelCandidates(configured)) {
-			if (!candidate) continue;
-			const match = models.find((model) => model.provider === candidate.provider && model.id === candidate.modelId);
-			if (!match) continue;
-			current = match;
-			selectedDefault = candidate;
-			break;
+		const requestedModel = params.modelRef ? parseModelValue(params.modelRef) : undefined;
+		if (params.modelRef && !requestedModel) {
+			throw new RequestError(ERROR_INVALID_PARAMS, `invalid draft model reference ${params.modelRef}`);
 		}
-		if (!current && configured) {
-			current = modelRuntime.getModel(configured.provider, configured.modelId) as PiModel | undefined;
-			selectedDefault = configured;
-			if (current && !models.some((model) => model.provider === current!.provider && model.id === current!.id)) {
-				models.push(current);
+		if (requestedModel) {
+			current = models.find((model) => model.provider === requestedModel.provider && model.id === requestedModel.modelId)
+				?? modelRuntime.getModel(requestedModel.provider, requestedModel.modelId) as PiModel | undefined;
+			if (!current) throw new RequestError(ERROR_INVALID_PARAMS, `unknown draft model ${params.modelRef}`);
+			if (!models.some((model) => model.provider === current!.provider && model.id === current!.id)) models.push(current);
+			selectedDefault = undefined;
+		} else {
+			for (const candidate of defaultModelCandidates(configured)) {
+				if (!candidate) continue;
+				const match = models.find((model) => model.provider === candidate.provider && model.id === candidate.modelId);
+				if (!match) continue;
+				current = match;
+				selectedDefault = candidate;
+				break;
+			}
+			if (!current && configured) {
+				current = modelRuntime.getModel(configured.provider, configured.modelId) as PiModel | undefined;
+				selectedDefault = configured;
+				if (current && !models.some((model) => model.provider === current!.provider && model.id === current!.id)) {
+					models.push(current);
+				}
 			}
 		}
 		current ??= models[0];
-		if (!current) return { configOptions: [] };
+		if (!current) return { configOptions: [], modelUsageRefresh: "unavailable" };
 
 		const levels = supportedThinkingLevels(current);
-		const thinkingLevel = selectedDefault?.thinkingLevel ?? levels[0] ?? "off";
+		if (params.thinkingLevel && !levels.includes(params.thinkingLevel)) {
+			throw new RequestError(ERROR_INVALID_PARAMS, `${params.modelRef ?? `${current.provider}/${current.id}`} does not support ${params.thinkingLevel} thinking`);
+		}
+		const thinkingLevel = params.thinkingLevel ?? selectedDefault?.thinkingLevel ?? levels[0] ?? "off";
+		const modelUsage = params.refreshModelUsage
+			? await this.querySessionModelUsage(`draft:${params.cwd}`, {
+				model: current,
+				thinkingLevel,
+				sessionId: "draft",
+				isStreaming: false,
+			})
+			: { refresh: "skipped" as const };
 		return {
 			configOptions: [
 				modelOption(current, models),
 				thoughtLevelOption(thinkingLevel, levels),
 			],
+			modelUsageRefresh: modelUsage.refresh,
+			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
 		};
 	}
 
@@ -2830,6 +2856,7 @@ function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): Ses
 		piSessionPath: resolve(session.path),
 		piSessionId: session.id,
 		cwd,
+		...(session.parentSessionPath ? { parentSessionPath: resolve(session.parentSessionPath) } : {}),
 		updatedAt: session.modified.toISOString(),
 	};
 	if (title) record.title = title;

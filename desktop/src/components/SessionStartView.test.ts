@@ -14,6 +14,8 @@ describe("SessionStartView", () => {
     expect(source).toContain("Search saved conversations…");
     expect(source).toContain("onSelect(session.sessionId)");
     expect(source).not.toContain(">New conversation<");
+    expect(source).toContain("sessionIsFork(session)");
+    expect(source).toContain("GitFork");
   });
 
   it("fills the transcript height while keeping header/search fixed and session rows scrollable", () => {

@@ -111,7 +111,40 @@ describe("ACP JSON-RPC client", () => {
       params: { cwd: "/workspace" },
     });
     transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { configOptions: [] } });
-    await expect(loading).resolves.toEqual({ configOptions: [] });
+    await expect(loading).resolves.toEqual({ configOptions: [], modelUsageRefresh: "skipped" });
+
+    const quota = client.draftConfig("/workspace", {
+      modelRef: "openai-codex/gpt-5.6-sol",
+      thinkingLevel: "high",
+    }, true);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toMatchObject({
+      method: "pix/session/draft_config",
+      params: {
+        cwd: "/workspace",
+        modelRef: "openai-codex/gpt-5.6-sol",
+        thinkingLevel: "high",
+        refreshModelUsage: true,
+      },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 2).id,
+      result: {
+        configOptions: [],
+        modelUsageRefresh: "ready",
+        modelUsage: {
+          modelKey: "gpt-5.6-sol",
+          provider: "openai",
+          updatedAt: 123,
+          hourly: { remainingPercent: 75, resetAt: 456, windowSeconds: 18_000 },
+        },
+      },
+    });
+    await expect(quota).resolves.toMatchObject({
+      modelUsageRefresh: "ready",
+      modelUsage: { modelKey: "gpt-5.6-sol" },
+    });
     await client.dispose();
   });
 

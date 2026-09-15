@@ -122,83 +122,85 @@
 
 <svelte:window onpointerdown={closeOutside} onkeydown={handleKeydown} />
 
-{#if status}
+{#if status || workspaceName}
   <div bind:this={root} class="flex min-w-0 items-center gap-1" data-runtime-status>
-    <div class="relative shrink-0">
-      <button
-        class="flex h-6 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[11px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-        type="button"
-        title={contextTitle()}
-        aria-label={contextTitle()}
-        aria-haspopup="dialog"
-        aria-expanded={dcpOpen}
-        aria-controls="runtime-dcp-popover"
-        onclick={toggleDcp}
-      >
-        <span class="font-sans text-[11px] text-muted-foreground max-[860px]:hidden">Context</span>
-        <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
-        <span class="relative h-1.5 w-10 overflow-hidden rounded-sm bg-border" aria-hidden="true">
-          {#if contextTone && contextPercent !== null && contextPercent !== undefined}
-            <span
-              class={["absolute inset-y-0 left-0 rounded-sm", toneFillClass(contextTone)]}
-              style={`width: ${clampUsagePercent(contextPercent)}%`}
-            ></span>
-          {/if}
-        </span>
-      </button>
-
-      {#if dcpOpen}
-        <div
-          id="runtime-dcp-popover"
-          class="absolute bottom-[calc(100%+0.375rem)] left-0 z-50 w-[min(390px,calc(100vw-16px))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
-          role="dialog"
-          aria-label="DCP session statistics"
+    {#if status?.context || status?.dcpTokensSaved !== undefined}
+      <div class="relative shrink-0">
+        <button
+          class="flex h-6 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[11px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          type="button"
+          title={contextTitle()}
+          aria-label={contextTitle()}
+          aria-haspopup="dialog"
+          aria-expanded={dcpOpen}
+          aria-controls="runtime-dcp-popover"
+          onclick={toggleDcp}
         >
-          <header class="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-            <div class="min-w-0">
-              <div class="text-[11px] font-medium text-foreground">DCP session statistics</div>
-              {#if status.context}
-                <div class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-                  Context {status.context.percent === null ? "unknown" : `${Math.round(status.context.percent)}%`}
-                  {#if status.context.tokens !== null}
-                    · {formatCompactTokens(status.context.tokens)} / {formatCompactTokens(status.context.contextWindow)}
+          <span class="font-sans text-[11px] text-muted-foreground max-[860px]:hidden">Context</span>
+          <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
+          <span class="relative h-1.5 w-10 overflow-hidden rounded-sm bg-border" aria-hidden="true">
+            {#if contextTone && contextPercent !== null && contextPercent !== undefined}
+              <span
+                class={["absolute inset-y-0 left-0 rounded-sm", toneFillClass(contextTone)]}
+                style={`width: ${clampUsagePercent(contextPercent)}%`}
+              ></span>
+            {/if}
+          </span>
+        </button>
+
+        {#if dcpOpen}
+          <div
+            id="runtime-dcp-popover"
+            class="absolute bottom-[calc(100%+0.375rem)] left-0 z-50 w-[min(390px,calc(100vw-16px))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
+            role="dialog"
+            aria-label="DCP session statistics"
+          >
+            <header class="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+              <div class="min-w-0">
+                <div class="text-[11px] font-medium text-foreground">DCP session statistics</div>
+                {#if status?.context}
+                  <div class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                    Context {status.context.percent === null ? "unknown" : `${Math.round(status.context.percent)}%`}
+                    {#if status.context.tokens !== null}
+                      · {formatCompactTokens(status.context.tokens)} / {formatCompactTokens(status.context.contextWindow)}
+                    {/if}
+                  </div>
                   {/if}
+              </div>
+              <button
+                class="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border border-border bg-transparent px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
+                type="button"
+                title={compressionTitle()}
+                aria-label="Compress stale context with DCP"
+                aria-busy={compressingContext}
+                disabled={!canCompressContext || compressingContext}
+                onclick={onCompressContext}
+              >
+                {#if compressingContext}
+                  <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+                  <span>Compressing…</span>
+                {:else}
+                  <Minimize2 class="h-3 w-3" aria-hidden="true" />
+                  <span>Compress</span>
+                {/if}
+              </button>
+            </header>
+            <div class="max-h-[min(420px,55vh)] overflow-y-auto px-3 py-2.5">
+              {#if dcpBody}
+                <pre class="select-text whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground">{dcpBody}</pre>
+              {:else if loadingDcpStats}
+                <div class="flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground" aria-live="polite">
+                  <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+                  <span>Loading DCP telemetry…</span>
                 </div>
+              {:else}
+                <p class="text-[11px] leading-4 text-muted-foreground">DCP telemetry is not available for this session yet.</p>
               {/if}
             </div>
-            <button
-              class="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border border-border bg-transparent px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
-              type="button"
-              title={compressionTitle()}
-              aria-label="Compress stale context with DCP"
-              aria-busy={compressingContext}
-              disabled={!canCompressContext || compressingContext}
-              onclick={onCompressContext}
-            >
-              {#if compressingContext}
-                <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
-                <span>Compressing…</span>
-              {:else}
-                <Minimize2 class="h-3 w-3" aria-hidden="true" />
-                <span>Compress</span>
-              {/if}
-            </button>
-          </header>
-          <div class="max-h-[min(420px,55vh)] overflow-y-auto px-3 py-2.5">
-            {#if dcpBody}
-              <pre class="select-text whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-muted-foreground">{dcpBody}</pre>
-            {:else if loadingDcpStats}
-              <div class="flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground" aria-live="polite">
-                <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
-                <span>Loading DCP telemetry…</span>
-              </div>
-            {:else}
-              <p class="text-[11px] leading-4 text-muted-foreground">DCP telemetry is not available for this session yet.</p>
-            {/if}
           </div>
-        </div>
-      {/if}
-    </div>
+        {/if}
+      </div>
+    {/if}
 
     {#if workspaceName}
       <div
@@ -217,7 +219,7 @@
       </div>
     {/if}
 
-    {#if status.modelUsage}
+    {#if status?.modelUsage}
       <button
         class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-[11px] tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
         type="button"

@@ -1,10 +1,12 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
+  import GitFork from "@lucide/svelte/icons/git-fork";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
+  import { sessionIsFork } from "../lib/session-tabs";
 
   let {
     sessions,
@@ -158,8 +160,13 @@
           <span aria-hidden="true"></span>
         {/if}
         <span class="min-w-0">
-          <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">
-            {session.title || "Untitled conversation"}
+          <strong class="flex min-w-0 items-center gap-1 text-xs font-medium">
+            {#if sessionIsFork(session)}
+              <GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {/if}
+            <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+              {session.title || "Untitled conversation"}
+            </span>
           </strong>
           <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">
             {displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}

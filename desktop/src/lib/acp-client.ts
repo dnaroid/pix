@@ -122,8 +122,8 @@ export class AcpClient {
     });
   }
 
-  draftConfig(cwd: string): Promise<{ configOptions: SessionConfigOption[] }> {
-    return this.pix.draftConfig(cwd);
+  draftConfig(cwd: string, selection?: DraftSessionConfig, refreshModelUsage = false) {
+    return this.pix.draftConfig(cwd, selection, refreshModelUsage);
   }
 
   loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse> {

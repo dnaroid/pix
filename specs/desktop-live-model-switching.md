@@ -18,6 +18,7 @@ Keep Desktop model and thinking selection available while the agent is running, 
 
 - Desktop keeps the combined model/thinking picker enabled while the active session is processing a prompt.
 - The same picker is visible on a UI-only New Conversation draft before its first prompt. In that state the selection is staged locally from the sessionless draft config catalogue; it does not require an active session runtime and does not send `session/set_config_option`.
+- The draft status bar follows that staged model/thinking selection for provider quota display. Applying a different staged model or thinking level starts a sessionless best-effort quota refresh through `pix/session/draft_config`; it does not materialize the draft or send a live-session config mutation.
 - The picker remembers thinking independently per model. The current model begins from the actual session/draft thinking; switching to another model restores that model's staged value from the current picker interaction or its persisted user-level `thinkingByModel` preference, then clamps it to the model's supported thinking levels.
 - Applying model/thinking successfully updates the shared user `~/.config/pi/pix.jsonc` `thinkingByModel` map. Cancelling the picker does not persist staged-only changes, and project `<project>/.pi/pix.jsonc` cannot override this user preference. See `model-thinking-preferences.md`.
 - Applying a new model during an active run sends the normal ACP `session/set_config_option` request immediately; Desktop does not wait for the prompt to finish before issuing it.

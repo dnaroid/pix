@@ -1,6 +1,7 @@
 <script lang="ts">
   import FileCode from "@lucide/svelte/icons/file-code";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
+  import GitFork from "@lucide/svelte/icons/git-fork";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
@@ -114,7 +115,7 @@
           <button
             use:titlebarDrag
             class={[
-              "flex h-full w-full items-center gap-2 bg-transparent pt-0 pb-1.5 pl-3.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+              "flex h-full w-full items-center gap-2 bg-transparent pt-0 pb-1.5 pl-3.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
               tab.closable ? "pr-9" : "pr-3.5",
               active && "font-medium text-foreground",
             ]}
@@ -140,6 +141,9 @@
                 ]}
                 aria-hidden="true"
               ></span>
+              {#if tab.fork}
+                <GitFork class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {/if}
             {:else if tab.kind === "preview"}
               <FileCode class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             {:else}
