@@ -54,8 +54,8 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 ## Verification
 
 - `npm --prefix desktop test -- session-history.test.ts acp-client.test.ts`
-- `node --import tsx --test test/session-history-file.test.ts` from `acp/`
-- `node --import tsx --test --test-name-pattern="desktop history cursor" test/agent.test.ts` from `acp/`
+- `node --import tsx --test acp/test/session-history-file.test.ts` from the repo root
+- `node --import tsx --test --test-name-pattern="desktop history cursor" acp/test/agent.test.ts` from the repo root
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
 - Manual desktop verification: open a conversation longer than the initial history tail, scroll continuously upward, and confirm older turns appear while the visible entry stays anchored and the first persisted entry is eventually reachable.

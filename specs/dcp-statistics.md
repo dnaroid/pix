@@ -19,7 +19,10 @@ The report separates these quantities:
 
 - SDK usage, which may lag, from the **last prepared DCP request**. Its scalar
   snapshot includes the selected model, input capacity/output reserve, resolved
-  routine/strong/hard thresholds, modes and pressure reason. It is dated and is
+  routine/strong/hard thresholds, modes and pressure reason, plus the routine
+  calibration fields `routineProjectedTokens` and `routineUsageAdjustmentTokens`
+  that expose post-compression routine adjustments separately from raw/projected
+  history counts. It is dated and is
   not presented as live provider-measured token usage. A changed model makes an
   old snapshot stale; an epoch boundary invalidates it until another request.
 - Active/retired/total journal blocks, active summary estimates and distinct
