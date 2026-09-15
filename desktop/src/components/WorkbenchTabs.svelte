@@ -6,13 +6,13 @@
   import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
   import { linearFocusIndex } from "../lib/keyboard-navigation";
-  import type { SessionActivityTone } from "../lib/session-activity";
   import {
     workbenchTabCloseFallback,
     type WorkbenchTab,
     type WorkbenchTabId,
   } from "../lib/workbench-tabs";
   import { titlebarDrag } from "../lib/titlebar-drag";
+  import SessionTabStatusIcon from "./SessionTabStatusIcon.svelte";
 
   let {
     tabs,
@@ -33,14 +33,6 @@
   } = $props();
 
   let tablist = $state<HTMLElement | null>(null);
-
-  function indicatorClass(tone: SessionActivityTone, runtimeActive: boolean): string {
-    if (tone === "warning") return "border-tool-warning bg-tool-warning opacity-100";
-    if (tone === "info") return "border-tool-info bg-tool-info opacity-100";
-    return runtimeActive
-      ? "border-primary bg-primary opacity-100"
-      : "border-muted-foreground bg-transparent opacity-70";
-  }
 
   function focusTab(id: WorkbenchTabId): void {
     const tab = tablist?.querySelector<HTMLButtonElement>(`[data-workbench-tab-id="${CSS.escape(id)}"]`);
@@ -133,14 +125,7 @@
             disabled={tab.disabled}
           >
             {#if tab.kind === "session"}
-              <span
-                class={[
-                  "h-[7px] w-[7px] shrink-0 rounded-full border opacity-70",
-                  indicatorClass(tab.activityTone, tab.runtimeActive),
-                  tab.pulsing && "animate-pulse motion-reduce:animate-none",
-                ]}
-                aria-hidden="true"
-              ></span>
+              <SessionTabStatusIcon kind={tab.statusKind} {active} />
               {#if tab.fork}
                 <GitFork class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               {/if}

@@ -52,21 +52,25 @@ describe("desktop agent notification coordinator", () => {
   it("waits for active subagents before reporting successful completion", async () => {
     const { api, service } = notificationHarness(false);
     let activeSubagents = 1;
+    const onCompleted = vi.fn();
     const coordinator = createDesktopAgentNotificationCoordinator({
       notifications: service,
       sessionTitle: () => "Background task",
       agentState: () => "idle",
       isPromptRunning: () => false,
       activeSubagents: () => activeSubagents,
+      onCompleted,
     });
 
     coordinator.promptSettled("session-1", "end_turn");
     await Promise.resolve();
     expect(api.sendNotification).not.toHaveBeenCalled();
+    expect(onCompleted).not.toHaveBeenCalled();
 
     activeSubagents = 0;
     coordinator.sessionActivityChanged("session-1");
     await vi.waitFor(() => expect(api.sendNotification).toHaveBeenCalledTimes(1));
+    expect(onCompleted).toHaveBeenCalledWith("session-1");
     expect(api.sendNotification).toHaveBeenCalledWith({
       title: "Pix — Completed",
       body: "Background task",
@@ -96,12 +100,14 @@ describe("desktop agent notification coordinator", () => {
   it("drops a deferred completion when new work starts", async () => {
     const { api, service } = notificationHarness(false);
     let activeSubagents = 1;
+    const onCompleted = vi.fn();
     const coordinator = createDesktopAgentNotificationCoordinator({
       notifications: service,
       sessionTitle: () => "Queued work",
       agentState: () => "idle",
       isPromptRunning: () => false,
       activeSubagents: () => activeSubagents,
+      onCompleted,
     });
 
     coordinator.promptSettled("session-1", "end_turn");
@@ -111,5 +117,6 @@ describe("desktop agent notification coordinator", () => {
     await Promise.resolve();
 
     expect(api.sendNotification).not.toHaveBeenCalled();
+    expect(onCompleted).not.toHaveBeenCalled();
   });
 });

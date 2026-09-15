@@ -7,7 +7,7 @@
   import DesktopWorkbenchSurface from "./components/DesktopWorkbenchSurface.svelte";
   import DesktopOverlays from "./components/DesktopOverlays.svelte";
   import DesktopStatusBar from "./components/DesktopStatusBar.svelte";
-  import type { WorkbenchTabId } from "./lib/workbench-tabs";
+  import { workbenchSessionTabId, type WorkbenchTabId } from "./lib/workbench-tabs";
   import { createTranscriptAttachmentController } from "./app/transcript-attachments";
   import { createTranscriptScrollController } from "./app/transcript-scroll.svelte";
   import { createErrorState } from "./app/error-state.svelte";
@@ -30,6 +30,7 @@
   import { createDesktopInteractionServices } from "./app/desktop-interaction-services.svelte";
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
+  import { createSessionTabAttentionStore } from "./app/session-tab-attention.svelte";
   import { createDesktopViewModelServices } from "./app/desktop-view-model-services";
   import {
     createDesktopAgentNotificationCoordinator,
@@ -128,6 +129,7 @@
 
   const sessionCatalog = sessionServices.catalog;
   const sessions = $derived(sessionCatalog.sessions);
+  const sessionTabAttention = createSessionTabAttentionStore();
 
   const nativeNotifications = createDesktopNotificationService();
   const agentNotifications = createDesktopAgentNotificationCoordinator({
@@ -136,6 +138,10 @@
     agentState: (sessionId) => promptRuntime.agentState(sessionId),
     isPromptRunning: (sessionId) => promptRuntime.isRunning(sessionId),
     activeSubagents: (sessionId) => sessionActivity.summaries.get(sessionId)?.activeSubagents ?? 0,
+    onCompleted: (sessionId) => sessionTabAttention.markCompleted(
+      sessionId,
+      activeWorkbenchTabId === workbenchSessionTabId(sessionId),
+    ),
   });
   onSessionActivityChanged = agentNotifications.sessionActivityChanged;
 
@@ -168,11 +174,20 @@
     setPromptAttachments: (attachments) => promptAttachments = attachments,
     setErrorMessage: errors.set,
     reportError,
-    onPromptStarted: agentNotifications.promptStarted,
+    onPromptStarted: (sessionId) => {
+      sessionTabAttention.clear(sessionId);
+      agentNotifications.promptStarted(sessionId);
+    },
     onPromptSettled: agentNotifications.promptSettled,
     onPromptError: agentNotifications.promptError,
-    onSessionCleared: agentNotifications.clearSession,
-    onReset: agentNotifications.reset,
+    onSessionCleared: (sessionId) => {
+      sessionTabAttention.clear(sessionId);
+      agentNotifications.clearSession(sessionId);
+    },
+    onReset: () => {
+      sessionTabAttention.reset();
+      agentNotifications.reset();
+    },
   });
   const promptRuntime = promptServices.runtime;
   const queuedMessages = promptServices.queue;
@@ -493,6 +508,7 @@
     project: projectServices,
     interactions: interactionServices,
     draft: draftSession,
+    tabAttention: sessionTabAttention,
   });
   const sessionMutationRunning = $derived(presentationState.sessionMutationRunning);
   const canUseSession = $derived(presentationState.canUseSession);
@@ -562,6 +578,7 @@
     activeTodoSnapshot: () => presentationState.activeTodoSnapshot,
     activeSubagentSnapshot: () => presentationState.activeSubagentSnapshot,
     setSessionInspectorOpen,
+    markSessionTabViewed: sessionTabAttention.clear,
   });
   const viewModels = createDesktopViewModelServices({
     platform: desktopShortcutPlatform,

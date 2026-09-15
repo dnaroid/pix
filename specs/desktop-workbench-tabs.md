@@ -30,8 +30,8 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 - The unified tablist uses roving focus: Left/Right and Home/End move focus without activation, Enter/Space activate via native button behavior, Delete closes a closable focused tab, and middle-click uses the same close path.
 - Closing Preview/Diff removes only that UI surface. Closing a session uses the existing session-close flow, including running-session confirmation and ACP teardown. When an active session closes next to Preview/Diff, Pix may keep the necessary fallback session runtime active underneath while selecting the logical neighboring workbench tab.
 - A sole UI-only draft conversation remains non-closable. New Conversation remains the one trailing action outside the roving tab sequence.
-- Session activity dots stay attached to session-kind tabs even while Preview/Diff is selected. The underlying active runtime may therefore have an activity indicator without being the currently selected workbench surface.
-- A real session tab whose ACP session metadata marks it as a fork shows a compact branch icon before its title, alongside (not instead of) the activity dot. Draft, Preview, and Git Diff tabs never show this fork marker.
+- Session-kind tabs keep their semantic session-status icon even while Preview/Diff is selected. Status and workbench selection are independent: the icon reports session execution/attention/completion state while the tab border/background remains the only selected-surface affordance.
+- A real session tab whose ACP session metadata marks it as a fork shows a compact branch icon before its title, alongside (not instead of) the session status icon. Draft, Preview, and Git Diff tabs never show this fork marker.
 - The saved-session selector and embedded draft selector remain session-only. Preview/Diff never appear as resumable conversations.
 - Command Palette entries **Show Conversation**, **Show Preview**, **Show Git Diff**, and **Close Active Editor** target this unified workbench model. Focus Composer first selects the active conversation tab before focusing the hidden/mounted composer.
 
@@ -65,8 +65,8 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 ## Verification
 
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed insertion, session-id separation, close fallback, and stale-active normalization.
-- `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist and kind-specific close dispatch.
-- `desktop/src/app/workbench-model.test.ts` covers propagation of fork metadata into the session-tab presentation model.
+- `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist, semantic session-status icon set, and kind-specific close dispatch.
+- `desktop/src/app/workbench-model.test.ts` covers propagation of fork metadata into the session-tab presentation model; `desktop/src/lib/session-tab-status.test.ts` covers status precedence and unseen-completion semantics.
 - Existing session-tab/draft tests verify that session membership and lazy draft materialization remain session-only.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`

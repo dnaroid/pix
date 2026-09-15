@@ -8,6 +8,7 @@ import type { SessionSubagentSnapshot } from "../lib/session-subagents";
 import type { SessionTodoSnapshot } from "../lib/session-todos";
 import {
   normalizeWorkbenchTab,
+  workbenchSessionId,
   type WorkbenchTab,
   type WorkbenchTabId,
 } from "../lib/workbench-tabs";
@@ -30,6 +31,7 @@ type DesktopRootEffectsOptions = {
   activeTodoSnapshot: () => SessionTodoSnapshot | undefined;
   activeSubagentSnapshot: () => SessionSubagentSnapshot | undefined;
   setSessionInspectorOpen: (open: boolean) => void;
+  markSessionTabViewed: (sessionId: string) => void;
 };
 
 export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
@@ -94,6 +96,11 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
       options.activeConversationWorkbenchTabId(),
     );
     if (normalized !== options.activeWorkbenchTabId()) options.setActiveWorkbenchTabId(normalized);
+  });
+
+  $effect(() => {
+    const sessionId = workbenchSessionId(options.activeWorkbenchTabId());
+    if (sessionId) options.markSessionTabViewed(sessionId);
   });
 
   return {

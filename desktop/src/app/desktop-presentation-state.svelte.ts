@@ -15,6 +15,7 @@ import type { DesktopProjectServices } from "./desktop-project-services";
 import type { DesktopPromptServices } from "./desktop-prompt-services";
 import type { DesktopSessionServices } from "./desktop-session-services";
 import { DRAFT_SESSION_TAB_ID, type createDraftSession } from "./draft-session.svelte";
+import type { SessionTabAttentionStore } from "./session-tab-attention.svelte";
 import {
   buildDesktopWorkbenchTabs,
   buildSessionWorkbenchTabs,
@@ -33,6 +34,7 @@ type DesktopPresentationStateOptions = {
   project: DesktopProjectServices;
   interactions: DesktopInteractionServices;
   draft: DraftSession;
+  tabAttention: SessionTabAttentionStore;
 };
 
 export function createDesktopPresentationState(options: DesktopPresentationStateOptions) {
@@ -86,10 +88,10 @@ export function createDesktopPresentationState(options: DesktopPresentationState
   const workbenchSessionTabs = $derived.by(() => buildSessionWorkbenchTabs({
     sessions: titlebarSessions,
     draftSessionTabId: DRAFT_SESSION_TAB_ID,
-    activeConversationTabId,
     runningSessionIds: options.prompt.runtime.runningSessionIds,
     sessionActivityBySessionId: options.sessions.activity.summaries,
     pendingElicitationSessionIds: options.interactions.pendingElicitationSessionIds,
+    unseenCompletedSessionIds: options.tabAttention.unseenCompletedSessionIds,
     disabled: sessionMutationRunning,
     realSessionCount: tabSessions.length,
   }));

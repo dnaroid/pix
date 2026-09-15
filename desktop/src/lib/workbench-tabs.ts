@@ -1,4 +1,4 @@
-import type { SessionActivityTone } from "./session-activity";
+import type { SessionTabStatusKind } from "./session-tab-status";
 
 export type WorkbenchTabId = `session:${string}` | "preview" | "git-diff";
 
@@ -14,13 +14,10 @@ interface WorkbenchTabBase {
 export interface WorkbenchSessionTab extends WorkbenchTabBase {
   readonly kind: "session";
   readonly sessionId: string;
-  readonly runtimeActive: boolean;
   readonly running: boolean;
   readonly draft: boolean;
   readonly fork: boolean;
-  readonly activityTone: SessionActivityTone;
-  readonly activityLabel: string;
-  readonly pulsing: boolean;
+  readonly statusKind: SessionTabStatusKind;
 }
 
 export interface WorkbenchPreviewTab extends WorkbenchTabBase {

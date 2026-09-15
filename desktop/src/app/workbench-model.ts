@@ -1,9 +1,9 @@
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import {
   sessionActivityLabel,
-  sessionActivityTone,
   type SessionActivitySummary,
 } from "../lib/session-activity";
+import { sessionTabStatusKind, sessionTabStatusLabel } from "../lib/session-tab-status";
 import {
   buildWorkbenchTabs,
   workbenchSessionTabId,
@@ -32,10 +32,10 @@ export function sessionWorkbenchTitle(session: SessionInfo): string {
 export function buildSessionWorkbenchTabs(options: {
   sessions: readonly SessionInfo[];
   draftSessionTabId: string;
-  activeConversationTabId: string | null;
   runningSessionIds: ReadonlySet<string>;
   sessionActivityBySessionId: ReadonlyMap<string, SessionActivitySummary>;
   pendingElicitationSessionIds: ReadonlySet<string>;
+  unseenCompletedSessionIds: ReadonlySet<string>;
   disabled: boolean;
   realSessionCount: number;
 }): WorkbenchSessionTab[] {
@@ -45,22 +45,26 @@ export function buildSessionWorkbenchTabs(options: {
     const needsInput = options.pendingElicitationSessionIds.has(session.sessionId);
     const draft = session.sessionId === options.draftSessionTabId;
     const activityLabel = sessionActivityLabel(activity, running, needsInput);
+    const statusKind = sessionTabStatusKind({
+      activity,
+      running,
+      needsInput,
+      unseenComplete: options.unseenCompletedSessionIds.has(session.sessionId),
+    });
+    const statusLabel = sessionTabStatusLabel(statusKind, activityLabel);
     return {
       id: workbenchSessionTabId(session.sessionId),
       kind: "session",
       sessionId: session.sessionId,
       label: session.title || "Untitled conversation",
-      title: `${sessionWorkbenchTitle(session)} · ${activityLabel}`,
+      title: `${sessionWorkbenchTitle(session)} · ${statusLabel}`,
       panelId: "conversation-workspace",
       closable: !draft || options.realSessionCount > 0,
       disabled: options.disabled,
-      runtimeActive: session.sessionId === options.activeConversationTabId,
       running,
       draft,
       fork: sessionIsFork(session),
-      activityTone: sessionActivityTone(activity, running, needsInput),
-      activityLabel,
-      pulsing: running || (activity?.activeSubagents ?? 0) > 0,
+      statusKind,
     };
   });
 }

@@ -19,13 +19,10 @@ function session(sessionId: string): WorkbenchSessionTab {
     title: sessionId,
     panelId: "conversation-workspace",
     closable: true,
-    runtimeActive: sessionId === "a",
     running: false,
     draft: false,
     fork: false,
-    activityTone: "idle",
-    activityLabel: "Session idle",
-    pulsing: false,
+    statusKind: "idle",
   };
 }
 

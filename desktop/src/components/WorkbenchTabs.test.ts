@@ -4,6 +4,7 @@ import sessionTabClosureSource from "../app/session-tab-closure.ts?raw";
 import workbenchControllerSource from "../app/workbench-controller.ts?raw";
 import workbenchModelSource from "../app/workbench-model.ts?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
+import statusIconSource from "./SessionTabStatusIcon.svelte?raw";
 import source from "./WorkbenchTabs.svelte?raw";
 
 describe("WorkbenchTabs desktop interaction", () => {
@@ -15,6 +16,7 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).toContain('linearFocusIndex(index, event.key, tabs.length, "horizontal", true)');
     expect(source).toContain('data-workbench-tab-id={tab.id}');
     expect(source).toContain('tab.kind === "session"');
+    expect(source).toContain("<SessionTabStatusIcon kind={tab.statusKind} {active} />");
     expect(source).toContain("tab.fork");
     expect(source).toContain("GitFork");
     expect(source).toContain('tab.kind === "preview"');
@@ -47,5 +49,16 @@ describe("WorkbenchTabs desktop interaction", () => {
   it("keeps the sole UI-only draft conversation non-closable", () => {
     expect(workbenchModelSource).toContain("closable: !draft || options.realSessionCount > 0");
     expect(workbenchModelSource).toContain("const draft = session.sessionId === options.draftSessionTabId");
+  });
+
+  it("uses semantic IDE icons for session state instead of a color-only activity dot", () => {
+    expect(statusIconSource).toContain("CircleCheck");
+    expect(statusIconSource).toContain("LoaderCircle");
+    expect(statusIconSource).toContain("CircleHelp");
+    expect(statusIconSource).toContain("TriangleAlert");
+    expect(statusIconSource).toContain("animate-spin text-tool-info");
+    expect(statusIconSource).toContain('kind === "unseen-complete"');
+    expect(statusIconSource).toContain("bg-primary ring-1 ring-background");
+    expect(source).not.toContain('h-[7px] w-[7px] shrink-0 rounded-full border');
   });
 });

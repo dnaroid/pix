@@ -6,10 +6,10 @@ function build(sessions: SessionInfo[]) {
   return buildSessionWorkbenchTabs({
     sessions,
     draftSessionTabId: "draft",
-    activeConversationTabId: null,
     runningSessionIds: new Set(),
     sessionActivityBySessionId: new Map(),
     pendingElicitationSessionIds: new Set(),
+    unseenCompletedSessionIds: new Set(),
     disabled: false,
     realSessionCount: sessions.length,
   });

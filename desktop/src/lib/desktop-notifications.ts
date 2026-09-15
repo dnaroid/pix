@@ -88,6 +88,7 @@ type DesktopAgentNotificationCoordinatorOptions = {
   agentState: (sessionId: string) => AgentControlState;
   isPromptRunning: (sessionId: string) => boolean;
   activeSubagents: (sessionId: string) => number;
+  onCompleted?: (sessionId: string) => void;
 };
 
 function stopReasonMessage(reason: Exclude<StopReason, "end_turn" | "cancelled">): string {
@@ -119,6 +120,11 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
     if (options.agentState(sessionId) !== "idle") return;
     if (options.activeSubagents(sessionId) > 0) return;
     pendingCompletions.delete(sessionId);
+    try {
+      options.onCompleted?.(sessionId);
+    } catch {
+      // In-app attention chrome is best effort and must not block native notification delivery.
+    }
     void options.notifications.completed(title(sessionId));
   }
 
