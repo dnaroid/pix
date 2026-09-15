@@ -24,6 +24,7 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 
 - `@lydell/node-pty` Windows termination is signal-less: use `kill()` without POSIX signal arguments and release owned ConPTY resources.
 - Windows browser/process cleanup is ownership-scoped. Cleanup helpers must not discover or terminate themselves; owned child roots are terminated recursively and cleanup is verified before returning.
+- Node child-process smoke helpers invoke npm through its JavaScript entrypoint (`process.execPath` + `npm_execpath`) rather than trying to `execFile` `npm.cmd` directly.
 
 ## Package-smoke invariants
 

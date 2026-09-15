@@ -7,12 +7,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCliPath = process.env.npm_execpath;
+if (!npmCliPath) throw new Error("npm_execpath is required; run this smoke check through npm run smoke-test:cli");
 let workDir;
 let tarballPath;
 
-function run(command, args, options = {}) {
-	execFileSync(command, args, {
+function runNpm(args, options = {}) {
+	return execFileSync(process.execPath, [npmCliPath, ...args], {
 		cwd: repoRoot,
 		stdio: "inherit",
 		env: process.env,
@@ -30,14 +31,13 @@ function runPix(entryPath, args, extraEnv = {}) {
 
 try {
 	console.log("Building Pix...");
-	run(npmExecutable, ["run", "build:pix"]);
+	runNpm(["run", "build:pix"]);
 
 	console.log("Packing npm tarball...");
-	const packOutput = execFileSync(
-		npmExecutable,
-		["pack", "--pack-destination", repoRoot],
-		{ cwd: repoRoot, encoding: "utf8", env: process.env },
-	);
+	const packOutput = runNpm(["pack", "--pack-destination", repoRoot], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "inherit"],
+	});
 	const tarballName = packOutput.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).at(-1);
 	if (!tarballName) throw new Error("npm pack did not report a tarball name");
 	tarballPath = path.join(repoRoot, tarballName);
@@ -50,7 +50,7 @@ try {
 		'{ "name": "pix-cli-smoke-test", "private": true, "version": "0.0.0" }\n',
 		"utf8",
 	);
-	run(npmExecutable, ["install", "--prefix", workDir, tarballPath, "--ignore-scripts", "--no-save"]);
+	runNpm(["install", "--prefix", workDir, tarballPath, "--ignore-scripts", "--no-save"]);
 
 	const packageRoot = path.join(workDir, "node_modules", "pi-ui-extend");
 	const entryPath = path.join(packageRoot, "bin", "pix.mjs");
