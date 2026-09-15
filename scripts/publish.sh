@@ -3,10 +3,8 @@
 # Publish pi-ui-extend to npm via CI.
 #
 # Prerequisites:
-#   1. npm Granular Access Token with package read/write access.
-#   2. Token stored in GitHub repo secret: NPM_TOKEN
-#      gh secret set NPM_TOKEN
-#   3. All release changes committed.
+#   1. npm trusted publishing configured for this GitHub repository/workflow.
+#   2. All release changes committed.
 #
 # Usage:
 #   npm run publish-npm              # patch release

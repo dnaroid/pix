@@ -13,15 +13,39 @@ npm run smoke-test
 `release:check` runs type checking, the test suite, a production build, and `npm pack --dry-run`.
 `smoke-test` packs the real tarball, installs it into an isolated temp directory, checks the bundled files, and runs non-interactive `pix` commands from the installed package.
 
+## CI regression guardrails
+
+The normative CI invariants are recorded in [`specs/ci-release.md`](../specs/ci-release.md). This section is the operational checklist for release work.
+
+The GitHub Actions release workflow has two different responsibilities and they should stay separate:
+
+- `build-and-test` runs on Ubuntu, macOS, and Windows. This is the cross-platform correctness gate: type checks, unit/integration tests, platform-specific host checks, and the Pix build belong here.
+- Package smoke tests validate the artifact a user actually installs. Run the full payload/tarball smoke test on Ubuntu, and a smaller pack/install/CLI sanity check on Windows. A separate macOS package smoke job is unnecessary unless packaging gains macOS-specific behavior.
+
+Keep CI tests deterministic across runner speed and operating systems:
+
+- Assert explicit byte/count/state thresholds instead of assuming a background producer will do enough work within a short wall-clock interval. For example, a truncation test should write a fixed amount greater than the limit rather than write repeatedly for 300 ms and assume the runner will exceed the limit.
+- Use timers only when timeout behavior itself is the contract. Do not use elapsed time as a proxy for produced output, process progress, or cleanup completion.
+- When a test needs asynchronous process teardown, wait for an observable owned-process condition rather than relying on a short sleep.
+- Run configuration-sensitive suite checks with an isolated `HOME` when reproducing CI locally. User-level Pix/pi-tools-suite config can intentionally change DCP and other opt-in behavior and must not be mistaken for a CI regression.
+
+Windows process tests have additional invariants:
+
+- `@lydell/node-pty` on Windows does not support POSIX signal arguments to `kill`; terminate an owned Windows PTY with signal-less `kill()` and release its ConPTY resources.
+- Browser/process cleanup must stay ownership-scoped. When a PowerShell helper discovers descendants, it must not select or terminate itself; kill owned child roots recursively and verify cleanup before returning.
+- Treat CRLF/LF differences as presentation differences unless line endings are the behavior under test.
+
+Package smoke assertions should check stable package contracts. If a bundled guide title, required payload path, CLI entry point, or other intentionally asserted artifact changes, update the corresponding smoke assertion in the same change. Do not remove the smoke test merely because ordinary source tests are green: source tests do not prove that `npm pack` contains an installable, runnable artifact.
+
+Current implementation:
+
+- `.github/workflows/publish.yml` owns the CI matrix and release gates.
+- `scripts/smoke-test-package.sh` is the full packed-artifact/payload smoke test.
+- `scripts/smoke-test-package-cli.mjs` is the cross-platform pack/install/CLI sanity check used on Windows.
+
 ## Publish a new npm version
 
-Pix uses the same release style as `indexer-cli`: a local command bumps the version, smoke-tests the tarball, then pushes the release commit and tag. GitHub Actions publishes the tag to npm using the `NPM_TOKEN` repository secret.
-
-One-time setup:
-
-```bash
-gh secret set NPM_TOKEN
-```
+Pix uses the same release style as `indexer-cli`: a local command bumps the version, smoke-tests the tarball, then pushes the release commit and tag. GitHub Actions publishes the tag to npm using npm trusted publishing (GitHub OIDC), so the publish job does not require a long-lived `NPM_TOKEN` secret.
 
 Release commands:
 

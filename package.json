@@ -80,6 +80,7 @@
     "prepack": "npm run generate-schemas --silent",
     "pack:dry-run": "npm pack --dry-run",
     "smoke-test": "mise exec node@24.16.0 -- bash scripts/smoke-test-package.sh",
+    "smoke-test:cli": "mise exec node@24.16.0 -- node scripts/smoke-test-package-cli.mjs",
     "release:check": "npm run check && npm run build:pix && npm run pack:dry-run",
     "publish-npm": "bash scripts/publish.sh",
     "generate-schemas": "tsx scripts/generate-schemas.ts",

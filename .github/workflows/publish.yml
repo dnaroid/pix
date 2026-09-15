@@ -57,13 +57,17 @@ jobs:
 
   package-smoke-test:
     needs: build-and-test
-    name: Package smoke test (${{ matrix.os }})
+    name: Package smoke test (${{ matrix.os }} / ${{ matrix.mode }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            mode: full
+          - os: windows-latest
+            mode: cli
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,8 +76,12 @@ jobs:
           cache: npm
       - uses: jdx/mise-action@v2
       - run: npm ci --ignore-scripts
-      - name: Smoke-test packed tarball
+      - name: Full packed-package smoke test
+        if: matrix.mode == 'full'
         run: npm run smoke-test
+      - name: Packed CLI sanity check
+        if: matrix.mode == 'cli'
+        run: npm run smoke-test:cli
 
   publish:
     needs: package-smoke-test
