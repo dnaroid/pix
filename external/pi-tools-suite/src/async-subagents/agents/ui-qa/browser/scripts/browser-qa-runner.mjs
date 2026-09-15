@@ -43,6 +43,7 @@ const EXIT_RUNNER_TIMEOUT = 124;
 const DEFAULT_RUNNER_TIMEOUT_MS = 90_000;
 const MAX_RUNNER_TIMEOUT_MS = 100_000;
 const CLEANUP_TIMEOUT_MS = 5_000;
+const WINDOWS_DESCENDANT_CLEANUP_TIMEOUT_MS = 10_000;
 const HARD_EXIT_GRACE_MS = 15_000;
 const PROGRESS_LOG_MAX_BYTES = 1024 * 1024;
 const DEFAULT_VIEWPORT = Object.freeze({ width: 1280, height: 720 });
@@ -2174,36 +2175,43 @@ function terminateRunnerDescendants() {
 	// failures can skip the process-tree walk entirely.
 	if (!runnerMayHaveBrowserChildren) return;
 	if (process.platform === "win32") {
-		// Detached children are not covered by a POSIX process-group kill. Walk
-		// the Windows process tree explicitly so a timed-out Playwright/browser
-		// child cannot keep the private QA workspace locked after the runner exits.
+		// Detached children are not covered by a POSIX process-group kill. Query
+		// only this runner's direct children, then let taskkill /T own recursive
+		// termination. The cleanup PowerShell process is itself a direct child of
+		// the runner, so exclude $PID; the previous all-process walk could include
+		// and kill its own helper before it reached the browser child.
 		const script = `
 $root = ${process.pid}
-$processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)
-$pending = [System.Collections.Generic.Queue[int]]::new()
-$pending.Enqueue($root)
-$descendants = [System.Collections.Generic.HashSet[int]]::new()
-while ($pending.Count -gt 0) {
-  $parent = $pending.Dequeue()
-foreach ($candidate in $processes) {
-    $candidatePid = [int]$candidate.ProcessId
-    if ([int]$candidate.ParentProcessId -eq $parent -and $candidatePid -ne $root -and $descendants.Add($candidatePid)) {
-      $pending.Enqueue($candidatePid)
-    }
+$self = $PID
+for ($attempt = 0; $attempt -lt 3; $attempt++) {
+  $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $root" -ErrorAction SilentlyContinue |
+    Where-Object { [int]$_.ProcessId -ne $self })
+  if ($children.Count -eq 0) { exit 0 }
+  foreach ($child in $children) {
+    & taskkill.exe /PID ([string]([int]$child.ProcessId)) /T /F *> $null
+  }
+  if ($attempt -lt 2) {
+    Start-Sleep -Milliseconds 50
   }
 }
-foreach ($candidatePid in $descendants) {
-  Stop-Process -Id $candidatePid -Force -ErrorAction SilentlyContinue
+$remaining = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $root" -ErrorAction SilentlyContinue |
+  Where-Object { [int]$_.ProcessId -ne $self })
+if ($remaining.Count -gt 0) {
+  exit 1
 }
+exit 0
 `;
-		spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+		const cleanup = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
 			stdio: "ignore",
-			// The first powershell.exe launch on a machine can stall for seconds
-			// in AV scanning; give the tree walk room to complete so detached
-			// browser children cannot outlive the runner and lock the workspace.
-			timeout: 5_000,
+			// A cold PowerShell/CIM startup can spend several seconds in Windows AV
+			// scanning. Keep cleanup bounded, but leave enough headroom for taskkill
+			// to finish and release the QA workspace before this runner exits.
+			timeout: WINDOWS_DESCENDANT_CLEANUP_TIMEOUT_MS,
 			windowsHide: true,
 		});
+		if (!cleanup.error && cleanup.status === 0) {
+			runnerMayHaveBrowserChildren = false;
+		}
 		return;
 	}
 
