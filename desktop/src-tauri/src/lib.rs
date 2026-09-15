@@ -24,6 +24,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
+mod desktop_context_menu;
+
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -7749,9 +7751,11 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            desktop_context_menu::desktop_edit,
             deepgram_token,
             acp_start,
             acp_send,

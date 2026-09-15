@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
   import DesktopTitlebar from "./components/DesktopTitlebar.svelte";
@@ -618,6 +619,7 @@
   const overlaysViewModel = viewModels.overlays;
   const statusBarViewModel = viewModels.statusBar;
 
+  onMount(() => installDesktopContextMenu({ reportError }));
   onMount(desktopLifecycle.start);
 
 </script>

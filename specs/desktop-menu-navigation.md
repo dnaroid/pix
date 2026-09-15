@@ -27,6 +27,10 @@ letting each WebView menu behave like an unrelated stack of buttons.
 - Tab dismisses the transient menu instead of trapping focus inside it.
 - Disabled commands remain discoverable and retain native disabled semantics.
 
+Native text/link context menus delegate traversal, dismissal and focus handling
+to the OS rather than the DOM navigation helpers. Their routing, native editing
+roles and lifecycle are defined in `specs/desktop-context-menus.md`.
+
 ## Migrated surfaces
 
 - Composer overflow actions focus the first enabled command on open and reuse the

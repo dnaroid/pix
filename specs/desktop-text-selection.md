@@ -39,6 +39,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 6. Text-entry inputs and contenteditable editors retain their native local Select All behavior when focused.
 7. Buttons, selects, disclosure summaries, tabs, options, checkbox/radio controls, and menu-item chrome remain non-selectable even when nested inside an otherwise selectable content surface.
 8. Existing per-component `select-none` behavior remains authoritative for interaction labels that intentionally live inside the transcript, such as disclosure summaries.
+9. In Tauri windows, right-click on selected content opens the native application text menu, not the WebView menu. Selection Copy takes priority over whole-user-message actions; the message ellipsis still exposes those actions. Text editing uses native editing commands without replacing the draft value or inventing a separate undo stack. See `desktop-context-menus.md`.
 
 ## Related files
 

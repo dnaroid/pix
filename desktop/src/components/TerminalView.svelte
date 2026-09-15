@@ -277,4 +277,5 @@
   class="h-full min-h-0 min-w-0 w-full max-w-full overflow-hidden bg-code text-foreground [&_.xterm]:h-full [&_.xterm]:max-w-full [&_.xterm-viewport]:!overflow-y-auto"
   role="application"
   aria-label={ariaLabel}
+  data-terminal-readonly={!running}
 ></div>

@@ -9,6 +9,7 @@
     "core:window:allow-internal-toggle-maximize",
     "core:webview:allow-create-webview-window",
     "dialog:allow-open",
+    "clipboard-manager:allow-write-text",
     "notification:default",
     "opener:allow-open-url",
     "opener:allow-default-urls"

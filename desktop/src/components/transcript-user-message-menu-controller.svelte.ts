@@ -1,4 +1,5 @@
 import { tick } from "svelte";
+import { desktopContextTarget } from "../lib/desktop-context-target";
 import { desktopCommandDefinition } from "../lib/desktop-commands";
 import {
   isTypeaheadKey,
@@ -163,6 +164,12 @@ export function createTranscriptUserMessageMenuController(options: TranscriptUse
   }
 
   function openContextMenu(event: MouseEvent, messageId: string): void {
+    // Selected text/links have their own native menu. The ellipsis remains an
+    // unconditional route to whole-message Copy/Fork/Undo actions.
+    if (desktopContextTarget(event.target)) {
+      close();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
