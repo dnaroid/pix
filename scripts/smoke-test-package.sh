@@ -69,6 +69,7 @@ pass "Installed tarball in $WORK_DIR"
 
 PKG_ROOT="$WORK_DIR/node_modules/pi-ui-extend"
 ENTRY_JS="$PKG_ROOT/bin/pix.mjs"
+BIN_PIX="$WORK_DIR/node_modules/.bin/pix"
 
 if [[ ! -f "$ENTRY_JS" ]]; then
 	fail "Pix entry point not found: $ENTRY_JS"
@@ -77,6 +78,17 @@ fi
 
 if [[ ! -f "$PKG_ROOT/dist/main.js" ]]; then
 	fail "Built renderer entry not found: $PKG_ROOT/dist/main.js"
+	exit 1
+fi
+
+PIX_BIN_TARGET=$(node -e 'const fs = require("fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(pkg.bin?.pix ?? "");' "$PKG_ROOT/package.json")
+LEGACY_BIN_TARGET=$(node -e 'const fs = require("fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(pkg.bin?.["pi-ui-extend"] ?? "");' "$PKG_ROOT/package.json")
+if [[ "$PIX_BIN_TARGET" != "bin/pix.mjs" || "$LEGACY_BIN_TARGET" != "bin/pix.mjs" ]]; then
+	fail "Packed package has invalid CLI bin metadata: pix=$PIX_BIN_TARGET pi-ui-extend=$LEGACY_BIN_TARGET"
+	exit 1
+fi
+if [[ ! -x "$BIN_PIX" ]]; then
+	fail "Installed Pix CLI shim not found or not executable: $BIN_PIX"
 	exit 1
 fi
 
@@ -137,7 +149,7 @@ smoke() {
 	fi
 }
 
-smoke "pix --help" node "$ENTRY_JS" --help
+smoke "installed pix shim --help" "$BIN_PIX" --help
 smoke "pix update --help" node "$ENTRY_JS" update --help
 smoke "pix install --help" node "$ENTRY_JS" install --help
 smoke "pix update --check (offline)" env PI_OFFLINE=1 node "$ENTRY_JS" update --check

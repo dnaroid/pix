@@ -13,8 +13,8 @@
   },
   "type": "module",
   "bin": {
-    "pi-ui-extend": "./bin/pix.mjs",
-    "pix": "./bin/pix.mjs"
+    "pi-ui-extend": "bin/pix.mjs",
+    "pix": "bin/pix.mjs"
   },
   "exports": {
     ".": {

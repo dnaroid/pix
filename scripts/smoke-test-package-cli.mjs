@@ -57,8 +57,15 @@ try {
 	const builtEntryPath = path.join(packageRoot, "dist", "main.js");
 	if (!fs.existsSync(entryPath)) throw new Error(`Pix entry point is missing from the packed artifact: ${entryPath}`);
 	if (!fs.existsSync(builtEntryPath)) throw new Error(`Pix build output is missing from the packed artifact: ${builtEntryPath}`);
+	const installedPackage = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
+	if (installedPackage.bin?.pix !== "bin/pix.mjs" || installedPackage.bin?.["pi-ui-extend"] !== "bin/pix.mjs") {
+		throw new Error(`Packed package has invalid CLI bin metadata: ${JSON.stringify(installedPackage.bin ?? null)}`);
+	}
+	const cliShimPath = path.join(workDir, "node_modules", ".bin", process.platform === "win32" ? "pix.cmd" : "pix");
+	if (!fs.existsSync(cliShimPath)) throw new Error(`Installed Pix CLI shim is missing: ${cliShimPath}`);
 
 	console.log("Running installed CLI sanity checks...");
+	runNpm(["--prefix", workDir, "exec", "--", "pix", "--help"]);
 	runPix(entryPath, ["--help"]);
 	runPix(entryPath, ["update", "--help"]);
 	runPix(entryPath, ["install", "--help"]);

@@ -30,7 +30,8 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 ## Package-smoke invariants
 
 - Source tests do not replace package smoke coverage: `npm pack` must still be proven installable and runnable.
-- Smoke assertions track stable package contracts such as required payload paths, entry points, and intentionally asserted guide/CLI behavior.
+- Smoke assertions track stable package contracts such as required payload paths, entry points, npm `bin` metadata/shims, and intentionally asserted guide/CLI behavior.
+- Pix CLI bin targets use npm-normalized package-relative paths (`bin/pix.mjs`, without a leading `./`) so npm 12 does not strip them during publish normalization.
 - When an intentionally asserted package contract changes, its smoke assertion changes in the same commit.
 
 ## Implementation
