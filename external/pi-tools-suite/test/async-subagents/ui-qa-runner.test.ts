@@ -744,8 +744,9 @@ process.stdin.on("data", (data) => {
 	test("bounds the terminal recording to the transcript limit without failing the run", () => {
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeProjectFile(project, "flooding.mjs", `
-const flood = setInterval(() => process.stdout.write("x".repeat(64 * 1024)), 5);
-setTimeout(() => { clearInterval(flood); process.stdout.write("\\nREADY\\nDONE\\n"); }, 300);
+const chunk = "x".repeat(64 * 1024);
+for (let index = 0; index < 20; index += 1) process.stdout.write(chunk);
+process.stdout.write("\\nREADY\\nDONE\\n");
 `);
 		writeFlow(uiWorkspace, "flood.jsonc", {
 			target: { command: { argv: [nodeExecutable, "flooding.mjs"] } },
