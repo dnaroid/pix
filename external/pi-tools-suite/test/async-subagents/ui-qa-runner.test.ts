@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { probeBrowserBackend, resolveBrowserDriver, runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
 import { desktopEvidenceName, desktopPlatformContract, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
-import { resolveTuiPresentation, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
+import { releaseWindowsPtyResources, resolveTuiPresentation, terminateOwnedPty, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
 import { CHROME_DEVTOOLS_DRIVER, chromeDevtoolsStartArgs, probeChromeDevtoolsProvider } from "../../src/async-subagents/agents/ui-qa/drivers/chrome-devtools/chrome-devtools-provider.mjs";
 import { chooseNativeTerminalProvider, nativeTerminalBridgeCommandFile, nativeTerminalBridgeShellCommand, nativeTerminalProviderLaunchArgs } from "../../src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs";
 
@@ -549,6 +549,34 @@ process.stdin.on("data", (data) => {
 		expect(() => resolveTuiPresentation({ target: { command: { argv: ["node", "fixture.mjs"], presentation: "project-specific" } } })).toThrow(/presentation/);
 	});
 
+	test("uses signal-less node-pty termination and releases Windows ConPTY handles", async () => {
+		const killArgs: unknown[][] = [];
+		let inputDestroyed = 0;
+		let outputDestroyed = 0;
+		let disposed = 0;
+		let workerTerminated = 0;
+		const processHandle = {
+			kill: (...args: unknown[]) => { killArgs.push(args); },
+			_agent: {
+				inSocket: { destroy: () => { inputDestroyed += 1; } },
+				outSocket: { destroy: () => { outputDestroyed += 1; } },
+				_conoutSocketWorker: {
+					dispose: () => { disposed += 1; },
+					_worker: { terminate: async () => { workerTerminated += 1; } },
+				},
+			},
+		};
+
+		terminateOwnedPty(processHandle, "SIGTERM", "win32");
+		await releaseWindowsPtyResources(processHandle, "win32");
+
+		expect(killArgs).toEqual([[]]);
+		expect(inputDestroyed).toBe(1);
+		expect(outputDestroyed).toBe(1);
+		expect(disposed).toBe(1);
+		expect(workerTerminated).toBe(1);
+	});
+
 	test("routes explicit native-terminal presentation through the generic TUI backend", () => {
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeProjectFile(project, "fixture.mjs", "setInterval(() => {}, 1000);\n");
@@ -682,7 +710,6 @@ process.stdin.on("data", (data) => {
 			],
 		});
 		const result = invoke(project, agentDir, ["run", "--flow", "recording.jsonc", "--run-id", "recording", "--runner-timeout-ms", "10000"]);
-		expectRunnerStatus(result, 0);
 		expectRunnerStatus(result, 0);
 		expect(result.payload.status).toBe("PASSED");
 		expect(result.payload.selection.supportedCapabilities).toContain("terminalRecording");

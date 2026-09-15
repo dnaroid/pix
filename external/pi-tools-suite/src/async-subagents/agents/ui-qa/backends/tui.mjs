@@ -592,17 +592,55 @@ function createTerminalRecording(evidenceDir, viewport) {
 }
 
 async function cleanupOwnedPty(processHandle, exited, exitPromise) {
-	if (exited()) return;
-	try { processHandle.kill("SIGTERM"); } catch { /* already exited */ }
-	if (process.platform !== "win32") {
-		try { process.kill(-processHandle.pid, "SIGTERM"); } catch { /* node-pty may already have reaped the group */ }
+	try {
+		if (exited()) return;
+		terminateOwnedPty(processHandle, "SIGTERM");
+		await Promise.race([exitPromise, sleep(CLEANUP_GRACE_MS)]);
+		if (exited()) return;
+		// Windows node-pty 1.1.0 has no signal-aware escalation: kill(signal)
+		// throws before starting its owned ConPTY process-tree cleanup. One
+		// signal-less kill above is therefore the Windows termination request;
+		// repeating it would start a second async console-process-list helper.
+		if (process.platform !== "win32") terminateOwnedPty(processHandle, "SIGKILL");
+	} finally {
+		await releaseWindowsPtyResources(processHandle);
 	}
-	await Promise.race([exitPromise, sleep(CLEANUP_GRACE_MS)]);
-	if (exited()) return;
-	try { processHandle.kill("SIGKILL"); } catch { /* already exited */ }
-	if (process.platform !== "win32") {
-		try { process.kill(-processHandle.pid, "SIGKILL"); } catch { /* already exited */ }
+}
+
+export function terminateOwnedPty(processHandle, signal, platform = process.platform) {
+	try {
+		if (platform === "win32") processHandle.kill();
+		else processHandle.kill(signal);
+	} catch { /* already exited or unsupported by the PTY implementation */ }
+	if (platform !== "win32") {
+		try { process.kill(-processHandle.pid, signal); } catch { /* node-pty may already have reaped the group */ }
 	}
+}
+
+/**
+ * @lydell/node-pty 1.1.0 leaves Windows ConPTY host handles alive after a
+ * natural child exit. The dedicated UI QA runner has no more PTY work after
+ * backend cleanup, so release those handles explicitly instead of keeping the
+ * runner process alive indefinitely.
+ *
+ * This is best-effort and Windows-only because these members are node-pty
+ * implementation details and must never affect an already-settled QA result.
+ */
+export async function releaseWindowsPtyResources(processHandle, platform = process.platform) {
+	if (platform !== "win32") return;
+	const agent = processHandle?._agent;
+	for (const socket of [agent?.inSocket, agent?.outSocket]) {
+		try { socket?.destroy?.(); } catch { /* best effort */ }
+	}
+	try {
+		if (agent?._closeTimeout) clearTimeout(agent._closeTimeout);
+	} catch { /* best effort */ }
+	const conout = agent?._conoutSocketWorker;
+	try { conout?.dispose?.(); } catch { /* best effort */ }
+	try {
+		if (conout?._drainTimeout) clearTimeout(conout._drainTimeout);
+	} catch { /* best effort */ }
+	try { await conout?._worker?.terminate?.(); } catch { /* best effort */ }
 }
 
 function keySequences(value) {
