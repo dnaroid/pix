@@ -364,6 +364,30 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 			showReview();
 		}
 
+		function confirmMultipleAnswer(): void {
+			const question = currentQuestion();
+			if (!question.multiple) return;
+			const selection = selections.get(question.id);
+			if (!selection || !selectionIsComplete(question, selection)) {
+				const existing = multipleSelection(question);
+				if (existing.customText !== undefined && !existing.customText.trim() && (existing.images?.length ?? 0) === 0) {
+					customError = "Custom Answer cannot be empty.";
+				} else {
+					const minimum = question.minSelections ?? 1;
+					customError = `Choose at least ${minimum} answer${minimum === 1 ? "" : "s"}.`;
+				}
+				refresh();
+				return;
+			}
+
+			customError = undefined;
+			if (questionIndex < questions.length - 1) {
+				moveToQuestion(questionIndex + 1);
+				return;
+			}
+			submitOrAnswerRemaining();
+		}
+
 		function enterCustomMode(): void {
 			const question = currentQuestion();
 			const existing = selections.get(question.id);
@@ -451,7 +475,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 				mode = "choices";
 				customError = undefined;
 				syncChoiceSelection();
-				refresh();
+				confirmMultipleAnswer();
 				return;
 			}
 			selections.set(question.id, {
@@ -599,7 +623,16 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 				goBack();
 				return;
 			}
-			if (isKey(data, "enter") || data === " ") {
+			if (currentQuestion().multiple) {
+				if (data === " ") {
+					selectChoice(selectedChoiceIndex);
+					return;
+				}
+				if (isKey(data, "enter")) {
+					confirmMultipleAnswer();
+					return;
+				}
+			} else if (isKey(data, "enter") || data === " ") {
 				selectChoice(selectedChoiceIndex);
 				return;
 			}

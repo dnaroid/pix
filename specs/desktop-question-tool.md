@@ -57,6 +57,7 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
   inventing bounds at that trust boundary.
 - Desktop returns versioned JSON in ACP accept content key `value`; the extension validates question ids, unique choice values, selection bounds, custom text, image MIME types, and base64 data before creating the authoritative result shape.
 - Existing single-select results retain their current scalar answer shape. Multi-select results contain one answer per question with `multiple: true` and an ordered `selections` array; each item uses the existing choice/custom answer fields.
+- In the TUI, multi-select choices are toggled with Space. Enter validates and commits the whole current multi-select answer, advances to the next question, and from the final question submits when all answers are complete (otherwise it routes to the first unanswered question). Selecting `Something else…` with Space activates custom input; Enter there commits the custom text/images as part of the same multi-select answer and follows the same advance/submit behavior. Single-select activation behavior is unchanged.
 - Only Desktop-launched ACP sessions receive the explicit bundled extension path and bridge environment flag. Other ACP clients retain existing behavior.
 
 ## Verification
