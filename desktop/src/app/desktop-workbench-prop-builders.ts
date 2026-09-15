@@ -69,6 +69,7 @@ export type WorkbenchConversationBuilderOptions = {
   autocomplete: ReturnType<typeof createAutocompleteStore>;
   draft: ReturnType<typeof import("./draft-session.svelte").createDraftSession>;
   conversationActions: ReturnType<typeof createConversationSessionActions>;
+  openHistoryPicker: (query: string) => void | Promise<void>;
   promptSubmit: ReturnType<typeof createPromptSubmit>;
   projectActions: ReturnType<typeof createProjectActions>;
   attachments: ReturnType<typeof createAttachmentDraftController>;
@@ -188,6 +189,7 @@ export function buildWorkbenchConversationProps(
       questionMode,
       onAutocomplete: options.autocomplete.complete,
       onDraftChange: options.draft.promote,
+      onOpenHistory: () => options.openHistoryPicker(""),
       onEnhance: () => options.conversationActions.enhancePromptDraft(options.promptText()),
       onSubmit: options.promptSubmit.submit,
       onDefer: options.promptQueue.deferCurrentDraft,

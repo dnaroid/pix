@@ -48,6 +48,7 @@ export function createDesktopWorkbenchViewModelServices(options: DesktopViewMode
       autocomplete: options.sessions.autocomplete,
       draft: options.transitions.draft,
       conversationActions: options.conversation.actions,
+      openHistoryPicker: options.conversation.navigation.openHistoryPicker,
       promptSubmit: options.promptActions.submit,
       projectActions: options.projectActions.actions,
       attachments: options.interactions.attachments,

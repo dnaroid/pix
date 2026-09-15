@@ -26,7 +26,7 @@ Give Pix Desktop one reusable command vocabulary for keyboard shortcuts, command
 - Workbench-surface commands are **Show Conversation**, **Show Preview**, **Show Git Diff**, and **Close Active Editor**. They operate on the unified top workbench model without adding Preview/Diff to conversation session membership.
 - The palette remains available while Preview or Git Diff is selected because those are ordinary workbench tabs rather than blocking modals. **Focus Composer** first selects the active conversation tab, then focuses the mounted composer.
 - Commands that require a concrete message or draft context remain contextual and are not promoted into the global palette merely because their metadata is centralized.
-- Composer overflow actions and user-message context-menu labels reuse the shared command definitions; their existing local enablement and handlers remain authoritative.
+- Composer overflow actions and user-message context-menu labels reuse the shared command definitions; their existing local enablement and handlers remain authoritative. The composer overflow exposes Prompt History as a direct entry to the same `session.history` picker used by the palette and `/history`; selecting an item restores that prompt into the composer without submitting it.
 - The status bar exposes a compact Command Palette action and shows the platform shortcut in its tooltip. This is a stable discoverability path in addition to the keyboard shortcut.
 
 ## Invariants
@@ -44,11 +44,14 @@ Give Pix Desktop one reusable command vocabulary for keyboard shortcuts, command
 - `desktop/src/components/CommandPicker.svelte`
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/components/PromptComposer.svelte`
+- `desktop/src/components/PromptComposerActionsMenu.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/lib/workbench-tabs.ts`
 - `desktop/src/app/desktop-command-controller.svelte.ts`
 - `desktop/src/app/desktop-command-services.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/app/desktop-workbench-view-model-services.ts`
 
 ## Verification
 

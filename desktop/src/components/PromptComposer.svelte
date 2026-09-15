@@ -47,6 +47,7 @@
     questionMode,
     onAutocomplete,
     onDraftChange = () => {},
+    onOpenHistory,
     onEnhance,
     onSubmit,
     onDefer,
@@ -76,6 +77,7 @@
     questionMode?: QuestionComposerMode;
     onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
     onDraftChange?: () => void;
+    onOpenHistory?: () => void | Promise<void>;
     onEnhance?: () => void | Promise<void>;
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
@@ -89,6 +91,7 @@
     onOpenAttachment: (attachment: Attachment) => void;
   } = $props();
 
+  const historyCommand = desktopCommandDefinition("session.history");
   const enhanceCommand = desktopCommandDefinition("composer.enhance");
   const createTaskCommand = desktopCommandDefinition("composer.createTask");
   const deferCommand = desktopCommandDefinition("composer.defer");
@@ -164,6 +167,13 @@
   const conversationContextKey = $derived(activeSessionId ?? (draftSession ? "pix:desktop-draft-session" : undefined));
   const hasConversationTarget = $derived(!!conversationContextKey);
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
+  const canOpenPromptHistory = $derived(
+    !editorMode
+      && !questionMode
+      && !!onOpenHistory
+      && !!activeSessionId
+      && ready,
+  );
   const canCreateTask = $derived(
     !editorMode
       && !questionMode
@@ -297,6 +307,12 @@
     await focus();
   }
 
+  async function openPromptHistory(): Promise<void> {
+    composerMenuOpen = false;
+    if (!canOpenPromptHistory || !onOpenHistory) return;
+    await onOpenHistory();
+  }
+
   function toggleComposerMenu(): void {
     if (composerMenuOpen) {
       composerMenuOpen = false;
@@ -314,6 +330,7 @@
 
   function composerMenuNavigationItems(): MenuNavigationItem[] {
     return [
+      { label: historyCommand.label, disabled: !canOpenPromptHistory },
       { label: enhanceCommand.label, disabled: !canEnhancePrompt },
       { label: createTaskCommand.label, disabled: !canCreateTask },
       { label: deferCommand.label, disabled: !activeSessionId || !ready || !hasQueueableDraft },
@@ -491,12 +508,15 @@
 {#if composerMenuOpen && !editorMode && !questionMode}
   <PromptComposerActionsMenu
     bind:menu={composerMenu}
+    historyLabel={historyCommand.label}
     enhanceLabel={enhanceCommand.label}
     createTaskLabel={createTaskCommand.label}
     deferLabel={deferCommand.label}
+    canOpenHistory={canOpenPromptHistory}
     canEnhance={canEnhancePrompt}
     {canCreateTask}
     canDefer={!!activeSessionId && ready && hasQueueableDraft}
+    onOpenHistory={() => void openPromptHistory()}
     onEnhance={() => void enhanceWithVoiceStop()}
     onCreateTask={() => void createTaskWithVoiceStop()}
     onDefer={() => void deferWithVoiceStop()}

@@ -5,6 +5,9 @@ import transcriptMenuControllerSource from "./transcript-user-message-menu-contr
 
 describe("desktop menu keyboard wiring", () => {
   it("gives composer overflow menus shared arrow/type-ahead navigation", () => {
+    expect(composerSource).toContain('desktopCommandDefinition("session.history")');
+    expect(composerSource).toContain("canOpenPromptHistory");
+    expect(composerSource).toContain("openPromptHistory()");
     expect(composerSource).toContain("handleComposerMenuKeydown");
     expect(composerSource).toContain("menuFocusIndex(items, currentIndex, event.key)");
     expect(composerSource).toContain("menuTypeaheadFocusIndex(items, currentIndex, query)");

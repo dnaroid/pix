@@ -34,7 +34,9 @@ roles and lifecycle are defined in `specs/desktop-context-menus.md`.
 ## Migrated surfaces
 
 - Composer overflow actions focus the first enabled command on open and reuse the
-  command-registry labels for Enhance prompt, Create task, and Pause for later.
+  command-registry labels for Prompt History, Enhance prompt, Create task, and
+  Pause for later. Prompt History opens the existing history picker and remains
+  disabled until a concrete ready session is available.
 - User-message context/ellipsis menus focus the first enabled action and preserve
   the existing four-command Copy/Fork/Fork in new tab/Undo contract.
 - Project task status menus initially focus the current status; choosing a status
@@ -53,6 +55,7 @@ roles and lifecycle are defined in `specs/desktop-context-menus.md`.
 
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/components/PromptComposer.svelte`
+- `desktop/src/components/PromptComposerActionsMenu.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/transcript-user-message-menu-controller.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
