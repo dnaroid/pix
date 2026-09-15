@@ -116,7 +116,9 @@ for required_file in "${REQUIRED_FILES[@]}"; do
 done
 
 GUIDE_OUTPUT=$(node "$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs" guide --backend browser)
-if [[ "$GUIDE_OUTPUT" != "# Browser backend router"$'\n'* ]] || [[ "$GUIDE_OUTPUT" == *"QA_AUTH_UPDATE_REQUIRED"* ]]; then
+GUIDE_HEADER=${GUIDE_OUTPUT%%$'\n'*}
+GUIDE_HEADER=${GUIDE_HEADER%$'\r'}
+if [[ "$GUIDE_HEADER" != "# Browser backend router" ]] || [[ "$GUIDE_OUTPUT" == *"QA_AUTH_UPDATE_REQUIRED"* ]]; then
 	fail "Packaged UI-QA runner did not return the isolated browser guide"
 	exit 1
 fi
