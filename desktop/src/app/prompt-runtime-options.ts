@@ -1,3 +1,4 @@
+import type { StopReason } from "@agentclientprotocol/sdk";
 import type { AcpClient, QueuedUserMessage } from "../lib/acp-client";
 
 export type PromptRuntimeOptions = {
@@ -15,4 +16,9 @@ export type PromptRuntimeOptions = {
     sessionEntryId: string | undefined,
   ) => void;
   finalizeTranscriptActivity: (sessionId: string, endedAtMs: number) => void;
+  onPromptStarted?: (sessionId: string) => void;
+  onPromptSettled?: (sessionId: string, stopReason: StopReason) => void;
+  onPromptError?: (sessionId: string, error: unknown) => void;
+  onSessionCleared?: (sessionId: string) => void;
+  onReset?: () => void;
 };

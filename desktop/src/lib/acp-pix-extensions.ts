@@ -26,6 +26,14 @@ export type AcpRequest = <Response>(
   signal?: AbortSignal,
 ) => Promise<Response>;
 
+function isStopReason(value: unknown): value is NonNullable<AgentControlStatus["stopReason"]> {
+  return value === "end_turn"
+    || value === "max_tokens"
+    || value === "max_turn_requests"
+    || value === "refusal"
+    || value === "cancelled";
+}
+
 export class AcpPixExtensions {
   constructor(private readonly request: AcpRequest) {}
 
@@ -96,7 +104,15 @@ export class AcpPixExtensions {
     if (!isRecord(response) || typeof response.sessionId !== "string" || !isAgentControlState(response.state)) {
       throw new Error("pix/session/agent_control returned an invalid response");
     }
-    return { sessionId: response.sessionId, state: response.state };
+    const stopReason = response.stopReason;
+    if (stopReason !== undefined && !isStopReason(stopReason)) {
+      throw new Error("pix/session/agent_control returned an invalid stop reason");
+    }
+    return {
+      sessionId: response.sessionId,
+      state: response.state,
+      ...(stopReason === undefined ? {} : { stopReason }),
+    };
   }
 
   async runtimeStatus(sessionId: string, refreshModelUsage = false): Promise<RuntimeStatus> {

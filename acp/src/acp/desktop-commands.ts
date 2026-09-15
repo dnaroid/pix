@@ -1,4 +1,10 @@
-import { RequestError, type ContentBlock, type SessionConfigOption, type SessionUpdate } from "@agentclientprotocol/sdk";
+import {
+	RequestError,
+	type ContentBlock,
+	type SessionConfigOption,
+	type SessionUpdate,
+	type StopReason,
+} from "@agentclientprotocol/sdk";
 
 const ERROR_INVALID_PARAMS = -32602;
 
@@ -55,6 +61,7 @@ export interface DesktopAgentControlRequest extends DesktopSessionRequest {
 export interface DesktopAgentControlResponse {
 	readonly sessionId: string;
 	readonly state: DesktopAgentControlState;
+	readonly stopReason?: StopReason;
 }
 
 export interface DesktopRuntimeStatusRequest extends DesktopSessionRequest {

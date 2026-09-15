@@ -18,6 +18,7 @@ type DesktopInteractionServicesOptions = {
   promptAttachments: () => Attachment[];
   setPromptAttachments: (attachments: Attachment[]) => void;
   activateAttachment: (attachment: Attachment) => void | Promise<void>;
+  onPendingElicitation?: (pending: PendingElicitation) => void;
   setErrorMessage: (message: string) => void;
   reportError: (error: unknown) => void;
 };
@@ -42,6 +43,7 @@ export function createDesktopInteractionServices(options: DesktopInteractionServ
   const elicitation = createElicitationStore({
     cancelQuestionImageOperation: (requestId) => questionImages.cancelQuestionImageOperation(requestId),
     activeSessionId: () => options.state.sessionId,
+    onPendingCreated: options.onPendingElicitation,
   });
   const activePendingElicitation = $derived.by<PendingElicitation | null>(() => {
     const activeSessionId = options.state.sessionId;

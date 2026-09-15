@@ -1,5 +1,6 @@
 import type { AcpClient } from "../lib/acp-client";
 import type { Attachment } from "../lib/attachments";
+import type { StopReason } from "@agentclientprotocol/sdk";
 import {
   bindLocalUserMessageSessionEntry,
   finalizeTranscriptActivity,
@@ -26,6 +27,11 @@ type DesktopPromptServicesOptions = {
   setPromptAttachments: (attachments: Attachment[]) => void;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
+  onPromptStarted?: (sessionId: string) => void;
+  onPromptSettled?: (sessionId: string, stopReason: StopReason) => void;
+  onPromptError?: (sessionId: string, error: unknown) => void;
+  onSessionCleared?: (sessionId: string) => void;
+  onReset?: () => void;
 };
 
 export function createDesktopPromptServices(options: DesktopPromptServicesOptions) {
@@ -46,6 +52,11 @@ export function createDesktopPromptServices(options: DesktopPromptServicesOption
     sessionHistoryLoading: options.sessionHistoryLoading,
     setErrorMessage: options.setErrorMessage,
     reportError: options.reportError,
+    onPromptStarted: options.onPromptStarted,
+    onPromptSettled: options.onPromptSettled,
+    onPromptError: options.onPromptError,
+    onSessionCleared: options.onSessionCleared,
+    onReset: options.onReset,
     appendQueuedMessage: queue.appendToTranscript,
     bindPromptSessionEntry: (sessionId, transcriptMessageId, sessionEntryId) => {
       const current = options.state.transcriptFor(sessionId);

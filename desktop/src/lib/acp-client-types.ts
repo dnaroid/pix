@@ -4,6 +4,7 @@ import type {
   SessionConfigOption,
   SessionNotification,
   SessionUpdate,
+  StopReason,
 } from "@agentclientprotocol/sdk";
 import type { AgentControlState } from "./agent-control";
 import type { SessionStateNotification } from "./session-state";
@@ -120,6 +121,7 @@ export interface LazySessionHistory {
 export interface AgentControlStatus {
   readonly sessionId: string;
   readonly state: AgentControlState;
+  readonly stopReason?: StopReason;
 }
 
 export interface ContextUsageStatus {

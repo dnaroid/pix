@@ -15,6 +15,9 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     reportError: options.reportError,
     bindPromptSessionEntry: options.bindPromptSessionEntry,
     finalizeTranscriptActivity: options.finalizeTranscriptActivity,
+    onPromptStarted: options.onPromptStarted,
+    onPromptSettled: options.onPromptSettled,
+    onPromptError: options.onPromptError,
     flushAutoQueue: (sessionId) => queue.flushAutoQueue(sessionId),
   });
 
@@ -38,19 +41,20 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     setErrorMessage: options.setErrorMessage,
     reportError: options.reportError,
     runs,
-    flushAutoQueue: queue.flushAutoQueue,
   });
 
   function clearSession(sessionId: string): void {
     queue.clearSession(sessionId);
     agent.clearSession(sessionId);
     runs.clearSession(sessionId);
+    options.onSessionCleared?.(sessionId);
   }
 
   function reset(): void {
     runs.reset();
     queue.reset();
     agent.reset();
+    options.onReset?.();
   }
 
   return {

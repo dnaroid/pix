@@ -22,11 +22,12 @@ type DesktopSessionServicesOptions = {
     sessionId: string,
     workspace: string,
   ) => void | Promise<void>;
+  onActivityChanged?: (sessionId: string) => void;
   reportError: (error: unknown) => void;
 };
 
 export function createDesktopSessionServices(options: DesktopSessionServicesOptions) {
-  const activity = createSessionActivityStore();
+  const activity = createSessionActivityStore({ onChange: options.onActivityChanged });
   const inspectorPreference = createSessionInspectorPreference();
   const tabs = createSessionTabsState();
   const catalog = createSessionCatalog({

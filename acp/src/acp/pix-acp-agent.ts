@@ -1966,14 +1966,15 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, `pi continuation failed: ${stringifyUnknown(error)}`);
 		}
 
+		let stopReason: StopReason;
 		try {
-			await settled;
+			stopReason = await settled;
 		} catch (error) {
 			throw new RequestError(ERROR_SERVER, `pi process died: ${stringifyUnknown(error)}`);
 		}
 		await this.syncLiveSessionRecord(session);
 		const state = await this.refreshAgentControlState(session);
-		return { sessionId: session.acpSessionId, state };
+		return { sessionId: session.acpSessionId, state, stopReason };
 	}
 
 	private async desktopRuntimeStatus(params: DesktopRuntimeStatusRequest): Promise<DesktopRuntimeStatusResponse> {

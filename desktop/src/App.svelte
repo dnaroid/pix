@@ -31,6 +31,10 @@
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
   import { createDesktopViewModelServices } from "./app/desktop-view-model-services";
+  import {
+    createDesktopAgentNotificationCoordinator,
+    createDesktopNotificationService,
+  } from "./lib/desktop-notifications";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
@@ -60,6 +64,7 @@
     closeProjectSwitcher: () => void;
   } | null>(null);
   let localMessageId = 0;
+  let onSessionActivityChanged = (_sessionId: string): void => {};
 
   const errors = createErrorState();
   const reportError = errors.report;
@@ -107,6 +112,7 @@
       activateDraftSessionTab({ resetComposer: true });
       void requestClient.deleteSession(sessionId).catch(() => undefined);
     },
+    onActivityChanged: (sessionId) => onSessionActivityChanged(sessionId),
     reportError,
   });
   const sessionActivity = sessionServices.activity;
@@ -122,6 +128,16 @@
 
   const sessionCatalog = sessionServices.catalog;
   const sessions = $derived(sessionCatalog.sessions);
+
+  const nativeNotifications = createDesktopNotificationService();
+  const agentNotifications = createDesktopAgentNotificationCoordinator({
+    notifications: nativeNotifications,
+    sessionTitle: (sessionId) => sessionCatalog.sessions.find((session) => session.sessionId === sessionId)?.title ?? undefined,
+    agentState: (sessionId) => promptRuntime.agentState(sessionId),
+    isPromptRunning: (sessionId) => promptRuntime.isRunning(sessionId),
+    activeSubagents: (sessionId) => sessionActivity.summaries.get(sessionId)?.activeSubagents ?? 0,
+  });
+  onSessionActivityChanged = agentNotifications.sessionActivityChanged;
 
   const sessionRuntime = sessionServices.runtime;
   const changingConfig = $derived(
@@ -152,6 +168,11 @@
     setPromptAttachments: (attachments) => promptAttachments = attachments,
     setErrorMessage: errors.set,
     reportError,
+    onPromptStarted: agentNotifications.promptStarted,
+    onPromptSettled: agentNotifications.promptSettled,
+    onPromptError: agentNotifications.promptError,
+    onSessionCleared: agentNotifications.clearSession,
+    onReset: agentNotifications.reset,
   });
   const promptRuntime = promptServices.runtime;
   const queuedMessages = promptServices.queue;
@@ -300,6 +321,7 @@
     promptAttachments: () => promptAttachments,
     setPromptAttachments: (attachments) => promptAttachments = attachments,
     activateAttachment: projectServices.preview.activateAttachment,
+    onPendingElicitation: (pending) => agentNotifications.needsInput(pending.sessionId, pending.message),
     setErrorMessage: errors.set,
     reportError,
   });

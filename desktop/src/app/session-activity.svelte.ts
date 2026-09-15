@@ -15,7 +15,11 @@ import {
   type SessionSubagentSnapshot,
 } from "../lib/session-subagents";
 
-export function createSessionActivityStore() {
+type SessionActivityStoreOptions = {
+  onChange?: (sessionId: string) => void;
+};
+
+export function createSessionActivityStore(options: SessionActivityStoreOptions = {}) {
   let todos = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagents = $state<Map<string, SessionSubagentSnapshot>>(new Map());
   let summaries = $state<Map<string, SessionActivitySummary>>(new Map());
@@ -37,6 +41,7 @@ export function createSessionActivityStore() {
         todos.get(notification.sessionId),
         subagents.get(notification.sessionId),
       );
+      options.onChange?.(notification.sessionId);
       return true;
     }
 
@@ -55,6 +60,7 @@ export function createSessionActivityStore() {
       todos.get(notification.sessionId),
       subagents.get(notification.sessionId),
     );
+    options.onChange?.(notification.sessionId);
     return true;
   }
 

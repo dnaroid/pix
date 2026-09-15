@@ -10,9 +10,9 @@ type PromptAgentControlOptions = Pick<
   | "operationRunning"
   | "setErrorMessage"
   | "reportError"
+  | "onPromptError"
 > & {
   runs: PromptRunLifecycle;
-  flushAutoQueue: (sessionId: string) => void | Promise<void>;
 };
 
 export function createPromptAgentControl(options: PromptAgentControlOptions) {
@@ -63,20 +63,23 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     options.setErrorMessage(null);
     options.runs.clearEndedAt(sessionId);
     setAgentState(sessionId, "resuming");
-    options.runs.setRunning(sessionId, true);
+    const runGeneration = options.runs.beginRun(sessionId);
+    let stopReason: Awaited<ReturnType<typeof requestClient.agentControl>>["stopReason"];
     try {
       const next = await requestClient.agentControl(sessionId, "continue");
+      stopReason = next.stopReason;
       if (requestClient === options.client() && options.runtimeReady(sessionId)) setAgentState(sessionId, next.state);
     } catch (error) {
-      if (requestClient === options.client() && options.runtimeReady(sessionId)) {
+      if (requestClient !== options.client()) return;
+      if (options.runtimeReady(sessionId)) {
         const next = await requestClient.agentControl(sessionId, "state").catch(() => undefined);
         setAgentState(sessionId, next?.state ?? "idle");
-        if (sessionId === options.activeSessionId()) options.reportError(error);
       }
+      options.onPromptError?.(sessionId, error);
+      if (sessionId === options.activeSessionId()) options.reportError(error);
     } finally {
       if (requestClient === options.client()) {
-        options.runs.finishRun(sessionId);
-        queueMicrotask(() => void options.flushAutoQueue(sessionId));
+        options.runs.finishRunAndFlush(sessionId, runGeneration, stopReason);
       }
     }
   }

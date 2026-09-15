@@ -1505,6 +1505,7 @@ test("Pix Desktop exposes generic resumable stops and continues without a user p
 			action: "continue",
 		}) as DesktopAgentControlResponse;
 		assert.equal(resumed.state, "idle");
+		assert.equal(resumed.stopReason, "end_turn");
 		assert.equal(pi.continues, 1);
 		assert.deepEqual(pi.promptCalls, [{ message: "use more tools", images: undefined }]);
 	});

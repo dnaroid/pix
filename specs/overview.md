@@ -102,6 +102,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [desktop-attachments](./desktop-attachments.md) | Desktop chat attachments |
 | [desktop-diff-view](./desktop-diff-view.md) | Desktop diff view |
 | [desktop-window-state](./desktop-window-state.md) | Desktop window state persistence |
+| [desktop-system-notifications](./desktop-system-notifications.md) | Background native completion, question, and agent-error notifications |
 | [desktop-tool-rows](./desktop-tool-rows.md) | Desktop tool result rows |
 | [desktop-autocomplete](./desktop-autocomplete.md) | Desktop prompt autocomplete |
 | [desktop-agent-pause](./desktop-agent-pause.md) | Desktop turn-boundary pause and continuation |

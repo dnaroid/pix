@@ -40,6 +40,7 @@ export type PendingElicitation = PendingFormElicitation | PendingQuestionElicita
 type ElicitationStoreOptions = {
   cancelQuestionImageOperation: (requestId?: number) => void;
   activeSessionId: () => string | null;
+  onPendingCreated?: (pending: PendingElicitation) => void;
 };
 
 export function createElicitationStore(options: ElicitationStoreOptions) {
@@ -90,7 +91,10 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     for (const item of pending) item.resolve({ action: "cancel" });
   }
 
-  function request(request: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+  function requestInternal(
+    request: CreateElicitationRequest,
+    notifyPending: boolean,
+  ): Promise<CreateElicitationResponse> {
     const question = parseQuestionElicitation(request);
     const field = parseElicitation(request);
     if (!question && !field) return Promise.resolve({ action: "cancel" });
@@ -122,7 +126,12 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
         next.set(ownerSessionId, pending);
         pendingBySession = next;
       }
+      if (notifyPending) options.onPendingCreated?.(pending);
     });
+  }
+
+  function request(request: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+    return requestInternal(request, true);
   }
 
   function updateQuestionnaire(active: PendingElicitation | null, state: QuestionnaireState, requestId?: number): void {
@@ -179,7 +188,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
   }
 
   async function requestLocalTextInput(message: string, title: string): Promise<string | undefined> {
-    const response = await request({
+    const response = await requestInternal({
       mode: "form",
       sessionId: options.activeSessionId() ?? "local",
       message,
@@ -188,7 +197,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
         properties: { value: { type: "string", title } },
         required: ["value"],
       },
-    } as unknown as CreateElicitationRequest);
+    } as unknown as CreateElicitationRequest, false);
     if (response.action !== "accept") return undefined;
     const content = (response as { content?: Record<string, unknown> | null }).content;
     const value = content?.value;

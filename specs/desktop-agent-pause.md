@@ -38,6 +38,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 ## Protocol bridge
 
 - Desktop uses the private `pix/session/agent_control` ACP request with `state`, `pause`, and `continue` actions.
+- A successful `continue` response includes the final ACP `stopReason` from the resumed run after it settles, alongside the resulting agent-control state. Desktop uses that settled reason for the same completion/error classification as a normal prompt; `state` and `pause` responses do not need a stop reason.
 - ACP publishes session-scoped state changes over the existing private `pix/session-state` notification on the `agent-control` channel.
 - The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the TUI pause algorithm with `Agent.shouldStopAfterTurn` and `Agent.continue()`.
 - Explicit `PIX_ACP_PI_ENTRY` overrides remain supported, but a replacement entry must implement the Pix control shim for Desktop pause/continue to work.
@@ -58,7 +59,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 
 ## Verification
 
-- ACP tests cover pause-requested to paused state and generic resumable-stop to continuation flow.
+- ACP tests cover pause-requested to paused state and generic resumable-stop to continuation flow, including the settled continuation stop reason.
 - Desktop tests cover the private ACP control request and session-state parsing.
 - ACP typecheck/tests/stdio smoke and Desktop Svelte/TypeScript checks pass.
 

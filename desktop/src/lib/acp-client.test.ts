@@ -208,9 +208,13 @@ describe("ACP JSON-RPC client", () => {
     transport.message({
       jsonrpc: "2.0",
       id: requestAt(transport, 2).id,
-      result: { sessionId: "session-1", state: "idle" },
+      result: { sessionId: "session-1", state: "idle", stopReason: "end_turn" },
     });
-    await expect(continuing).resolves.toEqual({ sessionId: "session-1", state: "idle" });
+    await expect(continuing).resolves.toEqual({
+      sessionId: "session-1",
+      state: "idle",
+      stopReason: "end_turn",
+    });
 
     await client.dispose();
   });
