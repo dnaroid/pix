@@ -19,6 +19,37 @@ interface PromptComposerTextareaControllerOptions {
   readonly requestAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
 }
 
+/** Keep the visual ghost text on the exact same text metrics as the textarea. */
+export function syncPromptGhostLayer(
+  textarea: HTMLTextAreaElement,
+  ghostLayer: HTMLDivElement,
+): void {
+  const style = getComputedStyle(textarea);
+  ghostLayer.style.fontFamily = style.fontFamily;
+  ghostLayer.style.fontSize = style.fontSize;
+  ghostLayer.style.fontStyle = style.fontStyle;
+  ghostLayer.style.fontWeight = style.fontWeight;
+  ghostLayer.style.fontVariant = style.fontVariant;
+  ghostLayer.style.fontStretch = style.fontStretch;
+  ghostLayer.style.lineHeight = style.lineHeight;
+  ghostLayer.style.letterSpacing = style.letterSpacing;
+  ghostLayer.style.wordSpacing = style.wordSpacing;
+  ghostLayer.style.textTransform = style.textTransform;
+  ghostLayer.style.textIndent = style.textIndent;
+  ghostLayer.style.whiteSpace = style.whiteSpace;
+  ghostLayer.style.overflowWrap = style.overflowWrap;
+  ghostLayer.style.wordBreak = style.wordBreak;
+  ghostLayer.style.tabSize = style.tabSize;
+  ghostLayer.style.paddingTop = style.paddingTop;
+  ghostLayer.style.paddingBottom = style.paddingBottom;
+  ghostLayer.style.paddingLeft = style.paddingLeft;
+
+  const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+  const scrollbarWidth = Math.max(0, textarea.offsetWidth - textarea.clientWidth);
+  ghostLayer.style.paddingRight = `${paddingRight + scrollbarWidth}px`;
+  ghostLayer.scrollTop = textarea.scrollTop;
+}
+
 export function createPromptComposerTextareaController(options: PromptComposerTextareaControllerOptions) {
   let suggestion = $state("");
   let composing = $state(false);
@@ -58,8 +89,7 @@ export function createPromptComposerTextareaController(options: PromptComposerTe
     const textarea = options.textarea();
     const ghostLayer = options.ghostLayer();
     if (!textarea || !ghostLayer) return;
-    ghostLayer.style.paddingRight = `${Math.max(2, textarea.offsetWidth - textarea.clientWidth + 2)}px`;
-    ghostLayer.scrollTop = textarea.scrollTop;
+    syncPromptGhostLayer(textarea, ghostLayer);
   }
 
   function resize(): void {

@@ -39,7 +39,11 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 - Changing the session, draft, selection, attachment state, or eligibility cancels pending work and clears the ghost suffix.
 - Late or failed requests cannot replace the current suggestion and do not show an application error.
 - Tab appends the visible suffix, keeps focus in the textarea, and does not move focus. Escape clears it. Enter continues to submit normally.
-- Ghost text mirrors textarea wrapping and scrolling, is not announced as editable content, and a screen-reader status announces that Tab can accept it.
+- Ghost text mirrors the textarea's computed typography, line height, padding,
+  wrapping and scrolling rather than relying on parallel CSS defaults. This keeps
+  the suffix aligned with the caret across wrapped/multi-line prompts. It is not
+  announced as editable content, and a screen-reader status announces that Tab
+  can accept it.
 
 ## Related files
 
@@ -58,6 +62,8 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 
 - ACP tests cover request parsing, active-session routing, history access, completion output, and request cancellation.
 - Desktop tests cover eligibility, debounce, stale/cancelled requests, dismissal, acceptance, and ACP cancellation.
+- `desktop/scripts/autocomplete-ghost-smoke.mjs` checks real Chromium computed
+  text metrics for the textarea and ghost overlay.
 - `npm --prefix acp run check`
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
