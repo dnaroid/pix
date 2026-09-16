@@ -35,6 +35,11 @@ user actually sends work to the agent.
   an `AgentSession`, create a session file, or otherwise materialize the draft.
   The staged draft selection remains attached to that draft while the user
   switches between tabs.
+- The same draft status line keeps the workspace/project name and current Git
+  branch visible and queries provider quota for the staged model/thinking pair
+  through the shared model-usage controller. Draft quota refresh, including a
+  click-forced refresh, remains sessionless; context/DCP usage stays absent until
+  the draft is materialized because there is no runtime context yet.
 - A normal first prompt submission materializes the draft in place: Pix creates
   the new runtime using any staged draft model/thinking selection, activates/
   binds it, converts the same tab id from draft to real-session ownership, and
@@ -146,8 +151,9 @@ user actually sends work to the agent.
 - Menu/popup tests cover excluding already-open sessions, omitting the **new**
   row, the **Open a conversation** selector label, direct replacement of the
   draft tab, and applying a draft model choice without materializing a runtime.
-- Status tests cover rendering/click-targeting draft model and thinking values
-  before a runtime session exists.
+- Status/model-usage tests cover rendering/click-targeting draft model and
+  thinking values, retaining workspace/branch chrome, and loading/refreshing
+  staged-model quota before a runtime session exists.
 - Command-navigation tests cover synchronizing the draft selector query while a
   shared saved-session load is already in progress.
 - `npm run test:inner`

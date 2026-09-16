@@ -1,5 +1,6 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { MODEL_USAGE_POLL_INTERVAL_MS, MODEL_USAGE_STATUS_TICK_MS } from "../constants.js";
+import type { SessionModel } from "../types.js";
 import {
 	formatModelUsageStatusLabel,
 	modelUsageDescriptor,
@@ -19,6 +20,7 @@ export type ModelUsageRefreshStart =
 
 export type AppModelUsageControllerHost = {
 	runtimeSession(): AgentSession | undefined;
+	draftSelection?(): { model: SessionModel; thinkingLevel: string } | undefined;
 	render(): void;
 };
 
@@ -69,7 +71,7 @@ export class AppModelUsageController {
 	refreshNow(): ModelUsageRefreshStart {
 		const session = this.host.runtimeSession();
 		this.syncActiveModel(session);
-		const descriptor = modelUsageDescriptor(session?.model, session?.thinkingLevel);
+		const descriptor = this.activeDescriptor(session);
 		if (!descriptor) return { kind: "unsupported" };
 
 		const promise = this.refresh(true, descriptor);
@@ -79,7 +81,7 @@ export class AppModelUsageController {
 	private tick(force = false): void {
 		const session = this.host.runtimeSession();
 		this.syncActiveModel(session);
-		const descriptor = modelUsageDescriptor(session?.model, session?.thinkingLevel);
+		const descriptor = this.activeDescriptor(session);
 		if (!descriptor) return;
 		const cacheKey = descriptorCacheKey(descriptor)!;
 
@@ -94,7 +96,7 @@ export class AppModelUsageController {
 
 	private refresh(force = false, activeDescriptor?: ModelUsageDescriptor): Promise<ModelUsageRefreshResult> | undefined {
 		const session = this.host.runtimeSession();
-		const descriptor = activeDescriptor ?? modelUsageDescriptor(session?.model, session?.thinkingLevel);
+		const descriptor = activeDescriptor ?? this.activeDescriptor(session);
 		if (!descriptor) return undefined;
 
 		const modelKey = descriptorCacheKey(descriptor)!;
@@ -127,7 +129,7 @@ export class AppModelUsageController {
 	}
 
 	private syncActiveModel(session: AgentSession | undefined): boolean {
-		const nextModelKey = descriptorCacheKey(modelUsageDescriptor(session?.model, session?.thinkingLevel));
+		const nextModelKey = descriptorCacheKey(this.activeDescriptor(session));
 		if (nextModelKey === this.activeModelKey) return false;
 
 		this.activeModelKey = nextModelKey;
@@ -137,5 +139,11 @@ export class AppModelUsageController {
 
 	private activeStatus(): ModelUsageStatus | undefined {
 		return this.activeModelKey ? this.statuses.get(this.activeModelKey) : undefined;
+	}
+
+	private activeDescriptor(session: AgentSession | undefined): ModelUsageDescriptor | undefined {
+		if (session) return modelUsageDescriptor(session.model, session.thinkingLevel);
+		const draft = this.host.draftSelection?.();
+		return draft ? modelUsageDescriptor(draft.model, draft.thinkingLevel) : undefined;
 	}
 }

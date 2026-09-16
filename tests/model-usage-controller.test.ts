@@ -89,6 +89,60 @@ describe("model usage controller", () => {
 		]);
 	});
 
+	it("uses the staged draft model when no runtime session exists", async () => {
+		let draft = {
+			model: { provider: "openai-codex", id: "gpt-5.5" } as SessionModel,
+			thinkingLevel: "high",
+		};
+		const queriedModelKeys: string[] = [];
+		const controller = new AppModelUsageController({
+			runtimeSession: () => undefined,
+			draftSelection: () => draft,
+			render: () => {},
+		}, async (descriptor) => {
+			queriedModelKeys.push(descriptor.modelKey);
+			return usageStatus(descriptor, descriptor.modelKey.endsWith("gpt-5.5") ? 73 : 41);
+		});
+
+		controller.observeSession(undefined);
+		await settlePromises();
+		assert.match(controller.statusLabel(), /^73%/u);
+
+		draft = {
+			model: { provider: "openai-codex", id: "gpt-5-mini" } as SessionModel,
+			thinkingLevel: "medium",
+		};
+		controller.observeSession(undefined);
+		await settlePromises();
+
+		assert.match(controller.statusLabel(), /^41%/u);
+		assert.deepEqual(queriedModelKeys, ["openai-codex/gpt-5.5", "openai-codex/gpt-5-mini"]);
+	});
+
+	it("force-refreshes staged draft usage without materializing a session", async () => {
+		const draft = {
+			model: { provider: "openai-codex", id: "gpt-5.5" } as SessionModel,
+			thinkingLevel: "high",
+		};
+		let remainingPercent = 68;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => undefined,
+			draftSelection: () => draft,
+			render: () => {},
+		}, async (descriptor) => usageStatus(descriptor, remainingPercent));
+
+		controller.observeSession(undefined);
+		await settlePromises();
+		assert.match(controller.statusLabel(), /^68%/u);
+
+		remainingPercent = 52;
+		const refresh = controller.refreshNow();
+		assert.equal(refresh.kind, "started");
+		if (refresh.kind !== "started") throw new Error("Expected started refresh");
+		assert.equal(await refresh.promise, "refreshed");
+		assert.match(controller.statusLabel(), /^52%/u);
+	});
+
 	it("reports an in-flight refresh without starting another request", () => {
 		const activeSession = sessionWithModel("openai-codex", "gpt-5.5");
 		let queryCount = 0;

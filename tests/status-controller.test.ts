@@ -461,6 +461,26 @@ describe("StatusLineRenderer", () => {
 		assert.ok(layout.details.endsWith(`workspace ${usageLabel}`));
 	});
 
+	it("keeps workspace, branch, and model usage visible for a draft status line", () => {
+		const usageLabel = "73% ███▋  1h12m";
+		const modelLabel = "openai-codex/gpt-5.5";
+		const thinkingLabel = "high";
+		const renderer = statusLineRenderer({
+			widgetText: "",
+			voiceActive: false,
+			currentStatus: `${modelLabel} ${APP_ICONS.lightbulb} ${thinkingLabel}`,
+			draftModelStatus: { modelLabel, thinkingLabel },
+			workspaceLabel: "workspace (feature/draft)",
+			workspaceGitBranchLabel: "(feature/draft)",
+			modelUsageLabel: usageLabel,
+		});
+
+		const layout = renderer.layout(100);
+
+		assert.ok(layout.details.includes("workspace (feature/draft)"));
+		assert.ok(layout.details.endsWith(usageLabel));
+	});
+
 	it("colors model usage bars by remaining quota thresholds", () => {
 		const usageLabel = "50% ██▌   06.01 • 20% █     12:31";
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });

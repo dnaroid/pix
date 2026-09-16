@@ -228,6 +228,7 @@ export class PiUiExtendApp {
 		});
 		this.modelUsageController = new AppModelUsageController({
 			runtimeSession: () => this.runtime?.session,
+			draftSelection: () => this.draftModelUsageSelection(),
 			render: () => this.render(),
 		});
 		this.tabsController = new AppTabsController({
@@ -1023,6 +1024,7 @@ export class PiUiExtendApp {
 		this.draftModelRef = ref;
 		this.draftThinkingLevel = thinkingLevel;
 		this.draftModelOverrideRef = `${ref}:${thinkingLevel}`;
+		this.modelUsageController.observeSession(undefined);
 		this.setStatus("new conversation");
 	}
 
@@ -1039,6 +1041,13 @@ export class PiUiExtendApp {
 		const state = this.draftModelState();
 		if (!state?.modelRef) return undefined;
 		return { modelLabel: state.modelRef, thinkingLabel: state.thinkingLevel };
+	}
+
+	private draftModelUsageSelection(): { model: SessionModel; thinkingLevel: ThinkingLevel } | undefined {
+		const state = this.draftModelState();
+		if (!state?.modelRef) return undefined;
+		const model = state.models.find((candidate) => `${candidate.provider}/${candidate.id}` === state.modelRef);
+		return model ? { model, thinkingLevel: state.thinkingLevel } : undefined;
 	}
 
 	private applyPixConfig(config: PixConfig): void {
