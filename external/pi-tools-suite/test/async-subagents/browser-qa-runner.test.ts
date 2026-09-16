@@ -1022,30 +1022,31 @@ describe("private browser QA runner", () => {
 		expect(actions).toContain("upload:input[type=file]:sample.csv=a,b\n1,2");
 	});
 
-	test("rejects unsafe capability inputs without exposing observed dialog content", () => {
-		const cases = [
-			{
-				name: "response",
-				flow: { steps: [{ action: "click", locator: { css: ".atomic" }, expectResponse: { path: "/api/items?token=secret", method: "POST", status: 200 } }] },
-				reason: "exact path, method, and status",
-			},
-			{
-				name: "upload",
-				flow: { steps: [{ action: "uploadFiles", locator: { css: "input" }, files: [{ name: "secret", mimeType: "text/plain", path: ".pi/qa_auth.jsonc" }] }] },
-				reason: "canonical base64",
-			},
-			{
-				name: "environment",
-				flow: { environment: { timezoneId: "Not/A_Timezone" }, steps: [{ action: "goto", path: "/" }] },
-				reason: "timezoneId is invalid",
-			},
-			{
-				name: "download",
-				flow: { steps: [{ action: "download", locator: { css: ".download" }, filename: { equals: "report.csv" }, maxBytes: 2, retain: true, name: "too-large" }] },
-				reason: "exceeded maxBytes",
-			},
-		];
-		for (const item of cases) {
+	// Each case starts a fresh Node runner. Keep independent scenarios out of
+	// one shared timeout so slow Windows process startup cannot exhaust it.
+	for (const item of [
+		{
+			name: "response",
+			flow: { steps: [{ action: "click", locator: { css: ".atomic" }, expectResponse: { path: "/api/items?token=secret", method: "POST", status: 200 } }] },
+			reason: "exact path, method, and status",
+		},
+		{
+			name: "upload",
+			flow: { steps: [{ action: "uploadFiles", locator: { css: "input" }, files: [{ name: "secret", mimeType: "text/plain", path: ".pi/qa_auth.jsonc" }] }] },
+			reason: "canonical base64",
+		},
+		{
+			name: "environment",
+			flow: { environment: { timezoneId: "Not/A_Timezone" }, steps: [{ action: "goto", path: "/" }] },
+			reason: "timezoneId is invalid",
+		},
+		{
+			name: "download",
+			flow: { steps: [{ action: "download", locator: { css: ".download" }, filename: { equals: "report.csv" }, maxBytes: 2, retain: true, name: "too-large" }] },
+			reason: "exceeded maxBytes",
+		},
+	]) {
+		test(`rejects unsafe capability input: ${item.name}`, () => {
 			const project = tempProject();
 			const agentDir = createBrowserQaAgent(project);
 			installFakePlaywright(project);
@@ -1053,8 +1054,10 @@ describe("private browser QA runner", () => {
 			const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", item.name], agentDir);
 			expect(result).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
 			expect(result.json.reason).toContain(item.reason);
-		}
+		}, 10_000);
+	}
 
+	test("rejects mismatched dialogs without exposing observed content", () => {
 		const project = tempProject();
 		const agentDir = createBrowserQaAgent(project);
 		installFakePlaywright(project);
@@ -1067,7 +1070,9 @@ describe("private browser QA runner", () => {
 		expect(mismatch).toMatchObject({ code: 1, json: { reason: expect.stringContaining("native dialog did not match expectation") } });
 		expect(fs.readFileSync(path.join(project, "dialog-result"), "utf8")).toBe("dismissed");
 		expect(mismatch.stdout).not.toContain("secret-dialog-value");
+	}, 10_000);
 
+	test("rejects responses that do not belong to the action", () => {
 		const responseProject = tempProject();
 		const responseAgentDir = createBrowserQaAgent(responseProject);
 		installFakePlaywright(responseProject);
@@ -1078,7 +1083,9 @@ describe("private browser QA runner", () => {
 		}] }));
 		const preexisting = run(responseProject, ["run", "--base-url", "https://staging.example.test", "--flow", responseFlow, "--run-id", "preexisting-response"], responseAgentDir);
 		expect(preexisting).toMatchObject({ code: 1, json: { reason: expect.stringContaining("expected response was not observed") } });
+	}, 10_000);
 
+	test("closes undeclared popups and excludes their evidence", () => {
 		const popupProject = tempProject();
 		const popupAgentDir = createBrowserQaAgent(popupProject);
 		installFakePlaywright(popupProject);

@@ -11,6 +11,10 @@ const originalCache = process.env.XDG_CACHE_HOME;
 const originalRpcStateBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 const roots: string[] = [];
 
+// Real Git/filesystem scenarios spawn many processes on Windows. This is a
+// deadlock ceiling, not a performance assertion or a production command timeout.
+const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
+
 type ExecOptions = { cwd?: string; timeout?: number };
 
 afterEach(() => {
@@ -228,7 +232,7 @@ describe("resource registry", () => {
 			actions: ["uninstall", "remove"],
 		});
 		expect(h.reloads).toBe(1);
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("serializes the startup Desktop snapshot with the Registry panel refresh", async () => {
 		const root = tempRoot();
@@ -272,7 +276,7 @@ describe("resource registry", () => {
 		expect(maxActiveDesktopClones).toBe(1);
 		expect(snapshots).toHaveLength(2);
 		expect(snapshots.every((snapshot) => snapshot?.configured === true && snapshot?.error === undefined)).toBe(true);
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("reuses the project registry snapshot across session starts", async () => {
 		const root = tempRoot();
@@ -312,7 +316,7 @@ describe("resource registry", () => {
 
 		await command.handler("rpc refresh", h.ctx);
 		expect(fetches).toBeGreaterThan(fetchesAfterRefresh);
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("drops a deferred Desktop registry snapshot after its session context becomes stale", async () => {
 		const root = tempRoot();
@@ -404,7 +408,7 @@ describe("resource registry", () => {
 		expect(fs.readFileSync(path.join(seed, "agents", "architect.md"), "utf8")).toContain("Architecture review");
 		expect(h.notices.at(-1)?.message).toContain("Pushed agent \"architect\"");
 		expect(h.reloads).toBe(4);
-	}, 20_000);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("supports all for bulk install, update, push, remote remove, and local uninstall across skills and agents", async () => {
 		const root = tempRoot();
@@ -469,7 +473,7 @@ describe("resource registry", () => {
 		expect(fs.existsSync(path.join(project, ".pi", "agents", "local-agent.md"))).toBe(false);
 		expect(h.notices.at(-1)?.message).toContain("Uninstalled 4 local resources");
 		expect(h.reloads).toBe(5);
-	}, 20_000);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("pushes, reports, and pulls project-scoped tasks, plans, and TODO without mixing them with reusable resources", async () => {
 		const root = tempRoot();
@@ -535,7 +539,7 @@ describe("resource registry", () => {
 		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
 		expect(h.notices.at(-1)?.message).toContain("has local changes");
 		expect(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8")).toContain("local change");
-	}, 20_000);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("syncs task attachments as a portable project bundle and tracks attachment changes", async () => {
 		const root = tempRoot();
@@ -587,7 +591,7 @@ describe("resource registry", () => {
 		await command.handler("push tasks", h.ctx);
 		git(seed, ["pull", "--ff-only", "origin", "main"]);
 		expect(fs.existsSync(path.join(seed, "projects", "task-assets", "task-attachments"))).toBe(false);
-	}, 20_000);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("treats an empty plans directory as removal of registry plans", async () => {
 		const root = tempRoot();
@@ -633,7 +637,7 @@ describe("resource registry", () => {
 		expect(provenance.projectResources.plans).toBeUndefined();
 		await command.handler("status", h.ctx);
 		expect(h.messages.at(-1)?.content).not.toContain("plans/");
-	}, 20_000);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("removes a single remote resource, keeps the project copy, and reports removed-remote status", async () => {
 		const root = tempRoot();
@@ -662,7 +666,7 @@ describe("resource registry", () => {
 
 		await command.handler("status", h.ctx);
 		expect(h.messages.at(-1)?.content).toContain("× demo  [SKILL]  **REMOVED FROM REGISTRY**");
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("uninstalls a local resource, keeps the registry copy, clears provenance, and reloads", async () => {
 		const root = tempRoot();
@@ -691,7 +695,7 @@ describe("resource registry", () => {
 
 		await command.handler("status", h.ctx);
 		expect(h.messages.at(-1)?.content).toContain("· demo  [SKILL]  **NOT INSTALLED**");
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("supports scoped bulk removal through the rm alias", async () => {
 		const root = tempRoot();
@@ -711,7 +715,7 @@ describe("resource registry", () => {
 
 		expect(fs.existsSync(path.join(seed, "agents", "reviewer.md"))).toBe(false);
 		expect(fs.existsSync(path.join(seed, "skills", "demo", "SKILL.md"))).toBe(true);
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("offers remote removal through the registry TUI", async () => {
 		const root = tempRoot();
@@ -736,7 +740,7 @@ describe("resource registry", () => {
 		expect(fs.existsSync(path.join(seed, "skills", "demo"))).toBe(false);
 		expect(fs.existsSync(path.join(seed, "agents", "reviewer.md"))).toBe(true);
 		expect(h.reloads).toBe(1);
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("offers project-state push and pull through the registry TUI", async () => {
 		const root = tempRoot();
@@ -766,7 +770,7 @@ describe("resource registry", () => {
 		selections = ["Pull project state", "Tasks"];
 		await command.handler("", h.ctx);
 		expect(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8")).toContain("tui-v2");
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("checks for registry updates asynchronously on application startup and warns only when needed", async () => {
 		const root = tempRoot();
@@ -802,7 +806,7 @@ describe("resource registry", () => {
 		startupHandler?.({ type: "session_start", reason: "reload" }, h.ctx);
 		await Bun.sleep(50);
 		expect(h.notices.filter((notice) => notice.type === "warning")).toHaveLength(warningCount);
-	}, 15_000);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("startup check warns when project-scoped state is available remotely but missing locally", async () => {
 		const root = tempRoot();
@@ -829,7 +833,7 @@ describe("resource registry", () => {
 		startupHandler?.({ type: "session_start", reason: "startup" }, h.ctx);
 		await waitFor(() => h.notices.some((notice) => notice.type === "warning"), 12_000);
 		expect(h.notices.find((notice) => notice.type === "warning")?.message).toContain("1 update available");
-	}, 15_000);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("bootstraps the configured branch when the private registry repository is empty", async () => {
 		const root = tempRoot();
@@ -853,7 +857,7 @@ describe("resource registry", () => {
 
 		expect(git(root, ["--git-dir", remote, "show", "main:skills/first/SKILL.md"])).toContain("Bootstrap");
 		expect(h.notices.at(-1)?.message).toContain("Pushed skill \"first\"");
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("status marks simultaneous local and remote edits as diverged and update refuses to overwrite", async () => {
 		const root = tempRoot();
@@ -883,5 +887,5 @@ describe("resource registry", () => {
 		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
 		expect(h.notices.at(-1)?.message).toContain("has local changes");
 		expect(fs.readFileSync(path.join(project, ".pi", "skills", "demo", "SKILL.md"), "utf8")).toContain("local change");
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 });
