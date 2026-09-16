@@ -3800,7 +3800,9 @@ describe("DCP pruning effectiveness", () => {
         appendEntry() {},
         sendMessage() {},
       } as any;
-      await dcpModule(pi);
+      // Exercise destructive fallback, not the developer's auto-summary policy.
+      // Ambient user configuration can enable a successful summary instead.
+      await dcpModule(pi, { config: config() });
       const contextHandler = handlers.get("context")?.[0];
       const providerHandler = handlers.get("before_provider_request")?.[0];
       const afterProviderHandler = handlers.get("after_provider_response")?.[0];

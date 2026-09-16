@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { prepareDcpReminderScenario } from "./support/dcp-reminder-scenario.js";
+import { closeConversationRange } from "../src/dcp/conversation-index.js";
 
 import { DcpSessionSimulator } from "./support/dcp-session-simulator.js";
 
@@ -38,6 +39,98 @@ function toolOutput(index: number): string {
 }
 
 describe("DCP deterministic session-simulation E2E", () => {
+  test("resumed history compresses both sides of an interrupted wait using the delivered recommendations without retries", async () => {
+    const sim = await DcpSessionSimulator.create({
+      contextWindow: 64_000,
+      sessionId: "interrupted-wait-recovery",
+      configure(config) {
+        config.debug = false;
+        for (const strategy of Object.values(config.strategies)) strategy.enabled = false;
+        config.compress.minContextPercent = 0.26;
+        config.compress.maxContextPercent = 0.80;
+        config.compress.summaryBuffer = false;
+        config.compress.nudgeFrequency = 1;
+        config.compress.iterationNudgeThreshold = 1;
+        Object.assign(config.compress.autoCandidates, {
+          enabled: true, minContextPercent: 0.26, keepRecentTurns: 1, minMessages: 2, minTokens: 100,
+        });
+        // Only the simulated model may act: an auto fallback must not hide a bad hint.
+        config.compress.autoCompress.enabled = false;
+        config.compress.autoCompress.summarizerModel = [];
+        config.compress.autoCompress.summarizerFallbackModels = [];
+      },
+    });
+    try {
+      sim.appendUser("Inspect the original issue. Preserve BEFORE_RESTART_FACT.");
+      for (let index = 0; index < 3; index++) {
+        await sim.toolTurn({ output: `Decision: BEFORE_RESTART_FACT.\n${"old inspection detail\n".repeat(100)}` });
+      }
+      const interruptedId = await sim.interruptedToolTurn({
+        toolName: "subagents", input: { action: "wait", timeout: 300 }, label: "interrupted-wait",
+      });
+      await sim.restart();
+      sim.appendUser("Continue after restart. Preserve AFTER_RESTART_FACT.");
+      for (let index = 0; index < 3; index++) {
+        await sim.toolTurn({ output: `Decision: AFTER_RESTART_FACT.\n${"resumed inspection detail\n".repeat(100)}` });
+      }
+      sim.appendUser("ACTIVE_REQUEST: now investigate cleanup; keep this turn intact.");
+      await sim.toolTurn({
+        output: `ACTIVE_TOOL_OUTPUT\n${"still needed cleanup diagnostics\n".repeat(3_000)}`,
+        label: "large-active-result",
+      });
+      const initial = await sim.project("first-recommendation");
+      expect(initial.sample.reminderCarriers).toEqual(["toolResult"]);
+      expect(sim.state.compressionBlocks).toHaveLength(0);
+      const findInterrupted = (messages: any[]) => messages.find((message) =>
+        message.role === "assistant" && message.content.some((part: any) => part.type === "toolCall" && part.id === interruptedId),
+      );
+      const originalInterrupted = structuredClone(findInterrupted(initial.messages));
+      expect(originalInterrupted).toBeDefined();
+      const interruptedStableId = sim.state.conversationIndexSnapshot.find((entry) => entry.toolCallIds?.includes(interruptedId))!.stableId;
+      const activeStart = initial.messages.findIndex((message) =>
+        message.role === "user" && JSON.stringify(message.content).includes("ACTIVE_REQUEST"),
+      );
+      expect(activeStart).toBeGreaterThanOrEqual(0);
+      const activeStableIds = new Set(sim.state.conversationIndexSnapshot.slice(activeStart).map((entry) => entry.stableId));
+      const selectedStableIds: string[][] = [];
+      for (const [index, fact] of ["BEFORE_RESTART_FACT", "AFTER_RESTART_FACT"].entries()) {
+        const projection = await sim.project(`recommendation-${index}`);
+        const reminder = sim.state.nudgeAnchors[0]?.renderedReminder ?? "";
+        const match = /Recommended range candidate: (\w+)\.\.(\w+)/.exec(reminder);
+        expect(match).not.toBeNull();
+        const [, startId, endId] = match!;
+        const closure = closeConversationRange(sim.state.conversationIndexSnapshot, startId!, endId!)!;
+        expect(closure).toMatchObject({ expanded: false, incompleteToolGroup: false });
+        selectedStableIds.push(sim.state.conversationIndexSnapshot.slice(closure.startIndex, closure.endIndex + 1).map((entry) => entry.stableId));
+        const { sample, result } = await sim.compressTurn({
+          topic: `Completed work ${index}`, ranges: [{ startId, endId, summary: `Decision: ${fact}. Inspection complete.` }],
+        });
+        expect(sample.providerSent).toBe(true);
+        expect(sample.reminderCarriers).toEqual(["toolResult"]);
+        expect(result.isError).not.toBe(true);
+        expect(result.details).toMatchObject({ committed: true });
+        expect(result.details.netGain).toBeGreaterThan(0);
+        const after = await sim.project(`after-compress-${index}`);
+        expect(after.sample.projectedTokens).toBeLessThan(projection.sample.projectedTokens);
+      }
+      expect(selectedStableIds.flat()).not.toContain(interruptedStableId);
+      expect(selectedStableIds.flat().some((id) => activeStableIds.has(id))).toBe(false);
+      expect(selectedStableIds[0]!.some((id) => selectedStableIds[1]!.includes(id))).toBe(false);
+      const beforeRestart = await sim.project("before-final-restart");
+      expect(findInterrupted(beforeRestart.messages)).toEqual(originalInterrupted);
+      expect(beforeRestart.messages.some((message) => message.role === "toolResult" && message.toolCallId === interruptedId)).toBe(false);
+      const text = JSON.stringify(beforeRestart.messages);
+      for (const fact of ["BEFORE_RESTART_FACT", "AFTER_RESTART_FACT", "ACTIVE_REQUEST", "ACTIVE_TOOL_OUTPUT"]) {
+        expect(text).toContain(fact);
+      }
+      await sim.restart();
+      const replay = await sim.project("replayed-successful-compressions");
+      expect(replay.messages).toEqual(beforeRestart.messages);
+      expect(sim.report()).toMatchObject({ compressionCommits: 2, providerCapacityViolations: 0, aborts: 0 });
+      expect(sim.report().toolReminderProviderTurns).toBeGreaterThanOrEqual(2);
+    } finally { sim.dispose(); }
+  });
+
   test("single-user session delivers a tool-result reminder and replays its exact bytes after restart", async () => {
     const { sim, previous, projected } = await prepareDcpReminderScenario();
     try {

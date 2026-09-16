@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { closeConversationRange, detectToolGroupSpans } from "../src/dcp/conversation-index.js";
+import { protocolClosedBoundaryRuns } from "../src/dcp/protocol-closed-ranges.js";
 import type { ConversationIndexEntry } from "../src/dcp/state.js";
 
 interface RefGroup {
@@ -94,13 +95,14 @@ function generateTrace(seed: number): ConversationIndexEntry[] {
   let toolSequence = 0;
   let timestamp = int(next, 1, 4);
 
-  const push = (entry: Omit<ConversationIndexEntry, "index" | "stableId" | "visibleId" | "timestamp" | "origin">) => {
+  const push = (entry: Omit<ConversationIndexEntry, "index" | "stableId" | "visibleId" | "timestamp" | "origin" | "contentHash">) => {
     const index = entries.length;
     // Deliberately collide timestamps often; ordering must come from branch index.
     if (next() > 0.55) timestamp += int(next, 0, 1);
     entries.push({
       index,
       stableId: `stable-${seed}-${index}`,
+      contentHash: `fixture-hash-${seed}-${index}`,
       visibleId: `m${String(index + 1).padStart(3, "0")}`,
       timestamp,
       origin: "raw",
@@ -156,6 +158,28 @@ describe("DCP seeded conversation-index properties", () => {
         const expectedGroups = refGroups(entries);
         const actualGroups = detectToolGroupSpans(entries);
         expect(actualGroups, `group mismatch seed=${traceSeed}`).toEqual(expectedGroups);
+
+        // Recommendation runs must satisfy the independent protocol oracle,
+        // including interrupted parallel groups and non-addressable passthroughs.
+        const boundaries = entries.filter((entry) => !entry.passthrough)
+          .map((entry) => ({ id: entry.visibleId!, messageIndex: entry.index }));
+        const runs = protocolClosedBoundaryRuns(boundaries, entries);
+        for (const run of runs) {
+          const start = run[0]!.messageIndex;
+          const end = run[run.length - 1]!.messageIndex;
+          expect(refClose(entries, start, end), `unsafe recommendation seed=${traceSeed}`)
+            .toMatchObject({ expanded: false, incompleteToolGroup: false });
+        }
+
+        // Omitting one policy-protected entry must neither bridge it nor leave
+        // half of its complete tool group in any proposed range.
+        const omitted = boundaries[Math.floor(boundaries.length / 2)]!;
+        for (const run of protocolClosedBoundaryRuns(boundaries.filter((boundary) => boundary !== omitted), entries)) {
+          const start = run[0]!.messageIndex;
+          const end = run[run.length - 1]!.messageIndex;
+          expect(start > omitted.messageIndex || end < omitted.messageIndex).toBe(true);
+          expect(refClose(entries, start, end)).toMatchObject({ expanded: false, incompleteToolGroup: false });
+        }
 
         const next = rng(traceSeed ^ 0xa5a5a5a5);
         for (let pick = 0; pick < 6; pick++) {

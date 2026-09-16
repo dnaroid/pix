@@ -5,7 +5,8 @@ import {
   estimateMessageTokens,
 } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
-import { detectToolGroupSpans, findConversationIndexEntry } from "./conversation-index.js";
+import { closeConversationRange, detectToolGroupSpans, findConversationIndexEntry } from "./conversation-index.js";
+import { protocolClosedBoundaryRuns } from "./protocol-closed-ranges.js";
 
 interface CandidateBoundary {
   id: string;
@@ -120,58 +121,39 @@ function selectOldestSafePrefix(
   maxSafeMessageIndex: number,
   options?: CompressionCandidateSelectionOptions,
 ): CandidateBoundary[] | null {
-  if (boundaries.length === 0) return null;
-  if (!options || options.requiredSavingsTokens === undefined) {
-    let full = boundaries.slice();
-    while (full.length > 0 && full[0]!.isSystemReminder) full = full.slice(1);
-    while (full.length > 0 && full[full.length - 1]!.isSystemReminder) full = full.slice(0, -1);
-    if (full.length < Math.max(1, settings.minMessages)) return null;
-    if (full.reduce((sum, boundary) => sum + boundary.tokenEstimate, 0) < settings.minTokens) return null;
-    return full;
-  }
-  const requiredSavings = Math.max(0, Math.floor(options.requiredSavingsTokens));
+  const requiredSavings = Math.max(0, Math.floor(options?.requiredSavingsTokens ?? 0));
   const estimatorMargin = Math.max(0, Math.floor(options?.estimatorMarginTokens ?? 0));
   const targetSourceTokens = Math.max(settings.minTokens, requiredSavings + estimatorMargin);
   const minMessages = Math.max(1, settings.minMessages);
+  const eligible = boundaries.filter((boundary) => boundary.messageIndex <= maxSafeMessageIndex);
+  while (eligible[0]?.isSystemReminder) eligible.shift();
+  while (eligible[eligible.length - 1]?.isSystemReminder) eligible.pop();
 
-  let selectedEnd = -1;
-  let selectedTokens = 0;
-  for (let index = 0; index < boundaries.length; index++) {
-    selectedTokens += boundaries[index]!.tokenEstimate;
-    if (index + 1 >= minMessages && selectedTokens >= targetSourceTokens) {
-      selectedEnd = index;
-      break;
-    }
-  }
-  if (selectedEnd < 0) selectedEnd = boundaries.length - 1;
-
-  let selected = boundaries.slice(0, selectedEnd + 1);
-  if (state.conversationIndexSnapshot.length > 0) {
-    const groups = detectToolGroupSpans(state.conversationIndexSnapshot);
-    const startMessageIndex = selected[0]!.messageIndex;
-    let endMessageIndex = selected[selected.length - 1]!.messageIndex;
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const group of groups) {
-        const overlaps = group.startIndex <= endMessageIndex && group.endIndex >= startMessageIndex;
-        if (!overlaps) continue;
-        if (!group.complete) return null;
-        if (group.endIndex > endMessageIndex) {
-          if (group.endIndex > maxSafeMessageIndex) return null;
-          endMessageIndex = group.endIndex;
-          changed = true;
+  for (const run of protocolClosedBoundaryRuns(eligible, state.conversationIndexSnapshot)) {
+    while (run[0]?.isSystemReminder) run.shift();
+    while (run[run.length - 1]?.isSystemReminder) run.pop();
+    if (run.length === 0) continue;
+    let selectedEnd = run.length - 1;
+    if (options?.requiredSavingsTokens !== undefined) {
+      let selectedTokens = 0;
+      for (let index = 0; index < run.length; index++) {
+        selectedTokens += run[index]!.tokenEstimate;
+        if (index + 1 >= minMessages && selectedTokens >= targetSourceTokens) {
+          selectedEnd = index;
+          break;
         }
       }
     }
-    selected = boundaries.filter((boundary) => boundary.messageIndex <= endMessageIndex);
+    const closure = closeConversationRange(state.conversationIndexSnapshot, run[0]!.id, run[selectedEnd]!.id);
+    if (!closure || closure.incompleteToolGroup || closure.startIndex !== run[0]!.messageIndex ||
+      closure.endIndex > run[run.length - 1]!.messageIndex) continue;
+    const selected = run.filter((boundary) => boundary.messageIndex <= closure.endIndex);
+    if (selected[selected.length - 1]!.messageIndex !== closure.endIndex) continue;
+    if (selected.length < minMessages) continue;
+    if (selected.reduce((sum, boundary) => sum + boundary.tokenEstimate, 0) < settings.minTokens) continue;
+    return selected;
   }
-
-  while (selected.length > 0 && selected[0]!.isSystemReminder) selected = selected.slice(1);
-  while (selected.length > 0 && selected[selected.length - 1]!.isSystemReminder) selected = selected.slice(0, -1);
-  if (selected.length < minMessages) return null;
-  if (selected.reduce((sum, boundary) => sum + boundary.tokenEstimate, 0) < settings.minTokens) return null;
-  return selected;
+  return null;
 }
 
 export function detectCompressionCandidate(

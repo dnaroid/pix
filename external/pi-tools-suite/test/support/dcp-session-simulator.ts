@@ -12,6 +12,12 @@ import { createState, type DcpState } from "../../src/dcp/state.js";
 
 type Handler = (event: any, ctx: any) => any;
 
+interface ToolTurnOptions {
+  toolName?: string;
+  input?: Record<string, unknown>;
+  label?: string;
+}
+
 export interface DcpSessionSimulationSample {
   step: number;
   label: string;
@@ -271,13 +277,7 @@ export class DcpSessionSimulator {
     return projected;
   }
 
-  async toolTurn(options: {
-    toolName?: string;
-    input?: Record<string, unknown>;
-    output: string;
-    isError?: boolean;
-    label?: string;
-  }): Promise<DcpSessionSimulationSample> {
+  private async beginToolTurn(options: ToolTurnOptions) {
     const toolName = options.toolName ?? "read";
     const toolCallId = `session-sim-tool-${++this.toolCounter}`;
     const input = options.input ?? { path: `/fixture/${toolCallId}.txt` };
@@ -295,15 +295,26 @@ export class DcpSessionSimulator {
     this.manager.appendMessage(assistant as any);
     await this.emit("message_end", { type: "message_end", message: assistant });
     await this.emit("tool_call", { type: "tool_call", toolCallId, toolName, input });
+    return { sample, toolCallId, toolName };
+  }
 
+  /** Simulate process loss after persisting the call but before any result. */
+  async interruptedToolTurn(options: ToolTurnOptions): Promise<string> {
+    const { toolCallId } = await this.beginToolTurn(options);
+    return toolCallId;
+  }
+
+  private async finishToolTurn(toolCallId: string, toolName: string, output: {
+    content: any[]; details?: unknown; isError?: boolean;
+  }): Promise<void> {
     const result = {
       role: "toolResult",
       toolCallId,
       toolName,
-      isError: options.isError ?? false,
+      isError: output.isError ?? false,
       timestamp: this.nextTimestamp(),
-      content: [{ type: "text", text: options.output }],
-      details: {},
+      content: output.content,
+      details: output.details ?? {},
     };
     this.manager.appendMessage(result as any);
     await this.emit("tool_result", {
@@ -314,7 +325,25 @@ export class DcpSessionSimulator {
       details: result.details,
       isError: result.isError,
     });
+  }
+
+  async toolTurn(options: ToolTurnOptions & {
+    output: string;
+    isError?: boolean;
+  }): Promise<DcpSessionSimulationSample> {
+    const { sample, toolCallId, toolName } = await this.beginToolTurn(options);
+    await this.finishToolTurn(toolCallId, toolName, {
+      content: [{ type: "text", text: options.output }], isError: options.isError,
+    });
     return sample;
+  }
+
+  /** Model-selected compression, including provider delivery and persisted result. */
+  async compressTurn(args: Record<string, unknown>, label = "compress") {
+    const { sample, toolCallId, toolName } = await this.beginToolTurn({ toolName: "compress", input: args, label });
+    const result = await this.compress(toolCallId, args);
+    await this.finishToolTurn(toolCallId, toolName, result);
+    return { sample, result };
   }
 
   async assistantTurn(text: string, label = "assistant:stop"): Promise<DcpSessionSimulationSample> {

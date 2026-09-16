@@ -158,6 +158,16 @@ Active implemented contract.
 - Routine candidates pick the **minimal oldest protocol-safe prefix** that
   restores the required budget tokens, always older than the most recent
   `keepRecentTurns` user turns. `[confirmed by code, pruner-candidates.ts:222]`
+- Ordinary advisory candidates without a recovery target must pass the same
+  protocol-closure check as budget-aware candidates and the `compress` executor.
+  `protocol-closed-ranges.ts` partitions eligible history at incomplete tool
+  groups and policy-excluded entries, preserving completed runs on either side.
+  Runs below configured size minima are skipped, not combined across a blocker.
+  A rejected stale/manual selection reports bounded blocking assistant/missing
+  result IDs and closed alternatives within its original bounds; it never
+  fabricates a result or rewrites the selection/previously frozen reminder.
+  `[confirmed by test/dcp-closed-range-candidates.test.ts and
+  test/dcp-conversation-index-generative.test.ts]`
 - When candidate selection is serving active progress/capacity recovery, it can
   exclude already-compressed block placeholders while preserving the same
   retention and provider-evidence rules. Ordinary/non-pressure selection keeps
@@ -219,6 +229,15 @@ Active implemented contract.
   uses a real SessionManager/journal to verify tool-reminder delivery and restart
   byte equality, separately from automatic compression. Its report distinguishes
   reminders projected from provider turns that actually send them.
+- The session simulator also persists a `subagents(wait)` call without its
+  result, reopens that JSONL, and resumes work across new user turns. With auto
+  compression disabled, a scripted model consumes each delivered recommendation
+  and executes the registered `compress` tool with full provider/call/result
+  hooks. Two first-attempt positive-gain commits cover completed work before and
+  after the interrupted group; its assistant, active turn, and retained facts
+  survive, and another restart reproduces the exact projection. This is a
+  deterministic lifecycle/protocol regression, not a claim about live-model
+  choice. `[confirmed by test/dcp-session-sim-e2e.test.ts]`
 - The opt-in `test/prompt-evals/dcp-reminder-e2e.test.ts` feeds the same scene
   to a real model with alternative tools and no forced `tool_choice`. It requires
   an actual `compress` tool call and executes it through the registered tool,

@@ -120,6 +120,14 @@ is allowed to replace. They remain distinct because prior pruning or an earlier
 summary can make the two representations differ.
 
 Range compression must cover a protocol-closed assistant/tool-result group.
+Routine recommendations use the same closure authority even without a recovery
+token target. Historical incomplete groups split eligible history into closed
+runs; a too-small run does not prevent selection of later eligible work. The
+planner never bridges an excluded block/message or widens into protected recent
+turns to complete a group. An incomplete-group error names the blocking assistant
+and missing result IDs, and lists bounded protocol-closed alternatives inside
+the requested selection. It does not imply that an interrupted historical call
+will finish by waiting, fabricate its result, or mutate a rejected selection.
 Message-body compression can replace one supported tool-result body while
 preserving its role, call ID, tool name, error status, position, and siblings.
 Signed assistant content is never edited in place.

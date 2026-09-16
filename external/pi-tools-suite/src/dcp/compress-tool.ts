@@ -36,6 +36,7 @@ import {
 } from "./compression-preview.js"
 import { settleCompressionProgress } from "./compression-progress.js"
 import { estimateMessageTokens } from "./pruner-metadata.js"
+import { incompleteToolGroupGuidance } from "./protocol-closed-ranges.js"
 import {
   buildSummarySourceManifest,
   hashSummarySourceManifest,
@@ -190,7 +191,7 @@ function validateProtocolClosedRanges(plans: ResolvedRangeBoundaries[], state: D
     if (closure.incompleteToolGroup) {
       throw new Error(
         `Compression range ${plan.startId}..${plan.endId} intersects an incomplete tool group. ` +
-        "Wait until the complete assistant/tool-result group is present or choose another closed range.",
+        incompleteToolGroupGuidance(state.conversationIndexSnapshot, plan.startId, plan.endId),
       )
     }
     if (closure.expanded) {
