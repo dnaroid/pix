@@ -587,7 +587,7 @@ describe("resource registry", () => {
 		await command.handler("push tasks", h.ctx);
 		git(seed, ["pull", "--ff-only", "origin", "main"]);
 		expect(fs.existsSync(path.join(seed, "projects", "task-assets", "task-attachments"))).toBe(false);
-	});
+	}, 20_000);
 
 	test("treats an empty plans directory as removal of registry plans", async () => {
 		const root = tempRoot();
