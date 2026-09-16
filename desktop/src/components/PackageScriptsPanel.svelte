@@ -196,13 +196,14 @@
     <div class="relative min-h-0 min-w-0 w-full max-w-full overflow-hidden bg-code">
       {#if activeTerminal}
         {#key activeTerminal.id}
+          {@const terminalId = activeTerminal.id}
           <TerminalView
             bind:this={terminalView}
             initialContent={activeTerminal.output}
             running={activeTerminal.status === "running"}
             ariaLabel={`${activeTerminal.script} terminal`}
-            onInput={(data) => void writeTerminal(activeTerminal.id, data)}
-            onResize={(cols, rows) => void resizeTerminal(activeTerminal.id, cols, rows)}
+            onInput={(data) => writeTerminal(terminalId, data)}
+            onResize={(cols, rows) => resizeTerminal(terminalId, cols, rows)}
           />
         {/key}
       {:else if loading}

@@ -40,6 +40,7 @@ export class AcpJsonRpcConnection {
   private nextId = 1;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private disposed = false;
+  private disposal: Promise<void> | null = null;
 
   constructor(
     private readonly transport: AcpTransport,
@@ -50,8 +51,9 @@ export class AcpJsonRpcConnection {
     if (this.disposed) throw new Error("ACP client is disposed");
     await this.transport.start({
       onLine: (line) => this.receiveLine(line),
-      onStderr: (line) => this.handlers.onDiagnostic?.(line),
+      onStderr: (line) => { if (!this.disposed) this.handlers.onDiagnostic?.(line); },
       onExit: (exit) => {
+        if (this.disposed) return;
         this.rejectAll(new Error(exit.error ?? `pix-acp exited${exit.code === null ? "" : ` with code ${exit.code}`}`));
         this.handlers.onExit?.(exit);
       },
@@ -104,11 +106,12 @@ export class AcpJsonRpcConnection {
     return this.send({ jsonrpc: "2.0", method, params });
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) return;
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal;
     this.disposed = true;
     this.rejectAll(new Error("ACP client disposed"));
-    await this.transport.stop();
+    this.disposal = Promise.resolve().then(() => this.transport.stop());
+    return this.disposal;
   }
 
   private cancelRemoteRequest(id: JsonRpcId, sent: Promise<void>): void {
@@ -118,10 +121,12 @@ export class AcpJsonRpcConnection {
   }
 
   private async send(message: Record<string, unknown>): Promise<void> {
+    if (this.disposed) throw new Error("ACP client is disposed");
     await this.transport.send(JSON.stringify(message));
   }
 
   private receiveLine(line: string): void {
+    if (this.disposed) return;
     let message: unknown;
     try {
       message = JSON.parse(line);
@@ -134,7 +139,7 @@ export class AcpJsonRpcConnection {
       return;
     }
     void this.handleMessage(message).catch((error: unknown) => {
-      this.handlers.onDiagnostic?.(`failed to handle ACP message: ${toError(error).message}`);
+      if (!this.disposed) this.handlers.onDiagnostic?.(`failed to handle ACP message: ${toError(error).message}`);
     });
   }
 

@@ -34,6 +34,7 @@ export function createPreviewState(options: PreviewStoreOptions) {
   let filePreviewGeneration = 0;
 
   function show(target: PreviewTarget, navigation: PreviewNavigation): void {
+    filePreviewGeneration += 1;
     const opening = currentPreview(history) === undefined;
     if (opening) {
       workbenchAnchorId = options.activeWorkbenchTabId() ?? options.activeConversationWorkbenchTabId();

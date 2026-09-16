@@ -11,7 +11,8 @@ type ProjectDocumentsStoreOptions = {
   workspace: () => string;
   openProjectFile: (path: string) => void | Promise<void>;
   showEmptyFile: (file: ProjectFilePreview) => void;
-  afterSave: (file: ProjectFilePreview, workspace: string) => void;
+  previewId: () => number | undefined;
+  afterSave: (file: ProjectFilePreview, workspace: string, previewId: number | undefined) => void;
   clearError: () => void;
   reportError: (error: unknown) => void;
 };
@@ -19,9 +20,12 @@ type ProjectDocumentsStoreOptions = {
 export function createProjectDocumentsStore(options: ProjectDocumentsStoreOptions) {
   let snapshot = $state<ProjectDocumentsSnapshot>(EMPTY_PROJECT_DOCUMENTS);
   let generation = 0;
+  let workspaceGeneration = 0;
+  const writes = new Map<string, Promise<ProjectFilePreview>>();
 
   function reset(): void {
     generation += 1;
+    workspaceGeneration += 1;
     snapshot = EMPTY_PROJECT_DOCUMENTS;
   }
 
@@ -50,19 +54,26 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
   async function save(path: string, content: string): Promise<boolean> {
     const workspace = options.workspace();
     if (!workspace || !isEditableProjectMarkdown(path)) return false;
+    const requestGeneration = workspaceGeneration;
+    const previewId = options.previewId();
+    const isCurrent = () => requestGeneration === workspaceGeneration && options.workspace() === workspace;
+    const key = `${workspace}\0${path}`;
     options.clearError();
     try {
-      const saved = await invoke<ProjectFilePreview>("write_project_markdown", {
-        workspace,
-        path,
-        content,
+      const previous = writes.get(key) ?? Promise.resolve();
+      const pending = previous.catch(() => {}).then(() => invoke<ProjectFilePreview>("write_project_markdown", {
+        workspace, path, content,
+      })).finally(() => {
+        if (writes.get(key) === pending) writes.delete(key);
       });
-      if (options.workspace() !== workspace) return false;
-      options.afterSave(saved, workspace);
+      writes.set(key, pending);
+      const saved = await pending;
+      if (!isCurrent()) return false;
+      options.afterSave(saved, workspace, previewId);
       void load(workspace);
       return true;
     } catch (error) {
-      if (options.workspace() === workspace) options.reportError(error);
+      if (isCurrent()) options.reportError(error);
       return false;
     }
   }

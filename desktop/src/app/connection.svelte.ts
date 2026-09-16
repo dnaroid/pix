@@ -27,10 +27,28 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
   let status = $state<ConnectionStatus>("starting");
   let diagnostics = $state<string[]>([]);
   let imagePromptSupported = $state(false);
+  let disposed = false;
+  let generation = 0;
+  let connectPromise: Promise<void> | null = null;
   let reconnectPromise: Promise<void> | null = null;
+  let disposePromise: Promise<void> | null = null;
 
-  async function connect(): Promise<void> {
+  function connect(): Promise<void> {
+    if (disposed) return Promise.resolve();
+    if (reconnectPromise) return reconnectPromise;
+    if (connectPromise) return connectPromise;
+    if (client) return status === "ready" ? Promise.resolve() : reconnect();
+    const pending = performConnect(++generation).finally(() => {
+      if (connectPromise === pending) connectPromise = null;
+    });
+    connectPromise = pending;
+    return pending;
+  }
+
+  async function performConnect(requestGeneration: number): Promise<void> {
+    if (disposed || requestGeneration !== generation) return;
     status = "starting";
+    imagePromptSupported = false;
     options.setErrorMessage(null);
     const transport = new TauriAcpTransport();
     const next = new AcpClient(transport, {
@@ -55,17 +73,21 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
       },
       onExit: (exit) => {
         if (client !== next) return;
+        client = null;
+        generation += 1;
+        imagePromptSupported = false;
         options.onDisconnect();
         status = exit.requested ? "stopped" : "error";
         if (!exit.requested) {
           options.setErrorMessage(exit.error ?? `pix-acp exited${exit.code === null ? "" : ` with code ${exit.code}`}`);
         }
+        void next.dispose().catch(() => {});
       },
     });
     client = next;
     try {
       const initialization = await next.start();
-      if (client !== next) {
+      if (disposed || requestGeneration !== generation || client !== next) {
         await next.dispose();
         return;
       }
@@ -73,32 +95,46 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
       status = "ready";
       if (options.workspace()) await options.openWorkspaceSession();
     } catch (error) {
-      if (client !== next) return;
+      if (disposed || requestGeneration !== generation || client !== next) return;
       status = "error";
       options.reportError(error);
     }
   }
 
-  async function reconnect(): Promise<void> {
+  function reconnect(): Promise<void> {
+    if (disposed) return Promise.resolve();
     if (reconnectPromise) return reconnectPromise;
-    reconnectPromise = performReconnect().finally(() => {
-      reconnectPromise = null;
+    const pending = performReconnect(++generation).finally(() => {
+      if (reconnectPromise === pending) reconnectPromise = null;
     });
-    return reconnectPromise;
+    reconnectPromise = pending;
+    return pending;
   }
 
-  async function performReconnect(): Promise<void> {
+  async function performReconnect(requestGeneration: number): Promise<void> {
     const previous = client;
     client = null;
+    status = "starting";
+    imagePromptSupported = false;
     options.onDisconnect();
     await previous?.dispose().catch(() => {});
-    await connect();
+    await performConnect(requestGeneration);
   }
 
-  async function dispose(): Promise<void> {
+  function dispose(): Promise<void> {
+    if (disposePromise) return disposePromise;
+    disposed = true;
+    generation += 1;
     const current = client;
     client = null;
-    await current?.dispose();
+    status = "stopped";
+    imagePromptSupported = false;
+    disposePromise = Promise.all([
+      current?.dispose(),
+      connectPromise?.catch(() => {}),
+      reconnectPromise?.catch(() => {}),
+    ]).then(() => {});
+    return disposePromise;
   }
 
   return {

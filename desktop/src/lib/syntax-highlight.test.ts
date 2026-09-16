@@ -2,6 +2,28 @@ import { describe, expect, it } from "vitest";
 import { highlightCode, languageForFilePath, languageForReadTool } from "./syntax-highlight";
 
 describe("syntax highlighting", () => {
+  it("keeps large code as escaped, untruncated lines without token markup", () => {
+    const line = 'const value = "<script>&\\\"";';
+    const source = `${Array.from({ length: 4000 }, () => line).join("\n")}\n`;
+    const result = highlightCode(source, "typescript");
+    expect(result.language).toBe("plaintext");
+    expect(result.html).not.toContain("sh__token");
+    expect(result.html).not.toContain("<script>");
+    expect(result.html.match(/class="sh__line"/g)).toHaveLength(4001);
+    expect(result.html.match(/&lt;script&gt;&amp;/g)).toHaveLength(4000);
+    expect(result.html.length).toBeLessThan(source.length * 4);
+    expect(result.html.endsWith('<span class="sh__line"></span>')).toBe(true);
+  });
+
+  it("preserves empty lines and CRLF in plaintext fallback", () => {
+    expect(highlightCode("\r\ntext\r\n\n").html).toBe([
+      '<span class="sh__line">\r</span>',
+      '<span class="sh__line">text\r</span>',
+      '<span class="sh__line"></span>',
+      '<span class="sh__line"></span>',
+    ].join("\n"));
+  });
+
   it("normalizes Markdown aliases and safely falls back to plaintext", () => {
     const typescript = highlightCode("const ready: boolean = true;", "tsx");
     const unknown = highlightCode("<script>alert(1)</script>", "not-a-language");

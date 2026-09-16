@@ -76,6 +76,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Raw absolute paths, URL-like destinations other than the separately supported `file://` flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
 - An unclosed fenced code block remains visible while the message streams.
 - Code and tables may scroll horizontally instead of widening the transcript.
+- Shared source/fenced-code highlighting skips tokenization for blocks larger than 32,768 UTF-16 code units and for unknown/plaintext languages. These blocks remain fully escaped, untruncated plaintext with the same per-line structure, preserving source line numbers and line-range navigation without generating token markup for the whole large input.
 - Markdown parsing uses a small local parser rather than a parser/sanitizer runtime dependency.
 
 ## Related files
@@ -89,6 +90,8 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/markdown-inline.ts`
 - `desktop/src/lib/markdown-links.ts`
 - `desktop/src/lib/markdown.test.ts`
+- `desktop/src/lib/syntax-highlight.ts`
+- `desktop/src/lib/syntax-highlight.test.ts`
 - `desktop/src/lib/preview-history.ts`
 - `desktop/src/lib/preview-history.test.ts`
 - `desktop/src/lib/project-files.ts`
@@ -118,6 +121,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   unsafe input, DCP control-block stripping/fail-open streaming behavior,
   Mermaid fallback/security, and incomplete fences.
 - Rust tests cover workspace/home confinement and preview size/UTF-8 validation.
+- Syntax-highlighting tests cover the large-source fallback, escaped markup, retained empty/CRLF lines, and unchanged small-source highlighting.
 - Rust tests also cover project/absolute media confinement, traversal, unsupported
   local binary files, and allowed media resolution.
 - `npm run test`, `npm run check`, and `npm run build:web` pass in `desktop/`.

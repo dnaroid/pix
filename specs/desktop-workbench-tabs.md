@@ -26,6 +26,8 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 - Conversation, Preview, and Git Diff remain mounted while merely hidden by another workbench tab so composer/transcript state, Preview edit draft/history/scroll, media state, and Git review output do not reset on ordinary tab switching.
 - Switching to a different conversation selects that session's workbench tab but does not discard workspace-scoped Preview or Git Diff tabs. Their state remains available until explicitly closed or the workspace lifecycle invalidates it.
 - Preview shows a dirty indicator while its Markdown draft differs from the loaded file. Closing dirty Preview asks before discard; cancellation keeps the tab/state intact. Workspace changes and project-reloading Git mutations keep the existing dirty-preview confirmation.
+- File reads and attachment preparation share Preview load ownership. Closing, navigating, opening an immediate preview, or invalidating the workspace prevents an older load from replacing/reopening the current Preview or reporting an obsolete error.
+- Markdown saves capture their workspace and originating Preview entry. Writes to the same workspace/path are serialized; a late save cannot replace a reopened entry with the same path, unlock another edit's save, or close a newer edit. Text typed while saving remains an editable dirty draft rather than being replaced by the saved snapshot.
 - Git Diff shows a compact busy indicator during LLM review/resolve work without becoming a modal.
 - The unified tablist uses roving focus: Left/Right and Home/End move focus without activation, Enter/Space activate via native button behavior, Delete closes a closable focused tab, and middle-click uses the same close path.
 - Closing Preview/Diff removes only that UI surface. Closing a session uses the existing session-close flow, including running-session confirmation and ACP teardown. When an active session closes next to Preview/Diff, Pix may keep the necessary fallback session runtime active underneath while selecting the logical neighboring workbench tab.
@@ -48,6 +50,9 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 - `desktop/src/app/workbench-controller.ts`
 - `desktop/src/app/desktop-presentation-state.svelte.ts`
 - `desktop/src/app/preview-state.svelte.ts`
+- `desktop/src/app/preview-file-io.ts`
+- `desktop/src/app/project-documents.svelte.ts`
+- `desktop/src/app/desktop-project-services.ts`
 - `desktop/src/app/session-tab-controller.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/PreviewPane.svelte`
@@ -68,6 +73,7 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 - `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist, semantic session-status icon set, and kind-specific close dispatch.
 - `desktop/src/app/workbench-model.test.ts` covers propagation of fork metadata into the session-tab presentation model; `desktop/src/lib/session-tab-status.test.ts` covers status precedence and unseen-completion semantics.
 - Existing session-tab/draft tests verify that session membership and lazy draft materialization remain session-only.
+- `desktop/src/app/preview.test.ts`, `desktop/src/app/project-documents.test.ts`, and `desktop/src/components/preview-editor-controller.test.ts` use controlled promises to verify late-load/save ownership, same-file write serialization, and preservation of newer drafts.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

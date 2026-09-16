@@ -40,6 +40,7 @@ type SessionCoordinatorOptions = {
 
 export function createSessionCoordinator(options: SessionCoordinatorOptions) {
   function resetAfterDisconnect(): void {
+    options.updates.reset();
     options.closeProjectSelector();
     options.closeSessionSelector();
     options.clearCommandPicker();
@@ -90,6 +91,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
   }
 
   function forgetRuntime(sessionId: string): void {
+    options.updates.discardSession(sessionId);
     options.activity.markForgotten(sessionId);
     options.cancelPendingElicitationForSession(sessionId);
     options.runtime.forget(sessionId);

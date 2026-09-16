@@ -1,3 +1,4 @@
+import { untrack } from "svelte";
 import type { ProjectFilePreview } from "../lib/project-files";
 
 interface PreviewEditorControllerOptions {
@@ -15,6 +16,9 @@ export function createPreviewEditorController(options: PreviewEditorControllerOp
     draft: "",
     saving: false,
   });
+  let sourceId = options.previewId();
+  let sourcePath = options.file()?.path;
+  let editGeneration = 0;
 
   function canEdit(): boolean {
     return Boolean(
@@ -27,40 +31,65 @@ export function createPreviewEditorController(options: PreviewEditorControllerOp
 
   function dirty(): boolean {
     const file = options.file();
-    return Boolean(file && state.draft !== file.content);
+    return Boolean(state.editing && file && state.draft !== file.content);
   }
 
-  $effect(() => {
-    options.previewId();
-    state.draft = options.file()?.content ?? "";
-    state.editing = false;
-    state.saving = false;
-  });
+  function synchronizeSource(): void {
+    const id = options.previewId();
+    const file = options.file();
+    const content = file?.content ?? "";
+    untrack(() => {
+      if (sourceId !== id || sourcePath !== file?.path) {
+        editGeneration += 1;
+        sourceId = id;
+        sourcePath = file?.path;
+        state.editing = false;
+        state.saving = false;
+      }
+      // A save updates the loaded file before its promise settles. Keep text
+      // typed during that write instead of replacing it with the saved snapshot.
+      if (!state.editing) state.draft = content;
+    });
+  }
+
+  $effect(synchronizeSource);
+  $effect(() => () => { editGeneration += 1; });
 
   $effect(() => {
     options.onDirtyChange()?.(dirty());
   });
 
   function begin(): void {
+    synchronizeSource();
+    editGeneration += 1;
+    state.saving = false;
     state.draft = options.file()?.content ?? "";
     state.editing = true;
   }
 
   function cancel(): void {
+    editGeneration += 1;
+    state.saving = false;
     state.draft = options.file()?.content ?? "";
     state.editing = false;
   }
 
   async function save(): Promise<void> {
+    synchronizeSource();
     const file = options.file();
     const saveFile = options.onSaveProjectFile();
     if (!file || !canEdit() || !saveFile || state.saving || !dirty()) return;
+    const generation = ++editGeneration;
+    const previewId = options.previewId();
+    const draft = state.draft;
+    const isCurrent = () => generation === editGeneration
+      && options.previewId() === previewId && options.file()?.path === file.path;
     state.saving = true;
     try {
-      const saved = await saveFile(file.path, state.draft);
-      if (saved) state.editing = false;
+      const saved = await saveFile(file.path, draft);
+      if (saved && isCurrent() && state.draft === draft) state.editing = false;
     } finally {
-      state.saving = false;
+      if (isCurrent()) state.saving = false;
     }
   }
 

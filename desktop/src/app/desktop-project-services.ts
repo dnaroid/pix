@@ -60,8 +60,9 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     workspace: options.workspace,
     openProjectFile: preview.openProjectFile,
     showEmptyFile: (file) => preview.show({ kind: "file", file }, "replace"),
-    afterSave: (file) => {
-      preview.replaceCurrentFile(file);
+    previewId: () => preview.active?.id,
+    afterSave: (file, _workspace, previewId) => {
+      if (preview.active?.id === previewId) preview.replaceCurrentFile(file);
       registry.scheduleProjectSync(file.path === PROJECT_TODO_PATH ? "todo" : "plans");
     },
     clearError: options.clearError,

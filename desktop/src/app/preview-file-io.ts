@@ -14,14 +14,18 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
   const fileValidationRequests = new Map<string, Promise<boolean>>();
 
   async function activateAttachment(attachment: Attachment): Promise<void> {
+    const generation = state.beginFileLoad();
+    const workspace = options.workspace();
+    const isCurrent = () => state.fileLoadIsCurrent(generation) && options.workspace() === workspace;
     if ((attachment.deferredImageId && !attachment.dataUrl) || attachment.path) {
       try {
         await options.prepareAttachment(attachment);
       } catch (error) {
-        options.reportError(error);
+        if (isCurrent()) options.reportError(error);
         return;
       }
     }
+    if (!isCurrent()) return;
     const preparedAttachment = options.preparedAttachment(attachment);
     if (preparedAttachment.kind === "image" || preparedAttachment.kind === "video") {
       state.show({ kind: "attachment", attachment: preparedAttachment }, "replace");
@@ -34,7 +38,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     try {
       await invoke("open_attachment", { path: preparedAttachment.path });
     } catch (error) {
-      options.reportError(error);
+      if (isCurrent()) options.reportError(error);
     }
   }
 
@@ -89,7 +93,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
       if (!state.fileLoadIsCurrent(generation) || options.workspace() !== workspace) return;
       state.show({ kind: "file", file: preview, ...(lineRange ? { lineRange } : {}) }, navigation);
     } catch (error) {
-      if (state.fileLoadIsCurrent(generation)) options.reportError(error);
+      if (state.fileLoadIsCurrent(generation) && options.workspace() === workspace) options.reportError(error);
     }
   }
 

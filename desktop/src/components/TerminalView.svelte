@@ -45,9 +45,6 @@
   let inputTimer: number | null = null;
   let resizeTimer: number | null = null;
   let renderedControlledContent = "";
-  // Backend limits each IPC write to 64 KiB. 16K UTF-16 code units stays
-  // comfortably below that even for multi-byte UTF-8 input/pastes.
-  const MAX_INPUT_CHUNK_CHARS = 16 * 1024;
 
   export function write(data: string): void {
     if (data) terminal?.write(data);
@@ -218,9 +215,8 @@
     if (!inputBuffer) return;
     const pending = inputBuffer;
     inputBuffer = "";
-    for (let offset = 0; offset < pending.length; offset += MAX_INPUT_CHUNK_CHARS) {
-      void onInput(pending.slice(offset, offset + MAX_INPUT_CHUNK_CHARS));
-    }
+    // The controller serializes/chunks per PTY, including programmatic input.
+    void onInput(pending);
   }
 
   function terminalTheme(node: HTMLElement) {

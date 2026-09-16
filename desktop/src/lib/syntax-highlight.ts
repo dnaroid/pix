@@ -1,16 +1,24 @@
 import { highlight, type LanguageName } from "sugar-high";
 import { lang } from "sugar-high/lang";
+import { escapeHtml } from "./markdown-escape";
 
 export interface HighlightedCode {
   readonly html: string;
   readonly language: LanguageName;
 }
 
-/** Highlight code with a fast plaintext fallback when the hint is unknown. */
+// Token markup can be tens of times larger than the source. Avoid lexing and
+// creating that many DOM nodes synchronously for large previews/tool results.
+const MAX_HIGHLIGHT_CHARS = 32 * 1024;
+
+/** Keep source and line navigation intact even when token highlighting is too expensive. */
 export function highlightCode(code: string, languageHint?: string): HighlightedCode {
-  const language = languageHint ? lang(languageHint) ?? "plaintext" : "plaintext";
+  let language: LanguageName = "plaintext";
+  if (code.length <= MAX_HIGHLIGHT_CHARS && languageHint) language = lang(languageHint) ?? "plaintext";
   return {
-    html: highlight(code, { lang: language }),
+    html: language === "plaintext"
+      ? code.split("\n").map((line) => `<span class="sh__line">${escapeHtml(line)}</span>`).join("\n")
+      : highlight(code, { lang: language }),
     language,
   };
 }
