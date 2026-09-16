@@ -122,6 +122,7 @@ export function gitReviewHasFindings(review: string | undefined): boolean {
   const normalized = review?.trim().toLowerCase();
   if (!normalized) return false;
   if (normalized.startsWith("### review failed")) return false;
+  if (normalized === "no diff to review.") return false;
 
   const noFindingsPatterns = [
     /\bno significant findings\b/u,

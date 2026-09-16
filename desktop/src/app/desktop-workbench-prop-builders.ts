@@ -251,10 +251,11 @@ export function buildWorkbenchEditorProps(
     gitDiff: gitDiffPreview ? {
       diff: gitDiffPreview,
       review: options.git.diffReview,
+      reviewStale: options.git.reviewResult?.stale ?? false,
       reviewLoading: options.git.llmActionId?.startsWith("review:") === true,
       resolveLoading: options.git.resolveRunning,
-      canReview: Boolean(options.clientAvailable() && sessionId && options.activeSessionRuntimeReady()),
-      canResolve: Boolean(options.clientAvailable() && options.workspace() && options.statusReady() && !options.operationRunning()),
+      canReview: Boolean(options.clientAvailable() && sessionId && options.activeSessionRuntimeReady() && !options.git.actionId && !options.git.llmActionId && !options.git.resolveRunning),
+      canResolve: Boolean(options.clientAvailable() && options.workspace() && options.statusReady() && !options.operationRunning() && !options.git.actionId && !options.git.llmActionId && !options.git.reviewResult?.stale),
       onValidateProjectFile: options.preview.validateProjectFile,
       onValidateLocalFile: options.preview.validateLocalFile,
       onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),

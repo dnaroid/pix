@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { GitDiff, GitDiffScope, GitSnapshot } from "../lib/git";
+import { sameGitDiff, gitPushBlockedReason, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 
 type GitWorkspaceStoreOptions = {
@@ -21,13 +22,20 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let llmActionId = $state<string | null>(null);
   let resolveRunning = $state(false);
   let diffPreview = $state<GitDiff | null>(null);
-  let diffReview = $state<string | undefined>(undefined);
+  let reviewResult = $state<GitReviewResult | null>(null);
+  let notice = $state<string | null>(null);
+  let details = $state<GitRepositoryDetails | null>(null);
+  let detailsLoading = $state(false);
+  let detailsGeneration = 0;
+  let generation = 0;
   let workbenchAnchorId = $state<WorkbenchTabId | null>(null);
   let workbenchOpenedOrder = $state(0);
   let loadGeneration = 0;
   let statusBranchGeneration = 0;
 
   function reset(): void {
+    generation += 1;
+    detailsGeneration += 1;
     loadGeneration += 1;
     statusBranchGeneration += 1;
     snapshot = undefined;
@@ -37,27 +45,38 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     actionId = null;
     llmActionId = null;
     resolveRunning = false;
+    reviewResult = null;
+    notice = null;
+    details = null;
+    detailsLoading = false;
     closeDiff();
   }
 
   async function refresh(): Promise<void> {
     const workspace = options.workspace();
     if (!workspace) return;
-    const generation = ++loadGeneration;
+    const requestGeneration = ++loadGeneration;
     loading = true;
     error = null;
     try {
       const next = await invoke<GitSnapshot>("git_status", { workspace });
-      if (generation !== loadGeneration || options.workspace() !== workspace) return;
+      if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
       snapshot = next;
       statusBranchGeneration += 1;
       statusBranch = next.detached || next.branch === "HEAD" ? undefined : next.branch;
+      const review = reviewResult;
+      if (review && !review.stale && llmActionId === null) {
+        const current = await requestDiff(review.diff.path, review.diff.scope);
+        if (requestGeneration === loadGeneration && reviewResult === review && (!current || !sameGitDiff(current, review.diff))) {
+          reviewResult = { ...review, stale: true };
+        }
+      }
     } catch (reason) {
-      if (generation !== loadGeneration || options.workspace() !== workspace) return;
+      if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
       snapshot = undefined;
       error = reason instanceof Error ? reason.message : String(reason);
     } finally {
-      if (generation === loadGeneration && options.workspace() === workspace) loading = false;
+      if (requestGeneration === loadGeneration && options.workspace() === workspace) loading = false;
     }
   }
 
@@ -83,10 +102,12 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     nextActionId: string,
     command: string,
     payload: Record<string, unknown> = {},
-    mutationOptions: { reloadProject?: boolean } = {},
+    mutationOptions: { reloadProject?: boolean; success?: string } = {},
   ): Promise<boolean> {
     const workspace = options.workspace();
-    if (!workspace || actionId !== null) return false;
+    const requestGeneration = generation;
+    const current = () => options.workspace() === workspace && generation === requestGeneration;
+    if (!workspace || actionId !== null || llmActionId !== null || resolveRunning) return false;
     if (
       mutationOptions.reloadProject
       && options.previewDirty()
@@ -94,37 +115,91 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     ) return false;
     actionId = nextActionId;
     error = null;
+    notice = null;
     try {
       await invoke(command, { workspace, ...payload });
-      if (options.workspace() !== workspace) return false;
+      if (!current()) return false;
+      if (command !== "git_fetch" && command !== "git_push") invalidateReview();
       if (mutationOptions.reloadProject) {
         closeDiff();
         await options.reloadProject(workspace);
       }
       await refresh();
-      return options.workspace() === workspace;
+      if (!current()) return false;
+      notice = mutationOptions.success ?? null;
+      if (details) void loadDetails();
+      return true;
     } catch (reason) {
-      if (options.workspace() === workspace) error = reason instanceof Error ? reason.message : String(reason);
+      if (current()) {
+        const detail = reason instanceof Error ? reason.message : String(reason);
+        // Failed pull/stash apply can still have changed refs or produced conflicts.
+        invalidateReview();
+        await refresh();
+        if (current()) error = detail;
+      }
       return false;
     } finally {
-      if (options.workspace() === workspace && actionId === nextActionId) actionId = null;
+      if (current() && actionId === nextActionId) actionId = null;
     }
   }
 
-  function stage(path?: string): void {
-    void runMutation(path ? `stage:${path}` : "stage:all", "git_stage", { path: path ?? null });
+  function stage(path?: string): Promise<boolean> {
+    return runMutation(path ? `stage:${path}` : "stage:all", "git_stage", { path: path ?? null });
   }
 
   function unstage(path?: string): void {
     void runMutation(path ? `unstage:${path}` : "unstage:all", "git_unstage", { path: path ?? null });
   }
 
-  async function commit(message: string): Promise<boolean> {
-    return runMutation("commit", "git_commit", { message });
+  async function commit(message: string, pushAfterCommit = false): Promise<boolean> {
+    const workspace = options.workspace();
+    const requestGeneration = generation;
+    const current = () => options.workspace() === workspace && generation === requestGeneration;
+    if (!workspace || !message.trim() || actionId || llmActionId || resolveRunning) return false;
+    if (snapshot?.changes.some((change) => change.conflicted)) {
+      error = "Resolve merge conflicts before committing";
+      return false;
+    }
+    if (pushAfterCommit && gitPushBlockedReason(snapshot)) {
+      error = gitPushBlockedReason(snapshot);
+      return false;
+    }
+    let committed = false;
+    actionId = "commit";
+    error = null;
+    notice = null;
+    try {
+      await invoke("git_commit", { workspace, message });
+      committed = true;
+      if (!current()) return true;
+      invalidateReview();
+      if (pushAfterCommit) {
+        actionId = "push";
+        await invoke("git_push", { workspace });
+      }
+      if (current()) notice = pushAfterCommit ? "Committed and pushed successfully." : "Commit created locally. Ready to push.";
+    } catch (reason) {
+      if (current()) {
+        const detail = reason instanceof Error ? reason.message : String(reason);
+        error = committed ? `Commit created, but push failed. Retry Push; do not commit again. ${detail}` : detail;
+      }
+    } finally {
+      if (current()) {
+        const mutationError = error;
+        await refresh();
+        if (current()) {
+          if (mutationError) error = mutationError;
+          actionId = null;
+          if (details) void loadDetails();
+        }
+      }
+    }
+    // A failed push must not leave a message that invites a duplicate commit.
+    return committed;
   }
 
   function push(): void {
-    void runMutation("push", "git_push");
+    void runMutation("push", "git_push", {}, { success: "Branch pushed successfully." });
   }
 
   function switchBranch(branch: string): void {
@@ -137,6 +212,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
 
   async function requestDiff(path: string | undefined, scope: GitDiffScope): Promise<GitDiff | undefined> {
     const workspace = options.workspace();
+    const requestGeneration = generation;
     if (!workspace) return undefined;
     try {
       const diff = await invoke<GitDiff>("git_diff", {
@@ -144,9 +220,9 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
         path: path ?? null,
         scope,
       });
-      return options.workspace() === workspace ? diff : undefined;
+      return options.workspace() === workspace && generation === requestGeneration ? diff : undefined;
     } catch (reason) {
-      if (options.workspace() === workspace) error = reason instanceof Error ? reason.message : String(reason);
+      if (options.workspace() === workspace && generation === requestGeneration) error = reason instanceof Error ? reason.message : String(reason);
       return undefined;
     }
   }
@@ -154,6 +230,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   async function openDiff(path: string | undefined, scope: GitDiffScope): Promise<void> {
     if (actionId !== null) return;
     const nextActionId = `diff:${scope}:${path ?? "all"}`;
+    const requestGeneration = generation;
     actionId = nextActionId;
     error = null;
     try {
@@ -161,7 +238,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       if (!diff) return;
       showDiff(diff);
     } finally {
-      if (actionId === nextActionId) actionId = null;
+      if (generation === requestGeneration && actionId === nextActionId) actionId = null;
     }
   }
 
@@ -171,13 +248,11 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       workbenchOpenedOrder = options.nextWorkbenchAuxOrder();
     }
     diffPreview = diff;
-    diffReview = undefined;
     options.setActiveWorkbenchTabId("git-diff");
   }
 
   function closeDiff(): void {
     diffPreview = null;
-    diffReview = undefined;
     workbenchAnchorId = null;
     workbenchOpenedOrder = 0;
   }
@@ -187,22 +262,67 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   }
 
   function beginLlmAction(id: string): boolean {
-    if (llmActionId !== null) return false;
+    if (llmActionId !== null || actionId !== null || resolveRunning) return false;
     llmActionId = id;
     error = null;
     return true;
   }
 
-  function finishLlmAction(id: string): void {
-    if (llmActionId === id) llmActionId = null;
+  function finishLlmAction(id: string, requestGeneration = generation): void {
+    if (generation === requestGeneration && llmActionId === id) llmActionId = null;
   }
 
   function setError(message: string | null): void {
     error = message;
   }
 
-  function setReview(review: string | undefined): void {
-    diffReview = review;
+  function setReview(review: string | undefined, diff = diffPreview): void {
+    reviewResult = review && diff ? { diff, text: review, stale: false } : null;
+  }
+
+  function invalidateReview(): void {
+    if (reviewResult) reviewResult = { ...reviewResult, stale: true };
+  }
+
+  function showReview(): void {
+    if (reviewResult) showDiff(reviewResult.diff);
+  }
+
+  async function loadDetails(): Promise<void> {
+    const workspace = options.workspace();
+    const requestGeneration = generation;
+    const request = ++detailsGeneration;
+    if (!workspace) return;
+    const current = () => workspace === options.workspace() && requestGeneration === generation && request === detailsGeneration;
+    detailsLoading = true;
+    try {
+      const [history, stashes] = await Promise.all([
+        invoke<GitHistoryEntry[]>("git_history", { workspace }),
+        invoke<GitStashEntry[]>("git_stash_list", { workspace }),
+      ]);
+      if (current()) details = { history, stashes };
+    } catch (reason) {
+      if (current()) error = reason instanceof Error ? reason.message : String(reason);
+    } finally {
+      if (current()) detailsLoading = false;
+    }
+  }
+
+  function repositoryAction(action: GitRepositoryAction, target?: string): Promise<boolean> {
+    if ((action === "discard" || action === "stash-apply") && !target) return Promise.resolve(false);
+    if (action === "discard" && !window.confirm(`Discard unstaged changes in ${target}?\n\nStaged changes are kept. This cannot be undone.`)) return Promise.resolve(false);
+    const commands = {
+      fetch: "git_fetch", pull: "git_pull", "stash-save": "git_stash_save",
+      "stash-apply": "git_stash_apply", discard: "git_discard_file",
+    } as const;
+    const success = {
+      fetch: "Remotes fetched.", pull: "Branch updated (fast-forward only).",
+      "stash-save": "Changes saved to stash, including untracked files.",
+      "stash-apply": "Stash restored. The saved stash is kept.", discard: "Unstaged changes discarded. Staged changes are kept.",
+    } as const;
+    return runMutation(action, commands[action], action === "discard" ? { path: target } : action === "stash-apply" ? { reference: target } : {}, {
+      reloadProject: action !== "fetch", success: success[action],
+    });
   }
 
   function setResolveRunning(running: boolean): void {
@@ -218,7 +338,12 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     get llmActionId() { return llmActionId; },
     get resolveRunning() { return resolveRunning; },
     get diffPreview() { return diffPreview; },
-    get diffReview() { return diffReview; },
+    get diffReview() { return sameGitDiff(reviewResult?.diff, diffPreview) ? reviewResult?.text : undefined; },
+    get reviewResult() { return reviewResult; },
+    get notice() { return notice; },
+    get details() { return details; },
+    get detailsLoading() { return detailsLoading; },
+    get generation() { return generation; },
     get workbenchAnchorId() { return workbenchAnchorId; },
     get workbenchOpenedOrder() { return workbenchOpenedOrder; },
     reset,
@@ -240,6 +365,10 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     finishLlmAction,
     setError,
     setReview,
+    invalidateReview,
+    showReview,
+    loadDetails,
+    repositoryAction,
     setResolveRunning,
   };
 }

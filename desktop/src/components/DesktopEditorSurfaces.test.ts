@@ -22,7 +22,7 @@ describe("desktop editor work surfaces", () => {
     expect(diffSource).toContain("Copy prompt");
     expect(diffSource).toContain('copyPromptConfirmed ? "Copied" : "Copy prompt"');
     expect(diffSource).toContain('aria-live="polite"');
-    expect(diffSource).toContain("const copyPromptDisabled = $derived(!canResolve || reviewLoading || resolveLoading)");
+    expect(diffSource).toContain("const copyPromptDisabled = $derived(!canResolve || reviewLoading || resolveLoading || reviewStale)");
     expect(diffSource).toContain("disabled={copyPromptDisabled}");
     expect(workbenchBuilderSource).toContain("gitAssist.copyReviewResolutionPrompt()");
   });

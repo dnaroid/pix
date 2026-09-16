@@ -8,6 +8,7 @@ import {
 import type { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
+import { sameGitDiff } from "../lib/git-workflow";
 
 type GitWorkspaceStore = ReturnType<typeof createGitWorkspaceStore>;
 type SessionRuntimeStore = ReturnType<typeof createSessionRuntimeStore>;
@@ -32,9 +33,10 @@ type GitAssistOptions = {
 
 export function createGitAssist(options: GitAssistOptions) {
   function currentResolutionPrompt(): string | undefined {
-    const diff = options.git.diffPreview;
-    const review = options.git.diffReview;
-    if (!diff || !review || !gitReviewHasFindings(review)) return undefined;
+    const result = options.git.reviewResult;
+    const diff = result?.diff;
+    const review = result?.text;
+    if (!diff || !review || result?.stale || !gitReviewHasFindings(review)) return undefined;
     return gitReviewResolutionPrompt(diff, review);
   }
 
@@ -42,6 +44,7 @@ export function createGitAssist(options: GitAssistOptions) {
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
     const requestWorkspace = options.workspace();
+    const requestGeneration = options.git.generation;
     if (
       !requestClient
       || !sessionId
@@ -52,19 +55,19 @@ export function createGitAssist(options: GitAssistOptions) {
     const actionId = `review:${path ? `${scope}:${path}` : "all"}`;
     if (!options.git.beginLlmAction(actionId)) return;
     try {
-      const current = options.git.diffPreview;
-      const diff = current && current.path === path && current.scope === scope
-        ? current
-        : await options.git.requestDiff(path, scope);
+      // An open editor is a snapshot, not a source for a fresh review.
+      const diff = await options.git.requestDiff(path, scope);
       if (
         !diff
         || requestClient !== options.client()
         || requestWorkspace !== options.workspace()
         || sessionId !== options.activeSessionId()
+        || requestGeneration !== options.git.generation
       ) return;
       options.git.showDiff(diff);
+      options.git.setReview(undefined);
       if (!diff.content.trim()) {
-        options.git.setReview("No diff to review.");
+        options.git.setReview("No diff to review.", diff);
         return;
       }
       const review = await requestClient.gitAssist(sessionId, "review", gitDiffForLlm(diff));
@@ -72,22 +75,28 @@ export function createGitAssist(options: GitAssistOptions) {
         requestClient !== options.client()
         || requestWorkspace !== options.workspace()
         || sessionId !== options.activeSessionId()
+        || requestGeneration !== options.git.generation
       ) return;
-      if (options.git.diffPreview?.path !== diff.path || options.git.diffPreview?.scope !== diff.scope) return;
-      options.git.setReview(review);
+      options.git.setReview(review, diff);
+      const current = await options.git.requestDiff(path, scope);
+      if (requestClient === options.client() && requestWorkspace === options.workspace()
+        && requestGeneration === options.git.generation && options.git.reviewResult?.text === review
+        && (!current || !sameGitDiff(current, diff))) options.git.invalidateReview();
     } catch (error) {
       if (
         requestClient === options.client()
         && requestWorkspace === options.workspace()
         && sessionId === options.activeSessionId()
+        && requestGeneration === options.git.generation
       ) {
         const detail = error instanceof Error ? error.message : String(error);
+        options.git.setError(`Review failed: ${detail}`);
         if (options.git.diffPreview?.path === path && options.git.diffPreview?.scope === scope) {
           options.git.setReview(`### Review failed\n\n${detail}`);
         }
       }
     } finally {
-      options.git.finishLlmAction(actionId);
+      options.git.finishLlmAction(actionId, requestGeneration);
     }
   }
 
@@ -95,6 +104,9 @@ export function createGitAssist(options: GitAssistOptions) {
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
     const requestWorkspace = options.workspace();
+    const requestGeneration = options.git.generation;
+    const current = () => requestClient === options.client() && sessionId === options.activeSessionId()
+      && requestWorkspace === options.workspace() && requestGeneration === options.git.generation;
     if (
       !requestClient
       || !sessionId
@@ -106,37 +118,41 @@ export function createGitAssist(options: GitAssistOptions) {
     if (!options.git.beginLlmAction(actionId)) return undefined;
     try {
       const diff = await options.git.requestDiff(undefined, "staged");
-      if (
-        !diff
-        || requestClient !== options.client()
-        || requestWorkspace !== options.workspace()
-        || sessionId !== options.activeSessionId()
-      ) return undefined;
+      if (!diff || !current()) return undefined;
       if (!diff.content.trim()) {
         options.git.setError("There are no staged changes to describe.");
         return undefined;
       }
-      return await requestClient.gitAssist(sessionId, "commit-message", gitDiffForLlm(diff));
+      const message = await requestClient.gitAssist(sessionId, "commit-message", gitDiffForLlm(diff));
+      if (!current()) return undefined;
+      const latest = await options.git.requestDiff(undefined, "staged");
+      if (!current()) return undefined;
+      if (!latest || !sameGitDiff(diff, latest)) {
+        options.git.setError("Staged changes changed during generation. Generate the message again.");
+        return undefined;
+      }
+      return message;
     } catch (error) {
-      if (
-        requestClient === options.client()
-        && requestWorkspace === options.workspace()
-        && sessionId === options.activeSessionId()
-      ) options.git.setError(error instanceof Error ? error.message : String(error));
+      if (current()) options.git.setError(error instanceof Error ? error.message : String(error));
       return undefined;
     } finally {
-      options.git.finishLlmAction(actionId);
+      options.git.finishLlmAction(actionId, requestGeneration);
     }
   }
 
   async function resolveReviewInNewSession(): Promise<void> {
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
+    const requestGeneration = options.git.generation;
+    const reviewedDiff = options.git.reviewResult?.diff;
     const prompt = currentResolutionPrompt();
     if (
       !requestClient
       || !requestWorkspace
       || !prompt
+      || !reviewedDiff
+      || options.git.actionId !== null
+      || options.git.llmActionId !== null
       || options.git.resolveRunning
       || options.operationRunning()
       || !options.statusReady()
@@ -146,15 +162,22 @@ export function createGitAssist(options: GitAssistOptions) {
     options.git.setError(null);
     let createdSessionId: string | undefined;
     try {
+      const current = await options.git.requestDiff(reviewedDiff.path, reviewedDiff.scope);
+      if (requestClient !== options.client() || requestWorkspace !== options.workspace() || requestGeneration !== options.git.generation) return;
+      if (!current || !sameGitDiff(current, reviewedDiff)) {
+        options.git.invalidateReview();
+        options.git.setError("Changes have changed since this review. Run code review again before starting a fix session.");
+        return;
+      }
       const created = await requestClient.newSession(requestWorkspace);
       createdSessionId = created.sessionId;
-      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) {
+      if (requestClient !== options.client() || requestWorkspace !== options.workspace() || requestGeneration !== options.git.generation) {
         await requestClient.closeSession(created.sessionId).catch(() => undefined);
         return;
       }
 
       await options.runtime.ensure(requestClient, created.sessionId, requestWorkspace);
-      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) {
+      if (requestClient !== options.client() || requestWorkspace !== options.workspace() || requestGeneration !== options.git.generation) {
         await requestClient.closeSession(created.sessionId).catch(() => undefined);
         options.forgetRuntime(created.sessionId);
         return;
@@ -166,6 +189,7 @@ export function createGitAssist(options: GitAssistOptions) {
         return;
       }
 
+      options.git.invalidateReview();
       const transcriptMessageId = options.activateResolutionSession(created.sessionId, requestWorkspace, prompt);
       const run = options.prompts.runPromptRequest(
         requestClient,
@@ -177,20 +201,22 @@ export function createGitAssist(options: GitAssistOptions) {
       options.onResolutionRunStarted(created.sessionId);
       void options.refreshSessions();
       void run
-        .then(() => options.refreshSessions())
+        .then(() => {
+          if (requestClient === options.client() && requestWorkspace === options.workspace() && requestGeneration === options.git.generation) return options.refreshSessions();
+        })
         .catch((error) => {
-          if (requestClient === options.client() && requestWorkspace === options.workspace()) options.reportError(error);
+          if (requestClient === options.client() && requestWorkspace === options.workspace() && requestGeneration === options.git.generation) options.reportError(error);
         });
     } catch (error) {
       if (createdSessionId) {
         await requestClient.closeSession(createdSessionId).catch(() => undefined);
         options.forgetRuntime(createdSessionId);
       }
-      if (requestClient === options.client() && requestWorkspace === options.workspace()) {
+      if (requestClient === options.client() && requestWorkspace === options.workspace() && requestGeneration === options.git.generation) {
         options.git.setError(error instanceof Error ? error.message : String(error));
       }
     } finally {
-      if (requestClient === options.client() && requestWorkspace === options.workspace()) {
+      if (requestClient === options.client() && requestWorkspace === options.workspace() && requestGeneration === options.git.generation) {
         options.git.setResolveRunning(false);
       }
     }
@@ -201,6 +227,7 @@ export function createGitAssist(options: GitAssistOptions) {
     if (
       !prompt
       || options.git.resolveRunning
+      || options.git.actionId != null
       || options.git.llmActionId?.startsWith("review:") === true
       || options.operationRunning()
       || !options.statusReady()

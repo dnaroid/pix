@@ -23,6 +23,7 @@
   } from "../lib/project-tasks";
   import { fuzzySearch } from "../lib/fuzzy";
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
+  import type { GitPanelWorkflow } from "../lib/git-workflow";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
   import {
@@ -97,6 +98,7 @@
     gitError,
     gitActionId,
     gitLlmActionId,
+    gitWorkflow,
     projectDocuments,
     recentProjects,
     projectColors,
@@ -156,6 +158,7 @@
     gitError: string | null;
     gitActionId: string | null;
     gitLlmActionId: string | null;
+    gitWorkflow: GitPanelWorkflow;
     projectDocuments: ProjectDocumentsSnapshot;
     recentProjects: string[];
     projectColors: ReadonlyMap<string, string>;
@@ -193,9 +196,9 @@
     onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
     onGitRefresh: () => void;
     onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
-    onGitStage: (path?: string) => void;
+    onGitStage: (path?: string) => Promise<boolean>;
     onGitUnstage: (path?: string) => void;
-    onGitCommit: (message: string) => Promise<boolean>;
+    onGitCommit: (message: string, pushAfterCommit?: boolean) => Promise<boolean>;
     onGitPush: () => void;
     onGitSwitchBranch: (branch: string) => void;
     onGitCreateBranch: (branch: string) => void;
@@ -646,6 +649,7 @@
             error={gitError}
             actionId={gitActionId}
             llmActionId={gitLlmActionId}
+            workflow={gitWorkflow}
             {sessionReady}
             onRefresh={onGitRefresh}
             onOpenDiff={onGitOpenDiff}

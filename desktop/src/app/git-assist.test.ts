@@ -15,6 +15,7 @@ function createCopyFixture(gitOverrides: Record<string, unknown> = {}) {
   const git = {
     diffPreview: diff,
     diffReview: review,
+    reviewResult: { diff, text: review, stale: false },
     resolveRunning: false,
     llmActionId: null,
     ...gitOverrides,
@@ -54,6 +55,7 @@ describe("Git review resolution prompt copy", () => {
   it.each([
     ["review refresh", { llmActionId: "review:all" }],
     ["resolution startup", { resolveRunning: true }],
+    ["changed diff", { reviewResult: { diff, text: review, stale: true } }],
   ])("does not copy stale review content during %s", async (_label, gitOverrides) => {
     const { assist, writeText } = createCopyFixture(gitOverrides);
 

@@ -12,6 +12,7 @@
     "build:web": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
+    "test:git-workflow": "node scripts/git-workflow-smoke.mjs",
     "test:context-menu": "node scripts/context-menu-smoke.mjs"
   },
   "dependencies": {

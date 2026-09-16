@@ -3,6 +3,7 @@ dist/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/schemas/
 desktop/*.tsbuildinfo
+desktop/.artifacts/
 .env
 .DS_Store
 .indexer-cli/

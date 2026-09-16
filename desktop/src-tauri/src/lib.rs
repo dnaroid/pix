@@ -25,6 +25,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
 mod desktop_context_menu;
+mod git_operations;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -7779,6 +7780,13 @@ pub fn run() {
             git_unstage,
             git_commit,
             git_push,
+            git_operations::git_fetch,
+            git_operations::git_pull,
+            git_operations::git_history,
+            git_operations::git_stash_list,
+            git_operations::git_stash_save,
+            git_operations::git_stash_apply,
+            git_operations::git_discard_file,
             git_switch_branch,
             git_create_branch,
             list_project_documents,
