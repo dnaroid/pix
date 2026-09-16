@@ -75,7 +75,11 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Same-document hash links in a Markdown preview scroll to stable, deduplicated heading anchors.
 - Raw absolute paths, URL-like destinations other than the separately supported `file://` flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
 - An unclosed fenced code block remains visible while the message streams.
-- Code and tables may scroll horizontally instead of widening the transcript.
+- Fenced code keeps its intrinsic width for short content and is capped at the
+  available content width. Long logical lines visually wrap without horizontal
+  scrolling while preserving whitespace, source line breaks, and syntax
+  highlighting. Tables retain their existing horizontal scrolling behavior
+  outside the Preview editor.
 - Shared source/fenced-code highlighting skips tokenization for blocks larger than 32,768 UTF-16 code units and for unknown/plaintext languages. These blocks remain fully escaped, untruncated plaintext with the same per-line structure, preserving source line numbers and line-range navigation without generating token markup for the whole large input.
 - Markdown parsing uses a small local parser rather than a parser/sanitizer runtime dependency.
 

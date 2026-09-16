@@ -264,7 +264,8 @@
     width: fit-content;
     max-width: 100%;
     margin: 0.75rem 0;
-    overflow: auto;
+    box-sizing: border-box;
+    overflow: hidden;
     border: 1px solid var(--code-border);
     border-radius: var(--radius-lg);
     background: var(--code);
@@ -272,12 +273,13 @@
   }
   .markdown-text :global(pre code) {
     display: block;
-    width: max-content;
+    width: auto;
     border-radius: 0;
     background: transparent;
     padding: 0;
     color: inherit;
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .markdown-text :global(pre code.highlighted-code) {
     /* Sugar High emits block line spans separated by literal newlines. */
@@ -286,7 +288,8 @@
   .markdown-text :global(.highlighted-code .sh__line) {
     display: block;
     min-height: 1.45em;
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     line-height: 1.45;
   }
   .markdown-text :global(.table-scroll) {
