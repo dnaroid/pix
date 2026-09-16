@@ -16,7 +16,7 @@
 		"pix-acp": "./dist/main.js"
 	},
 	"engines": {
-		"node": ">=22.19.0"
+		"node": ">=22.19.0 <25"
 	},
 	"scripts": {
 		"dev": "tsx src/main.ts",

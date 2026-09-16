@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { ModelCommandActions } from "../src/app/commands/command-model-actions.js";
 import type { CommandControllerHost } from "../src/app/commands/command-host.js";
 import type { SessionModel } from "../src/app/types.js";
+
+const testHome = mkdtempSync(join(tmpdir(), "pix-command-model-actions-home-"));
+process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
+
+const { ModelCommandActions } = await import("../src/app/commands/command-model-actions.js");
+const { loadPixConfig, savePixDefaultModel } = await import("../src/config.js");
 
 describe("ModelCommandActions.runModelCommand", () => {
 	it("reloads resources after switching models when idle", async () => {
@@ -196,6 +205,32 @@ describe("ModelCommandActions combined selector entry points", () => {
 		await actions.runThinkingSlashCommand("");
 
 		assert.deepEqual(opened, ["model", "thinking"]);
+	});
+});
+
+describe("ModelCommandActions.runDefaultThinkingSlashCommand", () => {
+	it("persists thinking from a UI-only draft when a default model is already configured", async () => {
+		const events: string[] = [];
+		savePixDefaultModel("openai/gpt-5");
+		const host = {
+			runtime: () => undefined,
+			isRunning: () => true,
+			addEntry: (entry: { text?: string }) => events.push(`entry:${entry.text ?? ""}`),
+			setSessionStatus: (session: unknown) => events.push(`session-status:${session === undefined ? "draft" : "runtime"}`),
+			toast: { error: (message: string) => events.push(`toast:error:${message}`) },
+		} as unknown as CommandControllerHost;
+
+		await new ModelCommandActions(host).runDefaultThinkingSlashCommand("high");
+
+		assert.deepEqual(loadPixConfig().defaultModel, {
+			modelRef: "openai/gpt-5",
+			fallbackModels: [],
+			thinking: "high",
+		});
+		assert.deepEqual(events, [
+			"entry:Default thinking level set to high for openai/gpt-5. New sessions will use it unless --model is provided.",
+			"session-status:draft",
+		]);
 	});
 });
 

@@ -24,7 +24,6 @@ jobs:
           cache: npm
       - uses: oven-sh/setup-bun@v2
       - run: bun --version
-      - uses: jdx/mise-action@v2
       - run: npm ci --ignore-scripts
       - run: npx tsc --noEmit
       - run: npm run generate-schemas:check

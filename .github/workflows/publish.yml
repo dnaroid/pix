@@ -17,18 +17,28 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Check/build (${{ matrix.os }})
+    name: Check/build (${{ matrix.os }} / Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [pinned]
+        include:
+          - os: ubuntu-latest
+            node: "22.19.0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        if: matrix.node == 'pinned'
         with:
           node-version-file: .node-version
+          cache: npm
+      - uses: actions/setup-node@v4
+        if: matrix.node != 'pinned'
+        with:
+          node-version: ${{ matrix.node }}
           cache: npm
       - uses: oven-sh/setup-bun@v2
         if: runner.os != 'Windows'
@@ -36,7 +46,6 @@ jobs:
         if: runner.os == 'Windows'
         run: npm install -g bun@1.3.14
       - run: bun --version
-      - uses: jdx/mise-action@v2
       - run: npm ci --ignore-scripts
       - run: npm run check
       - name: Install and check ACP adapter
@@ -74,7 +83,6 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - uses: jdx/mise-action@v2
       - run: npm ci --ignore-scripts
       - name: Full packed-package smoke test
         if: matrix.mode == 'full'
@@ -102,7 +110,6 @@ jobs:
           node-version-file: .node-version
           cache: npm
           registry-url: https://registry.npmjs.org
-      - uses: jdx/mise-action@v2
       - run: npm install -g npm@latest
       - run: npm ci --ignore-scripts
       - run: npm run check

@@ -404,10 +404,8 @@ export class ModelCommandActions {
 	}
 
 	private saveDefaultThinking(level: ThinkingLevel): void {
-		const runtime = getRuntime(this.host, "default-thinking");
-		if (!runtime) return;
-
-		const fallbackModelRef = runtime.session.model ? this.host.modelRef(runtime.session.model as SessionModel) : undefined;
+		const runtime = this.host.runtime();
+		const fallbackModelRef = runtime?.session.model ? this.host.modelRef(runtime.session.model as SessionModel) : undefined;
 		const saved = savePixDefaultThinking(level, fallbackModelRef);
 		if (!saved) throw new Error("Set /default-model first or select a session model before setting default thinking");
 
@@ -416,7 +414,7 @@ export class ModelCommandActions {
 			kind: "system",
 			text: `Default thinking level set to ${saved.thinking ?? level} for ${saved.modelRef}. New sessions will use it unless --model is provided.`,
 		});
-		this.host.setSessionStatus(runtime.session);
+		this.host.setSessionStatus(runtime?.session);
 	}
 }
 

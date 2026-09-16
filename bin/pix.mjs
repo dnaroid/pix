@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const minimumNodeVersion = [22, 19, 0];
-const minimumNodeVersionLabel = "22.19.0";
+const supportedNodeRange = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).engines.node;
 const launcherPath = fileURLToPath(import.meta.url);
 const packageRoot = dirname(dirname(launcherPath));
 const mainPath = fileURLToPath(new URL("../dist/main.js", import.meta.url));
@@ -13,8 +12,8 @@ const installPath = fileURLToPath(new URL("../dist/app/cli/install.js", import.m
 const cliArgs = process.argv.slice(2);
 
 if (!isCurrentNodeSupported()) {
-	console.error(`[pix] Node ${minimumNodeVersionLabel}+ is required; current Node is ${process.versions.node}.`);
-	console.error("[pix] Install/use a newer Node, for example `mise install node@22.19.0` or `nvm install 22`.");
+	console.error(`[pix] Node ${supportedNodeRange} is required; current Node is ${process.versions.node}.`);
+	console.error("[pix] Install a supported Node.js release and ensure node and npm use it on PATH.");
 	process.exit(1);
 }
 
@@ -45,9 +44,15 @@ if (!existsSync(mainPath)) {
 await import(new URL("../dist/main.js", import.meta.url));
 
 function isCurrentNodeSupported() {
-	const parts = process.versions.node.split(".").map((part) => Number.parseInt(part, 10));
+	// Only the project's bounded stable range is accepted; fail closed if its format changes.
+	const range = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)$/u.exec(supportedNodeRange);
+	const version = /^(\d+)\.(\d+)\.(\d+)$/u.exec(process.versions.node);
+	if (!range || !version) return false;
+	const minimumNodeVersion = range.slice(1, 4).map(Number);
+	const parts = version.slice(1).map(Number);
+	if (parts[0] >= Number(range[4])) return false;
 	for (let index = 0; index < minimumNodeVersion.length; index += 1) {
-		const current = parts[index] ?? 0;
+		const current = parts[index];
 		const minimum = minimumNodeVersion[index];
 		if (current > minimum) return true;
 		if (current < minimum) return false;

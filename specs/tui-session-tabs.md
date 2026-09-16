@@ -48,6 +48,11 @@ user actually sends work to the agent.
 - Resource slash commands that require a Pi session materialize the draft
   before execution. Purely local slash commands and shell input do not create a
   Pi session merely because the draft exists.
+- `/default-model` and `/default-thinking` are purely local, sessionless
+  commands: they persist defaults for future sessions without allocating an
+  `AgentSession` or materializing a UI-only draft. `/default-thinking` uses the
+  configured default model and only falls back to the active session model when
+  a runtime exists.
 - Choosing a saved conversation from the draft selector loads that persisted
   session directly into the same draft tab. Pix does not create or tear down a
   throwaway new session.

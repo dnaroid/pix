@@ -23,7 +23,6 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - uses: oven-sh/setup-bun@v2
-      - uses: jdx/mise-action@v2
       - run: npm ci --ignore-scripts
       - name: Generate schemas
         run: npm run generate-schemas

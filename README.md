@@ -512,10 +512,21 @@ Pix implements the Pi extension UI surface for notifications, keyed toasts, widg
 
 ## Development
 
+Use the exact Node.js version in `.node-version` for development and builds;
+`.nvmrc` mirrors it for nvm users. No particular version manager is required:
+all npm scripts use the `node` and `npm` already on your `PATH`.
+The supported runtime range is `>=22.19.0 <25`, shared by Pix, ACP, and Desktop.
+CI checks the pinned version on Linux, macOS, and Windows, plus the minimum
+supported version on Linux.
+
 ```bash
 git clone https://github.com/dnaroid/pix.git
 cd pix
-npm install
+
+# Select the version from .node-version using your preferred installation method.
+# With nvm (optional): nvm install && nvm use
+node --version
+npm ci
 
 # Run from source
 npm run dev -- --cwd /path/to/project

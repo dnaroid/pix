@@ -78,15 +78,20 @@ test("Git assistant keeps and executes the configured fallback chain", async () 
 	assert.deepEqual(streamed, ["provider/fallback"]);
 });
 
-test("Git assistant timeout includes ModelRuntime initialization", async () => {
+test("Git assistant timeout includes ModelRuntime initialization", async (t) => {
+	const deadline = new AbortController();
+	const timeout = t.mock.method(AbortSignal, "timeout", () => deadline.signal);
+	let initializationStarted = false;
 	const assistant = createGitAssistant({
-		createModelRuntime: async () => await new Promise<never>(() => {}),
+		createModelRuntime: async () => {
+			initializationStarted = true;
+			return await new Promise<never>(() => {});
+		},
 		loadModelRef: () => "provider/model",
 		timeoutMs: 25,
 	});
-	const startedAt = Date.now();
 
-	await assert.rejects(
+	const rejected = assert.rejects(
 		assistant({
 			cwd: "/tmp/project",
 			kind: "review",
@@ -95,7 +100,12 @@ test("Git assistant timeout includes ModelRuntime initialization", async () => {
 		}),
 		/timeout|aborted/iu,
 	);
-	assert.ok(Date.now() - startedAt < 1_000, "runtime initialization should be bounded by the request timeout");
+	assert.equal(initializationStarted, true);
+	assert.equal(timeout.mock.callCount(), 1);
+	assert.deepEqual(timeout.mock.calls[0]?.arguments, [25]);
+	// Drive the deadline explicitly: the pending runtime stub has no live I/O handles.
+	deadline.abort(new Error("Request timeout"));
+	await rejected;
 });
 
 test("Git assistant gives code review more time than commit-message generation", async () => {

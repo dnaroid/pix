@@ -141,6 +141,7 @@ describe("AppVoiceController", () => {
 			await controller.stopRecording();
 
 			assert.equal(audioProcess.killed, true);
+			assert.equal(audioProcess.exitCode, 0);
 			assert.ok(socket.sent.some((value) => value === JSON.stringify({ type: "Finalize" })));
 			assert.deepEqual(host.transcripts, ["final transcript", "tail words"]);
 			assert.equal(socket.closed, true);
@@ -466,6 +467,11 @@ function fakeAudioProcess(): EventEmitter & {
 	audioProcess.exitCode = null;
 	audioProcess.kill = function kill(_signal: string): boolean {
 		this.killed = true;
+		// Model process completion instead of depending on unreferenced fallback timers.
+		queueMicrotask(() => {
+			this.exitCode = 0;
+			this.emit("close", 0, null);
+		});
 		return true;
 	};
 	return audioProcess;
