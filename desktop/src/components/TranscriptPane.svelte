@@ -229,11 +229,11 @@
   {#if !activeSessionId}
     <section class="grid h-full place-items-center content-center p-10 text-center">
       {#if workspace}
-        <p class="text-[13px] text-muted-foreground" role="status">Opening conversation…</p>
+        <p class="text-sm text-muted-foreground" role="status">Opening conversation…</p>
       {:else}
         <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-md border border-border bg-panel-strong font-semibold text-primary">P</div>
         <h2 class="mb-2 text-lg font-medium text-foreground">Open a workspace</h2>
-        <p class="mb-5 max-w-[470px] text-[13px] leading-relaxed text-muted-foreground">
+        <p class="mb-5 max-w-[470px] text-sm leading-relaxed text-muted-foreground">
           Choose a folder to begin a Pix session.
         </p>
         <button
@@ -245,12 +245,12 @@
     </section>
   {:else if transcript.items.length === 0 && historyLoading}
     <section class="grid min-h-[220px] place-items-center content-center p-10 text-center">
-      <p class="text-[13px] text-muted-foreground" role="status">Loading conversation…</p>
+      <p class="text-sm text-muted-foreground" role="status">Loading conversation…</p>
     </section>
   {:else if transcript.items.length === 0}
     <section class="grid min-h-[220px] place-items-center content-center p-10 text-center">
       <h2 class="mb-2 text-lg font-medium text-foreground">What should we work on?</h2>
-      <p class="mb-5 max-w-[470px] text-[13px] leading-relaxed text-muted-foreground">
+      <p class="mb-5 max-w-[470px] text-sm leading-relaxed text-muted-foreground">
         Pix can inspect this workspace, edit files, and run your development tools.
       </p>
     </section>

@@ -118,7 +118,7 @@
 
 </script>
 
-<footer class="flex h-full min-w-0 select-none items-center gap-2 border-t border-border bg-chrome px-2.5 text-[11px] text-muted-foreground">
+<footer class="flex h-full min-w-0 select-none items-center gap-2 border-t border-border bg-chrome px-2.5 text-xs text-muted-foreground">
   <div class={[
     "flex items-center gap-2",
     status === "error" && "text-destructive",

@@ -272,13 +272,13 @@
         <h2 id="model-thinking-picker-title" class="text-sm font-medium text-foreground">
           {visibilityMode ? "Manage visible models" : "Select model & thinking"}
         </h2>
-        <p class="mt-0.5 text-[11px] text-muted-foreground">
+        <p class="mt-0.5 text-xs text-muted-foreground">
           {visibilityMode ? "Choose which models appear in both Pix model pickers." : "Choose both, then apply them together to this session."}
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-1">
         <button
-          class="h-7 cursor-pointer rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="h-7 cursor-pointer rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           disabled={applying || savingVisibility}
           onclick={toggleVisibilityMode}
@@ -338,10 +338,10 @@
           {/if}
           <span class="min-w-0">
             <strong class={["block truncate font-mono text-xs font-medium", modelDisplayToneClass(model.tone)]}>{model.ref}</strong>
-            <small class="mt-0.5 block truncate text-[11px] text-muted-foreground">{model.name}</small>
+            <small class="mt-0.5 block truncate text-xs text-muted-foreground">{model.name}</small>
           </span>
           {#if model.current}
-            <span class="shrink-0 text-[11px] font-medium text-muted-foreground">{visibilityMode ? "current · required" : "current"}</span>
+            <span class="shrink-0 text-xs font-medium text-muted-foreground">{visibilityMode ? "current · required" : "current"}</span>
           {/if}
         </button>
       {:else}
@@ -352,13 +352,13 @@
     {#if !visibilityMode}<div class="border-t border-border px-3.5 py-3">
       <div class="mb-2 flex min-w-0 items-baseline justify-between gap-3">
         <span class="text-xs font-medium text-foreground">Thinking</span>
-        {#if selectedModel}<span class="truncate text-[11px] text-muted-foreground">{selectedModel.name}</span>{/if}
+        {#if selectedModel}<span class="truncate text-xs text-muted-foreground">{selectedModel.name}</span>{/if}
       </div>
       <div class="flex flex-wrap gap-1" role="radiogroup" aria-label="Thinking level">
         {#each selectedModel?.thinkingLevels ?? ["off"] as level, index (level)}
           <button
             class={[
-              "h-7 cursor-pointer rounded-sm border px-2.5 text-[11px] font-medium transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              "h-7 cursor-pointer rounded-sm border px-2.5 text-xs font-medium transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
               selectedThinking === level ? "border-input bg-panel-selected" : "border-transparent bg-transparent",
               modelDisplayToneClass(thinkingLevelTone(level, selectedModel?.thinkingLevels ?? ["off"])),
             ]}
@@ -376,7 +376,7 @@
     </div>{/if}
 
     <footer class="flex min-w-0 items-center justify-between gap-3 border-t border-border/60 px-3.5 py-2.5">
-      <p class="min-w-0 truncate text-[11px] text-muted-foreground">
+      <p class="min-w-0 truncate text-xs text-muted-foreground">
         {#if visibilityMode}
           Changes save immediately · Shift+Tab returns to selection
         {:else if selectedModel}
@@ -407,7 +407,7 @@
     </footer>
 
     {#if applyError}
-      <p class="border-t border-destructive/30 bg-destructive/5 px-3.5 py-2 text-[11px] text-destructive" role="alert">{applyError}</p>
+      <p class="border-t border-destructive/30 bg-destructive/5 px-3.5 py-2 text-xs text-destructive" role="alert">{applyError}</p>
     {/if}
   </div>
 </dialog>

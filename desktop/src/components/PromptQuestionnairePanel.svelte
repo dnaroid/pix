@@ -44,7 +44,7 @@
 
 <div class="border-b border-border bg-panel px-3 pt-2.5">
   <div class="mb-2 flex items-center justify-between gap-3">
-    <p class="min-w-0 truncate text-[11px] font-medium text-muted-foreground">{questionMode.message}</p>
+    <p class="min-w-0 truncate text-xs font-medium text-muted-foreground">{questionMode.message}</p>
     <button
       class="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       type="button"
@@ -112,7 +112,7 @@
         <p class="mt-0.5 text-xs text-muted-foreground">Review every answer before sending.</p>
       </div>
       <span class={[
-        "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+        "rounded-full px-2 py-0.5 text-xs font-semibold",
         allQuestionsComplete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
       ]}>{allQuestionsComplete ? "Ready" : "Incomplete"}</span>
     </div>
@@ -130,7 +130,7 @@
           <span class={[
             "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full",
             complete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
-          ]}>{#if complete}<Check class="size-2.5" strokeWidth={2.4} />{:else}<span class="text-[11px] leading-none">!</span>{/if}</span>
+          ]}>{#if complete}<Check class="size-2.5" strokeWidth={2.4} />{:else}<span class="text-xs leading-none">!</span>{/if}</span>
           <span class="min-w-0 flex-1">
             <span class="block text-xs font-semibold text-foreground">{question.label}</span>
             <span class={[
@@ -138,7 +138,7 @@
               complete ? "text-muted-foreground" : "font-medium text-destructive",
             ]}>{answerLabel(question)}</span>
           </span>
-          <span class="text-[11px] font-medium text-muted-foreground group-hover:text-foreground">Edit</span>
+          <span class="text-xs font-medium text-muted-foreground group-hover:text-foreground">Edit</span>
         </button>
       {/each}
     </div>
@@ -149,12 +149,12 @@
       <div class="min-w-0">
         <p class="text-sm leading-relaxed font-medium whitespace-pre-wrap text-foreground">{currentQuestion.prompt}</p>
         {#if currentQuestion.multiple}
-          <p id="question-selection-hint" class="mt-1 text-[11px] text-muted-foreground" aria-live="polite">
+          <p id="question-selection-hint" class="mt-1 text-xs text-muted-foreground" aria-live="polite">
             Select {currentQuestion.minSelections ?? 1}–{maxSelections} answers · {currentSelectionCount} selected
           </p>
         {/if}
       </div>
-      <span class="mt-0.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">{questionMode.state.activeTab + 1}/{questionMode.questions.length}</span>
+      <span class="mt-0.5 shrink-0 text-xs tabular-nums text-muted-foreground">{questionMode.state.activeTab + 1}/{questionMode.questions.length}</span>
     </div>
     <div
       class="mb-3 divide-y divide-border/70 border-t border-border/70"
@@ -187,7 +187,7 @@
           ]}>{#if selected}{#if currentQuestion.multiple}<Check class="size-3 text-primary" strokeWidth={2.4} />{:else}<span class="size-2 rounded-full bg-primary"></span>{/if}{/if}</span>
           <span class="min-w-0">
             <span class="block text-xs font-medium text-foreground">{choice.label}</span>
-            {#if choice.description}<span class="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{choice.description}</span>{/if}
+            {#if choice.description}<span class="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{choice.description}</span>{/if}
           </span>
         </button>
       {/each}

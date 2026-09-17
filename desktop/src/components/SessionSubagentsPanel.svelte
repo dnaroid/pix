@@ -43,20 +43,20 @@
 <section aria-labelledby="session-subagents-heading">
   <div class="flex h-8 items-center gap-1.5 border-b border-border px-2.5">
     <Workflow class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-    <h2 id="session-subagents-heading" class="text-[11px] font-semibold uppercase tracking-wide text-foreground">Agents</h2>
+    <h2 id="session-subagents-heading" class="text-xs font-semibold uppercase tracking-wide text-foreground">Agents</h2>
     {#if activeCount > 0}
-      <span class="ml-auto font-mono text-[11px] text-muted-foreground">{activeCount}</span>
+      <span class="ml-auto font-mono text-xs text-muted-foreground">{activeCount}</span>
     {/if}
   </div>
 
   <div>
     {#if runs.length === 0}
-      <div class="border-b border-border px-2.5 py-3 text-[11px] text-muted-foreground">No active agents</div>
+      <div class="border-b border-border px-2.5 py-3 text-xs text-muted-foreground">No active agents</div>
     {:else}
       <div>
         {#each runs as run (run.runDir)}
           <section aria-label={`Subagent run ${sessionSubagentRunName(run.runDir)}`}>
-            <h3 class="truncate border-b border-border bg-chrome/45 px-2.5 py-1 font-mono text-[11px] font-medium text-muted-foreground" title={run.runDir}>
+            <h3 class="truncate border-b border-border bg-chrome/45 px-2.5 py-1 font-mono text-xs font-medium text-muted-foreground" title={run.runDir}>
               {sessionSubagentRunName(run.runDir)}
             </h3>
             <div>
@@ -71,12 +71,12 @@
                     </span>
                     <div class="min-w-0 flex-1">
                       <div class="flex min-w-0 items-center gap-2">
-                        <h4 class="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold leading-4 text-foreground" title={agent.id}>{agent.id}</h4>
-                        <span class={["shrink-0 text-[11px] font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
-                        <span class="shrink-0 font-mono text-[11px] text-muted-foreground">{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
+                        <h4 class="min-w-0 flex-1 truncate font-mono text-xs font-semibold leading-4 text-foreground" title={agent.id}>{agent.id}</h4>
+                        <span class={["shrink-0 text-xs font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
+                        <span class="shrink-0 font-mono text-xs text-muted-foreground">{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                       </div>
-                      <p class="mt-0.5 line-clamp-2 break-words text-[11px] leading-4 text-muted-foreground">{task}</p>
-                      <div class="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <p class="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-muted-foreground">{task}</p>
+                      <div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                         <span class="shrink-0 font-mono">{sessionSubagentModelLabel(preview)}</span>
                         {#if agent.lastActivity}
                           <span class="text-muted-foreground/50">·</span>

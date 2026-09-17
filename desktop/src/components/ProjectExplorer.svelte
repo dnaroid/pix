@@ -89,15 +89,15 @@
     aria-label="Project files"
   >
     {#if rootLoading && rootEntries.length === 0}
-      <div class="flex items-center justify-center gap-1.5 py-8 text-[11px] text-muted-foreground">
+      <div class="flex items-center justify-center gap-1.5 py-8 text-xs text-muted-foreground">
         <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading project files…
       </div>
     {:else if rootError}
-      <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-[11px] leading-4 text-tool-error">
+      <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">
         {rootError}
       </div>
     {:else if rootEntries.length === 0}
-      <div class="px-3 py-8 text-center text-[11px] text-muted-foreground">This project folder is empty.</div>
+      <div class="px-3 py-8 text-center text-xs text-muted-foreground">This project folder is empty.</div>
     {:else}
       {#each rows as row, index (row.entry.path)}
         {@const entry = row.entry}
@@ -114,7 +114,7 @@
         >
           <button
             class={[
-              "flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left text-[11px] text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              "flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left text-xs text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               hiddenEntry && treeState.selectedPath !== entry.path
                 ? "opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100"
                 : "",
@@ -169,7 +169,7 @@
         </div>
         {#if entry.kind === "directory" && expanded && treeState.errorByDirectory[entry.path]}
           <div
-            class="pr-2 text-[11px] leading-4 text-tool-error"
+            class="pr-2 text-xs leading-4 text-tool-error"
             style:padding-left={`${34 + (row.depth + 1) * 14}px`}
           >{treeState.errorByDirectory[entry.path]}</div>
         {/if}
@@ -179,7 +179,7 @@
 
   {#if dragController.entry && dragController.dragging}
     <div
-      class="pointer-events-none fixed z-50 flex max-w-80 items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 font-mono text-[11px] text-popover-foreground shadow-md"
+      class="pointer-events-none fixed z-50 flex max-w-80 items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 font-mono text-xs text-popover-foreground shadow-md"
       style:left={`${dragController.clientX + 12}px`}
       style:top={`${dragController.clientY + 12}px`}
     >

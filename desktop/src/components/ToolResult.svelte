@@ -70,7 +70,7 @@
     padding: 0.5rem 0.625rem;
     color: var(--foreground);
     font-family: "Geist Mono", ui-monospace, monospace;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.35;
     white-space: pre-wrap;
   }

@@ -15,6 +15,11 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain("onMinimumWidthChange={layoutController.setProjectSwitcherMinimumWidth}");
   });
 
+  it("does not let Source Control shrink below its desktop action layout", () => {
+    expect(layoutControllerSource).toContain("const GIT_MIN_WIDTH = 360");
+    expect(layoutControllerSource).toContain('if (tab === "git") return GIT_MIN_WIDTH');
+  });
+
   it("treats the Activity Bar as one vertical keyboard toolbar", () => {
     expect(activityBarSource).toContain('role="toolbar"');
     expect(activityBarSource).toContain('aria-orientation="vertical"');

@@ -19,7 +19,7 @@
   const conflicted = $derived(snapshot.changes.some((change) => change.conflicted));
   const stashes = $derived(workflow.details?.stashes ?? []);
   const selectedStash = $derived(stashes.some((stash) => stash.reference === reference) ? reference : stashes[0]?.reference ?? "");
-  const button = "inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-[11px] hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40";
+  const button = "inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40";
   async function toggleBranch(): Promise<void> { creatingBranch = !creatingBranch; if (creatingBranch) { await tick(); branchInput?.focus(); } }
   async function closeBranch(): Promise<void> {
     creatingBranch = false;
@@ -29,7 +29,7 @@
 </script>
 
 <details class="border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
-  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
     <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />Repository tools
   </summary>
   <div class="space-y-3 px-2 pb-3">
@@ -41,35 +41,35 @@
     </div>
     {#if creatingBranch}
       <form class="flex gap-1" onsubmit={(event) => { event.preventDefault(); if (branchName.trim() && !busy) { onCreateBranch(branchName.trim()); creatingBranch = false; branchName = ""; } }}>
-        <input bind:this={branchInput} bind:value={branchName} class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="New branch name" placeholder="feature/my-change" onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); void closeBranch(); } }} />
+        <input bind:this={branchInput} bind:value={branchName} class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="New branch name" placeholder="feature/my-change" onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); void closeBranch(); } }} />
         <button class={button} type="submit" disabled={busy || !branchName.trim()}>Create</button>
       </form>
     {/if}
     <section class="space-y-1.5" aria-label="Stashes">
-      <div class="flex items-center justify-between text-[11px] text-muted-foreground"><strong class="font-medium">Saved stashes</strong><button class="rounded-sm px-1 hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={workflow.onLoadDetails} disabled={workflow.detailsLoading || busy}>Refresh</button></div>
-      {#if workflow.detailsLoading && !workflow.details}<p class="text-[11px] text-muted-foreground" role="status">Loading repository details…</p>
+      <div class="flex items-center justify-between text-xs text-muted-foreground"><strong class="font-medium">Saved stashes</strong><button class="rounded-sm px-1 hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={workflow.onLoadDetails} disabled={workflow.detailsLoading || busy}>Refresh</button></div>
+      {#if workflow.detailsLoading && !workflow.details}<p class="text-xs text-muted-foreground" role="status">Loading repository details…</p>
       {:else if stashes.length}
         <div class="flex gap-1">
           <div class="relative min-w-0 flex-1">
-            <select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pl-2 pr-6 font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Saved stash" value={selectedStash} onchange={(event) => reference = event.currentTarget.value} disabled={busy}>
+            <select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pl-2 pr-6 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Saved stash" value={selectedStash} onchange={(event) => reference = event.currentTarget.value} disabled={busy}>
               {#each stashes as stash (stash.reference)}<option value={stash.reference}>{stash.reference}: {stash.subject}</option>{/each}
             </select>
             <ChevronDown class="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground" aria-hidden="true" />
           </div>
           <button class={button} type="button" disabled={busy || dirty || !selectedStash} title={dirty ? "Commit or stash changes first" : "Restore this stash and keep the saved copy"} onclick={() => void workflow.onRepositoryAction("stash-apply", selectedStash)}>Restore</button>
         </div>
-        <p class="text-[10px] leading-4 text-muted-foreground">Restore keeps the saved copy. Requires a clean working tree.</p>
-      {:else}<p class="text-[11px] text-muted-foreground">No saved stashes.</p>{/if}
+        <p class="text-xs leading-4 text-muted-foreground">Restore keeps the saved copy. Requires a clean working tree.</p>
+      {:else}<p class="text-xs text-muted-foreground">No saved stashes.</p>{/if}
     </section>
     <section aria-label="Recent commits">
-      <h3 class="mb-1 text-[11px] font-medium text-muted-foreground">Recent commits <span class="font-normal">· latest 30</span></h3>
+      <h3 class="mb-1 text-xs font-medium text-muted-foreground">Recent commits <span class="font-normal">· latest 30</span></h3>
       <ol class="space-y-1.5">
         {#each workflow.details?.history ?? [] as entry (entry.hash)}
           <li title={`${entry.hash}\n${entry.author} · ${entry.date}`}>
-            <p class="truncate text-[11px] text-foreground">{entry.subject}</p>
-            <p class="truncate text-[10px] text-muted-foreground"><span class="font-mono">{entry.shortHash}</span> · {entry.author} · {entry.date.slice(0, 10)}</p>
+            <p class="truncate text-xs text-foreground">{entry.subject}</p>
+            <p class="truncate text-xs text-muted-foreground"><span class="font-mono">{entry.shortHash}</span> · {entry.author} · {entry.date.slice(0, 10)}</p>
           </li>
-        {:else}<li class="text-[11px] text-muted-foreground">{workflow.detailsLoading ? "Loading…" : "No commits yet."}</li>{/each}
+        {:else}<li class="text-xs text-muted-foreground">{workflow.detailsLoading ? "Loading…" : "No commits yet."}</li>{/each}
       </ol>
     </section>
   </div>
