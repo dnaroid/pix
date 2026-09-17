@@ -45,13 +45,13 @@
         <span class="flex min-w-0 items-baseline gap-2">
           <span class="shrink-0 font-mono text-xs font-semibold text-foreground">/{match.command.name}</span>
           {#if match.inputHint}
-            <span class="truncate font-mono text-[11px] text-muted-foreground">{match.inputHint}</span>
+            <span class="truncate font-mono text-xs text-muted-foreground">{match.inputHint}</span>
           {/if}
         </span>
-        <span class="mt-0.5 block truncate text-[11px] text-muted-foreground">{match.command.description}</span>
+        <span class="mt-0.5 block truncate text-xs text-muted-foreground">{match.command.description}</span>
       </span>
       {#if match.source}
-        <span class="mt-0.5 shrink-0 rounded border border-border/80 px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{match.source}</span>
+        <span class="mt-0.5 shrink-0 rounded border border-border/80 px-1.5 py-0.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">{match.source}</span>
       {/if}
     </button>
   {/each}

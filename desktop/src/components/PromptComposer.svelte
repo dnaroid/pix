@@ -627,7 +627,7 @@
       {#if !editorMode && !questionMode && (voiceController.interim || voiceController.error)}
         <p
           class={[
-            "mt-1.5 truncate text-[11px]",
+            "mt-1.5 truncate text-xs",
             voiceController.error ? "text-destructive" : "text-muted-foreground",
           ]}
           aria-live="polite"
@@ -642,7 +642,7 @@
           type="button"
           onclick={questionMode.onCancel}
         >Cancel</button>
-        {#if questionMode.addingImages}<span class="ml-auto text-[11px] text-muted-foreground" aria-live="polite">Adding images…</span>{/if}
+        {#if questionMode.addingImages}<span class="ml-auto text-xs text-muted-foreground" aria-live="polite">Adding images…</span>{/if}
         {#if questionnaireController.previewing}
           <button
             class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"

@@ -115,7 +115,7 @@
       cursorStyle: "block",
       disableStdin: !running,
       fontFamily: '"Geist Mono", ui-monospace, monospace',
-      fontSize: 11,
+      fontSize: 12,
       lineHeight: 1.25,
       minimumContrastRatio: 4.5,
       scrollback: 5_000,

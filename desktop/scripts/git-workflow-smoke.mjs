@@ -118,7 +118,7 @@ try {
 
   // Actual browser layout checks at the application's minimum sidebar width.
   await reset("many");
-  await page.evaluate(() => window.gitWorkflowSmoke.setWidth(236));
+  await page.evaluate(() => window.gitWorkflowSmoke.setWidth(360));
   await message.fill("check colors and geometry");
   for (const theme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: theme });
@@ -153,7 +153,7 @@ try {
   await panel.getByRole("button", { name: "Restore", exact: true }).click();
   assert.deepEqual(await calls(), ["fetch:all", "pull:all", "stash-apply:stash@{0}"]);
   assert.deepEqual(pageErrors, []);
-  console.log("Git workflow browser smoke passed: 3 flows, staged scope, failures, draft race, keyboard, full-height review, 236px light/dark geometry and semantic colors.");
+  console.log("Git workflow browser smoke passed: 3 flows, staged scope, failures, draft race, keyboard, full-height review, 360px light/dark geometry and semantic colors.");
   console.log(`Screenshots: ${screenshots}`);
 } finally {
   await browser?.close();

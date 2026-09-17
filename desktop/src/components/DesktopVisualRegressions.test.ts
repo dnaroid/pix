@@ -14,6 +14,9 @@ import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
+import markdownSource from "./MarkdownText.svelte?raw";
+import terminalSource from "./TerminalView.svelte?raw";
+import toolResultSource from "./ToolResult.svelte?raw";
 
 describe("desktop visual regressions", () => {
   it("keeps the composer placeholder on one visual line", () => {
@@ -129,12 +132,28 @@ describe("desktop visual regressions", () => {
     expect(settingsSource).not.toContain("resize-y");
   });
 
-  it("enforces accessible minimum font size across panels and outputs", () => {
-    expect(idxSource).not.toMatch(/text-\[[6789]px\]/);
-    expect(idxSource).toContain('className="text-[11px] leading-[1.55]"');
-    expect(settingsSource).not.toMatch(/text-\[[6789]px\]/);
-    expect(packageScriptsSource).not.toMatch(/text-\[[6789]px\]/);
-    expect(sessionTodosSource).not.toMatch(/text-\[[6789]px\]/);
-    expect(sessionTodosSource).toContain("text-[11px] leading-4 text-muted-foreground");
+  it("keeps desktop typography on the compact IDE scale with a 12px minimum", async () => {
+    // @ts-expect-error Node fs import in Vitest runner
+    const fs = (await import(/* @vite-ignore */ "node:fs")).default;
+    // @ts-expect-error Node path import in Vitest runner
+    const path = (await import(/* @vite-ignore */ "node:path")).default;
+    // @ts-expect-error Node __dirname in Vitest runner
+    const componentsDir = path.resolve(__dirname);
+    const componentSources = fs.readdirSync(componentsDir)
+      .filter((name: string) => name.endsWith(".svelte"))
+      .map((name: string) => [name, fs.readFileSync(path.join(componentsDir, name), "utf-8")] as const);
+
+    for (const [name, source] of componentSources) {
+      expect(source, `${name} must not use arbitrary font utilities below 12px`).not.toMatch(/text-\[(?:[0-9]|1[01])px\]/);
+      expect(source, `${name} must not hard-code CSS font sizes below 12px`).not.toMatch(/font-size:\s*(?:[0-9]|1[01])px/);
+      expect(source, `${name} must not configure runtime font sizes below 12px`).not.toMatch(/fontSize:\s*(?:[0-9]|1[01])(?:\D|$)/);
+    }
+
+    expect(idxSource).toContain('className="text-xs leading-[1.55]"');
+    expect(sessionTodosSource).toContain("text-xs leading-4 text-muted-foreground");
+    expect(toolResultSource).toContain("font-size: 12px");
+    expect(terminalSource).toContain("fontSize: 12");
+    expect(markdownSource).not.toMatch(/font-size:\s+0\.(?:85|88|9|92|94)em;/);
+    expect(markdownSource).toContain("max(0.85em, 0.75rem)");
   });
 });

@@ -225,11 +225,11 @@
     onkeydown={handleTriggerKeydown}
   >
     <span bind:this={textSlot} class="min-w-0 flex-1">
-      <strong class="block truncate text-[11px] font-medium text-foreground">
+      <strong class="block truncate text-xs font-medium text-foreground">
         {workspace ? projectName(workspace) : "Open project"}
       </strong>
       {#if workspace}
-        <small class="block truncate font-mono text-[11px] leading-4 text-muted-foreground">{projectParentPath(workspace)}</small>
+        <small class="block truncate font-mono text-xs leading-4 text-muted-foreground">{projectParentPath(workspace)}</small>
       {/if}
     </span>
     <span bind:this={chevronSlot} class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-sidebar-border bg-background/55 text-muted-foreground transition-colors group-hover:border-border group-hover:text-foreground" aria-hidden="true">
@@ -246,7 +246,7 @@
       aria-label="Select project"
       onkeydown={handleMenuKeydown}
     >
-      <div class="flex h-7 items-center px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <div class="flex h-7 items-center px-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         <span>Recent projects</span>
         <span class="ml-auto font-mono font-normal tracking-normal opacity-70">{recentProjects.length}/{MAX_RECENT_PROJECTS}</span>
       </div>
@@ -267,8 +267,8 @@
             >
               <ProjectFolderIcon project={project} color={projectColors.get(project)} class="h-4 w-4 justify-self-center" />
               <span class="min-w-0">
-                <strong class="block truncate text-[11px] font-medium">{projectName(project)}</strong>
-                <small class="block truncate font-mono text-[11px] leading-4 text-muted-foreground">{projectParentPath(project)}</small>
+                <strong class="block truncate text-xs font-medium">{projectName(project)}</strong>
+                <small class="block truncate font-mono text-xs leading-4 text-muted-foreground">{projectParentPath(project)}</small>
               </span>
               {#if selected}<Check class="h-3.5 w-3.5 text-primary" aria-hidden="true" />{/if}
             </button>
@@ -284,13 +284,13 @@
             ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
           </div>
         {:else}
-          <p class="px-2 py-4 text-center text-[11px] text-muted-foreground">No recent projects</p>
+          <p class="px-2 py-4 text-center text-xs text-muted-foreground">No recent projects</p>
         {/each}
       </div>
 
       <div class="border-t border-sidebar-border p-1.5">
         <button
-          class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           data-project-option
           type="button"
           role="menuitem"
@@ -299,7 +299,7 @@
           disabled={currentWindowDisabled}
         ><FolderPlus class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /><span class="truncate">Open folder…</span></button>
         <button
-          class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+          class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
           data-project-option
           type="button"
           role="menuitem"

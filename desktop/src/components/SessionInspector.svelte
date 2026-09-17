@@ -147,8 +147,8 @@
 
   <header class="flex min-w-0 items-center gap-2 border-b border-border bg-chrome px-2.5">
     <Activity class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-    <strong class="shrink-0 text-[11px] font-semibold uppercase tracking-wide">Session</strong>
-    <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={sessionTitle}>{sessionTitle}</span>
+    <strong class="shrink-0 text-xs font-semibold uppercase tracking-wide">Session</strong>
+    <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={sessionTitle}>{sessionTitle}</span>
     <button
       class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
       type="button"
@@ -163,7 +163,7 @@
       <div>
         <Activity class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium">No active session</p>
-        <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Open a conversation to inspect its runtime activity.</p>
+        <p class="mt-1 text-xs leading-4 text-muted-foreground">Open a conversation to inspect its runtime activity.</p>
       </div>
     </div>
   {:else}

@@ -68,11 +68,11 @@
     <div class="flex min-w-0 items-center gap-2 px-2.5 py-2">
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
-          <strong class="truncate text-[11px] font-medium text-foreground">{snapshot?.packageName ?? "package.json"}</strong>
-          {#if snapshot}<span class="shrink-0 font-mono text-[10px] text-muted-foreground">{snapshot.packageManager}</span>{/if}
-          {#if runningCount > 0}<span class="shrink-0 text-[10px] text-tool-success">{runningCount} running</span>{/if}
+          <strong class="truncate text-xs font-medium text-foreground">{snapshot?.packageName ?? "package.json"}</strong>
+          {#if snapshot}<span class="shrink-0 font-mono text-xs text-muted-foreground">{snapshot.packageManager}</span>{/if}
+          {#if runningCount > 0}<span class="shrink-0 text-xs text-tool-success">{runningCount} running</span>{/if}
         </div>
-        <div class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/70" title={snapshot?.packagePath}>{snapshot?.packagePath ?? "Reading package.json…"}</div>
+        <div class="mt-0.5 truncate font-mono text-xs text-muted-foreground/70" title={snapshot?.packagePath}>{snapshot?.packagePath ?? "Reading package.json…"}</div>
       </div>
       <button
         class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
@@ -90,7 +90,7 @@
           <span class="sr-only">Search package scripts</span>
           <Search class="pointer-events-none absolute top-1/2 left-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <input
-            class="h-7 w-full rounded-md border border-input bg-panel-strong pr-2 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
+            class="h-7 w-full rounded-md border border-input bg-panel-strong pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
             type="search"
             placeholder="Filter scripts…"
             bind:value={query}
@@ -111,21 +111,21 @@
               <Play class={["h-3 w-3", startingScript === script.name ? "animate-pulse" : ""]} aria-hidden="true" />
             </span>
             <span class="min-w-0 flex-1">
-              <span class="block truncate font-mono text-[11px] font-medium text-foreground">{script.name}</span>
-              <span class="block truncate font-mono text-[10px] leading-3.5 text-muted-foreground" title={script.command}>{script.command}</span>
+              <span class="block truncate font-mono text-xs font-medium text-foreground">{script.name}</span>
+              <span class="block truncate font-mono text-xs leading-3.5 text-muted-foreground" title={script.command}>{script.command}</span>
             </span>
           </button>
         {/each}
-        {#if visibleScripts.length === 0}<div class="px-3 py-4 text-center text-[11px] text-muted-foreground">No matching scripts.</div>{/if}
+        {#if visibleScripts.length === 0}<div class="px-3 py-4 text-center text-xs text-muted-foreground">No matching scripts.</div>{/if}
       </div>
     {:else if snapshot && !snapshot.exists}
       <div class="border-t border-sidebar-border/70 px-3 py-4 text-center">
         <TerminalSquare class="mx-auto mb-1.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-        <p class="text-[11px] font-medium text-foreground">No package.json</p>
-        <p class="mt-0.5 text-[11px] text-muted-foreground">Add one at the project root to run package scripts.</p>
+        <p class="text-xs font-medium text-foreground">No package.json</p>
+        <p class="mt-0.5 text-xs text-muted-foreground">Add one at the project root to run package scripts.</p>
       </div>
     {:else if snapshot && snapshot.scripts.length === 0}
-      <div class="border-t border-sidebar-border/70 px-3 py-4 text-center text-[11px] text-muted-foreground">No scripts in package.json.</div>
+      <div class="border-t border-sidebar-border/70 px-3 py-4 text-center text-xs text-muted-foreground">No scripts in package.json.</div>
     {/if}
   </div>
 
@@ -147,7 +147,7 @@
               onclick={() => void controller.selectTerminal(terminal.id)}
             >
               <span class={["h-1.5 w-1.5 shrink-0 rounded-full", terminalTone(terminal)]} aria-hidden="true"></span>
-              <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{terminal.script}</span>
+              <span class="min-w-0 flex-1 truncate font-mono text-xs">{terminal.script}</span>
             </button>
             <button
               class="mr-0.5 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100"
@@ -162,7 +162,7 @@
 
       {#if activeTerminal}
         <div class="flex shrink-0 items-center border-l border-code-border/70 px-0.5">
-          <span class="max-w-28 truncate px-1.5 font-mono text-[10px] text-muted-foreground" title={packageTerminalStatusLabel(activeTerminal)}>
+          <span class="max-w-28 truncate px-1.5 font-mono text-xs text-muted-foreground" title={packageTerminalStatusLabel(activeTerminal)}>
             {packageTerminalStatusLabel(activeTerminal)}
           </span>
           <button
@@ -207,13 +207,13 @@
           />
         {/key}
       {:else if loading}
-        <div class="absolute inset-0 flex min-w-0 items-center justify-center px-4 text-[11px] text-muted-foreground"><span class="inline-flex items-center gap-1.5"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading terminals…</span></div>
+        <div class="absolute inset-0 flex min-w-0 items-center justify-center px-4 text-xs text-muted-foreground"><span class="inline-flex items-center gap-1.5"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading terminals…</span></div>
       {:else}
         <div class="absolute inset-0 flex min-w-0 items-center justify-center px-4 text-center">
           <div class="max-w-64">
             <TerminalSquare class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
-            <p class="text-[11px] font-medium text-foreground">No terminal open</p>
-            <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Run a package script or press + to open an interactive shell.</p>
+            <p class="text-xs font-medium text-foreground">No terminal open</p>
+            <p class="mt-1 text-xs leading-4 text-muted-foreground">Run a package script or press + to open an interactive shell.</p>
           </div>
         </div>
       {/if}
@@ -221,7 +221,7 @@
   </div>
 
   {#if error}
-    <div class="absolute right-2 bottom-2 left-2 z-20 rounded-md border border-tool-error/30 bg-popover px-2 py-1.5 text-[11px] leading-4 text-tool-error shadow-md" role="status">
+    <div class="absolute right-2 bottom-2 left-2 z-20 rounded-md border border-tool-error/30 bg-popover px-2 py-1.5 text-xs leading-4 text-tool-error shadow-md" role="status">
       {error}
     </div>
   {/if}

@@ -42,13 +42,13 @@
     <header class="shrink-0 bg-background px-2.5 pt-2.5 pb-2">
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-xs font-semibold text-foreground">Open a conversation</h2>
-        <span class="text-[11px] text-muted-foreground">or start typing below</span>
+        <span class="text-xs text-muted-foreground">or start typing below</span>
       </div>
       <label class="relative mt-2 block">
         <span class="sr-only">Search saved conversations</span>
         <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <input
-          class="h-7 w-full rounded-md border border-input bg-panel-strong pr-2 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
+          class="h-7 w-full rounded-md border border-input bg-panel-strong pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
           bind:this={searchInput}
           bind:value={query}
           type="search"
@@ -64,16 +64,16 @@
           type="button"
           onclick={() => onSelect(session.sessionId)}
         >
-          <strong class="flex min-w-0 items-center gap-1 text-[11px] font-medium text-foreground">
+          <strong class="flex min-w-0 items-center gap-1 text-xs font-medium text-foreground">
             {#if sessionIsFork(session)}
               <GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
             {/if}
             <span class="min-w-0 truncate">{session.title || "Untitled conversation"}</span>
           </strong>
-          <small class="shrink-0 font-mono text-[10px] text-muted-foreground">{displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}</small>
+          <small class="shrink-0 font-mono text-xs text-muted-foreground">{displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}</small>
         </button>
       {:else}
-        <p class="px-3 py-6 text-center text-[11px] text-muted-foreground">
+        <p class="px-3 py-6 text-center text-xs text-muted-foreground">
           {query ? "No matching saved conversations" : "No saved conversations outside the open tabs"}
         </p>
       {/each}

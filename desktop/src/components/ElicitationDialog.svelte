@@ -38,7 +38,7 @@
   onclick={(event) => { if (event.target === event.currentTarget) onAnswer(false); }}
 >
   <form class="w-[min(520px,100%)] rounded-lg border border-border bg-popover p-5 text-popover-foreground shadow-md" onsubmit={submit}>
-    <span class="text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
+    <span class="text-xs font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
     <h2 id="elicitation-title" class="mt-2 mb-4 text-sm leading-snug font-medium whitespace-pre-wrap text-foreground">{message}</h2>
     <label class="grid gap-1.5">
       <span class="text-xs font-semibold">{field.label}</span>

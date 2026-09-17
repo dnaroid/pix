@@ -164,16 +164,16 @@
       {/if}
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
       {#if file && lineRange}
-        <span class="shrink-0 rounded border border-tool-warning/30 bg-tool-warning/10 px-1.5 py-0.5 font-mono text-[11px] text-tool-warning">
+        <span class="shrink-0 rounded border border-tool-warning/30 bg-tool-warning/10 px-1.5 py-0.5 font-mono text-xs text-tool-warning">
           L{lineRange.startLine}{lineRange.endLine === lineRange.startLine ? "" : `–${lineRange.endLine}`}
         </span>
       {/if}
       {#if renderAsMarkdown}
-        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Markdown
         </span>
       {:else if highlighted}
-        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {highlighted.language}
         </span>
         <button

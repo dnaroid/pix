@@ -96,7 +96,7 @@
   >
     <header class="flex items-center justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
       <div>
-        <span class="font-mono text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">
+        <span class="font-mono text-xs font-semibold tracking-[0.08em] text-primary uppercase">
           {picker.command === "commands" ? "Commands" : `/${picker.command}`}
         </span>
         <h2 id="command-picker-title" class="mt-1 text-sm font-medium text-foreground">{picker.title}</h2>
@@ -148,10 +148,10 @@
               picker.command === "model" && "font-mono",
               modelDisplayToneClass(item.tone),
             ]}>{item.label}</strong>
-            {#if item.description}<small class={["mt-0.5 block truncate text-[11px] text-muted-foreground", picker.command !== "commands" && "font-mono"]}>{item.description}</small>{/if}
+            {#if item.description}<small class={["mt-0.5 block truncate text-xs text-muted-foreground", picker.command !== "commands" && "font-mono"]}>{item.description}</small>{/if}
           </span>
           {#if item.shortcut}
-            <kbd class="rounded-sm border border-border/70 bg-panel px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">{item.shortcut}</kbd>
+            <kbd class="rounded-sm border border-border/70 bg-panel px-1.5 py-0.5 font-mono text-xs font-medium text-muted-foreground">{item.shortcut}</kbd>
           {:else}
             <span aria-hidden="true"></span>
           {/if}

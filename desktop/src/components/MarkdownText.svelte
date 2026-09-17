@@ -168,7 +168,7 @@
     box-decoration-break: clone;
     padding: 0.08em 0.3em;
     font-family: "Geist Mono", ui-monospace, monospace;
-    font-size: 0.92em;
+    font-size: max(0.92em, 0.75rem);
     -webkit-box-decoration-break: clone;
   }
   .markdown-text :global(a[data-project-file]:hover),
@@ -236,13 +236,13 @@
   }
   .markdown-text :global(.markdown-media-status) {
     padding: 1rem;
-    font-size: 0.85em;
+    font-size: max(0.85em, 0.75rem);
   }
   .markdown-text :global(.markdown-media-caption) {
     display: block;
     max-width: 100%;
     color: var(--muted-foreground);
-    font-size: 0.85em;
+    font-size: max(0.85em, 0.75rem);
   }
   .markdown-text :global(.markdown-media-caption a[data-project-file]),
   .markdown-text :global(.markdown-media-caption a[data-local-file]) {
@@ -258,7 +258,7 @@
     padding: 0.12em 0.32em;
     color: var(--primary);
     font-family: "Geist Mono", ui-monospace, monospace;
-    font-size: 0.88em;
+    font-size: max(0.88em, 0.75rem);
   }
   .markdown-text :global(pre) {
     width: fit-content;
@@ -305,7 +305,7 @@
     width: max-content;
     border-collapse: collapse;
     border: 1px solid var(--border);
-    font-size: 0.94em;
+    font-size: max(0.94em, 0.75rem);
   }
   .markdown-text.fit-tables :global(table) {
     width: 100%;
@@ -367,6 +367,6 @@
   .markdown-text :global(.mermaid-error) {
     margin: 0 0 0.5rem;
     color: var(--destructive);
-    font-size: 0.9em;
+    font-size: max(0.9em, 0.75rem);
   }
 </style>
