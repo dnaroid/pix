@@ -50,7 +50,7 @@
       <GitBranch class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       {#if snapshot}
         <div class="relative min-w-0 flex-1">
-          <select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pl-2 pr-7 font-mono text-[11px] text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
+          <select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pl-2 pr-7 font-mono text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
             aria-label="Current branch" value={snapshot.branch} disabled={busy}
             onchange={(event) => { const branch = event.currentTarget.value; if (branch && branch !== snapshot?.branch) onSwitchBranch(branch); }}>
             {#if snapshot.detached}<option value="HEAD" disabled>Detached HEAD</option>{/if}
@@ -62,7 +62,7 @@
       <button class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" title="Refresh Git status" aria-label="Refresh Git status" disabled={loading || busy} onclick={onRefresh}><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
     </div>
     {#if snapshot}
-      <div class="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         <span class="min-w-0 flex-1 truncate" title={snapshot.upstream ?? "No upstream configured"}>{snapshot.upstream ?? "Local branch"}</span>
         <span class="shrink-0 font-mono" title="Outgoing / incoming commits" aria-label={`${snapshot.ahead} outgoing, ${snapshot.behind} incoming commits`}>↑{snapshot.ahead} ↓{snapshot.behind}</span>
         <button class="inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button"
@@ -75,23 +75,23 @@
   </header>
 
   <div class="min-h-0 flex-1 overflow-y-auto">
-    {#if error}<div class="border-b border-tool-error/25 bg-tool-error/5 px-3 py-2 text-[11px] leading-4 text-tool-error break-words" role="alert">{error}</div>{/if}
-    {#if workflow.notice && !error}<div class="border-b border-sidebar-border px-3 py-2 text-[11px] leading-4 text-tool-success" role="status">{workflow.notice}</div>{/if}
-    {#if actionId && actionId !== "push" && actionId !== "commit"}<p class="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground" role="status"><RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />Updating repository…</p>{/if}
+    {#if error}<div class="border-b border-tool-error/25 bg-tool-error/5 px-3 py-2 text-xs leading-4 text-tool-error break-words" role="alert">{error}</div>{/if}
+    {#if workflow.notice && !error}<div class="border-b border-sidebar-border px-3 py-2 text-xs leading-4 text-tool-success" role="status">{workflow.notice}</div>{/if}
+    {#if actionId && actionId !== "push" && actionId !== "commit"}<p class="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground" role="status"><RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />Updating repository…</p>{/if}
     {#if snapshot}
-      {#if snapshot.behind > 0}<p class="border-b border-tool-warning/20 bg-tool-warning/5 px-3 py-2 text-[11px] leading-4 text-tool-warning">{snapshot.behind} incoming commit(s). {snapshot.ahead > 0 ? "Branches have diverged. Resolve divergence before pushing." : "Pull from Repository tools before pushing."}</p>{/if}
-      {#if conflicts}<p class="border-b border-tool-error/20 bg-tool-error/5 px-3 py-2 text-[11px] leading-4 text-tool-error" role="status">{conflicts} conflicted file(s). Resolve and stage them before committing.</p>{/if}
+      {#if snapshot.behind > 0}<p class="border-b border-tool-warning/20 bg-tool-warning/5 px-3 py-2 text-xs leading-4 text-tool-warning">{snapshot.behind} incoming commit(s). {snapshot.ahead > 0 ? "Branches have diverged. Resolve divergence before pushing." : "Pull from Repository tools before pushing."}</p>{/if}
+      {#if conflicts}<p class="border-b border-tool-error/20 bg-tool-error/5 px-3 py-2 text-xs leading-4 text-tool-error" role="status">{conflicts} conflicted file(s). Resolve and stage them before committing.</p>{/if}
       {#if workflow.review || reviewLoading}
         <section class="space-y-2 border-b border-sidebar-border px-2 py-2" aria-label="Code review checkpoint">
-          <div class="flex items-center gap-1.5 text-[11px]">
+          <div class="flex items-center gap-1.5 text-xs">
             {#if reviewLoading}<RefreshCw class="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />{:else}<ShieldCheck class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />{/if}
             <strong class="flex-1 font-medium">{reviewLoading ? "Reviewing changes…" : workflow.review?.stale ? "Review is out of date" : reviewStatus === "failed" ? "Review failed" : reviewStatus === "empty" ? "Nothing to review" : findings ? "Review ready · findings" : "Review ready · no findings"}</strong>
             {#if workflow.review}<button class="h-6 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={workflow.onShowReview}>View</button>{/if}
           </div>
           {#if workflow.review && !reviewLoading}
-            <p class="text-[11px] leading-4 text-muted-foreground">{workflow.review.diff.path ?? (workflow.review.diff.scope === "staged" ? "Staged changes" : workflow.review.diff.scope === "unstaged" ? "Working-tree changes" : "All changes")}. {workflow.review.stale ? "Changes moved on. Run review again." : findings ? "Fix in a new session, or commit after inspecting the findings." : reviewStatus === "complete" ? "Generate a message below, then commit and push." : "Run code review again to continue."}</p>
+            <p class="text-xs leading-4 text-muted-foreground">{workflow.review.diff.path ?? (workflow.review.diff.scope === "staged" ? "Staged changes" : workflow.review.diff.scope === "unstaged" ? "Working-tree changes" : "All changes")}. {workflow.review.stale ? "Changes moved on. Run review again." : findings ? "Fix in a new session, or commit after inspecting the findings." : reviewStatus === "complete" ? "Generate a message below, then commit and push." : "Run code review again to continue."}</p>
             {#if findings && !workflow.review.stale}
-              <button class="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!workflow.canResolve || busy} onclick={workflow.onResolve}>
+              <button class="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!workflow.canResolve || busy} onclick={workflow.onResolve}>
                 <Wrench class="h-3.5 w-3.5" aria-hidden="true" />{workflow.resolveRunning ? "Starting session…" : "Fix in new session"}
               </button>
             {/if}
@@ -99,18 +99,18 @@
         </section>
       {/if}
       {#if snapshot.changes.length === 0}
-        <div class="flex items-start gap-2 px-3 py-5 text-muted-foreground"><Check class="mt-0.5 h-4 w-4 shrink-0 text-tool-success" aria-hidden="true" /><div><p class="text-xs font-medium text-foreground">Working tree clean</p><p class="mt-1 text-[11px]">{snapshot.ahead ? "Local commits are ready to push." : "No uncommitted changes."}</p></div></div>
+        <div class="flex items-start gap-2 px-3 py-5 text-muted-foreground"><Check class="mt-0.5 h-4 w-4 shrink-0 text-tool-success" aria-hidden="true" /><div><p class="text-xs font-medium text-foreground">Working tree clean</p><p class="mt-1 text-xs">{snapshot.ahead ? "Local commits are ready to push." : "No uncommitted changes."}</p></div></div>
       {:else}
         <div class="flex gap-1 px-2 py-2">
-          <input type="search" class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-[11px] outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Filter changed files" placeholder="Filter changed files…" bind:value={query} />
-          <button class="shrink-0 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!sessionReady || busy || Boolean(conflicts)} title="Review staged, unstaged and untracked changes together" onclick={() => onReview(undefined, "all")}>Review all</button>
+          <input type="search" class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-xs outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Filter changed files" placeholder="Filter changed files…" bind:value={query} />
+          <button class="shrink-0 rounded-sm px-1.5 text-xs text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!sessionReady || busy || Boolean(conflicts)} title="Review staged, unstaged and untracked changes together" onclick={() => onReview(undefined, "all")}>Review all</button>
         </div>
         <GitChangesSection changes={staged} scope="staged" {query} {busy} {onOpenDiff} onToggle={(path) => onUnstage(path)} onDiscard={() => {}} />
         <GitChangesSection changes={unstaged} scope="unstaged" {query} {busy} {onOpenDiff} onToggle={(path) => void onStage(path)} onDiscard={(path) => void workflow.onRepositoryAction("discard", path)} />
       {/if}
       {#key workspace}<GitRepositoryTools {snapshot} {busy} {workflow} {onCreateBranch} />{/key}
-    {:else if loading}<p class="px-3 py-4 text-[11px] text-muted-foreground" role="status">Reading Git status…</p>
-    {:else if !error}<p class="px-3 py-4 text-[11px] text-muted-foreground">Open a Git repository to use Source Control.</p>{/if}
+    {:else if loading}<p class="px-3 py-4 text-xs text-muted-foreground" role="status">Reading Git status…</p>
+    {:else if !error}<p class="px-3 py-4 text-xs text-muted-foreground">Open a Git repository to use Source Control.</p>{/if}
   </div>
 
   {#if snapshot}

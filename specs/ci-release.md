@@ -26,6 +26,8 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 - Tests must assert explicit bytes, counts, states, or observable ownership conditions instead of assuming a runner completes enough work during a short wall-clock interval.
 - Timers are appropriate only when timeout behavior itself is under test; elapsed time must not stand in for output volume, process progress, or cleanup completion.
 - Real Git/filesystem integration tests may use an explicit generous harness timeout for slow Windows runners; that timeout is only a deadlock safety ceiling, never a performance assertion.
+- Resource-registry scenarios that invoke real Git share a 30-second harness ceiling, including Desktop RPC snapshot tests. Pure unit tests and the command-timeout regression retain their own limits.
+- Independent browser-QA rejection scenarios that launch separate Node runners are separate tests, with fresh fixtures and per-case time budgets; they must not consume a single aggregate timeout. Keep all rejection, redaction, and cleanup assertions when splitting cases.
 - Process-cleanup tests wait for an observable owned-process condition when teardown completion matters.
 - Process test doubles emit their terminal lifecycle events; they must not depend on unreferenced fallback timers keeping the test runner alive across Node versions.
 - Local reproduction of configuration-sensitive suite tests uses an isolated `HOME` so user Pix/pi-tools-suite configuration cannot change the tested defaults.
@@ -64,6 +66,8 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 - `tests/voice-controller.test.ts`
 - `acp/test/git-assistant.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
+- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
+- `external/pi-tools-suite/test/resource-registry.test.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/tui.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
 

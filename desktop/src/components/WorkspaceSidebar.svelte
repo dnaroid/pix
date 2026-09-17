@@ -522,11 +522,11 @@
   {#if !layoutController.collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
       <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome px-3">
-        <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide">{activeTabTitle}</strong>
+        <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
-          <span class="min-w-0 truncate text-[11px] text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
+          <span class="min-w-0 truncate text-xs text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
           <button
-            class="ml-auto flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            class="ml-auto flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
             onclick={openCreate}
             disabled={!workspace || busy}
@@ -747,7 +747,7 @@
           <GripVertical class="h-3.5 w-3.5" aria-hidden="true" />
         </div>
         <div class="min-w-0 flex-1">
-          <h3 class="break-words pt-1 text-[11px] font-medium leading-4">{projectTaskDisplayLabel(draggedTask)}</h3>
+          <h3 class="break-words pt-1 text-xs font-medium leading-4">{projectTaskDisplayLabel(draggedTask)}</h3>
         </div>
       </div>
     </div>
@@ -781,7 +781,7 @@
     >
       <div class="w-full rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md">
         <strong class="text-xs font-semibold">Delete task?</strong>
-        <p class="mt-1.5 break-words text-[11px] leading-4 text-muted-foreground">“{deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}” will be removed from the project task file.</p>
+        <p class="mt-1.5 break-words text-xs leading-4 text-muted-foreground">“{deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}” will be removed from the project task file.</p>
         <div class="mt-3 flex justify-end gap-2">
           <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => deleteTaskId = null}>Cancel</button>
           <button class="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={confirmDelete} disabled={busy}>Delete</button>

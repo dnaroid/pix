@@ -185,6 +185,14 @@ Build hierarchy with weight, spacing, and muted foreground before introducing ma
 
 UI copy SHOULD remain compact and direct.
 
+Desktop application chrome MUST NOT render text below 12 px. Keep the routine
+IDE scale intentionally small: use 12 px for compact controls, metadata, paths,
+status text, diffs, terminals, and other dense technical chrome; 14 px for
+ordinary readable UI text; 16 px for larger content; and 18 px for prominent
+empty-state or section headings. Prefer those four steps over one-off 10, 11,
+or 13 px sizes. Rich document content such as Markdown may use its own heading
+hierarchy, but supporting inline text and captions still keep a 12 px floor.
+
 ## 6. Radius, borders, and elevation
 
 The semantic theme uses a compact editor-oriented base radius. Persistent panes

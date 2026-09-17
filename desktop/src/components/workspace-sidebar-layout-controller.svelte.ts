@@ -3,6 +3,7 @@ import type { SidebarIndicatorTab } from "../lib/sidebar-indicators";
 const ACTIVITY_BAR_WIDTH = 40;
 const DEFAULT_WIDTH = 296;
 const MIN_WIDTH = 236;
+const GIT_MIN_WIDTH = 360;
 const REGISTRY_MIN_WIDTH = 344;
 const SETTINGS_MIN_WIDTH = 360;
 const SCRIPTS_MIN_WIDTH = 400;
@@ -142,6 +143,7 @@ export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebar
 
   function sidebarMinWidth(tab: SidebarIndicatorTab): number {
     if (tab === "project") return Math.max(MIN_WIDTH, projectSwitcherMinimumWidth);
+    if (tab === "git") return GIT_MIN_WIDTH;
     if (tab === "registry") return REGISTRY_MIN_WIDTH;
     if (tab === "settings") return SETTINGS_MIN_WIDTH;
     if (tab === "scripts") return SCRIPTS_MIN_WIDTH;

@@ -118,21 +118,21 @@
       <div class="px-4 py-8 text-center">
         <ListTodo class="mx-auto mb-2 h-5 w-5 text-tool-error" aria-hidden="true" />
         <p class="text-xs font-medium">Task file needs attention</p>
-        <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Fix <code class="font-mono">.pi/tasks.jsonc</code>, then try again. Its contents were not replaced.</p>
-        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-[11px] font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onReload}><RotateCw class="h-3 w-3" aria-hidden="true" />Retry</button>
+        <p class="mt-1 text-xs leading-4 text-muted-foreground">Fix <code class="font-mono">.pi/tasks.jsonc</code>, then try again. Its contents were not replaced.</p>
+        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onReload}><RotateCw class="h-3 w-3" aria-hidden="true" />Retry</button>
       </div>
     {:else if !workspace}
-      <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p><p class="mt-1 text-[11px] text-muted-foreground">Tasks are stored inside its .pi folder.</p></div>
+      <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p><p class="mt-1 text-xs text-muted-foreground">Tasks are stored inside its .pi folder.</p></div>
     {:else if tasks.length === 0}
-      <div class="px-4 py-8 text-center"><ListTodo class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">No tasks yet</p><p class="mt-1 text-[11px] text-muted-foreground">Add the first project task.</p></div>
+      <div class="px-4 py-8 text-center"><ListTodo class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">No tasks yet</p><p class="mt-1 text-xs text-muted-foreground">Add the first project task.</p></div>
     {:else}
       <div class="space-y-2.5">
         {#each TASK_GROUPS as group (group.type)}
           {@const groupTasks = tasks.filter((task) => task.type === group.type)}
           <section class="space-y-1" aria-label={`${group.label} tasks`} data-task-group={group.type}>
-            <div class="flex h-5 items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            <div class="flex h-5 items-center gap-1.5 px-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               <span>{group.label}</span>
-              <span class="font-mono text-[11px] font-normal opacity-65">{groupTasks.length}</span>
+              <span class="font-mono text-xs font-normal opacity-65">{groupTasks.length}</span>
             </div>
 
             <div
@@ -143,7 +143,7 @@
               role="list"
             >
               {#if groupTasks.length === 0 && !isDropPlaceholder(group.type, null, "after")}
-                <div class="pointer-events-none grid h-8 place-items-center border border-dashed border-sidebar-border/70 text-[11px] text-muted-foreground/55">Empty</div>
+                <div class="pointer-events-none grid h-8 place-items-center border border-dashed border-sidebar-border/70 text-xs text-muted-foreground/55">Empty</div>
               {/if}
 
               {#each groupTasks as task (task.id)}
@@ -151,7 +151,7 @@
                 {#if isDropPlaceholder(group.type, task.id, "before")}
                   <div
                     data-task-drop-placeholder
-                    class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
+                    class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-xs font-medium text-primary"
                     style:min-height={`${draggedTaskHeight}px`}
                     role="presentation"
                   >Move to {group.label}</div>
@@ -183,7 +183,7 @@
 
                     <div class="min-w-0 flex-1">
                       <div class="flex min-w-0 items-start gap-1">
-                        <h3 class="min-w-0 flex-1 break-words pt-1 text-[11px] font-medium leading-4 text-foreground">{taskLabel}</h3>
+                        <h3 class="min-w-0 flex-1 break-words pt-1 text-xs font-medium leading-4 text-foreground">{taskLabel}</h3>
                         <div class="flex shrink-0 items-center opacity-65 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <div class="relative" data-task-status-control>
                             <button
@@ -213,7 +213,7 @@
                               >
                                 {#each TASK_STATUSES as status}
                                   <button
-                                    class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[11px] leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
+                                    class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
                                     type="button"
                                     role="menuitemradio"
                                     tabindex="-1"
@@ -255,7 +255,7 @@
                 {#if isDropPlaceholder(group.type, task.id, "after")}
                   <div
                     data-task-drop-placeholder
-                    class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
+                    class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-xs font-medium text-primary"
                     style:min-height={`${draggedTaskHeight}px`}
                     role="presentation"
                   >Move to {group.label}</div>
@@ -265,7 +265,7 @@
               {#if isDropPlaceholder(group.type, null, "after")}
                 <div
                   data-task-drop-placeholder
-                  class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
+                  class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-xs font-medium text-primary"
                   style:min-height={`${draggedTaskHeight}px`}
                   role="presentation"
                 >Move to {group.label}</div>
