@@ -3,6 +3,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJson, root, run, version } from "./common.mjs";
 
+function stringifyJsonLike(original, data) {
+  const indent = original.includes('\n\t"') || original.includes('\r\n\t"') ? "\t" : 2;
+  const eol = original.includes("\r\n") ? "\r\n" : "\n";
+  return `${JSON.stringify(data, null, indent).replaceAll("\n", eol)}${eol}`;
+}
+
 export function versionEdits(directory, next) {
   // Installer-compatible stable versions. Prerelease distribution can be added with an explicit MSI policy.
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(next)) throw new Error("Release version must be stable X.Y.Z");
@@ -17,13 +23,14 @@ export function versionEdits(directory, next) {
       const data = JSON.parse(original);
       data.version = next;
       if (file === "package-lock.json") data.packages[""].version = next;
-      const indent = original.includes('\n\t"') ? "\t" : 2;
-      edits.set(path, `${JSON.stringify(data, null, indent)}\n`);
+      edits.set(path, stringifyJsonLike(original, data));
     }
   }
-  const config = readJson(join(directory, "desktop/src-tauri/tauri.conf.json"));
+  const configPath = join(directory, "desktop/src-tauri/tauri.conf.json");
+  const configOriginal = readFileSync(configPath, "utf8");
+  const config = JSON.parse(configOriginal);
   config.version = next;
-  edits.set("desktop/src-tauri/tauri.conf.json", `${JSON.stringify(config, null, 2)}\n`);
+  edits.set("desktop/src-tauri/tauri.conf.json", stringifyJsonLike(configOriginal, config));
   for (const file of ["Cargo.toml", "Cargo.lock"]) {
     const path = `desktop/src-tauri/${file}`;
     const text = readFileSync(join(directory, path), "utf8");

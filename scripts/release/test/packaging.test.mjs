@@ -114,3 +114,25 @@ test("version synchronization changes only Pix's Cargo package and all app manif
     assert.throws(() => versionEdits(directory, invalid), /version|Version/u);
   }
 });
+
+test("version synchronization preserves CRLF JSON files on Windows checkouts", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "pix-version-crlf-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const prefix of ["", "acp/", "desktop/"]) {
+    await mkdir(join(directory, prefix), { recursive: true });
+    for (const file of ["package.json", "package-lock.json"]) {
+      const source = await readFile(join(root, prefix, file), "utf8");
+      await writeFile(join(directory, prefix, file), source.replaceAll("\n", "\r\n"));
+    }
+  }
+  await mkdir(join(directory, "desktop/src-tauri"), { recursive: true });
+  for (const file of ["Cargo.toml", "Cargo.lock", "tauri.conf.json"]) {
+    const source = await readFile(join(root, "desktop/src-tauri", file), "utf8");
+    await writeFile(join(directory, "desktop/src-tauri", file), source.replaceAll("\n", "\r\n"));
+  }
+
+  const edits = versionEdits(directory, version());
+  for (const [path, content] of edits) {
+    assert.equal(content, await readFile(join(directory, path), "utf8"), path);
+  }
+});

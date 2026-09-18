@@ -20,6 +20,9 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 - `bin/pix.mjs` reads that range from the installed package metadata and rejects unsupported versions before loading Pix. Its dependency-free check deliberately accepts only the bounded stable range format `>=major.minor.patch <major`; prereleases and an unrecognized range format fail closed.
 - The build-and-test matrix also runs the minimum supported version on Ubuntu. That matrix entry must track the lower bound in `engines.node`; this run may not silently switch to the development pin.
 - npm scripts use the selected `node`/`npm` from `PATH` and must not invoke or require a version manager. The same rule applies to lifecycle hooks, builds, and tests; selecting the environment is the caller's responsibility.
+- Release version synchronization preserves each JSON file's existing LF/CRLF
+  convention. Windows checkouts must not fail `release:version:check` merely
+  because Git materialized CRLF line endings.
 - `tests/node-version.test.ts` guards pin/manifest/lockfile/CI alignment and launcher boundary behavior. Update the contract and its tests together when changing supported versions.
 
 ## Deterministic test invariants
