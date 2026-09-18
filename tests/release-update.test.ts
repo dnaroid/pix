@@ -35,7 +35,7 @@ test("portable marker blocks all npm mutations even under node_modules and with 
 test("portable update uses GitHub stable release metadata instead of npm", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "pix-release-update-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  await writeFile(join(directory, "package.json"), JSON.stringify({ name: "pi-ui-extend", version: "1.2.3" }));
+  await writeFile(join(directory, "package.json"), JSON.stringify({ name: "pi-ui-extend", version: "1.2.3", private: true }));
   await writeFile(join(directory, ".pix-portable.json"), "{}");
   const oldFetch = globalThis.fetch;
   const previous = Object.fromEntries(["PI_OFFLINE", "PI_SKIP_VERSION_CHECK", "PIX_SKIP_VERSION_CHECK"].map((key) => [key, process.env[key]]));

@@ -9,10 +9,11 @@ import { root, targets } from "../common.mjs";
 const require = createRequire(join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"));
 const { parse } = require("yaml");
 const workflow = parse(readFileSync(join(root, ".github/workflows/publish.yml"), "utf8"));
+const checkWorkflow = parse(readFileSync(join(root, ".github/workflows/check.yml"), "utf8"));
 
 test("release matrix covers every supported native OS/CPU and follows correctness gates", () => {
   const build = workflow.jobs["build-release"];
-  assert.equal(build.needs, "package-smoke-test");
+  assert.equal(build.needs, "release-contract");
   assert.deepEqual(build.strategy.matrix.include.map((row) => row.target).sort(), Object.keys(targets).sort());
   assert.deepEqual(build.strategy.matrix.include.map((row) => [row.target, row.os]), [
     ["linux-x64", "ubuntu-22.04"], ["macos-arm64", "macos-15"],
@@ -26,15 +27,27 @@ test("release matrix covers every supported native OS/CPU and follows correctnes
   assert.match(releaseBuild.env.TAURI_SIGNING_PRIVATE_KEY, /secrets\.TAURI_SIGNING_PRIVATE_KEY/u);
 });
 
-test("manual builds cannot publish and only the final release job has contents-write permission", () => {
+test("CI and release workflows do not duplicate npm/publication work", () => {
+  assert.deepEqual(workflow.on.push.tags, ["v*"]);
+  assert.equal(workflow.on.push.branches, undefined);
+  assert.equal(workflow.on.pull_request, undefined);
+  assert.equal(workflow.jobs.publish, undefined);
+  assert.equal(workflow.jobs["package-smoke-test"], undefined);
+  assert.equal(workflow.jobs["build-and-test"], undefined);
+  assert.deepEqual(checkWorkflow.on.push.branches, ["master"]);
+  assert.deepEqual(checkWorkflow.on.pull_request.branches, ["master"]);
+  assert.ok(checkWorkflow.jobs["build-and-test"]);
+  const browserInstall = checkWorkflow.jobs["build-and-test"].steps.find((step) => step.name === "Install Chromium for browser QA E2E");
+  assert.match(browserInstall.if, /matrix\.node == 'pinned'/u);
+});
+
+test("manual release builds cannot publish and only the final release job has contents-write permission", () => {
   assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
   assert.equal(workflow.permissions.contents, "read");
   const publisher = workflow.jobs["github-release"];
-  assert.deepEqual(publisher.needs, ["build-release", "publish"]);
-  for (const name of ["publish", "github-release"]) {
-    assert.match(workflow.jobs[name].if, /github\.event_name == 'push'/u);
-    assert.match(workflow.jobs[name].if, /refs\/tags\/v/u);
-  }
+  assert.equal(publisher.needs, "build-release");
+  assert.match(publisher.if, /github\.event_name == 'push'/u);
+  assert.match(publisher.if, /refs\/tags\/v/u);
   assert.deepEqual(Object.entries(workflow.jobs).filter(([, job]) => job.permissions?.contents === "write").map(([name]) => name), ["github-release"]);
   assert.ok(publisher.steps.some((step) => step.run?.includes("checksums.mjs")));
   assert.ok(publisher.steps.some((step) => step.run?.includes("publish-github.mjs")));

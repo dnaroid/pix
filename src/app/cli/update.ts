@@ -198,11 +198,11 @@ async function checkPackageUpdate(packageInfo: PixPackageInfo, options: PixUpdat
 		packageRoot: packageInfo.packageRoot,
 	};
 
-	if (packageInfo.private) {
+	if (packageInfo.private && !isReleaseInstall(packageInfo.packageRoot)) {
 		return {
 			...base,
 			status: "unavailable",
-			reason: "this checkout is marked private in package.json, so it cannot be updated from npm",
+			reason: "this source checkout is marked private and is not a release installation",
 		};
 	}
 

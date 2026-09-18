@@ -1,6 +1,7 @@
 {
   "name": "pi-ui-extend",
   "version": "2.0.1",
+  "private": true,
   "description": "Pix: a workspace-first terminal UI for Pi with tabs, readable tool activity, voice input, and bundled agent tools.",
   "private": false,
   "repository": {
@@ -78,10 +79,6 @@
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-exclude=src/main.ts --test-coverage-lines=94 --test-coverage-branches=80 --test-coverage-functions=94 \"tests/**/*.test.ts\"",
     "update-sdk-references": "node .pi/skills/pi-sdk/scripts/update-references.mjs",
     "prepack": "npm run generate-schemas --silent",
-    "pack:dry-run": "npm pack --dry-run",
-    "smoke-test": "bash scripts/smoke-test-package.sh",
-    "smoke-test:cli": "node scripts/smoke-test-package-cli.mjs",
-    "release:check": "npm run check && npm run build:pix && npm run pack:dry-run",
     "release:version": "node scripts/release/sync-version.mjs",
     "release:version:check": "node scripts/release/sync-version.mjs --check",
     "version": "node scripts/release/sync-version.mjs --stage",
@@ -91,11 +88,9 @@
     "release:smoke": "node scripts/release/smoke.mjs",
     "release:smoke:desktop": "node scripts/release/smoke-desktop.mjs",
     "test:release": "node --test scripts/release/test/*.test.mjs",
-    "publish-npm": "bash scripts/publish.sh",
     "generate-schemas": "tsx scripts/generate-schemas.ts",
     "generate-schemas:check": "tsx scripts/generate-schemas.ts --check",
-    "generate-schemas:watch": "tsx watch scripts/generate-schemas.ts",
-    "prepublishOnly": "npm run check && npm run build:pix && npm run generate-schemas"
+    "generate-schemas:watch": "tsx watch scripts/generate-schemas.ts"
   },
   "dependencies": {
     "@cortexkit/antigravity-auth-core": "2.2.1",

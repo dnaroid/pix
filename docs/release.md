@@ -1,11 +1,11 @@
 # Release and update verification
 
-Use this checklist before publishing `pi-ui-extend` so installs work on macOS, Linux, and Windows and the `pi-tools-suite` extension payload is included.
+Use this checklist before publishing a Pix GitHub Release so installs work on macOS, Linux, and Windows and the `pi-tools-suite` extension payload is included.
 
 ## Downloadable TUI and Desktop releases
 
-One stable `vX.Y.Z` tag produces npm publication and a **draft GitHub Release**
-containing portable TUI and Desktop installers. The contract is in
+One stable `vX.Y.Z` tag produces a **draft GitHub Release** containing portable
+TUI and Desktop installers. The contract is in
 [`specs/release-distribution.md`](../specs/release-distribution.md).
 
 | Target | TUI | Desktop |
@@ -101,12 +101,12 @@ and additionally exercise ACP and the native application for Desktop.
 
 ### CI and publishing
 
-The `Publish` workflow uses native Ubuntu 22.04 x64, macOS 15 ARM64, macOS 15 Intel
-and Windows 2022 x64 runners. `Actions → Publish → Run workflow` builds and tests
+The `Release` workflow uses native Ubuntu 22.04 x64, macOS 15 ARM64, macOS 15 Intel
+and Windows 2022 x64 runners. `Actions → Release → Run workflow` builds and tests
 all packages without publishing anything. The ten installers/archives are
 available as four Actions artifacts. On a version-tag push, the final job waits
-for the full native matrix and npm publication, validates the complete set,
-adds `SHA256SUMS`, and uploads everything to a draft release. Only then review
+for the full native matrix, validates the complete set, adds `SHA256SUMS`, and
+uploads everything to a draft release. Only then review
 the release notes/signing status and click **Publish release** in GitHub.
 
 The draft is intentional: an unsigned or incomplete first build must not silently
@@ -166,10 +166,14 @@ npm run smoke-test
 
 The normative CI invariants are recorded in [`specs/ci-release.md`](../specs/ci-release.md). This section is the operational checklist for release work.
 
-The GitHub Actions release workflow has two different responsibilities and they should stay separate:
+The GitHub Actions workflows have two different responsibilities and they stay separate:
 
-- `build-and-test` runs on Ubuntu, macOS, and Windows. This is the cross-platform correctness gate: type checks, unit/integration tests, platform-specific host checks, and the Pix build belong here.
-- npm package smoke tests run the full payload/tarball test on Ubuntu and a smaller pack/install/CLI check on Windows. Portable/Tauri release artifacts additionally run smoke tests on all four native targets.
+- `check.yml` runs the cross-platform correctness matrix on pull requests and
+  `master` pushes. It does not run on release tags.
+- `publish.yml` is release-only: a lightweight release-contract check followed by
+  the four native standalone package jobs and, for tag pushes, Draft GitHub Release creation.
+- Native release smoke remains mandatory because it validates the relocated TUI
+  archive and installed Desktop application, not source or npm-package behavior.
 
 Keep CI tests deterministic across runner speed and operating systems:
 
@@ -184,28 +188,25 @@ Windows process tests have additional invariants:
 - Browser/process cleanup must stay ownership-scoped. When a PowerShell helper discovers descendants, it must not select or terminate itself; kill owned child roots recursively and verify cleanup before returning.
 - Treat CRLF/LF differences as presentation differences unless line endings are the behavior under test.
 
-Package smoke assertions should check stable package contracts. If a bundled guide title, required payload path, CLI entry point, or other intentionally asserted artifact changes, update the corresponding smoke assertion in the same change. Do not remove the smoke test merely because ordinary source tests are green: source tests do not prove that `npm pack` contains an installable, runnable artifact.
-
 Current implementation:
 
-- `.github/workflows/publish.yml` owns the CI matrix and release gates.
-- `scripts/smoke-test-package.sh` is the full packed-artifact/payload smoke test.
-- `scripts/smoke-test-package-cli.mjs` is the cross-platform pack/install/CLI sanity check used on Windows.
+- `.github/workflows/check.yml` owns PR/master correctness checks.
+- `.github/workflows/publish.yml` owns tag/manual release packaging and Draft Release creation.
+- `scripts/release/smoke.mjs` and `smoke-desktop.mjs` validate the actual standalone artifacts.
 
-## Publish a new npm version
+## Create a release version
 
-Pix uses the same release style as `indexer-cli`: a local command bumps the version, smoke-tests the tarball, then pushes the release commit and tag. GitHub Actions publishes the tag to npm using npm trusted publishing (GitHub OIDC), so the publish job does not require a long-lived `NPM_TOKEN` secret.
-
-Release commands:
+The root `package.json` version remains the authoritative application version even
+though Pix is not published to npm. Use `npm version` because its version hook
+synchronizes ACP, Desktop, Tauri, Cargo and lockfiles before creating the tag:
 
 ```bash
-npm run publish-npm              # patch release
-npm run publish-npm -- minor      # minor release
-npm run publish-npm -- major      # major release
-npm run publish-npm -- 0.2.0      # exact version
+npm version patch -m "chore(release): %s"
+# or an exact version
+npm version 2.0.2 -m "chore(release): %s"
+git push origin master
+git push origin v2.0.2
 ```
-
-The command requires a clean working tree on `master`, pulls latest from `origin/master`, runs `release:check`, runs `npm version`, runs the tarball smoke test, then pushes the branch and `v*` tag. The tag workflow verifies that `package.json` matches the tag before `npm publish --access public`.
 
 The root `package.json` version is authoritative. Its npm `version` hook synchronizes
 ACP, Desktop, Tauri, Cargo and lockfile versions and stages them before npm creates
@@ -214,23 +215,11 @@ the release commit/tag. `npm run release:version:check` detects drift; use
 Only stable `X.Y.Z` versions within MSI bounds are supported by this release path.
 Do not bump `external/pi-tools-suite/package.json` unless publishing the suite separately.
 
-## Tarball smoke test
-
-From a clean temporary directory:
-
-```bash
-npm pack /path/to/pi-ui-extend
-npm install -g ./pi-ui-extend-*.tgz --ignore-scripts
-pix update --check
-```
-
-Confirm the dry-run/pack output contains:
-
-- `bin/pix.mjs`
-- `dist/**`
-- `extensions/**`
-- `external/pi-tools-suite/**`
-- `README.md` and `docs/release.md`
+`npm pack` is still used internally by `scripts/release/prepare.mjs` to apply the
+declared package-file allowlist before installing locked production dependencies
+into a standalone payload. It is an implementation detail, not a supported
+installation or publication channel. The root package is marked `private` to
+prevent accidental registry publication.
 
 ## External suite checks
 

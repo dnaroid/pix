@@ -6,25 +6,22 @@
 
 Tabs, readable tool activity, session navigation, local voice input, an interactive shell, and a bundled toolkit for repository-scale agent work.
 
-[![npm version](https://img.shields.io/npm/v/pi-ui-extend?color=cb3837)](https://www.npmjs.com/package/pi-ui-extend)
-[![npm downloads](https://img.shields.io/npm/dm/pi-ui-extend)](https://www.npmjs.com/package/pi-ui-extend)
 [![check](https://github.com/dnaroid/pix/actions/workflows/check.yml/badge.svg)](https://github.com/dnaroid/pix/actions/workflows/check.yml)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.19-339933?logo=node.js&logoColor=white)](#requirements)
 
 </div>
 
 ![Pix workspace with tabs, compact thinking and tool activity, and live status](assets/screenshots/pix-overview.png)
 
-## Start in two commands
+## Start
 
-```bash
-npx pi-ui-extend install
-npx pi-ui-extend --cwd .
-```
+Download the TUI archive or Desktop installer for your OS/CPU from
+[GitHub Releases](https://github.com/dnaroid/pix/releases). Standalone releases
+include their own Node.js runtime and Pix dependencies, so Node/npm is not an
+installation prerequisite.
 
-The setup command checks runtime helpers, creates non-secret Pix and tools configuration templates when missing, and prints a credential-aware checklist. It never imports credentials. The second command opens the current project in Pix without requiring a global Pix install.
-
-> Already installed globally? Run `pix --cwd .`.
+For TUI, extract the complete archive and run `pix` (macOS/Linux) or `pix.cmd`
+(Windows) from a terminal. For Desktop, install or launch the native package for
+your platform.
 
 ## Why Pix?
 
@@ -142,16 +139,16 @@ Update/Restart flow in the app; development builds do not run that updater.
 Git, tools needed by your projects, provider credentials and optional voice/
 clipboard helpers are separate. Unsigned/ad-hoc builds may show OS warnings;
 check the release notes before installing. See the [release guide](docs/release.md)
-for building, signing, checksums and updates. npm installation remains available below.
+for building, signing, checksums and updates.
 
 ### Requirements
 
-The Node/npm requirements below apply to the npm/source installation channel.
-
-- **Node.js `>=22.19.0 <25`**
 - macOS, Linux, or Windows terminal with 256-color support
-- npm or another way to run the published npm package
 - provider credentials supported by Pi, unless you only use locally configured models
+
+For source development only, use **Node.js `>=22.19.0 <25`** plus npm and Rust/Tauri
+tooling as required by the build you are running. End-user GitHub Release packages
+do not require a separately installed Node.js runtime.
 
 Recommended:
 
@@ -167,19 +164,9 @@ Optional:
 - Ollama with web search enabled for the bundled `web_search` and `web_fetch` tools
 - language servers for the LSP module (see [LSP setup](external/pi-tools-suite/README.md#lsp-setup) for install commands and ready-to-paste configs for popular servers, including Svelte, Vue, Go, clangd, Lua, and bash)
 
-### One-shot use
-
-```bash
-# Check/install runtime helpers for this user
-npx pi-ui-extend install
-
-# Start Pix in a project
-npx pi-ui-extend --cwd /path/to/project
-```
-
 ### First-run checklist
 
-1. Run `npx pi-ui-extend install`. It preserves existing files and creates these non-secret templates when missing:
+1. Start Pix once. It creates non-secret configuration templates when missing:
    - `~/.config/pi/pix.jsonc`
    - `~/.config/pi/pi-tools-suite.jsonc`
 2. Configure at least one model provider:
@@ -188,25 +175,8 @@ npx pi-ui-extend --cwd /path/to/project
 3. Start Pix, use `/model` to select an available model, and follow any startup authentication diagnostic.
 4. Configure only the optional integrations you need; none are required for normal model conversations.
 
-The installer installs JetBrainsMono Nerd Font when it is missing. Pix also checks it on startup and starts a background installation when needed so the icon UI remains readable even when setup was skipped. Installation failures are reported while Pix keeps its fallback icons. Use `--check` to inspect the machine without creating files, installing helpers, or changing credentials.
-
-### Global install
-
-```bash
-npm install -g pi-ui-extend --ignore-scripts
-pix install
-pix --cwd /path/to/project
-```
-
-The package exposes both `pix` and `pi-ui-extend`; they launch the same application.
-
-### Check without changing anything
-
-```bash
-npx pi-ui-extend install --check
-# or, after a global install
-pix install --check
-```
+Pix checks the Nerd Font/runtime helpers on startup and keeps graceful fallbacks
+when optional helpers are unavailable.
 
 ### Start options
 
@@ -601,7 +571,7 @@ acp/                         pix-acp: ACP adapter embedding pi into editors like
 **If your coding agent lives in the terminal, give it a workspace.**
 
 ```bash
-npx pi-ui-extend --cwd .
+pix --cwd .
 ```
 
 </div>

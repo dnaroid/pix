@@ -59,16 +59,16 @@ describe("Node version configuration", () => {
 	});
 
 	it("keeps CI on the shared pin with a separate minimum-version matrix entry", () => {
-		for (const name of ["check", "pr-check", "publish"]) {
+		for (const name of ["check", "publish"]) {
 			const workflow = readText(`.github/workflows/${name}.yml`);
 			assert.match(workflow, /node-version-file: \.node-version/u, name);
 			assert.doesNotMatch(workflow, /\bmise\b/u, name);
 		}
 		const minimum = /^>=(\d+\.\d+\.\d+) /u.exec(supportedRange)?.[1];
 		assert.ok(minimum);
-		const publish = readText(".github/workflows/publish.yml");
-		assert.ok(publish.includes(`node: "${minimum}"`));
-		assert.ok(publish.includes("node-version: ${{ matrix.node }}"));
+		const check = readText(".github/workflows/check.yml");
+		assert.ok(check.includes(`node: "${minimum}"`));
+		assert.ok(check.includes("node-version: ${{ matrix.node }}"));
 	});
 });
 

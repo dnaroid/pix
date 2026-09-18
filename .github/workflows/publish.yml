@@ -1,12 +1,9 @@
-name: Publish
+name: Release
 
 on:
   push:
-    branches: [master]
     tags:
       - "v*"
-  pull_request:
-    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -17,67 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Check/build (${{ matrix.os }} / Node ${{ matrix.node }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [pinned]
-        include:
-          - os: ubuntu-latest
-            node: "22.19.0"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        if: matrix.node == 'pinned'
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - uses: actions/setup-node@v4
-        if: matrix.node != 'pinned'
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - uses: oven-sh/setup-bun@v2
-        if: runner.os != 'Windows'
-      - name: Install Bun on Windows
-        if: runner.os == 'Windows'
-        run: npm install -g bun@1.3.14
-      - run: bun --version
-      - run: npm ci --ignore-scripts
-      - run: npm run check
-      - name: Install and check ACP adapter
-        run: npm ci --prefix acp --ignore-scripts && npm run check:acp
-      - name: Install and check desktop frontend
-        run: npm ci --prefix desktop --ignore-scripts && npm run check:desktop && npm --prefix desktop test
-      - name: Check desktop Rust host
-        if: runner.os == 'macOS'
-        run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check && cargo check --manifest-path desktop/src-tauri/Cargo.toml
-      - run: npm run test:tools-suite
-      - name: Install Chromium for browser QA E2E
-        if: runner.os == 'Linux'
-        run: npx playwright install --with-deps chromium
-      - name: Run browser QA mock-page E2E
-        if: runner.os == 'Linux'
-        run: npm run test:browser-qa-e2e
-      - run: npm run build:pix
-
-  package-smoke-test:
-    needs: build-and-test
-    name: Package smoke test (${{ matrix.os }} / ${{ matrix.mode }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            mode: full
-          - os: windows-latest
-            mode: cli
+  release-contract:
+    name: Release contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,15 +25,16 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Full packed-package smoke test
-        if: matrix.mode == 'full'
-        run: npm run smoke-test
-      - name: Packed CLI sanity check
-        if: matrix.mode == 'cli'
-        run: npm run smoke-test:cli
+      - run: npm run test:release
+      - name: Verify tag and all application versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/release/sync-version.mjs --check --tag
+      - name: Verify application versions
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: node scripts/release/sync-version.mjs --check
 
   build-release:
-    needs: package-smoke-test
+    needs: release-contract
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Release packages (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -187,8 +128,6 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npm run release:build -- ${{ matrix.target }}
-      - name: Test native backend path resolution
-        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib backend_runtime
       - name: Upload package size reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -225,42 +164,8 @@ jobs:
           }
           Remove-Item (Join-Path $env:RUNNER_TEMP 'pix-certificate.pfx') -Force -ErrorAction SilentlyContinue
 
-  publish:
-    needs: package-smoke-test
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      # npm trusted publishing (OIDC): the job exchanges a GitHub-issued
-      # identity token for a short-lived npm publish token, so no NPM_TOKEN
-      # secret is needed. Requires npm >= 11.5 and the npmjs.com trusted
-      # publisher entry for pi-ui-extend (repo dnaroid/pix, publish.yml).
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: npm
-          registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@latest
-      - run: npm ci --ignore-scripts
-      - run: npm run check
-      - run: npm run build:pix
-      - name: Verify package version matches tag
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          if [[ "$PACKAGE_VERSION" != "$TAG_VERSION" ]]; then
-            echo "package.json version ($PACKAGE_VERSION) does not match tag ($TAG_VERSION)"
-            exit 1
-          fi
-      - name: Publish to npm
-        run: npm publish --access public
-
   github-release:
-    needs: [build-release, publish]
+    needs: build-release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -2,16 +2,31 @@
 
 ## Scope
 
-This spec defines the release CI invariants for Pix. It covers the cross-platform correctness matrix, packed-package smoke coverage, deterministic-test requirements, and Windows process-cleanup rules that must remain true when CI or UI-QA tests change.
+This spec defines the CI and release invariants for Pix. It covers the
+cross-platform correctness matrix, standalone release verification,
+deterministic-test requirements, and Windows process-cleanup rules that must
+remain true when CI or UI-QA tests change.
 
 ## CI contract
 
-- `build-and-test` runs on Ubuntu, macOS, and Windows and is the cross-platform correctness gate.
-- The full packed-artifact smoke test runs on Ubuntu and verifies the tarball payload plus installed CLI behavior.
-- Windows runs the smaller packed CLI smoke path: build, `npm pack`, isolated install, required entry/build files, and non-interactive CLI commands.
-- A separate macOS **npm** package-smoke job is not required. Portable/Tauri artifacts have their own native smoke matrix.
-- Publishing remains gated on the package-smoke job and uses npm trusted publishing through GitHub OIDC.
-- GitHub Release builds, shared application versions, signing, complete-asset gates and portable update behavior are governed by [`release-distribution.md`](release-distribution.md). The existing npm publish job remains independent; the draft GitHub Release waits for both npm publication and all native package builds.
+- `check.yml` runs `build-and-test` on Ubuntu, macOS, and Windows for pull requests
+  and `master` pushes only. It also runs the minimum supported Node version on
+  Ubuntu. Release tags do not repeat this matrix.
+- Browser QA E2E runs once on the pinned Ubuntu job, not again on the minimum-Node
+  compatibility job.
+- `publish.yml` runs only for `v*` tags or manual dispatch. It has a lightweight
+  `release-contract` gate and the four-target native release matrix.
+- The native release matrix does not rerun standalone Rust backend unit tests
+  after packaging: the installed Desktop smoke exercises the bundled backend on
+  each target, while ordinary CI owns source-level Rust checks.
+- GitHub Release creation depends only on successful native release artifacts.
+  There is no npm publish job, registry credential/OIDC path, or npm-package
+  smoke gate.
+- `npm pack` remains an internal release-preparation primitive used to apply the
+  package allowlist before locked production dependencies are installed into the
+  standalone payload. It is not an install or publication channel.
+- GitHub Release builds, shared application versions, signing, complete-asset gates
+  and portable update behavior are governed by [`release-distribution.md`](release-distribution.md).
 - Desktop release jobs require the Tauri updater signing key and must emit the
   signed updater sidecars/bundles expected for their native target. The final
   release job generates `latest.json` only from a complete four-target matrix;
@@ -47,20 +62,22 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 - Windows browser/process cleanup is ownership-scoped. Cleanup helpers must not discover or terminate themselves; owned child roots are terminated recursively and cleanup is verified before returning.
 - Node child-process smoke helpers invoke npm through its JavaScript entrypoint (`process.execPath` + `npm_execpath`) rather than trying to `execFile` `npm.cmd` directly.
 
-## Package-smoke invariants
+## Standalone release-smoke invariants
 
-- Source tests do not replace package smoke coverage: `npm pack` must still be proven installable and runnable.
-- Smoke assertions track stable package contracts such as required payload paths, entry points, npm `bin` metadata/shims, and intentionally asserted guide/CLI behavior.
-- Pix CLI bin targets use npm-normalized package-relative paths (`bin/pix.mjs`, without a leading `./`) so npm 12 does not strip them during publish normalization.
-- When an intentionally asserted package contract changes, its smoke assertion changes in the same commit.
+- Source tests do not replace release smoke. Every native release job must execute
+  the extracted TUI archive and the installed/relocated Desktop application.
+- TUI smoke proves bundled Node, native PTY, extensions and esbuild without ACP.
+- Desktop smoke additionally proves ACP initialize/new/close and native host
+  startup from the actual installer/bundle path.
+- Release smoke isolates HOME/config/secrets and places a failing system-Node
+  sentinel ahead of OS tools; success must come from the bundled runtime.
 
 ## Implementation
 
 - `.github/workflows/check.yml`
-- `.github/workflows/pr-check.yml`
 - `.github/workflows/publish.yml`
-- `scripts/smoke-test-package.sh`
-- `scripts/smoke-test-package-cli.mjs`
+- `scripts/release/smoke.mjs`
+- `scripts/release/smoke-desktop.mjs`
 - `package.json`
 - `.node-version`
 - `.nvmrc`
@@ -83,8 +100,7 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 
 - `node --import tsx --test tests/node-version.test.ts`
 - `npm run check`
-- `npm run smoke-test`
-- `npm run smoke-test:cli`
+- `npm run test:release`
 - `npm run test:tools-suite` with an isolated `HOME` when reproducing CI defaults locally
 - `git diff --check`
 

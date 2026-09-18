@@ -4,7 +4,8 @@
 
 Pix ships standalone Node runtime payloads in portable TUI archives and Tauri
 Desktop installers. The two variants share preparation code, not an identical
-file inventory: only Desktop includes ACP. npm remains a separate supported channel.
+file inventory: only Desktop includes ACP. GitHub Releases are the only supported
+distribution channel; the root package is private and must not be published to npm.
 Root `package.json` is the authoritative application version. ACP, Desktop,
 Tauri, the Pix Cargo package, and the three npm lockfile root records share it.
 `npm version` runs `scripts/release/sync-version.mjs --stage` before creating its
@@ -125,7 +126,9 @@ The optimization run completed `npm run release:build -- macos-arm64` with exit
 code 0. Both extracted TUI and the native GUI copied from its read-only mounted
 DMG passed isolated smoke checks: pinned Node, native PTY, extensions and retained
 esbuild; Desktop also passed ACP initialize/new/close. The recorded regression run
-passed 1209 root tests, 25 release tests, npm package smoke and workflow actionlint.
+passed 1209 root tests, 25 release tests and workflow actionlint. Historical local
+npm-smoke evidence may still exist under `.artifacts`, but npm is no longer a
+supported publication channel.
 Windows, Linux and macOS Intel were not executed in this local optimization run;
 their support still requires the corresponding native CI results. Real-certificate
 signing/notarization was not tested by the ad-hoc build.
@@ -180,15 +183,15 @@ generates `latest.json` for Tauri Updater, then adds an alphabetically ordered
 `SHA256SUMS`. A complete updater-capable GitHub Release therefore contains
 eighteen files: sixteen matrix assets, `latest.json`, and `SHA256SUMS`.
 
-The existing correctness matrix and npm package smoke gates remain. In
-`publish.yml`, `build-release` runs after package smoke on tag pushes or manual
-dispatch; each native runner prepares, packages, and tests its artifacts before
-upload. `github-release` waits for every release build and npm publication,
-has the only new `contents: write` permission, validates the tag and repository,
-and creates/updates a draft release. Reruns may replace draft assets but never
-already published assets. The maintainer reviews and publishes the complete
-draft. Manual dispatch only produces Actions artifacts and cannot publish npm
-or create a GitHub Release. Ordinary branch pushes/PRs run tests, not publishing.
+`check.yml` owns PR/master correctness checks and never runs on release tags.
+`publish.yml` is release-only. A lightweight `release-contract` job validates
+release tests and version/tag alignment, then `build-release` runs the four native
+targets. Each runner prepares, packages, audits and smoke-tests its real artifacts
+before upload. `github-release` waits only for the native release matrix, has the
+only `contents: write` permission, validates the tag/repository, and creates or
+updates a draft release. Reruns may replace draft assets but never published
+assets. Manual dispatch produces Actions artifacts but cannot create a GitHub
+Release. There is no npm publication gate or registry dependency.
 
 ## Signing and updates
 
@@ -286,7 +289,8 @@ build. Signing with real certificates still requires a credentialed release run.
 ## Implementation
 
 - `scripts/release/`: preparation, Node downloads, signing, installers, smoke and publication.
-- `.github/workflows/publish.yml`: native matrix and publication dependencies.
+- `.github/workflows/check.yml`: PR/master correctness matrix.
+- `.github/workflows/publish.yml`: release contract, native matrix and Draft Release creation.
 - `desktop/src-tauri/src/backend_runtime.rs`, `release_smoke.rs`, `lib.rs` and release config: resource-backed host.
 - `src/app/cli/release-update.ts`, `portable-update.ts`,
   `portable-update-helper.ts`, `update.ts`, TUI command actions and ACP update
