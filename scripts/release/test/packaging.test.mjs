@@ -122,13 +122,13 @@ test("version synchronization preserves CRLF JSON files on Windows checkouts", a
     await mkdir(join(directory, prefix), { recursive: true });
     for (const file of ["package.json", "package-lock.json"]) {
       const source = await readFile(join(root, prefix, file), "utf8");
-      await writeFile(join(directory, prefix, file), source.replaceAll("\n", "\r\n"));
+      await writeFile(join(directory, prefix, file), source.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n"));
     }
   }
   await mkdir(join(directory, "desktop/src-tauri"), { recursive: true });
   for (const file of ["Cargo.toml", "Cargo.lock", "tauri.conf.json"]) {
     const source = await readFile(join(root, "desktop/src-tauri", file), "utf8");
-    await writeFile(join(directory, "desktop/src-tauri", file), source.replaceAll("\n", "\r\n"));
+    await writeFile(join(directory, "desktop/src-tauri", file), source.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n"));
   }
 
   const edits = versionEdits(directory, version());
