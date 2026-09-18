@@ -275,10 +275,16 @@ The smoke harness isolates the user profile, allowlists only OS/session environm
 variables (no provider/signing credentials), removes development Node/npm paths,
 adds a failing system-Node sentinel, invokes the real launcher, and runs the exact pinned
 bundled Node. It loads native clipboard/PTY dependencies (PTY execution asserts
-explicit output), bundled JS/TS extensions and retained esbuild binaries. Desktop
+explicit output), bundled JS/TS extensions and every retained esbuild binary. The
+esbuild probe reads the generated `DEPENDENCIES.json` inventory instead of recursively
+walking the full dependency tree, avoiding pathological Windows filesystem cost.
+Desktop
 additionally runs real ACP initialize/new/close without a model request; TUI
 asserts that ACP is absent. GUI checks use an app copied from a read-only mounted DMG, extracted DEB/AppImage
 or a temporary NSIS installation, and boot the native application diagnostic.
+Linux checks the DEB payload directly; for the AppImage it intentionally lets the
+native Tauri host resolve `resource_dir()` from the extracted AppDir instead of
+hardcoding an AppImage-internal resource path.
 The native check must produce the backend completion marker, not merely exit
 successfully. macOS executable paths are canonicalized rather than weakening
 Tauri's protection against symlink-based resource resolution.

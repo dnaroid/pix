@@ -24,3 +24,16 @@ test("smoke has isolated paths and a failing system-Node sentinel ahead of OS to
   assert.equal(poison, join(scratch, "no-system-node"));
   assert.match(await readFile(join(poison, process.platform === "win32" ? "node.cmd" : "node"), "utf8"), /86/u);
 });
+
+test("release probe uses the generated dependency inventory instead of recursively scanning node_modules", async () => {
+  const probe = await readFile(join(process.cwd(), "scripts/release/probe.mjs"), "utf8");
+  assert.match(probe, /DEPENDENCIES\.json/u);
+  assert.match(probe, /entry\?\.name !== "esbuild"/u);
+  assert.doesNotMatch(probe, /readdirSync/u);
+});
+
+test("Linux AppImage smoke delegates resource lookup to the native Tauri host", async () => {
+  const smoke = await readFile(join(process.cwd(), "scripts/release/smoke-desktop.mjs"), "utf8");
+  assert.match(smoke, /APPDIR: appdir/u);
+  assert.doesNotMatch(smoke, /squashfs-root\/usr\/lib\/pix-desktop\/pix-runtime/u);
+});

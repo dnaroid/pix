@@ -34,7 +34,12 @@ export function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root, stdio: "inherit", timeout: 20 * 60_000, windowsHide: true, ...options,
   });
-  if (result.error) throw result.error;
+  if (result.error) {
+    const diagnostic = [result.stdout, result.stderr].filter(Boolean).map(String).join("\n").slice(-24000);
+    const error = new Error(`${command} failed to run: ${result.error.message}${diagnostic ? `\n${diagnostic}` : ""}`);
+    error.cause = result.error;
+    throw error;
+  }
   if (result.status !== 0) {
     const diagnostic = [result.stdout, result.stderr].filter(Boolean).map(String).join("\n").slice(-24000);
     throw new Error(`${command} failed (${result.signal ?? result.status})${diagnostic ? `\n${diagnostic}` : ""}`);

@@ -1,9 +1,9 @@
 // This file is copied into each payload. It must use only bundled files and Node built-ins.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -12,6 +12,7 @@ assert.equal(process.env.PIX_RELEASE_SMOKE, "1", "Use the release smoke harness 
 assert.equal(process.env.PI_OFFLINE, "1", "Release smoke must not contact model providers");
 const app = join(root, "app");
 const manifest = JSON.parse(readFileSync(join(root, "release.json"), "utf8"));
+const dependencyInventory = JSON.parse(readFileSync(join(root, "DEPENDENCIES.json"), "utf8"));
 assert.ok(["tui", "desktop"].includes(manifest.variant), "The payload must declare its variant");
 assert.equal(process.versions.node, manifest.node.version, "The pinned bundled Node must execute this probe");
 assert.equal(JSON.parse(readFileSync(join(app, "package.json"), "utf8")).version, manifest.version);
@@ -49,31 +50,32 @@ const { createJiti } = sdkRequire("jiti");
 const jiti = createJiti(join(app, "package.json"), { interopDefault: true, fsCache: false });
 assert.equal(typeof await jiti.import(join(app, "external/pi-tools-suite/index.ts"), { default: true }), "function");
 
-// Exercise every retained esbuild host/binary pair, including versions nested by the SDK.
-function verifyEsbuild(directory) {
-  if (!existsSync(directory)) return;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const path = join(directory, entry.name);
-    if (entry.name.startsWith("@")) { verifyEsbuild(path); continue; }
-    const pkg = JSON.parse(readFileSync(join(path, "package.json"), "utf8"));
-    if (pkg.name === "esbuild") {
-      const esbuild = require(path);
-      const result = esbuild.transformSync("const value: number = 42", { loader: "ts" });
-      assert.match(result.code, /42/u);
-      esbuild.stop();
-    }
-    verifyEsbuild(join(path, "node_modules"));
+// Exercise every retained esbuild host/binary pair, including versions nested by
+// the SDK. Use the package inventory generated during release preparation instead
+// of recursively walking tens of thousands of node_modules entries on Windows.
+function verifyEsbuildInventory() {
+  const appRoot = resolve(app);
+  const directories = new Set();
+  for (const entry of dependencyInventory) {
+    if (entry?.name !== "esbuild" || typeof entry.path !== "string") continue;
+    const packageJson = resolve(app, entry.path);
+    assert.ok(packageJson.startsWith(`${appRoot}${sep}`), `Unsafe dependency inventory path: ${entry.path}`);
+    directories.add(dirname(packageJson));
+  }
+  assert.ok(directories.size > 0, "Release payload must retain at least one esbuild package");
+  for (const directory of directories) {
+    const esbuild = require(directory);
+    const result = esbuild.transformSync("const value: number = 42", { loader: "ts" });
+    assert.match(result.code, /42/u);
+    esbuild.stop();
   }
 }
-verifyEsbuild(join(app, "node_modules"));
+verifyEsbuildInventory();
 
 if (manifest.variant === "desktop") {
 for (const path of ["acp/dist/main.js", "acp/dist/pi/pix-rpc-entry.js"]) {
   assert.ok(existsSync(join(app, path)), `Missing Desktop payload file: ${path}`);
 }
-verifyEsbuild(join(app, "acp/node_modules"));
-
 const child = spawn(process.execPath, [join(app, "acp/dist/main.js")], {
   cwd: process.cwd(), env: process.env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
 });

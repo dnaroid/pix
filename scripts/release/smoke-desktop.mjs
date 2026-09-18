@@ -37,9 +37,10 @@ export async function smokeDesktop(name = hostTarget()) {
       run("dpkg-deb", ["-x", join(assets, `pix-desktop-${version()}-${name}.deb`), extracted]);
       payload = join(extracted, "usr/lib/pix-desktop/pix-runtime");
       executable = join(extracted, "usr/bin/pix-desktop");
-      // Also check the portable GUI image, which has a separate resource layout.
+      // Also extract the portable GUI image. Do not hardcode its internal resource
+      // directory: the native Tauri smoke below resolves resource_dir() from the
+      // extracted AppDir and verifies the bundled backend through that real path.
       run(join(assets, `pix-desktop-${version()}-${name}.AppImage`), ["--appimage-extract"], { cwd: scratch });
-      await smokePayload(join(scratch, "squashfs-root/usr/lib/pix-desktop/pix-runtime"), join(scratch, "appimage-home"), "desktop");
     } else {
       const installed = join(scratch, "installed");
       windowsInstall = installed;
