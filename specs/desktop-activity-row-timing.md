@@ -12,7 +12,7 @@ Active implemented contract.
 
 ## Goal
 
-Make collapsed Desktop activity rows compactly show the full thinking/tool flow, identify what is active now, and show how long completed activity took without adding polling or animation-driven timing work.
+Make collapsed Desktop activity rows compactly show the full thinking/tool flow, identify what is active now, and show elapsed time both while activity is live and after it completes.
 
 ## Behavior
 
@@ -20,10 +20,10 @@ Make collapsed Desktop activity rows compactly show the full thinking/tool flow,
 - A collapsed activity group shows unique presentation names in first-seen order, including the literal `thinking`, separated by commas. Repeated normalized names appear once in the header; every individual thinking block and tool call remains intact and in original order when expanded.
 - A header name is emphasized with the semantic primary color while any occurrence of that activity is live. Tool calls are live while pending or in progress. Thinking is live only when its row has a recorded start and no recorded end.
 - Historical/replayed thinking without enough timing metadata is not synthesized as active.
-- A completed activity group shows a muted elapsed duration next to the names.
+- An activity group with a recorded start shows a muted elapsed duration next to the names, including while any of its labels is live. The live value advances from the earliest recorded start to the current pane clock; it freezes to the persisted final duration as soon as activity settles.
 - Activity-group duration is the wall-clock span from the earliest recorded thinking/tool start to the latest recorded thinking/tool completion. Parallel calls therefore do not double-count elapsed time.
 - Thinking starts at the first live thought chunk and ends at the next visible assistant/tool/user activity boundary. If a prompt settles without another visible update, prompt settlement closes the trailing thinking interval.
-- Duration capture piggybacks on existing Desktop session updates. There is no interval, polling loop, requestAnimationFrame timer, or per-row timer for elapsed time.
+- Duration capture piggybacks on existing Desktop session updates. A single 100 ms pane-level interval samples elapsed time only while that pane has at least one active activity group. It is cleared when no activity remains active and on pane teardown; rows never own timers and inactive rows do not receive clock updates.
 - Persisted history reuses timestamps already present in Pi JSONL instead of inventing a timer. The assistant message timestamp plus its enclosing session-entry timestamp reconstruct the persisted model-response span; the enclosing assistant entry marks the start of following tool execution, and each tool-result entry marks that tool's completion.
 - A replayed assistant response with exactly one thinking block may show that persisted response span on the thinking row. When one assistant response contains multiple thinking blocks, replay omits per-thinking duration because the session format has no per-block timestamps and assigning the same duration to each block would be misleading.
 - History without the required persisted timestamps still omits duration.
@@ -48,7 +48,7 @@ Make collapsed Desktop activity rows compactly show the full thinking/tool flow,
 
 ## Verification
 
-- ACP history tests cover preservation and propagation of persisted timing metadata. Transcript tests cover live thought boundaries, prompt-end finalization, replayed timing metadata, mixed thinking/tool grouping, active header labels, parallel wall-clock span, and duration formatting. Tool-presentation tests cover first-seen de-duplication of tool header names.
+- ACP history tests cover preservation and propagation of persisted timing metadata. Transcript tests cover live thought boundaries, prompt-end finalization, replayed timing metadata, mixed thinking/tool grouping, active header labels, controllable live-clock sampling/final-duration freezing, parallel wall-clock span, and duration formatting. Tool-presentation tests cover first-seen de-duplication of tool header names.
 - `npm --prefix desktop test -- transcript.test.ts transcript-activity.test.ts session-history-concurrency.test.ts`
-- `npm --prefix desktop run test:transcript-activity` exercises native disclosure events, lazy mounting/hydration, late completions, session replacement, live highlight transitions, keyboard toggles, and a large collapsed transcript in Chromium with stubbed backend calls.
+- `npm --prefix desktop run test:transcript-activity` exercises native disclosure events, lazy mounting/hydration, late completions, session replacement, controllable live-duration updates/freezing and timer teardown, keyboard toggles, and a large collapsed transcript in Chromium with stubbed backend calls.
 - `npm --prefix desktop run check` and `npm --prefix desktop run build:web` check types and production compilation. Browser smoke is not an end-to-end native Tauri or arbitrary-size frame-budget guarantee.

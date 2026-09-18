@@ -249,7 +249,7 @@ export function publishTodoState(
 	publishRpcSessionState(ctx as TodoStateEventContext | undefined, TODO_STATE_EVENT, snapshot);
 }
 
-function appendTodoStateSnapshot(
+export function appendTodoStateSnapshot(
 	pi: TodoStateEntryWriter,
 	action: TaskAction,
 	params: Record<string, unknown>,

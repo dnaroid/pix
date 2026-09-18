@@ -78,6 +78,18 @@
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
+  let activityNowMs = $state(Date.now());
+  const hasActiveActivity = $derived(displayItems.some((item) => item.type === "activity-group" && item.active));
+
+  // One pane-level clock updates every live collapsed header. Completed rows
+  // receive no clock prop, so their persisted final duration stays static.
+  $effect(() => {
+    if (!hasActiveActivity) return;
+    activityNowMs = Date.now();
+    const timer = window.setInterval(() => activityNowMs = Date.now(), 100);
+    return () => window.clearInterval(timer);
+  });
+
   const userMessageMenuController = createTranscriptUserMessageMenuController({
     items: () => displayItems,
     activeSessionId: () => activeSessionId,
@@ -282,7 +294,7 @@
         {:else}
           {#key activeSessionId}
             <TranscriptActivityGroup
-              {item} {gapClass} {onLoadToolResult} {onOpenAttachment} {onPrepareAttachment}
+              {item} nowMs={item.active ? activityNowMs : undefined} {gapClass} {onLoadToolResult} {onOpenAttachment} {onPrepareAttachment}
               {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile}
               {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia}
             />

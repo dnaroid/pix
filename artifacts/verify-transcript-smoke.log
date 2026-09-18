@@ -1,0 +1,24 @@
+
+> pix-desktop@0.1.0 test:transcript-activity
+> node scripts/transcript-activity-smoke.mjs
+
+{
+  "status": "passed",
+  "scenarios": [
+    "lazy DOM",
+    "per-tool hydration",
+    "duplicate toggles",
+    "late result after collapse",
+    "session replacement",
+    "live highlights and duration",
+    "duration freeze and timer teardown",
+    "keyboard disclosure",
+    "large collapsed history"
+  ],
+  "stress": {
+    "entries": 10000,
+    "updateMs": 49.1,
+    "mountedActivityRows": 0,
+    "mountedElements": 16
+  }
+}

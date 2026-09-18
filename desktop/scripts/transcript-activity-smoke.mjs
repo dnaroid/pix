@@ -22,6 +22,16 @@ const server = await createServer({
         import { createSessionHistory } from "/src/app/session-history.svelte.ts";
         import { applySessionUpdate, emptyTranscript, finalizeTranscriptActivity } from "/src/lib/transcript.ts";
         import "/src/styles.css";
+        let clockNow = 100;
+        let nextTimerId = 0;
+        const activityTimers = new Map();
+        Date.now = () => clockNow;
+        window.setInterval = callback => {
+          const id = ++nextTimerId;
+          activityTimers.set(id, callback);
+          return id;
+        };
+        window.clearInterval = id => activityTimers.delete(id);
         const state = createActiveSessionState();
         const requests = [], pending = [], validations = [];
         const client = { toolResult: (sessionId, toolCallId) => {
@@ -46,6 +56,12 @@ const server = await createServer({
         mount(TranscriptPane, { target: document.querySelector("#app"), props });
         window.activitySmoke = {
           requests, validations,
+          get timerCount() { return activityTimers.size; },
+          async advanceClock(milliseconds) {
+            clockNow += milliseconds;
+            for (const callback of [...activityTimers.values()]) callback();
+            await tick();
+          },
           async setSynthetic(sessionId, count = 400) {
             history.cancel(); state.setSessionId(sessionId);
             const items = Array.from({ length: count }, (_, i) => i % 2 === 0
@@ -66,11 +82,11 @@ const server = await createServer({
           async startLive() {
             history.cancel(); state.setSessionId("live");
             state.setTranscript(applySessionUpdate(emptyTranscript, { sessionUpdate: "agent_thought_chunk",
-              messageId: "live-thought", content: { type: "text", text: "LIVE_THOUGHT" } }, 100));
+              messageId: "live-thought", content: { type: "text", text: "LIVE_THOUGHT" } }, Date.now()));
             await tick();
           },
-          async update(update, at) { state.setTranscript(applySessionUpdate(state.transcript, update, at)); await tick(); },
-          async settle() { state.setTranscript(finalizeTranscriptActivity(state.transcript, 500)); await tick(); },
+          async update(update) { state.setTranscript(applySessionUpdate(state.transcript, update, Date.now())); await tick(); },
+          async settle() { state.setTranscript(finalizeTranscriptActivity(state.transcript, Date.now())); await tick(); },
         };
       `;
     },
@@ -134,18 +150,29 @@ try {
   assert.equal(await page.evaluate(() => document.body.textContent.includes("STALE_SESSION_BODY")), false);
   assert.equal(await page.locator("[data-activity-entry-id]").count(), 0);
 
+  const inactiveTimerCount = await page.evaluate(() => window.activitySmoke.timerCount);
   await page.evaluate(() => window.activitySmoke.startLive());
   assert.equal(await page.locator('[data-activity-name="thinking"]').getAttribute("data-activity-active"), "true");
+  assert.equal(await page.locator("[data-activity-duration]").textContent(), "<0.1s");
+  assert.equal(await page.evaluate(() => window.activitySmoke.timerCount), inactiveTimerCount + 1, "one pane clock serves live groups");
+  await page.evaluate(() => window.activitySmoke.advanceClock(1_300));
+  assert.equal(await page.locator("[data-activity-duration]").textContent(), "1.3s");
   await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "running-read",
-    name: "read", title: "Read", status: "in_progress" }, 200));
+    name: "read", title: "Read", status: "in_progress" }));
   assert.equal(await page.locator('[data-activity-name="thinking"]').getAttribute("data-activity-active"), "false");
   assert.equal(await page.locator('[data-activity-name="read"]').getAttribute("data-activity-active"), "true");
   assert.equal(await outer.count(), 1);
+  await page.evaluate(() => window.activitySmoke.advanceClock(700));
+  assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s");
   await page.evaluate(async () => {
-    await window.activitySmoke.update({ sessionUpdate: "tool_call_update", toolCallId: "running-read", status: "completed" }, 300);
+    await window.activitySmoke.update({ sessionUpdate: "tool_call_update", toolCallId: "running-read", status: "completed" });
     await window.activitySmoke.settle();
   });
   assert.equal(await page.locator('[data-activity-active="true"]').count(), 0);
+  assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s");
+  assert.equal(await page.evaluate(() => window.activitySmoke.timerCount), inactiveTimerCount, "settled activity clears the pane clock");
+  await page.evaluate(() => window.activitySmoke.advanceClock(10_000));
+  assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s", "final duration does not advance");
 
   await outerSummary.focus();
   await page.keyboard.press("Enter");
@@ -165,7 +192,8 @@ try {
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 2);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: "passed", scenarios: ["lazy DOM", "per-tool hydration", "duplicate toggles",
-    "late result after collapse", "session replacement", "live highlights", "keyboard disclosure", "large collapsed history"], stress }, null, 2));
+    "late result after collapse", "session replacement", "live highlights and duration", "duration freeze and timer teardown",
+    "keyboard disclosure", "large collapsed history"], stress }, null, 2));
 } finally {
   await browser?.close();
   await server.close();

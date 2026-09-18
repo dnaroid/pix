@@ -121,7 +121,8 @@ describe("desktop visual regressions", () => {
       expect(source).not.toContain("open={$derived");
     }
 
-    expect(dcpContextPanelSource).toContain('<details class="group border-b border-border" open>');
+    expect(dcpContextPanelSource).toContain('<details class="group border-b border-border">');
+    expect(dcpContextPanelSource).not.toContain('<details class="group border-b border-border" open>');
     for (const source of [sessionSubagentsSource, sessionTodosSource]) {
       expect(source).toContain('ontoggle={noteToggle}');
       expect(source).toContain('receivedInitialSnapshot || snapshot === undefined');
@@ -135,8 +136,14 @@ describe("desktop visual regressions", () => {
     expect(sessionTodosSource.indexOf('aria-label="Clear session plan"')).toBeGreaterThan(sessionTodosSource.indexOf("</details>"));
     expect(sessionTodosSource).toContain("disabled={!canClearTodos || clearingTodos || rows.length === 0}");
     expect(sessionSubagentsSource).toContain("{activeCount} active");
-    expect(dcpContextPanelSource).toContain("saved ~{formatCompactTokens(view.liveTokensSaved)}");
-    expect(dcpContextPanelSource).toContain("{Math.round(occupancyPercent)}% occupied");
+    const dcpSummary = dcpContextPanelSource.slice(
+      dcpContextPanelSource.indexOf("<summary"),
+      dcpContextPanelSource.indexOf("</summary>"),
+    );
+    expect(dcpSummary).toContain("~{formatCompactTokens(view.liveTokensSaved)}");
+    expect(dcpSummary).not.toContain("occupied");
+    expect(dcpSummary).not.toContain("saved");
+    expect(dcpSummary).not.toContain("unknown");
   });
 
   it("keeps the model and thinking selector available while a prompt is running", () => {

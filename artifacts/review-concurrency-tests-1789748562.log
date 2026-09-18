@@ -1,0 +1,14 @@
+
+> pix-desktop@0.1.0 test
+> vitest run --run src/lib/transcript-activity.test.ts
+
+6:22:43 PM [vite-plugin-svelte] no Svelte config found at /Volumes/128GBSSD/Projects/pi-ui-extend/desktop - using default configuration.
+
+ RUN  v4.1.11 /Volumes/128GBSSD/Projects/pi-ui-extend/desktop
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  18:22:43
+   Duration  154ms (transform 53ms, setup 0ms, import 70ms, tests 4ms, environment 0ms)
+

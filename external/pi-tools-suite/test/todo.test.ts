@@ -1170,6 +1170,7 @@ describe.serial("todo extension lifecycle", () => {
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
 		const extension = (await import("../src/todo/index.js")).default;
 		const { getTodos } = await import("../src/todo/todo.js");
+		const { replayFromBranch } = await import("../src/todo/state/replay.js");
 		const pi = new FakePi();
 		const ctx = {
 			cwd: mkdtempSync(join(tmpdir(), "todo-message-end-recovery-")),
@@ -1197,6 +1198,34 @@ describe.serial("todo extension lifecycle", () => {
 			);
 
 			expect(getTodos()).toEqual([]);
+			expect(pi.customEntries).toHaveLength(1);
+			expect(pi.customEntries[0]).toEqual({
+				customType: "pi-tools-suite:todo-state",
+				data: {
+					action: "update",
+					params: { action: "update", id: 1, status: "completed" },
+					tasks: [],
+					nextId: 1,
+				},
+			});
+			const priorInProgress = {
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "todo",
+					details: {
+						tasks: [{ id: 1, subject: "Ship fix", status: "in_progress", activeForm: "shipping fix", thinking: "high" }],
+						nextId: 2,
+					},
+				},
+			};
+			expect(
+				replayFromBranch({
+					sessionManager: {
+						getBranch: () => [priorInProgress, { type: "custom", ...pi.customEntries[0] }],
+					},
+				}),
+			).toEqual({ tasks: [], nextId: 1 });
 			expect(pi.thinkingLevel).toBe("off");
 			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
 			await pi.emit("agent_end", {}, ctx);

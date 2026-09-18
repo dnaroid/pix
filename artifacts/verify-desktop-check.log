@@ -1,0 +1,12 @@
+
+> pi-ui-extend@1.0.47 check:desktop
+> npm --prefix desktop run check
+
+
+> pix-desktop@0.1.0 check
+> svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p tsconfig.node.json
+
+Loading svelte-check in workspace: /Volumes/128GBSSD/Projects/pi-ui-extend/desktop
+Getting Svelte diagnostics...
+
+svelte-check found 0 errors and 0 warnings

@@ -71,9 +71,7 @@ function buildActivityGroup(entries: readonly [ActivityEntry, ...ActivityEntry[]
   }
   const active = running || pending;
   const status: ToolCallStatus = failed ? "failed" : running ? "in_progress" : pending ? "pending" : "completed";
-  const durationMs = !active && earliestStart !== undefined && latestEnd !== undefined
-    ? Math.max(0, latestEnd - earliestStart)
-    : undefined;
+  const durationMs = active ? undefined : elapsedDuration(earliestStart, latestEnd);
 
   return {
     type: "activity-group",
@@ -82,8 +80,23 @@ function buildActivityGroup(entries: readonly [ActivityEntry, ...ActivityEntry[]
     tools,
     status,
     active,
+    ...(earliestStart !== undefined ? { startedAtMs: earliestStart } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
   };
+}
+
+/** Returns a final duration or samples an active group's duration at `nowMs`. */
+export function activityGroupDuration(
+  item: Pick<ActivityGroupItem, "active" | "startedAtMs" | "durationMs">,
+  nowMs?: number,
+): number | undefined {
+  return item.active ? elapsedDuration(item.startedAtMs, nowMs) : item.durationMs;
+}
+
+function elapsedDuration(startedAtMs: number | undefined, endedAtMs: number | undefined): number | undefined {
+  return startedAtMs === undefined || endedAtMs === undefined
+    ? undefined
+    : Math.max(0, endedAtMs - startedAtMs);
 }
 
 export function activityEntryActive(entry: ActivityEntry): boolean {

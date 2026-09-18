@@ -1,0 +1,1363 @@
+
+> pi-tools-suite-local@0.1.0 test
+> bun test test --run test/todo.test.ts
+
+bun test v1.3.14 (0d9b296a)
+
+test/dcp-auto-compression-projection.test.ts:
+(pass) DCP auto-compression projection regressions > canonical message hash survives JSONL round-trip of runtime-only tool details [0.45ms]
+(pass) DCP auto-compression projection regressions > v2 block with JSON-normalized tool details still materializes after restart-shaped reload [13.46ms]
+(pass) DCP auto-compression projection regressions > v2 block from a pruned projection materializes on raw messages and a later candidate sees the block [4.82ms]
+(pass) DCP auto-compression projection regressions > summarizer deadline still leaves time to commit the programmatic fallback [25.14ms]
+(pass) DCP auto-compression projection regressions > a true whole-operation overrun is classified as summarizer-unavailable [1154.87ms]
+(pass) DCP auto-compression projection regressions > parent abort stays a cancellation passthrough and is never reclassified [26.97ms]
+(pass) DCP auto-compression projection regressions > rejected exact source stays memoized when unrelated provider tail grows [1.41ms]
+
+test/context-inventory.test.ts:
+(pass) context inventory > reports final active tools, skills readable in context, and parent-model-gated agents [4.81ms]
+(pass) context inventory > hides frontier-review for a frontier parent [0.84ms]
+(pass) context inventory > does not claim loaded skills or agents when their access tools are inactive [0.46ms]
+
+test/tool-descriptions.test.ts:
+(pass) tool descriptions > shell aliases share a compact pre-delivery test-output contract [0.08ms]
+(pass) tool descriptions > shell test guidance preserves outcome and verification scope [0.02ms]
+(pass) tool descriptions > shell guidance stays bounded and retains file-tool routing [0.03ms]
+(pass) tool descriptions > repo search starts without code bodies and permits only a narrow inline follow-up [0.03ms]
+(pass) tool descriptions > repo maps prefer scoped pages and exact reads over large trees or snippets [0.04ms]
+(pass) tool descriptions > repo symbol and impact guidance allows scoped details without default expansion [0.03ms]
+(pass) tool descriptions > repo guidance fits within the pre-economy description budget [0.04ms]
+(pass) tool descriptions > repo knowledge guidance requires contract maintenance only in indexed repo-aware mode [0.06ms]
+(pass) tool descriptions > subagents descriptions and parent catalog agree on parent-first role selection [0.20ms]
+(pass) tool descriptions > apply_patch prompt documents begin-patch and unified diff support [0.02ms]
+(pass) tool descriptions > compress prompt encourages context-pressure housekeeping after completed work [0.03ms]
+(pass) tool descriptions > todo prompt locks the model-facing workflow invariants [0.03ms]
+(pass) tool descriptions > session recovery prompt guides overview-first raw-history recovery [0.06ms]
+(pass) tool descriptions > subagents prompt keeps explicit delegation triggers in repo-aware mode [0.06ms]
+(pass) tool descriptions > subagents prompt prioritizes broad fallback delegation when repo tools are unavailable [0.03ms]
+
+test/dcp-manual-progress.test.ts:
+(pass) DCP manual compression progress > modern rollup replaces old summary prose while retaining protected fragments exactly once [5.96ms]
+(pass) DCP manual compression progress > explicit modern block references expand once and unknown references fail atomically [4.07ms]
+(pass) DCP manual compression progress > a longer summary cannot publish state, clear reminders or erase patience [1.17ms]
+(pass) DCP manual compression progress > wrapper and ID-carrier overhead can reject a nominally shorter summary [0.44ms]
+(pass) DCP manual compression progress > protected-fragment expansion participates in the gain proof [0.42ms]
+(pass) DCP manual compression progress > overlapping mixed selections and a net-negative batch leave no partial commit [5.50ms]
+(pass) DCP manual compression progress > a missing runtime projection is not replaced by a guessed metadata estimate [1.84ms]
+(pass) DCP manual compression progress > partial positive savings keep debt and patience until a sufficient commit [10.84ms]
+(pass) DCP manual compression progress > persistence failure rolls back a positive preparation including progress state [1.52ms]
+(pass) DCP manual compression progress > unselected signed assistant and parallel tool results remain byte-stable [3.93ms]
+
+test/dcp-review-regressions.test.ts:
+(pass) DCP independent review regressions > config instances do not share mutable nested defaults [0.18ms]
+(pass) DCP independent review regressions > net budget recovery expands an insufficient prefix under the same safety policy [92.50ms]
+(pass) DCP independent review regressions > summary covers physical membership even when timestamps move backwards [3.24ms]
+(pass) DCP independent review regressions > missing modern boundary never substitutes unrelated same-timestamp content [2.71ms]
+(pass) DCP independent review regressions > message mode refuses actual SDK textSignature [1.91ms]
+(pass) DCP independent review regressions > already-aborted manual and automatic operations never publish [0.72ms]
+(pass) DCP independent review regressions > parallel successful compress calls retain distinct blocks [2.17ms]
+(pass) DCP independent review regressions > source middle is preserved and changes the full source hash [0.18ms]
+
+test/e2e-retry.test.ts:
+(pass) e2e retry helper > recognizes 429 rate-limit errors [0.12ms]
+(pass) e2e retry helper > retries retryable failures after the configured pause [1.46ms]
+(pass) e2e retry helper > reads conservative defaults and clamps env overrides [0.02ms]
+
+test/shell-command-policy.test.ts:
+(pass) shared shell command policy > recognises simple read-only inspection commands [0.47ms]
+(pass) shared shell command policy > proves allowlisted inspection pipelines and ephemeral temp-file staging [0.13ms]
+(pass) shared shell command policy > recognises bounded verification commands without treating arbitrary scripts as tests [0.08ms]
+(pass) shared shell command policy > fails closed for mutation, unsafe redirects, command substitution, and dangerous inspection flags [0.15ms]
+
+test/todo.test.ts:
+(pass) todo tool > registers metadata and performs create/list/get/update/delete/clear [9.87ms]
+(pass) todo tool > stores and formats per-task thinking levels [0.15ms]
+(pass) todo tool > keeps live tool state isolated by session id in one process [0.17ms]
+(pass) todo tool > warns before appending to unfinished todos and supports replace for new plans [0.17ms]
+(pass) todo tool > publishes live todo state events after commits [0.14ms]
+(pass) todo tool > mirrors live todo state through the reserved RPC widget envelope [0.17ms]
+(pass) todo tool > does not expose the private state widget to other RPC hosts [0.09ms]
+(pass) todo tool > throws Pi tool errors without committing invalid mutations [0.17ms]
+(pass) todo tool > automatically clears todo state when all visible tasks are completed [0.13ms]
+(pass) todo tool > validates dependency invariants [0.30ms]
+(pass) todo tool > filters list output and formats get output with inverse blocks [0.19ms]
+(pass) todo tool > supports hierarchy, batch operations, and import/export [0.68ms]
+(pass) todo reducer > rejects repeated task ids in a batch update without changing the plan [0.10ms]
+(pass) todo reducer > validates create blockedBy references [0.07ms]
+(pass) todo reducer > enforces status transitions and deleted terminal behavior [0.08ms]
+(pass) todo reducer > merges metadata, removes blockedBy, and catches graph edge cases [0.13ms]
+(pass) todo reducer > handles missing ids and delete edge cases [0.07ms]
+(pass) todo replay > replays the last valid todo branch snapshot and clones task objects [0.16ms]
+(pass) todo replay > replays a command snapshot after an older tool result [0.08ms]
+(pass) /todos command > /todos command renders empty and grouped UI summaries and handles non-interactive mode [0.77ms]
+(pass) /todos command > /todos command supports filters, tree view, and export [0.52ms]
+(pass) /todos command > /todos persist controls project plan file and scope defers out-of-scope tasks [2.01ms]
+(pass) /todos command > /todos-clear and /todos clear reset todo state and persisted plans [1.12ms]
+(pass) /todos command > todo tool autosaves while persistence is enabled and removes complete plans [1.01ms]
+(pass) todo extension lifecycle > adds one repo knowledge reminder before the final active todo in repo-aware projects [7.89ms]
+(pass) todo extension lifecycle > does not add the repo knowledge finalization reminder outside repo-aware projects [2.52ms]
+(pass) todo extension lifecycle > adds compact thinking prompt and switches/restores active task thinking [1.70ms]
+(pass) todo extension lifecycle > restores the baseline thinking only after the last active todo completes [1.48ms]
+(pass) todo extension lifecycle > forces the configured GLM-5.3 todo thinking override to max [1.56ms]
+(pass) todo extension lifecycle > prefers exact provider/model todo overrides over wildcard and bare-model matches [1.89ms]
+(pass) todo extension lifecycle > restores original thinking after off final todo completion and plan replacement [1.35ms]
+(pass) todo extension lifecycle > restores original thinking from persisted task metadata when the in-memory map is gone [1.20ms]
+(pass) todo extension lifecycle > suppresses the agent_end auto-nudge caused by an internal todo thinking switch [1.44ms]
+(pass) todo extension lifecycle > optimistically completes the current in-progress todo on agent_end when it was started this turn [1.04ms]
+(pass) todo extension lifecycle > optimistically completes the current in-progress todo on assistant message_end before agent_end [1.20ms]
+(pass) todo extension lifecycle > optimistically completes the current in-progress todo when the final assistant content is a plain string [1.12ms]
+(pass) todo extension lifecycle > does not auto-complete or auto-nudge on tool-use assistant turns [1.06ms]
+(pass) todo extension lifecycle > does not auto-nudge after a terminal provider error [0.89ms]
+(pass) todo extension lifecycle > does not auto-complete an in-progress todo that was already active before this turn [1.05ms]
+(pass) todo extension lifecycle > loads persisted plans on startup, prompts for scope, and suppresses duplicate auto-nudge [1.41ms]
+(pass) todo extension lifecycle > auto-nudges unfinished tasks once per signature and resets after branch replay [0.65ms]
+(pass) todo extension lifecycle > schedules the first unfinished-todo nudge after agent_settled for older lingering work [0.52ms]
+(pass) todo extension lifecycle > does not queue a pre-final todo reconciliation follow-up after todo mutations [1.03ms]
+(pass) todo extension lifecycle > auto-nudge ignores active tasks whose blockers are incomplete [0.59ms]
+(pass) todo extension lifecycle > defers auto-nudge while ask_user is pending [0.53ms]
+
+test/dcp-context-map-telemetry.test.ts:
+(pass) cached DCP projection token map > partitions overlapping classifications by policy priority and preserves token mass [0.41ms]
+(pass) cached DCP projection token map > uses the projected summary body estimate, not a block's original range [0.03ms]
+(pass) cached DCP projection token map > fails unavailable for empty, invalid, and mismatched projections [0.13ms]
+(pass) cached DCP projection token map > captures cached current-body estimates without rehashing or reading cached bodies [0.22ms]
+(pass) cached DCP projection token map > never classifies DCP control carriers as candidates [0.07ms]
+(pass) cached DCP projection token map > real context hook publishes cached token maps and invalidates stale owners [4.35ms]
+
+test/dcp-fresh-nudge.test.ts:
+(pass) DCP fresh tool-result reminders > single-user turn delivers a concrete reminder on the fresh tool tail without changing the sent prefix [9.50ms]
+(pass) DCP fresh tool-result reminders > failed or omitted-result sends consume freshness; duplicate result events cannot revive it [2.81ms]
+(pass) DCP fresh tool-result reminders > session_start invalidates local grants and late results, but allows a new post-send local result [2.76ms]
+(pass) DCP fresh tool-result reminders > model_select invalidates local grants and late results, but allows a new post-send local result [2.60ms]
+(pass) DCP fresh tool-result reminders > session_tree invalidates local grants and late results, but allows a new post-send local result [2.98ms]
+(pass) DCP fresh tool-result reminders > session_compact invalidates local grants and late results, but allows a new post-send local result [2.39ms]
+(pass) DCP fresh tool-result reminders > parallel equal-timestamp results anchor only the last fresh member, and never rebind by timestamp [0.17ms]
+(pass) DCP fresh tool-result reminders > missing local lifecycle, reused IDs, and duplicate tail results never establish freshness [0.05ms]
+(pass) DCP fresh tool-result reminders > a lower usage sample does not erase a published tool reminder from the prefix [2.47ms]
+(pass) DCP fresh tool-result reminders > retry with a frozen tool reminder does not bypass automatic-compression patience [9.92ms]
+
+test/locate-benchmark-e2e.test.ts:
+(skip) hard-to-find locate benchmark live e2e > locates the target with every search strategy and records rough tool-IO tokens
+
+test/antigravity-auth.test.ts:
+(pass) Antigravity account rotation > clamps the SDK max reasoning level to Antigravity high [2.42ms]
+(pass) Antigravity account rotation > preserves Antigravity OAuth client credentials when Pi auth storage refreshes [4.97ms]
+(pass) Antigravity account rotation > propagates the SDK cancellation signal to OAuth refresh [0.75ms]
+(pass) Antigravity account rotation > applies nullable header deletion markers before raw fetch [5.92ms]
+(pass) Antigravity account rotation > falls back to the native Antigravity OAuth client when auth.json has no client metadata [0.09ms]
+(pass) Antigravity account rotation > uses the native agy bootstrap shape for project discovery [0.13ms]
+(pass) Antigravity account rotation > uses Antigravity OAuth client credentials from the environment when auth.json has only accounts [1.95ms]
+(pass) Antigravity account rotation > fails when an Antigravity stream ends without a finish reason [1.08ms]
+(pass) Antigravity account rotation > notifies the UI when an Antigravity model turn fails without auth [0.91ms]
+(pass) Antigravity account rotation > does not auto-import opencode Antigravity accounts at request time [1.00ms]
+(pass) Antigravity account rotation > emits all-accounts-exhausted marker only after trying every account for the model [1.61ms]
+(pass) Antigravity account rotation > does not emit fallback marker for non-limit capacity failures after rotation is exhausted [1.17ms]
+(pass) Antigravity model catalog and live route mapping > registers the current Pi-compatible Antigravity catalog without image-output models [0.10ms]
+(pass) Antigravity model catalog and live route mapping > routes Gemini 3.5 Flash tiers to the legacy gemini-3 live routes [0.24ms]
+(pass) Antigravity model catalog and live route mapping > routes Gemini 3.6 Flash tiers with fixed numeric budgets [0.09ms]
+(pass) Antigravity model catalog and live route mapping > routes Gemini 3.7 and 3.8 Flash tiers with the dynamic budget sentinel [0.19ms]
+(pass) Antigravity model catalog and live route mapping > routes Gemini 3.1 Pro to the low and agent-mode live routes with upstream budgets [0.06ms]
+(pass) Antigravity model catalog and live route mapping > routes GPT-OSS 120B Medium without a thinking config [0.05ms]
+(pass) Antigravity model catalog and live route mapping > routes Sonnet 4.6 Thinking through the base claude-sonnet-4-6 model [0.10ms]
+(pass) Antigravity model catalog and live route mapping > keeps the dedicated Opus thinking route and legacy Antigravity routes [0.19ms]
+
+test/dcp-failed-attempt-replay.test.ts:
+(pass) DCP failed-attempt replay normalization > restored unrecorded error does not break exact block replay or raw-tail candidates [0.82ms]
+(pass) DCP failed-attempt replay normalization > old blocks that explicitly included error still require all recorded hashes [0.44ms]
+(pass) DCP failed-attempt replay normalization > restored unrecorded aborted does not break exact block replay or raw-tail candidates [0.32ms]
+(pass) DCP failed-attempt replay normalization > old blocks that explicitly included aborted still require all recorded hashes [0.25ms]
+(pass) DCP failed-attempt replay normalization > never treats an extra successful assistant as an ignorable retry attempt [0.19ms]
+(pass) DCP failed-attempt replay normalization > never treats an extra length-limited assistant as an ignorable retry attempt [0.14ms]
+(pass) DCP failed-attempt replay normalization > never treats an extra user as an ignorable retry attempt [0.15ms]
+(pass) DCP failed-attempt replay normalization > never treats an extra failed tool result as an ignorable retry attempt [0.19ms]
+(pass) DCP failed-attempt replay normalization > missing, reordered, changed or duplicated real members never gain replay authority [0.43ms]
+(pass) DCP failed-attempt replay normalization > without blocks, only failed/aborted assistants are omitted; tool results and signed valid items remain [0.23ms]
+(pass) DCP failed-attempt replay normalization > old failed-attempt IDs stay durable and are never reused for the next tail [0.26ms]
+
+test/dcp-journal.test.ts:
+(pass) DCP session journal > replays init plus projection deltas without transient provider/tool state [1.67ms]
+(pass) DCP session journal > emits no delta for an unchanged durable state [0.03ms]
+(pass) DCP session journal > allows block active-state changes but rejects immutable block rewrites [0.38ms]
+(pass) DCP session journal > rejects removal, reassignment, unpruning, and reactivation of published decisions [0.20ms]
+(pass) DCP session journal > rejects broken predecessor chains and conflicting duplicate operation ids [0.16ms]
+(pass) DCP session journal > rejects unknown schema and incomplete compression blocks [0.18ms]
+(pass) DCP session journal > treats a confirmed durable append as committed when a post-append notification throws [1.47ms]
+(pass) DCP session journal > rolls the active leaf back when append mutated memory but no durable record exists [0.17ms]
+
+test/dcp-protected-continuity.test.ts:
+(pass) DCP protected continuity > keeps shell protected from pruning while compacting proven inspection continuity [0.42ms]
+(pass) DCP protected continuity > compacts a proven compound inspection pipeline with temp-only staging [0.13ms]
+(pass) DCP protected continuity > compacts a confidently recognised simple Bun test result [0.80ms]
+(pass) DCP protected continuity > preserves actionable failure evidence in a compact recognised test digest [0.23ms]
+(pass) DCP protected continuity > retains exact output for mutation, compound, unknown, protected-path, and unrecognised test commands [0.28ms]
+(pass) DCP protected continuity > configured non-shell protected tools retain verbatim continuity [0.05ms]
+(pass) DCP protected continuity > does not replace a tiny protected result with a larger continuity digest [0.06ms]
+(pass) DCP protected continuity > recognises an already compact Gateway representation without reconstructing raw continuity [0.05ms]
+
+test/dcp-marathon-replay.test.ts:
+(pass) DCP marathon replay > one user turn sustains 10 useful auto rollups across 1000 tool groups and restart [2660.22ms]
+(pass) DCP marathon replay > journal recovery pressure keeps existing summaries intact instead of recreating the incident rollup ladder [149.88ms]
+
+test/compress-pruner.test.ts:
+(pass) DCP pruning effectiveness > resolveContextThresholds supports wildcard model keys with provider-specific precedence [0.35ms]
+(pass) DCP pruning effectiveness > routine context construction never retroactively deduplicates old tool outputs [0.37ms]
+(pass) DCP pruning effectiveness > same input with changed output is not treated as an exact duplicate [0.11ms]
+(pass) DCP pruning effectiveness > a new user turn does not authorize retroactive duplicate pruning [0.19ms]
+(pass) DCP pruning effectiveness > large old tool outputs remain intact until an explicit rewrite boundary [0.12ms]
+(pass) DCP pruning effectiveness > protectedFilePatterns prevent automatic tool-output pruning [0.09ms]
+(pass) DCP pruning effectiveness > mutating tool aliases are protected case-insensitively and unknown tools fail safe [0.43ms]
+(pass) DCP pruning effectiveness > nudge cadence honors frequency and can repeat during long user turns [0.05ms]
+(pass) DCP pruning effectiveness > context-limit nudges bypass routine cadence [0.02ms]
+(pass) DCP pruning effectiveness > nudge thresholds accept percent strings when called without pre-resolved thresholds [0.03ms]
+(pass) DCP pruning effectiveness > anchored nudges persist on existing messages and clear after compression [0.21ms]
+(pass) DCP pruning effectiveness > anchored nudge rendering stays frozen even when later pressure is stronger [0.15ms]
+(pass) DCP pruning effectiveness > nudge anchors stay on their original carrier until cleared [0.05ms]
+(pass) DCP pruning effectiveness > mid-turn nudge creation is deferred instead of synthesizing a cache-breaking carrier [0.04ms]
+(pass) DCP pruning effectiveness > literal reminder tags in user text do not force assistant fallback [0.06ms]
+(pass) DCP pruning effectiveness > fake block tags in user text remain real anchor candidates [0.03ms]
+(pass) DCP pruning effectiveness > stale anchors are cleared without creating a synthetic fallback [0.14ms]
+(pass) DCP pruning effectiveness > nudge guidance includes concrete ranges, priority messages, and active blocks [0.16ms]
+(pass) DCP pruning effectiveness > detects actionable compression candidates outside the active recent turns [0.16ms]
+(pass) DCP pruning effectiveness > budget-aware compression candidate picks the minimal protocol-safe oldest prefix [0.20ms]
+(pass) DCP pruning effectiveness > automatic block consolidation requires a batched physically-adjacent block-only range [0.21ms]
+(pass) DCP pruning effectiveness > compression candidates are suppressed below configured context pressure [0.21ms]
+(pass) DCP pruning effectiveness > preserves signed assistant content even when it contains DCP-like text [0.13ms]
+(pass) DCP pruning effectiveness > assistant metadata sanitizer is identity-only for signed provider content [0.03ms]
+(pass) DCP pruning effectiveness > strips stale user/tool markers while preserving fenced DCP examples [0.13ms]
+(pass) DCP pruning effectiveness > compression candidates use current addressable ids when source text contains stale ids [0.13ms]
+(pass) DCP pruning effectiveness > compress tool rolls up covered bN blocks and deactivates old blocks [1.69ms]
+(pass) DCP pruning effectiveness > compress tool rejects invalid block placeholders atomically [0.63ms]
+(pass) DCP pruning effectiveness > compress tool rejects overlapping ranges within one call before mutating state [0.29ms]
+(pass) DCP pruning effectiveness > compress tool keeps multi-range failures atomic when a later rollup is invalid [0.50ms]
+(pass) DCP pruning effectiveness > compress tool explains unknown non-mNNN IDs with current ID diagnostics [0.35ms]
+(pass) DCP pruning effectiveness > compress tool rejects unknown stable mNNN IDs instead of clamping [0.25ms]
+(pass) DCP pruning effectiveness > compress tool rejects when a stale startId has no valid forward clamp target [0.20ms]
+(pass) DCP pruning effectiveness > compress tool rolls up an active block when a stale mNNN resolves to its placeholder [0.55ms]
+(pass) DCP pruning effectiveness > compress tool throws on a stale mNNN with an empty snapshot and does not mutate state [0.12ms]
+(pass) DCP pruning effectiveness > compress tool reports per-operation savings and Pi context usage [0.42ms]
+(pass) DCP pruning effectiveness > compress tool publishes prepared journal state immediately after creating blocks [0.55ms]
+(pass) DCP pruning effectiveness > compress tool retries with the same tool call id idempotently [0.62ms]
+(pass) DCP pruning effectiveness > compress tool does not publish a late result after the session epoch changes [0.44ms]
+(pass) DCP pruning effectiveness > compress tool rejects partial overlap and preserves protected raw user messages [0.81ms]
+(pass) DCP pruning effectiveness > range and message compression accept the first raw ID after a block with the same timestamp [1.25ms]
+(pass) DCP pruning effectiveness > compress tool supports individual message compression and protect tags [0.69ms]
+(pass) DCP pruning effectiveness > message compression replaces only one tool-result body in a parallel group [1.05ms]
+(pass) DCP pruning effectiveness > compress advertises compact tool-group boundary rules before execution [0.09ms]
+(pass) DCP pruning effectiveness > range compression rejects a selection that cuts through a parallel tool group [0.54ms]
+(pass) DCP pruning effectiveness > message compression refuses to edit signed assistant content in place [0.37ms]
+(pass) DCP pruning effectiveness > message compression soft-skips invalid entries and reports grouped diagnostics [0.62ms]
+(pass) DCP pruning effectiveness > message compression candidates prioritize large stale messages [0.19ms]
+(pass) DCP pruning effectiveness > message compression candidates preserve the active turn when there are fewer turns than keepRecentTurns [0.08ms]
+(pass) DCP pruning effectiveness > message compression candidates suggest completed tool-result bodies but not tool-call assistants [0.13ms]
+(pass) DCP pruning effectiveness > emergency same-turn candidates preserve recent, unseen, user, and protected outputs [0.60ms]
+(pass) DCP pruning effectiveness > emergency range candidate unblocks auto-compress inside a single marathon user turn [28.34ms]
+(pass) DCP pruning effectiveness > disabled routine autoCandidates does not disable the emergency range safety planner [0.33ms]
+(pass) DCP pruning effectiveness > emergency range does not treat a later assistant as provider evidence for unseen results [0.14ms]
+(pass) DCP pruning effectiveness > emergency hard pressure is independent of a higher model threshold [0.02ms]
+(pass) DCP pruning effectiveness > disabled emergency pruning produces no same-turn candidates [0.10ms]
+(pass) DCP pruning effectiveness > provider exposure requires tool-result evidence in the outgoing payload [0.15ms]
+(pass) DCP pruning effectiveness > budget planner floors stale provider usage with the fresh repo projection [0.04ms]
+(pass) DCP pruning effectiveness > budget planner falls back to repo projection and clips summaryBuffer to capacity [0.04ms]
+(pass) DCP pruning effectiveness > blocked reason classifier distinguishes live head, unknown evidence, protected minimum, and exhausted budget [0.04ms]
+(pass) DCP pruning effectiveness > progress controller exposes explicit normal, pressure, waiting, preparing, and blocked phases [0.04ms]
+(pass) DCP pruning effectiveness > progress controller exposes committed, cooldown, and degraded terminal phases [0.04ms]
+(pass) DCP pruning effectiveness > provider evidence tracker promotes identical retries only after a successful terminal message [0.09ms]
+(pass) DCP pruning effectiveness > provider evidence tracker refuses aborted streams and consumes the pending attempt [0.03ms]
+(pass) DCP pruning effectiveness > provider evidence tracker refuses interleaved main and summarizer-shaped requests without a request id [0.04ms]
+(pass) DCP pruning effectiveness > provider evidence tracker treats changed content on the same model as ambiguous interleaving [0.03ms]
+(pass) DCP pruning effectiveness > emergency analysis excludes bashExecution messages that cannot be placeholder-pruned [0.13ms]
+(pass) DCP pruning effectiveness > emergency pruning stops at its budget and preserves tool-call/result validity [0.66ms]
+(pass) DCP pruning effectiveness > new rollups carry protected fragments once without recursively expanding the old summary [0.38ms]
+(pass) DCP pruning effectiveness > compression blocks prefer stable raw message IDs over changed timestamps [0.56ms]
+(pass) DCP pruning effectiveness > compression block sync keeps blocks active when origin compress call is pruned [0.09ms]
+(pass) DCP pruning effectiveness > protected tool outputs and subagent result artifacts are appended to summaries [5.11ms]
+(pass) DCP pruning effectiveness > protected subagent artifact recovery rejects symlinks outside the session cwd atomically [1.63ms]
+(pass) DCP pruning effectiveness > protected subagent artifact recovery refuses oversized files instead of truncating them [1.05ms]
+(pass) DCP pruning effectiveness > per-model thresholds and summaryBuffer adjust nudge decisions [0.18ms]
+(pass) DCP pruning effectiveness > /dcp no longer exposes decompress or recompress mutation commands [0.53ms]
+(pass) DCP pruning effectiveness > /dcp stats reports nudge telemetry from session entries and active anchors [2.97ms]
+(pass) DCP pruning effectiveness > DCP context transform hides /dcp stats custom messages from the model [1.37ms]
+(pass) DCP pruning effectiveness > DCP distributes stable IDs over user carriers without touching assistant messages [0.66ms]
+(pass) DCP pruning effectiveness > DCP provider hook does not move message-ID metadata to the payload tail [0.62ms]
+(pass) DCP pruning effectiveness > DCP leaves Responses function_call_output payload items unchanged [0.56ms]
+(pass) DCP pruning effectiveness > DCP keeps persistent IDs stable, monotonic, and collision-safe [0.21ms]
+(pass) DCP pruning effectiveness > same-timestamp messages resolve to distinct compression candidates [0.15ms]
+(pass) DCP pruning effectiveness > modern candidate snapshots never timestamp-match an unpublished assistant [0.51ms]
+(pass) DCP pruning effectiveness > DCP context transforms preserve strict append-only continuation [0.26ms]
+(pass) DCP pruning effectiveness > two continuations after an intentional v2 rewrite preserve the rewritten prefix and assistant bytes [0.83ms]
+(pass) DCP pruning effectiveness > OpenAI Responses payload conversion preserves the append-only prefix [0.29ms]
+(pass) DCP pruning effectiveness > reapplying DCP to transformed context does not duplicate carriers [0.11ms]
+(pass) DCP pruning effectiveness > assistant metadata sanitizer is an identity fast path for signed content [0.05ms]
+(pass) DCP pruning effectiveness > DCP below-threshold projection preserves published reminders and clears only absent carriers [1.58ms]
+(pass) DCP pruning effectiveness > DCP fresh projection overrides stale-low native usage and aborts an unshrinkable huge paste [0.99ms]
+(pass) DCP pruning effectiveness > DCP does not spam routine reminders when no candidate exists below emergency pressure [1.08ms]
+(pass) DCP pruning effectiveness > DCP emits an emergency reminder when one active turn has no normal compression candidate [8.64ms]
+(pass) DCP pruning effectiveness > DCP hard fallback lowers one-turn provider context and emits distinct diagnostics [22.17ms]
+(pass) DCP pruning effectiveness > successful model summary with non-positive gain does not disable the summarizer for a new source [3.90ms]
+(pass) DCP pruning effectiveness > DCP tries emergency current-turn pruning before aborting when exact auto-compression fails at input capacity [7.78ms]
+(pass) DCP pruning effectiveness > DCP emergency patience advances only on completed provider opportunities and resets to unknown on restart [4.92ms]
+(pass) DCP pruning effectiveness > DCP marks provider exposure only after a successful response [2.55ms]
+(pass) DCP pruning effectiveness > DCP does not register agent_end snapshot persistence [0.53ms]
+(pass) DCP pruning effectiveness > DCP context transform forces a strong nudge on context-window downgrade [1.73ms]
+(pass) DCP pruning effectiveness > DCP auto-compress decision fires after patience ignored strong nudges above emergency threshold [0.08ms]
+(pass) DCP pruning effectiveness > DCP hard pressure prefers an enabled safe summary rewrite even when no reminder opportunity was possible [0.04ms]
+(pass) DCP pruning effectiveness > DCP pressure can auto-compress when no cache-safe reminder carrier exists [0.03ms]
+(pass) DCP pruning effectiveness > DCP manual mode cannot be widened into autonomous summary creation [0.03ms]
+(pass) DCP pruning effectiveness > DCP auto-compress decision is disabled when autoCompress.enabled=false [0.02ms]
+(pass) DCP pruning effectiveness > DCP auto-compress creates a programmatic block when summarizerModel is empty [0.73ms]
+(pass) DCP pruning effectiveness > DCP auto-compress rejects a non-positive gain without mutating state [0.37ms]
+(pass) DCP pruning effectiveness > DCP auto-compress rejects positive gain below required budget recovery atomically [0.89ms]
+(pass) DCP pruning effectiveness > DCP auto-compress can commit positive partial recovery while retaining the remaining debt [1.40ms]
+(pass) DCP pruning effectiveness > DCP auto-compress does not publish live state when durable publication fails [0.70ms]
+(pass) DCP pruning effectiveness > DCP auto-compress rejects a late summary after the session epoch changes [0.48ms]
+(pass) DCP pruning effectiveness > DCP auto-compress closes a partial parallel group before building its summary [0.97ms]
+(pass) DCP pruning effectiveness > DCP auto-compress excludes a same-timestamp live head from its summary input [0.63ms]
+(pass) DCP pruning effectiveness > DCP context transform emits context-limit nudges with concrete candidates [1.36ms]
+(pass) DCP pruning effectiveness > DCP context transform strips leaked message-id control blocks from prior transcript [0.63ms]
+(pass) DCP pruning effectiveness > DCP context transform hides current DCP diagnostic custom messages from the model [0.63ms]
+(pass) DCP pruning effectiveness > DCP module stays headless and only registers non-UI hooks [0.34ms]
+
+test/repo-native-compact.test.ts:
+(pass) repo discovery Native Compact config > defaults to baseline and layers user, PI_CONFIG_DIR, project, and env [2.19ms]
+(pass) repo discovery Native Compact config > keeps the previous safe profile and records invalid layers [2.43ms]
+(pass) repo discovery Native Compact argument policy > normalizes equals-form and applies compact native defaults [0.56ms]
+(pass) repo discovery Native Compact argument policy > rejects duplicate, malformed, unknown, and conflicting flags before execution [0.09ms]
+(pass) repo discovery Native Compact argument policy > enforces compact limits and allows only a bounded explicit full override [0.35ms]
+(pass) repo discovery Native Compact argument policy > publishes compact/full native limits as model-facing argument guidance [0.12ms]
+(pass) repo discovery Native Compact final delivery budget > keeps the complete result inside both budgets and preserves unicode [1.44ms]
+(pass) repo discovery Native Compact final delivery budget > leaves already-bounded output byte-equivalent [0.05ms]
+(pass) repo discovery Native Compact wrapper integration > baseline keeps historical schema/default argv while native compact adds its explicit override [2.63ms]
+(pass) repo discovery Native Compact wrapper integration > refuses a policy violation before idx and records only safe policy metadata [0.92ms]
+
+test/todo-persistence-e2e.test.ts:
+(skip) todo persistence real pi e2e > loads a project plan, scopes it, and waits out the duplicate auto-nudge window
+
+test/opencode-import.test.ts:
+(pass) opencode import > imports opencode auth.json credentials and Antigravity accounts [3.15ms]
+(pass) opencode import > keeps existing Pi auth unless force is passed [1.82ms]
+(pass) opencode import > routes OpenAI API keys separately from Codex OAuth [1.02ms]
+(pass) opencode import > rejects incomplete OAuth credentials instead of writing partial auth [0.68ms]
+(pass) opencode import > reads OPENCODE_AUTH_CONTENT and honors the canonical Pi agent directory [0.89ms]
+(pass) opencode import > preserves existing Antigravity OAuth client credentials when force-importing accounts [1.31ms]
+(pass) opencode import > parses opencode import command arguments [0.19ms]
+(pass) opencode import > describes no-write results without claiming that auth was written [2.16ms]
+(pass) opencode import > reloads resources only after credentials are written [9.12ms]
+
+test/dcp-recovery.test.ts:
+(pass) DCP ephemeral tool-record recovery > rebuilds protection metadata from raw history without inventing provider evidence [0.21ms]
+
+test/dcp-manual-cheap-summary.test.ts:
+(pass) DCP explicit/manual cheap summarizer > omitted range summary uses configured cheap model even when auto firing is disabled [1.63ms]
+(pass) DCP explicit/manual cheap summarizer > omitted message summary uses the same cheap summarizer path [1.32ms]
+(pass) DCP explicit/manual cheap summarizer > explicit summary bypasses the summarizer completely [0.70ms]
+(pass) DCP explicit/manual cheap summarizer > an explicitly empty summary remains explicit for backward compatibility [0.63ms]
+(pass) DCP explicit/manual cheap summarizer > unavailable or timed-out cheap model falls back to extractive continuation [34.68ms]
+(pass) DCP explicit/manual cheap summarizer > parent abort during delegated summary never commits [13.17ms]
+(pass) DCP explicit/manual cheap summarizer > verified source change during summarizer await is rejected atomically [0.76ms]
+
+test/dcp-conversation-index-generative.test.ts:
+(pass) DCP seeded conversation-index properties > tool-group detection and range closure match an independent reference [113.91ms]
+
+test/compress-ui.test.ts:
+(pass) DCP headless helpers > normalizes Pi context usage for tool responses and pruning decisions [0.17ms]
+
+test/repo-discovery.test.ts:
+(pass) repo discovery output truncation > registered repo tools expose economy guidance without changing execution defaults [3.09ms]
+(pass) repo discovery output truncation > registers repo_knowledge only when idx is available and project is indexed [0.95ms]
+(pass) repo discovery output truncation > repo_knowledge maps compact read actions and guards semantic mutations [1.70ms]
+(pass) repo discovery output truncation > keeps top lines when the line limit is exceeded [0.03ms]
+(pass) repo discovery output truncation > keeps complete top lines when the byte limit is exceeded [0.02ms]
+(pass) repo discovery output truncation > does not split multi-byte characters when the first line exceeds the byte limit [0.06ms]
+(pass) repo discovery output truncation > repo_* tool results keep top lines when truncated [0.95ms]
+(pass) repo discovery output truncation > /idx-init installs indexer-cli before init when idx is unavailable [1.23ms]
+(pass) repo discovery output truncation > /idx-init repairs missing idx even when .indexer-cli already exists [0.78ms]
+(pass) repo discovery output truncation > /idx-init skips npm install when idx is available [0.63ms]
+
+test/session-recovery.test.ts:
+(pass) session recovery tools > registers four tools and maps stable active/all sections [4.25ms]
+(pass) session recovery tools > searches raw pre-compaction history and Unicode case-insensitively [0.61ms]
+(pass) session recovery tools > recovers full structured details for Context Gateway web compacts by tool call id [0.53ms]
+(pass) session recovery tools > reads a bounded section and reports unknown section IDs normally [0.41ms]
+(pass) session recovery tools > reads an exact late entry and continues a long entry body without returning to the section head [1.32ms]
+(pass) session recovery tools > paginates overview and search results and hides DCP control custom entries [1.73ms]
+(pass) session recovery tools > recovers deterministic context, file evidence, errors, and pending calls [0.89ms]
+(pass) session recovery tools > returns a clear normal result for an empty or unavailable session [0.13ms]
+(pass) session recovery tools > bounds rendered entry bodies [0.15ms]
+
+test/dcp-debug-log.test.ts:
+(pass) DCP debug log > disabled debug state summary is an O(1) no-op [0.54ms]
+(pass) DCP debug log > rotates the active file when it reaches maxBytes and keeps maxBackups copies [14.53ms]
+(pass) DCP debug log > backups contain prior log content and the active file stays appendable [4.70ms]
+(pass) DCP debug log > resolves limits from config then env, and floors maxBackups at 1 [0.88ms]
+(pass) DCP debug log > writes nothing when debug is disabled [53.08ms]
+
+test/resource-registry.test.ts:
+(pass) resource registry > derives the same project key from SSH and HTTPS GitHub remotes [0.49ms]
+(pass) resource registry > registers one /registry command [0.54ms]
+(pass) resource registry > bounds spawned commands and identifies a timed-out command [56.80ms]
+(pass) resource registry > reports an actionable error for a configured local registry that no longer exists [1.54ms]
+(pass) resource registry > publishes structured registry snapshots for the Desktop RPC manager [1089.13ms]
+(pass) resource registry > serializes the startup Desktop snapshot with the Registry panel refresh [566.15ms]
+(pass) resource registry > reuses the project registry snapshot across session starts [732.95ms]
+(pass) resource registry > drops a deferred Desktop registry snapshot after its session context becomes stale [52.93ms]
+(pass) resource registry > installs, detects updates, updates, and pushes skills/agents through Git [1874.04ms]
+(pass) resource registry > supports all for bulk install, update, push, remote remove, and local uninstall across skills and agents [2385.73ms]
+(pass) resource registry > pushes, reports, and pulls project-scoped tasks, plans, and TODO without mixing them with reusable resources [2245.05ms]
+(pass) resource registry > syncs task attachments as a portable project bundle and tracks attachment changes [1802.89ms]
+(pass) resource registry > treats an empty plans directory as removal of registry plans [2251.23ms]
+(pass) resource registry > removes a single remote resource, keeps the project copy, and reports removed-remote status [1250.86ms]
+(pass) resource registry > uninstalls a local resource, keeps the registry copy, clears provenance, and reloads [732.28ms]
+(pass) resource registry > supports scoped bulk removal through the rm alias [815.65ms]
+(pass) resource registry > offers remote removal through the registry TUI [810.94ms]
+(pass) resource registry > offers project-state push and pull through the registry TUI [1219.95ms]
+(pass) resource registry > checks for registry updates asynchronously on application startup and warns only when needed [986.35ms]
+(pass) resource registry > startup check warns when project-scoped state is available remotely but missing locally [664.76ms]
+(pass) resource registry > bootstraps the configured branch when the private registry repository is empty [495.66ms]
+(pass) resource registry > status marks simultaneous local and remote edits as diverged and update refuses to overwrite [1118.73ms]
+
+test/auto-compress.test.ts:
+(pass) summary source manifest + extractive fallback > preserves tool linkage and arguments-only facts while redacting credentials [0.27ms]
+(pass) summary source manifest + extractive fallback > extractive fallback retains explicit decision, verification failure, next step, and tool args [0.20ms]
+(pass) summary source manifest + extractive fallback > extractive fallback may exceed 8192 tokens when the source is much larger [1.47ms]
+(pass) summary source manifest + extractive fallback > refuses to split one parallel tool group across a manifest budget boundary [0.15ms]
+(pass) generateModelSummary > returns model text with usedModelRef + ok attempt on success [0.23ms]
+(pass) generateModelSummary > sends the summarizer continuation requirements and complete source transcript [0.22ms]
+(pass) generateModelSummary > records empty outcome and returns no text when the model yields nothing [0.09ms]
+(pass) generateModelSummary > records error outcome and falls through to the next model in the fallback list [0.15ms]
+(pass) generateModelSummary > records no-auth outcome when the registry rejects auth [0.32ms]
+(pass) generateModelSummary > supports successful auth supplied only through provider environment [0.16ms]
+(pass) generateModelSummary > uses an extension provider stream instead of the global compat registry [0.11ms]
+(pass) generateModelSummary > chunks large sources on complete tool groups and merges every chunk [0.28ms]
+(pass) generateModelSummary > bounds hanging auth with the total summarizer operation deadline [26.52ms]
+(pass) generateModelSummary > bounds a completion that ignores AbortSignal with the same total deadline [27.33ms]
+(pass) generateModelSummary > records no-model outcome when the registry cannot resolve the model [0.18ms]
+(pass) generateModelSummary > returns empty attempts when no summarizer models are configured [0.07ms]
+(pass) createAutoCompressionBlock summaryMode + debug fields > programmatic mode (by design) when summarizerModel is empty [1.18ms]
+(pass) createAutoCompressionBlock summaryMode + debug fields > model mode when the summarizer succeeds [0.64ms]
+(pass) createAutoCompressionBlock summaryMode + debug fields > uses explicit summarizerFallbackModels after the primary model fails [0.52ms]
+(pass) createAutoCompressionBlock summaryMode + debug fields > programmatic_fallback mode with attempts when every model fails [0.61ms]
+(pass) createAutoCompressionBlock summaryMode + debug fields > non-positive gain after a successful model summary does not masquerade as summarizer failure [0.51ms]
+(pass) createAutoCompressionBlock summaryMode + debug fields > blocked gain records when the configured summarizer really fell back to extraction [0.63ms]
+
+test/dcp-session-sim-e2e.test.ts:
+(pass) DCP deterministic session-simulation E2E > resumed history compresses both sides of an interrupted wait using the delivered recommendations without retries [65.42ms]
+(pass) DCP deterministic session-simulation E2E > single-user session delivers a tool-result reminder and replays its exact bytes after restart [29.54ms]
+(pass) DCP deterministic session-simulation E2E > keeps a long tool-heavy session bounded while materially reducing provider-token occurrences [2130.24ms]
+(pass) DCP deterministic session-simulation E2E > replays journal state across restart without rebuilding an ever-growing summary ladder [1632.28ms]
+
+test/model-completion.test.ts:
+(pass) model completion > dispatches through ModelRegistry.complete with nullable headers intact [0.13ms]
+
+test/web-search.test.ts:
+(pass) web-search tools > web-credentials stores an Ollama key securely and activates the cloud API immediately [5.31ms]
+(pass) web-search tools > web-credentials stores, reports, and clears a Tavily fallback key without displaying it [1.88ms]
+(pass) web-search tools > web-credentials is headless-safe [0.36ms]
+(pass) web-search tools > web_search posts to normalized Ollama host and returns structured details [0.51ms]
+(pass) web-search tools > web_fetch returns content/link metadata [0.73ms]
+(pass) web-search tools > web_search falls back to Tavily after an Ollama error [0.54ms]
+(pass) web-search tools > web_fetch falls back to Tavily Extract after an Ollama error [0.56ms]
+(pass) web-search tools > reports Ollama auth errors with signin guidance [0.44ms]
+(pass) web-search tools > reports both failures without leaking the Tavily API key [0.63ms]
+(pass) web-search tools > reports a Tavily Extract failed_result [0.50ms]
+(pass) web-search tools > does not start a Tavily fallback after parent cancellation [0.48ms]
+(pass) web-search tools > reports invalid JSON instead of leaking a generic parser error [0.22ms]
+(pass) web-search tools > starts local Ollama and retries after connection refused [0.60ms]
+(pass) web-search tools > waits and retries local endpoint 404s while Ollama web API is still becoming ready [254.93ms]
+(pass) web-search tools > does not try to spawn Ollama for remote hosts [3.14ms]
+(pass) web-search tools > times out stalled Ollama requests [2.50ms]
+
+test/dcp-lifecycle-marathon.test.ts:
+(pass) DCP full lifecycle marathon > provider completions drive repeated budget-sufficient compression and preserve retired facts [7716.76ms]
+
+test/coding-discipline.test.ts:
+(pass) coding discipline > recognizes GLM models and the vision-capable GLM-5.3 Flash exception [2.70ms]
+(pass) coding discipline > keeps lookup active only for text-only GLM models [5.25ms]
+(pass) coding discipline > keeps coding discipline but omits text-only lookup rules for GLM-5.3 Flash [1.18ms]
+(pass) coding discipline > does not register lookup when lookupModel is disabled [0.86ms]
+(pass) coding discipline > lookup falls through to configured fallback models [1.86ms]
+(pass) coding discipline > does not inject discipline into non-GLM main-agent requests [0.95ms]
+(pass) coding discipline > deduplicates the injected discipline block across repeated provider requests [1.33ms]
+(pass) coding discipline > strips pi's built-in Pi documentation block from the system prompt [0.88ms]
+(pass) coding discipline > injects <available_skills> when pi-core's gate failed and skills are loaded [0.94ms]
+(pass) coding discipline > does not re-inject <available_skills> when the block is already present [0.94ms]
+(pass) coding discipline > does not inject <available_skills> when no skills are loaded [0.78ms]
+(pass) coding discipline quality contract > targets evidence, hypothesis management, bounded retries, verification, counterexamples, and escalation [0.09ms]
+(pass) coding discipline quality contract > does not register the old chatter-reminder context hook [0.73ms]
+
+test/ast-grep.test.ts:
+(pass) ast-grep tools > registers ast_grep and ast_apply with argument normalization [16.71ms]
+(pass) ast-grep tools > ast_grep is read-only, validates conflicts, and builds run args [1.34ms]
+(pass) ast-grep tools > ast_apply forces update-all and reports preflight changed files [0.81ms]
+(pass) ast-grep tools > preserves at-prefixed paths and renders ast_apply label [0.48ms]
+(pass) ast-grep tools > counts json stream and scan diagnostics without counting context lines [0.16ms]
+
+test/lsp.test.ts:
+(pass) LSP shared helpers > formats diagnostics and resolves paths/commands [4.63ms]
+(pass) LSP shared helpers > caches Trust once decisions for the current session [0.93ms]
+(pass) LSP shared helpers > persists Trust always decisions and does not cache rejects [0.99ms]
+(pass) LSP shared helpers > loads LSP servers from shared pi-tools-suite config instead of agent lsp.json [2.08ms]
+(pass) LSP library post-edit diagnostics > top-level suite loads the LSP post-edit hook [48.48ms]
+(pass) LSP library post-edit diagnostics > registers post-edit diagnostics hook without TUI renderers [360.62ms]
+(pass) LSP library post-edit diagnostics > reuses one LSP process for repeated diagnostics calls and shuts it down [340.75ms]
+(pass) LSP library post-edit diagnostics > backs off after a crashing LSP startup [69.88ms]
+(pass) LSP library post-edit diagnostics > starts separate clients for different roots with the same server id [626.61ms]
+(pass) LSP library post-edit diagnostics > deduplicates changedFiles diagnostics without adding separate chat messages [332.26ms]
+(pass) LSP library post-edit diagnostics > skips deleted files without appending an ENOENT warning [4.50ms]
+(pass) LSP library post-edit diagnostics > detects diagnostics for Claude-style Write and Edit aliases [582.16ms]
+(pass) LSP library post-edit diagnostics > uses tsserver diagnostics fallback when advertised [74.14ms]
+(pass) LSP library post-edit diagnostics > uses pull diagnostics when advertised [60.66ms]
+(pass) LSP library post-edit diagnostics > can keep slow pull-diagnostic servers non-blocking [39.34ms]
+(pass) LSP library post-edit diagnostics > waits for published diagnostics when pull diagnostics is disabled [193.27ms]
+(pass) LSP library post-edit diagnostics > uses dynamically registered pull diagnostics [57.85ms]
+(pass) LSP library post-edit diagnostics > adds local Markdown and Mermaid diagnostics [54.06ms]
+(pass) LSP library post-edit diagnostics > kills stubborn LSP processes that ignore shutdown and SIGTERM [2302.58ms]
+(pass) LSP library post-edit diagnostics > kills child process groups created by LSP wrapper scripts [331.19ms]
+(pass) LSP library post-edit diagnostics > aborts startup waits and kills the LSP process [59.92ms]
+
+test/dcp-post-compress-usage.test.ts:
+(pass) DCP post-compression provider usage > does not issue another routine nudge for the pre-compression usage sample [17.80ms]
+(pass) DCP post-compression provider usage > retains provider overhead rather than trusting the small local history alone [13.55ms]
+(pass) DCP post-compression provider usage > new tool output can immediately restore routine pressure [15.36ms]
+(pass) DCP post-compression provider usage > model changes invalidate any correction from the previous model [14.94ms]
+(pass) DCP post-compression provider usage > the existing automatic hard recovery still blocks an oversized protected task [37.48ms]
+(pass) DCP post-compression provider usage > a fresh correlated provider sample retires the old compression adjustment [19.62ms]
+
+test/credential-firewall.test.ts:
+(pass) credential firewall redactor > redacts high-confidence credentials with stable placeholders [0.48ms]
+(pass) credential firewall redactor > redacts private keys, assignments, basic auth, and credential URLs [0.10ms]
+(pass) credential firewall redactor > redacts AWS access identifiers and AWS secret assignments [0.05ms]
+(pass) credential firewall redactor > does not redact env references, placeholders, ordinary hashes, or opaque provider fields [0.18ms]
+(pass) credential firewall redactor > walks nested provider payloads without mutating the original [0.07ms]
+(pass) credential firewall redactor > uses structured sensitive field names as a high-confidence signal [0.05ms]
+(pass) credential firewall extension > loads layered session-hygiene and notify settings [0.83ms]
+(pass) credential firewall extension > sanitizes outbound payloads and emits no secret value in the warning [0.62ms]
+(pass) credential firewall extension > session hygiene sanitizes tool results and completed messages [0.79ms]
+
+test/dcp-shadow-plan.test.ts:
+(pass) DCP shadow planner > plans pressure/candidates on a detached clone with zero live-state mutation [1.22ms]
+
+test/dcp-journal-lifecycle.test.ts:
+(pass) DCP journal lifecycle > new session persists exact projection decisions across restart and fork without a sidecar [4.59ms]
+(pass) DCP journal lifecycle > pre-journal persisted sessions are not adopted or converted [0.50ms]
+
+test/dcp-config.test.ts:
+(pass) DCP config > uses context-pressure DCP cleanup defaults [0.25ms]
+(pass) DCP config > appends explicit summarizer fallbacks after legacy primary refs and deduplicates [0.12ms]
+(pass) DCP config > normalizes malformed summarizer model fields to resolved arrays [0.47ms]
+(pass) DCP config > reads DCP settings from the user pi-tools-suite config [0.37ms]
+(pass) DCP config > applies model-specific overrides on top of the shared DCP config [0.33ms]
+(pass) DCP config > supports wildcard model override keys with exact matches taking precedence [0.33ms]
+(pass) DCP config > drops removed DCP policy keys and reports actionable compatibility issues [0.37ms]
+(pass) DCP config > extracts provider/model and model-only keys from context [0.03ms]
+(pass) DCP config > ignores legacy, project, and PI_CONFIG_DIR DCP config files [0.84ms]
+
+test/dcp-progress-opportunities.test.ts:
+(pass) DCP bounded actionable opportunities > routine pressure cannot spend 132 completed responses waiting for a new user turn [35.57ms]
+(pass) DCP bounded actionable opportunities > repeated context callbacks, retries, failed streams and absent reminders do not invent opportunities [29.52ms]
+(pass) DCP bounded actionable opportunities > a single long user turn does not rewrite its old user carrier under routine pressure [11.36ms]
+(pass) DCP bounded actionable opportunities > failed compress calls still consume opportunities and cannot starve automatic recovery [42.18ms]
+(pass) DCP bounded actionable opportunities > auto-disabled routine escalation is explicit, deduplicated and never overrides consent [569.90ms]
+(pass) DCP bounded actionable opportunities > manual mode is not widened into autonomous summaries below emergency pressure [12.94ms]
+(pass) DCP bounded actionable opportunities > crossing emergency pressure does not grant fresh patience after routine opportunities [0.23ms]
+(pass) DCP bounded actionable opportunities > partial savings retain a stable remaining goal across callbacks [0.08ms]
+(pass) DCP bounded actionable opportunities > reminder delivery detection covers provider text shapes and rejects unrelated payloads [1.05ms]
+(pass) DCP bounded actionable opportunities > an unchanged native usage sample cannot re-charge partial emergency savings [0.05ms]
+(pass) DCP bounded actionable opportunities > capacity recovery planning is capped by the current budget instead of stale cumulative debt [0.03ms]
+(pass) DCP bounded actionable opportunities > module pressure recovery preserves an existing summary and compresses only the remaining raw prefix [24.52ms]
+(pass) DCP bounded actionable opportunities > provider send is blocked after a lifecycle reset until the new epoch rebuilds context [5.98ms]
+
+test/codex-reasoning-fix.test.ts:
+(pass) codex-reasoning-fix > is registered last so no later suite hook can reintroduce invalid content [0.20ms]
+(pass) codex-reasoning-fix > does not monkey-patch global fetch or WebSocket transport [0.06ms]
+(pass) codex-reasoning-fix > strips content from reasoning items in a Responses `input` payload [1.27ms]
+(pass) codex-reasoning-fix > leaves reasoning items that already lack content untouched [0.14ms]
+(pass) codex-reasoning-fix > is a no-op for non-Responses payloads (system-only / messages / non-record) [0.07ms]
+(pass) codex-reasoning-fix > registers a before_provider_request handler that returns the cleaned payload [0.20ms]
+(pass) codex-reasoning-fix > handler returns undefined when nothing needs cleaning [0.06ms]
+(pass) codex-reasoning-fix > removes prompt_cache_retention from openai-codex requests [0.18ms]
+(pass) codex-reasoning-fix > removes prompt_cache_retention from every current openai-codex model [0.12ms]
+(pass) codex-reasoning-fix > removes legacy retention from direct OpenAI GPT-5.6+ but preserves older and other providers [0.18ms]
+(pass) codex-reasoning-fix > uses a fully qualified payload model only when selected-model metadata is unavailable [0.08ms]
+(pass) codex-reasoning-fix > final sanitizer removes content introduced by an earlier payload hook [0.17ms]
+(pass) stripCarrier (shared core) > strips content from non-message items in an `input` array [3.81ms]
+(pass) stripCarrier (shared core) > returns undefined when nothing needs stripping [0.20ms]
+
+test/dcp-closed-range-candidates.test.ts:
+(pass) DCP closed range recommendations > skips the historical incomplete group with planning options  [0.54ms]
+(pass) DCP closed range recommendations > skips the historical incomplete group with planning options {"requiredSavingsTokens":10} [0.18ms]
+(pass) DCP closed range recommendations > skips the historical incomplete group with planning options {"requiredSavingsTokens":100000} [0.17ms]
+(pass) DCP closed range recommendations > a too-small prefix does not starve the closed work after an interrupted call [0.20ms]
+(pass) DCP closed range recommendations > a partial parallel result group is excluded, not mistaken for a closed suffix [0.15ms]
+(pass) DCP closed range recommendations > returns no range when every eligible slice is incomplete or too small [0.11ms]
+(pass) DCP closed range recommendations > budget sizing still closes all parallel results without entering the active turn [0.22ms]
+(pass) DCP closed range recommendations > a rejected stale suggestion identifies the missing result and closed alternatives without mutation [0.73ms]
+
+test/model-tools.test.ts:
+(pass) model tools > exports argument adapters and model profile detection [2.23ms]
+94 | 		await expectRejectsWithMessage(pi.tools.get("Bash").execute("call", { command: "echo hi", run_in_background: true }, undefined, undefined, { cwd }), "run_in_background");
+95 | 		await pi.tools.get("shell").execute("call", { command: "  echo hi  ", timeout_ms: 2500 }, undefined, undefined, { cwd });
+96 | 		expect(builtinExecutions[builtinExecutions.length - 1]).toMatchObject({ name: "bash", args: { command: "echo hi", timeout: 3 } });
+97 | 
+98 | 		pi.handlers.get("session_start")({}, { model: { id: "claude-sonnet" } });
+99 | 		expect(pi.activeTools).toEqual(["custom", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
+                              ^
+error: expect(received).toEqual(expected)
+
+  [
+    "custom",
+    "Read",
+-   "Edit",
+-   "Write",
+    "Bash",
+-   "Grep",
+-   "Glob",
+  ]
+
+- Expected  - 4
++ Received  + 0
+
+      at <anonymous> (/Volumes/128GBSSD/Projects/pi-ui-extend/external/pi-tools-suite/test/model-tools.test.ts:99:26)
+(fail) model tools > registers aliases, adapts executions, and switches active tools by model [3.67ms]
+111 | 		const pi = new FakePi();
+112 | 		pi.activeTools = ["read", "custom", ...REPO_DISCOVERY_TOOL_NAMES, "bash"];
+113 | 
+114 | 		register(pi as any, MODEL_TOOL_TEST_DEPENDENCIES as any);
+115 | 		pi.handlers.get("session_start")({}, { model: { id: "claude-sonnet" } });
+116 | 		expect(pi.activeTools).toEqual([...REPO_DISCOVERY_TOOL_NAMES, "custom", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
+                               ^
+error: expect(received).toEqual(expected)
+
+  [
+    "repo_architecture",
+    "repo_structure",
+    "repo_ast",
+    "repo_search",
+    "repo_explain",
+    "repo_deps",
+    "repo_knowledge",
+    "custom",
+    "Read",
+-   "Edit",
+-   "Write",
+    "Bash",
+-   "Grep",
+-   "Glob",
+  ]
+
+- Expected  - 4
++ Received  + 0
+
+      at <anonymous> (/Volumes/128GBSSD/Projects/pi-ui-extend/external/pi-tools-suite/test/model-tools.test.ts:116:26)
+(fail) model tools > keeps active repo discovery tools ahead of lower-level profile tools [0.31ms]
+(pass) model tools > can preserve a narrowed managed tool selection while switching names for the model [0.19ms]
+(pass) model tools > apply_patch creates, updates, moves, and deletes files [2.29ms]
+(pass) model tools > apply_patch applies unified diffs [24.75ms]
+
+test/comment-checker.test.ts:
+(pass) comment-checker detect > flags a restate-code line comment in a write [1.49ms]
+(pass) comment-checker detect > write: compact one-line-per-file format with line numbers [0.24ms]
+(pass) comment-checker detect > flags Python-style # comment [0.19ms]
+(pass) comment-checker detect > flags SQL -- comment [0.18ms]
+(pass) comment-checker detect > does not flag TODO/FIXME, license, docstring, pragma, shebang [0.18ms]
+(pass) comment-checker detect > does not flag net-unchanged comments in an edit (old_string == new_string comment) [0.44ms]
+(pass) comment-checker detect > flags a net-new comment added inside an edit [0.36ms]
+(pass) comment-checker detect > flags apply_patch Add File with slop comments [0.27ms]
+(pass) comment-checker detect > ignore non-mutation tools [0.19ms]
+(pass) comment-checker detect > ignore error results [0.13ms]
+(pass) comment-checker detect > dedup: second nudge within window is suppressed [0.20ms]
+(pass) comment-checker detect > disabled via config commentChecker.enabled=false [0.58ms]
+(pass) comment-checker detect > aggressive strictness flags non-essential comments [0.52ms]
+(pass) comment-checker detect > conservative strictness leaves generic explanations alone [0.47ms]
+(pass) comment-checker detect unit > does not flag JSDoc/docstring block continuation lines [0.17ms]
+(pass) comment-checker detect unit > detectSlopComments direct [0.15ms]
+(pass) comment-checker detect unit > multi-language comment body extraction [0.14ms]
+
+test/config.test.ts:
+(pass) pi-tools-suite config > resolves the user config path from a supplied home directory [0.12ms]
+(pass) pi-tools-suite config > uses HOME for the default user config path even when the runtime homedir is cached [0.08ms]
+(pass) pi-tools-suite config > disables modules from config lists and maps [0.45ms]
+(pass) pi-tools-suite config > loads lookupModel from config layers and allows disabling it [0.53ms]
+(pass) pi-tools-suite config > loads resource registry remote/branch/projectKey from layered config and environment [0.49ms]
+(pass) pi-tools-suite config > loads todoThinking from config and environment [0.39ms]
+(pass) pi-tools-suite config > merges todo thinking model overrides and allows later layers to remove inherited entries [0.43ms]
+(pass) pi-tools-suite config > project config can re-enable a globally disabled module [0.40ms]
+(pass) pi-tools-suite config > environment variables disable modules last [0.57ms]
+(pass) pi-tools-suite config > environment variable can disable the whole suite [0.46ms]
+(pass) pi-tools-suite config > creates a default user config when it is missing [0.75ms]
+(pass) pi-tools-suite config > unknown removed modules are ignored [0.32ms]
+(pass) pi-tools-suite config > credential firewall is disabled by default and requires explicit opt-in [0.59ms]
+(pass) pi-tools-suite config > truncation metadata normalizer is disabled by default and requires explicit opt-in [0.54ms]
+
+test/dcp-routine-pressure.test.ts:
+(pass) routine pressure calibration > subtracts only new compression while keeping overhead and appended tail [0.20ms]
+(pass) routine pressure calibration > does not adjust an unchanged projection or infer savings from an undo [0.06ms]
+(pass) routine pressure calibration > the fresh local projection is always a floor [0.03ms]
+(pass) routine pressure calibration > requires the exact successful usage source, not merely a matching timestamp [0.04ms]
+(pass) routine pressure calibration > a error completion cannot supply a calibration [0.02ms]
+(pass) routine pressure calibration > a aborted completion cannot supply a calibration
+(pass) routine pressure calibration > ambiguous requests, unsent projections and zero usage cannot supply calibration [0.05ms]
+(pass) routine pressure calibration > owner/window changes and restart discard calibration [0.03ms]
+
+test/dcp-transaction-faults.test.ts:
+(pass) DCP transaction fault boundaries > a changed source during the model await cannot reach persistence [1.17ms]
+(pass) DCP transaction fault boundaries > same tool-call id with changed parameters is a conflict, not an idempotent success [1.15ms]
+(pass) DCP transaction fault boundaries > new interior content is not deleted by a previously committed exact block [2.23ms]
+(pass) DCP transaction fault boundaries > failed command persistence neither mutates manual mode nor reports success [2.07ms]
+
+test/tool-selection-e2e.test.ts:
+(skip) repo-aware tool-selection live e2e > uses repo_search for a single semantic discovery when repo_* tools are available (unknown owner)
+(skip) repo-aware tool-selection live e2e > uses repo_search for a single semantic discovery when repo_* tools are available (duplicate charge report)
+(skip) repo-aware tool-selection live e2e > uses repo_search for a single semantic discovery when repo_* tools are available (pre-bug trace)
+(skip) repo-aware tool-selection live e2e > falls back to direct file/search tools when repo_* tools are unavailable (unknown owner)
+(skip) repo-aware tool-selection live e2e > falls back to direct file/search tools when repo_* tools are unavailable (duplicate charge report)
+(skip) repo-aware tool-selection live e2e > falls back to direct file/search tools when repo_* tools are unavailable (pre-bug trace)
+(skip) repo-aware tool-selection live e2e > uses repo_architecture before broad reads when repo_* tools are available (new contributor)
+(skip) repo-aware tool-selection live e2e > uses repo_architecture before broad reads when repo_* tools are available (before change)
+(skip) repo-aware tool-selection live e2e > uses repo_architecture before broad reads when repo_* tools are available (team onboarding)
+(skip) repo-aware tool-selection live e2e > uses direct search/read for exact-string small edits even when repo_* tools are available (lsp clean-report wording)
+(skip) repo-aware tool-selection live e2e > uses repo_knowledge context for an authoritative behavior/contract question
+(skip) repo-aware tool-selection live e2e > uses task-scoped repo_knowledge impact after a material behavior change
+(skip) repo-aware tool-selection live e2e > creates and records a new primary spec when no suitable contract exists
+(skip) repo-aware tool-selection live e2e > updates an existing primary spec and verifies after intentional semantic drift
+(skip) repo-aware tool-selection live e2e > accepts reviewed no-impact without inventing a relation or spec mutation
+(skip) repo-aware tool-selection live e2e > reconciles a moved primary spec without rewriting its source
+(skip) repo-aware tool-selection live e2e > uses subagents for broad independent discovery when repo_* tools are unavailable (release readiness)
+(skip) repo-aware tool-selection live e2e > uses subagents for broad independent discovery when repo_* tools are unavailable (incident triage)
+(skip) repo-aware tool-selection live e2e > uses subagents for broad independent discovery when repo_* tools are unavailable (test strategy)
+(skip) repo-aware tool-selection live e2e > creates a synchronized todo plan for non-trivial multi-stage work
+(skip) repo-aware tool-selection live e2e > compresses a high-pressure closed range with continuation-critical details
+(skip) repo-aware tool-selection live e2e > starts unknown-query context recovery with session_overview
+(skip) repo-aware tool-selection live e2e > does not create todos or compress for a trivial chat question
+
+test/dcp-prompts.test.ts:
+(pass) DCP prompt contracts > normal mode ties proactive compression to meaningful pressure and closed work [0.05ms]
+(pass) DCP prompt contracts > manual mode forbids unsolicited housekeeping but retains summary quality rules [0.02ms]
+(pass) DCP prompt contracts > strong and soft reminders preserve their distinct urgency boundaries [0.03ms]
+(pass) DCP prompt contracts > routine reminders reject low-value compression and protect active context [0.04ms]
+(pass) DCP prompt contracts > compress tool contract preserves continuation state and safe boundaries [0.07ms]
+(pass) DCP prompt contracts > rollup guidance does not require recursive summaries or mistake a partial commit for relief [0.03ms]
+
+test/session-name.test.ts:
+(pass) session_name tool > registers and sets the current session name [0.17ms]
+(pass) session_name tool > returns the current session name when no name is provided [0.07ms]
+
+test/evals/live-evals.test.ts:
+(skip) pi-tools-suite live eval matrix > tool.semantic-repo-search [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.architecture-first [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.knowledge-context [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.knowledge-impact [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.exact-literal-direct [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.ast-structural [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.todo-plan [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.session-recovery-overview [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.two-hypotheses-before-fix [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.behavior-over-structural-check [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.async-stale-state [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.investigate-without-edit-probes [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.counterexample-preserves-validation [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.sol-delegates-substantial [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.sol-keeps-tiny-edit [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.luna-delegates-substantial [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.luna-escalates-high-risk [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.terra-escalates-high-risk [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.trivial-chat-no-tools [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.known-file-read-no-oracle [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.routine-local-failure-no-oracle [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.small-known-edit-no-plan [<no-model>]
+
+test/evals/recovery-corpus.test.ts:
+(pass) Context Gateway recovery corpus identity > keeps opaque expected values out of prompts and versions the corpus [0.04ms]
+(pass) Context Gateway recovery corpus identity > places each hidden fact in the intended synthetic source and nowhere in config [2.14ms]
+(pass) Context Gateway recovery corpus identity > cleanup declarations reference only the synthetic producer sources [0.04ms]
+
+test/evals/recovery-report.test.ts:
+(pass) Context Gateway recovery safe reporting > drops transient paths, raw args, stdout/body and hidden facts from the report row [0.38ms]
+
+test/evals/recovery-run-identity.test.ts:
+(pass) Context Gateway recovery run identity > pins dirty source, harness, validator, corpus, SDK/runtime/config, and arm order without absolute paths [89.03ms]
+
+test/evals/extension-contracts.test.ts:
+(pass) eval coverage registry > every extension has deterministic eval coverage [0.09ms]
+(pass) eval coverage registry > every model-facing tool has deterministic eval coverage [0.12ms]
+(pass) eval coverage registry > all live coverage references resolve to declared eval cases [0.11ms]
+(pass) eval coverage registry > deterministic coverage references existing test files [0.26ms]
+(pass) previously uncovered extension contracts > usage registers a lazy /usage command without querying providers during registration [1.21ms]
+(pass) previously uncovered extension contracts > resource-registry registers one management command without touching the project [0.09ms]
+(pass) previously uncovered extension contracts > prompt-commands registers its management command with an isolated home [1.14ms]
+
+test/evals/harness.test.ts:
+(pass) eval harness > derives mutation and behavioral verification metrics from tool events [0.60ms]
+(pass) eval harness > generated recorder uses shared Context Gateway telemetry without copying raw bodies or args into its snapshot [37.69ms]
+(pass) eval harness > generated recorder can remove only declared in-project fixture files after a tool result [2.52ms]
+(pass) eval harness > enforces reproduce-before-edit and verify-after-edit workflow assertions [0.30ms]
+(pass) eval harness > renders comparable model/token/cost report [0.23ms]
+
+test/evals/recovery-validation.test.ts:
+(pass) Context Gateway native recovery validation > requires the exact producer handle and a successful fact-bearing Read result [0.23ms]
+(pass) Context Gateway native recovery validation > accepts both Read.file_path and Read.path only when they equal the issued handle [0.10ms]
+(pass) Context Gateway native recovery validation > rejects Read before producer result, source reads, producer reruns, and direct guessing [0.07ms]
+(pass) Context Gateway native recovery validation > rejects failed producer/read, unverified cleanup, and handles without the hidden fact [0.05ms]
+(pass) Context Gateway native recovery validation > distinguishes unavailable native temp-output states instead of collapsing them into a fact miss [0.03ms]
+(pass) Context Gateway native recovery validation > does not trust a full-output-looking path unless the producer details probe issued it [0.02ms]
+(pass) Context Gateway native recovery validation > validates Read continuation against the same source and the exact native offset hint [0.20ms]
+(pass) Context Gateway native recovery validation > rejects missing continuation, failed continuation result, and unknown cases [0.05ms]
+
+test/evals/session-token-efficiency.test.ts:
+(pass) session token-efficiency analysis > separates provider usage, DCP projection, tool telemetry, and repeated reads [1.33ms]
+(pass) session token-efficiency analysis > can project protected continuity savings from journal tool-fragment provenance [1.52ms]
+(pass) session token-efficiency analysis > control-plane accounting exposes independently budgetable components [0.13ms]
+(pass) session token-efficiency analysis > carrier accounting measures distributed message-ID overhead separately [0.22ms]
+(pass) session token-efficiency analysis > measures parent-output opportunity from historical explicit compress summaries [0.12ms]
+(pass) session token-efficiency analysis > separates ingress savings, DCP history gain, and unattributed post-reduction read candidates [0.34ms]
+
+test/context-gateway/native-recovery-contracts.test.ts:
+(pass) P01-R native recovery contracts > Read continuation is exact for the SDK text view across CRLF, Unicode, empty/EOF, and large limits [1.99ms]
+(pass) P01-R native recovery contracts > Read byte truncation keeps Unicode valid but a huge single line exposes no line continuation [1.02ms]
+(pass) P01-R native recovery contracts > Read continuation reads the current file version rather than an immutable snapshot [0.16ms]
+(pass) P01-R native recovery contracts > repo structure/AST native cursors are passed to new executions and do not imply a stable historical index [1.14ms]
+(pass) P01-R native recovery contracts > successful Bash full output is exact at publication time but remains a mutable/expiring temp file [3.67ms]
+(pass) P01-R native recovery contracts > actual Read recovers a Bash head fact omitted from the delivered tail via the final native handle [1.45ms]
+(pass) P01-R native recovery contracts > Bash timeout/abort/nonzero preserve visible status but do not return a structured recovery result [2.76ms]
+(pass) P01-R native recovery contracts > Bash streaming preview can expose a still-growing temp path; only the final successful result is a recovery boundary [2.10ms]
+(pass) P01-R native recovery contracts > ast_grep publishes a temp artifact only for successful truncation; cancelled/error paths do not fabricate one [2.18ms]
+(pass) P01-R native recovery contracts > actual Read recovers an ast_grep late fact omitted from the delivered head via the final native artifact [1.54ms]
+
+test/context-gateway/capture-contracts.test.ts:
+(pass) context gateway P00: pre-truncation capture capabilities > built-in read has full bytes inside execute but exposes only the truncated result [2.38ms]
+(pass) context gateway P00: pre-truncation capture capabilities > built-in bash exposes a trusted full-output temp path when its delivered tail is truncated [1.48ms]
+(pass) context gateway P00: pre-truncation capture capabilities > repo_search/repo_ast/repo_structure truncate inside the suite wrapper without a full-output handle [0.93ms]
+(pass) context gateway P00: pre-truncation capture capabilities > ast_grep truncates its delivered head but preserves the complete output in its temp artifact [333.33ms]
+
+test/context-gateway/observe.test.ts:
+(pass) context gateway P01 observe module > publishes the verified storeless result/provider ordering [0.05ms]
+(pass) context gateway P01 observe module > off is byte-equivalent and registers no model tools [0.51ms]
+(pass) context gateway P01 observe module > observe records only aggregate metadata and still returns no transformation [0.73ms]
+(pass) context gateway P01 observe module > runtime modes are ephemeral and enforce activates only at a safe boundary [0.36ms]
+(pass) context gateway P01 observe module > mode changes require a safe boundary while an observed tool call is in flight [0.17ms]
+(pass) context gateway P01 observe module > session lifecycle resets aggregate and transient telemetry without rewriting persisted results [0.42ms]
+(pass) context gateway P01 observe module > parallel observed calls can complete out of order without crossing class/parser bindings [0.26ms]
+(pass) context gateway P01 observe module > late results after a branch/session boundary stay unbound and do not contaminate the new aggregate [0.21ms]
+(pass) context gateway P01 observe module > configured enforce leaves unbound/non-enforceable results byte-equivalent [0.10ms]
+(pass) context gateway P01 observe module > enforce compacts only an over-budget recognised complete simple test result [0.43ms]
+(pass) context gateway P01 observe module > enforce compacts over-budget web results while retaining structured raw details for recovery [0.56ms]
+(pass) context gateway P01 observe module > enforce compacts an over-budget web_fetch from retained structured content [0.32ms]
+(pass) context gateway P01 observe module > enforce fails open for within-budget, compound, truncated, unknown, and read results [0.61ms]
+(pass) context gateway P01 observe module > enforce never post-hoc slices producer-native repo compact output [0.15ms]
+(pass) context gateway P01 telemetry contracts > repeat reads are passive candidates and telemetry never exposes raw args/body [0.11ms]
+(pass) context gateway P01 telemetry contracts > normalises read identity while distinguishing exact repeats from new ranges [0.06ms]
+(pass) context gateway P01 telemetry contracts > N01 negative fixture keeps tool results out of assistant prose and carries branch scope [0.19ms]
+(pass) context gateway P01 telemetry contracts > records only allowlisted native policy outcome fields from repo tools [0.08ms]
+(pass) context gateway P01 telemetry contracts > counts duplicated truncation metadata by size without retaining its body [0.09ms]
+(pass) context gateway P01 telemetry contracts > classifies shell test/build output in observe telemetry without retaining diagnostics, args, or body [0.37ms]
+(pass) context gateway P01 telemetry contracts > keeps only a safe command-scope enum and refuses prospective compact delivery for compound shell input [0.10ms]
+
+test/context-gateway/lifecycle-contracts.test.ts:
+(pass) context gateway P00: compaction lifecycle separation > DCP manual compression is a tool path and observes native compaction only after session_compact [0.31ms]
+
+test/context-gateway/storeless-format-contracts.test.ts:
+(pass) P01-R storeless format contracts > publishes one explicit storeless capability decision per measured/non-supported surface [0.14ms]
+(pass) P01-R storeless format contracts > mutation provenance prefers exact changedFiles details over broader input paths [0.05ms]
+(pass) P01-R storeless format contracts > actual apply_patch result reports only files from that invocation, not unrelated dirty workspace files [1.80ms]
+(pass) P01-R storeless format contracts > LSP enrichment is a no-op for errored/cancelled mutation results and preserves the original outcome object [0.09ms]
+(pass) P01-R storeless format contracts > web/document result observation is passive and does not reinterpret or fetch its source [0.08ms]
+(pass) P01-R storeless format contracts > structured JSON-like output remains opaque text so large integers are not parsed or rounded [0.03ms]
+(pass) P01-R storeless format contracts > subagent result paths stay their producer's artifacts and are not promoted to Gateway grants [0.05ms]
+(pass) P01-R storeless format contracts > image parts remain visual passthrough and are accounted separately from text [0.06ms]
+
+test/context-gateway/provider-serialization.test.ts:
+(pass) context gateway P00: installed provider serialization > OpenAI completions onPayload sees serialized tool content but not tool-result details [3.06ms]
+
+test/context-gateway/sdk-pipeline.test.ts:
+(pass) context gateway P00: installed SDK tool_result pipeline > chains content/details/isError/usage mutations in extension and handler order [0.57ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > suppresses a handler exception, reports it, and continues with the current result [0.26ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > a later independent tool_result handler can reinsert raw output after shaping [0.09ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > returns undefined when no handler changes the result [0.05ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > AgentSession installs the real afterToolCall bridge and preserves handler mutations [1.29ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > AgentSession bridge fails open to the raw result when the only tool_result handler throws [0.21ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > runner invalidation does not itself suppress a late tool_result handler [0.18ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > custom tool exceptions reach tool_result as errors and persist for the next provider turn [7.09ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > built-in bash timeout preserves partial output and timeout status but loses structured details on throw [1.73ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > built-in bash nonzero exit can mention a temp path in error text but loses the structured trusted handle [4.31ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > session abort finalizes an in-flight bash result as an error with the captured prefix [1.35ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > reloading extensions during an in-flight tool call routes finalization through the new runner and invalidates the old wrapper [1.48ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > native manual compaction has its own session_before_compact -> session_compact lifecycle [1.48ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > parallel tool execution keeps source toolCallId ordering for result messages even when completion order differs [18.20ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > streaming tool updates stay runtime-only while the final result is persisted and delivered [1.26ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > P01 off/observe are transcript/provider byte-preserving and create no Gateway archive [2.41ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > selective enforce persists and delivers only the bounded recognised test summary [1.30ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > persists the post-hook tool result and sends it to the next model context [1.78ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > opt-in truncation metadata normalization removes only duplicate details before JSONL and next context [1.85ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > storeless security chain persists only the normalized/redacted result to JSONL and next context [2.80ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > storeless result order preserves outcome/images/usage while firewall redacts after observe and normalization [0.65ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > firewall-off keeps visible content while normalizer still removes only duplicate metadata [0.28ms]
+(pass) context gateway P00: installed SDK tool_result pipeline > provider firewall runs before the final Codex sanitizer without restoring secrets or invalid fields [0.31ms]
+
+test/context-gateway/benchmark.test.ts:
+(pass) P01-N offline paired runtime benchmark > Prompt Compact is runtime-equivalent to Baseline while reducing registered repo guidance [5.82ms]
+(pass) P01-N offline paired runtime benchmark > Native Compact reduces delivered bytes while deterministic continuations recover every critical fact [5.06ms]
+
+test/context-gateway/accounting.test.ts:
+(pass) context gateway efficiency accounting > counts compact savings, artifact/session recovery tax, and exact provider usage separately [0.33ms]
+(pass) context gateway efficiency accounting > rotates scalar JSONL with the same bounded retention shape as DCP [6.29ms]
+Warning: Context Gateway accounting write failed (EEXIST); accounting remains best-effort.
+ code: "PI_CONTEXT_GATEWAY_ACCOUNTING_FAILURE"
+
+      at reportFailure (/Volumes/128GBSSD/Projects/pi-ui-extend/external/pi-tools-suite/src/context-gateway/accounting-log.ts:84:10)
+      at <anonymous> (/Volumes/128GBSSD/Projects/pi-ui-extend/external/pi-tools-suite/src/context-gateway/accounting-log.ts:276:4)
+
+(pass) context gateway efficiency accounting > filesystem failures stay observable but never reject the accounting drain [0.76ms]
+(pass) context gateway efficiency accounting > recovers an abandoned rotation lock without truncating the active stream [1.02ms]
+Warning: Context Gateway accounting rotation lock failed (EBUSY); accounting remains best-effort.
+ code: "PI_CONTEXT_GATEWAY_ACCOUNTING_FAILURE"
+
+      at reportFailure (/Volumes/128GBSSD/Projects/pi-ui-extend/external/pi-tools-suite/src/context-gateway/accounting-log.ts:84:10)
+      at rotateIfNeeded (/Volumes/128GBSSD/Projects/pi-ui-extend/external/pi-tools-suite/src/context-gateway/accounting-log.ts:208:4)
+      at async appendRecord (/Volumes/128GBSSD/Projects/pi-ui-extend/external/pi-tools-suite/src/context-gateway/accounting-log.ts:250:9)
+
+(pass) context gateway efficiency accounting > does not reclaim an old lock while its recorded owner is alive [0.51ms]
+(pass) context gateway efficiency accounting > bounds long-epoch call and read identity tracking [12.73ms]
+(pass) context gateway efficiency accounting > mode transitions finalize and start epochs while in-flight refusal emits nothing [3.54ms]
+(pass) context gateway efficiency accounting > integration log contains efficiency/provider scalars but never raw bodies, paths, or tool arguments [1.86ms]
+
+test/context-gateway/test-output-parser.test.ts:
+(pass) P01-R R-D pure test/build parser > recognises a complete Bun success terminal summary without inventing diagnostics [0.12ms]
+(pass) P01-R R-D pure test/build parser > keeps exact middle Bun failure/warning lines and accepts the host nonzero status after the terminal summary [0.06ms]
+(pass) P01-R R-D pure test/build parser > does not turn PASS-before-exit-1 into a successful complete test run [0.04ms]
+(pass) P01-R R-D pure test/build parser > marks an otherwise valid summary partial when the SDK result is upstream-truncated or timed out [0.07ms]
+(pass) P01-R R-D pure test/build parser > normalizes ANSI and CR overwrite only for parsing [0.05ms]
+(pass) P01-R R-D pure test/build parser > recognises TAP only with a terminal plan/count summary and preserves exact failure diagnostics [0.13ms]
+(pass) P01-R R-D pure test/build parser > recognises bounded TypeScript diagnostic output and refuses pretty/unparsed extra text as complete [0.06ms]
+(pass) P01-R R-D pure test/build parser > mixed/nested command formats remain partial instead of attributing the final outcome to the first summary [0.04ms]
+(pass) P01-R R-D pure test/build parser > leaves unknown output unrecognised and never makes a generic head/tail compact candidate [0.03ms]
+(pass) P01-R R-D pure test/build parser > prospective compact output is all-or-passthrough: mandatory diagnostics are never sliced to fit [0.11ms]
+(pass) P01-R R-D pure test/build parser > recognised output still stays passthrough for compound or unknown shell command scope [0.04ms]
+(pass) P01-R R-D pure test/build parser > bounds parser work on huge output and forces passthrough even when head/tail resemble a complete run [0.13ms]
+
+test/context-gateway/config.test.ts:
+(pass) context gateway P01 config > defaults to off with the experimental budgets [1.17ms]
+(pass) context gateway P01 config > layers user, PI_CONFIG_DIR, project, and env without writing config [0.89ms]
+(pass) context gateway P01 config > keeps previous safe values and records issues for invalid settings [0.36ms]
+(pass) context gateway P01 config > maps result classes to their dedicated budgets instead of one generic max [0.04ms]
+
+test/context-gateway/metadata-normalization.test.ts:
+(pass) context gateway non-store experiment: truncation metadata normalization > opt-in module returns only a details patch for a proven duplicate [0.18ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > normalizes only a proven duplicate and leaves ambiguous custom metadata untouched [0.18ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > treats a same-name replacement as duplicate cleanup only, not as trusted provenance [0.04ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > is idempotent and preserves Unicode multipart/image content and the original objects [0.07ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > removing only details.truncation.content substantially reduces persisted JSONL duplication [0.92ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > the checked OpenAI-completions provider payload is byte-equivalent after metadata normalization [2.23ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > DCP observes the same delivered text and normalized structural details [0.30ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > normalizes the installed SDK read and bash truncation shapes without changing delivered content [9.31ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > normalizes the real suite ast_grep truncation shape and preserves its native full-output handle [3.72ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > keeps installed Bash collapsed and expanded rendering equivalent after normalization [92.13ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > keeps installed Read collapsed/expanded rendering equivalent after normalization [5.76ms]
+(pass) context gateway non-store experiment: truncation metadata normalization > keeps suite ast_grep collapsed/expanded rendering equivalent after normalization [2.38ms]
+
+test/prompt-evals/dcp-reminder-e2e.test.ts:
+(skip) DCP live reminder response > model calls compress from a real mid-turn reminder and the call commits positive gain
+
+test/prompt-evals/async-routing-e2e.test.ts:
+(skip) async-subagents direct live prompt evals > routes an omitted type to a project-local Markdown specialist alongside built-in roles
+(skip) async-subagents direct live prompt evals > routes omitted subagent types from task semantics while preserving explicit overrides
+(skip) async-subagents direct live prompt evals > classifies ultrawork boundary: clearly parallel release review
+(skip) async-subagents direct live prompt evals > classifies ultrawork boundary: vague potentially complex bug
+(skip) async-subagents direct live prompt evals > classifies ultrawork boundary: known one-file wording edit
+
+test/prompt-evals/dcp-summary-e2e.test.ts:
+(skip) DCP direct live summary prompt eval > continues correctly after two summaries, an explicit decision reversal and untrusted output
+(skip) DCP direct live summary prompt eval > preserves continuation-critical markers and drops repeated log noise
+(skip) DCP direct live summary prompt eval > selects protocol-closed range boundaries around parallel tool groups
+
+test/async-subagents/browser-qa-runner.e2e.test.ts:
+(skip) runs public QA without auth, then records form login and private action evidence
+
+test/async-subagents/e2e.test.ts:
+(skip) async-subagents live e2e orchestration > delegates visual investigation to an image-capable research model
+(skip) async-subagents live e2e orchestration > delegates a broad project investigation
+(skip) async-subagents live e2e orchestration > delegates a focused payment code review
+(skip) async-subagents live e2e orchestration > delegates a release-plan critique
+(skip) async-subagents live e2e orchestration > delegates QA test-gap analysis
+(skip) async-subagents live e2e orchestration > delegates incident triage across independent hypotheses
+(skip) async-subagents live e2e orchestration > delegates change-impact analysis
+(skip) async-subagents live e2e orchestration > does not delegate a simple README lookup
+(skip) async-subagents live e2e orchestration > does not delegate a direct smoke-test command
+(skip) async-subagents live e2e orchestration > does not delegate a small single-file code lookup
+
+test/async-subagents/model-pools.test.ts:
+(pass) ordered agent models and preset pools > ships six Markdown modes and pool-only presets from a single defaults source [1.19ms]
+(pass) ordered agent models and preset pools > intersects without reordering or appending pool-only models [0.05ms]
+(pass) ordered agent models and preset pools > no preset keeps the complete agent order [0.02ms]
+(pass) ordered agent models and preset pools > fails on an empty intersection with [] [0.07ms]
+(pass) ordered agent models and preset pools > fails on an empty intersection with ["outside/only"] [0.01ms]
+(pass) ordered agent models and preset pools > empty candidate lists do not inherit the parent, even without a preset [0.88ms]
+(pass) ordered agent models and preset pools > preserves explicit task, CLI and forced model overrides with no implicit fallbacks [0.11ms]
+(pass) ordered agent models and preset pools > pool presets do not execute stale legacy role or thinking overrides [0.03ms]
+(pass) ordered agent models and preset pools > oracle prefers a different provider without escaping the pool [0.06ms]
+(pass) ordered agent models and preset pools > validates models and deduplicates candidates in stable order [6.97ms]
+(pass) ordered agent models and preset pools > Markdown models ignore old JSONC type fields and retain bundled unrelated fields [1.33ms]
+(pass) ordered agent models and preset pools > new models wins over legacy fields in one Markdown profile [0.62ms]
+(pass) ordered agent models and preset pools > legacy model and fallbackModels fields still work inside an agent file [1.28ms]
+(pass) ordered agent models and preset pools > old builtin role names are rejected unless explicitly configured [0.92ms]
+(pass) ordered agent models and preset pools > explicit custom Markdown types keep their own names and settings [0.93ms]
+(pass) ordered agent models and preset pools > legacy preset role overrides apply only to explicitly configured matching types [0.89ms]
+(pass) model availability and capabilities > an unconfigured provider cannot pass selection just because auth resolution returns ok [0.41ms]
+(pass) model availability and capabilities > filters missing and unauthenticated candidates without calling an LLM [0.08ms]
+(pass) model availability and capabilities > image tasks and UI QA keep only confirmed image-capable candidates [0.12ms]
+(pass) model availability and capabilities > image checks and explicit models never escape an incompatible choice [0.10ms]
+(pass) model availability and capabilities > configured blind-model overrides take priority over runtime image metadata [0.07ms]
+(pass) model availability and capabilities > auth errors remain redacted and cannot silently select the parent [0.18ms]
+(pass) model availability and capabilities > quota history cannot introduce candidates outside the selected pool [0.18ms]
+(pass) model availability and capabilities > cancellation during model auth does not produce a spawn plan [0.08ms]
+
+test/async-subagents/core.test.ts:
+(pass) core paths > builds, creates, and resolves run directories [0.86ms]
+(pass) core paths > rejects unsafe basenames [0.17ms]
+(pass) core paths > records project registry entries and resolves omitted runDir [3.79ms]
+(pass) core paths > serializes concurrent registry writers and atomically preserves every mapping [220.86ms]
+(pass) core paths > recovers a dead registry lock owner [14.65ms]
+(pass) core paths > does not reclaim an expired registry lock from the same live process [127.87ms]
+(pass) core utils and prompt generation > builds per-agent completion notifications with remaining active agents [0.26ms]
+(pass) core utils and prompt generation > classifies terminal notification statuses [0.04ms]
+(pass) core utils and prompt generation > limits concurrent work with an abortable semaphore [21.48ms]
+(pass) core utils and prompt generation > persists sub-agent sessions only when explicitly enabled [0.10ms]
+(pass) core utils and prompt generation > resolves bounded sub-agent log limits from env [0.19ms]
+(pass) core utils and prompt generation > formats utility values [0.17ms]
+(pass) core utils and prompt generation > uses economical context-aware orchestration regardless of parent tier [0.25ms]
+(pass) core utils and prompt generation > generates and writes prompts with defaults and scope [1.05ms]
+(pass) pi invocation > uses the pi executable from a generic runtime [0.30ms]
+(pass) pi invocation > reuses the current pi entrypoint when available [0.47ms]
+(pass) subagent type config > detects launched and queued agent prompt records through shared helpers [0.98ms]
+(pass) subagent type config > loads bundled presets and runtime defaults without public sub-agent config [0.95ms]
+(pass) subagent type config > filters roles by parent model with deny taking precedence over allow [0.45ms]
+(pass) subagent type config > resolves the built-in balanced role models and UI QA profile [0.87ms]
+(pass) subagent type config > defines bundled sub-agent roles as individual markdown agent files [0.66ms]
+(pass) subagent type config > ships the ui-qa progressive-disclosure guides in the package/sync payload without new roles [0.66ms]
+(pass) subagent type config > inherits QA instructions with model overrides [0.99ms]
+(pass) subagent type config > selects explicit roles or falls back to the configured default [0.05ms]
+(pass) subagent type config > loads project preset pools, persists active selection, and resolves agent-file defaults [2.19ms]
+(pass) subagent type config > uses internal runtime defaults plus per-agent retry and max result config [0.92ms]
+(pass) subagent type config > loads Markdown type profiles and resolves model/thinking/tools [1.19ms]
+(pass) subagent type config > project agent definitions (.pi/agents) > loads .pi/agents/*.md as local sub-agent types [1.18ms]
+(pass) subagent type config > project agent definitions (.pi/agents) > parses nested modelByParent and retry from frontmatter [0.87ms]
+(pass) subagent type config > project agent definitions (.pi/agents) > walks up to find .pi/agents and ignores legacy project config type fields [0.90ms]
+(pass) subagent type config > project agent definitions (.pi/agents) > parses icon frontmatter and does not inherit legacy JSONC type fields [1.86ms]
+(pass) subagent type config > project agent definitions (.pi/agents) > ignores removed ASYNC_SUBAGENTS_CONFIG while keeping .pi/agents authoritative [0.87ms]
+(pass) subagent type config > project agent definitions (.pi/agents) > rejects name mismatch, invalid names, and unsupported YAML [2.86ms]
+(pass) subagent type config > project agent definitions (.pi/agents) > reloads .pi/agents without caching (respects /reload and live edits) [0.91ms]
+(pass) subagent type config > resolves modelByParent from the current parent model [0.96ms]
+(pass) subagent type config > honors an explicitly passed legacy preset object rather than overriding it by parent tier [0.32ms]
+(pass) subagent type config > does not map removed builtin role names onto canonical roles [0.39ms]
+(pass) subagent type config > detects force-current-model env flags and formats current model refs [0.11ms]
+(pass) run and agent state > maps only user-visible RPC activity in memory [0.10ms]
+(pass) run and agent state > restores the latest activity from progress.jsonl without debug logs [1.63ms]
+(pass) run and agent state > detects planned, running, done, failed, stopped, and RPC prompt failures [7.62ms]
+(pass) run and agent state > reads result and stderr for an agent [1.14ms]
+(pass) run and agent state > reads structured result metadata when result.json exists [2.01ms]
+(pass) run and agent state > structured result extracts chaining fields without truncating raw result.md [0.91ms]
+(pass) run and agent state > waits until launched agents are terminal, timeout/abort/failFast aware [1038.70ms]
+(pass) run and agent state > stops running agents and records stopped metadata [12.23ms]
+(pass) run and agent state > stops the launcher-owned POSIX process group [56.43ms]
+(pass) run and agent state > stops planned queued agents before they launch [1.95ms]
+(pass) cleanup candidates > keeps newest runs, skips incomplete/non-agent dirs, and filters by mtime [3.35ms]
+(pass) spawning agents > delivers the inline QA workflow while disabling skills for every child [265.27ms]
+(pass) spawning agents > provides UI QA with native and browser-backend workspaces and clears stale evidence on reuse [54.61ms]
+(pass) spawning agents > writes metadata, captures agent_end output, and notifies completion [51.13ms]
+(pass) spawning agents > loads Antigravity auth only for an explicitly selected Antigravity model [251.75ms]
+(pass) spawning agents > notifies completion when the pi process cannot be spawned [3.78ms]
+(pass) spawning agents > writes session metadata when sub-agent sessions are enabled [50.95ms]
+(pass) spawning agents > captures final assistant text when pi exits without agent_end [49.71ms]
+(pass) spawning agents > keeps RPC stdin open until async prompt emits a result [153.29ms]
+(pass) spawning agents > keeps opted-in runtime logs compact and bounded [64.38ms]
+(pass) spawning agents > waits for agent_settled across a delayed continuation [1300.11ms]
+(pass) spawning agents > attaches task image paths to the RPC prompt [88.42ms]
+(pass) spawning agents > turns RPC prompt failures into failed results [38.78ms]
+(pass) spawning agents > retries failed agents with pending state and then succeeds [141.38ms]
+(pass) spawning agents > falls back to configured provider models on quota limit failures in the current session [188.26ms]
+(pass) spawning agents > waits for Antigravity all-accounts exhaustion before provider fallback [0.90ms]
+(pass) spawning agents > does not retry stopped agents or explicitly empty retryable exit codes [132.78ms]
+(pass) spawning agents > terminates agents that exceed the execution timeout [534.77ms]
+(pass) spawning agents > records invalid final JSON lines and exits with process status [87.15ms]
+(pass) spawning agents > falls back to synthetic completion state if agent state disappears [83.43ms]
+
+test/async-subagents/ui-qa-desktop.e2e.test.ts:
+(skip) macOS desktop backend semantically activates a real AppKit control
+(skip) macOS desktop backend records exact-window video concurrently with the flow
+
+test/async-subagents/browser-qa-runner.test.ts:
+(pass) private browser QA runner > bounds a hung browser stage, kills its detached child, and leaves sanitized progress [178.12ms]
+(pass) private browser QA runner > bounds auth scaffold discovery and kills a hung browser child [184.66ms]
+(pass) private browser QA runner > terminates hung synchronous trace sanitization in a worker [5094.71ms]
+(pass) private browser QA runner > lists auth profiles without exposing credentials or origins [51.69ms]
+(pass) private browser QA runner > runs public QA without auth config or profile [162.49ms]
+(pass) private browser QA runner > supports explicit additional origins for public QA and rejects non-origin values [213.02ms]
+(pass) private browser QA runner > scaffolds form auth with private placeholders and blocks use until the user fills them [132.06ms]
+(pass) private browser QA runner > replaces only the runner's empty template and supports an explicit success condition [170.30ms]
+(pass) private browser QA runner > fails closed when auth scaffold discovery or public metadata is unsupported [338.00ms]
+(pass) private browser QA runner > applies viewport and supports safe scrolling, metrics, and retrying assertions [92.10ms]
+(pass) private browser QA runner > waits for network and visible loading UI, then settles recorded actions [93.14ms]
+(pass) private browser QA runner > does not hang on long-lived or never-ending background requests after an action [537.20ms]
+(pass) private browser QA runner > ignores a preexisting background request when waiting for a later interaction [88.88ms]
+(pass) private browser QA runner > assertText requires visible rendered text while assertTextContent can inspect hidden DOM text [188.15ms]
+(pass) private browser QA runner > rejects an authRejectedIf step with no rejection condition [93.73ms]
+(pass) private browser QA runner > installs context-wide click visualization and a paced drag replay [92.00ms]
+(pass) private browser QA runner > fails instead of interacting while a visible loading indicator persists [99.65ms]
+(pass) private browser QA runner > supports deterministic environment, atomic expectations, drag/drop, memory uploads, and bounded downloads [120.73ms]
+(pass) private browser QA runner > rejects unsafe capability input: response [96.02ms]
+(pass) private browser QA runner > rejects unsafe capability input: upload [95.33ms]
+(pass) private browser QA runner > rejects unsafe capability input: environment [53.25ms]
+(pass) private browser QA runner > rejects unsafe capability input: download [110.97ms]
+(pass) private browser QA runner > rejects mismatched dialogs without exposing observed content [95.95ms]
+(pass) private browser QA runner > rejects responses that do not belong to the action [212.31ms]
+(pass) private browser QA runner > closes undeclared popups and excludes their evidence [96.97ms]
+(pass) private browser QA runner > brings declared popups forward and forces a repaint before recording video [91.72ms]
+(pass) private browser QA runner > discards retained downloads that contain configured authentication [107.70ms]
+(pass) private browser QA runner > refreshes rotated authentication before evidence and fails closed on late rotation [195.22ms]
+(pass) private browser QA runner > rejects unsafe evaluate scripts and out-of-range viewports [227.44ms]
+(pass) private browser QA runner > rejects invalid configuration for every supported auth mode [254.32ms]
+(pass) private browser QA runner > requires the launcher-owned agent directory and rejects flows outside its workspace [82.26ms]
+(pass) private browser QA runner > executes every supported auth mode through the trusted flow runner [608.82ms]
+(pass) private browser QA runner > rejects permissive auth files, symlinked flows, and evidence collisions [126.63ms]
+(pass) private browser QA runner > never executes a model-authored JavaScript file [43.85ms]
+(pass) private browser QA runner > creates a private empty auth template and explicitly requests credentials [193.20ms]
+(pass) private browser QA runner > rejects disallowed base URLs with update-required status [42.31ms]
+(pass) private browser QA runner > creates isolated screenshot, video, trace, and redacted result evidence [86.11ms]
+(pass) private browser QA runner > turns application auth rejection into a redacted update request [97.15ms]
+
+test/async-subagents/routing.test.ts:
+(pass) parent-first sub-agent routing > preserves explicit roles without any router/auth calls even when routing is disabled [0.22ms]
+(pass) parent-first sub-agent routing > normalizes the legacy browser-qa role to ui-qa without routing [0.51ms]
+(pass) parent-first sub-agent routing > rejects unknown explicit type rewiev before routing a mixed batch [0.09ms]
+(pass) parent-first sub-agent routing > rejects unknown explicit type toString before routing a mixed batch [0.02ms]
+(pass) parent-first sub-agent routing > rejects unknown explicit type __proto__ before routing a mixed batch [0.01ms]
+(pass) parent-first sub-agent routing > routes only omitted roles and cannot overwrite the parent's explicit choice [0.61ms]
+(pass) parent-first sub-agent routing > treats parent-model-gated roles as unavailable for explicit and automatic routing [0.18ms]
+(pass) parent-first sub-agent routing > frontier-review is routable for a non-frontier parent and rejected for a frontier parent [0.39ms]
+(pass) parent-first sub-agent routing > errors on omitted roles with no runtime rather than silently choosing quick [0.21ms]
+(pass) parent-first sub-agent routing > requires explicit roles when the LLM router is disabled, regardless of defaultType [0.05ms]
+(pass) parent-first sub-agent routing > rejects invalid/missing routes: "" [0.13ms]
+(pass) parent-first sub-agent routing > rejects invalid/missing routes: "not JSON" [0.04ms]
+(pass) parent-first sub-agent routing > rejects invalid/missing routes: "{\"routes\":[]}" [0.03ms]
+(pass) parent-first sub-agent routing > rejects invalid/missing routes: "{\"routes\":[{\"id\":\"audit\",\"subagentType\":\"invented\"}]}" [0.03ms]
+(pass) parent-first sub-agent routing > does not return a partially routed batch as a successful spawn plan [0.08ms]
+(pass) parent-first sub-agent routing > treats a provider error response as failure, not successful LLM routing [0.07ms]
+(pass) parent-first sub-agent routing > tries the configured fallback router after provider-error [0.13ms]
+(pass) parent-first sub-agent routing > tries the configured fallback router after invalid-json [0.04ms]
+(pass) parent-first sub-agent routing > tries the configured fallback router after exception [0.04ms]
+(pass) parent-first sub-agent routing > propagates cancellation instead of falling back or returning a spawn plan [0.12ms]
+(pass) parent-first sub-agent routing > uses the same project-local catalog for explicit and automatic roles [0.83ms]
+
+test/async-subagents/ui-qa-runner.test.ts:
+(pass) ui-qa guide routing > prints only the requested backend guide from the fixed allowlist [179.44ms]
+(pass) ui-qa guide routing > serves the browser auth guide only through the explicit auth topic [278.76ms]
+(pass) ui-qa guide routing > serves provider and platform detail guides only through backend-scoped topics [391.61ms]
+(pass) ui-qa guide routing > keeps base guides thin and provider details isolated [166.69ms]
+(pass) ui-qa guide routing > rejects unknown backends, topics, options, and extra arguments [660.81ms]
+(pass) ui-qa guide routing > runs from an arbitrary project cwd including paths with spaces [167.53ms]
+(pass) ui-qa guide routing > keeps every bundled guide within the bounded guide size [0.15ms]
+(pass) capability-first UI QA runner > gives repeated unnamed desktop evidence steps collision-free filenames [0.13ms]
+(pass) capability-first UI QA runner > selects the browser backend for a URL without launching Playwright [58.67ms]
+(pass) capability-first UI QA runner > selects Playwright or Chrome DevTools by browser capability rather than project identity [0.46ms]
+(pass) capability-first UI QA runner > starts Chrome DevTools with a per-run fail-closed security policy [0.09ms]
+(pass) capability-first UI QA runner > rejects non-loopback Chrome DevTools attach endpoints [1.79ms]
+(pass) capability-first UI QA runner > runs Chrome DevTools through an isolated owned daemon and stops only that session [737.32ms]
+(pass) capability-first UI QA runner > preserves the browser backend's bounded in-memory upload flow size [66.11ms]
+(pass) capability-first UI QA runner > preserves redacted browser credential update metadata [29.36ms]
+(pass) capability-first UI QA runner > drives a real alternate-screen TUI through PTY input and screen assertions [1263.41ms]
+(pass) capability-first UI QA runner > advertises terminalRecording as a TUI capability [96.99ms]
+(pass) capability-first UI QA runner > keeps PTY presentation as the backward-compatible default and makes native terminal explicit [0.18ms]
+(pass) capability-first UI QA runner > uses signal-less node-pty termination and releases Windows ConPTY handles [0.28ms]
+(pass) capability-first UI QA runner > routes explicit native-terminal presentation through the generic TUI backend [7322.09ms]
+(pass) capability-first UI QA runner > native-terminal bootstrap contains only the trusted bridge command, never target argv [0.23ms]
+(pass) capability-first UI QA runner > native-terminal selects native hosts by platform capability rather than project identity [0.18ms]
+(pass) capability-first UI QA runner > native-terminal direct providers launch only the trusted bridge and a unique evidence title [0.12ms]
+(pass) capability-first UI QA runner > native-terminal keeps PTY semantic oracles but rejects dishonest PTY-only resizing [0.13ms]
+(pass) capability-first UI QA runner > native-terminal bridge bootstrap validates its fixed transport parameters [0.14ms]
+(pass) capability-first UI QA runner > records a bounded asciicast v2 terminal video under the evidence directory [1329.65ms]
+(pass) capability-first UI QA runner > bounds the terminal recording to the transcript limit without failing the run [1805.54ms]
+(pass) capability-first UI QA runner > models cursor movement, erase operations, and resize as terminal state [1351.99ms]
+(pass) capability-first UI QA runner > does not retain the exit assertion timeout after the PTY exits [182.72ms]
+(pass) capability-first UI QA runner > cleanup terminates its PTY but leaves an unrelated process alive [1136.14ms]
+(pass) capability-first UI QA runner > rejects shell, generic utility, inline-code, and untrusted environment launch primitives [288.28ms]
+(pass) capability-first UI QA runner > rejects flow and launch paths that escape or symlink outside the owning workspace [232.61ms]
+(pass) capability-first UI QA runner > bounds action and runner timeouts [2590.09ms]
+(pass) capability-first UI QA runner > hard timeout leaves backend cleanup time to kill a SIGTERM-resistant PTY [1219.33ms]
+(pass) capability-first UI QA runner > returns deterministic desktop platform capabilities and structured blockers [3722.97ms]
+(pass) capability-first UI QA runner > returns a parent-ready remediation handoff when a required backend is blocked [123.88ms]
+(pass) capability-first UI QA runner > gates desktop capture steps on honestly probed capabilities [0.26ms]
+(pass) capability-first UI QA runner > uses process-group selectors for POSIX launches and owned process-tree roots on Windows [0.04ms]
+(pass) capability-first UI QA runner > bundles capability-probed Windows UIA and Linux AT-SPI desktop helpers without shell evaluation [1.12ms]
+(pass) capability-first UI QA runner > scales independent-window video to fill its Retina output surface [0.25ms]
+(pass) capability-first UI QA runner > targets and cleans a package-wrapper GUI descendant through its owned POSIX group [97.56ms]
+
+test/async-subagents/selection-e2e.test.ts:
+(skip) async-subagents live e2e sub-agent type selection > delegates real-browser QA to the explicit ui-qa profile
+(skip) async-subagents live e2e sub-agent type selection > parent selects research for independent review without model overrides or polling
+(skip) async-subagents live e2e sub-agent type selection > omits the role when the user explicitly requests the automatic router
+(skip) async-subagents live e2e sub-agent type selection > selects research, implement, and verify by execution mode rather than discipline
+(skip) async-subagents live e2e sub-agent type selection > uses research for complex evidence gathering instead of automatically escalating to oracle
+
+test/async-subagents/model-pool-contract.test.ts:
+(pass) model-pool selection contract > uses agent.models ordering, not preset.models ordering [0.16ms]
+(pass) model-pool selection contract > treats model as an optional leading candidate for old/configured profiles [0.05ms]
+(pass) model-pool selection contract > rejects an empty intersection ([]) rather than picking an arbitrary model [0.08ms]
+(pass) model-pool selection contract > rejects an empty intersection (["other/unlisted"]) rather than picking an arbitrary model [0.01ms]
+(pass) model-pool selection contract > filters custom parent-dependent candidates by the active pool [0.07ms]
+(pass) model-pool selection contract > preserves deliberate explicit overrides without automatic fallback [0.09ms]
+(pass) model-pool selection contract > session quota fallback cannot escape the filtered chain through a cached mapping [0.06ms]
+(pass) model-pool selection contract > new-install pools do not redefine agents or change worker instructions [1.63ms]
+(pass) model-pool selection contract > oracle uses a strong candidate inside the pool, preferring an independent provider [0.57ms]
+(pass) model-pool selection contract > rejects removed builtin role names unless explicitly configured [0.74ms]
+(pass) model-pool selection contract > ignores legacy asyncSubagents type overrides without rewriting the file [0.46ms]
+(pass) model-pool selection contract > project preset files override bundled pools without redefining agents [1.07ms]
+(pass) model-pool selection contract > a project pool replaces a legacy pool and agent Markdown remains authoritative [1.56ms]
+(pass) model-pool selection contract > project preset files can add a custom pool [0.98ms]
+(pass) model-pool selection contract > a model pool filters an agent without changing its thinking [1.13ms]
+(pass) model-pool selection contract > an explicit empty agent.models does not revive inherited candidates or parent escalation [0.78ms]
+(pass) model-pool selection contract > legacy model fields in an agent file still replace the shipped agent.models primary [0.74ms]
+(pass) model-pool selection contract > keeps images on confirmed image models and excludes blind quota fallbacks [0.17ms]
+(pass) model-pool selection contract > skips unavailable runtime candidates but cannot invent a model outside the pool [0.12ms]
+(pass) model-pool selection contract > auth failure details are not copied into the model-selection error [0.16ms]
+
+test/async-subagents/tools.test.ts:
+(pass) extension entrypoint > registers tools and default commands without UI renderers [10.63ms]
+(pass) extension entrypoint > publishes live session state through the opted-in desktop RPC bridge [1.26ms]
+(pass) extension entrypoint > injects model-specific orchestration and escalation strategy prompts [1.59ms]
+(pass) extension entrypoint > injects the effective project-local sub-agent catalog into the parent system prompt [1.15ms]
+(pass) extension entrypoint > registers session navigation commands when sub-agent sessions are enabled [0.28ms]
+(pass) extension entrypoint > session shutdown kills running sub-agent processes before deleting run state [510.83ms]
+(pass) extension entrypoint > session shutdown keeps sibling-session sub-agents in the same cwd alive [521.25ms]
+(pass) extension entrypoint > orchestration slash commands enqueue follow-up prompts [4.89ms]
+(pass) extension entrypoint > ULTRAWORK env transforms normal input into ultrawork mode [2.44ms]
+(pass) extension entrypoint > ULTRAWORK_AUTO uses weak-router decision only for first non-GPT input [4.40ms]
+(pass) extension entrypoint > ULTRAWORK_AUTO skips GPT-like models without disabling normal delegation [1.77ms]
+(pass) extension entrypoint > ULTRAWORK_AUTO hint decision appends a soft delegation hint [2.84ms]
+(pass) extension entrypoint > sub-agent preset commands select persistent presets from the TUI [5.13ms]
+(pass) extension entrypoint > sub-agent preset session command overrides public spawn only for current process [248.16ms]
+(pass) extension entrypoint > sub-agent preset command exposes bundled model pools [1.26ms]
+(pass) extension entrypoint > cleans entrypoint live tracking when a registered spawn completes [1010.72ms]
+(pass) extension entrypoint > removes project sub-agent files when the main session closes [16.01ms]
+(pass) extension entrypoint > keeps project sub-agent files across reload and fork shutdowns [3.91ms]
+(pass) subagents tool > dispatches actions through one public tool [6.48ms]
+(pass) status tool > returns no-agent, filtered, and validated status results [3.24ms]
+(pass) result tool > reads missing and compact agent output without inlining raw logs [4.69ms]
+(pass) wait tool > polls until completion or fail-fast [2.80ms]
+(pass) stop tool > stops running agents and validates inputs [5.20ms]
+(pass) cleanup tool > refuses unsafe roots, dry-runs, and deletes candidates [3.22ms]
+(pass) spawn tool > subagents rejects model pool/capability failures before launching any task [4.76ms]
+(pass) spawn tool > async_subagents_spawn rejects model pool/capability failures before launching any task [2.92ms]
+(pass) spawn tool > subagents rejects invalid or unresolved batches before creating run state [2.80ms]
+(pass) spawn tool > async_subagents_spawn rejects invalid or unresolved batches before creating run state [1.50ms]
+(pass) spawn tool > validates tasks, spawns agents, streams updates, renders results, and cleans live tracking [1011.24ms]
+(pass) spawn tool > propagates type icon into task previews only when configured [1023.68ms]
+(pass) spawn tool > writes structured result.json with configured maxResultBytes from spawn [1023.02ms]
+(pass) spawn tool > result tool defaults to summary-first output with artifact paths [7.79ms]
+(pass) spawn tool > queues excess agents without blocking spawn when maxConcurrent is reached [1714.31ms]
+(pass) spawn tool > stops queued agents before their concurrency slot opens [23.95ms]
+(pass) spawn tool > AGENTS_PRESET overrides active persistent sub-agent preset for future spawns [1016.29ms]
+(pass) spawn tool > spawn tool falls back from exhausted preset providers for the current process [2051.19ms]
+(pass) spawn tool > rejects unknown AGENTS_PRESET without falling back to saved preset [5.42ms]
+(pass) spawn tool > does not terminate sub-agent auto-retries after an error agent_end [1021.14ms]
+(pass) spawn tool > routes agents through configured subagent type models [1037.04ms]
+(pass) spawn tool > force-current-model env ignores task, config, env, and extra-arg model choices [1025.13ms]
+
+test/async-subagents/ui.test.ts:
+(pass) format helpers > formats statuses, labels, glyphs, pluralization, and truncation [0.74ms]
+(pass) task normalization > validates task arrays and normalizes optional fields [1.18ms]
+(pass) live run tracking > creates and reuses a per-run live map [0.19ms]
+(pass) live run tracking > prunes completed live agents without rendering UI [6.41ms]
+(pass) live run tracking > restores only running agents linked to the active parent session [5.48ms]
+(pass) live run tracking > keeps queued live agents until they become running [5.05ms]
+(pass) rendering > renders compact, expanded, and plain run summaries [1.95ms]
+(pass) rendering > public subagents spawn renders a concise launch message [0.68ms]
+(pass) rendering > truncates every rendered line to the supplied width [0.29ms]
+(pass) polling > clamps watch seconds [0.13ms]
+(pass) polling > emits updates and returns when a run is terminal, timed out, or aborted [16.52ms]
+(pass) slash command registration > selects project model-pool presets without editing them [2.46ms]
+(pass) slash command registration > registers /sub-status and reports usage, empty runs, and agent status [1.69ms]
+(pass) slash command registration > opens sub-agent sessions, reports location, and returns [5.28ms]
+
+74 tests skipped:
+(skip) hard-to-find locate benchmark live e2e > locates the target with every search strategy and records rough tool-IO tokens
+(skip) todo persistence real pi e2e > loads a project plan, scopes it, and waits out the duplicate auto-nudge window
+(skip) repo-aware tool-selection live e2e > uses repo_search for a single semantic discovery when repo_* tools are available (unknown owner)
+(skip) repo-aware tool-selection live e2e > uses repo_search for a single semantic discovery when repo_* tools are available (duplicate charge report)
+(skip) repo-aware tool-selection live e2e > uses repo_search for a single semantic discovery when repo_* tools are available (pre-bug trace)
+(skip) repo-aware tool-selection live e2e > falls back to direct file/search tools when repo_* tools are unavailable (unknown owner)
+(skip) repo-aware tool-selection live e2e > falls back to direct file/search tools when repo_* tools are unavailable (duplicate charge report)
+(skip) repo-aware tool-selection live e2e > falls back to direct file/search tools when repo_* tools are unavailable (pre-bug trace)
+(skip) repo-aware tool-selection live e2e > uses repo_architecture before broad reads when repo_* tools are available (new contributor)
+(skip) repo-aware tool-selection live e2e > uses repo_architecture before broad reads when repo_* tools are available (before change)
+(skip) repo-aware tool-selection live e2e > uses repo_architecture before broad reads when repo_* tools are available (team onboarding)
+(skip) repo-aware tool-selection live e2e > uses direct search/read for exact-string small edits even when repo_* tools are available (lsp clean-report wording)
+(skip) repo-aware tool-selection live e2e > uses repo_knowledge context for an authoritative behavior/contract question
+(skip) repo-aware tool-selection live e2e > uses task-scoped repo_knowledge impact after a material behavior change
+(skip) repo-aware tool-selection live e2e > creates and records a new primary spec when no suitable contract exists
+(skip) repo-aware tool-selection live e2e > updates an existing primary spec and verifies after intentional semantic drift
+(skip) repo-aware tool-selection live e2e > accepts reviewed no-impact without inventing a relation or spec mutation
+(skip) repo-aware tool-selection live e2e > reconciles a moved primary spec without rewriting its source
+(skip) repo-aware tool-selection live e2e > uses subagents for broad independent discovery when repo_* tools are unavailable (release readiness)
+(skip) repo-aware tool-selection live e2e > uses subagents for broad independent discovery when repo_* tools are unavailable (incident triage)
+(skip) repo-aware tool-selection live e2e > uses subagents for broad independent discovery when repo_* tools are unavailable (test strategy)
+(skip) repo-aware tool-selection live e2e > creates a synchronized todo plan for non-trivial multi-stage work
+(skip) repo-aware tool-selection live e2e > compresses a high-pressure closed range with continuation-critical details
+(skip) repo-aware tool-selection live e2e > starts unknown-query context recovery with session_overview
+(skip) repo-aware tool-selection live e2e > does not create todos or compress for a trivial chat question
+(skip) pi-tools-suite live eval matrix > tool.semantic-repo-search [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.architecture-first [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.knowledge-context [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.knowledge-impact [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.exact-literal-direct [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.ast-structural [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.todo-plan [<no-model>]
+(skip) pi-tools-suite live eval matrix > tool.session-recovery-overview [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.two-hypotheses-before-fix [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.behavior-over-structural-check [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.async-stale-state [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.investigate-without-edit-probes [<no-model>]
+(skip) pi-tools-suite live eval matrix > quality.counterexample-preserves-validation [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.sol-delegates-substantial [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.sol-keeps-tiny-edit [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.luna-delegates-substantial [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.luna-escalates-high-risk [<no-model>]
+(skip) pi-tools-suite live eval matrix > orchestration.terra-escalates-high-risk [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.trivial-chat-no-tools [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.known-file-read-no-oracle [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.routine-local-failure-no-oracle [<no-model>]
+(skip) pi-tools-suite live eval matrix > negative.small-known-edit-no-plan [<no-model>]
+(skip) DCP live reminder response > model calls compress from a real mid-turn reminder and the call commits positive gain
+(skip) async-subagents direct live prompt evals > routes an omitted type to a project-local Markdown specialist alongside built-in roles
+(skip) async-subagents direct live prompt evals > routes omitted subagent types from task semantics while preserving explicit overrides
+(skip) async-subagents direct live prompt evals > classifies ultrawork boundary: clearly parallel release review
+(skip) async-subagents direct live prompt evals > classifies ultrawork boundary: vague potentially complex bug
+(skip) async-subagents direct live prompt evals > classifies ultrawork boundary: known one-file wording edit
+(skip) DCP direct live summary prompt eval > continues correctly after two summaries, an explicit decision reversal and untrusted output
+(skip) DCP direct live summary prompt eval > preserves continuation-critical markers and drops repeated log noise
+(skip) DCP direct live summary prompt eval > selects protocol-closed range boundaries around parallel tool groups
+(skip) runs public QA without auth, then records form login and private action evidence
+(skip) async-subagents live e2e orchestration > delegates visual investigation to an image-capable research model
+(skip) async-subagents live e2e orchestration > delegates a broad project investigation
+(skip) async-subagents live e2e orchestration > delegates a focused payment code review
+(skip) async-subagents live e2e orchestration > delegates a release-plan critique
+(skip) async-subagents live e2e orchestration > delegates QA test-gap analysis
+(skip) async-subagents live e2e orchestration > delegates incident triage across independent hypotheses
+(skip) async-subagents live e2e orchestration > delegates change-impact analysis
+(skip) async-subagents live e2e orchestration > does not delegate a simple README lookup
+(skip) async-subagents live e2e orchestration > does not delegate a direct smoke-test command
+(skip) async-subagents live e2e orchestration > does not delegate a small single-file code lookup
+(skip) macOS desktop backend semantically activates a real AppKit control
+(skip) macOS desktop backend records exact-window video concurrently with the flow
+(skip) async-subagents live e2e sub-agent type selection > delegates real-browser QA to the explicit ui-qa profile
+(skip) async-subagents live e2e sub-agent type selection > parent selects research for independent review without model overrides or polling
+(skip) async-subagents live e2e sub-agent type selection > omits the role when the user explicitly requests the automatic router
+(skip) async-subagents live e2e sub-agent type selection > selects research, implement, and verify by execution mode rather than discipline
+(skip) async-subagents live e2e sub-agent type selection > uses research for complex evidence gathering instead of automatically escalating to oracle
+
+
+2 tests failed:
+(fail) model tools > registers aliases, adapts executions, and switches active tools by model [3.67ms]
+(fail) model tools > keeps active repo discovery tools ahead of lower-level profile tools [0.31ms]
+
+ 955 pass
+ 74 skip
+ 2 fail
+ 58684 expect() calls
+Ran 1031 tests across 87 files. [100.79s]

@@ -31,14 +31,12 @@
   }
 </script>
 
-<details class="group border-b border-border" open>
+<details class="group border-b border-border">
   <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2.5 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ChartNoAxesCombined class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     <span class="font-semibold uppercase tracking-wide text-foreground">DCP</span>
     <span class="ml-auto font-mono tabular-nums text-muted-foreground">
-      {#if occupancyPercent !== undefined}{Math.round(occupancyPercent)}% occupied{/if}
-      {#if occupancyPercent !== undefined && view.liveTokensSaved !== undefined} · {/if}
-      {#if view.liveTokensSaved !== undefined}saved ~{formatCompactTokens(view.liveTokensSaved)}{:else if occupancyPercent === undefined}unknown{/if}
+      {#if view.liveTokensSaved !== undefined}~{formatCompactTokens(view.liveTokensSaved)}{/if}
     </span>
     <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
   </summary>

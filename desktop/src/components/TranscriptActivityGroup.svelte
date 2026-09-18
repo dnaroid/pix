@@ -6,7 +6,12 @@
   import type { Attachment } from "../lib/attachments";
   import { isUserBashTool, toolPresentation } from "../lib/tool-presentation";
   import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
-  import { activityEntryActive, activityGroupPresentationLabels, formatTranscriptDuration } from "../lib/transcript-presentation";
+  import {
+    activityEntryActive,
+    activityGroupDuration,
+    activityGroupPresentationLabels,
+    formatTranscriptDuration,
+  } from "../lib/transcript-presentation";
   import type { ActivityEntry, ActivityGroupItem } from "../lib/transcript";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
@@ -14,11 +19,13 @@
   import ToolStatusIcon from "./ToolStatusIcon.svelte";
 
   let {
-    item, gapClass = "", onLoadToolResult, onOpenAttachment, onPrepareAttachment,
+    item, nowMs, gapClass = "", onLoadToolResult, onOpenAttachment, onPrepareAttachment,
     onValidateProjectFile, onValidateLocalFile, onOpenProjectFile,
     onResolveProjectMedia, onOpenLocalFile, onResolveLocalMedia,
   }: {
     item: ActivityGroupItem;
+    /** Shared pane clock, supplied only to live groups. */
+    nowMs?: number;
     gapClass?: string;
     onLoadToolResult: (toolCallId: string) => void;
     onOpenAttachment: (attachment: Attachment) => void;
@@ -32,6 +39,7 @@
   const expandedEntries = new SvelteSet(initiallyOpen);
   const labels = $derived(activityGroupPresentationLabels(item.entries));
   const attention = $derived(toolGroupAttention(item.tools));
+  const durationMs = $derived(activityGroupDuration(item, nowMs));
 
   function toggleEntry(event: Event, entry: ActivityEntry): void {
     if (event.target !== event.currentTarget) return;
@@ -64,7 +72,7 @@
           >{label.name}</strong>
         {/each}
       </span>
-      {#if item.durationMs !== undefined}<span class="shrink-0 text-muted-foreground/45">{formatTranscriptDuration(item.durationMs)}</span>{/if}
+      {#if durationMs !== undefined}<span data-activity-duration class="shrink-0 text-muted-foreground/45">{formatTranscriptDuration(durationMs)}</span>{/if}
     </span>
   </summary>
   {#if expanded}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isUserBashTool } from "./tool-presentation";
 import {
+  activityGroupDuration,
   activityGroupPresentationLabels,
   applyDeferredToolResult,
   applySessionUpdate,
@@ -24,6 +25,28 @@ function tool(id: string): ToolItem {
 }
 
 describe("mixed transcript activity regressions", () => {
+  it("samples active elapsed time from a supplied clock, then preserves the final span", () => {
+    let state = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "agent_thought_chunk", messageId: "t1", content: { type: "text", text: "Plan" },
+    }, 100);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call", toolCallId: "read-1", name: "read", title: "Read", status: "in_progress",
+    }, 200);
+
+    const active = groupTranscriptItems(state.items)[0];
+    if (active?.type !== "activity-group") throw new Error("Expected an activity group");
+    expect(active).toMatchObject({ active: true, startedAtMs: 100 });
+    expect(active.durationMs).toBeUndefined();
+    expect(activityGroupDuration(active, 1_600)).toBe(1_500);
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call_update", toolCallId: "read-1", status: "completed",
+    }, 2_000);
+    const settled = group(state);
+    expect(settled).toMatchObject({ active: false, durationMs: 1_900 });
+    expect(activityGroupDuration(settled, 99_000)).toBe(1_900);
+  });
+
   it("visits timing metadata only linearly without mutating the input", () => {
     let timingReads = 0;
     const items = Object.freeze(Array.from({ length: 400 }, (_, index) => Object.freeze({

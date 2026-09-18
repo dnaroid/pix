@@ -51,6 +51,9 @@ export interface ActivityGroupItem {
   readonly tools: readonly ToolItem[];
   readonly status: ToolCallStatus;
   readonly active: boolean;
+  /** Earliest recorded entry start; used to sample elapsed time while active. */
+  readonly startedAtMs?: number;
+  /** Final elapsed span after the group settles. */
   readonly durationMs?: number;
 }
 

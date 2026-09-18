@@ -10,6 +10,7 @@ import { applyTaskMutation } from "./state/state-reducer.js";
 import { getState, replaceState } from "./state/store.js";
 import {
 	activateTodoStateScope,
+	appendTodoStateSnapshot,
 	DEFAULT_PROMPT_GUIDELINES,
 	DEFAULT_PROMPT_SNIPPET,
 	publishTodoState,
@@ -456,6 +457,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		const autoClear = autoClearCompletedTodos(result.state);
 		replaceState(autoClear.state);
+		appendTodoStateSnapshot(pi as any, action, params as Record<string, unknown>);
 		publishTodoState(pi as any, ctx, action, params as Record<string, unknown>);
 		if (todoThinkingEnabled) applyTodoThinkingAfterCommit(result.state, ctx, { action, params });
 		try {
