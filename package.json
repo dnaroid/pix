@@ -1,9 +1,8 @@
 {
   "name": "pi-ui-extend",
-  "version": "2.0.1",
-  "private": true,
-  "description": "Pix: a workspace-first terminal UI for Pi with tabs, readable tool activity, voice input, and bundled agent tools.",
+  "version": "2.0.2",
   "private": false,
+  "description": "Pix: a workspace-first terminal UI for Pi with tabs, readable tool activity, voice input, and bundled agent tools.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dnaroid/pix.git"

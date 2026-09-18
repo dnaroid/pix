@@ -1,6 +1,6 @@
 {
 	"name": "pix-acp",
-	"version": "2.0.1",
+	"version": "2.0.2",
 	"private": true,
 	"type": "module",
 	"description": "ACP (Agent Client Protocol) adapter that embeds the pix/pi coding agent into editors like Zed. Fork-in-progress of pi-acp with pix-specific integrations.",
