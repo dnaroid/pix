@@ -35,6 +35,8 @@ test("release probe uses the generated dependency inventory instead of recursive
 test("Linux AppImage smoke delegates resource lookup to the native Tauri host", async () => {
   const smoke = await readFile(join(process.cwd(), "scripts/release/smoke-desktop.mjs"), "utf8");
   assert.match(smoke, /APPDIR: appdir/u);
+  assert.match(smoke, /join\(appdir, "AppRun"\)/u);
+  assert.doesNotMatch(smoke, /join\(appdir, "usr\/bin\/pix-desktop"\)/u);
   assert.doesNotMatch(smoke, /squashfs-root\/usr\/lib\/pix-desktop\/pix-runtime/u);
   assert.match(smoke, /findInstalledPayload\(extracted\)/u);
   assert.doesNotMatch(smoke, /join\(extracted, "usr\/lib\/pix-desktop\/pix-runtime"\)/u);

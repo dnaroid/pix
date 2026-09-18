@@ -286,7 +286,9 @@ Linux checks the DEB payload directly; for the AppImage it intentionally lets th
 native Tauri host resolve `resource_dir()` from the extracted AppDir instead of
 hardcoding an AppImage-internal resource path. The DEB smoke likewise discovers
 the unique installed `pix-runtime/release.json` instead of assuming a particular
-Tauri Linux resource directory layout.
+Tauri Linux resource directory layout. Extracted AppImage native smoke launches
+its `AppRun` entrypoint rather than the inner executable so linuxdeploy's library
+paths and WebKit helper-process environment are preserved.
 
 The copied `verify.mjs` is a one-shot verifier. After all assertions (and Desktop
 ACP shutdown) succeed and it prints `PIX_RELEASE_RUNTIME_OK`, it exits explicitly.
@@ -298,6 +300,10 @@ Tauri's protection against symlink-based resource resolution.
 All process ceilings are deadlock safeguards, never speed assertions. Cross-OS
 support is verified by the native CI jobs, not inferred from a successful macOS
 build. Signing with real certificates still requires a credentialed release run.
+The generic release subprocess ceiling remains 20 minutes, while the single Tauri
+Desktop packaging subprocess gets a 35-minute ceiling because a cold Windows
+Rust build plus NSIS/MSI generation can legitimately exceed 20 minutes. The
+GitHub native job retains its independent 60-minute hard ceiling.
 
 ## Implementation
 

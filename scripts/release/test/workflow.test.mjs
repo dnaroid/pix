@@ -66,4 +66,6 @@ test("release configuration includes the self-contained runtime and signed Deskt
   assert.match(build, /env\.CI = "true"/u);
   assert.match(build, /"bundled-runtime"/u);
   assert.match(build, /TAURI_SIGNING_PRIVATE_KEY/u);
+  assert.match(build, /TAURI_BUILD_TIMEOUT_MS = 35 \* 60_000/u);
+  assert.match(build, /timeout: TAURI_BUILD_TIMEOUT_MS/u);
 });

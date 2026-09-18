@@ -71,9 +71,11 @@ export async function smokeDesktop(name = hostTarget()) {
     const options = { ...context, timeout: 180_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
     let output;
     if (process.platform === "linux") {
-      // Use the AppImage's AppDir so Tauri resolves resources inside the extracted image, not /usr.
+      // Launch through AppRun so linuxdeploy's library paths and WebKit helper
+      // process environment are preserved. APPDIR also keeps Tauri resource
+      // resolution inside the extracted image rather than host /usr.
       const appdir = join(scratch, "squashfs-root");
-      output = run("xvfb-run", ["-a", join(appdir, "usr/bin/pix-desktop"), "--release-smoke-test"], {
+      output = run("xvfb-run", ["-a", join(appdir, "AppRun"), "--release-smoke-test"], {
         ...options, env: { ...context.env, APPDIR: appdir },
       });
     } else {

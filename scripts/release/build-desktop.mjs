@@ -6,6 +6,8 @@ import { hostTarget, nodeVersion, npm, outputPaths, readJson, root, targetInfo, 
 import { smokeDesktop } from "./smoke-desktop.mjs";
 import { checkArchive, auditPayload } from "./size-budget.mjs";
 
+const TAURI_BUILD_TIMEOUT_MS = 35 * 60_000;
+
 export async function buildDesktop(name = hostTarget()) {
   const target = targetInfo(name);
   const { work, desktopPayload: payload, assets } = outputPaths(name);
@@ -43,7 +45,9 @@ export async function buildDesktop(name = hostTarget()) {
   const bundleRoot = join(root, "desktop/src-tauri/target", target.triple, "release/bundle");
   await rm(bundleRoot, { recursive: true, force: true, maxRetries: 5 });
   npm(["exec", "--", "tauri", "build", "--ci", "--target", target.triple,
-    "--features", "bundled-runtime", "--bundles", target.bundles, ...configArgs, "--", "--locked"], { cwd: join(root, "desktop"), env });
+    "--features", "bundled-runtime", "--bundles", target.bundles, ...configArgs, "--", "--locked"], {
+    cwd: join(root, "desktop"), env, timeout: TAURI_BUILD_TIMEOUT_MS,
+  });
   const formats = process.platform === "darwin" ? [["dmg", ".dmg"]]
     : process.platform === "win32" ? [["nsis", ".exe"], ["msi", ".msi"]]
       : [["appimage", ".AppImage"], ["deb", ".deb"]];
