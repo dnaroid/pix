@@ -107,6 +107,36 @@ be a byte-stable prefix on ordinary continuations.
    acquire a different identity after session serialization/reopen; unsupported
    array values and non-finite numbers follow their JSON representation.
 
+### Failed-attempt replay normalization
+
+The SDK can remove a failed assistant attempt from live agent state during retry
+while retaining that entry in JSONL. Restart/resume/fork reconstructs the entry
+again. The provider transform omits whole assistant messages whose `stopReason`
+is `error` or `aborted`; DCP uses the same exclusion before building new message
+IDs, conversation-index entries, candidates and projected-input estimates. This
+is provider-context normalization, not an age/error pruning strategy, not UI
+filtering, and not a change to the archive. Tool-result errors, successful
+assistants, and `length`-limited assistants are not excluded by this rule.
+
+`pruner-replay-context.ts` first prepares the cloned input for exact replay.
+Unrecorded terminal attempts cannot split a previously committed block's exact
+source sequence. For compatibility, a failed/aborted occurrence explicitly named
+by an active block's `sourceMembers` or `mutationMembers` is retained until the
+existing matcher has checked its ID, order and hash. After block application,
+remaining terminal attempts are omitted from the new provider projection.
+The matcher, membership arrays, summary bytes, signed contents and journal
+schema are unchanged. Missing/reordered real members, changed hashes, arbitrary
+interior messages or duplicate real members cannot gain replacement authority.
+No raw file is rewritten and no replacement tool result is fabricated.
+
+The regression uses real persisted SDK sessions and the actual lazy manager:
+live input omits a failed attempt, compression commits without that entry, and
+`startup`, `resume` and post-commit `fork` must reproduce the same compressed
+messages and IDs after the entry returns from JSONL. A small selected-model
+capacity rejects the raw history but accepts the replayed projection through
+the provider hook. A pre-commit fork retains its raw work without inheriting the
+later block, and parent archives remain append-only.
+
 ## Journal contracts relevant to cache stability
 
 - Only journal schema v1 created by the current implementation is supported.
@@ -191,12 +221,15 @@ cache-preserving unsafe deletion.
 - `external/pi-tools-suite/src/dcp/pruner-message-ids.ts`
 - `external/pi-tools-suite/src/dcp/pruner-nudge.ts`
 - `external/pi-tools-suite/src/dcp/pruner.ts`
+- `external/pi-tools-suite/src/dcp/pruner-replay-context.ts`
 - `external/pi-tools-suite/src/dcp/conversation-index.ts`
 - `external/pi-tools-suite/src/dcp/compress-tool.ts`
 - `external/pi-tools-suite/src/dcp/auto-compress.ts`
 - `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
 - `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
 - `external/pi-tools-suite/test/dcp-auto-compression-projection.test.ts`
+- `external/pi-tools-suite/test/dcp-failed-attempt-replay.test.ts`
+- `tests/dcp-retry-replay.integration.test.ts`
 - `external/pi-tools-suite/test/compress-pruner.test.ts`
 
 ## Verification
@@ -214,6 +247,8 @@ Deterministic tests must cover:
   reader, preserving IDs and exact block materialization;
 - JSONL round-trip stability for exact v2 membership, including tool-result
   details with runtime-only values;
+- persisted failed/aborted attempts returning after retry, including old blocks
+  that explicitly recorded an attempt and still require its unchanged hash;
 - hard-pressure marathon behavior and partial positive recovery;
 - stale recovery debt bounded by the current budget and pressure candidates that
   preserve existing compression blocks, including journal-replay marathon

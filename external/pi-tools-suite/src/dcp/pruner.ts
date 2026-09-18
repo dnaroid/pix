@@ -5,6 +5,7 @@ import { stripStaleDcpMetadataFromMessage } from "./pruner-metadata.js";
 import { injectMessageIds } from "./pruner-message-ids.js";
 import { copyRawMutationHash } from "./conversation-index.js";
 import { applyToolOutputPruning } from "./pruner-tools.js";
+import { isReplayableContextMessage, prepareDcpReplayMessages } from "./pruner-replay-context.js";
 
 export type {
   CompressionCandidate,
@@ -54,7 +55,7 @@ export function applyPruning(
 ): any[] {
   // Deep-clone each message and its content to prevent mutations from
   // affecting the original objects across context events.
-  const msgs: any[] = messages.map((m: any) => {
+  let msgs: any[] = messages.map((m: any) => {
     const clone = { ...m };
     if (Array.isArray(clone.content)) {
       clone.content = clone.content.map((contentBlock: any) =>
@@ -70,6 +71,8 @@ export function applyPruning(
     return stripped;
   });
 
+  msgs = prepareDcpReplayMessages(msgs, state);
+
   // 1. Count user turns → update state.currentTurn. Do this before inserting
   // synthetic compression summaries; the raw session is the source of truth.
   state.currentTurn = msgs.filter((m) => m.role === "user").length;
@@ -78,6 +81,11 @@ export function applyPruning(
   // then apply active compression blocks.
   syncCompressionBlocks(msgs, state, config);
   applyCompressionBlocks(msgs, state);
+
+  // Terminal attempts retained solely for old exact ledgers must not become
+  // new addressable source, protocol groups or budget pressure. Raw session
+  // entries remain untouched; this is the same omission the provider makes.
+  msgs = msgs.filter(isReplayableContextMessage);
 
   // Existing explicit/emergency pruning decisions are replayed, but routine
   // context construction never discovers new retroactive deletions. A new user

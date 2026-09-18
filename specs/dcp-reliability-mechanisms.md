@@ -152,6 +152,16 @@ Active implemented contract.
 
 ## Candidate selection and protected continuity
 
+Failed/aborted assistant attempts are normalized to the SDK's provider context
+before new selection, with a compatibility replay stage for exact ledgers that
+already named an attempt. This prevents a restored retry-history entry from
+leaving a valid block active but unmaterialized; it does not relax exact matching
+or remove failed tool results. The full contract is
+[failed-attempt replay normalization](./dcp-provider-cache-stability.md#failed-attempt-replay-normalization).
+Implementation: `src/dcp/pruner-replay-context.ts`, `src/dcp/pruner.ts`.
+Tests: `test/dcp-failed-attempt-replay.test.ts` and repository-root
+`tests/dcp-retry-replay.integration.test.ts` (real SDK/lazy restart and fork).
+
 `src/dcp/pruner-candidates.ts`, `src/dcp/pruner-emergency.ts`,
 `src/dcp/protected-continuity.ts`
 
