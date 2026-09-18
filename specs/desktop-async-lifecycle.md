@@ -26,6 +26,7 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - Transcript updates preserve enqueue order and are processed in portions of at most 128 updates per animation frame. The remaining backlog is scheduled for later frames; compaction does not copy the whole remaining queue on every frame.
 - Prompt-completion timing is retained until the final queued portion for that session has been finalized. Background-only updates do not request scrolling of the active conversation.
 - Disconnect resets and cancels queued replay before clearing session state. Forgetting a session discards its already-queued updates without discarding other sessions. Disposing the batcher rejects further enqueues; a reset remains reusable for a replacement connection.
+- Lazy tool-result and older-history requests own their in-flight entries by client, workspace, generation, and request identity. An obsolete completion cannot clear a newer request's deduplication entry for the same session/tool key. New generations do not remain blocked by old requests; stale success/failure cannot mutate the active transcript. Already-hydrated tool results are not requested again.
 
 ## Non-goals and limits
 
@@ -38,6 +39,7 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - `desktop/src/app/connection.svelte.ts`
 - `desktop/src/app/session-coordinator.ts`
 - `desktop/src/app/session-update-batcher.ts`
+- `desktop/src/app/session-history.svelte.ts`
 - `desktop/src/lib/tauri-transport.ts`
 - `desktop/src/lib/acp-json-rpc.ts`
 - `specs/desktop-session-parity.md`
@@ -50,6 +52,7 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - `desktop/src/lib/tauri-transport.test.ts` exercises partial subscription failure, cancellation during registration/native start, early event ordering, and serialized restart.
 - `desktop/src/lib/acp-json-rpc.test.ts` exercises shared disposal, pending-request rejection, and late incoming-request completion.
 - `desktop/src/app/session-update-batcher.test.ts` controls animation frames explicitly and checks multi-frame ordering, completion timing, reset, session removal, and terminal disposal.
+- `desktop/src/app/session-history-concurrency.test.ts` controls promise completion order to cover cancel/restart, generation replacement, duplicate hydration, obsolete success/failure, session switches, and old cursor completion racing with a new page request.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

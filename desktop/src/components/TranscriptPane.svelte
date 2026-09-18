@@ -11,20 +11,16 @@
   import { onDestroy, tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import type { ProjectFileLineRange } from "../lib/project-files";
-  import { isUserBashTool, toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
-  import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
   import {
     formatTranscriptDuration,
     groupTranscriptItems,
-    type ToolItem,
     type MessageItem,
     type TranscriptDisplayItem,
     type TranscriptState,
   } from "../lib/transcript";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
-  import ToolResult from "./ToolResult.svelte";
-  import ToolStatusIcon from "./ToolStatusIcon.svelte";
+  import TranscriptActivityGroup from "./TranscriptActivityGroup.svelte";
   import {
     createTranscriptUserMessageMenuController,
     userMessageMenuCommands,
@@ -103,29 +99,8 @@
 
   onDestroy(userMessageMenuController.dispose);
 
-  function handleToolResultToggle(event: Event, tool: ToolItem): void {
-    const details = event.currentTarget as HTMLDetailsElement;
-    if (details.open && tool.deferredResult && !tool.resultLoading) onLoadToolResult(tool.toolCallId);
-  }
-
-  function handleToolGroupToggle(event: Event, tools: readonly ToolItem[]): void {
-    const details = event.currentTarget as HTMLDetailsElement;
-    if (!details.open) return;
-    for (const tool of tools) {
-      if (tool.deferredResult && !tool.resultLoading) onLoadToolResult(tool.toolCallId);
-    }
-  }
-
-  function autoOpenBangDetails(node: HTMLDetailsElement, enabled: boolean): void {
-    if (enabled) node.open = true;
-  }
-
-  function containsUserBash(tools: readonly ToolItem[]): boolean {
-    return tools.some((tool) => isUserBashTool(tool));
-  }
-
   function isServiceItem(item: TranscriptDisplayItem | undefined): boolean {
-    return item?.type === "tool-group"
+    return item?.type === "activity-group"
       || (item?.type === "message" && (item.role === "thought" || item.role === "system"));
   }
 
@@ -140,10 +115,6 @@
   function durationLabel(startedAtMs: number | undefined, endedAtMs: number | undefined): string | undefined {
     if (startedAtMs === undefined || endedAtMs === undefined) return undefined;
     return formatTranscriptDuration(Math.max(0, endedAtMs - startedAtMs));
-  }
-
-  function toolGroupNames(tools: readonly ToolItem[]): string {
-    return toolGroupPresentationNames(tools);
   }
 
   const handleUserMessageMenuKeydown = userMessageMenuController.handleMenuKeydown;
@@ -309,65 +280,13 @@
             </article>
           {/if}
         {:else}
-          {@const groupAttention = toolGroupAttention(item.tools)}
-          {@const groupNames = toolGroupNames(item.tools)}
-          {@const groupDuration = item.durationMs === undefined ? undefined : formatTranscriptDuration(item.durationMs)}
-          <details use:autoOpenBangDetails={containsUserBash(item.tools)} class={[
-            "transcript-entry group w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80",
-            gapClass,
-            item.status === "failed" && "text-destructive",
-          ]} ontoggle={(event) => handleToolGroupToggle(event, item.tools)}>
-            <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-              <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-              <ToolStatusIcon status={item.status} attention={groupAttention} class="h-3 w-3 opacity-75" />
-              <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
-                <strong class="min-w-0 truncate font-normal text-muted-foreground/85">{groupNames}</strong>
-                {#if groupDuration}<span class="shrink-0 text-muted-foreground/45">{groupDuration}</span>{/if}
-              </span>
-            </summary>
-            <div class="mt-1 ml-[7px] space-y-0.5 border-l border-code-border pl-2.5">
-              {#each item.tools as tool (tool.id)}
-                {@const presentation = toolPresentation(tool)}
-                {@const attention = toolLspAttention(tool)}
-                <section>
-                  {#if tool.deferredResult || tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
-                    <details
-                      use:autoOpenBangDetails={isUserBashTool(tool)}
-                      class="group/result"
-                      ontoggle={(event) => handleToolResultToggle(event, tool)}
-                    >
-                      <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-                        <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                        <ToolStatusIcon status={tool.status} {attention} class="h-3 w-3 opacity-80" />
-                        <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
-                          <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
-                          {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
-                        </span>
-                      </summary>
-                      {#if tool.resultLoading}
-                        <div class="py-0.5 pl-8 text-xs leading-tight text-muted-foreground" role="status">Loading tool result…</div>
-                      {:else if tool.resultError}
-                        <div class="py-0.5 pl-8 text-xs leading-tight text-destructive" role="status">{tool.resultError}</div>
-                      {/if}
-                      <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-                      {#if !tool.resultLoading && (tool.content || tool.diffs.length > 0)}
-                        <ToolResult {tool} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
-                      {/if}
-                    </details>
-                  {:else}
-                    <div class="grid min-h-4 grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight">
-                      <span aria-hidden="true"></span>
-                      <ToolStatusIcon status={tool.status} {attention} class="h-3 w-3 opacity-80" />
-                      <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
-                        <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
-                        {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
-                      </span>
-                    </div>
-                  {/if}
-                </section>
-              {/each}
-            </div>
-          </details>
+          {#key activeSessionId}
+            <TranscriptActivityGroup
+              {item} {gapClass} {onLoadToolResult} {onOpenAttachment} {onPrepareAttachment}
+              {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile}
+              {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia}
+            />
+          {/key}
         {/if}
       {/each}
       {#if promptRunning}
@@ -456,12 +375,4 @@
   .message-action-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .message-action-item:disabled { cursor: default; opacity: 0.4; }
 
-  .tool-name[data-tool-tone="accent"] { color: var(--tool-accent); }
-  .tool-name[data-tool-tone="info"] { color: var(--tool-info); }
-  .tool-name[data-tool-tone="muted"] { color: var(--tool-muted); }
-  .tool-name[data-tool-tone="mutation"] { color: var(--tool-mutation); }
-  .tool-name[data-tool-tone="search"] { color: var(--tool-search); }
-  .tool-name[data-tool-tone="success"] { color: var(--tool-success); }
-  .tool-name[data-tool-tone="title"] { color: var(--tool-title); }
-  .tool-name[data-tool-tone="warning"] { color: var(--tool-warning); }
 </style>

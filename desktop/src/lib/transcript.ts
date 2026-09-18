@@ -1,7 +1,9 @@
 export type {
+  ActivityEntry,
+  ActivityGroupItem,
   MessageItem,
   MessageRole,
-  ToolGroupItem,
+  ThoughtItem,
   ToolItem,
   TranscriptDisplayItem,
   TranscriptItem,
@@ -29,4 +31,8 @@ export {
 } from "./transcript-deferred";
 
 export { finalizeTranscriptActivity } from "./transcript-timing";
-export { formatTranscriptDuration, groupTranscriptItems } from "./transcript-presentation";
+export {
+  activityGroupPresentationLabels,
+  formatTranscriptDuration,
+  groupTranscriptItems,
+} from "./transcript-presentation";

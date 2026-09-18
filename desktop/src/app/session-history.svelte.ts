@@ -25,12 +25,14 @@ type SessionHistoryOptions = {
   reportError: (error: unknown) => void;
 };
 
+type HistoryRequestOwner = { client: AcpClient; workspace: string; generation: number };
+
 export function createSessionHistory(options: SessionHistoryOptions) {
   let loading = $state(false);
   let generation = 0;
-  const loadingToolResults = new Set<string>();
+  const loadingToolResults = new Map<string, HistoryRequestOwner>();
   const olderCursorBySessionId = new Map<string, string>();
-  const loadingOlderSessionIds = new Set<string>();
+  const loadingOlderSessionIds = new Map<string, HistoryRequestOwner>();
 
   function begin(): number {
     loading = true;
@@ -106,11 +108,14 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     const sessionId = options.state.sessionId;
     const requestWorkspace = options.workspace();
     const requestGeneration = generation;
-    if (!requestClient || !sessionId || loading || loadingOlderSessionIds.has(sessionId)) return false;
+    if (!requestClient || !sessionId || loading) return false;
+    const pending = loadingOlderSessionIds.get(sessionId);
+    if (pending && isCurrent(pending.client, sessionId, pending.workspace, pending.generation)) return false;
 
     let cursor: string | undefined = olderCursorBySessionId.get(sessionId);
     if (!cursor) return false;
-    loadingOlderSessionIds.add(sessionId);
+    const owner = { client: requestClient, workspace: requestWorkspace, generation: requestGeneration };
+    loadingOlderSessionIds.set(sessionId, owner);
     try {
       while (cursor) {
         const history: LazySessionHistory = await requestClient.sessionHistory(sessionId, false, cursor);
@@ -139,7 +144,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
       if (isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) options.reportError(error);
       return false;
     } finally {
-      loadingOlderSessionIds.delete(sessionId);
+      if (loadingOlderSessionIds.get(sessionId) === owner) loadingOlderSessionIds.delete(sessionId);
     }
   }
 
@@ -149,9 +154,13 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     const requestWorkspace = options.workspace();
     const requestGeneration = generation;
     if (!requestClient || !sessionId) return;
+    const tool = options.state.transcript.items.find((item) => item.type === "tool" && item.toolCallId === toolCallId);
+    if (tool?.type !== "tool" || !tool.deferredResult) return;
     const key = `${sessionId}\0${toolCallId}`;
-    if (loadingToolResults.has(key)) return;
-    loadingToolResults.add(key);
+    const pending = loadingToolResults.get(key);
+    if (pending && isCurrent(pending.client, sessionId, pending.workspace, pending.generation)) return;
+    const owner = { client: requestClient, workspace: requestWorkspace, generation: requestGeneration };
+    loadingToolResults.set(key, owner);
     options.state.setTranscript(setToolResultLoading(options.state.transcript, toolCallId, true));
     try {
       const update = await requestClient.toolResult(sessionId, toolCallId);
@@ -169,7 +178,8 @@ export function createSessionHistory(options: SessionHistoryOptions) {
         ));
       }
     } finally {
-      loadingToolResults.delete(key);
+      // Cancellation may already have installed a new request with the same key.
+      if (loadingToolResults.get(key) === owner) loadingToolResults.delete(key);
     }
   }
 

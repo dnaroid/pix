@@ -30,7 +30,7 @@ const SEARCH_KEYS = [
 const REPO_KEYS = ["target", "path", "args", "maxLines", "maxBytes"] as const;
 
 export function toolPresentation(tool: ToolHeaderSource): ToolPresentation {
-  const name = displayName(tool);
+  const name = toolPresentationName(tool);
   return {
     name,
     args: headerArgs(name, tool.rawInput) || argsFromTitle(tool.title, name),
@@ -39,12 +39,12 @@ export function toolPresentation(tool: ToolHeaderSource): ToolPresentation {
 }
 
 export function toolGroupPresentationNames(tools: readonly ToolHeaderSource[]): string {
-  return [...new Set(tools.map((tool) => toolPresentation(tool).name))].join(", ");
+  return [...new Set(tools.map(toolPresentationName))].join(", ");
 }
 
 /** True only for Desktop one-shot user bash rows (`!`), not ordinary model bash tools. */
 export function isUserBashTool(tool: ToolHeaderSource): boolean {
-  if (toolPresentation(tool).name !== "bash") return false;
+  if (toolPresentationName(tool) !== "bash") return false;
   const args = asRecord(tool.rawInput);
   return typeof args?.excludeFromContext === "boolean";
 }
@@ -64,7 +64,7 @@ export function toolTone(toolName: string): ToolTone {
   return "title";
 }
 
-function displayName(tool: ToolHeaderSource): string {
+export function toolPresentationName(tool: Pick<ToolItem, "kind" | "name" | "title">): string {
   const explicit = typeof tool.name === "string" ? tool.name.trim() : "";
   if (explicit) return normalizedName(explicit);
 

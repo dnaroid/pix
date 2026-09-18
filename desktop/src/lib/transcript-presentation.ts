@@ -1,7 +1,9 @@
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
+import { toolPresentationName } from "./tool-presentation";
 import type {
+  ActivityEntry,
+  ActivityGroupItem,
   MessageItem,
-  ToolGroupItem,
   ToolItem,
   TranscriptDisplayItem,
   TranscriptItem,
@@ -9,22 +11,24 @@ import type {
 
 export function groupTranscriptItems(items: readonly TranscriptItem[]): TranscriptDisplayItem[] {
   const grouped: TranscriptDisplayItem[] = [];
+  let entries: [ActivityEntry, ...ActivityEntry[]] | undefined;
 
   for (const item of items) {
-    if (item.type === "message") {
+    if (item.type === "message" && item.role !== "thought") {
+      if (entries) {
+        grouped.push(buildActivityGroup(entries));
+        entries = undefined;
+      }
       grouped.push(messageForDisplay(item));
       continue;
     }
 
-    const previous = grouped.at(-1);
-    if (previous?.type === "tool-group") {
-      const tools: [ToolItem, ...ToolItem[]] = [...previous.tools, item];
-      grouped[grouped.length - 1] = buildToolGroup(tools);
-    } else {
-      grouped.push(buildToolGroup([item]));
-    }
+    const entry = item as ActivityEntry;
+    if (entries) entries.push(entry);
+    else entries = [entry];
   }
 
+  if (entries) grouped.push(buildActivityGroup(entries));
   return grouped;
 }
 
@@ -41,38 +45,72 @@ function messageForDisplay(item: MessageItem): MessageItem {
   return text === item.text ? item : { ...item, text };
 }
 
-function buildToolGroup(tools: readonly [ToolItem, ...ToolItem[]]): ToolGroupItem {
-  const active = tools.some((tool) => tool.status === "pending" || tool.status === "in_progress");
-  let status: ToolCallStatus = "completed";
-  if (tools.some((tool) => tool.status === "failed")) {
-    status = "failed";
-  } else if (tools.some((tool) => tool.status === "in_progress")) {
-    status = "in_progress";
-  } else if (tools.some((tool) => tool.status === "pending")) {
-    status = "pending";
-  }
+function buildActivityGroup(entries: readonly [ActivityEntry, ...ActivityEntry[]]): ActivityGroupItem {
+  const tools: ToolItem[] = [];
+  let failed = false;
+  let running = false;
+  let pending = false;
   let earliestStart: number | undefined;
   let latestEnd: number | undefined;
-  for (const tool of tools) {
-    if (tool.startedAtMs !== undefined) {
-      earliestStart = earliestStart === undefined ? tool.startedAtMs : Math.min(earliestStart, tool.startedAtMs);
+  for (const entry of entries) {
+    const { startedAtMs, endedAtMs } = entry;
+    if (entry.type === "tool") {
+      tools.push(entry);
+      failed ||= entry.status === "failed";
+      running ||= entry.status === "in_progress";
+      pending ||= entry.status === "pending";
+    } else {
+      running ||= startedAtMs !== undefined && endedAtMs === undefined;
     }
-    if (tool.endedAtMs !== undefined) {
-      latestEnd = latestEnd === undefined ? tool.endedAtMs : Math.max(latestEnd, tool.endedAtMs);
+    if (startedAtMs !== undefined) {
+      earliestStart = earliestStart === undefined ? startedAtMs : Math.min(earliestStart, startedAtMs);
+    }
+    if (endedAtMs !== undefined) {
+      latestEnd = latestEnd === undefined ? endedAtMs : Math.max(latestEnd, endedAtMs);
     }
   }
+  const active = running || pending;
+  const status: ToolCallStatus = failed ? "failed" : running ? "in_progress" : pending ? "pending" : "completed";
   const durationMs = !active && earliestStart !== undefined && latestEnd !== undefined
     ? Math.max(0, latestEnd - earliestStart)
     : undefined;
 
   return {
-    type: "tool-group",
-    id: `tool-group:${tools[0].toolCallId}`,
+    type: "activity-group",
+    id: `activity-group:${entries[0].id}`,
+    entries,
     tools,
     status,
     active,
     ...(durationMs !== undefined ? { durationMs } : {}),
   };
+}
+
+export function activityEntryActive(entry: ActivityEntry): boolean {
+  if (entry.type === "tool") return entry.status === "pending" || entry.status === "in_progress";
+  return entry.startedAtMs !== undefined && entry.endedAtMs === undefined;
+}
+
+export interface ActivityGroupPresentationLabel {
+  readonly name: string;
+  readonly active: boolean;
+}
+
+export function activityGroupPresentationLabels(
+  entries: readonly ActivityEntry[],
+): ActivityGroupPresentationLabel[] {
+  const labels = new Map<string, ActivityGroupPresentationLabel>();
+  for (const entry of entries) {
+    const name = entry.type === "tool" ? toolPresentationName(entry) : "thinking";
+    const active = activityEntryActive(entry);
+    const existing = labels.get(name);
+    if (!existing) {
+      labels.set(name, { name, active });
+    } else if (active && !existing.active) {
+      labels.set(name, { ...existing, active: true });
+    }
+  }
+  return [...labels.values()];
 }
 
 export function formatTranscriptDuration(durationMs: number): string {

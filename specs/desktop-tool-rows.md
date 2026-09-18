@@ -19,7 +19,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Carry the programmatic tool name and raw input from ACP into the desktop transcript.
 - Display a lowercase, bold tool name followed by compact, normal-weight arguments.
 - Use the default TUI color role for each built-in tool family in light and dark themes.
-- Keep the existing desktop tool grouping and expandable result bodies.
+- Keep expandable tool result bodies while allowing thinking and tool calls to share one Desktop activity group.
 - Show successful mutation diffs for live and replayed edit/write/apply-patch calls.
 - Keep the final tool text after the diff so LSP diagnostics and comment-checker notices appended by pi-tools-suite remain visible.
 - Reflect TUI-style post-mutation LSP attention in completed tool status icons and diagnostic line colors.
@@ -29,7 +29,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Porting TUI body previews or per-project `toolRenderer` overrides to desktop.
 - Synthesizing a clean comment-checker result when the hook emits no notice.
 - Producing an `ast_apply` diff when the tool result does not contain enough before/after data; its textual result and LSP diagnostics still render.
-- Changing tool grouping or expansion behavior.
+- Changing tool-result content or the explicit expand/collapse affordance.
 
 ## Behavior
 
@@ -39,7 +39,11 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.
 - Mutation, search, warning, success, info, accent, muted, and default tool-name roles use the TUI default palette.
 - Legacy ACP updates without a programmatic name or raw input fall back to splitting the existing title.
-- Collapsed multi-call group headers list normalized presentation names once in first-call order (for example `todo, repo_knowledge` even when `todo` ran more than once); expanding the group still shows every individual call.
+- Consecutive thinking and tool entries share one collapsible activity group until a visible user, assistant, or system message boundary.
+- Collapsed activity headers list normalized presentation names plus `thinking` once in first-seen order (for example `thinking, todo, repo_knowledge` even when a name occurs more than once).
+- Names with a currently active occurrence are emphasized with the semantic primary color; completed/inactive names stay muted. A live thought is active only when it has a recorded start and no recorded end, so replay data without timing metadata is not presented as live.
+- Expanding an activity group preserves the original interleaving of thinking blocks and individual tool calls.
+- The group itself does not hydrate tool bodies. Individual result disclosures hydrate on demand; closed groups/results do not mount their expensive Markdown, diffs, or attachment content. Reopening retains individual disclosure state within the same session, while switching sessions resets it even when replay IDs match.
 - A completed edit result patch is preferred because it carries full context. Otherwise explicit ACP diff content is used; when both are absent (notably session replay), edit and write diffs are reconstructed from recorded raw input.
 - Apply-patch input is rendered as one diff surface for both `*** Begin Patch` and unified-diff forms.
 - Failed mutations do not present their requested patch as an applied diff.
@@ -60,6 +64,10 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - `desktop/src/lib/tool-presentation.ts`
 - `desktop/src/lib/tool-output.ts`
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/components/TranscriptActivityGroup.svelte`
+- `desktop/src/app/session-history.svelte.ts`
+- `desktop/src/app/session-history-concurrency.test.ts`
+- `desktop/scripts/transcript-activity-smoke.mjs`
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/ToolStatusIcon.svelte`
 - `desktop/src/styles.css`

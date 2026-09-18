@@ -41,16 +41,20 @@ export interface ToolItem {
 
 export type TranscriptItem = MessageItem | ToolItem;
 
-export interface ToolGroupItem {
-  readonly type: "tool-group";
+export type ThoughtItem = MessageItem & { readonly role: "thought" };
+export type ActivityEntry = ToolItem | ThoughtItem;
+
+export interface ActivityGroupItem {
+  readonly type: "activity-group";
   readonly id: string;
-  readonly tools: readonly [ToolItem, ...ToolItem[]];
+  readonly entries: readonly [ActivityEntry, ...ActivityEntry[]];
+  readonly tools: readonly ToolItem[];
   readonly status: ToolCallStatus;
   readonly active: boolean;
   readonly durationMs?: number;
 }
 
-export type TranscriptDisplayItem = MessageItem | ToolGroupItem;
+export type TranscriptDisplayItem = MessageItem | ActivityGroupItem;
 
 export interface TranscriptState {
   readonly items: readonly TranscriptItem[];

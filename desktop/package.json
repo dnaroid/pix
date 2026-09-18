@@ -13,7 +13,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:git-workflow": "node scripts/git-workflow-smoke.mjs",
-    "test:context-menu": "node scripts/context-menu-smoke.mjs"
+    "test:context-menu": "node scripts/context-menu-smoke.mjs",
+    "test:transcript-activity": "node scripts/transcript-activity-smoke.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",

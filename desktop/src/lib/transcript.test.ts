@@ -5,6 +5,7 @@ import {
   applyDeferredToolResult,
   applySessionUpdate,
   applySessionUpdates,
+  activityGroupPresentationLabels,
   emptyTranscript,
   finalizeTranscriptActivity,
   formatTranscriptDuration,
@@ -320,8 +321,8 @@ describe("transcript reducer", () => {
     expect(state.items[1]).toMatchObject({ startedAtMs: 2_500, endedAtMs: 3_600 });
     expect(state.items[2]).toMatchObject({ startedAtMs: 2_700, endedAtMs: 4_100 });
 
-    const group = groupTranscriptItems(state.items).find((item) => item.type === "tool-group");
-    expect(group).toMatchObject({ durationMs: 1_600, active: false });
+    const group = groupTranscriptItems(state.items).find((item) => item.type === "activity-group");
+    expect(group).toMatchObject({ durationMs: 3_100, active: false });
   });
 
   it("restores persisted thought and tool timings from replay metadata", () => {
@@ -363,8 +364,8 @@ describe("transcript reducer", () => {
     ]);
 
     expect(state.items[0]).toMatchObject({ startedAtMs: 1_000, endedAtMs: 2_500 });
-    const group = groupTranscriptItems(state.items).find((item) => item.type === "tool-group");
-    expect(group).toMatchObject({ durationMs: 2_500, active: false });
+    const group = groupTranscriptItems(state.items).find((item) => item.type === "activity-group");
+    expect(group).toMatchObject({ durationMs: 4_000, active: false });
   });
 
   it("finalizes a trailing thought when a prompt ends without another visible update", () => {
@@ -388,24 +389,35 @@ describe("transcript reducer", () => {
 });
 
 describe("transcript display groups", () => {
-  it("groups consecutive tools and starts a new group after a message", () => {
+  it("groups interleaved thinking and tools until a visible message boundary", () => {
     const first = toolItem("one");
     const second = toolItem("two");
     const third = toolItem("three");
+    const thought = {
+      type: "message",
+      id: "thought:1",
+      role: "thought",
+      text: "Considering",
+      attachments: [],
+      startedAtMs: 1_000,
+      endedAtMs: 1_500,
+    } as const;
     const message = { type: "message", id: "assistant:1", role: "assistant", text: "Next", attachments: [] } as const;
 
-    const grouped = groupTranscriptItems([first, second, message, third]);
+    const grouped = groupTranscriptItems([first, thought, second, message, third]);
 
     expect(grouped).toHaveLength(3);
     expect(grouped[0]).toMatchObject({
-      type: "tool-group",
-      id: "tool-group:one",
+      type: "activity-group",
+      id: "activity-group:tool:one",
+      entries: [first, thought, second],
       tools: [first, second],
     });
     expect(grouped[1]).toBe(message);
     expect(grouped[2]).toMatchObject({
-      type: "tool-group",
-      id: "tool-group:three",
+      type: "activity-group",
+      id: "activity-group:tool:three",
+      entries: [third],
       tools: [third],
     });
   });
@@ -420,12 +432,51 @@ describe("transcript display groups", () => {
       toolItem("still-pending", "pending"),
       { type: "message", id: "break:3", role: "assistant", text: "break", attachments: [] },
       toolItem("completed", "completed"),
-    ]).filter((item) => item.type === "tool-group");
+    ]).filter((item) => item.type === "activity-group");
 
     expect(pendingGroup).toMatchObject({ status: "pending", active: true });
     expect(runningGroup).toMatchObject({ status: "in_progress", active: true });
     expect(failedGroup).toMatchObject({ status: "failed", active: true });
     expect(completedGroup).toMatchObject({ status: "completed", active: false });
+  });
+
+  it("keeps thinking in the header and marks active names for observability", () => {
+    const completedShell = toolItem("shell-completed", "completed", "shell");
+    const runningShell = toolItem("shell-running", "in_progress", "shell");
+    const activeThought = {
+      type: "message",
+      id: "thought:active",
+      role: "thought",
+      text: "Checking",
+      attachments: [],
+      startedAtMs: 2_000,
+    } as const;
+
+    const group = groupTranscriptItems([completedShell, activeThought, runningShell])[0];
+    expect(group).toMatchObject({ type: "activity-group", status: "in_progress", active: true });
+    if (group?.type !== "activity-group") throw new Error("expected activity group");
+
+    expect(activityGroupPresentationLabels(group.entries)).toEqual([
+      { name: "shell", active: true },
+      { name: "thinking", active: true },
+    ]);
+  });
+
+  it("does not treat replay thinking without timing as live activity", () => {
+    const replayThought = {
+      type: "message",
+      id: "thought:replay",
+      role: "thought",
+      text: "Historical thought",
+      attachments: [],
+    } as const;
+
+    const group = groupTranscriptItems([replayThought])[0];
+    expect(group).toMatchObject({ type: "activity-group", status: "completed", active: false });
+    if (group?.type !== "activity-group") throw new Error("expected activity group");
+    expect(activityGroupPresentationLabels(group.entries)).toEqual([
+      { name: "thinking", active: false },
+    ]);
   });
 
   it("hides redundant image labels when previews are present", () => {
@@ -459,11 +510,16 @@ describe("transcript display groups", () => {
   });
 });
 
-function toolItem(toolCallId: string, status: ToolItem["status"] = "completed"): ToolItem {
+function toolItem(
+  toolCallId: string,
+  status: ToolItem["status"] = "completed",
+  name?: string,
+): ToolItem {
   return {
     type: "tool",
     id: `tool:${toolCallId}`,
     toolCallId,
+    ...(name ? { name } : {}),
     title: toolCallId,
     kind: "other",
     status,
