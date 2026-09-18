@@ -39,7 +39,9 @@ current product non-goals.
   markdown/diff rendering, or authentication management.
 - Bundling Node or a platform-specific standalone `pix-acp` executable in this
   first slice. Development uses Node plus pix-acp's pinned pi npm dependency;
-  distributable sidecar packaging is a follow-up milestone.
+  distributable packaging is now governed by
+  [`release-distribution.md`](../specs/release-distribution.md), using bundled Node,
+  Pix and ACP resources for release builds while preserving source-mode development.
 - Reimplementing the pi runtime in Rust or the webview.
 
 ## Behavior

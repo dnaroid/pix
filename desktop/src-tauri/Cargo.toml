@@ -1,6 +1,6 @@
 [package]
 name = "pix-desktop"
-version = "0.1.0"
+version = "1.0.50"
 description = "Lightweight desktop client for Pix"
 authors = ["Pix contributors"]
 edition = "2021"
@@ -8,6 +8,9 @@ edition = "2021"
 [lib]
 name = "pix_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+bundled-runtime = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

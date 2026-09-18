@@ -7,6 +7,7 @@ on:
       - "v*"
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -91,6 +92,138 @@ jobs:
         if: matrix.mode == 'cli'
         run: npm run smoke-test:cli
 
+  build-release:
+    needs: package-smoke-test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    name: Release packages (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-x64
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x64
+          - os: windows-2022
+            target: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            acp/package-lock.json
+            desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+      - name: Install Linux bundle dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf libfuse2 xvfb
+      - run: npm ci --ignore-scripts
+      - run: npm ci --prefix acp --ignore-scripts
+      - run: npm ci --prefix desktop --ignore-scripts
+      - name: Verify tag and all application versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/release/sync-version.mjs --check --tag
+      - name: Import optional Apple signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then
+            echo 'No Apple certificate configured; building with ad-hoc signing.'
+            exit 0
+          fi
+          test -n "$APPLE_SIGNING_IDENTITY"
+          umask 077
+          KEYCHAIN="$RUNNER_TEMP/pix-signing.keychain-db"
+          PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$PASSWORD"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/pix-certificate.p12"
+          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/pix-certificate.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" "$HOME/Library/Keychains/login.keychain-db"
+          rm "$RUNNER_TEMP/pix-certificate.p12"
+      - name: Import optional Windows signing certificate
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Output 'No Windows certificate configured; building unsigned installers.'
+            exit 0
+          }
+          $path = Join-Path $env:RUNNER_TEMP 'pix-certificate.pfx'
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          try {
+            $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certificate = @(Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $password | Where-Object { $_.HasPrivateKey })
+            if ($certificate.Count -ne 1) { throw 'Expected exactly one private-key signing certificate' }
+            "PIX_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate[0].Thumbprint)" >> $env:GITHUB_ENV
+          } finally { Remove-Item $path -Force -ErrorAction SilentlyContinue }
+      - name: Build and test portable TUI and GUI installers
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run release:build -- ${{ matrix.target }}
+      - name: Test native backend path resolution
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib backend_runtime
+      - name: Upload package size reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: size-${{ matrix.target }}
+          path: |
+            .artifacts/releases/${{ matrix.target }}/pix/SIZE.json
+            .artifacts/releases/${{ matrix.target }}/pix/OPTIMIZATIONS.json
+            .artifacts/releases/${{ matrix.target }}/desktop/pix/SIZE.json
+            .artifacts/releases/${{ matrix.target }}/desktop/pix/OPTIMIZATIONS.json
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: .artifacts/releases/${{ matrix.target }}/assets/*
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 14
+      - name: Remove Apple signing material
+        if: always() && runner.os == 'macOS'
+        run: |
+          if [[ -f "$RUNNER_TEMP/pix-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/pix-signing.keychain-db"
+          fi
+          rm -f "$RUNNER_TEMP/pix-certificate.p12"
+      - name: Remove Windows signing material
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:PIX_WINDOWS_CERTIFICATE_THUMBPRINT) {
+            Remove-Item "Cert:\CurrentUser\My\$env:PIX_WINDOWS_CERTIFICATE_THUMBPRINT" -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'pix-certificate.pfx') -Force -ErrorAction SilentlyContinue
+
   publish:
     needs: package-smoke-test
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -124,3 +257,29 @@ jobs:
           fi
       - name: Publish to npm
         run: npm publish --access public
+
+  github-release:
+    needs: [build-release, publish]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: .artifacts/release-assets
+      - name: Verify complete matrix and generate checksums
+        run: |
+          node scripts/release/sync-version.mjs --check --tag
+          node scripts/release/checksums.mjs .artifacts/release-assets
+      - name: Create or update draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish-github.mjs .artifacts/release-assets

@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+# Resolve relative/absolute symlinks without changing the user's working directory.
+SELF=$0
+while [ -L "$SELF" ]; do
+  BASE=$(CDPATH= cd -P -- "$(dirname -- "$SELF")" && pwd)
+  LINK=$(readlink "$SELF")
+  case "$LINK" in /*) SELF=$LINK ;; *) SELF=$BASE/$LINK ;; esac
+done
+ROOT=$(CDPATH= cd -P -- "$(dirname -- "$SELF")" && pwd)
+export PATH="$ROOT/runtime${PATH:+:$PATH}"
+exec "$ROOT/runtime/node" "$ROOT/app/bin/pix.mjs" "$@"

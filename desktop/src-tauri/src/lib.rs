@@ -24,8 +24,11 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
+mod backend_runtime;
 mod desktop_context_menu;
 mod git_operations;
+#[cfg(feature = "bundled-runtime")]
+mod release_smoke;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -7245,71 +7248,18 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         return Ok(running.generation);
     }
 
-    let node = env::var_os("PIX_ACP_NODE_BINARY").unwrap_or_else(|| "node".into());
-    let entry = env::var_os("PIX_ACP_ENTRY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../acp/dist/main.js")
-        });
-    if !entry.is_file() {
-        return Err(format!(
-            "pix-acp entry not found at {} (run `npm run build:acp` first or set PIX_ACP_ENTRY)",
-            entry.display()
-        ));
-    }
-
-    let question_extension = env::var_os("PIX_ACP_QUESTION_EXTENSION")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../dist/bundled-extensions/question/index.js")
-        });
-    if !question_extension.is_file() {
-        return Err(format!(
-            "Pix question extension not found at {} (run `npm run build:pix` first or set PIX_ACP_QUESTION_EXTENSION)",
-            question_extension.display()
-        ));
-    }
-
-    let session_title_extension = env::var_os("PIX_ACP_SESSION_TITLE_EXTENSION")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../dist/bundled-extensions/session-title/index.js")
-        });
-    if !session_title_extension.is_file() {
-        return Err(format!(
-            "Pix session-title extension not found at {} (run `npm run build:pix` first or set PIX_ACP_SESSION_TITLE_EXTENSION)",
-            session_title_extension.display()
-        ));
-    }
-
-    let workspace_undo_extension = env::var_os("PIX_ACP_WORKSPACE_UNDO_EXTENSION")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../dist/bundled-extensions/workspace-undo/index.js")
-        });
-    if !workspace_undo_extension.is_file() {
-        return Err(format!(
-            "Pix workspace-undo extension not found at {} (run `npm run build:pix` first or set PIX_ACP_WORKSPACE_UNDO_EXTENSION)",
-            workspace_undo_extension.display()
-        ));
-    }
-
-    let mut child = Command::new(&node)
-        .arg(&entry)
-        .env("PIX_ACP_QUESTION_EXTENSION", &question_extension)
-        .env("PIX_ACP_SESSION_TITLE_EXTENSION", &session_title_extension)
-        .env(
-            "PIX_ACP_WORKSPACE_UNDO_EXTENSION",
-            &workspace_undo_extension,
-        )
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
+    let runtime = backend_runtime::BackendRuntime::resolve(&resource_dir)?;
+    let mut child = runtime
+        .command()?
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("failed to start {:?}: {error}", node))?;
+        .map_err(|error| format!("failed to start Pix backend: {error}"))?;
 
     let pipes = (child.stdin.take(), child.stdout.take(), child.stderr.take());
     let (Some(stdin), Some(stdout), Some(stderr)) = pipes else {
@@ -7735,6 +7685,8 @@ pub fn run() {
         .manage(IdxOperationState::default())
         .setup(|app| {
             app.manage(AttachmentPathState::new(app.handle()));
+            #[cfg(feature = "bundled-runtime")]
+            release_smoke::start_if_requested(app).map_err(std::io::Error::other)?;
             if let Some(workspace) =
                 ui_qa_workspace_from_environment().map_err(std::io::Error::other)?
             {

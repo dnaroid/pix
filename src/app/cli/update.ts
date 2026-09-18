@@ -4,6 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { fetchLatestReleaseVersion, isReleaseInstall, releaseUpdateHint } from "./release-update.js";
+export { isReleaseInstall } from "./release-update.js";
 
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
 const NPM_REGISTRY_URL = "https://registry.npmjs.org";
@@ -86,6 +88,7 @@ Options:
   -h, --help Show this help
 
 Inside the TUI, /update performs the same non-mutating check.
+Portable/Desktop GitHub Releases are replaced as a complete package; --force never changes global packages for those installations.
 The bundled skills payload under skills/ is copied into ~/.agents/skills on startup.
 The pi-tools-suite payload under external/pi-tools-suite is updated with Pix and linked into ~/.pi/agent/extensions on startup.`;
 }
@@ -120,7 +123,9 @@ export function getPixPackageVersion(packageRoot?: string): string {
 
 export async function checkPixUpdate(options: PixUpdateCheckOptions = {}): Promise<PixUpdateCheckResult> {
 	const packageInfo = readPixPackageInfo(options.packageRoot);
-	return await checkPackageUpdate(packageInfo, options);
+	return await checkPackageUpdate(packageInfo, isReleaseInstall(packageInfo.packageRoot)
+		? { ...options, fetchLatestVersion: options.fetchLatestVersion ?? fetchLatestReleaseVersion }
+		: options);
 }
 
 export async function checkPiUpdate(options: PiUpdateCheckOptions = {}): Promise<PixUpdateCheckResult> {
@@ -209,7 +214,7 @@ async function checkPackageUpdate(packageInfo: PixPackageInfo, options: PixUpdat
 			options.timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS,
 		);
 		if (!latestVersion) {
-			return { ...base, status: "unknown", reason: "npm registry did not return a latest version" };
+			return { ...base, status: "unknown", reason: "the distribution channel did not return a latest version" };
 		}
 		return {
 			...base,
@@ -226,6 +231,11 @@ async function checkPackageUpdate(packageInfo: PixPackageInfo, options: PixUpdat
 }
 
 export function formatPixUpdateCheck(result: PixUpdateCheckResult): string {
+	if (isReleaseInstall(result.packageRoot)) {
+		return ["Pix update (GitHub Release)", `current: ${result.packageName} v${result.currentVersion}`,
+			...(result.latestVersion ? [`latest: ${result.latestVersion}`] : []),
+			`status: ${result.status}${result.reason ? ` (${result.reason})` : ""}`, releaseUpdateHint()].join("\n");
+	}
 	const lines = [
 		"Pix update",
 		`current: ${result.packageName} v${result.currentVersion}`,
@@ -286,6 +296,7 @@ export function formatGlobalPiCheck(result: GlobalPiCheckResult): string {
 }
 
 export function formatPixStartupUpdateDialog(result: PixUpdateCheckResult): string {
+	if (isReleaseInstall(result.packageRoot)) return formatPixUpdateCheck(result);
 	const lines = [
 		"A new Pix version is available.",
 		`current: ${result.packageName} v${result.currentVersion}`,
@@ -317,6 +328,7 @@ export function getGlobalPiUpdateCommand(targetVersion: string, pixPackageRoot =
 }
 
 function getGlobalPackageUpdateCommand(packageName: string, version: string | undefined, packageRoot: string): PixSelfUpdateCommand | undefined {
+	if (isReleaseInstall(packageRoot)) return undefined;
 	if (!packageRootLooksPackageManaged(packageRoot)) return undefined;
 
 	const installSpec = version ? `${packageName}@${version}` : packageName;
@@ -355,6 +367,10 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 
 	const check = await pixUpdateDeps.checkPixUpdate();
 	console.log(formatPixUpdateCheck(check));
+	if (isReleaseInstall(check.packageRoot)) {
+		// Portable/Desktop installs are replaced as a unit. Even --force must not modify global packages.
+		return options.checkOnly && check.status !== "unknown" && check.status !== "unavailable" ? 0 : 1;
+	}
 	let globalPiCheck = checkGlobalPiInstall(check.packageRoot);
 	console.log(`\n${formatGlobalPiCheck(globalPiCheck)}`);
 

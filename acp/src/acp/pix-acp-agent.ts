@@ -3317,6 +3317,7 @@ async function formatPixUpdateReport(argumentsText: string): Promise<string> {
 		parsePixUpdateArgs(argv: readonly string[]): { help: boolean; force: boolean };
 		pixUpdateUsage(): string;
 		checkPixUpdate(): Promise<{ packageRoot: string }>;
+		isReleaseInstall(packageRoot: string): boolean;
 		checkGlobalPiInstall(packageRoot: string): unknown;
 		formatPixUpdateCheck(result: unknown): string;
 		formatGlobalPiCheck(result: unknown): string;
@@ -3335,6 +3336,7 @@ async function formatPixUpdateReport(argumentsText: string): Promise<string> {
 	}
 	if (options.help) return update.pixUpdateUsage();
 	const result = await update.checkPixUpdate();
+	if (update.isReleaseInstall(result.packageRoot)) return update.formatPixUpdateCheck(result);
 	const globalPi = update.checkGlobalPiInstall(result.packageRoot);
 	const forceHint = options.force
 		? "\n\n/update is check-only. To force a reinstall, run `pix update --force` in your shell and restart Pix."

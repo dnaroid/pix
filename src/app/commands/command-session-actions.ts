@@ -17,6 +17,7 @@ import { formatAccountUsageReport, queryAccountUsageReport } from "../model/mode
 import type { SessionModel } from "../types.js";
 import {
 	checkGlobalPiInstall,
+	isReleaseInstall,
 	checkPixUpdate,
 	formatGlobalPiCheck,
 	formatPixUpdateCheck,
@@ -287,6 +288,14 @@ export class SessionCommandActions {
 
 		const result = await checkPixUpdate();
 		if (!isCommandScopeActive(this.host, scope)) return;
+		if (isReleaseInstall(result.packageRoot)) {
+			this.host.addEntry({ id: createId("system"), kind: "system", text: formatPixUpdateCheck(result) });
+			this.host.setSessionStatus(runtime.session);
+			if (result.status === "newer") this.host.toast.info("A new Pix release is available");
+			else if (result.status === "current") this.host.toast.success("Pix is up to date");
+			else this.host.toast.warning("Pix update check incomplete");
+			return;
+		}
 		const globalPiResult = checkGlobalPiInstall(result.packageRoot);
 		const forceHint = options.force ? "\n\n/update is check-only. To force a reinstall, run `pix update --force` in your shell and restart Pix." : "";
 		this.host.addEntry({

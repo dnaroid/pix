@@ -123,7 +123,25 @@ Later files override earlier ones. Disable modules with `disabledModules`, `PI_T
 
 ## Install
 
+### Download a ready-to-run release
+
+[GitHub Releases](https://github.com/dnaroid/pix/releases) contains published
+portable TUI archives and Pix Desktop installers when a release has completed
+the native build/verification pipeline. Choose **TUI** or **Desktop** and your
+OS/CPU: Windows x64, macOS Apple Silicon, macOS Intel, or Linux x64.
+
+These packages contain Node.js and the Pix/ACP runtime; no separate Node/npm
+installation is required to launch them. For TUI, extract the whole archive and
+run `pix` (macOS/Linux) or `pix.cmd` (Windows) from your terminal. For Desktop,
+use the `.dmg`, Windows installer, `.AppImage`, or `.deb` for your system.
+Git, tools needed by your projects, provider credentials and optional voice/
+clipboard helpers are separate. Unsigned/ad-hoc builds may show OS warnings;
+check the release notes before installing. See the [release guide](docs/release.md)
+for building, signing, checksums and updates. npm installation remains available below.
+
 ### Requirements
+
+The Node/npm requirements below apply to the npm/source installation channel.
 
 - **Node.js `>=22.19.0 <25`**
 - macOS, Linux, or Windows terminal with 256-color support

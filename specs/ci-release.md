@@ -9,8 +9,9 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 - `build-and-test` runs on Ubuntu, macOS, and Windows and is the cross-platform correctness gate.
 - The full packed-artifact smoke test runs on Ubuntu and verifies the tarball payload plus installed CLI behavior.
 - Windows runs the smaller packed CLI smoke path: build, `npm pack`, isolated install, required entry/build files, and non-interactive CLI commands.
-- A separate macOS package-smoke job is not required unless packaging gains macOS-specific behavior.
+- A separate macOS **npm** package-smoke job is not required. Portable/Tauri artifacts have their own native smoke matrix.
 - Publishing remains gated on the package-smoke job and uses npm trusted publishing through GitHub OIDC.
+- GitHub Release builds, shared application versions, signing, complete-asset gates and portable update behavior are governed by [`release-distribution.md`](release-distribution.md). The existing npm publish job remains independent; the draft GitHub Release waits for both npm publication and all native package builds.
 
 ## Node.js version contract
 

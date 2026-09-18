@@ -1,6 +1,6 @@
 {
   "name": "pix-desktop",
-  "version": "0.1.0",
+  "version": "1.0.50",
   "private": true,
   "type": "module",
   "scripts": {

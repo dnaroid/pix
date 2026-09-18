@@ -45,7 +45,8 @@ echo "→ Running release check before bump..."
 npm run release:check
 
 echo "→ Bumping ${BUMP} version..."
-NEW_VERSION=$(npm version "$BUMP" -m "chore(release): %s")
+npm version "$BUMP" -m "chore(release): %s"
+NEW_VERSION="v$(node -p "require('./package.json').version")"
 echo "  Version: ${NEW_VERSION}"
 
 echo "→ Running smoke-test on packed artifact..."
@@ -55,4 +56,4 @@ echo "→ Pushing ${RELEASE_BRANCH} and ${NEW_VERSION}..."
 git push "$REMOTE" "$RELEASE_BRANCH"
 git push "$REMOTE" "$NEW_VERSION"
 
-echo "✓ Pushed ${NEW_VERSION} — CI will build, smoke-test, and publish to npm"
+echo "✓ Pushed ${NEW_VERSION} — CI will verify npm and desktop/portable packages, publish npm, and prepare a draft GitHub Release"

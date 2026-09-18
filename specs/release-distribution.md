@@ -1,0 +1,241 @@
+# GitHub Release distribution
+
+## Scope and version
+
+Pix ships standalone Node runtime payloads in portable TUI archives and Tauri
+Desktop installers. The two variants share preparation code, not an identical
+file inventory: only Desktop includes ACP. npm remains a separate supported channel.
+Root `package.json` is the authoritative application version. ACP, Desktop,
+Tauri, the Pix Cargo package, and the three npm lockfile root records share it.
+`npm version` runs `scripts/release/sync-version.mjs --stage` before creating its
+commit/tag; `release:version:check` rejects drift. Releases use stable `vX.Y.Z`
+tags and must respect MSI version bounds (255.255.65535). The external tools
+suite is not independently version-bumped.
+
+## Payload invariants
+
+- Targets are `linux-x64`, `macos-arm64`, `macos-x64`, and `windows-x64`. Packaging
+  runs natively on each target. Unsupported/cross-host targets fail before output
+  cleanup or dependency installation.
+- Node is downloaded from the official HTTPS distribution for `.node-version`.
+  The exact filename must appear once in `SHASUMS256.txt`; its SHA-256 is verified
+  before extraction. `release.json` records the source archive hash and version.
+  This is not a GPG verification or an asset attestation.
+- Release preparation removes only the owned compiler outputs (`dist`, and
+  `acp/dist` when building Desktop) before compilation. Stale Vosk models and
+  obsolete emitted JavaScript must not survive a previous local build. Source
+  files and the user's `models/` directory are not deleted.
+- Pix uses the actual `npm pack` allowlist and locked production dependencies,
+  including required optional platform packages. Desktop additionally installs
+  ACP's locked dependencies before conservative deduplication. Development
+  node_modules, HOME, credentials and the checkout are never copied into the
+  payload. Runtime compilers/loaders such as esbuild and jiti are retained.
+- Layout is `pix/runtime/node[.exe]`, `pix/app/{bin,dist,node_modules,...}` and
+  (Desktop only) `pix/app/acp/{dist,node_modules,...}`. Preserve the relative relationship between
+  ACP, Pix dist and the bundled tools suite. Native addons and dependency license
+  files are retained; `DEPENDENCIES.json` inventories shipped package metadata.
+- The shell/CMD launcher selects the absolute bundled Node path, prepends its
+  directory to PATH for child tools, preserves the caller's working directory,
+  forwards arguments, and propagates exit status.
+- Standalone means no separately installed Node/npm for Pix itself. Git, project
+  toolchains, optional language servers, voice/clipboard helpers and provider
+  credentials remain external requirements as applicable.
+
+## Payload optimization and size gates
+
+Preparation writes the TUI variant to `.artifacts/releases/<target>/pix` and the
+Desktop variant to `.artifacts/releases/<target>/desktop/pix`. Their `release.json`
+uses format 2 and declares `variant: tui` or `desktop`. `--tui-only` skips building
+and installing ACP entirely. The Desktop wrapper refuses a TUI or stale payload.
+
+Pruning is restricted to known native package families (`@esbuild/*`,
+`@lydell/node-pty-*`, and `@mariozechner/clipboard-*`) and Pi TUI's Darwin
+modifier prebuilds. Keep the actual target, macOS universal clipboard fallback,
+and glibc clipboard builds for the Linux target. Never infer removals from
+arbitrary filenames containing OS names. Missing target esbuild versions fail
+before pruning; smoke executes every remaining esbuild instance to prove native
+resolution after relocation. Debug JavaScript/declaration source maps are removed;
+runtime TypeScript, declarations, WASM, data, documentation and licenses stay.
+
+Only top-level ACP packages whose files, executable modes and complete declared
+dependency graphs match their parent installation can be removed. Graph comparison
+includes optional/peer dependencies, nested shrinkwrapped packages and cycles.
+Same package name/version is not sufficient. Different contents or dependency
+contexts remain isolated. Unix and Windows npm bin shims are repointed before
+removal; package loading then uses normal parent node_modules resolution. No
+directory links, dependency upgrades or lockfile edits are used for deduplication.
+
+`SIZE.json` records logical regular-file bytes/counts and section totals.
+`OPTIMIZATIONS.json` records removed platform packages/maps and shared dependencies.
+The size budgets in `scripts/release/size-budget.mjs` are 384 MiB for the TUI
+payload and 512 MiB for the Desktop backend payload, and 160/240 MiB respectively
+for their compressed archives/installers. Limits fail closed, not auto-adjusted
+to whatever a build produces. A budget change requires review. The installed
+GUI also contains the native host and signing metadata beyond its backend payload.
+
+Audits reject legacy Vosk files, ACP inside TUI, remaining foreign packages,
+and dangling/external links. Audits and size gates run before bundling and again
+on extracted/installed payloads. CI stores size reports separately as `size-*`
+artifacts, excluded from the final `release-*` asset download and release manifest.
+
+### Measured size baseline (2026-09-18)
+
+This is a historical local-build measurement, not a promised size for every OS
+or a claim that these files were published. Both measurements used Pix `1.0.50`
+on `macos-arm64`, with bundled Node `24.21.0` and Pi SDK `0.85.1`. The packaging
+changes were in the working tree based on `0a887c7`; that commit alone does not
+contain the implementation. macOS signing was ad-hoc, without notarization.
+
+| Measurement | Before (MiB) | After (MiB) | Reduction |
+| --- | ---: | ---: | ---: |
+| TUI `pix-tui-1.0.50-macos-arm64.tar.gz` | 395.03 | 72.83 | 81.56% |
+| Desktop `pix-desktop-1.0.50-macos-arm64.dmg` | 404.66 | 117.60 | 70.94% |
+| Unpacked TUI regular files | 1174.07 | 254.85 | 78.29% |
+| Complete Desktop `.app` regular files | 1216.86 | 426.34 | 64.96% |
+
+MiB means 1,048,576 bytes. Downloads are measured by archive file size; unpacked
+sizes sum regular-file lengths without following symlinks, not filesystem block
+allocation or Finder's reported disk usage. The optimized Desktop backend payload
+alone was about 388.8 MiB; the full `.app` additionally includes its native host
+and signing metadata. Do not compare its whole-app size to the backend-only budget.
+
+#### Causes of the original oversized packages
+
+The initial shared payload included Desktop ACP in the TUI archive. Two independent
+production installs also carried overlapping dependencies in `app/node_modules`
+and `app/acp/node_modules`. Nested Pi SDK dependency trees contained esbuild
+variants for 26 OS/CPU combinations; off-target esbuild packages alone occupied
+about 545.9 MiB across those two trees. A stale
+`dist/models/vosk/vosk-model-small-ru-0.22` added about 87.1 MiB even though current
+dictation no longer used it. These categories overlap and must not be added as
+independent savings. Production-only npm installation did not by itself guarantee
+a target-minimal artifact, and compilation over an existing `dist` did not remove
+obsolete assets.
+
+The corrected pipeline separates TUI/Desktop inventories, cleans compiler output,
+prunes known foreign binaries and debug maps, and conservatively shares equivalent
+ACP packages. This run shared 50 packages, saving 12,316,322 bytes (11.75 MiB)
+after pruning. It did **not** eliminate every duplicate or collapse all Pi SDK
+copies. Further savings must preserve the dependency-context rules above; removing
+an entire ACP `node_modules` or every `.ts`/`.wasm` file is not a valid shortcut.
+
+#### Evidence and repeat verification
+
+The optimization run completed `npm run release:build -- macos-arm64` with exit
+code 0. Both extracted TUI and the native GUI copied from its read-only mounted
+DMG passed isolated smoke checks: pinned Node, native PTY, extensions and retained
+esbuild; Desktop also passed ACP initialize/new/close. The recorded regression run
+passed 1209 root tests, 25 release tests, npm package smoke and workflow actionlint.
+Windows, Linux and macOS Intel were not executed in this local optimization run;
+their support still requires the corresponding native CI results. Real-certificate
+signing/notarization was not tested by the ad-hoc build.
+
+Local evidence was saved in `.artifacts/release-size-comparison.json`,
+`.artifacts/size-build.log`, `.artifacts/size-build.exit`,
+`.artifacts/size-check.log` and `.artifacts/size-npm-smoke.log`, plus each variant's
+`SIZE.json` and `OPTIMIZATIONS.json`. These are generated local evidence, not durable
+version-controlled dependencies of this spec; the dated table above preserves the
+baseline when artifacts are cleaned. Subsequent measurements must record their own
+version, target and signing mode rather than treating this snapshot as current.
+
+To validate a later packaging change on a supported native host, run
+`npm run test:release` and `npm run release:build -- <target>`. Compare actual
+archive bytes and both payload reports, then retain the successful artifact smoke
+results. Use `npm run release:smoke -- <target>` and
+`npm run release:smoke:desktop -- <target>` to recheck existing artifacts. Never
+raise size budgets or remove smoke assertions merely to make an oversized build pass.
+
+## Desktop runtime boundary
+
+`tauri.release.conf.json` enables bundling and copies the prepared payload to
+`pix-runtime/` in application resources. Release builds enable the explicit
+`bundled-runtime` Cargo feature. In that mode `BackendRuntime` resolves Node,
+ACP and all three host extensions only from Tauri's resource directory. Missing
+files fail with a reinstall diagnostic: never fall back to a build-time checkout,
+system Node or development entry overrides. The inherited Pi-entry override is
+removed when starting bundled ACP. Environment updates are child-scoped.
+
+Without this feature, existing development/watch workflows retain source paths
+and explicit `PIX_ACP_*` overrides. The base Tauri config stays unbundled for
+those workflows; distributable builds use the release orchestrator, not plain
+`tauri build` or `npm run build:desktop`.
+
+macOS release bundles declare a minimum version of 13.5, matching the Node 24
+binary's deployment target. The release builder sets `CI=true` for unattended
+DMG generation without Finder/AppleScript customization, including local builds.
+
+Backend resolution/spawning stays within the existing blocking-worker boundary.
+Generation, pipes, shutdown, and per-window ownership are unchanged. The packaged
+`--release-smoke-test` diagnostic requires the offline, isolated harness and
+performs verification on a worker thread after native Tauri/WebView setup.
+
+## Artifacts, gates and publishing
+
+The ten required assets are four TUI archives, two macOS DMGs, Windows NSIS EXE
+and MSI, and Linux AppImage and DEB. Names include application version, target,
+and `tui` or `desktop`. The final publish job rejects missing/unexpected assets
+and adds an alphabetically ordered `SHA256SUMS` file.
+
+The existing correctness matrix and npm package smoke gates remain. In
+`publish.yml`, `build-release` runs after package smoke on tag pushes or manual
+dispatch; each native runner prepares, packages, and tests its artifacts before
+upload. `github-release` waits for every release build and npm publication,
+has the only new `contents: write` permission, validates the tag and repository,
+and creates/updates a draft release. Reruns may replace draft assets but never
+already published assets. The maintainer reviews and publishes the complete
+draft. Manual dispatch only produces Actions artifacts and cannot publish npm
+or create a GitHub Release. Ordinary branch pushes/PRs run tests, not publishing.
+
+## Signing and updates
+
+macOS payload Mach-O files are signed inside-out before archiving/bundling. With
+no identity they are ad-hoc signed. The embedded Node executable alone receives
+Node-specific JIT/native-addon entitlements; the GUI uses separate entitlements.
+Optional Apple Developer ID and notarization credentials and Windows PFX signing
+credentials are supplied as Actions secrets, imported into temporary runner
+stores, and cleaned with `always()` steps. They are never embedded in artifacts.
+Absent certificates do not imply trusted signing or warning-free installation.
+
+`.pix-portable.json` marks a release installation. Presence, even with damaged
+JSON, disables package-manager self-mutation. CLI, TUI and ACP update reports use
+the stable GitHub Releases channel and instruct replacement of the whole package.
+`--force` cannot mutate global Pix/Pi packages. npm installs retain their existing
+npm update/ABI-alignment behavior. Settings and sessions stay in the user profile.
+There is no automatic binary replacement, Tauri Updater feed, or updater key in
+this first distribution contract.
+
+## Verification
+
+`test:release` covers targets, checksums, complete-asset gates, version propagation,
+published-release protection, stale output cleanup, platform filtering, conservative
+dependency sharing, bin shims, and strict size/content gates.
+`tests/release-update.test.ts` covers corrupt
+portable markers, no mutation under `node_modules`, force behavior and stable
+GitHub metadata. Rust `backend_runtime` tests cover relocation, missing resources
+and development overrides.
+
+Every built archive is extracted outside the checkout into paths with spaces.
+The smoke harness isolates the user profile, allowlists only OS/session environment
+variables (no provider/signing credentials), removes development Node/npm paths,
+adds a failing system-Node sentinel, invokes the real launcher, and runs the exact pinned
+bundled Node. It loads native clipboard/PTY dependencies (PTY execution asserts
+explicit output), bundled JS/TS extensions and retained esbuild binaries. Desktop
+additionally runs real ACP initialize/new/close without a model request; TUI
+asserts that ACP is absent. GUI checks use an app copied from a read-only mounted DMG, extracted DEB/AppImage
+or a temporary NSIS installation, and boot the native application diagnostic.
+The native check must produce the backend completion marker, not merely exit
+successfully. macOS executable paths are canonicalized rather than weakening
+Tauri's protection against symlink-based resource resolution.
+All process ceilings are deadlock safeguards, never speed assertions. Cross-OS
+support is verified by the native CI jobs, not inferred from a successful macOS
+build. Signing with real certificates still requires a credentialed release run.
+
+## Implementation
+
+- `scripts/release/`: preparation, Node downloads, signing, installers, smoke and publication.
+- `.github/workflows/publish.yml`: native matrix and publication dependencies.
+- `desktop/src-tauri/src/backend_runtime.rs`, `release_smoke.rs`, `lib.rs` and release config: resource-backed host.
+- `src/app/cli/release-update.ts`, `update.ts`, TUI command actions and ACP update report: distribution-aware update UX.
+- `scripts/release/test/packaging.test.mjs`, `tests/release-update.test.ts`, Rust module tests: deterministic guards.
+- `scripts/release/{prune,dedupe,payload-files,size-budget}.mjs` and
+  `scripts/release/test/optimization.test.mjs`: bounded runtime inventory and size regressions.
