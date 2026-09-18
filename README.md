@@ -134,6 +134,11 @@ These packages contain Node.js and the Pix/ACP runtime; no separate Node/npm
 installation is required to launch them. For TUI, extract the whole archive and
 run `pix` (macOS/Linux) or `pix.cmd` (Windows) from your terminal. For Desktop,
 use the `.dmg`, Windows installer, `.AppImage`, or `.deb` for your system.
+Portable TUI installs can later update themselves with `pix update`: the command
+downloads the matching GitHub Release archive, verifies `SHA256SUMS`, smoke-tests
+the staged runtime, and replaces the installation after the updater exits.
+Packaged Desktop checks the signed Tauri update feed on startup and offers an
+Update/Restart flow in the app; development builds do not run that updater.
 Git, tools needed by your projects, provider credentials and optional voice/
 clipboard helpers are separate. Unsigned/ad-hoc builds may show OS warnings;
 check the release notes before installing. See the [release guide](docs/release.md)

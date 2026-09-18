@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { expectedDigest, nodeArchive } from "../node-runtime.mjs";
 import { hostTarget, root, targetInfo, targets, version } from "../common.mjs";
-import { checksums, expectedAssets } from "../checksums.mjs";
+import { checksums, expectedAssets, expectedBuildAssets } from "../checksums.mjs";
 import { syncVersion, versionEdits } from "../sync-version.mjs";
 import { assertDraft, findRelease } from "../publish-github.mjs";
 
@@ -44,13 +44,20 @@ test("official checksums require an exact unique filename, not a substring", () 
 test("checksums reject incomplete or unexpected releases and hash the complete set deterministically", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "pix-checksums-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  const buildFiles = expectedBuildAssets("1.2.3");
   const files = expectedAssets("1.2.3");
-  assert.equal(files.length, 10);
+  assert.equal(buildFiles.length, 16);
+  assert.equal(files.length, 17);
   assert.equal(new Set(files).size, files.length);
   await assert.rejects(checksums(directory, "1.2.3"), /Incomplete/u);
-  for (const file of files) await writeFile(join(directory, file), `fixture:${file}`);
+  for (const file of buildFiles) await writeFile(join(directory, file), file.endsWith(".sig") ? `signature:${file}` : `fixture:${file}`);
   await checksums(directory, "1.2.3");
-  const expected = files.map((file) => `${createHash("sha256").update(`fixture:${file}`).digest("hex")}  ${file}`).join("\n") + "\n";
+  const latest = JSON.parse(await readFile(join(directory, "latest.json"), "utf8"));
+  assert.equal(latest.version, "1.2.3");
+  assert.deepEqual(Object.keys(latest.platforms).sort(), ["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"]);
+  assert.match(latest.platforms["windows-x86_64"].url, /pix-desktop-1\.2\.3-windows-x64-setup\.exe$/u);
+  assert.equal(latest.platforms["linux-x86_64"].signature, "signature:pix-desktop-1.2.3-linux-x64.AppImage.sig");
+  const expected = (await Promise.all(files.map(async (file) => `${createHash("sha256").update(await readFile(join(directory, file))).digest("hex")}  ${file}`))).join("\n") + "\n";
   assert.equal(await readFile(join(directory, "SHA256SUMS"), "utf8"), expected);
   await checksums(directory, "1.2.3");
   assert.equal(await readFile(join(directory, "SHA256SUMS"), "utf8"), expected);

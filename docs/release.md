@@ -54,6 +54,25 @@ Pix/ACP/dependency change. `release:smoke` and `release:smoke:desktop` rerun che
 against already built artifacts. These harnesses create temporary user profiles;
 do not invoke `verify.mjs` or the native diagnostic directly with your real HOME.
 
+Desktop release builds also require the Tauri updater signing private key. CI
+reads it from the `TAURI_SIGNING_PRIVATE_KEY` repository secret. A local release
+can provide that environment variable or `TAURI_SIGNING_PRIVATE_KEY_PATH`; the
+release helper also recognizes the ignored local path
+`.artifacts/release-signing/pix-updater.key`. Never commit the private key, and
+keep a durable secure backup: existing Desktop installations cannot accept future
+updates signed by an unrelated replacement key.
+
+For this repository the key pair has already been generated locally and the
+public half is embedded in the release config. Configure Actions with the same
+private key before pushing an updater-enabled release tag:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < .artifacts/release-signing/pix-updater.key
+```
+
+Do not generate a replacement key merely because the CI secret is missing; that
+would strand clients that already trust the committed public key.
+
 ### Package contents and size checks
 
 The TUI archive includes Pix and its Node runtime, **not ACP**. The Desktop
@@ -94,6 +113,9 @@ The draft is intentional: an unsigned or incomplete first build must not silentl
 become the public latest version. Reruns can replace draft assets, but the release
 script refuses to overwrite published assets. Publish a new version for fixes.
 Checksums detect damaged downloads; they do not replace trusted code signatures.
+The final release also contains signed Tauri updater artifacts plus `latest.json`;
+the latter is generated only after all four native jobs have supplied the exact
+expected asset set.
 
 ### Optional signing secrets
 
@@ -120,6 +142,14 @@ Keep keys out of the repository and out of release files. Official references:
 [macOS signing](https://v2.tauri.app/distribute/sign/macos/),
 [Windows signing](https://v2.tauri.app/distribute/sign/windows/), and
 [Tauri resource bundling](https://v2.tauri.app/develop/resources/).
+
+Tauri updater signing is independent from those OS identities. Configure
+`TAURI_SIGNING_PRIVATE_KEY` with the private minisign-compatible key whose public
+half is embedded in `tauri.release.conf.json`. The release matrix emits `.sig`
+files for Windows NSIS/Linux AppImage and signed `.app.tar.gz` updater bundles for
+both macOS architectures. `latest.json` maps the four Tauri targets to those
+files. OS code-signing warnings may still occur when Developer ID/Authenticode
+credentials are absent even though the updater signature itself is valid.
 
 ## Local release check
 
@@ -221,12 +251,21 @@ Some modules have optional runtime dependencies or host services:
 ## Update UX
 
 Portable TUI and packaged Desktop detect their `.pix-portable.json` marker and
-check stable GitHub Releases instead of npm. `/update`, `pix update --check`, and
-the Desktop report point to a complete replacement download. `pix update` or
-`--force` cannot modify global npm/Pi packages for these installs. Close Pix before
-replacing the complete package; sessions/settings remain in the user profile.
-Automatic binary replacement/Tauri Updater is not enabled in this first release
-pipeline. The following package-manager behavior applies only to npm installs.
+check stable GitHub Releases instead of npm. `/update` and `pix update --check`
+are non-mutating checks. For a portable TUI install, `pix update` downloads the
+exact OS/CPU archive and `SHA256SUMS`, verifies the digest, validates and smoke
+tests the staged runtime, then schedules a sibling-directory swap after the
+updater process exits. The swap keeps a rollback backup until the new tree takes
+the original path. A damaged marker disables automatic replacement rather than
+falling back to npm.
+
+Packaged Desktop uses Tauri Updater instead of the backend CLI. Production builds
+check `latest.json` at startup and show an Update banner when a newer signed
+version exists. Clicking Update downloads/verifies/installs it with progress;
+macOS/Linux then offer Restart, while Windows lets the passive installer handle
+the restart path. Development builds do not perform this check. Desktop and TUI
+release updates never mutate global npm/Pi packages. The following package-manager
+behavior applies only to npm installs.
 
 - `/update` inside Pix performs a non-mutating Pix update check and reports whether the global Pi package in the same package-manager prefix matches Pix's pinned Pi SDK version.
 - `pix update --check` performs the same compatibility check without a TTY and never mutates either package.

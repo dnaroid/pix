@@ -22,6 +22,8 @@ test("release matrix covers every supported native OS/CPU and follows correctnes
   assert.equal(upload.with["if-no-files-found"], "error");
   assert.equal(upload.with.path, ".artifacts/releases/${{ matrix.target }}/assets/*");
   assert.ok(build.steps.some((step) => step.with?.name === "size-${{ matrix.target }}"));
+  const releaseBuild = build.steps.find((step) => step.name === "Build and test portable TUI and GUI installers");
+  assert.match(releaseBuild.env.TAURI_SIGNING_PRIVATE_KEY, /secrets\.TAURI_SIGNING_PRIVATE_KEY/u);
 });
 
 test("manual builds cannot publish and only the final release job has contents-write permission", () => {
@@ -38,12 +40,17 @@ test("manual builds cannot publish and only the final release job has contents-w
   assert.ok(publisher.steps.some((step) => step.run?.includes("publish-github.mjs")));
 });
 
-test("release configuration includes a self-contained runtime and the bundled Node macOS floor", () => {
+test("release configuration includes the self-contained runtime and signed Desktop updater", () => {
   const config = JSON.parse(readFileSync(join(root, "desktop/src-tauri/tauri.release.conf.json"), "utf8"));
   assert.equal(config.bundle.active, true);
+  assert.equal(config.bundle.createUpdaterArtifacts, true);
   assert.deepEqual(config.bundle.resources, { "resources/pix-runtime/": "pix-runtime/" });
   assert.equal(config.bundle.macOS.minimumSystemVersion, "13.5");
+  assert.match(config.plugins.updater.pubkey, /^[A-Za-z0-9+/=]+$/u);
+  assert.deepEqual(config.plugins.updater.endpoints, ["https://github.com/dnaroid/pix/releases/latest/download/latest.json"]);
+  assert.equal(config.plugins.updater.windows.installMode, "passive");
   const build = readFileSync(join(root, "scripts/release/build-desktop.mjs"), "utf8");
   assert.match(build, /env\.CI = "true"/u);
   assert.match(build, /"bundled-runtime"/u);
+  assert.match(build, /TAURI_SIGNING_PRIVATE_KEY/u);
 });

@@ -12,6 +12,10 @@ This spec defines the release CI invariants for Pix. It covers the cross-platfor
 - A separate macOS **npm** package-smoke job is not required. Portable/Tauri artifacts have their own native smoke matrix.
 - Publishing remains gated on the package-smoke job and uses npm trusted publishing through GitHub OIDC.
 - GitHub Release builds, shared application versions, signing, complete-asset gates and portable update behavior are governed by [`release-distribution.md`](release-distribution.md). The existing npm publish job remains independent; the draft GitHub Release waits for both npm publication and all native package builds.
+- Desktop release jobs require the Tauri updater signing key and must emit the
+  signed updater sidecars/bundles expected for their native target. The final
+  release job generates `latest.json` only from a complete four-target matrix;
+  updater signing is independent from optional Apple/Windows OS code signing.
 
 ## Node.js version contract
 

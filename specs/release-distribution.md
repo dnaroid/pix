@@ -171,10 +171,14 @@ performs verification on a worker thread after native Tauri/WebView setup.
 
 ## Artifacts, gates and publishing
 
-The ten required assets are four TUI archives, two macOS DMGs, Windows NSIS EXE
-and MSI, and Linux AppImage and DEB. Names include application version, target,
-and `tui` or `desktop`. The final publish job rejects missing/unexpected assets
-and adds an alphabetically ordered `SHA256SUMS` file.
+The native matrix produces sixteen build assets. The original ten user-facing
+downloads remain four TUI archives, two macOS DMGs, Windows NSIS EXE and MSI,
+and Linux AppImage and DEB. Desktop updating adds two macOS `.app.tar.gz`
+updater bundles plus their signatures, the Windows NSIS signature, and the Linux
+AppImage signature. The final publish job rejects missing/unexpected assets,
+generates `latest.json` for Tauri Updater, then adds an alphabetically ordered
+`SHA256SUMS`. A complete updater-capable GitHub Release therefore contains
+eighteen files: sixteen matrix assets, `latest.json`, and `SHA256SUMS`.
 
 The existing correctness matrix and npm package smoke gates remain. In
 `publish.yml`, `build-release` runs after package smoke on tag pushes or manual
@@ -194,25 +198,74 @@ Node-specific JIT/native-addon entitlements; the GUI uses separate entitlements.
 Optional Apple Developer ID and notarization credentials and Windows PFX signing
 credentials are supplied as Actions secrets, imported into temporary runner
 stores, and cleaned with `always()` steps. They are never embedded in artifacts.
-Absent certificates do not imply trusted signing or warning-free installation.
+Absent certificates do not imply trusted OS signing or warning-free installation.
+
+Desktop update signing is a separate trust boundary from Apple Developer ID or
+Windows Authenticode signing. `createUpdaterArtifacts` is enabled for release
+builds. Tauri signs updater artifacts with the private key supplied only through
+`TAURI_SIGNING_PRIVATE_KEY` (or a local ignored key path); the corresponding
+public key is embedded in `tauri.release.conf.json`. `latest.json` references the
+published GitHub Release assets and their signatures for `linux-x86_64`,
+`windows-x86_64`, `darwin-aarch64`, and `darwin-x86_64`. Losing or replacing the
+private updater key without a migration path breaks update continuity for already
+installed Desktop clients. The private key must never be committed.
 
 `.pix-portable.json` marks a release installation. Presence, even with damaged
-JSON, disables package-manager self-mutation. CLI, TUI and ACP update reports use
-the stable GitHub Releases channel and instruct replacement of the whole package.
-`--force` cannot mutate global Pix/Pi packages. npm installs retain their existing
-npm update/ABI-alignment behavior. Settings and sessions stay in the user profile.
-There is no automatic binary replacement, Tauri Updater feed, or updater key in
-this first distribution contract.
+JSON, disables package-manager self-mutation. A valid format-2 marker additionally
+identifies `variant` and native `target`. npm installs retain their existing npm
+update/ABI-alignment behavior; `--force` on a release installation never mutates
+global Pix/Pi packages. Settings and sessions stay in the user profile.
+
+### Portable TUI updater
+
+`/update` inside the TUI remains a non-mutating check. `pix update --check` does
+the same from a shell. `pix update` on a valid portable TUI installation fetches
+the latest stable GitHub Release, selects the exact target archive, downloads it
+and `SHA256SUMS` with bounded byte counts, and requires exactly one matching
+SHA-256 entry. It never trusts a filename substring or npm metadata.
+
+The updater extracts into a temporary directory before touching the installation.
+ZIP extraction rejects absolute/traversal paths, backslashes, symlinks, and
+unsupported entry types. Tar extraction disallows preserved outside paths. The
+staged `release.json` and `.pix-portable.json` must match version, target, and TUI
+variant; all symlinks must resolve inside the staged tree. The exact bundled Node
+then runs the staged `verify.mjs` in an isolated offline profile, covering native
+PTY, extensions, and retained esbuild binaries.
+
+Only after verification is the tree copied to a sibling directory on the same
+filesystem. A detached helper, running from a temporary copy of the old bundled
+Node, waits for the invoking `pix update` process to exit. It renames the current
+installation to a sibling backup and the staged tree into the original path. If
+the second rename fails, it restores the backup. A successful swap deletes the
+backup and schedules cleanup of the temporary helper. Failures before the swap
+leave the current installation untouched. Desktop-marked payloads refuse this
+CLI replacement path and direct the user to the native updater.
+
+### Desktop updater
+
+Packaged production Desktop builds use Tauri Updater and check the static
+`latest.json` endpoint on startup. Development/watch builds do not run the update
+check. When a newer signed release exists, the UI shows a dismissible update
+banner; installation starts only after the user clicks **Update** and exposes
+download progress. Signature verification is performed by Tauri before install.
+Windows uses passive NSIS installation and may restart after the installer is
+launched. macOS/Linux expose **Restart** after replacement and relaunch through
+the process plugin. Failed checks or installs are retryable and never fall back to
+npm, ACP, the source checkout, or the portable-TUI replacement code.
 
 ## Verification
 
 `test:release` covers targets, checksums, complete-asset gates, version propagation,
 published-release protection, stale output cleanup, platform filtering, conservative
 dependency sharing, bin shims, and strict size/content gates.
-`tests/release-update.test.ts` covers corrupt
-portable markers, no mutation under `node_modules`, force behavior and stable
-GitHub metadata. Rust `backend_runtime` tests cover relocation, missing resources
-and development overrides.
+`tests/release-update.test.ts` covers corrupt portable markers, no npm mutation
+under `node_modules`, force behavior, stable GitHub metadata, exact asset/checksum
+selection, TUI/Desktop updater separation, and swap rollback. Desktop updater
+tests cover progress, install/restart, duplicate-install suppression, failure UX,
+and stale completion after disposal. Release packaging tests cover the exact
+signed updater asset set and generated four-platform `latest.json`. Rust
+`backend_runtime` tests cover relocation, missing resources and development
+overrides.
 
 Every built archive is extracted outside the checkout into paths with spaces.
 The smoke harness isolates the user profile, allowlists only OS/session environment
@@ -235,7 +288,11 @@ build. Signing with real certificates still requires a credentialed release run.
 - `scripts/release/`: preparation, Node downloads, signing, installers, smoke and publication.
 - `.github/workflows/publish.yml`: native matrix and publication dependencies.
 - `desktop/src-tauri/src/backend_runtime.rs`, `release_smoke.rs`, `lib.rs` and release config: resource-backed host.
-- `src/app/cli/release-update.ts`, `update.ts`, TUI command actions and ACP update report: distribution-aware update UX.
+- `src/app/cli/release-update.ts`, `portable-update.ts`,
+  `portable-update-helper.ts`, `update.ts`, TUI command actions and ACP update
+  report: distribution-aware checks and safe portable replacement.
+- `desktop/src/app/desktop-updater.svelte.ts`, `DesktopUpdateBanner.svelte`, the
+  Tauri updater/process plugins and release config: signed native GUI updates.
 - `scripts/release/test/packaging.test.mjs`, `tests/release-update.test.ts`, Rust module tests: deterministic guards.
 - `scripts/release/{prune,dedupe,payload-files,size-budget}.mjs` and
   `scripts/release/test/optimization.test.mjs`: bounded runtime inventory and size regressions.

@@ -2,6 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "resources": {
       "resources/pix-runtime/": "pix-runtime/"
     },
@@ -12,6 +13,17 @@
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
       "nsis": { "installMode": "currentUser" }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2REU4NjNGNTdCM0Q4N0UKUldSKzJMTlhQNGJlMWp2Rms3WE5CUjVWTCs3OW1NenByVTYrOHJ5Ry9iQkV3S3dSajVWREVDc3UK",
+      "endpoints": [
+        "https://github.com/dnaroid/pix/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

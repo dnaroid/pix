@@ -8,6 +8,7 @@
   import DesktopWorkbenchSurface from "./components/DesktopWorkbenchSurface.svelte";
   import DesktopOverlays from "./components/DesktopOverlays.svelte";
   import DesktopStatusBar from "./components/DesktopStatusBar.svelte";
+  import DesktopUpdateBanner from "./components/DesktopUpdateBanner.svelte";
   import { workbenchSessionTabId, type WorkbenchTabId } from "./lib/workbench-tabs";
   import { createTranscriptAttachmentController } from "./app/transcript-attachments";
   import { createTranscriptScrollController } from "./app/transcript-scroll.svelte";
@@ -37,6 +38,7 @@
     createDesktopAgentNotificationCoordinator,
     createDesktopNotificationService,
   } from "./lib/desktop-notifications";
+  import { createDesktopUpdater } from "./app/desktop-updater.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
@@ -70,6 +72,7 @@
 
   const errors = createErrorState();
   const reportError = errors.report;
+  const updater = createDesktopUpdater();
 
   const transcriptScroll = createTranscriptScrollController({
     activeSessionId: () => activeSessionId,
@@ -622,6 +625,7 @@
 
   onMount(() => installDesktopContextMenu({ reportError }));
   onMount(desktopLifecycle.start);
+  onMount(() => import.meta.env.PROD ? updater.start() : updater.dispose);
 
 </script>
 
@@ -647,3 +651,4 @@
 </div>
 
 <DesktopOverlays {...overlaysViewModel.props} />
+<DesktopUpdateBanner {updater} />

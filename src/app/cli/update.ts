@@ -4,7 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { fetchLatestReleaseVersion, isReleaseInstall, releaseUpdateHint } from "./release-update.js";
+import { fetchLatestReleaseVersion, isReleaseInstall, readReleaseInstallInfo, releaseUpdateHint } from "./release-update.js";
+import { schedulePortableTuiUpdate } from "./portable-update.js";
 export { isReleaseInstall } from "./release-update.js";
 
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
@@ -14,11 +15,13 @@ const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 type PixUpdateTestDeps = {
 	checkPixUpdate: typeof checkPixUpdate;
 	runCommand: typeof runCommand;
+	schedulePortableTuiUpdate: typeof schedulePortableTuiUpdate;
 };
 
 const defaultPixUpdateDeps: PixUpdateTestDeps = {
 	checkPixUpdate,
 	runCommand,
+	schedulePortableTuiUpdate,
 };
 
 let pixUpdateDeps = defaultPixUpdateDeps;
@@ -80,15 +83,16 @@ export type PiUpdateCheckOptions = PixUpdateCheckOptions & {
 export function pixUpdateUsage(): string {
 	return `Usage: pix update [--check] [--force]
 
-Check for or install the latest published Pix package and synchronize the global Pi CLI.
+Check for or install the latest Pix release for this installation channel.
 
 Options:
   --check    Only check Pix and global Pi; do not install anything
   --force    Reinstall Pix and its matching global Pi version
   -h, --help Show this help
 
-Inside the TUI, /update performs the same non-mutating check.
-Portable/Desktop GitHub Releases are replaced as a complete package; --force never changes global packages for those installations.
+Inside the TUI, /update performs the same non-mutating check. Run pix update in a shell to apply a portable TUI update.
+Portable TUI releases are downloaded, checksum-verified, smoke-tested, and atomically replaced after the updater exits.
+Desktop releases update through the native Pix Desktop updater. --force never changes global packages for release installations.
 The bundled skills payload under skills/ is copied into ~/.agents/skills on startup.
 The pi-tools-suite payload under external/pi-tools-suite is updated with Pix and linked into ~/.pi/agent/extensions on startup.`;
 }
@@ -232,9 +236,11 @@ async function checkPackageUpdate(packageInfo: PixPackageInfo, options: PixUpdat
 
 export function formatPixUpdateCheck(result: PixUpdateCheckResult): string {
 	if (isReleaseInstall(result.packageRoot)) {
-		return ["Pix update (GitHub Release)", `current: ${result.packageName} v${result.currentVersion}`,
+		const install = readReleaseInstallInfo(result.packageRoot);
+		return [`Pix update (${install?.variant === "desktop" ? "Desktop" : "portable TUI"} GitHub Release)`, `current: ${result.packageName} v${result.currentVersion}`,
 			...(result.latestVersion ? [`latest: ${result.latestVersion}`] : []),
-			`status: ${result.status}${result.reason ? ` (${result.reason})` : ""}`, releaseUpdateHint()].join("\n");
+			`status: ${result.status === "newer" ? "update available" : result.status === "current" ? "up to date" : result.status}${result.reason ? ` (${result.reason})` : ""}`,
+			releaseUpdateHint(result.packageRoot)].join("\n");
 	}
 	const lines = [
 		"Pix update",
@@ -368,8 +374,29 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 	const check = await pixUpdateDeps.checkPixUpdate();
 	console.log(formatPixUpdateCheck(check));
 	if (isReleaseInstall(check.packageRoot)) {
-		// Portable/Desktop installs are replaced as a unit. Even --force must not modify global packages.
-		return options.checkOnly && check.status !== "unknown" && check.status !== "unavailable" ? 0 : 1;
+		// Release installs are replaced as a unit. Even --force must never modify global packages.
+		if (options.checkOnly) return check.status !== "unknown" && check.status !== "unavailable" ? 0 : 1;
+		const install = readReleaseInstallInfo(check.packageRoot);
+		if (!install) {
+			console.error("Pix cannot safely self-update because its portable release marker is invalid. Download a fresh package from GitHub Releases.");
+			return 1;
+		}
+		if (install.variant === "desktop") {
+			console.error("This Pix backend belongs to Pix Desktop. Use the native Desktop update notification instead of the CLI updater.");
+			return 1;
+		}
+		if (check.status === "current" && !options.force) return 0;
+		if (["skipped", "unknown", "unavailable"].includes(check.status) && !options.force) return 1;
+		try {
+			const update = await pixUpdateDeps.schedulePortableTuiUpdate(check.packageRoot, check.currentVersion);
+			console.log(`Downloaded and verified Pix ${update.version} (${update.assetName}).`);
+			console.log("The portable installation will be replaced atomically after this updater process exits. Start `pix` again after the command returns.");
+			return 0;
+		} catch (error) {
+			console.error(`Portable Pix update failed before replacement: ${error instanceof Error ? error.message : String(error)}`);
+			console.error("The current installation was left unchanged.");
+			return 1;
+		}
 	}
 	let globalPiCheck = checkGlobalPiInstall(check.packageRoot);
 	console.log(`\n${formatGlobalPiCheck(globalPiCheck)}`);

@@ -1,4 +1,5 @@
-import { copyFile, cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hostTarget, nodeVersion, npm, outputPaths, readJson, root, targetInfo, version } from "./common.mjs";
@@ -22,6 +23,13 @@ export async function buildDesktop(name = hostTarget()) {
   env.CI = "true";
   for (const key of Object.keys(env)) if ((key.startsWith("APPLE_") || key.startsWith("TAURI_")) && !env[key]) delete env[key];
   if (process.platform === "darwin") env.APPLE_SIGNING_IDENTITY ||= "-";
+  if (!env.TAURI_SIGNING_PRIVATE_KEY) {
+    const configuredPath = env.TAURI_SIGNING_PRIVATE_KEY_PATH;
+    const localUpdaterKey = configuredPath || join(root, ".artifacts/release-signing/pix-updater.key");
+    if (existsSync(localUpdaterKey)) env.TAURI_SIGNING_PRIVATE_KEY = await readFile(localUpdaterKey, "utf8");
+    else throw new Error("TAURI_SIGNING_PRIVATE_KEY is required to build signed Desktop updater artifacts");
+  }
+  delete env.TAURI_SIGNING_PRIVATE_KEY_PATH;
   const configArgs = ["--config", "src-tauri/tauri.release.conf.json"];
   if (process.platform === "win32" && process.env.PIX_WINDOWS_CERTIFICATE_THUMBPRINT) {
     const signing = join(work, "windows-signing.json");
@@ -44,6 +52,23 @@ export async function buildDesktop(name = hostTarget()) {
     if (files.length !== 1) throw new Error(`Expected one ${extension} installer, found ${files.length}`);
     const destination = join(assets, `pix-desktop-${version()}-${name}${extension === ".exe" ? "-setup" : ""}${extension}`);
     await copyFile(join(bundleRoot, directory, files[0]), destination);
+    await checkArchive(destination, "desktop");
+    if ((process.platform === "linux" && extension === ".AppImage") || (process.platform === "win32" && extension === ".exe")) {
+      const signature = join(bundleRoot, directory, `${files[0]}.sig`);
+      if (!existsSync(signature)) throw new Error(`Missing Tauri updater signature: ${signature}`);
+      await copyFile(signature, `${destination}.sig`);
+    }
+  }
+  if (process.platform === "darwin") {
+    const directory = join(bundleRoot, "macos");
+    const updates = (await readdir(directory)).filter((file) => file.endsWith(".app.tar.gz"));
+    if (updates.length !== 1) throw new Error(`Expected one macOS updater bundle, found ${updates.length}`);
+    const source = join(directory, updates[0]);
+    const signature = `${source}.sig`;
+    if (!existsSync(signature)) throw new Error(`Missing Tauri updater signature: ${signature}`);
+    const destination = join(assets, `pix-desktop-${version()}-${name}-updater.tar.gz`);
+    await copyFile(source, destination);
+    await copyFile(signature, `${destination}.sig`);
     await checkArchive(destination, "desktop");
   }
   await smokeDesktop(name);

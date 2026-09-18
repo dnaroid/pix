@@ -185,6 +185,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npm run release:build -- ${{ matrix.target }}
       - name: Test native backend path resolution
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib backend_runtime
