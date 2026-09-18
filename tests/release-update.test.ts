@@ -94,6 +94,7 @@ test("portable release selection is exact and checksums reject ambiguity", () =>
     ],
   };
   assert.equal(portableTuiAssetName("2.0.1", "windows-x64"), "pix-tui-2.0.1-windows-x64.zip");
+  assert.throws(() => portableTuiAssetName("2.0.1", "macos-x64"), /Invalid release target/u);
   assert.deepEqual(portableReleaseAssets(release, "windows-x64"), { archive: release.assets[0], checksums: release.assets[1] });
   const digest = "a".repeat(64);
   assert.equal(parseSha256Sums(`${digest}  pix-tui-2.0.1-windows-x64.zip\n`, release.assets[0]!.name), digest);

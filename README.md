@@ -125,7 +125,7 @@ Later files override earlier ones. Disable modules with `disabledModules`, `PI_T
 [GitHub Releases](https://github.com/dnaroid/pix/releases) contains published
 portable TUI archives and Pix Desktop installers when a release has completed
 the native build/verification pipeline. Choose **TUI** or **Desktop** and your
-OS/CPU: Windows x64, macOS Apple Silicon, macOS Intel, or Linux x64.
+OS/CPU: Windows x64, macOS Apple Silicon, or Linux x64.
 
 These packages contain Node.js and the Pix/ACP runtime; no separate Node/npm
 installation is required to launch them. For TUI, extract the whole archive and

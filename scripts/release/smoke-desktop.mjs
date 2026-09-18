@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hostTarget, outputPaths, run, targetInfo, version } from "./common.mjs";
 import { smokePayload } from "./smoke.mjs";
+
+async function findInstalledPayload(root) {
+  const matches = [];
+  async function visit(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile() && entry.name === "release.json" && directory.endsWith("pix-runtime")) matches.push(directory);
+    }
+  }
+  await visit(root);
+  assert.equal(matches.length, 1, `Expected exactly one installed pix-runtime, found ${matches.length}: ${matches.join(", ")}`);
+  return matches[0];
+}
 
 export async function smokeDesktop(name = hostTarget()) {
   targetInfo(name);
@@ -35,7 +50,7 @@ export async function smokeDesktop(name = hostTarget()) {
       const extracted = join(scratch, "deb");
       await mkdir(extracted);
       run("dpkg-deb", ["-x", join(assets, `pix-desktop-${version()}-${name}.deb`), extracted]);
-      payload = join(extracted, "usr/lib/pix-desktop/pix-runtime");
+      payload = await findInstalledPayload(extracted);
       executable = join(extracted, "usr/bin/pix-desktop");
       // Also extract the portable GUI image. Do not hardcode its internal resource
       // directory: the native Tauri smoke below resolves resource_dir() from the

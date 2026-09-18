@@ -36,4 +36,13 @@ test("Linux AppImage smoke delegates resource lookup to the native Tauri host", 
   const smoke = await readFile(join(process.cwd(), "scripts/release/smoke-desktop.mjs"), "utf8");
   assert.match(smoke, /APPDIR: appdir/u);
   assert.doesNotMatch(smoke, /squashfs-root\/usr\/lib\/pix-desktop\/pix-runtime/u);
+  assert.match(smoke, /findInstalledPayload\(extracted\)/u);
+  assert.doesNotMatch(smoke, /join\(extracted, "usr\/lib\/pix-desktop\/pix-runtime"\)/u);
+});
+
+test("release probe exits explicitly after the success marker", async () => {
+  const probe = await readFile(join(process.cwd(), "scripts/release/probe.mjs"), "utf8");
+  const marker = probe.lastIndexOf("PIX_RELEASE_RUNTIME_OK");
+  const exit = probe.lastIndexOf("process.exit(0)");
+  assert.ok(marker >= 0 && exit > marker, "The one-shot probe must exit only after all verification succeeds");
 });

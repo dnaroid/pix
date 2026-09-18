@@ -12,7 +12,6 @@ TUI and Desktop installers. The contract is in
 | --- | --- | --- |
 | Windows x64 | `.zip` with `pix.cmd` | NSIS `-setup.exe` and `.msi` |
 | macOS Apple Silicon | `.tar.gz` with `pix` | `.dmg` |
-| macOS Intel | `.tar.gz` with `pix` | `.dmg` |
 | Linux x64 | `.tar.gz` with `pix` | `.AppImage` and `.deb` |
 
 Each download contains its own pinned Node.js and dependencies. Users do not need
@@ -101,10 +100,10 @@ and additionally exercise ACP and the native application for Desktop.
 
 ### CI and publishing
 
-The `Release` workflow uses native Ubuntu 22.04 x64, macOS 15 ARM64, macOS 15 Intel
-and Windows 2022 x64 runners. `Actions → Release → Run workflow` builds and tests
-all packages without publishing anything. The ten installers/archives are
-available as four Actions artifacts. On a version-tag push, the final job waits
+The `Release` workflow uses native Ubuntu 22.04 x64, macOS 15 ARM64 and Windows
+2022 x64 runners. `Actions → Release → Run workflow` builds and tests all packages
+without publishing anything. The eight user-facing installers/archives are
+available as three Actions artifacts. On a version-tag push, the final job waits
 for the full native matrix, validates the complete set, adds `SHA256SUMS`, and
 uploads everything to a draft release. Only then review
 the release notes/signing status and click **Publish release** in GitHub.
@@ -114,7 +113,7 @@ become the public latest version. Reruns can replace draft assets, but the relea
 script refuses to overwrite published assets. Publish a new version for fixes.
 Checksums detect damaged downloads; they do not replace trusted code signatures.
 The final release also contains signed Tauri updater artifacts plus `latest.json`;
-the latter is generated only after all four native jobs have supplied the exact
+the latter is generated only after all three native jobs have supplied the exact
 expected asset set.
 
 ### Optional signing secrets
@@ -171,7 +170,7 @@ The GitHub Actions workflows have two different responsibilities and they stay s
 - `check.yml` runs the cross-platform correctness matrix on pull requests and
   `master` pushes. It does not run on release tags.
 - `publish.yml` is release-only: a lightweight release-contract check followed by
-  the four native standalone package jobs and, for tag pushes, Draft GitHub Release creation.
+  the three native standalone package jobs and, for tag pushes, Draft GitHub Release creation.
 - Native release smoke remains mandatory because it validates the relocated TUI
   archive and installed Desktop application, not source or npm-package behavior.
 

@@ -11,7 +11,7 @@ import { syncVersion, versionEdits } from "../sync-version.mjs";
 import { assertDraft, findRelease } from "../publish-github.mjs";
 
 test("release matrix names explicit OS/CPU pairs and rejects cross-host dependency copying", () => {
-  assert.deepEqual(Object.keys(targets).sort(), ["linux-x64", "macos-arm64", "macos-x64", "windows-x64"]);
+  assert.deepEqual(Object.keys(targets).sort(), ["linux-x64", "macos-arm64", "windows-x64"]);
   const nativeTarget = Object.entries(targets).find(([, target]) => target.platform === process.platform && target.arch === process.arch)?.[0];
   if (nativeTarget) assert.equal(targetInfo(hostTarget()).arch, process.arch);
   else assert.throws(() => hostTarget(), /Unsupported release host/u);
@@ -46,15 +46,15 @@ test("checksums reject incomplete or unexpected releases and hash the complete s
   t.after(() => rm(directory, { recursive: true, force: true }));
   const buildFiles = expectedBuildAssets("1.2.3");
   const files = expectedAssets("1.2.3");
-  assert.equal(buildFiles.length, 16);
-  assert.equal(files.length, 17);
+  assert.equal(buildFiles.length, 12);
+  assert.equal(files.length, 13);
   assert.equal(new Set(files).size, files.length);
   await assert.rejects(checksums(directory, "1.2.3"), /Incomplete/u);
   for (const file of buildFiles) await writeFile(join(directory, file), file.endsWith(".sig") ? `signature:${file}` : `fixture:${file}`);
   await checksums(directory, "1.2.3");
   const latest = JSON.parse(await readFile(join(directory, "latest.json"), "utf8"));
   assert.equal(latest.version, "1.2.3");
-  assert.deepEqual(Object.keys(latest.platforms).sort(), ["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"]);
+  assert.deepEqual(Object.keys(latest.platforms).sort(), ["darwin-aarch64", "linux-x86_64", "windows-x86_64"]);
   assert.match(latest.platforms["windows-x86_64"].url, /pix-desktop-1\.2\.3-windows-x64-setup\.exe$/u);
   assert.equal(latest.platforms["linux-x86_64"].signature, "signature:pix-desktop-1.2.3-linux-x64.AppImage.sig");
   const expected = (await Promise.all(files.map(async (file) => `${createHash("sha256").update(await readFile(join(directory, file))).digest("hex")}  ${file}`))).join("\n") + "\n";

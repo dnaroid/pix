@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 export const PIX_RELEASES_URL = "https://github.com/dnaroid/pix/releases/latest";
 export const PIX_RELEASES_API_URL = "https://api.github.com/repos/dnaroid/pix/releases/latest";
-export const PIX_RELEASE_TARGETS = ["linux-x64", "macos-arm64", "macos-x64", "windows-x64"] as const;
+export const PIX_RELEASE_TARGETS = ["linux-x64", "macos-arm64", "windows-x64"] as const;
 
 export type ReleaseInstallVariant = "tui" | "desktop";
 

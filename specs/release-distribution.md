@@ -15,7 +15,7 @@ suite is not independently version-bumped.
 
 ## Payload invariants
 
-- Targets are `linux-x64`, `macos-arm64`, `macos-x64`, and `windows-x64`. Packaging
+- Targets are `linux-x64`, `macos-arm64`, and `windows-x64`. Packaging
   runs natively on each target. Unsupported/cross-host targets fail before output
   cleanup or dependency installation.
 - Node is downloaded from the official HTTPS distribution for `.node-version`.
@@ -129,8 +129,8 @@ esbuild; Desktop also passed ACP initialize/new/close. The recorded regression r
 passed 1209 root tests, 25 release tests and workflow actionlint. Historical local
 npm-smoke evidence may still exist under `.artifacts`, but npm is no longer a
 supported publication channel.
-Windows, Linux and macOS Intel were not executed in this local optimization run;
-their support still requires the corresponding native CI results. Real-certificate
+Windows and Linux were not executed in this local optimization run; their support
+still requires the corresponding native CI results. Real-certificate
 signing/notarization was not tested by the ad-hoc build.
 
 Local evidence was saved in `.artifacts/release-size-comparison.json`,
@@ -174,18 +174,18 @@ performs verification on a worker thread after native Tauri/WebView setup.
 
 ## Artifacts, gates and publishing
 
-The native matrix produces sixteen build assets. The original ten user-facing
-downloads remain four TUI archives, two macOS DMGs, Windows NSIS EXE and MSI,
-and Linux AppImage and DEB. Desktop updating adds two macOS `.app.tar.gz`
-updater bundles plus their signatures, the Windows NSIS signature, and the Linux
-AppImage signature. The final publish job rejects missing/unexpected assets,
+The native matrix produces twelve build assets. The eight user-facing downloads
+are three TUI archives, one macOS DMG, Windows NSIS EXE and MSI, and Linux
+AppImage and DEB. Desktop updating adds one macOS `.app.tar.gz` updater bundle
+plus its signature, the Windows NSIS signature, and the Linux AppImage signature.
+The final publish job rejects missing/unexpected assets,
 generates `latest.json` for Tauri Updater, then adds an alphabetically ordered
 `SHA256SUMS`. A complete updater-capable GitHub Release therefore contains
-eighteen files: sixteen matrix assets, `latest.json`, and `SHA256SUMS`.
+fourteen files: twelve matrix assets, `latest.json`, and `SHA256SUMS`.
 
 `check.yml` owns PR/master correctness checks and never runs on release tags.
 `publish.yml` is release-only. A lightweight `release-contract` job validates
-release tests and version/tag alignment, then `build-release` runs the four native
+release tests and version/tag alignment, then `build-release` runs the three native
 targets. Each runner prepares, packages, audits and smoke-tests its real artifacts
 before upload. `github-release` waits only for the native release matrix, has the
 only `contents: write` permission, validates the tag/repository, and creates or
@@ -209,7 +209,7 @@ builds. Tauri signs updater artifacts with the private key supplied only through
 `TAURI_SIGNING_PRIVATE_KEY` (or a local ignored key path); the corresponding
 public key is embedded in `tauri.release.conf.json`. `latest.json` references the
 published GitHub Release assets and their signatures for `linux-x86_64`,
-`windows-x86_64`, `darwin-aarch64`, and `darwin-x86_64`. Losing or replacing the
+`windows-x86_64` and `darwin-aarch64`. Losing or replacing the
 private updater key without a migration path breaks update continuity for already
 installed Desktop clients. The private key must never be committed.
 
@@ -266,7 +266,7 @@ under `node_modules`, force behavior, stable GitHub metadata, exact asset/checks
 selection, TUI/Desktop updater separation, and swap rollback. Desktop updater
 tests cover progress, install/restart, duplicate-install suppression, failure UX,
 and stale completion after disposal. Release packaging tests cover the exact
-signed updater asset set and generated four-platform `latest.json`. Rust
+signed updater asset set and generated three-platform `latest.json`. Rust
 `backend_runtime` tests cover relocation, missing resources and development
 overrides.
 
@@ -284,7 +284,14 @@ asserts that ACP is absent. GUI checks use an app copied from a read-only mounte
 or a temporary NSIS installation, and boot the native application diagnostic.
 Linux checks the DEB payload directly; for the AppImage it intentionally lets the
 native Tauri host resolve `resource_dir()` from the extracted AppDir instead of
-hardcoding an AppImage-internal resource path.
+hardcoding an AppImage-internal resource path. The DEB smoke likewise discovers
+the unique installed `pix-runtime/release.json` instead of assuming a particular
+Tauri Linux resource directory layout.
+
+The copied `verify.mjs` is a one-shot verifier. After all assertions (and Desktop
+ACP shutdown) succeed and it prints `PIX_RELEASE_RUNTIME_OK`, it exits explicitly.
+This avoids native dependency handles keeping Windows Node alive after successful
+verification; the explicit exit is never reached on an assertion/RPC failure.
 The native check must produce the backend completion marker, not merely exit
 successfully. macOS executable paths are canonicalized rather than weakening
 Tauri's protection against symlink-based resource resolution.

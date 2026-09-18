@@ -10,7 +10,6 @@ export const nodeVersion = () => readFileSync(join(root, ".node-version"), "utf8
 export const targets = {
   "linux-x64": { platform: "linux", arch: "x64", triple: "x86_64-unknown-linux-gnu", bundles: "appimage,deb" },
   "macos-arm64": { platform: "darwin", arch: "arm64", triple: "aarch64-apple-darwin", bundles: "app,dmg" },
-  "macos-x64": { platform: "darwin", arch: "x64", triple: "x86_64-apple-darwin", bundles: "app,dmg" },
   "windows-x64": { platform: "win32", arch: "x64", triple: "x86_64-pc-windows-msvc", bundles: "nsis,msi" },
 };
 

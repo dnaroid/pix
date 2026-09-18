@@ -33,7 +33,6 @@ export async function latestJson(directory, releaseVersion) {
     linux: `pix-desktop-${releaseVersion}-linux-x64.AppImage`,
     windows: `pix-desktop-${releaseVersion}-windows-x64-setup.exe`,
     macArm: `pix-desktop-${releaseVersion}-macos-arm64-updater.tar.gz`,
-    macIntel: `pix-desktop-${releaseVersion}-macos-x64-updater.tar.gz`,
   };
   const data = {
     version: releaseVersion,
@@ -42,7 +41,6 @@ export async function latestJson(directory, releaseVersion) {
       "linux-x86_64": { url: releaseUrl(releaseVersion, asset.linux), signature: await signature(directory, `${asset.linux}.sig`) },
       "windows-x86_64": { url: releaseUrl(releaseVersion, asset.windows), signature: await signature(directory, `${asset.windows}.sig`) },
       "darwin-aarch64": { url: releaseUrl(releaseVersion, asset.macArm), signature: await signature(directory, `${asset.macArm}.sig`) },
-      "darwin-x86_64": { url: releaseUrl(releaseVersion, asset.macIntel), signature: await signature(directory, `${asset.macIntel}.sig`) },
     },
   };
   await writeFile(join(directory, "latest.json"), `${JSON.stringify(data, null, 2)}\n`);

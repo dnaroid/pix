@@ -17,7 +17,7 @@ test("release matrix covers every supported native OS/CPU and follows correctnes
   assert.deepEqual(build.strategy.matrix.include.map((row) => row.target).sort(), Object.keys(targets).sort());
   assert.deepEqual(build.strategy.matrix.include.map((row) => [row.target, row.os]), [
     ["linux-x64", "ubuntu-22.04"], ["macos-arm64", "macos-15"],
-    ["macos-x64", "macos-15-intel"], ["windows-x64", "windows-2022"],
+    ["windows-x64", "windows-2022"],
   ]);
   const upload = build.steps.find((step) => step.with?.name === "release-${{ matrix.target }}");
   assert.equal(upload.with["if-no-files-found"], "error");

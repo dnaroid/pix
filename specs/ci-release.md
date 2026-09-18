@@ -15,7 +15,7 @@ remain true when CI or UI-QA tests change.
 - Browser QA E2E runs once on the pinned Ubuntu job, not again on the minimum-Node
   compatibility job.
 - `publish.yml` runs only for `v*` tags or manual dispatch. It has a lightweight
-  `release-contract` gate and the four-target native release matrix.
+  `release-contract` gate and the three-target native release matrix.
 - The native release matrix does not rerun standalone Rust backend unit tests
   after packaging: the installed Desktop smoke exercises the bundled backend on
   each target, while ordinary CI owns source-level Rust checks.
@@ -29,7 +29,7 @@ remain true when CI or UI-QA tests change.
   and portable update behavior are governed by [`release-distribution.md`](release-distribution.md).
 - Desktop release jobs require the Tauri updater signing key and must emit the
   signed updater sidecars/bundles expected for their native target. The final
-  release job generates `latest.json` only from a complete four-target matrix;
+  release job generates `latest.json` only from a complete three-target matrix;
   updater signing is independent from optional Apple/Windows OS code signing.
 
 ## Node.js version contract
