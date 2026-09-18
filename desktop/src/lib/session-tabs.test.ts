@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ListSessionsResponse, SessionInfo } from "@agentclientprotocol/sdk";
 import {
   buildTabSessions,
+  buildSessionTree,
   mergeRestoredSessionTabs,
   parseActiveSessionIds,
   replaceSessionTab,
@@ -33,6 +34,57 @@ describe("sessionIsFork", () => {
   it("reads the Pix fork marker from session-list metadata", () => {
     expect(sessionIsFork({ sessionId: "fork", cwd: "/tmp/project", _meta: { "pix.isFork": true } })).toBe(true);
     expect(sessionIsFork({ sessionId: "regular", cwd: "/tmp/project" })).toBe(false);
+  });
+});
+
+describe("buildSessionTree", () => {
+  const treeSession = (sessionId: string, updatedAt: string, parentSessionId?: unknown): SessionInfo => ({
+    ...session(sessionId),
+    updatedAt,
+    ...(parentSessionId === undefined ? {} : { _meta: { "pix.parentSessionId": parentSessionId } }),
+  });
+
+  it("sorts roots and siblings by descending activity and places children after their parent", () => {
+    const rows = buildSessionTree([
+      treeSession("older-root", "2025-01-01T00:00:00.000Z"),
+      treeSession("older-child", "2025-01-03T00:00:00.000Z", "older-root"),
+      treeSession("newer-child", "2025-01-04T00:00:00.000Z", "older-root"),
+      treeSession("newer-root", "2025-01-02T00:00:00.000Z"),
+    ]);
+    expect(rows.map((row) => [row.session.sessionId, row.treePrefix])).toEqual([
+      ["newer-root", ""],
+      ["older-root", ""],
+      ["newer-child", "   ├─"],
+      ["older-child", "   └─"],
+    ]);
+  });
+
+  it("draws continuation columns for arbitrarily nested forks", () => {
+    const rows = buildSessionTree([
+      treeSession("root", "2025-01-01T00:00:00.000Z"),
+      treeSession("first", "2025-01-03T00:00:00.000Z", "root"),
+      treeSession("second", "2025-01-02T00:00:00.000Z", "root"),
+      treeSession("nested", "2025-01-04T00:00:00.000Z", "first"),
+      treeSession("deep", "2025-01-05T00:00:00.000Z", "nested"),
+    ]);
+    expect(rows.map((row) => [row.session.sessionId, row.treePrefix])).toEqual([
+      ["root", ""],
+      ["first", "   ├─"],
+      ["nested", "   │  └─"],
+      ["deep", "   │     └─"],
+      ["second", "   └─"],
+    ]);
+  });
+
+  it("keeps orphaned, malformed and cyclic parent metadata visible as roots", () => {
+    const rows = buildSessionTree([
+      treeSession("orphan", "2025-01-04T00:00:00.000Z", "missing"),
+      treeSession("malformed", "2025-01-03T00:00:00.000Z", 42),
+      treeSession("cycle-a", "2025-01-02T00:00:00.000Z", "cycle-b"),
+      treeSession("cycle-b", "2025-01-01T00:00:00.000Z", "cycle-a"),
+    ]);
+    expect(rows.map((row) => row.session.sessionId)).toEqual(["orphan", "malformed", "cycle-a", "cycle-b"]);
+    expect(rows.map((row) => row.treePrefix)).toEqual(["", "", "", "   └─"]);
   });
 });
 

@@ -89,6 +89,7 @@
     taskStorageIndicatorError,
     activeTaskId,
     sessionReady,
+    gitAssistantReady,
     registrySnapshot,
     registryBackgroundSync,
     registryLoading,
@@ -149,6 +150,7 @@
     taskStorageIndicatorError: string | null;
     activeTaskId: string | null;
     sessionReady: boolean;
+    gitAssistantReady: boolean;
     registrySnapshot: RegistrySnapshot | undefined;
     registryBackgroundSync: RegistryBackgroundSyncState;
     registryLoading: boolean;
@@ -650,7 +652,7 @@
             actionId={gitActionId}
             llmActionId={gitLlmActionId}
             workflow={gitWorkflow}
-            {sessionReady}
+            {gitAssistantReady}
             onRefresh={onGitRefresh}
             onOpenDiff={onGitOpenDiff}
             onStage={onGitStage}

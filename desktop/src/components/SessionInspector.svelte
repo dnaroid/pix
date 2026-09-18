@@ -5,6 +5,8 @@
   import type { SessionActivitySummary } from "../lib/session-activity";
   import type { SessionSubagentSnapshot } from "../lib/session-subagents";
   import type { SessionTodoSnapshot } from "../lib/session-todos";
+  import type { RuntimeStatus } from "../lib/acp-client";
+  import DcpContextPanel from "./DcpContextPanel.svelte";
   import SessionSubagentsPanel from "./SessionSubagentsPanel.svelte";
   import SessionTodosPanel from "./SessionTodosPanel.svelte";
 
@@ -12,15 +14,21 @@
     activeSessionId,
     sessionTitle,
     summary,
+    runtimeStatus,
     todoSnapshot,
     subagentSnapshot,
+    canClearTodos,
+    onClearTodos,
     onClose,
   }: {
     activeSessionId: string | null;
     sessionTitle: string;
     summary: SessionActivitySummary;
+    runtimeStatus: RuntimeStatus | undefined;
     todoSnapshot: SessionTodoSnapshot | undefined;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
+    canClearTodos: boolean;
+    onClearTodos: () => Promise<boolean>;
     onClose: () => void;
   } = $props();
 
@@ -168,9 +176,11 @@
     </div>
   {:else}
     <div class="min-h-0 overflow-y-auto">
-      <SessionSubagentsPanel snapshot={subagentSnapshot} activeCount={summary.activeSubagents} />
-      <SessionTodosPanel snapshot={todoSnapshot} summary={summary} />
+      {#key activeSessionId}
+        <DcpContextPanel status={runtimeStatus} />
+        <SessionSubagentsPanel snapshot={subagentSnapshot} activeCount={summary.activeSubagents} />
+        <SessionTodosPanel snapshot={todoSnapshot} summary={summary} {canClearTodos} {onClearTodos} />
+      {/key}
     </div>
   {/if}
 </aside>
-

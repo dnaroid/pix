@@ -12,10 +12,12 @@ import source from "./SessionStartView.svelte?raw";
 describe("SessionStartView", () => {
   it("lists saved conversations without a redundant New conversation action", () => {
     expect(source).toContain("Search saved conversations…");
-    expect(source).toContain("onSelect(session.sessionId)");
+    expect(source).toContain("onSelect(row.session.sessionId)");
     expect(source).not.toContain(">New conversation<");
-    expect(source).toContain("sessionIsFork(session)");
+    expect(source).toContain("!row.treePrefix && sessionIsFork(row.session)");
     expect(source).toContain("GitFork");
+    expect(source).toContain("buildSessionTree(sessions)");
+    expect(source).toContain('treePrefix: ""');
   });
 
   it("fills the transcript height while keeping header/search fixed and session rows scrollable", () => {

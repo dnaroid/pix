@@ -12,7 +12,7 @@ Active implemented contract.
 
 ## Goal
 
-Add read-only, live views of the active session's execution Plan and Subagents to Pix Desktop without conflating either runtime surface with project tasks, and present that state in session-scoped IDE chrome rather than as a workspace-level destination.
+Add live views of the active session's execution Plan and Subagents to Pix Desktop, with a runtime-backed Plan clear action, without conflating either runtime surface with project tasks, and present that state in session-scoped IDE chrome rather than as a workspace-level destination.
 
 ## Scope
 
@@ -28,7 +28,7 @@ Add read-only, live views of the active session's execution Plan and Subagents t
 
 ## Non-goals
 
-- Creating, editing, deleting, or reordering todos from Desktop.
+- Creating, editing, or reordering todos from Desktop, or directly mutating todo state outside the runtime command path.
 - Starting, stopping, opening, waiting for, or reading Subagent results from Desktop.
 - Moving or changing project tasks stored in `.pi/tasks.jsonc`.
 - Showing historical completed, failed, or stopped Subagents after they leave the live widget.
@@ -52,9 +52,12 @@ Add read-only, live views of the active session's execution Plan and Subagents t
 - Snapshot freshness is tracked independently per channel. A newer `checkedAt` snapshot wins over an older late notification. Forgetting/closing a runtime records a per-session freshness barrier, so an already-queued pre-close Todo/Subagent notification cannot repopulate cleared activity after the runtime is gone; a later snapshot from a reopened runtime is accepted normally.
 - Inspector open/closed state is a Desktop IDE preference rather than session data. Keeping the inspector open across tab changes preserves spatial memory while its contents follow `activeSessionId`; the preference is persisted best-effort in local storage.
 - When an active session first shows a visible Plan todo or live Subagent, or adds another visible todo/subagent identity, Desktop opens the inspector. When that same session's previously non-empty combined visible Plan and Agents lists both become empty, Desktop closes it. Snapshot/status updates with unchanged visible identities do not override a manual open/close, and activity tracked for one session never triggers a transition while another session is active.
-- With no active session, the status-bar entry is disabled; an already-open inspector shows a compact empty state until a session becomes active.
+- On the first display of each session tab, Desktop also reconciles inspector visibility immediately: existing visible activity opens it, no visible activity closes it. If initial snapshots arrive later, newly observed activity opens it then. Returning to an already observed tab without changed identities does not overwrite the manual pane choice.
+- DCP, Agents, and Plan are independent native keyboard-accessible accordions with informative summary headers. DCP starts expanded; Agents and Plan start collapsed without a snapshot, then use their first available snapshot to expand only when live agents or an open plan exist. A manual toggle before that snapshot takes precedence, and ordinary later snapshot updates never reset the accordion. Session switches reset these section defaults for the newly displayed session. The DCP capacity map and its metric semantics are defined in [desktop-runtime-status.md](./desktop-runtime-status.md).
+- With no active session, including while the selected conversation is a UI-only draft, the status-bar entry is disabled and the Session inspector is not rendered. The open/closed preference is retained, so materializing or selecting a real session can restore the pane without making the draft occupy inspector space.
 - With an active session, Plan and Agents remain distinct sections and each shows a compact informational empty state when it has no live content.
 - When at least one pending, in-progress, or deferred todo exists, all non-deleted todos are shown in stable hierarchy order, including completed items.
+- The Plan header offers a compact, accessible Clear session plan action when its active session is ready and idle and has visible todos. It invokes private ACP `pix/session/clear_todos`, which dispatches the existing `/todos-clear` extension handler directly without running a user prompt, adding `/todos-clear` to chat, or creating a user transcript entry. It preserves the composer draft, reports request failures, disables while unavailable or in flight (including after inspector remounts or switching away and back), never mutates the displayed snapshot locally, and never toggles the Plan accordion. The ACP session lock is claimed before asynchronous work so duplicate clears cannot race; the existing extension handler remains authoritative for state publishing and persistence. Success depends on that handler, not an unrelated session-list metadata write.
 - Subagents matches the TUI live-panel rule: only planned, running, or retrying agents are visible; terminal agents disappear with the next snapshot, and the section does not invent historical state.
 - Multiple live runs remain distinct even when they reuse an agent id. Run and task ordering follows the source snapshot.
 - The status HUD is intentionally denser than the inspector: idle state renders a compact Session entry point, while active state may show the live Subagent count and completed/total Plan progress.
@@ -95,6 +98,7 @@ Add read-only, live views of the active session's execution Plan and Subagents t
 
 - Suite tests cover RPC-only publishing for both runtime channels and preserve the existing event-bus snapshots.
 - ACP tests cover startup delivery, envelope decoding, session scoping, and malformed payload rejection.
+- Todo-clear tests cover private ACP routing without a user prompt/transcript, idle and duplicate-request guards, handler failure propagation, completion acknowledgement, and the existing hidden-snapshot replay contract.
 - Desktop tests cover notification decoding; todo validation, deleted filtering, open-state semantics, and hierarchy; Subagents validation, active-state filtering, run grouping, elapsed labels, and stale/session-isolated snapshots; plus incremental session-activity summary/tone/progress derivation, background-session isolation, and the post-forget freshness barrier.
 - `npm --prefix external/pi-tools-suite run check`
 - `npm --prefix acp run check`

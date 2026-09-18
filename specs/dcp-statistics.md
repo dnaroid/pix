@@ -43,6 +43,20 @@ The report separates these quantities:
   different live runtime metric: the extension's `state.tokensSaved` estimate,
   also used by `/dcp context`. It is not derived from `measuredGain`, does not
   change this durable report's accounting, and is not a billing claim.
+- Desktop's token-volume map uses a separate, cached runtime observation,
+  not a durable statistics reducer output. It exposes only bounded scalar
+  metadata from the last completed context preparation: owner epoch, revision,
+  preparation time and estimated token totals for candidate/incomplete-group/
+  active-summary/retained content. Totals partition current projected messages,
+  with protection taking precedence over candidate, then summary, then retained;
+  summary volume is the current summary, not the removed source. It carries no
+  message bodies, tool arguments, position ranges or raw
+  history. A selected candidate is advisory compression guidance, not a deletion
+  authorization; actual compression still performs its normal closure and
+  stale-plan validation. Retained content does not imply eligibility. The
+  process-local getter and message-boundary transport do not read full history
+  or rerun candidate detection. See [desktop-runtime-status.md](./desktop-runtime-status.md)
+  for presentation and freshness rules.
 - Journaled anchors and context projection events, versus recorded provider
   attempts containing reminders and correlated successful completed
   opportunities. Failed attempts may count as attempts, never as successful

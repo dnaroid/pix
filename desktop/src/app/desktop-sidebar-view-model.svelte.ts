@@ -17,6 +17,7 @@ type SidebarProps = ComponentProps<typeof DesktopSidebar>["props"];
 export function createDesktopSidebarViewModel(options: {
   workspace: () => string;
   canUseSession: () => boolean;
+  gitAssistantReady: () => boolean;
   anyPromptRunning: () => boolean;
   sessionMutationRunning: () => boolean;
   externalEditorLabel: () => string;
@@ -41,6 +42,7 @@ export function createDesktopSidebarViewModel(options: {
     taskStorageIndicatorError: options.projectTasks.saveError,
     activeTaskId: options.projectActions.actionId,
     sessionReady: options.canUseSession(),
+    gitAssistantReady: options.gitAssistantReady(),
     registrySnapshot: options.registry.snapshot,
     registryBackgroundSync: options.registry.backgroundSyncState,
     registryLoading: options.registry.actionId === "refresh",

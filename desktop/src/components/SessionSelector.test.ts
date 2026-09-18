@@ -12,7 +12,12 @@ describe("SessionSelector opening and outside dismissal", () => {
   });
 
   it("marks forked saved conversations with the branch icon", () => {
-    expect(source).toContain("sessionIsFork(session)");
+    expect(source).toContain("!row.treePrefix && sessionIsFork(row.session)");
     expect(source).toContain("GitFork");
+  });
+
+  it("uses the shared tree without a query and leaves search results flat", () => {
+    expect(source).toContain("if (!query.trim()) return buildSessionTree(sessions)");
+    expect(source).toContain('treePrefix: ""');
   });
 });

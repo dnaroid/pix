@@ -33,7 +33,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - A project-scoped `session/list` includes native sessions created by either TUI or Desktop.
 - A discovered native session is persisted in the ACP map so `session/load` can open it later.
 - Reconciliation deduplicates by resolved Pi session path and retains an existing ACP ID when present.
-- Reconciliation persists the native parent-session path internally when present. `session/list` exposes only a boolean `pix.isFork` flag in that session's namespaced ACP metadata; Desktop does not receive the parent path.
+- Reconciliation persists the native parent-session path internally when present. `session/list` exposes a boolean `pix.isFork` and, when the parent is already mapped, its safe ACP id as `pix.parentSessionId` in that session's namespaced metadata; Desktop never receives a parent path.
 - The response carries ordered TUI open-tab session IDs in namespaced ACP metadata.
 - Desktop uses the returned sessions as the source for saved-session discovery. The titlebar still contains only restored TUI tabs, Desktop-opened tabs, and the active session.
 - Desktop and TUI both use UI-only draft tabs for new conversations. A draft is
@@ -47,6 +47,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - Desktop's embedded chooser and TUI's under-tabs chooser present only returned
   sessions that are not already represented by real tabs, so already-open or
   running conversations are not duplicated there.
+- Without a search query, Desktop saved-session surfaces render the same fork tree as TUI: roots and siblings are sorted by descending `updatedAt`, each child follows its parent, and arbitrary nesting uses monospaced `├─`/`└─`/`│` connectors. Search results remain flat ranked matches while retaining fork markers.
 - When restoring an older mapped session whose persisted history is unavailable, Desktop first waits for the concurrent runtime load. A loadable empty session is retained; only a record whose history and runtime both fail is cleaned up. Runtime-load generations prevent a late completion from repopulating state after that cleanup.
 - Per-session activity indicators may decorate titlebar tabs, but runtime activity never changes restored membership, ordering, close semantics, or saved-session discovery.
 - Missing, malformed, or stale tab snapshots produce no restored tabs and do not break session listing.
@@ -68,9 +69,9 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 
 ## Verification
 
-- ACP tests cover native discovery, stable mapping, cwd filtering, fallback, and tab metadata.
+- ACP tests cover native discovery, stable mapping, cwd filtering, fallback, and safe fork-parent/tab metadata.
 - Session-map tests cover bulk path reconciliation and ID collisions.
-- Desktop unit tests cover metadata parsing and tab ordering.
+- Desktop unit tests cover metadata parsing, tab ordering, fork-tree ordering/nesting, malformed ancestry, and flat search presentation.
 - ACP and Desktop checks pass.
 
 ## Risks / unknowns

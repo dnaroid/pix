@@ -163,6 +163,10 @@ export class AcpPixExtensions {
     }, null);
   }
 
+  async clearTodos(sessionId: string): Promise<void> {
+    await this.request("pix/session/clear_todos", { sessionId }, null);
+  }
+
   async userMessageAction(sessionId: string, entryId: string, action: UserMessageAction): Promise<UserMessageActionResult> {
     const response = await this.request<unknown>("pix/session/user_message_action", { sessionId, entryId, action }, null);
     if (!isRecord(response) || (response.status !== "ok" && response.status !== "warning" && response.status !== "cancelled")) {
@@ -189,8 +193,8 @@ export class AcpPixExtensions {
     return response.prompt;
   }
 
-  async gitAssist(sessionId: string, kind: "review" | "commit-message", diff: string): Promise<string> {
-    const response = await this.request<unknown>("pix/git/assist", { sessionId, kind, diff }, null);
+  async gitAssist(cwd: string, kind: "review" | "commit-message", diff: string): Promise<string> {
+    const response = await this.request<unknown>("pix/git/assist", { cwd, kind, diff }, null);
     if (!isRecord(response) || typeof response.text !== "string" || response.text.trim().length === 0) {
       throw new Error("pix/git/assist returned an invalid response");
     }

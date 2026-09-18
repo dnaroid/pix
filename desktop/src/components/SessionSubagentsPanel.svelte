@@ -1,5 +1,7 @@
 <script lang="ts">
   import Workflow from "@lucide/svelte/icons/workflow";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { onMount } from "svelte";
   import { agentIcon } from "../lib/agent-icons";
   import {
     formatSessionSubagentActivity,
@@ -21,6 +23,31 @@
   } = $props();
 
   const runs = $derived(visibleSessionSubagentRuns(snapshot));
+  let details = $state<HTMLDetailsElement>();
+  let receivedInitialSnapshot = false;
+  let manuallyToggled = false;
+  let defaultOpen: boolean | undefined;
+
+  function applyInitialOpenState(): void {
+    if (receivedInitialSnapshot || snapshot === undefined) return;
+    receivedInitialSnapshot = true;
+    defaultOpen = runs.length > 0;
+    if (details) details.open = defaultOpen;
+  }
+
+  // A session-state bridge can arrive after the inspector mounts. Apply the
+  // content-sensitive default once, but never bind `open`: native toggles then
+  // remain the source of truth for ordinary snapshot updates.
+  $effect(() => {
+    if (!manuallyToggled) applyInitialOpenState();
+  });
+
+  onMount(applyInitialOpenState);
+
+  function noteToggle(): void {
+    if (defaultOpen !== undefined && details?.open === defaultOpen) return;
+    manuallyToggled = true;
+  }
 
   function statusTone(status: SessionSubagentStatus): string {
     if (status === "running") return "text-tool-info";
@@ -40,14 +67,13 @@
   }
 </script>
 
-<section aria-labelledby="session-subagents-heading">
-  <div class="flex h-8 items-center gap-1.5 border-b border-border px-2.5">
+<details bind:this={details} class="group border-b border-border" ontoggle={noteToggle}>
+  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2.5 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <Workflow class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-    <h2 id="session-subagents-heading" class="text-xs font-semibold uppercase tracking-wide text-foreground">Agents</h2>
-    {#if activeCount > 0}
-      <span class="ml-auto font-mono text-xs text-muted-foreground">{activeCount}</span>
-    {/if}
-  </div>
+    <span class="font-semibold uppercase tracking-wide text-foreground">Agents</span>
+    <span class="ml-auto font-mono tabular-nums text-muted-foreground">{activeCount} active</span>
+    <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+  </summary>
 
   <div>
     {#if runs.length === 0}
@@ -94,4 +120,4 @@
       </div>
     {/if}
   </div>
-</section>
+</details>

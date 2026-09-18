@@ -78,6 +78,7 @@ import { inferDcpBlockedReason, planDcpBudget, type DcpBlockedReason } from "./p
 import { createBudgetedAutoCompressionBlock } from "./auto-compress-budget.js"
 import { compressionPlanningTokens, outstandingCompressionTokens, resetCompressionProgress, routineRecoveryTokens, trackCompressionProgress } from "./compression-progress.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction, invalidateDcpStateOwner } from "./state-transaction.js"
+import { captureDcpContextTokenEstimates, projectDcpContextMapTelemetry } from "./context-map-telemetry.js"
 
 const PIX_DCP_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.runtime-stats")
 
@@ -163,7 +164,15 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	const state = dependencies.state ?? createState()
 	// Pix ACP runs one pi process per session. Expose only this tiny live metric
 	// to the patched RPC session-stats surface; DCP state remains extension-owned.
-	runtimeGlobals[PIX_DCP_RUNTIME_STATS_SYMBOL] = () => ({ tokensSaved: state.tokensSaved })
+	let contextMapRevision = 0
+	let contextMapPass = 0
+	let contextMap: ReturnType<typeof projectDcpContextMapTelemetry> | undefined
+	// This process-local bridge is read-only. Its map is produced only by the
+	// existing context pass, never by Desktop inspection or a streaming delta.
+	runtimeGlobals[PIX_DCP_RUNTIME_STATS_SYMBOL] = () => ({
+		tokensSaved: state.tokensSaved,
+		contextMap: contextMap?.sessionEpoch === state.sessionEpoch ? contextMap : undefined,
+	})
 	let journalMirror: DcpJournalMirror | undefined
 	let journalSupported = false
 	let journalBlockedReason: string | undefined
@@ -283,6 +292,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		try { ctx.ui.notify(message, "warning") } catch { /* Headless/notification failure is not a persistence failure. */ }
 	}
 	const invalidateOwner = () => {
+		contextMap = undefined
+		contextMapPass++
 			invalidateDcpStateOwner(state)
 			routinePressureTracker.reset()
 			// Successful exposure belongs to the old provider/branch too, not only
@@ -353,6 +364,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 	// ── 5. session_start: restore state from session entries ──────────────────
 	pi.on("session_start", async (event, ctx) => {
+		contextMap = undefined
+		contextMapPass++
 		resetState(state)
 		routinePressureTracker.reset()
 		freshToolResults.reset()
@@ -387,6 +400,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	// Journal operations are committed at the mutation boundary; shutdown does
 	// not write a full runtime snapshot.
 	pi.on("session_shutdown", async () => {
+		contextMap = undefined
+		contextMapPass++
 		routinePressureTracker.reset()
 		freshToolResults.reset()
 		journalMirror = undefined
@@ -472,6 +487,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	// ── 10. context: apply pruning and inject nudges ──────────────────────────
 	pi.on("context", async (event, ctx) => {
 		const contextEpoch = state.sessionEpoch
+		const mapPass = ++contextMapPass
+		contextMap = undefined
+		let mapEntries = state.conversationIndexSnapshot
 		const effectiveConfig = configForContext(ctx)
 		ensureEphemeralJournal(ctx)
 		const contextMessages = event.messages
@@ -509,6 +527,18 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				state: summarizeDcpState(state, effectiveConfig),
 				...details,
 			}, ctx)
+			if (mapPass === contextMapPass) {
+				contextMap = providerReady
+					? projectDcpContextMapTelemetry(
+						mapEntries,
+						candidate ?? emergencyCompressionCandidate,
+						mapTokenEstimates,
+						++contextMapRevision,
+						contextEpoch,
+						Date.now(),
+					)
+					: undefined
+			}
 			return { messages }
 		}
 
@@ -545,6 +575,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			writeDcpDebugLog(effectiveConfig, "context.rehydrated_tool_records", { ...rehydration }, ctx)
 		}
 		let prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
+		mapEntries = state.conversationIndexSnapshot
+		let mapTokenEstimates = captureDcpContextTokenEstimates(mapEntries, prunedMessages, state.messageMetaSnapshot)
 		// Stable IDs and any pruning decisions that affect this provider-visible
 		// projection must be committed before the request can use them.
 		await persistJournalState(ctx, state)
@@ -1011,6 +1043,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						// Re-apply pruning so the new block takes effect on this
 						// same context pass instead of the next one.
 						prunedMessages = preparedProjection ?? applyPruning(contextMessages, state, effectiveConfig)
+						mapEntries = state.conversationIndexSnapshot
+						mapTokenEstimates = captureDcpContextTokenEstimates(mapEntries, prunedMessages, state.messageMetaSnapshot)
 						const clearedAnchors = clearDcpNudgeAnchors(state)
 						warnedProgress.clear()
 						state.progressRecovery = undefined
@@ -1128,6 +1162,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				)
 				if (emergencyPruneResult.prunedToolCallIds.length > 0) {
 					prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
+					mapEntries = state.conversationIndexSnapshot
+					mapTokenEstimates = captureDcpContextTokenEstimates(mapEntries, prunedMessages, state.messageMetaSnapshot)
 					const clearedAnchors = clearDcpNudgeAnchors(state)
 					state.consecutiveIgnoredStrongNudges = 0
 					state.progressRecovery = undefined

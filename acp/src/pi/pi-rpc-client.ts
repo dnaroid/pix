@@ -116,7 +116,21 @@ export interface PiSessionTreeNode {
 export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>> & {
 	/** Live DCP estimate injected by Pix's RPC entry when the DCP extension is active. */
 	readonly pixDcpTokensSaved?: number | undefined;
+	/** Live DCP context-map snapshot injected by Pix's RPC entry. */
+	readonly pixDcpContextMap?: PiDcpContextMap | undefined;
 };
+
+export interface PiDcpContextMap {
+	readonly revision: number;
+	readonly sessionEpoch: number;
+	readonly generatedAt: number;
+	readonly tokenEstimates: {
+		readonly candidate: number;
+		readonly protected: number;
+		readonly compressed: number;
+		readonly retained: number;
+	};
+}
 
 /**
  * Structural subset of pi `AgentMessage` used for session history replay.
@@ -168,6 +182,8 @@ export interface PiClient {
 	 */
 	onExit(listener: (error: Error) => void): () => void;
 	prompt(message: string, images?: PiImageContent[]): Promise<void>;
+	/** Execute the supported todo clear extension command without creating a user message. */
+	clearTodos(): Promise<void>;
 	bash(command: string, excludeFromContext?: boolean): Promise<PiBashResult>;
 	/** Request a graceful stop at the next agent turn boundary. */
 	pause(): Promise<void>;
@@ -304,6 +320,15 @@ export class PiRpcClient implements PiClient {
 
 	prompt(message: string, images?: PiImageContent[]): Promise<void> {
 		return this.requireClient().prompt(message, images);
+	}
+
+	async clearTodos(): Promise<void> {
+		const rawClient = this.requireClient() as unknown as {
+			send(command: { type: "prompt"; message: string }): Promise<unknown>;
+			getData<T>(response: unknown): T;
+		};
+		const response = await rawClient.send({ type: "prompt", message: "\u0000pix:clear-todos" });
+		rawClient.getData<Record<string, never>>(response);
 	}
 
 	async bash(command: string, excludeFromContext = false): Promise<PiBashResult> {

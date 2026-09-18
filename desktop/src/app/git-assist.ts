@@ -16,9 +16,8 @@ type PromptRuntime = ReturnType<typeof createPromptRuntime>;
 
 type GitAssistOptions = {
   client: () => AcpClient | null;
-  activeSessionId: () => string | null;
   workspace: () => string;
-  activeSessionRuntimeReady: () => boolean;
+  gitAssistantReady: () => boolean;
   operationRunning: () => boolean;
   statusReady: () => boolean;
   git: GitWorkspaceStore;
@@ -42,14 +41,12 @@ export function createGitAssist(options: GitAssistOptions) {
 
   async function reviewDiff(path: string | undefined, scope: GitDiffScope): Promise<void> {
     const requestClient = options.client();
-    const sessionId = options.activeSessionId();
     const requestWorkspace = options.workspace();
     const requestGeneration = options.git.generation;
     if (
       !requestClient
-      || !sessionId
       || !requestWorkspace
-      || !options.activeSessionRuntimeReady()
+      || !options.gitAssistantReady()
       || options.git.llmActionId !== null
     ) return;
     const actionId = `review:${path ? `${scope}:${path}` : "all"}`;
@@ -61,7 +58,6 @@ export function createGitAssist(options: GitAssistOptions) {
         !diff
         || requestClient !== options.client()
         || requestWorkspace !== options.workspace()
-        || sessionId !== options.activeSessionId()
         || requestGeneration !== options.git.generation
       ) return;
       options.git.showDiff(diff);
@@ -70,11 +66,10 @@ export function createGitAssist(options: GitAssistOptions) {
         options.git.setReview("No diff to review.", diff);
         return;
       }
-      const review = await requestClient.gitAssist(sessionId, "review", gitDiffForLlm(diff));
+      const review = await requestClient.gitAssist(requestWorkspace, "review", gitDiffForLlm(diff));
       if (
         requestClient !== options.client()
         || requestWorkspace !== options.workspace()
-        || sessionId !== options.activeSessionId()
         || requestGeneration !== options.git.generation
       ) return;
       options.git.setReview(review, diff);
@@ -86,7 +81,6 @@ export function createGitAssist(options: GitAssistOptions) {
       if (
         requestClient === options.client()
         && requestWorkspace === options.workspace()
-        && sessionId === options.activeSessionId()
         && requestGeneration === options.git.generation
       ) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -102,16 +96,14 @@ export function createGitAssist(options: GitAssistOptions) {
 
   async function generateCommitMessage(): Promise<string | undefined> {
     const requestClient = options.client();
-    const sessionId = options.activeSessionId();
     const requestWorkspace = options.workspace();
     const requestGeneration = options.git.generation;
-    const current = () => requestClient === options.client() && sessionId === options.activeSessionId()
+    const current = () => requestClient === options.client()
       && requestWorkspace === options.workspace() && requestGeneration === options.git.generation;
     if (
       !requestClient
-      || !sessionId
       || !requestWorkspace
-      || !options.activeSessionRuntimeReady()
+      || !options.gitAssistantReady()
       || options.git.llmActionId !== null
     ) return undefined;
     const actionId = "commit-message";
@@ -123,7 +115,7 @@ export function createGitAssist(options: GitAssistOptions) {
         options.git.setError("There are no staged changes to describe.");
         return undefined;
       }
-      const message = await requestClient.gitAssist(sessionId, "commit-message", gitDiffForLlm(diff));
+      const message = await requestClient.gitAssist(requestWorkspace, "commit-message", gitDiffForLlm(diff));
       if (!current()) return undefined;
       const latest = await options.git.requestDiff(undefined, "staged");
       if (!current()) return undefined;

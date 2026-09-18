@@ -24,6 +24,7 @@ import {
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_BASH_METHOD,
+	PIX_CLEAR_TODOS_METHOD,
 	PIX_AGENT_CONTROL_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -57,6 +58,7 @@ function piSessionPath(literal: string): string {
 import {
 	PIX_CONTEXT_USAGE_CHANNEL,
 	PIX_DCP_TOKENS_SAVED_CHANNEL,
+	PIX_DCP_CONTEXT_MAP_CHANNEL,
 	PIX_SESSION_STATE_METHOD,
 } from "../src/acp/session-state-bridge.js";
 import type {
@@ -98,6 +100,9 @@ class FakePiClient implements PiClient {
 	static readonly sessionFiles = new Map<string, PiAgentMessage[]>();
 
 	readonly promptCalls: { message: string; images?: PiImageContent[] }[] = [];
+	clearTodosCalls = 0;
+	clearTodosGate: Promise<void> | undefined;
+	clearTodosError: Error | undefined;
 	readonly bashCalls: { command: string; excludeFromContext: boolean }[] = [];
 	readonly steerCalls: string[] = [];
 	readonly followUpCalls: string[] = [];
@@ -208,6 +213,12 @@ class FakePiClient implements PiClient {
 		this.promptCalls.push({ message, images });
 		await this.promptHook?.(message);
 		if (!this.promptHandledWithoutRun) this.state = { ...this.state, isStreaming: true };
+	}
+
+	async clearTodos(): Promise<void> {
+		this.clearTodosCalls++;
+		await this.clearTodosGate;
+		if (this.clearTodosError) throw this.clearTodosError;
 	}
 
 	async bash(command: string, excludeFromContext = false): Promise<PiBashResult> {
@@ -917,7 +928,7 @@ test("pix/prompt/enhance uses the dedicated enhancer without sending a session p
 	assert.deepEqual(harness.clients[0]?.promptCalls, []);
 });
 
-test("pix/git/assist runs independently while the main session prompt is active", async () => {
+test("pix/git/assist runs independently without creating or loading a session", async () => {
 	let observed: { cwd: string; kind: string; diff: string } | undefined;
 	const harness = createTestAdapter({
 		gitAssistant: async ({ cwd, kind, diff }) => {
@@ -927,16 +938,8 @@ test("pix/git/assist runs independently while the main session prompt is active"
 	});
 
 	await connect(harness.adapter, async (cx) => {
-		const session = await cx.buildSession("/tmp/git-review-project").start();
-		const pendingPrompt = cx.request("session/prompt", {
-			sessionId: session.sessionId,
-			prompt: [{ type: "text", text: "keep working" }],
-		});
-		const pi = harness.clients[0]!;
-		await waitFor(() => pi.promptCalls.length === 1);
-
 		const review = await cx.request(PIX_GIT_ASSIST_METHOD, {
-			sessionId: session.sessionId,
+			cwd: "/tmp/git-review-project",
 			kind: "review",
 			diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
 		});
@@ -946,10 +949,8 @@ test("pix/git/assist runs independently while the main session prompt is active"
 			kind: "review",
 			diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
 		});
-
-		pi.emit({ type: "agent_start" });
-		pi.emit({ type: "agent_settled" });
-		await pendingPrompt;
+		assert.equal(harness.adapter.sessionCount, 0);
+		assert.deepEqual(harness.clients, []);
 	});
 });
 
@@ -961,10 +962,9 @@ test("pix/git/assist exposes backend failures instead of masking them as Interna
 	});
 
 	await connect(harness.adapter, async (cx) => {
-		const session = await cx.buildSession("/tmp/git-review-project").start();
 		await assert.rejects(
 			cx.request(PIX_GIT_ASSIST_METHOD, {
-				sessionId: session.sessionId,
+				cwd: "/tmp/git-review-project",
 				kind: "review",
 				diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
 			}),
@@ -1076,7 +1076,10 @@ test("session/list reconciles native Pi sessions and reports ordered TUI tabs", 
 	const listed = await connect(harness.adapter, (cx) => cx.request("session/list", { cwd: "/tmp/proj" }));
 	assert.deepEqual(requestedCwds, ["/tmp/proj"]);
 	assert.deepEqual(listed.sessions.map((session) => session.sessionId), ["native-b", "existing-acp-id"]);
-	assert.deepEqual(listed.sessions[0]?._meta, { "pix.isFork": true });
+	assert.deepEqual(listed.sessions[0]?._meta, {
+		"pix.isFork": true,
+		"pix.parentSessionId": "existing-acp-id",
+	});
 	assert.equal(listed.sessions[1]?._meta, undefined);
 	assert.equal(listed.sessions[1]?.title, "Native title");
 	assert.deepEqual(listed._meta?.["pix.tabs"], {
@@ -1260,6 +1263,9 @@ test("Pix Desktop pause stops at the turn boundary and exposes a paused continua
 	assert.deepEqual(states.map((state) => state.state), ["pause-requested", "paused"]);
 });
 
+const preparedDcpMapFixture = { revision: 1, sessionEpoch: 0, generatedAt: 100,
+	tokenEstimates: { candidate: 1000, protected: 0, compressed: 100, retained: 2000 } };
+
 test("Pix Desktop runtime status exposes pi context usage without refreshing model quota", async () => {
 	const { adapter, clients } = createTestAdapter();
 	await connect(adapter, async (cx) => {
@@ -1268,6 +1274,7 @@ test("Pix Desktop runtime status exposes pi context usage without refreshing mod
 		Object.assign(pi.sessionStats, {
 			contextUsage: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
 			pixDcpTokensSaved: 12_345,
+			pixDcpContextMap: preparedDcpMapFixture,
 		});
 
 		const response = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
@@ -1278,6 +1285,7 @@ test("Pix Desktop runtime status exposes pi context usage without refreshing mod
 		assert.equal(response.sessionId, session.sessionId);
 		assert.deepEqual(response.context, { tokens: 128_000, contextWindow: 200_000, percent: 64 });
 		assert.equal(response.dcpTokensSaved, 12_345);
+		assert.deepEqual(response.dcpContextMap, preparedDcpMapFixture);
 		assert.equal(response.modelUsageRefresh, "skipped");
 		assert.equal(response.modelUsage, undefined);
 		assert.equal(pi.getTreeCalls, 0, "periodic runtime status must not traverse the DCP session tree");
@@ -1288,6 +1296,7 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 	type ContextNotification = { sessionId: string; channel: string; data: unknown };
 	const notifications: ContextNotification[] = [];
 	const savingsNotifications: ContextNotification[] = [];
+	const mapNotifications: ContextNotification[] = [];
 	const { adapter, clients } = createTestAdapter();
 
 	await connect(
@@ -1315,6 +1324,7 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 			Object.assign(pi.sessionStats, {
 				contextUsage: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
 				pixDcpTokensSaved: 12_345,
+				pixDcpContextMap: preparedDcpMapFixture,
 			});
 			pi.emit({
 				type: "message_end",
@@ -1334,6 +1344,8 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 			} as PiEvent);
 			await waitFor(() => notifications.length === 1);
 			await waitFor(() => savingsNotifications.length === 1);
+			await waitFor(() => mapNotifications.length === 1);
+			assert.deepEqual(mapNotifications[0]?.data, preparedDcpMapFixture);
 			assert.equal(pi.getSessionStatsCalls, 1);
 			assert.deepEqual(notifications[0], {
 				sessionId: session.sessionId,
@@ -1349,6 +1361,7 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 			Object.assign(pi.sessionStats, {
 				contextUsage: { tokens: null, contextWindow: 200_000, percent: null },
 				pixDcpTokensSaved: 18_000,
+				pixDcpContextMap: undefined,
 			});
 			pi.emit({
 				type: "compaction_end",
@@ -1359,6 +1372,8 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 			} as PiEvent);
 			await waitFor(() => notifications.length === 2);
 			await waitFor(() => savingsNotifications.length === 2);
+			await waitFor(() => mapNotifications.length === 2);
+			assert.equal(mapNotifications[1]?.data, null, "unavailable after compaction explicitly clears the old map");
 			assert.equal(pi.getSessionStatsCalls, 2);
 			assert.deepEqual(notifications[1], {
 				sessionId: session.sessionId,
@@ -1400,6 +1415,7 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 				(ctx) => {
 					if (ctx.params.channel === PIX_CONTEXT_USAGE_CHANNEL) notifications.push(ctx.params);
 					if (ctx.params.channel === PIX_DCP_TOKENS_SAVED_CHANNEL) savingsNotifications.push(ctx.params);
+					if (ctx.params.channel === PIX_DCP_CONTEXT_MAP_CHANNEL) mapNotifications.push(ctx.params);
 				},
 			);
 		},
@@ -2685,6 +2701,82 @@ test("Pix Desktop bash bridge forwards context flags even while an agent turn is
 		}>;
 	assert.equal(bashResults.length, 2);
 	assert.equal(bashResults.every((update) => update.status === "completed"), true);
+});
+
+test("Pix Desktop clears a session plan through the private action without a prompt or transcript entry", async (t) => {
+	const harness = createTestAdapter();
+	await connectAs(
+		harness.adapter,
+		"pix-desktop",
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/todo-clear", mcpServers: [] }) as { sessionId: string };
+			const pi = harness.clients[0]!;
+			const touch = t.mock.method(SessionMapStore.prototype, "touch", async () => {
+				throw new Error("session list metadata is unavailable");
+			});
+
+			await cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: created.sessionId });
+
+			assert.equal(pi.clearTodosCalls, 1);
+			assert.equal(touch.mock.callCount(), 0, "successful clear must not depend on a session-list write");
+			t.mock.restoreAll();
+			assert.deepEqual(pi.promptCalls, [], "todo clear must not use the chat prompt path");
+			assert.deepEqual(await pi.getMessages(), [], "todo clear must not create a user transcript entry");
+		},
+	);
+});
+
+test("Pix Desktop todo clear serializes duplicate requests and releases its idle guard after failure", async () => {
+	const harness = createTestAdapter();
+	await connectAs(
+		harness.adapter,
+		"pix-desktop",
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/todo-clear-guard", mcpServers: [] }) as { sessionId: string };
+			const pi = harness.clients[0]!;
+			const gate = Promise.withResolvers<void>();
+			pi.clearTodosGate = gate.promise;
+
+			const first = cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: created.sessionId });
+			await waitFor(() => pi.clearTodosCalls === 1);
+			await assert.rejects(
+				cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: created.sessionId }),
+				/session plan clear is unavailable while the agent is running/u,
+			);
+			gate.resolve();
+			await first;
+
+			pi.clearTodosError = new Error("clear failed");
+			await assert.rejects(
+				cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: created.sessionId }),
+				/session plan clear failed: Error: clear failed/u,
+			);
+			pi.clearTodosError = undefined;
+			await cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: created.sessionId });
+			assert.equal(pi.clearTodosCalls, 3, "a failure must release the session guard");
+		},
+	);
+});
+
+test("Pix Desktop todo clear validates its target and rejects busy state without affecting other sessions", async () => {
+	const harness = createTestAdapter();
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const first = await cx.request("session/new", { cwd: "/tmp/clear-first", mcpServers: [] }) as { sessionId: string };
+		const second = await cx.request("session/new", { cwd: "/tmp/clear-second", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[1]!;
+		await assert.rejects(cx.request(PIX_CLEAR_TODOS_METHOD, {}));
+		await assert.rejects(cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: "unknown" }), /unknown session/u);
+		for (const busy of [{ isStreaming: true, isCompacting: false }, { isStreaming: false, isCompacting: true }]) {
+			Object.assign(pi.state, busy);
+			await assert.rejects(cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: second.sessionId }), /session is busy/u);
+		}
+		assert.equal(pi.clearTodosCalls, 0);
+		Object.assign(pi.state, { isStreaming: false, isCompacting: false });
+		await cx.request(PIX_CLEAR_TODOS_METHOD, { sessionId: second.sessionId });
+		assert.equal(pi.clearTodosCalls, 1);
+		assert.equal(harness.clients[0]!.clearTodosCalls, 0);
+		assert.notEqual(first.sessionId, second.sessionId);
+	});
 });
 
 test("Pix Desktop deferred queue persists and edit returns the paused message", async () => {

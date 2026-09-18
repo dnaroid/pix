@@ -152,6 +152,7 @@ export interface RuntimeStatus {
   readonly sessionId: string;
   readonly context?: ContextUsageStatus;
   readonly dcpTokensSaved?: number;
+  readonly dcpContextMap?: import("./dcp-context-map").PreparedDcpContextMap;
   readonly dcpStats?: string;
   readonly modelUsageRefresh: ModelUsageRefresh;
   readonly modelUsage?: ModelUsageStatus;

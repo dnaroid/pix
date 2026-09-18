@@ -22,9 +22,8 @@ function createCopyFixture(gitOverrides: Record<string, unknown> = {}) {
   };
   const assist = createGitAssist({
     client: () => null,
-    activeSessionId: () => null,
     workspace: () => "/workspace",
-    activeSessionRuntimeReady: () => false,
+    gitAssistantReady: () => false,
     operationRunning: () => false,
     statusReady: () => true,
     git: git as any,

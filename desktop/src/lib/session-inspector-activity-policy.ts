@@ -30,7 +30,11 @@ export function createSessionInspectorActivityTracker() {
     const previous = identitiesBySession.get(sessionId);
     identitiesBySession.set(sessionId, next);
 
-    if (!previous) return next.size > 0 ? "open" : null;
+    // First display is a decision, not merely a transition: a restored/open
+    // inspector must not remain visible for an empty session, and a session
+    // that already has activity must not stay hidden just because its snapshot
+    // arrived before this active-tab effect.
+    if (!previous) return next.size > 0 ? "open" : "close";
     if (previous.size > 0 && next.size === 0) return "close";
     return hasNewIdentity(previous, next) ? "open" : null;
   }

@@ -32,6 +32,7 @@ export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
 export const PIX_DCP_STATS_METHOD = "pix/session/dcp_stats";
 export const PIX_DRAFT_CONFIG_METHOD = "pix/session/draft_config";
 export const PIX_BASH_METHOD = "pix/session/bash";
+export const PIX_CLEAR_TODOS_METHOD = "pix/session/clear_todos";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -101,8 +102,21 @@ export interface DesktopRuntimeStatusResponse {
 	readonly sessionId: string;
 	readonly context?: DesktopContextUsage;
 	readonly dcpTokensSaved?: number;
+	readonly dcpContextMap: DesktopDcpContextMap | null;
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
+}
+
+export interface DesktopDcpContextMap {
+	readonly revision: number;
+	readonly sessionEpoch: number;
+	readonly generatedAt: number;
+	readonly tokenEstimates: {
+		readonly candidate: number;
+		readonly protected: number;
+		readonly compressed: number;
+		readonly retained: number;
+	};
 }
 
 export interface DesktopDcpStatsResponse {
@@ -129,7 +143,8 @@ export interface DesktopEnhancePromptResponse {
 
 export type DesktopGitAssistantKind = "review" | "commit-message";
 
-export interface DesktopGitAssistantRequest extends DesktopSessionRequest {
+export interface DesktopGitAssistantRequest {
+	readonly cwd: string;
 	readonly kind: DesktopGitAssistantKind;
 	readonly diff: string;
 }
@@ -369,17 +384,18 @@ export function parseDesktopEnhancePromptRequest(value: unknown): DesktopEnhance
 }
 
 export function parseDesktopGitAssistantRequest(value: unknown): DesktopGitAssistantRequest {
-	const session = parseDesktopSessionRequest(value);
 	if (
 		!isRecord(value)
+		|| typeof value.cwd !== "string"
+		|| value.cwd.trim().length === 0
 		|| (value.kind !== "review" && value.kind !== "commit-message")
 		|| typeof value.diff !== "string"
 		|| value.diff.trim().length === 0
 		|| value.diff.length > 200_000
 	) {
-		throw new RequestError(ERROR_INVALID_PARAMS, "pix/git/assist requires kind and a non-empty diff up to 200000 characters");
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/git/assist requires cwd, kind and a non-empty diff up to 200000 characters");
 	}
-	return { ...session, kind: value.kind, diff: value.diff };
+	return { cwd: value.cwd, kind: value.kind, diff: value.diff };
 }
 
 export function parseDesktopUserMessageActionRequest(value: unknown): DesktopUserMessageActionRequest {

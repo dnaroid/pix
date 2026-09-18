@@ -586,6 +586,7 @@
     workspace: () => workspace,
     status: () => status,
     clientAvailable: () => Boolean(client),
+    client: () => client,
     operationRunning: () => operationRunning,
     dragActive: () => dragActive,
     activeWorkbenchTabId: () => activeWorkbenchTabId,

@@ -1,5 +1,6 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { Attachment } from "../lib/attachments";
+import type { AcpClient } from "../lib/acp-client";
 import type { DesktopShortcutPlatform } from "../lib/desktop-commands";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 import type { ActiveSessionState } from "./active-session-state.svelte";
@@ -32,6 +33,7 @@ export type DesktopViewModelServicesOptions = {
   workspace: () => string;
   status: () => ConnectionStatus;
   clientAvailable: () => boolean;
+  client: () => AcpClient | null;
   operationRunning: () => boolean;
   dragActive: () => boolean;
   activeWorkbenchTabId: () => WorkbenchTabId | null;

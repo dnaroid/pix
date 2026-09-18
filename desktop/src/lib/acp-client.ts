@@ -171,6 +171,10 @@ export class AcpClient {
     return this.pix.bash(sessionId, command, excludeFromContext, displayText);
   }
 
+  clearTodos(sessionId: string): Promise<void> {
+    return this.pix.clearTodos(sessionId);
+  }
+
   userMessageAction(
     sessionId: string,
     entryId: string,
@@ -207,8 +211,8 @@ export class AcpClient {
     return this.pix.enhancePrompt(sessionId, draft);
   }
 
-  gitAssist(sessionId: string, kind: "review" | "commit-message", diff: string): Promise<string> {
-    return this.pix.gitAssist(sessionId, kind, diff);
+  gitAssist(cwd: string, kind: "review" | "commit-message", diff: string): Promise<string> {
+    return this.pix.gitAssist(cwd, kind, diff);
   }
 
   importSession(sessionId: string, path: string): Promise<{ configOptions: SessionConfigOption[] }> {

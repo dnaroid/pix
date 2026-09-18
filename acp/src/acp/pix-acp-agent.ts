@@ -112,6 +112,7 @@ import {
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
 	PIX_BASH_METHOD,
+	PIX_CLEAR_TODOS_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_IMPORT_SESSION_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -132,6 +133,7 @@ import {
 	parseDesktopDraftConfigRequest,
 	parseDesktopBashRequest,
 	parseDesktopAgentControlRequest,
+	parseDesktopSessionRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopImportSessionRequest,
 	parseDesktopQueueActionRequest,
@@ -141,7 +143,6 @@ import {
 	parseDesktopRuntimeStatusRequest,
 	parseDesktopSessionImageRequest,
 	parseDesktopSessionHistoryRequest,
-	parseDesktopSessionRequest,
 	parseDesktopToolResultRequest,
 	parseDesktopUserMessageActionRequest,
 	type DesktopEnhancePromptRequest,
@@ -236,6 +237,7 @@ import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
 import { cancelledResponse, fromElicitationResponse, toElicitationRequest } from "./ui-request-bridge.js";
 import {
 	PIX_CONTEXT_USAGE_CHANNEL,
+	PIX_DCP_CONTEXT_MAP_CHANNEL,
 	PIX_DCP_TOKENS_SAVED_CHANNEL,
 	PIX_SESSION_STATE_METHOD,
 	sessionStateEnvelopeFromUiRequest,
@@ -479,6 +481,9 @@ export class PixAcpAgent {
 			.onRequest(PIX_BASH_METHOD, parseDesktopBashRequest, (ctx) =>
 				this.desktopBash(ctx.params),
 			)
+			.onRequest(PIX_CLEAR_TODOS_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopClearTodos(ctx.params),
+			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
 				this.autocomplete(ctx.params, ctx.signal),
 			)
@@ -612,11 +617,9 @@ export class PixAcpAgent {
 		params: DesktopGitAssistantRequest,
 		signal: AbortSignal,
 	): Promise<DesktopGitAssistantResponse> {
-		const session = this.sessions.get(params.sessionId);
-		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		try {
 			const text = await this.gitAssistant({
-				cwd: session.cwd,
+				cwd: params.cwd,
 				kind: params.kind,
 				diff: params.diff,
 				signal,
@@ -765,6 +768,28 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, `bash command failed: ${stringifyUnknown(error)}`);
 		} finally {
 			session.bashRunning = false;
+		}
+	}
+
+	private async desktopClearTodos(params: DesktopSessionRequest): Promise<Record<string, never>> {
+		const session = this.requireDesktopSession(params.sessionId);
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "session plan clear is unavailable while the agent is running");
+		}
+		// Claim the session before the first await so simultaneous ACP requests
+		// cannot both pass the idle check and dispatch the destructive command.
+		session.builtinRunning = true;
+		try {
+			const state = await session.pi.getState();
+			if (state.isStreaming || state.isCompacting) {
+				throw new RequestError(ERROR_SERVER, "session plan clear is unavailable while the session is busy");
+			}
+			await session.pi.clearTodos();
+			return {};
+		} catch (error) {
+			throw new RequestError(ERROR_SERVER, `session plan clear failed: ${stringifyUnknown(error)}`);
+		} finally {
+			session.builtinRunning = false;
 		}
 	}
 
@@ -1358,10 +1383,18 @@ export class PixAcpAgent {
 		}
 
 		const records = await this.sessionMap.list(params.cwd ?? undefined);
+		const sessionIdByPath = new Map(records
+			.map((record) => [resolve(record.piSessionPath), record.sessionId]));
 		const sessions: SessionInfo[] = records.map((record) => {
 			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt };
 			if (record.title !== undefined) info.title = record.title;
-			if (record.parentSessionPath !== undefined) info._meta = { "pix.isFork": true };
+			if (record.parentSessionPath !== undefined) {
+				const parentSessionId = sessionIdByPath.get(resolve(record.parentSessionPath));
+				info._meta = {
+					"pix.isFork": true,
+					...(parentSessionId ? { "pix.parentSessionId": parentSessionId } : {}),
+				};
+			}
 			return info;
 		});
 		if (!params.cwd) return { sessions };
@@ -1372,7 +1405,6 @@ export class PixAcpAgent {
 		} catch (error) {
 			this.options.logger.warn(`TUI tab discovery failed: ${stringifyUnknown(error)}`);
 		}
-		const sessionIdByPath = new Map(records.map((record) => [resolve(record.piSessionPath), record.sessionId]));
 		const sessionIds = tabs.sessionPaths.flatMap((path) => {
 			const sessionId = sessionIdByPath.get(resolve(path));
 			return sessionId ? [sessionId] : [];
@@ -1752,10 +1784,17 @@ export class PixAcpAgent {
 				channel: PIX_CONTEXT_USAGE_CHANNEL,
 				data: stats.contextUsage ?? null,
 			});
+			if (this.sessions.get(session.acpSessionId) !== session || session.contextUsagePushGeneration !== generation) return;
 			await session.client.notify(PIX_SESSION_STATE_METHOD, {
 				sessionId: session.acpSessionId,
 				channel: PIX_DCP_TOKENS_SAVED_CHANNEL,
 				data: dcpTokensSavedFromStats(stats) ?? null,
+			});
+			if (this.sessions.get(session.acpSessionId) !== session || session.contextUsagePushGeneration !== generation) return;
+			await session.client.notify(PIX_SESSION_STATE_METHOD, {
+				sessionId: session.acpSessionId,
+				channel: PIX_DCP_CONTEXT_MAP_CHANNEL,
+				data: dcpContextMapFromStats(stats) ?? null,
 			});
 		} catch (error) {
 			if (this.sessions.get(session.acpSessionId) !== session) return;
@@ -1992,6 +2031,7 @@ export class PixAcpAgent {
 			sessionId: session.acpSessionId,
 			...(stats.contextUsage ? { context: stats.contextUsage } : {}),
 			...(dcpTokensSaved !== undefined ? { dcpTokensSaved } : {}),
+			dcpContextMap: dcpContextMapFromStats(stats) ?? null,
 			modelUsageRefresh: modelUsage.refresh,
 			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
 		};
@@ -2944,6 +2984,26 @@ function dcpTokensSavedFromStats(stats: PiSessionStats): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0
 		? Math.round(value)
 		: undefined;
+}
+
+function dcpContextMapFromStats(stats: PiSessionStats): PiSessionStats["pixDcpContextMap"] {
+	const value = stats.pixDcpContextMap;
+	const estimates = value?.tokenEstimates;
+	if (!value
+		|| !Number.isSafeInteger(value.revision) || value.revision <= 0
+		|| !Number.isSafeInteger(value.sessionEpoch) || value.sessionEpoch < 0
+		|| !Number.isSafeInteger(value.generatedAt) || value.generatedAt <= 0
+		|| !Number.isFinite(new Date(value.generatedAt).getTime())
+		|| !estimates || ![estimates.candidate, estimates.protected, estimates.compressed, estimates.retained]
+			.every((tokens) => Number.isSafeInteger(tokens) && tokens >= 0)) return undefined;
+	const total = estimates.candidate + estimates.protected + estimates.compressed + estimates.retained;
+	if (!Number.isSafeInteger(total) || total <= 0) return undefined;
+	return {
+		revision: value.revision, sessionEpoch: value.sessionEpoch,
+		generatedAt: value.generatedAt,
+		tokenEstimates: { candidate: estimates.candidate, protected: estimates.protected,
+			compressed: estimates.compressed, retained: estimates.retained },
+	};
 }
 
 type ModelUsageRefreshResult =

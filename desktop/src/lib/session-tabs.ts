@@ -2,11 +2,78 @@ import type { ListSessionsResponse, SessionInfo } from "@agentclientprotocol/sdk
 
 const PIX_TABS_META_KEY = "pix.tabs";
 const PIX_IS_FORK_META_KEY = "pix.isFork";
+const PIX_PARENT_SESSION_ID_META_KEY = "pix.parentSessionId";
 export const ACTIVE_SESSIONS_STORAGE_KEY = "pix.desktop.activeSessions";
 
 /** Pix session-list metadata mirrors Pi's parent-session fork marker without exposing the parent path. */
 export function sessionIsFork(session: SessionInfo): boolean {
   return session._meta?.[PIX_IS_FORK_META_KEY] === true;
+}
+
+/** A saved-session row with its TUI-style ancestry connector, if applicable. */
+export interface SessionTreeRow {
+  readonly session: SessionInfo;
+  /** Monospaced `├─`/`└─` connector and ancestor continuation columns. */
+  readonly treePrefix: string;
+}
+
+/**
+ * Order saved sessions as the TUI fork tree. Invalid, missing and cyclic parent
+ * metadata is treated as a root so one bad record cannot hide a conversation.
+ */
+export function buildSessionTree(sessions: readonly SessionInfo[]): SessionTreeRow[] {
+  const byId = new Map(sessions.map((session) => [session.sessionId, session]));
+  const children = new Map<string, SessionInfo[]>();
+  const roots: SessionInfo[] = [];
+
+  for (const session of sessions) {
+    const parentSessionId = sessionParentSessionId(session);
+    if (!parentSessionId || parentSessionId === session.sessionId || !byId.has(parentSessionId)) {
+      roots.push(session);
+      continue;
+    }
+    const siblings = children.get(parentSessionId) ?? [];
+    siblings.push(session);
+    children.set(parentSessionId, siblings);
+  }
+
+  const compare = (left: SessionInfo, right: SessionInfo): number => {
+    const updated = (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+    return updated || left.sessionId.localeCompare(right.sessionId);
+  };
+  roots.sort(compare);
+  for (const siblings of children.values()) siblings.sort(compare);
+
+  const result: SessionTreeRow[] = [];
+  const visited = new Set<string>();
+  function append(
+    session: SessionInfo,
+    depth: number,
+    ancestorContinues: readonly boolean[],
+    isLast: boolean,
+  ): void {
+    if (visited.has(session.sessionId)) return;
+    visited.add(session.sessionId);
+    const treePrefix = depth === 0
+      ? ""
+      : `${ancestorContinues.map((continues) => (continues ? "│  " : "   ")).join("")}${isLast ? "└─" : "├─"}`;
+    result.push({ session, treePrefix });
+    const descendants = children.get(session.sessionId) ?? [];
+    descendants.forEach((child, index) => {
+      const last = index === descendants.length - 1;
+      append(child, depth + 1, [...ancestorContinues, depth > 0 && !isLast], last);
+    });
+  }
+
+  roots.forEach((root, index) => append(root, 0, [], index === roots.length - 1));
+  // A parent cycle has no root. Present its deterministic first member as one.
+  for (const session of [...sessions].sort(compare)) append(session, 0, [], true);
+  return result;
+}
+
+function sessionParentSessionId(session: SessionInfo): string | undefined {
+  const value = session._meta?.[PIX_PARENT_SESSION_ID_META_KEY];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /** Read the ordered TUI tab ids from Pix's namespaced ACP response metadata. */

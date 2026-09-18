@@ -6,7 +6,7 @@
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
-  import { sessionIsFork } from "../lib/session-tabs";
+  import { buildSessionTree, sessionIsFork } from "../lib/session-tabs";
 
   let {
     sessions,
@@ -35,7 +35,8 @@
   let query = $state("");
   let selector = $state<HTMLElement | null>(null);
   let search = $state<HTMLInputElement | null>(null);
-  const filteredSessions = $derived.by(() => {
+  const displayedSessions = $derived.by(() => {
+    if (!query.trim()) return buildSessionTree(sessions);
     return fuzzySearch(
       sessions.map((session) => ({
         value: session,
@@ -44,7 +45,7 @@
         keywords: [displayDate(session.updatedAt)],
       })),
       query,
-    ).map((match) => match.value);
+    ).map((match) => ({ session: match.value, treePrefix: "" }));
   });
 
   $effect(() => {
@@ -72,9 +73,9 @@
       selector?.querySelector<HTMLButtonElement>("[data-session-option]")?.focus();
       return;
     }
-    if (event.key === "Enter" && filteredSessions[0]) {
+    if (event.key === "Enter" && displayedSessions[0]) {
       event.preventDefault();
-      onSelect(filteredSessions[0].sessionId);
+      onSelect(displayedSessions[0].session.sessionId);
     }
   }
 
@@ -141,35 +142,38 @@
       </button>
     {/if}
 
-    {#each filteredSessions as session (session.sessionId)}
+    {#each displayedSessions as row (row.session.sessionId)}
       <button
         class={[
           "grid w-full grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-md bg-transparent px-2 py-2 text-left text-popover-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-          session.sessionId === activeSessionId && mode === "open" && "bg-accent",
+          row.session.sessionId === activeSessionId && mode === "open" && "bg-accent",
           mode === "delete" && "hover:text-destructive focus-visible:text-destructive",
         ]}
         data-session-option
         type="button"
-        aria-current={mode === "open" && session.sessionId === activeSessionId ? "true" : undefined}
-        onclick={() => onSelect(session.sessionId)}
+        aria-current={mode === "open" && row.session.sessionId === activeSessionId ? "true" : undefined}
+        onclick={() => onSelect(row.session.sessionId)}
         {disabled}
       >
-        {#if mode === "open" && session.sessionId === activeSessionId}
+        {#if mode === "open" && row.session.sessionId === activeSessionId}
           <Check class="h-4 w-4 text-primary" aria-hidden="true" />
         {:else}
           <span aria-hidden="true"></span>
         {/if}
         <span class="min-w-0">
           <strong class="flex min-w-0 items-center gap-1 text-xs font-medium">
-            {#if sessionIsFork(session)}
+            {#if row.treePrefix}
+              <span class="shrink-0 whitespace-pre font-mono text-muted-foreground" aria-hidden="true">{row.treePrefix}</span>
+            {/if}
+            {#if !row.treePrefix && sessionIsFork(row.session)}
               <GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
             {/if}
             <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-              {session.title || "Untitled conversation"}
+              {row.session.title || "Untitled conversation"}
             </span>
           </strong>
           <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">
-            {displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}
+            {displayDate(row.session.updatedAt) || row.session.sessionId.slice(0, 8)}
           </small>
         </span>
       </button>

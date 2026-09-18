@@ -1,5 +1,6 @@
 import type { ContextUsageStatus, RuntimeStatus } from "../lib/acp-client";
 import { parseContextUsageStatus } from "../lib/acp-response-parsers";
+import { newerDcpContextMap, parseDcpContextMap } from "../lib/dcp-context-map";
 import {
   EMPTY_RUNTIME_STATUS_GENERATIONS,
   beginRuntimeStatusRefresh,
@@ -12,6 +13,7 @@ import {
 import {
   PIX_CONTEXT_USAGE_CHANNEL,
   PIX_DCP_TOKENS_SAVED_CHANNEL,
+  PIX_DCP_CONTEXT_MAP_CHANNEL,
   type SessionStateNotification,
 } from "../lib/session-state";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
@@ -27,10 +29,12 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
 
   const statusGenerationsBySession = new Map<string, RuntimeStatusGenerations>();
   const dcpStatsRequestGenerations = new Map<string, number>();
+  let lifecycleGeneration = 0;
 
   async function refreshStatus(sessionId: string, refreshModelUsage = false): Promise<void> {
     const requestClient = options.client();
     if (!requestClient || !options.isReady(sessionId)) return;
+    const requestLifecycleGeneration = lifecycleGeneration;
     const request = beginRuntimeStatusRefresh(
       statusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
       refreshModelUsage,
@@ -45,7 +49,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
 
     try {
       const next = await requestClient.runtimeStatus(sessionId, refreshModelUsage);
-      if (requestClient !== options.client() || !options.isReady(sessionId)) return;
+      if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client() || !options.isReady(sessionId)) return;
       const merged = mergeRuntimeStatusResponse(
         statuses.get(sessionId),
         next,
@@ -55,6 +59,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
           request.quotaGeneration,
         ),
       );
+      if (!merged) return;
       const nextStatuses = new Map(statuses);
       nextStatuses.set(sessionId, merged);
       statuses = nextStatuses;
@@ -63,7 +68,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // private status request races a session reload or transient transport failure.
     } finally {
       const live = statusGenerationsBySession.get(sessionId);
-      if (request.quotaGeneration !== undefined && live?.quota === request.quotaGeneration) {
+      if (requestLifecycleGeneration === lifecycleGeneration && requestClient === options.client()
+        && request.quotaGeneration !== undefined && live?.quota === request.quotaGeneration) {
         const next = new Set(modelUsageRefreshing);
         next.delete(sessionId);
         modelUsageRefreshing = next;
@@ -72,6 +78,27 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   function handleSessionState(notification: SessionStateNotification): boolean {
+    if (notification.channel === PIX_DCP_CONTEXT_MAP_CHANNEL) {
+      if (!options.isReady(notification.sessionId)) return true;
+      const incoming = parseDcpContextMap(notification.data);
+      const previous = statuses.get(notification.sessionId);
+      const dcpContextMap = newerDcpContextMap(previous?.dcpContextMap, incoming);
+      if (incoming && dcpContextMap !== incoming) return true;
+      const generation = beginRuntimeStatusRefresh(
+        statusGenerationsBySession.get(notification.sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
+        false,
+      );
+      statusGenerationsBySession.set(notification.sessionId, generation.generations);
+      const nextStatuses = new Map(statuses);
+      nextStatuses.set(notification.sessionId, {
+        ...previous,
+        sessionId: notification.sessionId,
+        modelUsageRefresh: previous?.modelUsageRefresh ?? "skipped",
+        dcpContextMap,
+      });
+      statuses = nextStatuses;
+      return true;
+    }
     if (notification.channel === PIX_DCP_TOKENS_SAVED_CHANNEL) {
       if (!options.isReady(notification.sessionId)) return true;
       let tokensSaved: number | undefined;
@@ -133,6 +160,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     const requestClient = options.client();
     if (!requestClient || !options.isReady(sessionId) || dcpStatsRefreshing.has(sessionId)) return;
 
+    const requestLifecycleGeneration = lifecycleGeneration;
     const generation = (dcpStatsRequestGenerations.get(sessionId) ?? 0) + 1;
     dcpStatsRequestGenerations.set(sessionId, generation);
     const refreshing = new Set(dcpStatsRefreshing);
@@ -141,7 +169,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     try {
       const next = await requestClient.dcpStats(sessionId);
       if (
-        requestClient !== options.client()
+        requestLifecycleGeneration !== lifecycleGeneration
+        || requestClient !== options.client()
         || !options.isReady(sessionId)
         || dcpStatsRequestGenerations.get(sessionId) !== generation
       ) return;
@@ -157,7 +186,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     } catch {
       // DCP telemetry is best-effort; keep the last successfully loaded snapshot.
     } finally {
-      if (dcpStatsRequestGenerations.get(sessionId) !== generation) return;
+      if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client()
+        || dcpStatsRequestGenerations.get(sessionId) !== generation) return;
       const next = new Set(dcpStatsRefreshing);
       next.delete(sessionId);
       dcpStatsRefreshing = next;
@@ -165,7 +195,13 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   function forget(sessionId: string): void {
-    statusGenerationsBySession.delete(sessionId);
+    const generations = statusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS;
+    // Keep a monotonic tombstone. Deleting this entry would let an old request
+    // and a reopened runtime both look like generation one (ABA).
+    statusGenerationsBySession.set(sessionId, {
+      snapshot: generations.snapshot + 1,
+      quota: generations.quota + 1,
+    });
     dcpStatsRequestGenerations.set(sessionId, (dcpStatsRequestGenerations.get(sessionId) ?? 0) + 1);
     if (statuses.has(sessionId)) {
       const next = new Map(statuses);
@@ -185,6 +221,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   function reset(): void {
+    lifecycleGeneration += 1;
     statusGenerationsBySession.clear();
     dcpStatsRequestGenerations.clear();
     statuses = new Map();

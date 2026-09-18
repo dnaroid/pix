@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type { ModelUsageStatus, RuntimeStatus } from "./acp-client";
 import {
   EMPTY_RUNTIME_STATUS_GENERATIONS,
@@ -93,6 +93,7 @@ describe("desktop runtime status helpers", () => {
         snapshotRequest.quotaGeneration,
       ),
     );
+    assert(afterSnapshot);
     expect(afterSnapshot.modelUsageRefresh).toBe("skipped");
     expect(afterSnapshot.modelUsage).toBeUndefined();
 
@@ -107,6 +108,7 @@ describe("desktop runtime status helpers", () => {
         quotaRequest.quotaGeneration,
       ),
     );
+    assert(merged);
     expect(merged.modelUsage).toEqual(freshQuotaUsage);
     expect(merged.modelUsageRefresh).toBe("ready");
     expect(merged.context).toEqual(snapshotOnlyStatus.context);
@@ -124,6 +126,7 @@ describe("desktop runtime status helpers", () => {
       isLatestRuntimeStatusRefresh(request.generations, request.snapshotGeneration, request.quotaGeneration),
     );
 
+    assert(merged);
     expect(merged.dcpStats).toBe(previous.dcpStats);
     expect(merged.context?.percent).toBe(2);
   });
@@ -196,6 +199,7 @@ describe("desktop runtime status helpers", () => {
       ),
     );
 
+    assert(merged);
     expect(merged.context?.percent).toBe(64);
     expect(merged.modelUsage).toEqual(freshQuotaUsage);
     expect(merged.modelUsageRefresh).toBe("ready");
@@ -219,6 +223,7 @@ describe("desktop runtime status helpers", () => {
       ),
     );
 
+    assert(merged);
     expect(merged.dcpTokensSaved).toBe(24_680);
     expect(merged.modelUsage).toEqual(freshQuotaUsage);
     expect(merged.modelUsageRefresh).toBe("ready");
@@ -237,6 +242,7 @@ describe("desktop runtime status helpers", () => {
       quotaReadyStatus,
       isLatestRuntimeStatusRefresh(second.generations, first.snapshotGeneration, first.quotaGeneration),
     );
+    assert(merged);
     expect(merged.modelUsage).toEqual(staleQuotaUsage);
     expect(merged.modelUsageRefresh).toBe("skipped");
   });

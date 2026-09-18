@@ -15,7 +15,6 @@ function deferred<T>() {
 
 function fixture() {
   let workspace = "/one";
-  let sessionId = "original";
   let content = "+current changes";
   invoke.mockImplementation(async (command: string, payload: { scope: GitDiff["scope"]; path: string | null }) => {
     if (command === "git_diff") return { scope: payload.scope, path: payload.path ?? undefined, content, truncated: false };
@@ -26,7 +25,7 @@ function fixture() {
     setActiveWorkbenchTabId: () => {}, nextWorkbenchAuxOrder: () => 1,
   });
   const client = {
-    gitAssist: vi.fn(async (_session: string, _mode: string, _diff: string) => findings),
+    gitAssist: vi.fn(async (_cwd: string, _mode: string, _diff: string) => findings),
     newSession: vi.fn(async (_workspace: string) => ({ sessionId: "fix-session" })),
     closeSession: vi.fn(async (_session: string) => {}),
   };
@@ -37,8 +36,8 @@ function fixture() {
   const started = vi.fn();
   const refresh = vi.fn();
   const assist = createGitAssist({
-    client: () => client as any, activeSessionId: () => sessionId, workspace: () => workspace,
-    activeSessionRuntimeReady: () => true, operationRunning: () => false, statusReady: () => true,
+    client: () => client as any, workspace: () => workspace,
+    gitAssistantReady: () => true, operationRunning: () => false, statusReady: () => true,
     git, runtime: runtime as any, prompts: prompts as any, forgetRuntime: forget,
     activateResolutionSession: activate, onResolutionRunStarted: started, refreshSessions: refresh, reportError: vi.fn(),
   });
@@ -48,7 +47,6 @@ function fixture() {
   return {
     assist, git, client, runtime, prompts, activate, forget, started, refresh, setReview,
     changeContent(value: string) { content = value; },
-    changeSession(value: string) { sessionId = value; },
     changeWorkspace(value: string) { workspace = value; git.reset(); },
   };
 }
@@ -60,7 +58,7 @@ describe("Git assistant freshness", () => {
     const { git, assist, client } = fixture();
     git.showDiff({ scope: "all", content: "+outdated editor", truncated: false });
     await assist.reviewDiff(undefined, "all");
-    expect(client.gitAssist).toHaveBeenCalledWith("original", "review", "+current changes");
+    expect(client.gitAssist).toHaveBeenCalledWith("/one", "review", "+current changes");
     expect(git.reviewResult?.text).toBe(findings);
     expect(git.reviewResult?.stale).toBe(false);
   });
@@ -91,15 +89,15 @@ describe("Git assistant freshness", () => {
     await assist.resolveReviewInNewSession();
     expect(client.newSession).not.toHaveBeenCalled();
   });
-  it("does not accept a generated message from a previously active session", async () => {
-    const { git, assist, client, changeSession } = fixture();
+  it("generates from the workspace without an active conversation session", async () => {
+    const { git, assist, client } = fixture();
     const result = deferred<string>();
     client.gitAssist.mockReturnValueOnce(result.promise);
     const pending = assist.generateCommitMessage();
     await vi.waitFor(() => expect(client.gitAssist).toHaveBeenCalledOnce());
-    changeSession("different");
-    result.resolve("old session message");
-    await expect(pending).resolves.toBeUndefined();
+    expect(client.gitAssist).toHaveBeenCalledWith("/one", "commit-message", "+current changes");
+    result.resolve("workspace message");
+    await expect(pending).resolves.toBe("workspace message");
     expect(git.llmActionId).toBeNull();
   });
   it("rejects generated messages when the staged diff changed", async () => {

@@ -1,6 +1,7 @@
 export const PIX_SESSION_STATE_METHOD = "pix/session-state";
 export const PIX_CONTEXT_USAGE_CHANNEL = "context-usage";
 export const PIX_DCP_TOKENS_SAVED_CHANNEL = "dcp-tokens-saved";
+export const PIX_DCP_CONTEXT_MAP_CHANNEL = "dcp-context-map";
 
 export interface SessionStateNotification {
   readonly sessionId: string;

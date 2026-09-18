@@ -1,4 +1,5 @@
 import type { ContextUsageStatus, ModelUsageLimitWindow, RuntimeStatus } from "./acp-client";
+import { newerDcpContextMap } from "./dcp-context-map";
 
 export type UsageTone = "success" | "warning" | "error";
 
@@ -106,9 +107,13 @@ export function mergeRuntimeStatusResponse(
   previous: RuntimeStatus | undefined,
   next: RuntimeStatus,
   latest: { snapshot: boolean; quotaRefresh: boolean },
-): RuntimeStatus {
-  const snapshot = latest.snapshot || !previous ? next : previous;
-  const dcpStats = next.dcpStats ?? previous?.dcpStats;
+): RuntimeStatus | undefined {
+  if (!latest.snapshot && !latest.quotaRefresh) return previous;
+  // A stale request has no safe base to merge into after a forget/reset. In
+  // particular, do not recreate a just-forgotten session from its late reply.
+  if (!latest.snapshot && !previous) return undefined;
+  const snapshot = latest.snapshot ? next : previous!;
+  const dcpStats = (latest.snapshot ? next.dcpStats : undefined) ?? previous?.dcpStats;
   let modelUsage = previous?.modelUsage ?? snapshot.modelUsage;
   let modelUsageRefresh = snapshot.modelUsageRefresh;
   if (latest.quotaRefresh) {
@@ -119,6 +124,7 @@ export function mergeRuntimeStatusResponse(
   const { modelUsage: _snapshotModelUsage, dcpStats: _snapshotDcpStats, ...snapshotWithoutModelUsage } = snapshot;
   return {
     ...snapshotWithoutModelUsage,
+    dcpContextMap: newerDcpContextMap(previous?.dcpContextMap, snapshot.dcpContextMap),
     modelUsageRefresh,
     ...(dcpStats ? { dcpStats } : {}),
     ...(modelUsage ? { modelUsage } : {}),

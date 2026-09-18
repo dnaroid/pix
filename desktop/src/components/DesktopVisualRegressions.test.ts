@@ -11,6 +11,8 @@ import elicitationSource from "./ElicitationDialog.svelte?raw";
 import idxSource from "./IdxPanel.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
+import dcpContextPanelSource from "./DcpContextPanel.svelte?raw";
+import sessionSubagentsSource from "./SessionSubagentsPanel.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
@@ -97,6 +99,44 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("DCP saved ~");
     expect(runtimeStatusSource).toContain("Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens");
     expect(runtimeStatusSource).not.toContain("Context ${Math.round(context.percent)}%");
+  });
+
+  it("keeps DCP context visualization semantically separated in the Session inspector", () => {
+    expect(dcpContextPanelSource).toContain("Context token-volume capacity map");
+    expect(dcpContextPanelSource).not.toContain("DcpPreparedMap");
+    expect(dcpContextPanelSource).toContain("grouped capacity shares, not message positions");
+    expect(dcpContextPanelSource).toContain("Advisory compression candidates, not permission to delete");
+    expect(dcpContextPanelSource).toContain("DCP category estimates are unavailable.");
+    expect(dcpContextPanelSource).toContain("It is not measured commit gain or a billing counter.");
+    expect(dcpContextPanelSource).toContain("Old unmeasured commits remain unknown");
+    expect(dcpContextPanelSource).not.toContain("Open DCP statistics from Context in the status bar");
+  });
+
+  it("keeps Session inspector sections as independently persistent native accordions", () => {
+    for (const source of [dcpContextPanelSource, sessionSubagentsSource, sessionTodosSource]) {
+      expect(source).toContain('<details');
+      expect(source).toContain("<summary");
+      expect(source).toContain("[&::-webkit-details-marker]:hidden");
+      expect(source).not.toContain("bind:open");
+      expect(source).not.toContain("open={$derived");
+    }
+
+    expect(dcpContextPanelSource).toContain('<details class="group border-b border-border" open>');
+    for (const source of [sessionSubagentsSource, sessionTodosSource]) {
+      expect(source).toContain('ontoggle={noteToggle}');
+      expect(source).toContain('receivedInitialSnapshot || snapshot === undefined');
+      expect(source).toContain('if (!manuallyToggled) applyInitialOpenState()');
+    }
+
+    expect(sessionTodosSource).toContain("{summary.completedTodos}/{summary.totalTodos} tasks");
+    expect(sessionTodosSource).toContain('aria-label="Clear session plan"');
+    expect(sessionTodosSource).toContain("onclick={() => { void clearTodos(); }}");
+    // A header action inside details would disappear when the accordion closes.
+    expect(sessionTodosSource.indexOf('aria-label="Clear session plan"')).toBeGreaterThan(sessionTodosSource.indexOf("</details>"));
+    expect(sessionTodosSource).toContain("disabled={!canClearTodos || clearingTodos || rows.length === 0}");
+    expect(sessionSubagentsSource).toContain("{activeCount} active");
+    expect(dcpContextPanelSource).toContain("saved ~{formatCompactTokens(view.liveTokensSaved)}");
+    expect(dcpContextPanelSource).toContain("{Math.round(occupancyPercent)}% occupied");
   });
 
   it("keeps the model and thinking selector available while a prompt is running", () => {

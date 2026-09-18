@@ -29,6 +29,7 @@ Keep todos cleared after pix reloads or resumes the current session branch.
 ## Behavior
 
 - A successful slash-command mutation appends a hidden todo-state custom entry after updating live state.
+- Desktop's private `pix/session/clear_todos` action invokes that same `/todos-clear` handler directly, so it has identical hidden snapshot persistence and state publication without adding a slash command or user message to the transcript.
 - Session replay remains last-write-wins in branch order.
 - A valid custom snapshot supersedes earlier `todo` tool results; malformed or unrelated custom entries are ignored.
 - Existing sessions without custom snapshots continue to replay from `todo` tool results.

@@ -485,6 +485,7 @@ async fn deepgram_token(app: AppHandle) -> Result<DeepgramTokenResponse, String>
     .await
 }
 
+#[cfg(test)]
 fn resolve_deepgram_api_key(home: &Path, env_api_key: Option<String>) -> Result<String, String> {
     resolve_deepgram_runtime_config(home, env_api_key).map(|config| config.api_key)
 }

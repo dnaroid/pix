@@ -252,6 +252,22 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("clears session todos through the private ACP action", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const clear = client.clearTodos("session-1");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/clear_todos",
+      params: { sessionId: "session-1" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: {} });
+    await expect(clear).resolves.toBeUndefined();
+
+    await client.dispose();
+  });
+
   it("requests and validates Desktop runtime status snapshots", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

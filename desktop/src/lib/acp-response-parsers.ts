@@ -11,6 +11,8 @@ import type {
   RuntimeStatus,
 } from "./acp-client-types";
 
+import { parseDcpContextMap } from "./dcp-context-map";
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -26,6 +28,7 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus {
 
   const context = value.context === undefined ? undefined : parseContextUsageStatus(value.context);
   const modelUsage = value.modelUsage === undefined ? undefined : parseModelUsageStatus(value.modelUsage);
+  const dcpContextMap = parseDcpContextMap(value.dcpContextMap);
   if (
     value.dcpTokensSaved !== undefined
     && (!isFiniteNumber(value.dcpTokensSaved) || value.dcpTokensSaved < 0)
@@ -37,6 +40,7 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus {
   }
   return {
     sessionId: value.sessionId,
+    ...(dcpContextMap ? { dcpContextMap } : {}),
     ...(context ? { context } : {}),
     ...(typeof value.dcpTokensSaved === "number" ? { dcpTokensSaved: Math.round(value.dcpTokensSaved) } : {}),
     ...(typeof value.dcpStats === "string" ? { dcpStats: value.dcpStats } : {}),

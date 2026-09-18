@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
-  import { sessionIsFork } from "../lib/session-tabs";
+  import { buildSessionTree, sessionIsFork } from "../lib/session-tabs";
 
   let {
     sessions,
@@ -16,15 +16,17 @@
 
   let query = $state("");
   let searchInput = $state<HTMLInputElement | null>(null);
-  const filteredSessions = $derived(fuzzySearch(
-    sessions.map((session) => ({
-      value: session,
-      label: session.title ?? "Untitled conversation",
-      aliases: [session.sessionId],
-      keywords: [displayDate(session.updatedAt)],
-    })),
-    query,
-  ).map((match) => match.value));
+  const displayedSessions = $derived(query.trim()
+    ? fuzzySearch(
+      sessions.map((session) => ({
+        value: session,
+        label: session.title ?? "Untitled conversation",
+        aliases: [session.sessionId],
+        keywords: [displayDate(session.updatedAt)],
+      })),
+      query,
+    ).map((match) => ({ session: match.value, treePrefix: "" }))
+    : buildSessionTree(sessions));
 
   function displayDate(value: string | null | undefined): string {
     if (!value) return "";
@@ -58,19 +60,22 @@
     </header>
 
     <div class="min-h-0 overflow-y-auto border-t border-border/70" aria-label="Saved conversations">
-      {#each filteredSessions as session (session.sessionId)}
+      {#each displayedSessions as row (row.session.sessionId)}
         <button
           class="grid h-7 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/50 px-2.5 text-left transition-colors last:border-b-0 hover:bg-panel-hover focus-visible:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
           type="button"
-          onclick={() => onSelect(session.sessionId)}
+          onclick={() => onSelect(row.session.sessionId)}
         >
           <strong class="flex min-w-0 items-center gap-1 text-xs font-medium text-foreground">
-            {#if sessionIsFork(session)}
+            {#if row.treePrefix}
+              <span class="shrink-0 whitespace-pre font-mono text-muted-foreground" aria-hidden="true">{row.treePrefix}</span>
+            {/if}
+            {#if !row.treePrefix && sessionIsFork(row.session)}
               <GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
             {/if}
-            <span class="min-w-0 truncate">{session.title || "Untitled conversation"}</span>
+            <span class="min-w-0 truncate">{row.session.title || "Untitled conversation"}</span>
           </strong>
-          <small class="shrink-0 font-mono text-xs text-muted-foreground">{displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}</small>
+          <small class="shrink-0 font-mono text-xs text-muted-foreground">{displayDate(row.session.updatedAt) || row.session.sessionId.slice(0, 8)}</small>
         </button>
       {:else}
         <p class="px-3 py-6 text-center text-xs text-muted-foreground">

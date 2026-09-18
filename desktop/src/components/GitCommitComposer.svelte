@@ -8,9 +8,9 @@
   import { loadGitCommitDraft, saveGitCommitDraft, stagedGitChanges, type GitSnapshot, type GitDiffScope } from "../lib/git";
   import { gitPushBlockedReason } from "../lib/git-workflow";
 
-  let { workspace, snapshot, busy, llmActionId, sessionReady, actionId, onStage, onCommit, onGenerateCommitMessage, onReview }: {
+  let { workspace, snapshot, busy, llmActionId, gitAssistantReady, actionId, onStage, onCommit, onGenerateCommitMessage, onReview }: {
     workspace: string; snapshot: GitSnapshot; busy: boolean; llmActionId: string | null;
-    sessionReady: boolean; actionId: string | null;
+    gitAssistantReady: boolean; actionId: string | null;
     onStage: (path?: string) => Promise<boolean>;
     onCommit: (message: string, pushAfterCommit?: boolean) => Promise<boolean>;
     onGenerateCommitMessage: () => Promise<string | undefined>;
@@ -28,7 +28,7 @@
   const pushBlocked = $derived(gitPushBlockedReason(snapshot));
   const locked = $derived(busy || submitting || generating || llmActionId !== null);
   const canCommit = $derived(staged > 0 && Boolean(message.trim()) && !locked && !conflicts);
-  const canPrepare = $derived(sessionReady && !locked && snapshot.changes.length > 0 && !conflicts);
+  const canPrepare = $derived(gitAssistantReady && !locked && snapshot.changes.length > 0 && !conflicts);
   const reviewScope = $derived(staged > 0 ? "staged" : "all");
   const commitHint = $derived(conflicts ? "Resolve conflicts before committing" : staged === 0
     ? "Stage files or use Stage all & generate" : !message.trim() ? "Write or generate a commit message" : "Commit staged changes only");
@@ -84,13 +84,13 @@
   <div class="grid grid-cols-2 gap-1.5">
     <button class="inline-flex min-h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-strong px-1.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
       type="button" disabled={!canPrepare} onclick={() => void generate()}
-      title={!sessionReady ? "Open a ready session to generate a message" : staged ? `Generate from ${staged} staged files only` : `Stage all ${snapshot.changes.length} changed files, then generate a message`}>
+      title={!gitAssistantReady ? "Connect to generate a message" : staged ? `Generate from ${staged} staged files only` : `Stage all ${snapshot.changes.length} changed files, then generate a message`}>
       {#if generating}<RefreshCw class="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />{:else}<Sparkles class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{/if}
       {generating ? "Generating…" : staged ? "Generate message" : "Stage all & generate"}
     </button>
     <button class="inline-flex min-h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-strong px-1.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
       type="button" disabled={!canPrepare} onclick={() => onReview(undefined, reviewScope)}
-      title={!sessionReady ? "Open a ready session to run code review" : staged ? `Review ${staged} staged files before committing` : "Review all changes, including untracked files. Does not stage or commit."}>
+      title={!gitAssistantReady ? "Connect to run code review" : staged ? `Review ${staged} staged files before committing` : "Review all changes, including untracked files. Does not stage or commit."}>
       {#if llmActionId?.startsWith("review:")}<RefreshCw class="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />{:else}<ShieldCheck class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{/if}
       {llmActionId?.startsWith("review:") ? "Reviewing…" : "Code review"}
     </button>
@@ -116,7 +116,7 @@
       {submitting ? actionId === "push" ? "Pushing…" : "Committing…" : "Commit & push"}
     </button>
   </div>
-  {#if !sessionReady}<p class="text-xs leading-4 text-muted-foreground">AI actions need a ready session. Manual Git actions remain available.</p>
+  {#if !gitAssistantReady}<p class="text-xs leading-4 text-muted-foreground">AI actions need a ready connection. Manual Git actions remain available.</p>
   {:else if pushBlocked}<p class="text-xs leading-4 text-muted-foreground">{pushBlocked}. You can commit locally.</p>
   {:else if staged === 0}<p class="text-xs leading-4 text-muted-foreground">Choose files above, or explicitly stage all when generating.</p>{/if}
 </section>

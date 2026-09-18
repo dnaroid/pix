@@ -78,11 +78,9 @@ export type WorkbenchConversationBuilderOptions = {
 };
 
 export type WorkbenchEditorBuilderOptions = {
-  activeSessionId: () => string | null;
   workspace: () => string;
   statusReady: () => boolean;
   clientAvailable: () => boolean;
-  activeSessionRuntimeReady: () => boolean;
   operationRunning: () => boolean;
   activeWorkbenchTabId: () => string | null;
   externalEditorLabel: () => string;
@@ -100,6 +98,9 @@ export type WorkbenchInspectorBuilderOptions = {
   activeSessionActivity: () => InspectorProps["summary"];
   activeTodoSnapshot: () => InspectorProps["todoSnapshot"];
   activeSubagentSnapshot: () => InspectorProps["subagentSnapshot"];
+  activeRuntimeStatus: () => InspectorProps["runtimeStatus"];
+  canClearTodos: () => boolean;
+  clearSessionTodos: (sessionId: string) => Promise<boolean>;
   inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
 };
 
@@ -214,7 +215,6 @@ export function buildWorkbenchConversationProps(
 export function buildWorkbenchEditorProps(
   options: WorkbenchEditorBuilderOptions,
 ): Pick<DesktopWorkbenchSurfaceViewProps, "preview" | "previewVisible" | "gitDiff" | "gitDiffVisible"> {
-  const sessionId = options.activeSessionId();
   const activePreview = options.preview.active;
   const gitDiffPreview = options.git.diffPreview;
 
@@ -254,7 +254,7 @@ export function buildWorkbenchEditorProps(
       reviewStale: options.git.reviewResult?.stale ?? false,
       reviewLoading: options.git.llmActionId?.startsWith("review:") === true,
       resolveLoading: options.git.resolveRunning,
-      canReview: Boolean(options.clientAvailable() && sessionId && options.activeSessionRuntimeReady() && !options.git.actionId && !options.git.llmActionId && !options.git.resolveRunning),
+      canReview: Boolean(options.clientAvailable() && options.workspace() && options.statusReady() && !options.git.actionId && !options.git.llmActionId && !options.git.resolveRunning),
       canResolve: Boolean(options.clientAvailable() && options.workspace() && options.statusReady() && !options.operationRunning() && !options.git.actionId && !options.git.llmActionId && !options.git.reviewResult?.stale),
       onValidateProjectFile: options.preview.validateProjectFile,
       onValidateLocalFile: options.preview.validateLocalFile,
@@ -271,13 +271,20 @@ export function buildWorkbenchEditorProps(
 export function buildWorkbenchInspectorProps(
   options: WorkbenchInspectorBuilderOptions,
 ): Pick<DesktopWorkbenchSurfaceViewProps, "inspector"> {
+  const sessionId = options.activeSessionId();
   return {
-    inspector: options.inspectorPreference.open ? {
-      activeSessionId: options.activeSessionId(),
+    inspector: options.inspectorPreference.open && sessionId ? {
+      activeSessionId: sessionId,
       sessionTitle: options.activeTitle(),
       summary: options.activeSessionActivity(),
+      runtimeStatus: options.activeRuntimeStatus(),
       todoSnapshot: options.activeTodoSnapshot(),
       subagentSnapshot: options.activeSubagentSnapshot(),
+      canClearTodos: options.canClearTodos(),
+      onClearTodos: () => {
+        const activeSessionId = options.activeSessionId();
+        return activeSessionId ? options.clearSessionTodos(activeSessionId) : Promise.resolve(false);
+      },
       onClose: () => options.inspectorPreference.setOpen(false),
     } : null,
   };

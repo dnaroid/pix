@@ -2,8 +2,18 @@ import { externalEditorLabel } from "../lib/desktop-config";
 import { isEditableProjectMarkdown } from "../lib/project-documents";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import { createDesktopWorkbenchViewModel } from "./desktop-workbench-view-model.svelte";
+import { createSessionTodoActions } from "./session-todo-actions";
 
 export function createDesktopWorkbenchViewModelServices(options: DesktopViewModelServicesOptions) {
+  const todoActions = createSessionTodoActions({
+    client: options.client,
+    ready: (sessionId) => sessionId === options.state.sessionId
+      && options.state.runtimeReady
+      && !options.presentation.promptRunning
+      && !options.presentation.sessionMutationRunning
+      && !options.sessions.history.loading,
+    reportError: (error) => options.errors.report(error),
+  });
   return createDesktopWorkbenchViewModel({
     layout: {
       conversationVisible: () => options.presentation.activeWorkbenchTab?.kind === "session",
@@ -56,11 +66,9 @@ export function createDesktopWorkbenchViewModelServices(options: DesktopViewMode
       questionImages: options.interactions.questionImages,
     },
     editor: {
-      activeSessionId: () => options.state.sessionId,
       workspace: options.workspace,
       statusReady: () => options.status() === "ready",
       clientAvailable: options.clientAvailable,
-      activeSessionRuntimeReady: () => options.state.runtimeReady,
       operationRunning: options.operationRunning,
       activeWorkbenchTabId: options.activeWorkbenchTabId,
       externalEditorLabel: () => externalEditorLabel(options.project.workspace.externalEditor),
@@ -77,6 +85,14 @@ export function createDesktopWorkbenchViewModelServices(options: DesktopViewMode
       activeSessionActivity: () => options.presentation.activeSessionActivity,
       activeTodoSnapshot: () => options.presentation.activeTodoSnapshot,
       activeSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
+      activeRuntimeStatus: () => {
+        const sessionId = options.state.sessionId;
+        return sessionId ? options.sessions.runtime.statuses.get(sessionId) : undefined;
+      },
+      canClearTodos: () => Boolean(
+        options.state.sessionId && todoActions.canClear(options.state.sessionId),
+      ),
+      clearSessionTodos: todoActions.clear,
       inspectorPreference: options.sessions.inspectorPreference,
     },
   });

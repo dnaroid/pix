@@ -18,7 +18,7 @@ Optimize Source Control for message generation → commit → push, code review 
 
 The sidebar header shows the local branch, upstream, outgoing/incoming counts, status refresh and a standalone Push/Publish action. The branch selector also allows leaving detached HEAD. Incoming commits, conflicts, errors and completed operations have explicit feedback.
 
-The commit composer remains outside the file-list scroller. It has visible Generate message, Code review, Commit and Commit & push controls. Commit & push is primary when pushing is available; Commit remains available for local work without a remote. Missing model-session readiness disables only AI preparation, not manual Git operations or message editing. The Source Control view clamps its content pane to a 360 px minimum so these desktop actions keep their single-line labels and normal control spacing instead of compressing into a cramped layout.
+The commit composer remains outside the file-list scroller. It has visible Generate message, Code review, Commit and Commit & push controls. Commit & push is primary when pushing is available; Commit remains available for local work without a remote. Missing Git-assistant readiness disables only AI preparation, not manual Git operations or message editing. Git preparation uses the standalone assistant for the selected workspace and requires only a connected, ready ACP client and nonempty workspace; it does not create, load or depend on a conversation session. The Source Control view clamps its content pane to a 360 px minimum so these desktop actions keep their single-line labels and normal control spacing instead of compressing into a cramped layout.
 
 Staged and working-tree changes retain file status, per-scope additions/deletions, individual stage/unstage, stage/unstage-all and diff inspection. A path filter narrows visible rows. Bulk actions still affect their entire scope, including filtered-out files, and their tooltips state this. The filter resets when the workspace changes.
 
@@ -64,12 +64,14 @@ All new Git commands use the existing noninteractive argument-vector process hel
 - `desktop/src/components/GitDiffPane.svelte`: full-height Review/Diff editor and fix/copy actions.
 - `desktop/src/app/git-workspace.svelte.ts`: Git transaction, workspace state, review retention, IPC and lifecycle guards.
 - `desktop/src/app/git-assist.ts`: model preparation and verified fix-session handoff.
+- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`, `desktop-navigation-view-model-services.ts`, `desktop-workbench-git-services.ts` and `desktop-workbench-prop-builders.ts`: workspace-assistant readiness for Source Control and Git Diff, independent of conversation-tab runtime readiness.
+- `desktop/src/lib/acp-client.ts`, `desktop/src/lib/acp-pix-extensions.ts`, `acp/src/acp/desktop-commands.ts` and `acp/src/acp/pix-acp-agent.ts`: cwd-bound Git-assistant request transport and standalone ACP execution without allocating a conversation session.
 - `desktop/src/lib/git-workflow.ts` and `git.ts`: shared policies, types and prompt/draft helpers.
 - `desktop/src-tauri/src/git_operations.rs`: secondary commands and temporary-repository tests; minimal registration in `lib.rs`.
 
 ## Verification
 
-`npm --prefix desktop run check`, `npm --prefix desktop test`, and `npm --prefix desktop run build:web` cover static checking, the existing suite and production frontend compilation. Focused behavior tests are in `git-workspace.test.ts`, `git-assist-workflow.test.ts`, `git-assist.test.ts`, `git-workflow.test.ts` and `DesktopEditorSurfaces.test.ts`.
+`npm --prefix desktop run check`, `npm --prefix desktop test`, and `npm --prefix desktop run build:web` cover static checking, the existing suite and production frontend compilation. Focused behavior tests are in `git-workspace.test.ts`, `git-assist-workflow.test.ts`, `git-assist.test.ts`, `desktop-workbench-prop-builders.test.ts`, `git-workflow.test.ts` and `DesktopEditorSurfaces.test.ts`. ACP request parsing and standalone dispatch are covered by `acp/test/desktop-commands.test.ts` and `acp/test/agent.test.ts`.
 
 `npm --prefix desktop run test:git-workflow` mounts the real Svelte components with deterministic fake Git/ACP callbacks in Chromium. It exercises all three flows, partial/explicit staging, draft races, push partial success, no-session/no-remote/conflict states, keyboard controls, stable review/diff selection, full-height review and 360px light/dark Source Control geometry/semantic colors. Screenshots are written to ignored `desktop/.artifacts/git-workflow/`.
 

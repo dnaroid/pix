@@ -4,7 +4,10 @@
   import Circle from "@lucide/svelte/icons/circle";
   import CirclePause from "@lucide/svelte/icons/circle-pause";
   import Clock3 from "@lucide/svelte/icons/clock-3";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { onMount } from "svelte";
   import ListChecks from "@lucide/svelte/icons/list-checks";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import UserRound from "@lucide/svelte/icons/user-round";
   import type { SessionActivitySummary } from "../lib/session-activity";
   import {
@@ -16,12 +19,49 @@
   let {
     snapshot,
     summary,
+    canClearTodos = false,
+    onClearTodos,
   }: {
     snapshot: SessionTodoSnapshot | undefined;
     summary: SessionActivitySummary;
+    canClearTodos?: boolean;
+    onClearTodos?: () => Promise<boolean>;
   } = $props();
 
   const rows = $derived(visibleSessionTodoRows(snapshot));
+  let details = $state<HTMLDetailsElement>();
+  let receivedInitialSnapshot = false;
+  let manuallyToggled = false;
+  let defaultOpen: boolean | undefined;
+  let clearingTodos = $state(false);
+
+  function applyInitialOpenState(): void {
+    if (receivedInitialSnapshot || snapshot === undefined) return;
+    receivedInitialSnapshot = true;
+    defaultOpen = rows.length > 0;
+    if (details) details.open = defaultOpen;
+  }
+
+  $effect(() => {
+    if (!manuallyToggled) applyInitialOpenState();
+  });
+
+  onMount(applyInitialOpenState);
+
+  function noteToggle(): void {
+    if (defaultOpen !== undefined && details?.open === defaultOpen) return;
+    manuallyToggled = true;
+  }
+
+  async function clearTodos(): Promise<void> {
+    if (!onClearTodos || !canClearTodos || clearingTodos || rows.length === 0) return;
+    clearingTodos = true;
+    try {
+      await onClearTodos();
+    } finally {
+      clearingTodos = false;
+    }
+  }
 
   function statusTone(status: SessionTodoStatus): string {
     if (status === "completed") return "text-tool-success";
@@ -36,14 +76,14 @@
   }
 </script>
 
-<section aria-labelledby="session-todos-heading">
-  <div class="flex h-8 items-center gap-1.5 border-b border-border px-2.5">
+<div class="relative">
+<details bind:this={details} class="group border-b border-border" ontoggle={noteToggle}>
+  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2.5 pr-9 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ListChecks class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-    <h2 id="session-todos-heading" class="text-xs font-semibold uppercase tracking-wide text-foreground">Plan</h2>
-    {#if summary.openTodos > 0 && summary.totalTodos > 0}
-      <span class="ml-auto font-mono text-xs text-muted-foreground">{summary.completedTodos}/{summary.totalTodos}</span>
-    {/if}
-  </div>
+    <span class="font-semibold uppercase tracking-wide text-foreground">Plan</span>
+    <span class="ml-auto font-mono tabular-nums text-muted-foreground">{summary.completedTodos}/{summary.totalTodos} tasks</span>
+    <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+  </summary>
 
   <div>
     {#if rows.length === 0}
@@ -87,4 +127,13 @@
       </div>
     {/if}
   </div>
-</section>
+</details>
+  <button
+    class="absolute top-1 right-1 grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-panel-hover hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    type="button"
+    title="Clear session plan"
+    aria-label="Clear session plan"
+    disabled={!canClearTodos || clearingTodos || rows.length === 0}
+    onclick={() => { void clearTodos(); }}
+  ><Trash2 class="h-3.5 w-3.5" aria-hidden="true" /></button>
+</div>

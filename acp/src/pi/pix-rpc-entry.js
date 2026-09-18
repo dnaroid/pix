@@ -10,6 +10,7 @@ const { AgentSession } = await import("@earendil-works/pi-coding-agent");
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
+const PIX_CLEAR_TODOS_MESSAGE = "\u0000pix:clear-todos";
 const PIX_DCP_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.runtime-stats");
 
 const originalGetSessionStats = AgentSession.prototype.getSessionStats;
@@ -21,11 +22,36 @@ AgentSession.prototype.getSessionStats = function pixGetSessionStats() {
 		const runtimeStats = getter();
 		const tokensSaved = runtimeStats?.tokensSaved;
 		if (typeof tokensSaved !== "number" || !Number.isFinite(tokensSaved) || tokensSaved < 0) return stats;
-		return { ...stats, pixDcpTokensSaved: Math.round(tokensSaved) };
+		const contextMap = parseDcpContextMap(runtimeStats?.contextMap);
+		return {
+			...stats,
+			pixDcpTokensSaved: Math.round(tokensSaved),
+			...(contextMap ? { pixDcpContextMap: contextMap } : {}),
+		};
 	} catch {
 		return stats;
 	}
 };
+
+function parseDcpContextMap(value) {
+	const estimates = value?.tokenEstimates;
+	const valid = value && typeof value === "object"
+		&& Number.isSafeInteger(value.revision) && value.revision > 0
+		&& Number.isSafeInteger(value.sessionEpoch) && value.sessionEpoch >= 0
+		&& Number.isSafeInteger(value.generatedAt) && value.generatedAt > 0
+		&& Number.isFinite(new Date(value.generatedAt).getTime())
+		&& estimates && [estimates.candidate, estimates.protected, estimates.compressed, estimates.retained]
+			.every((tokens) => Number.isSafeInteger(tokens) && tokens >= 0);
+	if (!valid) return undefined;
+	const total = estimates.candidate + estimates.protected + estimates.compressed + estimates.retained;
+	if (!Number.isSafeInteger(total) || total <= 0) return undefined;
+	return {
+		revision: value.revision, sessionEpoch: value.sessionEpoch,
+		generatedAt: value.generatedAt,
+		tokenEstimates: { candidate: estimates.candidate, protected: estimates.protected,
+			compressed: estimates.compressed, retained: estimates.retained },
+	};
+}
 
 /** @type {WeakMap<AgentSession, {
  *   state: "idle" | "pause-requested" | "paused" | "resuming";
@@ -190,6 +216,18 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 			options?.preflightResult?.(false);
 			throw error;
 		}
+	}
+	if (text === PIX_CLEAR_TODOS_MESSAGE) {
+		const runner = this.extensionRunner;
+		const command = runner?.getCommand("todos-clear");
+		if (!command) throw new Error("Todo extension is unavailable in this session");
+		const context = runner.createCommandContext();
+		if (!context.isIdle()) throw new Error("Cannot clear session plan while the session is busy");
+		// The normal slash dispatcher reports handler errors as UI events and swallows
+		// them. Invoke the same handler directly so ACP receives a failed request.
+		await command.handler("", context);
+		options?.preflightResult?.(true);
+		return;
 	}
 	// Bind the turn-boundary hook before the normal prompt starts. Agent captures
 	// shouldStopAfterTurn when it builds the loop config, so installing the hook

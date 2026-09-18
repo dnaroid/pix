@@ -13,10 +13,10 @@
   import GitCommitComposer from "./GitCommitComposer.svelte";
   import GitRepositoryTools from "./GitRepositoryTools.svelte";
 
-  let { workspace, snapshot, loading, error, actionId, llmActionId, sessionReady, workflow,
+  let { workspace, snapshot, loading, error, actionId, llmActionId, gitAssistantReady, workflow,
     onRefresh, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
     workspace: string; snapshot: GitSnapshot | undefined; loading: boolean; error: string | null;
-    actionId: string | null; llmActionId: string | null; sessionReady: boolean; workflow: GitPanelWorkflow;
+    actionId: string | null; llmActionId: string | null; gitAssistantReady: boolean; workflow: GitPanelWorkflow;
     onRefresh: () => void; onOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onStage: (path?: string) => Promise<boolean>; onUnstage: (path?: string) => void;
     onCommit: (message: string, pushAfterCommit?: boolean) => Promise<boolean>; onPush: () => void;
@@ -103,7 +103,7 @@
       {:else}
         <div class="flex gap-1 px-2 py-2">
           <input type="search" class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-xs outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Filter changed files" placeholder="Filter changed files…" bind:value={query} />
-          <button class="shrink-0 rounded-sm px-1.5 text-xs text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!sessionReady || busy || Boolean(conflicts)} title="Review staged, unstaged and untracked changes together" onclick={() => onReview(undefined, "all")}>Review all</button>
+          <button class="shrink-0 rounded-sm px-1.5 text-xs text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!gitAssistantReady || busy || Boolean(conflicts)} title="Review staged, unstaged and untracked changes together" onclick={() => onReview(undefined, "all")}>Review all</button>
         </div>
         <GitChangesSection changes={staged} scope="staged" {query} {busy} {onOpenDiff} onToggle={(path) => onUnstage(path)} onDiscard={() => {}} />
         <GitChangesSection changes={unstaged} scope="unstaged" {query} {busy} {onOpenDiff} onToggle={(path) => void onStage(path)} onDiscard={(path) => void workflow.onRepositoryAction("discard", path)} />
@@ -114,6 +114,6 @@
   </div>
 
   {#if snapshot}
-    {#key workspace}<GitCommitComposer {workspace} {snapshot} {busy} {llmActionId} {sessionReady} {actionId} {onStage} {onCommit} {onGenerateCommitMessage} {onReview} />{/key}
+    {#key workspace}<GitCommitComposer {workspace} {snapshot} {busy} {llmActionId} {gitAssistantReady} {actionId} {onStage} {onCommit} {onGenerateCommitMessage} {onReview} />{/key}
   {/if}
 </section>

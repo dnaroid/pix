@@ -90,8 +90,16 @@ try {
   assert(await panel.getByRole("alert").textContent().then((text) => text.includes("Retry Push")));
   assert(!(await panel.getByRole("button", { name: "Push", exact: true }).isDisabled()));
 
-  // No model session or remote does not block an ordinary local commit.
+  // A draft tab can use the workspace assistant without a model session.
   await reset("no-session");
+  assert(!(await panel.getByRole("button", { name: "Generate message", exact: true }).isDisabled()));
+  await panel.getByRole("button", { name: "Generate message", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#git-commit-message")?.value.startsWith("feat:"));
+  assert.deepEqual(await calls(), ["generate"]);
+  await page.screenshot({ path: `${screenshots}/draft-tab-generation.png`, fullPage: true });
+
+  // A disconnected assistant still leaves ordinary local commits available.
+  await reset("disconnected");
   assert(await panel.getByRole("button", { name: "Generate message", exact: true }).isDisabled());
   await message.fill("manual commit");
   await message.press("Control+Shift+Enter");

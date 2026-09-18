@@ -14,6 +14,7 @@
   let review = $state<GitReviewResult | null>(null);
   let diff = $state<GitDiff | null>(null);
   let sessionReady = $state(true);
+  let gitAssistantReady = $state(true);
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let details = $state<GitPanelWorkflow["details"]>(null);
@@ -95,6 +96,7 @@
       reset(mode = "partial") {
         localStorage.removeItem(gitCommitDraftStorageKey(workspace));
         snapshot = initialSnapshot(mode); sessionReady = mode !== "no-session";
+        gitAssistantReady = mode !== "disconnected";
         review = null; diff = null; error = null; notice = null; details = null;
         llmActionId = null; delayGeneration = false; delayReview = false; stageFails = false; pushFails = false;
         calls = []; version += 1;
@@ -114,7 +116,7 @@
 <div class="flex h-screen min-h-0 min-w-0 overflow-hidden bg-background">
   <aside id="git-panel-fixture" class="flex min-h-0 shrink-0 border-r border-border" style:width={`${width}px`}>
     {#key version}
-      <GitPanel {workspace} {snapshot} loading={false} {error} actionId={null} {llmActionId} {sessionReady} {workflow}
+      <GitPanel {workspace} {snapshot} loading={false} {error} actionId={null} {llmActionId} {gitAssistantReady} {workflow}
         onRefresh={() => {}} onOpenDiff={openDiff} onStage={stage}
         onUnstage={(path) => { calls.push(`unstage:${path ?? "all"}`); }} onCommit={commit}
         onPush={() => calls.push("push")}
@@ -126,7 +128,7 @@
   <main class="flex min-h-0 min-w-0 flex-1">
     {#if diff}
       <GitDiffPane {diff} review={review?.text} reviewStale={review?.stale ?? false} reviewLoading={llmActionId === "review:all"}
-        resolveLoading={false} canReview={sessionReady && !llmActionId} canResolve={sessionReady && !review?.stale}
+        resolveLoading={false} canReview={gitAssistantReady && !llmActionId} canResolve={sessionReady && !review?.stale}
         onReview={() => void runReview(diff?.path, diff!.scope)} onResolve={workflow.onResolve}
         onCopyPrompt={() => { calls.push("copy-prompt"); return true; }} />
     {/if}

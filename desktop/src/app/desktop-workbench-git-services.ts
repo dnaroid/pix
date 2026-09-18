@@ -55,9 +55,8 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
 
   const gitAssist = createGitAssist({
     client: options.client,
-    activeSessionId: () => options.state.sessionId,
     workspace: options.workspace,
-    activeSessionRuntimeReady: () => options.state.runtimeReady,
+    gitAssistantReady: () => options.statusReady() && Boolean(options.client()) && Boolean(options.workspace()),
     operationRunning: options.operationRunning,
     statusReady: options.statusReady,
     git: options.project.git,
