@@ -7,12 +7,11 @@
 > tagged with its source: `[confirmed by code]`, `[confirmed by tests]`,
 > `[confirmed by docs]`, `[inferred]`, or `[unknown]`. Re-verify against
 > current code before relying on any claim. Last broad drift audit:
-> 2026-09-12. That pass re-verified all knowledge entries whose implementation
-> inputs had changed, refreshed changed Spec Wiki metadata, removed brittle test
-> counts from verification evidence, and reconciled this inventory with the
-> current `specs/` directory. Root, Desktop, ACP, and pi-tools-suite tests were
-> green; native Rust compilation could not be rerun because the local rustup
-> installation has no default toolchain configured.
+> 2026-09-19. That pass reviewed and classified all discovered knowledge
+> candidates, semantically re-verified every primary knowledge entry against its
+> current implementation/tests, and reconciled this inventory with the current
+> `specs/` directory. Root, Desktop, ACP, focused pi-tools-suite contract suites,
+> the Desktop production web build, and the native Tauri/Rust tests were green.
 
 ## Project context
 

@@ -35,7 +35,8 @@ The permanent key must stay outside UI/browser runtime code.
 - Once terminal voice input is disposed during application shutdown, in-flight
   language/toggle continuations cannot start another recorder or socket.
 - TUI credential resolution prefers `dictation.apiKey` from the loaded user Pix
-  config and falls back to `DEEPGRAM_API_KEY`. Project `.pi/pix.jsonc` files may
+  config and falls back to `DEEPGRAM_API_KEY`. Project
+  `$WORKSPACE/.pi/pix.jsonc` files may
   configure dictation behavior but cannot override the user-level API key.
 - Missing credentials, recorder failures, connection failures, and recognition
   failures return voice state to idle and surface an error without affecting

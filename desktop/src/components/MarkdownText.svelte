@@ -88,8 +88,9 @@
   .markdown-text :global(h5),
   .markdown-text :global(h6) {
     margin: 1.1em 0 0.45em;
-    color: inherit;
-    font-weight: 600;
+    color: color-mix(in srgb, var(--tool-warning) 78%, var(--foreground));
+    font-weight: 650;
+    letter-spacing: -0.01em;
     line-height: 1.3;
   }
   .markdown-text :global(h1) { font-size: 1.35rem; }

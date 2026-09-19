@@ -8,9 +8,9 @@ Light foundation: **Claude+** —
 Dark direction: **high-contrast, cool desktop palette inspired by Zed**
 
 The machine-readable Claude+ reference used as the light-theme foundation is
-bundled with the frontend skill at:
+bundled with the frontend skill at the workspace-relative runtime path:
 
-`.pi/skills/pix-desktop-frontend/references/claude-plus.theme.json`
+`$WORKSPACE/.pi/skills/pix-desktop-frontend/references/claude-plus.theme.json`
 
 ## 1. Product character
 

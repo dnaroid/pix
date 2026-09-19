@@ -9194,6 +9194,7 @@ mod tests {
         let orphan = attachments.join("100-2-orphan.png");
         fs::write(&kept, b"kept").expect("write kept task attachment");
         fs::write(&orphan, b"orphan").expect("write orphan task attachment");
+        let kept = fs::canonicalize(&kept).expect("canonical kept task attachment");
 
         let mut document = sample_task_document();
         document.tasks[0].description = Some(format!(

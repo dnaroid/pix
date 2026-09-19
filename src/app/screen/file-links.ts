@@ -82,7 +82,9 @@ function resolveExistingFileLocation(candidate: string, cwd: string | undefined)
 
 function candidatePathVariants(candidate: string): { pathText: string; line?: number | undefined; column?: number | undefined }[] {
 	const variants: { pathText: string; line?: number | undefined; column?: number | undefined }[] = [{ pathText: candidate }];
-	const locationSuffix = /^(.*?):(\d+)(?::(\d+))?(?:\+\d+)?$/u.exec(candidate);
+	// Editor targets carry one location, so range suffixes intentionally keep
+	// only their first line (and first column, when present).
+	const locationSuffix = /^(.*?):(\d+)(?::(\d+))?(?:\+\d+|-(?:L)?\d+(?:C\d+)?)?$/u.exec(candidate);
 	if (locationSuffix?.[1] && locationSuffix[1] !== candidate) {
 		variants.push({
 			pathText: locationSuffix[1],
@@ -91,7 +93,7 @@ function candidatePathVariants(candidate: string): { pathText: string; line?: nu
 		});
 	}
 
-	const markdownAnchorSuffix = /^(.*?)#L(\d+)(?:C(\d+))?$/u.exec(candidate);
+	const markdownAnchorSuffix = /^(.*?)#L(\d+)(?:C(\d+))?(?:-L\d+(?:C\d+)?)?$/u.exec(candidate);
 	if (markdownAnchorSuffix?.[1] && markdownAnchorSuffix[1] !== candidate) {
 		variants.push({
 			pathText: markdownAnchorSuffix[1],

@@ -35,8 +35,8 @@ export function linkForDestination(
   const homePath = normalizeHomeFileDestination(destination);
   if (homePath) return homeFileLink(homePath, label);
 
-  const projectPath = normalizeProjectFileDestination(destination);
-  if (projectPath) return projectFileLink(projectPath, label);
+  const projectReference = normalizeProjectFileReference(destination);
+  if (projectReference) return projectFileLink(projectReference.path, label, projectReference.range);
 
   const localPath = normalizeLocalFileDestination(destination);
   if (localPath) return localFileLink(localPath, label);
@@ -181,12 +181,25 @@ export function normalizeLocalFileDestination(destination: string): string | und
 
 /** Normalize a Markdown destination that can safely be resolved inside the active workspace. */
 export function normalizeProjectFileDestination(destination: string): string | undefined {
+  return normalizeProjectFileReference(destination)?.path;
+}
+
+/** Normalize a confined project path and an optional GitHub-style source-line fragment. */
+export function normalizeProjectFileReference(
+  destination: string,
+): { path: string; range?: ProjectFileLineRange } | undefined {
   if (!destination || /[\u0000-\u001f\u007f]/.test(destination)) return undefined;
   let value = destination.trim();
   if (value.startsWith("<") && value.endsWith(">")) value = value.slice(1, -1).trim();
-  value = value.split(/[?#]/, 1)[0] ?? "";
+  const queryStart = value.indexOf("?");
+  const fragmentStart = value.indexOf("#");
+  let pathEnd = value.length;
+  if (queryStart >= 0) pathEnd = Math.min(pathEnd, queryStart);
+  if (fragmentStart >= 0) pathEnd = Math.min(pathEnd, fragmentStart);
+  const pathValue = value.slice(0, pathEnd);
+  const fragment = fragmentStart >= 0 ? value.slice(fragmentStart + 1) : undefined;
   try {
-    value = decodeURIComponent(value);
+    value = decodeURIComponent(pathValue);
   } catch {
     return undefined;
   }
@@ -198,7 +211,28 @@ export function normalizeProjectFileDestination(destination: string): string | u
   const segments = value.split("/");
   if (segments.some((segment) => segment === "..")) return undefined;
   const normalized = segments.filter((segment) => segment && segment !== ".").join("/");
-  return normalized || undefined;
+  if (!normalized) return undefined;
+
+  const range = fragment ? projectFileLineRange(fragment) : undefined;
+  return { path: normalized, ...(range ? { range } : {}) };
+}
+
+function projectFileLineRange(fragment: string): ProjectFileLineRange | undefined {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(fragment);
+  } catch {
+    return undefined;
+  }
+  const match = /^L([1-9]\d*)(?:-L([1-9]\d*))?$/u.exec(decoded);
+  if (!match) return undefined;
+
+  const startLine = Number(match[1]);
+  const endLine = Number(match[2] ?? match[1]);
+  if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine) || endLine < startLine) {
+    return undefined;
+  }
+  return { startLine, endLine };
 }
 
 /** Normalize a user-home path without expanding it in the untrusted renderer. */

@@ -42,13 +42,15 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Markdown `read` tool results use the same renderer in a dense tool-result
   presentation; other tool results keep their dedicated plain/code/diff views.
 - Raw HTML is always escaped; Markdown never injects executable markup.
+- Markdown headings use the semantic warning accent mixed with the foreground so
+  their hierarchy stays prominent with a restrained warm tone in both themes.
 - Inline code uses the Desktop semantic accent rather than ordinary prose color.
 - Fenced `mermaid` blocks render as diagrams using Mermaid strict security and
   HTML labels disabled. While rendering is pending, or if parsing/rendering
   fails, the escaped source remains readable.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
 - External Markdown links are marked with an external-link icon in both transcripts and the Preview editor.
-- Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then activates the Preview editor with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
+- Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Explicit links preserve GitHub-style `#Lline` and `#Lstart-Lend` fragments as source line ranges; other fragments remain ordinary fragment-free project links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then activates the Preview editor with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
 - Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing Preview editor tab.
 - Trailing prose punctuation is not included in a bare URL; balanced URL parentheses remain part of it.
 - Activating a link delegates it to Tauri's opener plugin so the operating system opens it in the default browser or mail application.
@@ -108,6 +110,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/components/preview-markdown-controller.svelte.ts`
 - `desktop/src/components/preview-scroll-controller.svelte.ts`
+- `desktop/src/components/preview-scroll-controller.test.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/mermaid.ts`
@@ -126,6 +129,8 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   Mermaid fallback/security, and incomplete fences.
 - Rust tests cover workspace/home confinement and preview size/UTF-8 validation.
 - Syntax-highlighting tests cover the large-source fallback, escaped markup, retained empty/CRLF lines, and unchanged small-source highlighting.
+- Preview-scroll tests cover ordering the requested line reveal after pending
+  saved-position restoration and cancelling stale scheduled reveals.
 - Rust tests also cover project/absolute media confinement, traversal, unsupported
   local binary files, and allowed media resolution.
 - `npm run test`, `npm run check`, and `npm run build:web` pass in `desktop/`.

@@ -16,6 +16,39 @@ interface PreviewScrollControllerOptions {
   readonly onScrollPositionChange: () => ((id: number, position: PreviewScrollPosition) => void) | undefined;
 }
 
+type AnimationFrameScheduler = (callback: FrameRequestCallback) => number;
+type AnimationFrameCanceller = (handle: number) => void;
+
+/**
+ * Run work one paint after scroll restoration. `restoreScroll` also uses an
+ * animation frame, so a single frame can race it and have its line reveal
+ * reset back to the saved position.
+ */
+export function scheduleAfterScrollRestore(
+  callback: () => void,
+  requestFrame: AnimationFrameScheduler = requestAnimationFrame,
+  cancelFrame: AnimationFrameCanceller = cancelAnimationFrame,
+): () => void {
+  let firstFrame = 0;
+  let secondFrame = 0;
+  let cancelled = false;
+
+  firstFrame = requestFrame(() => {
+    firstFrame = 0;
+    if (cancelled) return;
+    secondFrame = requestFrame(() => {
+      secondFrame = 0;
+      if (!cancelled) callback();
+    });
+  });
+
+  return () => {
+    cancelled = true;
+    if (firstFrame) cancelFrame(firstFrame);
+    if (secondFrame) cancelFrame(secondFrame);
+  };
+}
+
 export function createPreviewScrollController(options: PreviewScrollControllerOptions) {
   function restoreScroll(
     node: HTMLElement,
@@ -75,12 +108,13 @@ export function createPreviewScrollController(options: PreviewScrollControllerOp
     if (!scroll || !options.file() || !options.highlighted()) return;
 
     let cancelled = false;
-    let frame = 0;
+    let cancelReveal = () => {};
     // The source body is injected with {@html}; wait for Svelte's DOM flush and
-    // then one frame so line boxes have final geometry before selecting/revealing.
+    // then for the scroll-restoration frame plus one paint so its line boxes have
+    // final geometry before selecting/revealing.
     void tick().then(() => {
       if (cancelled || options.previewId() !== requestedPreviewId) return;
-      frame = requestAnimationFrame(() => {
+      cancelReveal = scheduleAfterScrollRestore(() => {
         if (cancelled || options.previewId() !== requestedPreviewId) return;
         const lines = Array.from(scroll.querySelectorAll<HTMLElement>(".preview-code .sh__line"));
         for (const line of lines) line.classList.remove("preview-range-highlight");
@@ -107,7 +141,7 @@ export function createPreviewScrollController(options: PreviewScrollControllerOp
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(frame);
+      cancelReveal();
     };
   });
 

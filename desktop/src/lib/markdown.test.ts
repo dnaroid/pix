@@ -150,6 +150,26 @@ describe("renderMarkdown", () => {
     expect(html.match(/data-external-link/g)).toBeNull();
   });
 
+  it("preserves GitHub-style source-line fragments on explicit project-file links", () => {
+    const html = renderMarkdown([
+      "[context.ts:156](src/knowledge/context.ts#L156)",
+      "[range](src/knowledge/context.ts#L120-L148)",
+      "[query](src/knowledge/context.ts?plain=1#L200)",
+      "[heading](docs/guide.md#introduction)",
+    ].join("\n"));
+
+    expect(html).toContain(
+      'data-project-file-candidate="src/knowledge/context.ts" data-project-file-start-line="156" data-project-file-end-line="156"',
+    );
+    expect(html).toContain(
+      'data-project-file-candidate="src/knowledge/context.ts" data-project-file-start-line="120" data-project-file-end-line="148"',
+    );
+    expect(html).toContain(
+      'data-project-file-candidate="src/knowledge/context.ts" data-project-file-start-line="200" data-project-file-end-line="200"',
+    );
+    expect(html).toContain('data-project-file-candidate="docs/guide.md">heading</span>');
+  });
+
   it("emits inline preview targets for supported project images and videos", () => {
     const html = renderMarkdown([
       "[Before and after](.pi/artifacts/result.png)",

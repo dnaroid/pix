@@ -42,6 +42,22 @@ describe("file link detection", () => {
 		assert.equal(links[1]?.filePath, readme);
 	});
 
+	it("uses the first line when a file reference contains a range", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "pix-file-links-"));
+		const target = join(cwd, "src", "range.ts");
+		mkdirSync(join(cwd, "src"));
+		writeFileSync(target, "export {};\n", { flag: "wx" });
+
+		const links = detectFileLinks("Open ./src/range.ts#L12-L24 or ./src/range.ts:30-40", cwd);
+
+		assert.deepEqual(links.map((link) => ({ filePath: link.filePath, line: link.line, column: link.column })), [
+			{ filePath: target, line: 12, column: undefined },
+			{ filePath: target, line: 30, column: undefined },
+		]);
+		assert.equal(links[0]?.url.endsWith("/src/range.ts:12"), true);
+		assert.equal(links[1]?.url.endsWith("/src/range.ts:30"), true);
+	});
+
 	it("ignores non-files, invalid URLs, missing cwd, and overlapping shorter links", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "pix-file-links-"));
 		const nested = join(cwd, "nested", "file.ts");
