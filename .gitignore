@@ -25,3 +25,4 @@ __pycache__/
 .gpt-agent-plan.yaml
 .artifacts/
 desktop/src-tauri/resources/pix-runtime/
+artifacts/
