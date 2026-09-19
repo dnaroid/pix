@@ -7,6 +7,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
   defineTool,
+  type BashSpawnContext,
   type ExtensionAPI,
   type ExtensionContext,
   type ToolDefinition,
@@ -375,7 +376,7 @@ async function runShellAlias(
   const workdir = await resolveWorkdir(ctx, input.cwd ?? input.workdir);
   const tool = runtime.dependencies.createBashToolDefinition(
     ctx.cwd,
-    workdir ? { spawnHook: (spawnContext) => ({ ...spawnContext, cwd: workdir }) } : undefined,
+    workdir ? { spawnHook: (spawnContext: BashSpawnContext) => ({ ...spawnContext, cwd: workdir }) } : undefined,
   );
   return tool.execute(id, { command, timeout: timeoutSeconds(input) }, signal, onUpdate, ctx);
 }

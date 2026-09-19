@@ -1864,34 +1864,45 @@ setTimeout(() => {}, 1000);
 	test.serial("waits for agent_settled across a delayed continuation", async () => {
 		const cwd = tempDir();
 		const runDir = createRunDir(cwd, "spawn-agent-settled-delayed-continuation");
-		const piScript = path.join(tempDir(), "pi.js");
+		const controlDir = tempDir();
+		const readyPath = path.join(controlDir, "continuation-ready");
+		const continuePath = path.join(controlDir, "continue");
+		const piScript = path.join(controlDir, "pi.js");
 		writeFile(piScript, `
+const fs = require("node:fs");
+const readyPath = ${JSON.stringify(readyPath)};
+const continuePath = ${JSON.stringify(continuePath)};
 process.on("SIGTERM", () => {});
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "intermediate result" }] }], willRetry: false }));
-  setTimeout(() => {
+  fs.writeFileSync(readyPath, "ready");
+  const continuationGate = setInterval(() => {
+    if (!fs.existsSync(continuePath)) return;
+    clearInterval(continuationGate);
     console.log(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
     console.log(JSON.stringify({ type: "agent_start" }));
     console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "final result after continuation" }] }], willRetry: false }));
     console.log(JSON.stringify({ type: "agent_settled" }));
-  }, 250);
+  }, 10);
 });
-setTimeout(() => process.exit(0), 2500);
+setTimeout(() => process.exit(0), 5000);
 setInterval(() => {}, 1000);
 `);
 		process.argv[1] = piScript;
 
-		const startedAt = Date.now();
-		const completed = await Promise.race([
-			new Promise<any>((resolve) => {
-				spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
-			}),
-			new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for agent_settled completion")), 2000)),
-		]);
+		let resolved = false;
+		const completion = new Promise<any>((resolve) => {
+			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, (value) => {
+				resolved = true;
+				resolve(value);
+			});
+		});
+		await waitUntil(() => fs.existsSync(readyPath), 2000);
+		expect(resolved).toBe(false);
+		writeFile(continuePath, "continue");
+		const completed = await withTimeout(completion, "Timed out waiting for agent_settled completion", 3000);
 
 		const agentDir = path.join(runDir, "agent-1");
-		expect(Date.now() - startedAt).toBeLessThan(1500);
-		expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250);
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("final result after continuation");
 	});

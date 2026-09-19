@@ -58,22 +58,26 @@ describe("Node version configuration", () => {
 		}
 	});
 
-	it("keeps CI on the shared pin with a separate minimum-version matrix entry", () => {
+	it("keeps CI on the shared pin with minimum and upper-edge compatibility entries", () => {
 		for (const name of ["check", "publish"]) {
 			const workflow = readText(`.github/workflows/${name}.yml`);
 			assert.match(workflow, /node-version-file: \.node-version/u, name);
 			assert.doesNotMatch(workflow, /\bmise\b/u, name);
 		}
 		const minimum = /^>=(\d+\.\d+\.\d+) /u.exec(supportedRange)?.[1];
+		const upperExclusive = / <(\d+)$/u.exec(supportedRange)?.[1];
 		assert.ok(minimum);
+		assert.ok(upperExclusive);
+		const newestSupportedMajor = String(Number(upperExclusive) - 1);
 		const check = readText(".github/workflows/check.yml");
 		assert.ok(check.includes(`node: "${minimum}"`));
+		assert.ok(check.includes(`node: "${newestSupportedMajor}"`));
 		assert.ok(check.includes("node-version: ${{ matrix.node }}"));
 	});
 });
 
 describe("Pix launcher Node version guard", () => {
-	for (const version of new Set(["22.19.0", "22.19.1", "22.20.0", "23.0.0", "24.0.0", pinnedVersion])) {
+	for (const version of new Set(["22.19.0", "22.19.1", "22.20.0", "23.0.0", "24.0.0", "25.0.0", "26.0.0", "26.7.0", pinnedVersion])) {
 		it(`accepts supported Node ${version}`, (t) => {
 			const result = runLauncher(t, version);
 			assert.equal(result.status, 0, result.stderr);
@@ -82,7 +86,7 @@ describe("Pix launcher Node version guard", () => {
 		});
 	}
 
-	for (const version of ["20.20.2", "22.18.99", "25.0.0", "26.0.0", "24.0.0-rc.1", "invalid"]) {
+	for (const version of ["20.20.2", "22.18.99", "27.0.0", "28.0.0", "26.0.0-rc.1", "invalid"]) {
 		it(`rejects unsupported Node ${version} before loading the app`, (t) => {
 			const result = runLauncher(t, version);
 			assert.equal(result.status, 1);

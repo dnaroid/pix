@@ -146,7 +146,7 @@ for building, signing, checksums and updates.
 - macOS, Linux, or Windows terminal with 256-color support
 - provider credentials supported by Pi, unless you only use locally configured models
 
-For source development only, use **Node.js `>=22.19.0 <25`** plus npm and Rust/Tauri
+For source development only, use **Node.js `>=22.19.0 <27`** plus npm and Rust/Tauri
 tooling as required by the build you are running. End-user GitHub Release packages
 do not require a separately installed Node.js runtime.
 
@@ -517,7 +517,7 @@ Pix implements the Pi extension UI surface for notifications, keyed toasts, widg
 Use the exact Node.js version in `.node-version` for development and builds;
 `.nvmrc` mirrors it for nvm users. No particular version manager is required:
 all npm scripts use the `node` and `npm` already on your `PATH`.
-The supported runtime range is `>=22.19.0 <25`, shared by Pix, ACP, and Desktop.
+The supported runtime range is `>=22.19.0 <27`, shared by Pix, ACP, and Desktop.
 CI checks the pinned version on Linux, macOS, and Windows, plus the minimum
 supported version on Linux.
 

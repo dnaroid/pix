@@ -38,9 +38,9 @@ remain true when CI or UI-QA tests change.
 ## Node.js version contract
 
 - `.node-version` is the exact development/build pin; `.nvmrc` must mirror it. CI selects this pin with `actions/setup-node` on Ubuntu, macOS, and Windows.
-- Root `package.json` `engines.node` is the authoritative supported runtime range, currently `>=22.19.0 <25`. ACP and Desktop manifests and their lockfile root records must agree with it.
+- Root `package.json` `engines.node` is the authoritative supported runtime range, currently `>=22.19.0 <27`. ACP and Desktop manifests and their lockfile root records must agree with it.
 - `bin/pix.mjs` reads that range from the installed package metadata and rejects unsupported versions before loading Pix. Its dependency-free check deliberately accepts only the bounded stable range format `>=major.minor.patch <major`; prereleases and an unrecognized range format fail closed.
-- The build-and-test matrix also runs the minimum supported version on Ubuntu. That matrix entry must track the lower bound in `engines.node`; this run may not silently switch to the development pin.
+- The build-and-test matrix also runs the minimum supported version and the newest supported Node major on Ubuntu. The minimum entry must track the lower bound in `engines.node`; the upper-edge entry must track the highest allowed major below the exclusive upper bound. Neither compatibility run may silently switch to the development pin.
 - npm scripts use the selected `node`/`npm` from `PATH` and must not invoke or require a version manager. The same rule applies to lifecycle hooks, builds, and tests; selecting the environment is the caller's responsibility.
 - Release version synchronization preserves each JSON file's existing LF/CRLF
   convention. Windows checkouts must not fail `release:version:check` merely
