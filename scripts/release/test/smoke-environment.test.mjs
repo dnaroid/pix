@@ -50,13 +50,13 @@ test("release probe exits explicitly after the success marker", async () => {
   assert.ok(marker >= 0 && exit > marker, "The one-shot probe must exit only after all verification succeeds");
 });
 
-test("Desktop smoke uses a native-host sentinel instead of requiring GUI stdout", async () => {
+test("Desktop smoke uses a distinct native-host success exit code instead of requiring GUI stdout", async () => {
   const smoke = await readFile(join(process.cwd(), "scripts/release/smoke-desktop.mjs"), "utf8");
   const native = await readFile(join(process.cwd(), "desktop/src-tauri/src/release_smoke.rs"), "utf8");
-  assert.match(smoke, /PIX_RELEASE_SMOKE_SENTINEL/u);
-  assert.match(smoke, /readFile\(sentinel, "utf8"\)/u);
-  assert.match(native, /PIX_RELEASE_SMOKE_SENTINEL/u);
-  assert.match(native, /fs::write\(path, RELEASE_SMOKE_SENTINEL\)/u);
+  assert.match(smoke, /RELEASE_SMOKE_SUCCESS_EXIT_CODE = 86/u);
+  assert.match(smoke, /result\.status, RELEASE_SMOKE_SUCCESS_EXIT_CODE/u);
+  assert.match(native, /RELEASE_SMOKE_SUCCESS_EXIT_CODE: i32 = 86/u);
+  assert.match(native, /handle\.exit\(RELEASE_SMOKE_SUCCESS_EXIT_CODE\)/u);
 });
 
 test("Windows NSIS smoke encodes paths instead of relying on environment variables", () => {

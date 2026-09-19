@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { cp, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hostTarget, outputPaths, run, targetInfo, version } from "./common.mjs";
 import { smokePayload } from "./smoke.mjs";
+
+const RELEASE_SMOKE_SUCCESS_EXIT_CODE = 86;
 
 function powershellEncoded(script) {
   return Buffer.from(script, "utf16le").toString("base64");
@@ -87,24 +90,30 @@ export async function smokeDesktop(name = hostTarget()) {
       executable = join(installed, "pix-desktop.exe");
     }
     const context = await smokePayload(payload, join(scratch, "probe"), "desktop");
-    const sentinel = join(scratch, "native-smoke-ok");
-    const env = { ...context.env, PIX_RELEASE_SMOKE_SENTINEL: sentinel };
-    const options = { ...context, env, timeout: 180_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+    const options = { ...context, timeout: 180_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
     let output;
+    let command;
+    let args;
+    let nativeOptions = options;
     if (process.platform === "linux") {
       // Launch through AppRun so linuxdeploy's library paths and WebKit helper
       // process environment are preserved. APPDIR also keeps Tauri resource
       // resolution inside the extracted image rather than host /usr.
       const appdir = join(scratch, "squashfs-root");
-      output = run("xvfb-run", ["-a", join(appdir, "AppRun"), "--release-smoke-test"], {
-        ...options, env: { ...env, APPDIR: appdir },
-      });
+      command = "xvfb-run";
+      args = ["-a", join(appdir, "AppRun"), "--release-smoke-test"];
+      nativeOptions = { ...options, env: { ...context.env, APPDIR: appdir } };
     } else {
       // macOS Tauri intentionally rejects executable paths containing symlinks, including /var -> /private/var.
-      output = run(await realpath(executable), ["--release-smoke-test"], options);
+      command = await realpath(executable);
+      args = ["--release-smoke-test"];
     }
-    assert.equal(await readFile(sentinel, "utf8"), "PIX_RELEASE_RUNTIME_OK\n",
-      "The native host must complete its own backend verification, not merely exit");
+    const result = spawnSync(command, args, { windowsHide: true, ...nativeOptions });
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.signal, null, result.stderr);
+    assert.equal(result.status, RELEASE_SMOKE_SUCCESS_EXIT_CODE,
+      `The native host must complete its own backend verification (stdout: ${result.stdout}; stderr: ${result.stderr})`);
+    output = result.stdout;
     if (output) assert.match(output, /PIX_RELEASE_RUNTIME_OK/u);
     console.log(`Installed GUI native startup and runtime passed: ${name}`);
   } finally {

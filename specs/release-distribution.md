@@ -178,8 +178,9 @@ Backend resolution/spawning stays within the existing blocking-worker boundary.
 Generation, pipes, shutdown, and per-window ownership are unchanged. The packaged
 `--release-smoke-test` diagnostic requires the offline, isolated harness and
 performs verification on a worker thread after native Tauri/WebView setup. The
-native host writes a harness-owned success sentinel after backend verification;
-the smoke does not depend on GUI stdout being attached on Windows.
+native host exits with a dedicated success code only after backend verification;
+the smoke does not depend on GUI stdout being attached on Windows, and a normal
+GUI exit cannot be mistaken for verified release-smoke success.
 
 ## Artifacts, gates and publishing
 

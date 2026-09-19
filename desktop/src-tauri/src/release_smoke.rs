@@ -2,14 +2,14 @@
 //! The harness supplies an isolated profile. All filesystem/process work stays off the UI thread.
 use crate::backend_runtime::BackendRuntime;
 use std::{
-    env, fs,
+    env,
     process::Stdio,
     thread,
     time::{Duration, Instant},
 };
 use tauri::Manager;
 
-const RELEASE_SMOKE_SENTINEL: &[u8] = b"PIX_RELEASE_RUNTIME_OK\n";
+const RELEASE_SMOKE_SUCCESS_EXIT_CODE: i32 = 86;
 
 pub fn start_if_requested(app: &tauri::App) -> Result<(), String> {
     if !env::args_os().any(|arg| arg == "--release-smoke-test") {
@@ -54,14 +54,10 @@ pub fn start_if_requested(app: &tauri::App) -> Result<(), String> {
                     }
                 }
             }
-            if let Some(path) = env::var_os("PIX_RELEASE_SMOKE_SENTINEL") {
-                fs::write(path, RELEASE_SMOKE_SENTINEL)
-                    .map_err(|error| format!("Failed to write release smoke sentinel: {error}"))?;
-            }
             Ok(())
         })();
         match result {
-            Ok(()) => handle.exit(0),
+            Ok(()) => handle.exit(RELEASE_SMOKE_SUCCESS_EXIT_CODE),
             Err(error) => {
                 eprintln!("Pix release smoke: {error}");
                 handle.exit(1);
