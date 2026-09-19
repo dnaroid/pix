@@ -192,7 +192,9 @@ only `contents: write` permission, validates the tag/repository, creates a draft
 uploads the complete verified asset set, then publishes it as the stable GitHub
 Latest release. Failed/incomplete matrices remain non-public. Reruns may replace
 draft assets but never published assets. Manual dispatch produces Actions artifacts
-but cannot create a GitHub Release. There is no npm publication gate or registry dependency.
+but cannot create a GitHub Release. Draft discovery retries briefly after create/edit
+because GitHub's release listing is eventually consistent. There is no npm publication
+gate or registry dependency.
 
 ## Signing and updates
 

@@ -32,6 +32,15 @@ export async function findRelease(repository, tag, token, fetcher = fetch) {
   throw new Error("Release listing safety limit exceeded; refusing to create a potentially duplicate release");
 }
 
+export async function waitForRelease(repository, tag, token, fetcher = fetch, { attempts = 12, delayMs = 1000 } = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const release = await findRelease(repository, tag, token, fetcher);
+    if (release) return release;
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return undefined;
+}
+
 async function publish(directory) {
   const tag = process.env.GITHUB_REF_NAME;
   const repository = process.env.GITHUB_REPOSITORY;
@@ -42,14 +51,14 @@ async function publish(directory) {
   let release = await findRelease(repository, tag, token);
   if (!release) {
     run("gh", ["release", "create", tag, "--repo", repository, "--verify-tag", "--draft", "--title", `Pix ${tag}`, "--generate-notes"]);
-    release = await findRelease(repository, tag, token);
+    release = await waitForRelease(repository, tag, token);
   }
   if (!release) throw new Error("Created draft is not visible; refusing to upload assets");
   assertDraft(release, tag);
   const files = [...expectedAssets(version()), "SHA256SUMS"].map((name) => resolve(directory, name));
   run("gh", ["release", "upload", tag, ...files, "--repo", repository, "--clobber"]);
   run("gh", ["release", "edit", tag, "--repo", repository, "--draft=false", "--latest"]);
-  release = await findRelease(repository, tag, token);
+  release = await waitForRelease(repository, tag, token);
   if (!release) throw new Error("Published release is not visible after publication");
   assertPublished(release, tag);
   console.log(`Published ${tag} with the complete verified matrix and marked it Latest.`);

@@ -8,7 +8,7 @@ import { expectedDigest, nodeArchive } from "../node-runtime.mjs";
 import { hostTarget, root, targetInfo, targets, version } from "../common.mjs";
 import { checksums, expectedAssets, expectedBuildAssets } from "../checksums.mjs";
 import { syncVersion, versionEdits } from "../sync-version.mjs";
-import { assertDraft, assertPublished, findRelease } from "../publish-github.mjs";
+import { assertDraft, assertPublished, findRelease, waitForRelease } from "../publish-github.mjs";
 
 test("release matrix names explicit OS/CPU pairs and rejects cross-host dependency copying", () => {
   assert.deepEqual(Object.keys(targets).sort(), ["linux-x64", "macos-arm64", "windows-x64"]);
@@ -93,6 +93,17 @@ test("draft discovery paginates authenticated listings and fails closed on API e
   assert.match(calls[1], /page=2$/u);
   assert.equal(await findRelease("owner/repo", "missing", "token", async () => new Response("[]")), undefined);
   await assert.rejects(findRelease("owner/repo", "v1.2.3", "token", async () => new Response("", { status: 403 })), /no release was modified/u);
+});
+
+test("release publication tolerates GitHub draft visibility lag", async () => {
+  let calls = 0;
+  const draft = { tag_name: "v1.2.3", draft: true };
+  const result = await waitForRelease("owner/repo", "v1.2.3", "token", async () => {
+    calls += 1;
+    return new Response(JSON.stringify(calls < 3 ? [] : [draft]));
+  }, { attempts: 3, delayMs: 0 });
+  assert.deepEqual(result, draft);
+  assert.equal(calls, 3);
 });
 
 test("version synchronization changes only Pix's Cargo package and all app manifests", async (t) => {
