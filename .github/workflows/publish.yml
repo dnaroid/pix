@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Show PATH Node and npm
         run: |
           node --version
@@ -50,7 +50,7 @@ jobs:
           - os: windows-2022
             target: windows-x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Show PATH Node and npm
         run: |
           node --version
@@ -123,7 +123,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npm run release:build -- ${{ matrix.target }}
       - name: Upload package size reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: size-${{ matrix.target }}
@@ -134,7 +134,7 @@ jobs:
             .artifacts/releases/${{ matrix.target }}/desktop/pix/OPTIMIZATIONS.json
           if-no-files-found: warn
           retention-days: 14
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: .artifacts/releases/${{ matrix.target }}/assets/*
@@ -166,12 +166,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Show PATH Node and npm
         run: |
           node --version
           npm --version
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: release-*
           merge-multiple: true

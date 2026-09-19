@@ -15,6 +15,9 @@ remain true when CI or UI-QA tests change.
 - Browser QA E2E runs once on the Ubuntu job.
 - `publish.yml` runs only for `v*` tags or manual dispatch. It has a lightweight
   `release-contract` gate and the three-target native release matrix.
+- GitHub-owned checkout/artifact actions use current Node 24-compatible majors
+  (`checkout@v7`, `upload-artifact@v7`, `download-artifact@v7`) so workflow
+  execution does not depend on GitHub's temporary Node 20 compatibility shim.
 - The native release matrix does not rerun standalone Rust backend unit tests
   after packaging: the installed Desktop smoke exercises the bundled backend on
   each target, while ordinary CI owns source-level Rust checks.

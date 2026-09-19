@@ -46,6 +46,14 @@ test("CI and release workflows do not duplicate npm/publication work", () => {
   }
 });
 
+test("first-party checkout and artifact actions use Node 24 compatible majors", () => {
+  const serialized = JSON.stringify([workflow, checkWorkflow]);
+  assert.doesNotMatch(serialized, /actions\/(?:checkout|upload-artifact|download-artifact)@v[1-6](?=["\\])/u);
+  assert.match(serialized, /actions\/checkout@v7/u);
+  assert.match(serialized, /actions\/upload-artifact@v7/u);
+  assert.match(serialized, /actions\/download-artifact@v7/u);
+});
+
 test("manual release builds cannot publish and only the final release job has contents-write permission", () => {
   assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
   assert.equal(workflow.permissions.contents, "read");
