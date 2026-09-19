@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,7 +87,9 @@ export async function smokeDesktop(name = hostTarget()) {
       executable = join(installed, "pix-desktop.exe");
     }
     const context = await smokePayload(payload, join(scratch, "probe"), "desktop");
-    const options = { ...context, timeout: 180_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+    const sentinel = join(scratch, "native-smoke-ok");
+    const env = { ...context.env, PIX_RELEASE_SMOKE_SENTINEL: sentinel };
+    const options = { ...context, env, timeout: 180_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
     let output;
     if (process.platform === "linux") {
       // Launch through AppRun so linuxdeploy's library paths and WebKit helper
@@ -95,13 +97,15 @@ export async function smokeDesktop(name = hostTarget()) {
       // resolution inside the extracted image rather than host /usr.
       const appdir = join(scratch, "squashfs-root");
       output = run("xvfb-run", ["-a", join(appdir, "AppRun"), "--release-smoke-test"], {
-        ...options, env: { ...context.env, APPDIR: appdir },
+        ...options, env: { ...env, APPDIR: appdir },
       });
     } else {
       // macOS Tauri intentionally rejects executable paths containing symlinks, including /var -> /private/var.
       output = run(await realpath(executable), ["--release-smoke-test"], options);
     }
-    assert.match(output, /PIX_RELEASE_RUNTIME_OK/u, "The native host must complete its own backend verification, not merely exit");
+    assert.equal(await readFile(sentinel, "utf8"), "PIX_RELEASE_RUNTIME_OK\n",
+      "The native host must complete its own backend verification, not merely exit");
+    if (output) assert.match(output, /PIX_RELEASE_RUNTIME_OK/u);
     console.log(`Installed GUI native startup and runtime passed: ${name}`);
   } finally {
     if (windowsInstall) {
