@@ -139,7 +139,13 @@ impl BackendRuntime {
             .ok_or("Release verification needs a bundled runtime")?;
         let entry = root.join("verify.mjs");
         require_file(&entry)?;
-        self.command_for(&entry)
+        // Keep the release-smoke entrypoint relative to the bundled runtime
+        // root. On Windows, the installed smoke path deliberately contains
+        // spaces; passing the absolute script path through the native host can
+        // be misparsed by Node as the drive prefix (for example "C:").
+        let mut command = self.command_for(Path::new("verify.mjs"))?;
+        command.current_dir(root);
+        Ok(command)
     }
 
     fn command_for(&self, entry: &Path) -> Result<Command, String> {
@@ -257,6 +263,18 @@ mod tests {
         for (_, path) in runtime.extensions {
             assert!(path.starts_with(&fixture.0));
         }
+    }
+
+    #[cfg(feature = "bundled-runtime")]
+    #[test]
+    fn bundled_verification_uses_relative_entry_from_runtime_root() {
+        let fixture = Fixture::new();
+        fixture.payload();
+        fixture.file("verify.mjs");
+        let runtime = BackendRuntime::bundled(&fixture.0).unwrap();
+        let command = runtime.verification_command().unwrap();
+        assert_eq!(command.get_args().next().unwrap(), Path::new("verify.mjs"));
+        assert_eq!(command.get_current_dir(), Some(fixture.0.as_path()));
     }
 
     #[test]

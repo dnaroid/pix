@@ -56,7 +56,8 @@ test("Desktop smoke uses a distinct native-host success exit code instead of req
   assert.match(smoke, /RELEASE_SMOKE_SUCCESS_EXIT_CODE = 86/u);
   assert.match(smoke, /result\.status, RELEASE_SMOKE_SUCCESS_EXIT_CODE/u);
   assert.match(native, /RELEASE_SMOKE_SUCCESS_EXIT_CODE: i32 = 86/u);
-  assert.match(native, /handle\.exit\(RELEASE_SMOKE_SUCCESS_EXIT_CODE\)/u);
+  assert.match(native, /std::process::exit\(RELEASE_SMOKE_SUCCESS_EXIT_CODE\)/u);
+  assert.doesNotMatch(native, /handle\.exit\(RELEASE_SMOKE_SUCCESS_EXIT_CODE\)/u);
 });
 
 test("Windows NSIS smoke encodes paths instead of relying on environment variables", () => {

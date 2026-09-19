@@ -57,10 +57,14 @@ pub fn start_if_requested(app: &tauri::App) -> Result<(), String> {
             Ok(())
         })();
         match result {
-            Ok(()) => handle.exit(RELEASE_SMOKE_SUCCESS_EXIT_CODE),
+            // Release smoke owns this process. Exit directly so the verified
+            // result is observable cross-platform; AppHandle::exit only asks
+            // the event loop to terminate and the eventual process code can
+            // still become 0.
+            Ok(()) => std::process::exit(RELEASE_SMOKE_SUCCESS_EXIT_CODE),
             Err(error) => {
                 eprintln!("Pix release smoke: {error}");
-                handle.exit(1);
+                std::process::exit(1);
             }
         }
     });

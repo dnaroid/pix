@@ -181,7 +181,10 @@ Generation, pipes, shutdown, and per-window ownership are unchanged. The package
 performs verification on a worker thread after native Tauri/WebView setup. The
 native host exits with a dedicated success code only after backend verification;
 the smoke does not depend on GUI stdout being attached on Windows, and a normal
-GUI exit cannot be mistaken for verified release-smoke success.
+GUI exit cannot be mistaken for verified release-smoke success. The host uses
+direct process termination for this smoke-only code rather than Tauri event-loop
+shutdown. Bundled verification runs `verify.mjs` relative to the runtime root,
+which avoids Windows drive-prefix parsing failures in installed paths with spaces.
 
 ## Artifacts, gates and publishing
 
