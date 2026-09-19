@@ -109,7 +109,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 - `workspace_sidebar_indicator_poll` runs through the existing blocking-task boundary so filesystem, bounded Registry hashing, and Git work never blocks the WebView/UI thread.
 - Workspace paths are canonicalized before inspection. Source Control retains the existing rule that the selected workspace must itself be the Git repository root.
-- User config paths resolve from the platform home to `.config/pi/pix.jsonc` and `.config/pi/pi-tools-suite.jsonc`, matching the config loader/editor contract.
+- User config paths resolve from the platform home to `.config/pi/pix-desktop.jsonc` and `.config/pi/pi-tools-suite.jsonc`, matching the config loader/editor contract. TUI `.config/pi/pix.jsonc` is intentionally excluded from Desktop settings health.
 - User config health checks preserve JSONC support and validate the schema subset used by the Desktop settings editor without modifying files. Config reads/polls share a read lock while saves take the write lock, preventing the poll from observing the editor's truncate/write window; the config lock is released before Git/runtime state is inspected.
 - Package-terminal and IDX registry mutexes are used only to copy/update in-memory state. Rejected child processes are killed/reaped after releasing those registries, PTY resize uses a separate per-terminal master lock, and Stop never waits indefinitely for a busy stdin writer before reaching its process-tree kill path.
 - Poll failures are represented as indicator health instead of crashing or disabling unrelated views.

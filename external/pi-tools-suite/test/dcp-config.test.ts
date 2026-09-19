@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { loadConfig, modelKeysFromContext, resolveModelConfig, summarizerModelRefs } from "../src/dcp/config.js";
+import { DEFAULT_DCP_CONFIG } from "../src/dcp/defaults.js";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-tools-suite-dcp-config-"));
@@ -40,6 +41,11 @@ describe("DCP config", () => {
 			protectedTools: [],
 		});
 		expect(config.issues).toEqual([]);
+	});
+
+	test("keeps the exported browser-safe defaults identical to TUI load defaults", () => {
+		const config = loadConfig({ homeDir: tempDir() });
+		expect({ ...config, issues: [] }).toEqual(DEFAULT_DCP_CONFIG);
 	});
 
 	test("appends explicit summarizer fallbacks after legacy primary refs and deduplicates", () => {

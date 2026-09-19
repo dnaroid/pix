@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { parse as parseJsonc } from "jsonc-parser";
+import { pixProjectConfigPath, pixUserConfigPath } from "./pix-config-paths.js";
 import { parseModelRef } from "./pix-settings.js";
 
 const GIT_REVIEW_TIMEOUT_MS = 120_000;
@@ -166,8 +166,8 @@ export function loadGitAssistantModelRefs(
 	kind: GitAssistantKind,
 	homeDir = homedir(),
 ): string[] {
-	const globalPath = join(homeDir, ".config", "pi", "pix.jsonc");
-	const projectPath = join(cwd, ".pi", "pix.jsonc");
+	const globalPath = pixUserConfigPath(homeDir);
+	const projectPath = pixProjectConfigPath(cwd);
 	const defaults: GitAssistantModelConfig = {
 		modelRef: kind === "review" ? DEFAULT_GIT_REVIEW_MODEL : DEFAULT_GIT_COMMIT_MESSAGE_MODEL,
 		fallbackModels: [],

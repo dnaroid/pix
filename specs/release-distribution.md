@@ -262,6 +262,15 @@ launched. macOS/Linux expose **Restart** after replacement and relaunch through
 the process plugin. Failed checks or installs are retryable and never fall back to
 npm, ACP, the source checkout, or the portable-TUI replacement code.
 
+The updater is release-gated at both layers. Native Tauri registers the updater
+plugin only when the `bundled-runtime` Cargo feature is enabled, so ordinary
+development/debug bundles do not require a `plugins.updater` configuration.
+The release orchestrator also exports `VITE_PIX_DESKTOP_UPDATER=1` while Tauri
+builds the production frontend; without that explicit build flag the WebView
+does not start an updater check. This keeps `watch:all` and `tauri dev` from
+initializing release-only updater state while preserving updater behavior in
+official release artifacts.
+
 ## Verification
 
 `test:release` covers targets, checksums, complete-asset gates, version propagation,

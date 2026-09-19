@@ -3,13 +3,15 @@ import * as os from "node:os"
 import * as path from "node:path"
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent"
 import type { DcpConfig } from "./config.js"
+import {
+  DEFAULT_DCP_DEBUG_LOG_MAX_BACKUPS,
+  DEFAULT_DCP_DEBUG_LOG_MAX_BYTES,
+} from "./defaults.js"
 import type { DcpState } from "./state.js"
 
 const TRUE_ENV_RE = /^(1|true|yes|on)$/i
 const FALSE_ENV_RE = /^(0|false|no|off)$/i
 const MAX_IDS = 16
-const DEFAULT_DEBUG_LOG_MAX_BYTES = 5 * 1024 * 1024 // 5 MB
-const DEFAULT_DEBUG_LOG_MAX_BACKUPS = 3
 const MIN_DEBUG_LOG_MAX_BACKUPS = 1
 
 function truthyEnv(value: string | undefined): boolean | undefined {
@@ -46,14 +48,14 @@ function positiveIntEnv(value: string | undefined): number | undefined {
 export function dcpDebugLogMaxBytes(config: DcpConfig): number {
   return positiveIntEnv(process.env.PI_DCP_DEBUG_MAX_BYTES)
     ?? config.debugLog?.maxBytes
-    ?? DEFAULT_DEBUG_LOG_MAX_BYTES
+    ?? DEFAULT_DCP_DEBUG_LOG_MAX_BYTES
 }
 
 /** Number of rotated backups to keep (e.g. `.1`, `.2`, `.3`). */
 export function dcpDebugLogMaxBackups(config: DcpConfig): number {
   const value = positiveIntEnv(process.env.PI_DCP_DEBUG_MAX_BACKUPS)
     ?? config.debugLog?.maxBackups
-    ?? DEFAULT_DEBUG_LOG_MAX_BACKUPS
+    ?? DEFAULT_DCP_DEBUG_LOG_MAX_BACKUPS
   return Math.max(MIN_DEBUG_LOG_MAX_BACKUPS, Math.floor(value))
 }
 

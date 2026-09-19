@@ -1,11 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { RequestError } from "@agentclientprotocol/sdk";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { parse as parseJsonc } from "jsonc-parser";
 import type { Logger } from "../logging.js";
 import type { PiAgentMessage } from "../pi/pi-rpc-client.js";
+import { pixProjectConfigPath, pixUserConfigPath } from "./pix-config-paths.js";
 
 const ERROR_INVALID_PARAMS = -32602;
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -199,8 +198,8 @@ export function createAutocompleteCompleter(options: CreateAutocompleteCompleter
 }
 
 export function loadAutocompleteConfig(cwd: string): AutocompleteConfig {
-	const globalPath = join(homedir(), ".config", "pi", "pix.jsonc");
-	const projectPath = join(cwd, ".pi", "pix.jsonc");
+	const globalPath = pixUserConfigPath();
+	const projectPath = pixProjectConfigPath(cwd);
 	const globalConfig = readAutocompleteConfig(globalPath, DEFAULT_AUTOCOMPLETE_CONFIG);
 	return readAutocompleteConfig(projectPath, globalConfig);
 }

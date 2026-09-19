@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser";
 import { defaultModelFromParsed, type PixDefaultModel } from "./default-model.js";
+import { pixProjectConfigPath, pixUserConfigPath } from "./pix-config-paths.js";
 
 export const PIX_THINKING_LEVELS = [
 	"off",
@@ -107,13 +108,13 @@ export function savePixAutocompleteModel(modelRef: string, homeDir = homedir()):
 
 export function loadPixIgnoreContextFiles(cwd: string, homeDir = homedir()): boolean {
 	const globalPath = pixConfigPath(homeDir);
-	const projectPath = join(cwd, ".pi", "pix.jsonc");
+	const projectPath = pixProjectConfigPath(cwd);
 	const globalValue = readIgnoreContextFiles(globalPath);
 	return readIgnoreContextFiles(projectPath) ?? globalValue ?? false;
 }
 
 export function saveProjectPixIgnoreContextFiles(cwd: string, ignoreContextFiles: boolean): boolean {
-	const path = join(cwd, ".pi", "pix.jsonc");
+	const path = pixProjectConfigPath(cwd);
 	let source = readConfigSource(path);
 	source = applyEdits(source, modify(source, ["ignoreContextFiles"], ignoreContextFiles, { formattingOptions }));
 	writeConfig(path, source);
@@ -178,7 +179,7 @@ function readIgnoreContextFiles(path: string): boolean | undefined {
 }
 
 function pixConfigPath(homeDir: string): string {
-	return join(homeDir, ".config", "pi", "pix.jsonc");
+	return pixUserConfigPath(homeDir);
 }
 
 function readConfigSource(path: string): string {

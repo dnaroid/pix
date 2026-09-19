@@ -158,7 +158,7 @@ Recommended:
 
 Optional:
 
-- a Deepgram API key in `dictation.apiKey` inside `~/.config/pi/pix.jsonc` for voice input; `DEEPGRAM_API_KEY` remains supported as a fallback
+- a Deepgram API key in `dictation.apiKey` inside the relevant frontend profile (`~/.config/pi/pix.jsonc` for TUI, `~/.config/pi/pix-desktop.jsonc` for Desktop); `DEEPGRAM_API_KEY` remains supported as a fallback. Desktop exchanges the key through Deepgram `/v1/auth/grant`, so its key must have Member-or-higher authorization.
 - an audio recorder for terminal dictation: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux
 - `tmux` and `rsvg-convert` only if you want to regenerate README screenshots
 - Ollama with web search enabled for the bundled `web_search` and `web_fetch` tools
@@ -202,7 +202,7 @@ Pix uses Pi's model and authentication stores. Environment-based API keys and cr
 | --- | --- | --- | --- |
 | Model provider | **Yes**, unless the selected model needs no credentials | Run the stock Pi TUI with `npx @earendil-works/pi-coding-agent`, use `/login`, then `/reload` in Pix; or set a provider-supported environment key | Pix does not yet implement Pi's interactive `/login` and `/logout` dialogs. |
 | Existing OpenCode accounts | No; migration shortcut | Run `/opencode-import` in Pix | Imports only the credential types listed below and preserves existing Pi entries by default. |
-| Model-backed helpers | No | Review `promptEnhancer`, `autocomplete`, and `sessionTitle` in `pix.jsonc` | Each configured helper model needs credentials for its own provider; it need not use the main session provider. |
+| Model-backed helpers | No | Review `promptEnhancer`, `autocomplete`, and `sessionTitle` in TUI `pix.jsonc` or Desktop Settings (`pix-desktop.jsonc`) | Each configured helper model needs credentials for its own provider; it need not use the main session provider. |
 | Ollama/Tavily web access | No | Use local Ollama without a cloud key, set `OLLAMA_API_KEY`/`TAVILY_API_KEY`, or run `/web-credentials` | Stored keys live in `~/.config/pi/pi-tools-suite-credentials.json` with mode `0600`. |
 | Context7 documentation skill | No | Export `CONTEXT7_API_KEY` | The skill fails before making a network request when the variable is absent. |
 | Telegram task connector | No | Configure `telegramConnector.botToken` + `telegramConnector.chatId`, or `PIX_TELEGRAM_BOT_TOKEN` + `PIX_TELEGRAM_CHAT_ID` | Completion/question notifications; reply to continue the exact live session, or use `/new <task>` for a fresh session. |
@@ -287,11 +287,11 @@ Put the Deepgram key in the user Pix config:
 }
 ```
 
-The file is `~/.config/pi/pix.jsonc`. Keep the key in this user config rather than a project `.pi/pix.jsonc`; project config is intentionally not allowed to override the secret. `DEEPGRAM_API_KEY` remains supported as a compatibility fallback when `dictation.apiKey` is not set.
+For TUI, the file is `~/.config/pi/pix.jsonc`. Keep the key in this user config rather than a project `.pi/pix.jsonc`; project config is intentionally not allowed to override the secret. `DEEPGRAM_API_KEY` remains supported as a compatibility fallback when `dictation.apiKey` is not set.
 
 Then press `Ctrl+G` or click the microphone in the terminal status area to start/stop dictation. Pix streams microphone audio to Deepgram Nova-3 and inserts finalized text into the editor so you can review it before sending. The default dictation languages are English and Russian and can be changed with the existing language control.
 
-Pix Desktop exposes the same voice-input action directly in the message composer. The desktop client uses Nova-3 and respects `dictation.language` plus the selected language's `deepgramLanguage` value from the user Pix config. It requests a short-lived Deepgram token from the local Tauri backend; the permanent API key is read from the user Pix config (or the environment fallback) by Rust and is never exposed to the WebView. The Settings UI also exposes `Dictation · Api Key` as a sensitive field because it is generated from the Pix schema.
+Pix Desktop exposes the same voice-input action directly in the message composer, but uses its independent `~/.config/pi/pix-desktop.jsonc` profile. The desktop client uses Nova-3 by default and sends `dictation.language` directly as the Deepgram language code; there is no separate Desktop language-label registry. It requests a short-lived Deepgram token from the local Tauri backend; the permanent API key is read from the Desktop profile (or the environment fallback) by Rust and is never exposed to the WebView. Deepgram requires the key used for `/v1/auth/grant` to have Member-or-higher authorization. Configure it under **Settings → Desktop → Voice → Deepgram API key**.
 
 Voice audio is sent to Deepgram while recording. Pix no longer downloads or installs local speech-recognition models.
 
@@ -402,6 +402,15 @@ Both support the published schema:
 }
 ```
 
+Pix Desktop does **not** inherit either TUI file above. Its Settings panel owns a
+separate user profile at `~/.config/pi/pix-desktop.jsonc`, with project overrides
+at `<workspace>/.pi/pix-desktop.jsonc`, using
+`https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json`. The Desktop schema
+contains only settings consumed by Desktop or its ACP backend (models,
+autocomplete/prompt enhancement, session titles, voice input, model-picker
+preferences, external editor, and Source Control helpers); terminal renderer,
+theme, and other TUI-only settings remain in `pix.jsonc`.
+
 Singular model selectors resolve with an explicit ordered fallback array, even
 when it is empty. Existing configs that omit the array remain compatible and
 normalize to `[]`. Pix uses `fallbackModels` for object selectors; Desktop Git
@@ -470,7 +479,7 @@ Install `wl-clipboard` on Wayland or `xclip`/`xsel` on X11, then run `pix instal
 
 ### Voice input is unavailable
 
-Ensure `dictation.apiKey` is set in `~/.config/pi/pix.jsonc`, or set the compatibility fallback `DEEPGRAM_API_KEY` in the environment that launches Pix. Terminal voice input also needs an audio recorder: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux. Pix Desktop additionally needs microphone permission from the operating system. Voice support can be omitted without affecting the rest of Pix.
+Ensure `dictation.apiKey` is set in the active frontend profile (`~/.config/pi/pix.jsonc` for TUI or `~/.config/pi/pix-desktop.jsonc` for Desktop), or set the compatibility fallback `DEEPGRAM_API_KEY` in the environment that launches Pix. For Desktop, an HTTP 403 while requesting the short-lived token usually means the configured Deepgram key does not have Member-or-higher authorization required by `/v1/auth/grant`; update/create the key in Deepgram and save it under **Settings → Desktop → Voice**. Terminal voice input also needs an audio recorder: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux. Pix Desktop additionally needs microphone permission from the operating system. Voice support can be omitted without affecting the rest of Pix.
 
 ### A provider login dialog is missing
 

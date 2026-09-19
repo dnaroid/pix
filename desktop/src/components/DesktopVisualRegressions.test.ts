@@ -15,6 +15,12 @@ import dcpContextPanelSource from "./DcpContextPanel.svelte?raw";
 import sessionSubagentsSource from "./SessionSubagentsPanel.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
+import desktopSettingsEditorSource from "./settings/DesktopSettingsEditor.svelte?raw";
+import settingsModelListSource from "./settings/SettingsModelList.svelte?raw";
+import settingsModelSelectSource from "./settings/SettingsModelSelect.svelte?raw";
+import settingsModelVisibilitySource from "./settings/SettingsModelVisibility.svelte?raw";
+import settingsNumberInputSource from "./settings/SettingsNumberInput.svelte?raw";
+import settingsSectionNavSource from "./settings/SettingsSectionNav.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
 import markdownSource from "./MarkdownText.svelte?raw";
 import terminalSource from "./TerminalView.svelte?raw";
@@ -173,10 +179,45 @@ describe("desktop visual regressions", () => {
     expect(commandAvailability).not.toContain("promptRunning");
   });
 
-  it("suppresses browser-native number and textarea chrome in generated settings", () => {
-    expect(settingsSource).toContain("[&::-webkit-inner-spin-button]:appearance-none");
-    expect(settingsSource).toContain("[appearance:textfield]");
+  it("uses curated settings editors and keeps native number chrome suppressed", () => {
+    expect(settingsSource).toContain('import DesktopSettingsEditor from "./settings/DesktopSettingsEditor.svelte"');
+    expect(settingsSource).toContain('import ToolsSuiteSettingsEditor from "./settings/ToolsSuiteSettingsEditor.svelte"');
+    expect(settingsSource).toContain("Advanced JSONC");
+    expect(settingsSource).not.toContain("settingsSections");
+    expect(settingsNumberInputSource).toContain("[&::-webkit-inner-spin-button]:appearance-none");
+    expect(settingsNumberInputSource).toContain("[appearance:textfield]");
     expect(settingsSource).not.toContain("resize-y");
+  });
+
+  it("keeps sidebar settings navigation compact without horizontally scrolling tabs", () => {
+    expect(settingsSectionNavSource).toContain('aria-label="Settings section"');
+    expect(settingsSectionNavSource).toContain("<select");
+    expect(settingsSectionNavSource).not.toContain("overflow-x-auto");
+    expect(settingsSectionNavSource).not.toContain("aria-current");
+  });
+
+  it("uses the live model catalog instead of free-form model text fields", () => {
+    expect(settingsSource).toContain("modelThinkingConfigState(configOptions).models");
+    expect(desktopSettingsEditorSource).toContain("<SettingsModelSelect");
+    expect(desktopSettingsEditorSource).toContain("<SettingsModelList");
+    expect(desktopSettingsEditorSource).toContain("<SettingsModelVisibility");
+    expect(desktopSettingsEditorSource).not.toContain('placeholder="provider/model"');
+    expect(desktopSettingsEditorSource).not.toContain("SettingsStringList");
+    expect(desktopSettingsEditorSource).not.toContain('label="Remembered thinking by model"');
+    expect(settingsModelSelectSource).toContain("<optgroup label={provider}>");
+    expect(settingsModelListSource).toContain("availableToAdd");
+    expect(settingsModelVisibilitySource).toContain("Choose visible models");
+  });
+
+  it("keeps Desktop voice settings to the API key, language code, and speech model", () => {
+    expect(desktopSettingsEditorSource).toContain('label="Deepgram API key"');
+    expect(desktopSettingsEditorSource).toContain('label="Language"');
+    expect(desktopSettingsEditorSource).toContain('label="Speech model"');
+    expect(desktopSettingsEditorSource).not.toContain('label="Languages"');
+    expect(desktopSettingsEditorSource).not.toContain("deepgramLanguage");
+    expect(desktopSettingsEditorSource).not.toContain('"label": "English"');
+    expect(desktopSettingsEditorSource).toContain("LANGUAGE_OPTIONS");
+    expect(desktopSettingsEditorSource).toContain("SPEECH_MODEL_OPTIONS");
   });
 
   it("keeps desktop typography on the compact IDE scale with a 12px minimum", async () => {

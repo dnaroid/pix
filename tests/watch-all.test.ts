@@ -15,6 +15,7 @@ import {
 	desktopLaunchExecutable,
 	findProcessByExecutablePath,
 	formatCommandFailureReport,
+	hasProcessPid,
 	macOSCodeSignArguments,
 	macOSOpenArguments,
 	npmInvocation,
@@ -201,6 +202,12 @@ describe("watch:all macOS launch identity", () => {
 		assert.equal(findProcessByExecutablePath(entries, executable), 4711);
 		assert.equal(findProcessByExecutablePath(entries, `${executable}-helper`), 4713);
 		assert.equal(findProcessByExecutablePath(entries, "/tmp/run/other/Pix Desktop.app/Contents/MacOS/pix-desktop"), undefined);
+	});
+
+	it("can verify that the real app PID survived startup independently from /usr/bin/open", () => {
+		const entries = parseProcessList("  4711 /usr/bin/open -n -W /tmp/run\n  8112 /tmp/run/Pix Desktop.app/Contents/MacOS/pix-desktop\n");
+		assert.equal(hasProcessPid(entries, 8112), true);
+		assert.equal(hasProcessPid(entries, 9999), false);
 	});
 });
 

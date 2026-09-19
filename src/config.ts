@@ -102,7 +102,7 @@ export type PixConfig = {
 	defaultModel?: DefaultModelConfig;
 	/** User-level whitelist for model pickers. Undefined means show every available model. */
 	visibleModels?: string[];
-	/** Last applied thinking level for each model, shared by TUI and Desktop pickers. */
+	/** Last applied thinking level for each model in the TUI picker. Desktop uses pix-desktop.jsonc. */
 	thinkingByModel?: ModelThinkingPreferences;
 	promptEnhancer: PromptEnhancerConfig;
 	autocomplete: AutocompleteConfig;
@@ -790,7 +790,7 @@ function loadProjectPixConfig(cwd: string | undefined, fallback: PixConfig): Pix
 		const raw = readFileSync(configPath, "utf8");
 		return pixConfigFromParsed(parseJsonc(raw), fallback, {
 			allowDictationApiKey: false,
-			// Model visibility is a user UI preference shared by TUI and Desktop.
+			// Model visibility is a TUI user UI preference. Desktop uses pix-desktop.jsonc.
 			// Project config must not silently fork that picker state.
 			allowVisibleModels: false,
 			// Remembered thinking is the same cross-UI user preference.

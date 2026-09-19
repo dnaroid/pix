@@ -7,8 +7,9 @@ Active contract for terminal and desktop voice dictation.
 ## Contract
 
 Pix uses Deepgram live speech-to-text for voice input. The long-lived credential
-is configured as `dictation.apiKey` in the user Pix config
-`~/.config/pi/pix.jsonc`; `DEEPGRAM_API_KEY` remains a compatibility fallback.
+is configured as `dictation.apiKey` in the frontend-specific user Pix config:
+TUI uses `~/.config/pi/pix.jsonc`, while Desktop uses the independent
+`~/.config/pi/pix-desktop.jsonc`; `DEEPGRAM_API_KEY` remains a compatibility fallback.
 The permanent key must stay outside UI/browser runtime code.
 
 ### Terminal UI
@@ -52,15 +53,23 @@ The permanent key must stay outside UI/browser runtime code.
   Tauri backend, then requests microphone access and opens the Deepgram
   WebSocket from the WebView.
 - The Tauri `deepgram_token` command reads `dictation.apiKey` directly from the
-  user Pix config on the Rust side, falling back to `DEEPGRAM_API_KEY`, and
+  Desktop user `~/.config/pi/pix-desktop.jsonc` on the Rust side, never falling
+  back to TUI `pix.jsonc`, then falls back to `DEEPGRAM_API_KEY`, and
   exchanges it through Deepgram `/v1/auth/grant` with a 60-second TTL. Its
   blocking HTTP work runs on Tauri's blocking pool with explicit connection and
   total request deadlines. The permanent API key is never returned to
   JavaScript.
+- Deepgram currently requires the API key used with `/v1/auth/grant` to have
+  Member-or-higher authorization. A lower-privilege key may still be valid for
+  direct STT calls but cannot mint the short-lived token required by Desktop's
+  WebView transport. HTTP 401/402/403 grant failures are decoded by the native
+  host into actionable credential, billing, or permission diagnostics instead
+  of surfacing only a bare status code.
 - The token response also carries the non-secret Deepgram model and language
-  resolved from the same user Pix config. `dictation.language` is mapped through
-  the selected entry's `deepgramLanguage` value when present; defaults are
-  `nova-3` and `en`.
+  resolved from the same user Pix config. For current Desktop configuration,
+  `dictation.language` is the Deepgram language code itself and is sent directly;
+  defaults are `nova-3` and `en`. The Settings UI does not expose a separate
+  language registry or human-readable language labels.
 - The WebView authenticates the live socket with the temporary bearer token and
   records browser-supported Opus/container audio with `MediaRecorder`, emitting
   chunks every 250 ms.
@@ -92,11 +101,13 @@ The permanent key must stay outside UI/browser runtime code.
 ## Configuration compatibility
 
 `dictation.apiKey` is the preferred Deepgram credential and is intended only for
-the user config `~/.config/pi/pix.jsonc`; the Settings form exposes it as a
-sensitive field. `dictation.language`, `dictation.languages`, and persisted
-language selection remain supported. `dictation.model` selects the Deepgram
-speech model and defaults to `nova-3`; each language may set
-`deepgramLanguage`, defaulting to its map key.
+the relevant frontend's user config (`pix.jsonc` for TUI, `pix-desktop.jsonc`
+for Desktop); the Desktop Settings form exposes its own value as a sensitive
+field. Desktop config uses only `dictation.language` as the Deepgram language
+code and `dictation.model` as the speech model (default `nova-3`). A legacy
+Desktop `dictation.languages` map is still tolerated by the native reader for
+existing files, including a legacy `deepgramLanguage` remap, but it is no longer
+part of the Desktop schema, defaults, or Settings UI.
 
 Legacy Vosk `dirName`, `url`, and per-language `model` fields remain parseable
 for existing config files but are deprecated and ignored by the Deepgram

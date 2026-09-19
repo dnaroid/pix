@@ -16,7 +16,7 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 
 ## Scope
 
-- Pix `defaultModel`, `promptEnhancer`, `autocomplete`, and `sessionTitle` selectors.
+- Pix `defaultModel`, `promptEnhancer`, `autocomplete`, and `sessionTitle` selectors in both frontend profiles; TUI reads `pix.jsonc` and Desktop reads `pix-desktop.jsonc`.
 - Pix Desktop and TUI Git review and commit-message helper selectors.
 - pi-tools-suite `lookupModel` and DCP summarizer selectors.
 - async-subagent router and legacy singular role selectors, including `modelByParent` entries.
@@ -33,7 +33,7 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 ## Configuration contract
 
 - A singular selector uses a primary model plus a fallback array. Pix object-shaped selectors use `modelRef` + `fallbackModels`.
-- Git helpers keep the existing flat names under the compatibility `desktop.git` namespace: `reviewModelRef` + `reviewFallbackModels`, and `commitMessageModelRef` + `commitMessageFallbackModels`. Both Desktop and TUI consume them.
+- Git helpers keep the existing flat names under the compatibility `desktop.git` namespace: `reviewModelRef` + `reviewFallbackModels`, and `commitMessageModelRef` + `commitMessageFallbackModels`. TUI and Desktop resolve the same keys from their own independent Pix profile files.
 - pi-tools-suite lookup uses `lookupModel` + `lookupFallbackModels`.
 - DCP keeps `summarizerModel` as the ordered primary-model list and `summarizerFallbackModels` as the explicit ordered fallback list. Both are arrays.
 - The async-subagent router uses `model` + `fallbackModels`. Agent profiles using the modern `models` field already encode the whole ordered candidate chain in one array. Legacy `model` and each normalized `modelByParent` entry always resolve with `fallbackModels`, defaulting to `[]`.
@@ -75,6 +75,7 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 - `external/pi-tools-suite/src/dcp/`
 - `external/pi-tools-suite/src/async-subagents/core/`
 - `src/schemas/pix-schema.ts`
+- `src/schemas/pix-desktop-schema.ts`
 - `src/schemas/pi-tools-suite-schema.ts`
 
 ## Verification

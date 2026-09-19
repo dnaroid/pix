@@ -21,6 +21,16 @@ Keep the Desktop process launched by `npm run watch:all` on the latest successfu
 - `desktop/src-tauri/build.rs` explicitly tracks the generated `<repo>/desktop/dist/index.html` as a Cargo input. Vite's production entrypoint contains hashed references to the emitted JS/CSS assets, so a successful web rebuild invalidates the native crate even when no Rust source changed.
 - The native rebuild therefore regenerates and recompiles Tauri's embedded asset context before the newly bundled Desktop is launched.
 - A failed web/native build keeps the previous working Desktop process alive; the watcher never restarts into a partially built frontend.
+- macOS launch success is based on the real Tauri app process, not only the
+  `/usr/bin/open -n -W` helper. After resolving the exact copied bundle
+  executable PID, `watch:all` gives that PID its own startup grace interval and
+  verifies it is still present before printing that Desktop is running. A
+  short-lived app therefore reports a restart failure instead of a false
+  success followed immediately by `desktop stopped`.
+- Development/watch native builds do not compile/register the release-only
+  Tauri updater plugin, and the watch-built frontend does not start an updater
+  check. This avoids requiring release updater configuration in the base Tauri
+  config and keeps the debug `.app` launchable.
 - Build subprocess output remains streamed to the terminal in real time, but the
   watcher also retains only a bounded tail of the current build step. If that
   command exits unsuccessfully, `watch:all` repeats the retained tail underneath
@@ -48,6 +58,7 @@ Keep the Desktop process launched by `npm run watch:all` on the latest successfu
 
 - `tests/watch-all.test.ts` covers the ordered `web -> native` build plan and the Tauri CLI override that suppresses the duplicate `beforeBuildCommand`.
 - `tests/watch-all.test.ts` also covers bounded failed-command output retention
-  and the repeated bottom-of-terminal failure report.
+  and the repeated bottom-of-terminal failure report, plus exact app-PID
+  liveness checks used by the macOS startup gate.
 - After changing/rebuilding Desktop web output, the subsequent native build must rerun the `pix-desktop` build script and produce a launchable bundle with `index.html` embedded.
 - Run `npm run test:inner -- --test-name-pattern='watch:all'`, `npm --prefix desktop run check`, and a production Desktop web/native smoke build.

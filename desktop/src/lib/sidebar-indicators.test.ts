@@ -224,7 +224,7 @@ describe("sidebar indicators", () => {
     const broken = sidebarIndicators(inputs({
       poll: poll({
         project: { error: "workspace unreadable" },
-        settings: { errors: ["pix.jsonc contains invalid JSONC"] },
+        settings: { errors: ["pix-desktop.jsonc contains invalid JSONC"] },
       }),
       unseenScriptFailureIds: [],
       unseenIdxFailureIds: [],

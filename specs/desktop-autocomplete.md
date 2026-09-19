@@ -16,7 +16,7 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 
 ## Scope
 
-- Reuse the Pix `autocomplete` configuration, including its ordered `fallbackModels`, and configured provider credentials.
+- Use the Desktop profile's `autocomplete` configuration from `pix-desktop.jsonc`, including its ordered `fallbackModels`, and configured provider credentials. TUI `pix.jsonc` is not inherited.
 - Request completions through a private ACP extension method backed by `ModelRuntime`, not `session/prompt`.
 - Debounce eligible drafts, cancel superseded requests, and ignore stale responses.
 - Render the returned suffix as muted inline ghost text in the composer.
@@ -48,6 +48,8 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 ## Related files
 
 - `acp/src/acp/autocomplete.ts`
+- `acp/src/acp/pix-config-paths.ts`
+- `schemas/pix-desktop.json`
 - `acp/src/acp/pix-acp-agent.ts`
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/lib/acp-json-rpc.ts`

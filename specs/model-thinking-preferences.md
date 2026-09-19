@@ -12,11 +12,11 @@ Active implemented contract.
 
 ## Goal
 
-Remember the user's last applied thinking level independently for each model and reuse that preference in both Pix TUI and Desktop combined model/thinking selectors.
+Remember the user's last applied thinking level independently for each model in both Pix TUI and Desktop combined model/thinking selectors without sharing preference storage between the frontends.
 
 ## Persistence
 
-- Preferences live only in the user config `~/.config/pi/pix.jsonc` under `thinkingByModel`.
+- TUI preferences live in `~/.config/pi/pix.jsonc`; Desktop preferences live independently in `~/.config/pi/pix-desktop.jsonc`, both under `thinkingByModel`.
 - The shape is a map from normalized `provider/model` reference to one canonical thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
 - Example:
 
@@ -31,7 +31,7 @@ Remember the user's last applied thinking level independently for each model and
 
 - A valid thinking suffix on a model key is stripped before storage so `provider/model:high` and `provider/model` address the same preference.
 - Invalid values are ignored when the config is loaded.
-- Project `<project>/.pi/pix.jsonc` files cannot override `thinkingByModel`; this is a user UI preference shared by TUI and Desktop, matching the ownership model of `visibleModels`.
+- Project profile files cannot override `thinkingByModel`; it is a user UI preference. TUI and Desktop use separate user files, matching the ownership model of `visibleModels`.
 - `defaultModel.thinking` remains the default for creating a new session. `thinkingByModel` is selector memory and does not replace the default-model contract.
 
 ## Selector behavior
@@ -56,6 +56,7 @@ Remember the user's last applied thinking level independently for each model and
 - `src/config.ts`
 - `src/default-pix-config.ts`
 - `schemas/pix.json`
+- `schemas/pix-desktop.json`
 - `src/app/app.ts`
 - `src/app/popup/popup-menu-controller.ts`
 - `src/app/popup/popup-action-controller.ts`

@@ -80,3 +80,23 @@ test("project no-context-files overrides the global Pix setting", () => {
 	const project = parseJsonc(readFileSync(join(cwd, ".pi", "pix.jsonc"), "utf8")) as { ignoreContextFiles?: boolean };
 	assert.equal(project.ignoreContextFiles, true);
 });
+
+test("desktop profile saves settings without touching TUI Pix files", () => {
+	const previousProfile = process.env.PIX_CONFIG_PROFILE;
+	process.env.PIX_CONFIG_PROFILE = "desktop";
+	try {
+		const { home, path: tuiPath } = fixture();
+		writeFileSync(tuiPath, `{ "defaultModel": { "modelRef": "tui/model" } }`);
+
+		assert.equal(savePixDefaultModel("desktop/model:high", home), "desktop/model:high");
+		const desktopPath = join(home, ".config", "pi", "pix-desktop.jsonc");
+		const desktop = parseJsonc(readFileSync(desktopPath, "utf8")) as { defaultModel?: { modelRef?: string; thinking?: string } };
+		const tui = parseJsonc(readFileSync(tuiPath, "utf8")) as { defaultModel?: { modelRef?: string } };
+		assert.equal(desktop.defaultModel?.modelRef, "desktop/model");
+		assert.equal(desktop.defaultModel?.thinking, "high");
+		assert.equal(tui.defaultModel?.modelRef, "tui/model");
+	} finally {
+		if (previousProfile === undefined) delete process.env.PIX_CONFIG_PROFILE;
+		else process.env.PIX_CONFIG_PROFILE = previousProfile;
+	}
+});

@@ -6,6 +6,7 @@ import tasksPanelSource from "./WorkspaceSidebarTasksPanel.svelte?raw";
 import layoutControllerSource from "./workspace-sidebar-layout-controller.svelte.ts?raw";
 import statusMenuControllerSource from "./workspace-sidebar-status-menu-controller.svelte.ts?raw";
 import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?raw";
+import navigationViewModelSource from "../app/desktop-navigation-view-model-services.ts?raw";
 
 describe("WorkspaceSidebar project sizing", () => {
   it("uses the switcher's measured minimum in both resize clamping and CSS sizing", () => {
@@ -49,6 +50,12 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(indicatorDotSource).toContain("indicator.animated");
     expect(indicatorDotSource).toContain("motion-safe:animate-ping");
     expect(sidebarViewModelSource).toContain('backgroundSyncState.phase === "syncing" ? "background-sync" : null');
+  });
+
+  it("passes the live ACP model catalog through the sidebar into Settings", () => {
+    expect(navigationViewModelSource).toContain("configOptions: options.displayedConfigOptions");
+    expect(sidebarViewModelSource).toContain("settingsConfigOptions: options.configOptions()");
+    expect(sidebarSource).toContain("<SettingsPanel configOptions={settingsConfigOptions}");
   });
 
   it("feeds externally observed project registry changes into background sync", () => {

@@ -48,6 +48,41 @@ test("an existing global config without a default leaves model selection to pi",
 	assert.equal(loadPixDefaultModel(cwd, home), undefined);
 });
 
+test("desktop profile ignores TUI Pix config and reads only pix-desktop config", () => {
+	const previousProfile = process.env.PIX_CONFIG_PROFILE;
+	process.env.PIX_CONFIG_PROFILE = "desktop";
+	try {
+		const { home, cwd, globalPath, projectPath } = fixture();
+		writeFileSync(globalPath, `{ "defaultModel": { "modelRef": "tui/global", "thinking": "max" } }`);
+		writeFileSync(projectPath, `{ "defaultModel": { "modelRef": "tui/project", "thinking": "max" } }`);
+
+		assert.deepEqual(loadPixDefaultModel(cwd, home), {
+			provider: "openai-codex",
+			modelId: "gpt-5.6-sol",
+			fallbackModels: [],
+			thinkingLevel: "medium",
+		});
+
+		writeFileSync(
+			join(home, ".config", "pi", "pix-desktop.jsonc"),
+			`{ "defaultModel": { "modelRef": "desktop/global", "thinking": "high" } }`,
+		);
+		writeFileSync(
+			join(cwd, ".pi", "pix-desktop.jsonc"),
+			`{ "defaultModel": { "modelRef": "desktop/project", "thinking": "low" } }`,
+		);
+		assert.deepEqual(loadPixDefaultModel(cwd, home), {
+			provider: "desktop",
+			modelId: "project",
+			fallbackModels: [],
+			thinkingLevel: "low",
+		});
+	} finally {
+		if (previousProfile === undefined) delete process.env.PIX_CONFIG_PROFILE;
+		else process.env.PIX_CONFIG_PROFILE = previousProfile;
+	}
+});
+
 test("object thinking overrides a model-reference suffix", () => {
 	assert.deepEqual(defaultModelFromParsed({
 		defaultModel: { model: "zai/glm-5-turbo:low", thinkingLevel: "xhigh" },

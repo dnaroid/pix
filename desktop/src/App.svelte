@@ -42,6 +42,7 @@
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
+  const desktopUpdaterEnabled = import.meta.env.VITE_PIX_DESKTOP_UPDATER === "1";
 
   let workspace = $state("");
   const activeSessionState = createActiveSessionState();
@@ -625,7 +626,7 @@
 
   onMount(() => installDesktopContextMenu({ reportError }));
   onMount(desktopLifecycle.start);
-  onMount(() => import.meta.env.PROD ? updater.start() : updater.dispose);
+  onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
 
 </script>
 

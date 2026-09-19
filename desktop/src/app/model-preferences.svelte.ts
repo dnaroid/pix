@@ -24,7 +24,7 @@ export function createModelPreferencesStore(options: ModelPreferencesStoreOption
 
   async function load(): Promise<void> {
     try {
-      const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
+      const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "desktop" });
       visibleModelRefs = visibleModelRefsFromPixConfig(document.content);
       rememberedThinkingByModel = modelThinkingPreferencesFromPixConfig(document.content);
     } catch {
@@ -44,12 +44,12 @@ export function createModelPreferencesStore(options: ModelPreferencesStoreOption
   }
 
   async function performVisibleModelRefsSave(modelRefs: readonly string[]): Promise<void> {
-    let document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
+    let document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "desktop" });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const content = updateVisibleModelRefsInPixConfig(document.content, modelRefs);
       const result = await invoke<{ written: boolean; document: SettingsConfigDocument }>(
         "write_user_config_if_unchanged",
-        { kind: "pix", expectedContent: document.content, content },
+        { kind: "desktop", expectedContent: document.content, content },
       );
       if (result.written) {
         visibleModelRefs = visibleModelRefsFromPixConfig(result.document.content) ?? [...modelRefs];
@@ -62,12 +62,12 @@ export function createModelPreferencesStore(options: ModelPreferencesStoreOption
 
   async function rememberThinkingPreference(modelRef: string, thinkingLevel: string): Promise<void> {
     try {
-      let document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
+      let document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "desktop" });
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const content = updateModelThinkingPreferenceInPixConfig(document.content, modelRef, thinkingLevel);
         const result = await invoke<{ written: boolean; document: SettingsConfigDocument }>(
           "write_user_config_if_unchanged",
-          { kind: "pix", expectedContent: document.content, content },
+          { kind: "desktop", expectedContent: document.content, content },
         );
         if (result.written) {
           rememberedThinkingByModel = modelThinkingPreferencesFromPixConfig(result.document.content);

@@ -1,8 +1,13 @@
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "../../../external/pi-tools-suite/src/default-pi-tools-suite-config.js";
-import { DEFAULT_PIX_CONFIG_JSONC } from "../../../src/default-pix-config.js";
+import {
+  DEFAULT_DCP_CONFIG,
+  DEFAULT_DCP_DEBUG_LOG_MAX_BACKUPS,
+  DEFAULT_DCP_DEBUG_LOG_MAX_BYTES,
+} from "../../../external/pi-tools-suite/src/dcp/defaults.js";
+import { DEFAULT_DESKTOP_CONFIG_JSONC } from "./default-desktop-config";
 
-export type SettingsConfigKind = "pix" | "pi-tools-suite";
+export type SettingsConfigKind = "desktop" | "pi-tools-suite";
 
 export interface SettingsConfigDocument {
   readonly path: string;
@@ -38,7 +43,7 @@ export interface SettingsEditorCache {
   readonly drafts: Partial<Record<SettingsConfigKind, SettingsDraftDocument>>;
 }
 
-let editorCache: SettingsEditorCache = { activeKind: "pix", drafts: {} };
+let editorCache: SettingsEditorCache = { activeKind: "desktop", drafts: {} };
 
 export function settingsEditorCache(): SettingsEditorCache {
   return editorCache;
@@ -66,32 +71,6 @@ export function reconcileSavedSettingsDraft(
   };
 }
 
-export type SettingsFieldKind = "boolean" | "number" | "string" | "select" | "string-list" | "json";
-
-export interface SettingsSelectOption {
-  readonly label: string;
-  readonly value: unknown;
-}
-
-export interface SettingsField {
-  readonly path: readonly string[];
-  readonly label: string;
-  readonly description?: string;
-  readonly kind: SettingsFieldKind;
-  readonly options?: readonly SettingsSelectOption[];
-  readonly minimum?: number;
-  readonly maximum?: number;
-  readonly integer: boolean;
-  readonly sensitive: boolean;
-}
-
-export interface SettingsSection {
-  readonly id: string;
-  readonly title: string;
-  readonly description?: string;
-  readonly fields: readonly SettingsField[];
-}
-
 export interface ParsedSettingsSource {
   readonly value: Record<string, unknown>;
   readonly errors: readonly ParseError[];
@@ -103,7 +82,7 @@ export interface SettingsDefaultValue {
 }
 
 const SETTINGS_DEFAULT_SOURCES: Record<SettingsConfigKind, string> = {
-  pix: DEFAULT_PIX_CONFIG_JSONC,
+  desktop: DEFAULT_DESKTOP_CONFIG_JSONC,
   "pi-tools-suite": DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC,
 };
 
@@ -112,12 +91,18 @@ const SETTINGS_DEFAULT_SOURCES: Record<SettingsConfigKind, string> = {
 // is stable; schema/default and the canonical shipped config remain authoritative
 // when they provide a value.
 const SETTINGS_DEFAULT_OVERRIDES: Record<SettingsConfigKind, Record<string, unknown>> = {
-  pix: {
-    outputFilters: { patterns: [] },
-  },
+  desktop: {},
   "pi-tools-suite": {
     enabled: true,
     enabledModules: [],
+  },
+};
+
+const PI_TOOLS_SUITE_DCP_RUNTIME_DEFAULTS: Record<string, unknown> = {
+  ...DEFAULT_DCP_CONFIG,
+  debugLog: {
+    maxBytes: DEFAULT_DCP_DEBUG_LOG_MAX_BYTES,
+    maxBackups: DEFAULT_DCP_DEBUG_LOG_MAX_BACKUPS,
   },
 };
 
@@ -163,6 +148,14 @@ export function settingsDefaultValue(
     return { exists: true, value: fieldSchema.default };
   }
 
+  if (kind === "pi-tools-suite" && path[0] === "dcp") {
+    const dcpPath = path.slice(1);
+    if (settingsHasValue(PI_TOOLS_SUITE_DCP_RUNTIME_DEFAULTS, dcpPath)) {
+      return { exists: true, value: settingsValue(PI_TOOLS_SUITE_DCP_RUNTIME_DEFAULTS, dcpPath) };
+    }
+    return { exists: false };
+  }
+
   const defaults = settingsDefaultRoot(kind);
   if (settingsHasValue(defaults, path)) return { exists: true, value: settingsValue(defaults, path) };
 
@@ -197,112 +190,6 @@ export function updateSettingsSource(source: string, path: readonly string[], va
 
 export function removeSettingsValue(source: string, path: readonly string[]): string {
   return updateSettingsSource(source, path, undefined);
-}
-
-export function settingsSections(schema: SettingsSchema): SettingsSection[] {
-  const properties = schema.properties ?? {};
-  const generalFields: SettingsField[] = [];
-  const sections: SettingsSection[] = [];
-
-  for (const [key, child] of Object.entries(properties)) {
-    if (key === "$schema" || isForbiddenSchema(child)) continue;
-    if (normalizedSchemaType(child) === "object" && child.properties) {
-      const fields = collectFields(child, [key], []);
-      if (fields.length > 0) {
-        sections.push({ id: key, title: humanizeSettingKey(key), description: child.description, fields });
-      }
-    } else {
-      generalFields.push(fieldFromSchema([key], child, humanizeSettingKey(key)));
-    }
-  }
-
-  if (generalFields.length > 0) sections.unshift({ id: "general", title: "General", fields: generalFields });
-  return sections;
-}
-
-function collectFields(
-  schema: SettingsSchema,
-  basePath: readonly string[],
-  labelPath: readonly string[],
-): SettingsField[] {
-  const fields: SettingsField[] = [];
-  for (const [key, child] of Object.entries(schema.properties ?? {})) {
-    if (key === "$schema" || isForbiddenSchema(child)) continue;
-    const path = [...basePath, key];
-    const nextLabelPath = [...labelPath, humanizeSettingKey(key)];
-    if (normalizedSchemaType(child) === "object" && child.properties) {
-      fields.push(...collectFields(child, path, nextLabelPath));
-    } else {
-      fields.push(fieldFromSchema(path, child, nextLabelPath.join(" · ")));
-    }
-  }
-  if (fields.length === 0 && basePath.length > 0) {
-    fields.push(fieldFromSchema(basePath, schema, labelPath.at(-1) ?? "Configuration"));
-  }
-  return fields;
-}
-
-function fieldFromSchema(path: readonly string[], schema: SettingsSchema, label: string): SettingsField {
-  const options = schemaConstOptions(schema);
-  const type = normalizedSchemaType(schema);
-  let kind: SettingsFieldKind;
-  if (options.length > 0) kind = "select";
-  else if (type === "boolean") kind = "boolean";
-  else if (type === "number" || type === "integer") kind = "number";
-  else if (type === "string") kind = "string";
-  else if (type === "array" && normalizedSchemaType(schema.items) === "string") kind = "string-list";
-  else kind = "json";
-  return {
-    path,
-    label,
-    description: schema.description,
-    kind,
-    ...(options.length > 0 ? { options } : {}),
-    minimum: schema.minimum,
-    maximum: schema.maximum,
-    integer: type === "integer",
-    sensitive: path.some((segment) => /(?:token|password|secret|api.?key)/iu.test(segment)),
-  };
-}
-
-function schemaConstOptions(schema: SettingsSchema): SettingsSelectOption[] {
-  const branches = schema.anyOf ?? [];
-  if (branches.length === 0 || !branches.every((branch) => Object.prototype.hasOwnProperty.call(branch, "const"))) return [];
-  return branches.map((branch) => ({ value: branch.const, label: branch.const === null ? "null" : String(branch.const) }));
-}
-
-function normalizedSchemaType(schema: SettingsSchema | undefined): string | undefined {
-  if (!schema) return undefined;
-  if (schema.type) return schema.type;
-  const nonNull = (schema.anyOf ?? []).filter((branch) => branch.type !== "null");
-  return nonNull.length === 1 ? normalizedSchemaType(nonNull[0]) : undefined;
-}
-
-function isForbiddenSchema(schema: SettingsSchema): boolean {
-  return !!schema.not && Object.keys(schema.not).length === 0;
-}
-
-export function formatSettingsPath(path: readonly string[]): string {
-  return path.join(".");
-}
-
-export function humanizeSettingKey(value: string): string {
-  return value
-    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
-    .replace(/[-_]+/gu, " ")
-    .replace(/^./u, (character) => character.toUpperCase());
-}
-
-export function formatSettingValueForList(value: unknown): string {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").join("\n") : "";
-}
-
-export function parseSettingStringList(value: string): string[] {
-  return value.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean);
-}
-
-export function formatSettingJson(value: unknown): string {
-  return value === undefined ? "" : JSON.stringify(value, null, 2);
 }
 
 export function formatSettingsDefaultValue(value: unknown): string {

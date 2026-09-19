@@ -2,22 +2,22 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   // pix renderer configuration
   "defaultModel": { "modelRef": "openai-codex/gpt-5.6-sol", "fallbackModels": [], "thinking": "medium" },
-  // Optional model-picker whitelist shared by Pix TUI and Desktop. Omit it to show all available models.
+  // Optional TUI model-picker whitelist. Desktop keeps an independent whitelist in pix-desktop.jsonc.
   // "visibleModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5-turbo"],
-  // Last applied thinking level per model, shared by Pix TUI and Desktop model pickers.
+  // Last applied thinking level per model for TUI. Desktop keeps independent preferences.
   // "thinkingByModel": { "openai-codex/gpt-5.6-sol": "high", "zai/glm-5-turbo": "max" },
   // Disable AGENTS.md / CLAUDE.md discovery for this project when set in <cwd>/.pi/pix.jsonc.
   "ignoreContextFiles": false,
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.
   "maxProjectSessions": 0,
 	"desktop": {
-    // External editor used by Pix Desktop's Project explorer: zed, code/vscode, cursor, subl, idea, webstorm, or an executable path/name.
+    // Legacy compatibility field. Pix Desktop reads externalEditor from pix-desktop.jsonc instead.
     "externalEditor": "zed",
 		"git": {
-			// LLM used for Source Control and /code-review.
+			// TUI LLM used by /code-review. Desktop keeps an independent Source Control preference.
       "reviewModelRef": "openai-codex/gpt-5.6-luna:medium",
       "reviewFallbackModels": [],
-			// LLM used to generate commit messages in Desktop and /commit-message.
+			// TUI LLM used by /commit-message. Desktop keeps an independent Source Control preference.
       "commitMessageModelRef": "openai-codex/gpt-5.6-luna:minimal",
       "commitMessageFallbackModels": []
     }
@@ -72,7 +72,7 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "autocomplete": { "modelRef": "zai/glm-5-turbo", "fallbackModels": [], "debounceMs": 350, "timeoutMs": 3000, "maxTokens": 48, "maxPromptTokens": 1200, "includeRecentMessages": 0 },
   "sessionTitle": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"] },
   "dictation": {
-    // Deepgram API key used by both terminal and desktop voice input.
+    // Deepgram API key used by terminal voice input. Desktop uses pix-desktop.jsonc.
     // Keep secrets in this user config (~/.config/pi/pix.jsonc), not project .pi/pix.jsonc.
     "apiKey": "",
     "language": "en",

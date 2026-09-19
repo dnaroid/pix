@@ -157,10 +157,10 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
 
   async function loadPreferences(projectPath: string): Promise<void> {
     const [globalConfig, projectConfig] = await Promise.all([
-      invoke<ProjectFilePreview>("read_home_file", { path: "~/.config/pi/pix.jsonc" }).catch(() => undefined),
+      invoke<ProjectFilePreview>("read_home_file", { path: "~/.config/pi/pix-desktop.jsonc" }).catch(() => undefined),
       invoke<ProjectFilePreview>("read_project_file", {
         workspace: projectPath,
-        path: ".pi/pix.jsonc",
+        path: ".pi/pix-desktop.jsonc",
       }).catch(() => undefined),
     ]);
     if (options.workspace() !== projectPath) return;

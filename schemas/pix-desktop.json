@@ -1,0 +1,253 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and autocomplete."
+    },
+    "ignoreContextFiles": {
+      "type": "boolean",
+      "description": "Disable AGENTS.md / CLAUDE.md discovery for Desktop sessions. A project .pi/pix-desktop.jsonc value overrides the user default."
+    },
+    "defaultModel": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Provider/model identifier used for new Desktop sessions."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Fallback provider/model identifier."
+          },
+          "description": "Ordered default-model fallbacks tried after modelRef."
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            },
+            {
+              "type": "string",
+              "const": "max"
+            }
+          ],
+          "description": "Model thinking budget level."
+        }
+      },
+      "description": "Default model selection for new Desktop sessions."
+    },
+    "visibleModels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Provider/model identifier shown in the Desktop model picker."
+      },
+      "description": "Desktop-only user model-picker whitelist. Omit to show every available model."
+    },
+    "thinkingByModel": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            },
+            {
+              "type": "string",
+              "const": "max"
+            }
+          ],
+          "description": "Model thinking budget level."
+        }
+      },
+      "description": "Desktop-only last-applied thinking level per provider/model."
+    },
+    "promptEnhancer": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Model used for prompt enhancement."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered prompt-enhancer fallbacks tried after modelRef."
+        }
+      },
+      "description": "Prompt enhancer configuration."
+    },
+    "autocomplete": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Model for inline autocomplete. Empty string disables LLM autocomplete."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered autocomplete fallbacks tried after modelRef."
+        },
+        "debounceMs": {
+          "type": "number",
+          "description": "Delay after typing before requesting completion.",
+          "minimum": 100,
+          "maximum": 2000
+        },
+        "timeoutMs": {
+          "type": "number",
+          "description": "Hard timeout for a completion request.",
+          "minimum": 250,
+          "maximum": 10000
+        },
+        "maxTokens": {
+          "type": "number",
+          "description": "Maximum autocomplete output tokens.",
+          "minimum": 8,
+          "maximum": 256
+        },
+        "maxPromptTokens": {
+          "type": "number",
+          "description": "Maximum autocomplete input prompt tokens.",
+          "minimum": 256,
+          "maximum": 16000
+        },
+        "includeRecentMessages": {
+          "type": "number",
+          "description": "Recent conversation messages included as autocomplete context.",
+          "minimum": 0,
+          "maximum": 20
+        }
+      },
+      "description": "Desktop inline autocomplete configuration."
+    },
+    "sessionTitle": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Model used to generate compact session titles."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered session-title fallback models."
+        }
+      },
+      "description": "Automatic Desktop session-title generation."
+    },
+    "dictation": {
+      "type": "object",
+      "properties": {
+        "apiKey": {
+          "type": "string",
+          "description": "Deepgram API key for Desktop voice input. Stored only in ~/.config/pi/pix-desktop.jsonc; project config cannot override this secret. Desktop exchanges it through /v1/auth/grant, which requires Member or higher Deepgram permission."
+        },
+        "language": {
+          "type": "string",
+          "description": "Deepgram language code sent directly to speech recognition, e.g. 'en', 'ru', 'uk', or 'de'."
+        },
+        "model": {
+          "type": "string",
+          "description": "Deepgram speech-to-text model. Defaults to 'nova-3'."
+        }
+      },
+      "description": "Desktop voice dictation configuration. DEEPGRAM_API_KEY remains an environment fallback."
+    },
+    "desktop": {
+      "type": "object",
+      "properties": {
+        "externalEditor": {
+          "type": "string",
+          "description": "External editor used by the Project explorer. Aliases include zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted."
+        },
+        "git": {
+          "type": "object",
+          "properties": {
+            "reviewModelRef": {
+              "type": "string",
+              "description": "Model used for Source Control LLM diff review, optionally with a :thinking suffix."
+            },
+            "reviewFallbackModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered fallback models for Git diff review."
+            },
+            "commitMessageModelRef": {
+              "type": "string",
+              "description": "Model used to generate Git commit messages, optionally with a :thinking suffix."
+            },
+            "commitMessageFallbackModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered fallback models for Git commit-message generation."
+            }
+          },
+          "description": "Desktop Source Control LLM preferences."
+        }
+      },
+      "description": "Pix Desktop application preferences."
+    }
+  },
+  "$id": "https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Pix Desktop Configuration",
+  "description": "Configuration used only by Pix Desktop (~/.config/pi/pix-desktop.jsonc, with project overrides in <cwd>/.pi/pix-desktop.jsonc). TUI pix.jsonc is not inherited.",
+  "additionalProperties": true
+}

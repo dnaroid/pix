@@ -21,6 +21,7 @@ export async function buildDesktop(name = hostTarget()) {
   await mkdir(resources, { recursive: true });
   await cp(payload, resources, { recursive: true, verbatimSymlinks: true });
   const env = { ...process.env };
+  env.VITE_PIX_DESKTOP_UPDATER = "1";
   // The DMG bundler checks CI separately from the CLI flag to skip Finder customization.
   env.CI = "true";
   for (const key of Object.keys(env)) if ((key.startsWith("APPLE_") || key.startsWith("TAURI_")) && !env[key]) delete env[key];

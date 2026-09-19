@@ -1,4 +1,5 @@
 import type { ComponentProps } from "svelte";
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import DesktopSidebar from "../components/DesktopSidebar.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createGitAssist } from "./git-assist";
@@ -16,6 +17,7 @@ type SidebarProps = ComponentProps<typeof DesktopSidebar>["props"];
 
 export function createDesktopSidebarViewModel(options: {
   workspace: () => string;
+  configOptions: () => SessionConfigOption[];
   canUseSession: () => boolean;
   gitAssistantReady: () => boolean;
   anyPromptRunning: () => boolean;
@@ -35,6 +37,7 @@ export function createDesktopSidebarViewModel(options: {
 }) {
   const props = $derived.by<SidebarProps>(() => ({
     workspace: options.workspace(),
+    settingsConfigOptions: options.configOptions(),
     tasks: options.projectTasks.document.tasks,
     loading: options.projectTasks.loading,
     saving: options.projectTasks.saving,

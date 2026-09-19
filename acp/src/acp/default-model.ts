@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
+import { pixProjectConfigPath, pixUserConfigPath } from "./pix-config-paths.js";
 
 export type PixThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -28,7 +28,7 @@ const THINKING_LEVELS = new Set<PixThinkingLevel>([
 	"max",
 ]);
 
-// Mirrors the defaultModel written by src/default-pix-config.ts on a first TUI launch.
+// Mirrors the defaultModel written by src/default-pix-config.ts for a fresh Pix profile.
 const FIRST_LAUNCH_DEFAULT: DefaultModelConfig = {
 	modelRef: "openai-codex/gpt-5.6-sol",
 	fallbackModels: [],
@@ -38,13 +38,13 @@ const FIRST_LAUNCH_DEFAULT: DefaultModelConfig = {
 /**
  * Resolve the Pix default used for a brand-new session.
  *
- * This mirrors the TUI's config precedence: ~/.config/pi/pix.jsonc first,
- * then <cwd>/.pi/pix.jsonc. A project only replaces the global default when
+ * Config precedence is profile-aware: the active user Pix config first, then
+ * the matching <cwd>/.pi profile config. A project only replaces the global default when
  * it contains a valid defaultModel value.
  */
 export function loadPixDefaultModel(cwd: string, homeDir = homedir()): PixDefaultModel | undefined {
-	const globalPath = join(homeDir, ".config", "pi", "pix.jsonc");
-	const projectPath = join(cwd, ".pi", "pix.jsonc");
+	const globalPath = pixUserConfigPath(homeDir);
+	const projectPath = pixProjectConfigPath(cwd);
 
 	let configured = existsSync(globalPath)
 		? readDefaultModel(globalPath)

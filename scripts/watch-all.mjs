@@ -265,6 +265,11 @@ export function findProcessByExecutablePath(entries, executablePath) {
 	return entries.find((entry) => entry.command === executablePath || entry.command.startsWith(argumentPrefix))?.pid;
 }
 
+/** Whether a process-list snapshot still contains the launched application PID. */
+export function hasProcessPid(entries, pid) {
+	return entries.some((entry) => entry.pid === pid);
+}
+
 /** Update a cached filesystem stamp and report whether the path actually changed. */
 export function updateWatchedPathStamp(stamps, path, stamp) {
 	const previous = stamps.get(path);
@@ -775,6 +780,15 @@ class WatchAllSupervisor {
 					throw new Error(`could not find the launched desktop process (${executablePath})`);
 				}
 				this.candidateAppPid = candidate.appPid;
+				// `open -n -W` can outlive an app that launches and then immediately exits.
+				// Give the actual Tauri process its own grace window before announcing success.
+				await delay(STARTUP_GRACE_MS);
+				if (candidate.process.exitCode !== null || candidate.process.signalCode !== null) {
+					throw new Error(`new desktop exited during startup (${candidate.process.signalCode ?? `exit ${candidate.process.exitCode}`})`);
+				}
+				if (!hasProcessPid(parseProcessList(await processListSnapshot()), candidate.appPid)) {
+					throw new Error(`new desktop process ${candidate.appPid} exited during startup`);
+				}
 			}
 			if (this.stopping || this.pendingParts.size > 0) {
 				if (!this.stopping) {

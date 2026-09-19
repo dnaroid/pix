@@ -344,8 +344,17 @@ DCP reads its supported configuration from `dcp` in the canonical
 - `compress.autoCompress.enabled: false`, patience 2, no configured summarizer
   model by default;
 - bounded emergency-current-turn protection enabled with its limits in
-  `config.ts`;
+  `defaults.ts`;
 - exact/wildcard model overrides where defined by the current schema.
+
+The omission defaults above are owned by the browser-safe
+`external/pi-tools-suite/src/dcp/defaults.ts`. TUI `loadConfig()` clones those
+defaults and then merges the user `dcp` object on top. The generated starter
+`pi-tools-suite.jsonc` is initial file content, not the fallback source for a
+key that is later omitted from an existing config. Desktop Settings consumes
+the same default object (plus the shared debug-log size/backup constants), so a
+reset or absent DCP key displays the same effective value the TUI runtime will
+use.
 
 There is no persistence-backend selector, sidecar path, legacy state format, or
 undo configuration.
@@ -368,6 +377,7 @@ undo configuration.
 ## Related files
 
 - `external/pi-tools-suite/src/dcp/index.ts`
+- `external/pi-tools-suite/src/dcp/defaults.ts`
 - `external/pi-tools-suite/src/dcp/config.ts`
 - `external/pi-tools-suite/src/dcp/state.ts`
 - `external/pi-tools-suite/src/dcp/journal.ts`

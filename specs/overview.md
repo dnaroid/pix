@@ -77,7 +77,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [fenced-code-block-rendering](./fenced-code-block-rendering.md) | Fenced code blocks in chat Markdown |
 | [model-scope-fallback](./model-scope-fallback.md) | Model scope fallback to the available snapshot |
 | [model-visibility-whitelist](./model-visibility-whitelist.md) | Model picker visibility whitelist |
-| [model-thinking-preferences](./model-thinking-preferences.md) | Shared per-model remembered thinking preferences for TUI and Desktop |
+| [model-thinking-preferences](./model-thinking-preferences.md) | Per-model remembered thinking preferences with independent TUI/Desktop storage |
 | [tui-model-thinking-selector](./tui-model-thinking-selector.md) | Combined model and thinking selector |
 | [tui-session-tabs](./tui-session-tabs.md) | TUI session tabs and lazy UI-only draft conversations |
 | [file-link-opening](./file-link-opening.md) | File link opening (Zed / web / media routing) |

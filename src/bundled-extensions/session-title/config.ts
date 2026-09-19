@@ -37,8 +37,13 @@ const DEFAULT_CONFIG: SessionTitleConfig = {
 	debug: false,
 };
 
-const PIX_CONFIG_FILE = "pix.jsonc";
 const SESSION_TITLE_CONFIG_FILE = "session-title.jsonc";
+
+function pixConfigFile(): string {
+	return process.env.PIX_CONFIG_PROFILE?.trim().toLowerCase() === "desktop"
+		? "pix-desktop.jsonc"
+		: "pix.jsonc";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -106,7 +111,7 @@ function readModelList(value: unknown): string[] | undefined {
 }
 
 function readPixSessionTitleConfig(configDir: string): Record<string, unknown> {
-	const pixConfig = readJsonc(join(configDir, PIX_CONFIG_FILE));
+	const pixConfig = readJsonc(join(configDir, pixConfigFile()));
 	return isRecord(pixConfig.sessionTitle) ? pixConfig.sessionTitle : {};
 }
 

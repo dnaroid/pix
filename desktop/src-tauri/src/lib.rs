@@ -70,7 +70,8 @@ const MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW: usize = 6;
 const PACKAGE_TERMINAL_STOP_GRACE: Duration = Duration::from_millis(900);
 const PACKAGE_TERMINAL_STOP_TIMEOUT: Duration = Duration::from_secs(4);
 const PROJECT_TASKS_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
-const PIX_CONFIG_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/pix.json";
+const PIX_DESKTOP_CONFIG_SCHEMA_URL: &str =
+    "https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json";
 const PI_TOOLS_SUITE_SCHEMA_URL: &str =
     "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json";
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -92,6 +93,12 @@ struct DeepgramTokenResponse {
 struct DeepgramGrantResponse {
     access_token: String,
     expires_in: f64,
+}
+
+#[derive(Deserialize)]
+struct DeepgramApiErrorResponse {
+    err_code: Option<String>,
+    err_msg: Option<String>,
 }
 
 struct DeepgramRuntimeConfig {
@@ -466,14 +473,13 @@ async fn deepgram_token(app: AppHandle) -> Result<DeepgramTokenResponse, String>
             .send()
             .map_err(|error| format!("failed to request a Deepgram token: {error}"))?;
         let status = response.status();
+        let body = response
+            .text()
+            .map_err(|error| format!("failed to read the Deepgram token response: {error}"))?;
         if !status.is_success() {
-            return Err(format!(
-                "Deepgram token request failed with HTTP {}",
-                status.as_u16()
-            ));
+            return Err(deepgram_grant_error_message(status.as_u16(), &body));
         }
-        let grant = response
-            .json::<DeepgramGrantResponse>()
+        let grant = serde_json::from_str::<DeepgramGrantResponse>(&body)
             .map_err(|error| format!("failed to decode the Deepgram token response: {error}"))?;
         if grant.access_token.trim().is_empty() {
             return Err("Deepgram returned an empty access token".to_owned());
@@ -486,6 +492,30 @@ async fn deepgram_token(app: AppHandle) -> Result<DeepgramTokenResponse, String>
         })
     })
     .await
+}
+
+fn deepgram_grant_error_message(status: u16, body: &str) -> String {
+    let provider = serde_json::from_str::<DeepgramApiErrorResponse>(body).ok();
+    let provider_detail = provider
+        .as_ref()
+        .and_then(|error| error.err_msg.as_deref().or(error.err_code.as_deref()))
+        .map(str::trim)
+        .filter(|detail| !detail.is_empty())
+        .map(|detail| format!(" ({detail})"))
+        .unwrap_or_default();
+
+    match status {
+        401 => format!(
+            "Deepgram rejected the API key (HTTP 401{provider_detail}). Check the key in Desktop Settings → Voice."
+        ),
+        402 => format!(
+            "Deepgram rejected the token request because the project needs billing/credit (HTTP 402{provider_detail})."
+        ),
+        403 => format!(
+            "Deepgram cannot mint a temporary Desktop voice token with this API key (HTTP 403{provider_detail}). The /v1/auth/grant endpoint requires a Deepgram key with Member or higher permission. Create or update that key in Deepgram, then save it in Desktop Settings → Voice."
+        ),
+        _ => format!("Deepgram token request failed with HTTP {status}{provider_detail}"),
+    }
 }
 
 #[cfg(test)]
@@ -514,7 +544,7 @@ fn resolve_deepgram_runtime_config(
         .map(str::to_owned)
         .or(env_api_key)
         .ok_or_else(|| {
-            "Deepgram API key is not configured; set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY"
+            "Deepgram API key is not configured; set dictation.apiKey in ~/.config/pi/pix-desktop.jsonc or DEEPGRAM_API_KEY"
                 .to_owned()
         })?;
     let model = dictation
@@ -560,7 +590,7 @@ fn resolve_deepgram_runtime_config(
 }
 
 fn deepgram_user_pix_config(home: &Path) -> Result<Option<serde_json::Value>, String> {
-    let document = read_user_config_from(home, UserConfigKind::Pix)?;
+    let document = read_user_config_from(home, UserConfigKind::Desktop)?;
     if !document.exists {
         return Ok(None);
     }
@@ -646,7 +676,7 @@ struct GitLineStats {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum UserConfigKind {
-    Pix,
+    Desktop,
     PiToolsSuite,
 }
 
@@ -3177,7 +3207,7 @@ fn home_file_exists_from(home: &Path, home_path: &Path) -> bool {
 
 fn user_config_path(home: &Path, kind: UserConfigKind) -> PathBuf {
     let file_name = match kind {
-        UserConfigKind::Pix => "pix.jsonc",
+        UserConfigKind::Desktop => "pix-desktop.jsonc",
         UserConfigKind::PiToolsSuite => "pi-tools-suite.jsonc",
     };
     home.join(".config").join("pi").join(file_name)
@@ -3185,14 +3215,14 @@ fn user_config_path(home: &Path, kind: UserConfigKind) -> PathBuf {
 
 fn user_config_schema(kind: UserConfigKind) -> &'static str {
     match kind {
-        UserConfigKind::Pix => include_str!("../../../schemas/pix.json"),
+        UserConfigKind::Desktop => include_str!("../../../schemas/pix-desktop.json"),
         UserConfigKind::PiToolsSuite => include_str!("../../../schemas/pi-tools-suite.json"),
     }
 }
 
 fn user_config_schema_url(kind: UserConfigKind) -> &'static str {
     match kind {
-        UserConfigKind::Pix => PIX_CONFIG_SCHEMA_URL,
+        UserConfigKind::Desktop => PIX_DESKTOP_CONFIG_SCHEMA_URL,
         UserConfigKind::PiToolsSuite => PI_TOOLS_SUITE_SCHEMA_URL,
     }
 }
@@ -4324,13 +4354,13 @@ fn sidebar_idx_runtime_indicator_state(
 
 fn sidebar_settings_indicator_state(home: &Path) -> SidebarSettingsIndicatorState {
     let mut errors = Vec::new();
-    for kind in [UserConfigKind::Pix, UserConfigKind::PiToolsSuite] {
+    for kind in [UserConfigKind::Desktop, UserConfigKind::PiToolsSuite] {
         let path = user_config_path(home, kind);
         if !path.exists() {
             continue;
         }
         let label = match kind {
-            UserConfigKind::Pix => "pix.jsonc",
+            UserConfigKind::Desktop => "pix-desktop.jsonc",
             UserConfigKind::PiToolsSuite => "pi-tools-suite.jsonc",
         };
         let content = match fs::metadata(&path) {
@@ -7253,8 +7283,9 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         .resource_dir()
         .map_err(|error| error.to_string())?;
     let runtime = backend_runtime::BackendRuntime::resolve(&resource_dir)?;
-    let mut child = runtime
-        .command()?
+    let mut command = runtime.command()?;
+    command.env("PIX_CONFIG_PROFILE", "desktop");
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -7676,7 +7707,7 @@ fn ui_qa_workspace_url(current_url: &tauri::Url, workspace: &Path) -> Result<tau
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(AcpProcessState::default())
         .manage(PackageTerminalState::default())
         .manage(UserConfigState::default())
@@ -7708,8 +7739,10 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+    #[cfg(feature = "bundled-runtime")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         .invoke_handler(tauri::generate_handler![
             desktop_context_menu::desktop_edit,
             deepgram_token,
@@ -8742,18 +8775,18 @@ mod tests {
     #[test]
     fn user_settings_configs_resolve_under_the_platform_home_and_round_trip() {
         let home = temporary_workspace("user-settings-config");
-        let pix_path = user_config_path(&home, UserConfigKind::Pix);
+        let pix_path = user_config_path(&home, UserConfigKind::Desktop);
         let tools_path = user_config_path(&home, UserConfigKind::PiToolsSuite);
-        assert_eq!(pix_path, home.join(".config/pi/pix.jsonc"));
+        assert_eq!(pix_path, home.join(".config/pi/pix-desktop.jsonc"));
         assert_eq!(tools_path, home.join(".config/pi/pi-tools-suite.jsonc"));
 
         let missing =
-            read_user_config_from(&home, UserConfigKind::Pix).expect("read missing config");
+            read_user_config_from(&home, UserConfigKind::Desktop).expect("read missing config");
         assert!(!missing.exists);
-        assert!(missing.content.contains(PIX_CONFIG_SCHEMA_URL));
+        assert!(missing.content.contains(PIX_DESKTOP_CONFIG_SCHEMA_URL));
         assert!(missing.schema.contains("ignoreContextFiles"));
         assert!(
-            serde_json::from_str::<serde_json::Value>(user_config_schema(UserConfigKind::Pix))
+            serde_json::from_str::<serde_json::Value>(user_config_schema(UserConfigKind::Desktop))
                 .is_ok()
         );
         assert!(
@@ -8765,7 +8798,7 @@ mod tests {
 
         let saved = write_user_config_from(
             &home,
-            UserConfigKind::Pix,
+            UserConfigKind::Desktop,
             "{\n  // preserve JSONC\n  \"ignoreContextFiles\": true\n}",
         )
         .expect("write user config");
@@ -8781,14 +8814,38 @@ mod tests {
     }
 
     #[test]
+    fn desktop_user_settings_ignore_tui_pix_config() {
+        let home = temporary_workspace("desktop-settings-ignore-tui");
+        fs::create_dir_all(home.join(".config/pi")).expect("create config directory");
+        fs::write(
+            home.join(".config/pi/pix.jsonc"),
+            "{ \"defaultModel\": { \"modelRef\": \"tui/only\" } }\n",
+        )
+        .expect("write TUI config");
+
+        let desktop = read_user_config_from(&home, UserConfigKind::Desktop)
+            .expect("read isolated desktop config");
+        assert!(!desktop.exists);
+        assert_eq!(
+            Path::new(&desktop.path),
+            home.join(".config/pi/pix-desktop.jsonc")
+        );
+        assert!(!desktop.content.contains("tui/only"));
+        assert!(desktop.content.contains(PIX_DESKTOP_CONFIG_SCHEMA_URL));
+        assert!(sidebar_settings_indicator_state(&home).errors.is_empty());
+
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
     fn conditional_user_config_write_rejects_stale_snapshots() {
         let home = temporary_workspace("user-settings-config-cas");
         let initial =
-            read_user_config_from(&home, UserConfigKind::Pix).expect("read initial config");
+            read_user_config_from(&home, UserConfigKind::Desktop).expect("read initial config");
 
         let first = write_user_config_if_unchanged_from(
             &home,
-            UserConfigKind::Pix,
+            UserConfigKind::Desktop,
             &initial.content,
             "{\n  \"visibleModels\": [\"openai/a\"]\n}\n",
         )
@@ -8797,7 +8854,7 @@ mod tests {
 
         let stale = write_user_config_if_unchanged_from(
             &home,
-            UserConfigKind::Pix,
+            UserConfigKind::Desktop,
             &initial.content,
             "{\n  \"visibleModels\": [\"zai/b\"]\n}\n",
         )
@@ -8811,7 +8868,7 @@ mod tests {
     #[test]
     fn resolves_deepgram_runtime_config_from_user_pix_config_with_env_fallback() {
         let home = temporary_workspace("deepgram-user-config");
-        let path = user_config_path(&home, UserConfigKind::Pix);
+        let path = user_config_path(&home, UserConfigKind::Desktop);
         fs::create_dir_all(path.parent().expect("config parent")).expect("create config directory");
         fs::write(
             &path,
@@ -8822,7 +8879,7 @@ mod tests {
                 "model": "nova-3",
                 "language": "ru",
                 "languages": {
-                  "ru": { "deepgramLanguage": "ru" },
+                  "ru": { "deepgramLanguage": "legacy-ru" },
                 },
               },
             }"#,
@@ -8833,7 +8890,15 @@ mod tests {
             .expect("resolve config");
         assert_eq!(config.api_key, "dg-config-key");
         assert_eq!(config.model, "nova-3");
-        assert_eq!(config.language, "ru");
+        assert_eq!(config.language, "legacy-ru");
+
+        fs::write(
+            &path,
+            r#"{ "dictation": { "apiKey": "dg-config-key", "language": "uk", "model": "nova-3" } }"#,
+        )
+        .expect("write direct Desktop language config");
+        let direct = resolve_deepgram_runtime_config(&home, None).expect("resolve direct language");
+        assert_eq!(direct.language, "uk");
 
         fs::write(&path, "{ \"dictation\": { \"apiKey\": \"\" } }\n").expect("clear config key");
         let fallback = resolve_deepgram_runtime_config(&home, Some("dg-env-key".to_owned()))
@@ -8854,9 +8919,30 @@ mod tests {
     }
 
     #[test]
+    fn deepgram_grant_errors_explain_desktop_token_permissions() {
+        let forbidden = deepgram_grant_error_message(
+            403,
+            r#"{"err_code":"FORBIDDEN","err_msg":"Insufficient permissions.","request_id":"request-123"}"#,
+        );
+        assert!(forbidden.contains("HTTP 403"));
+        assert!(forbidden.contains("Insufficient permissions."));
+        assert!(forbidden.contains("Member or higher"));
+        assert!(forbidden.contains("Desktop Settings → Voice"));
+        assert!(!forbidden.contains("request-123"));
+
+        let unauthorized = deepgram_grant_error_message(
+            401,
+            r#"{"err_code":"INVALID_AUTH","err_msg":"Invalid credentials."}"#,
+        );
+        assert!(unauthorized.contains("HTTP 401"));
+        assert!(unauthorized.contains("Invalid credentials."));
+        assert!(unauthorized.contains("Settings → Voice"));
+    }
+
+    #[test]
     fn sidebar_settings_indicator_detects_jsonc_and_schema_errors() {
         let home = temporary_workspace("sidebar-settings-indicator");
-        let path = user_config_path(&home, UserConfigKind::Pix);
+        let path = user_config_path(&home, UserConfigKind::Desktop);
         fs::create_dir_all(path.parent().expect("config parent")).expect("create config directory");
 
         fs::write(
@@ -8883,12 +8969,12 @@ mod tests {
     #[test]
     fn user_settings_reject_normalized_content_over_the_size_limit_before_writing() {
         let home = temporary_workspace("user-settings-config-size-limit");
-        let path = user_config_path(&home, UserConfigKind::Pix);
+        let path = user_config_path(&home, UserConfigKind::Desktop);
         fs::create_dir_all(path.parent().expect("config parent")).expect("create config directory");
         fs::write(&path, "{}\n").expect("write existing config");
 
         let content = "x".repeat(MAX_USER_CONFIG_BYTES as usize);
-        let error = write_user_config_from(&home, UserConfigKind::Pix, &content)
+        let error = write_user_config_from(&home, UserConfigKind::Desktop, &content)
             .expect_err("reject normalized oversized config");
 
         assert!(error.contains("config is too large to save"));

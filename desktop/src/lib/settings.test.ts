@@ -4,7 +4,6 @@ import {
   reconcileSavedSettingsDraft,
   removeSettingsValue,
   settingsDefaultValue,
-  settingsSections,
   settingsSourceIssues,
   settingsValue,
   updateSettingsSource,
@@ -34,21 +33,7 @@ const schema: SettingsSchema = {
   },
 };
 
-describe("settings schema helpers", () => {
-  it("builds dynamic form sections from nested schema properties", () => {
-    const sections = settingsSections(schema);
-    expect(sections.map((section) => section.title)).toEqual(["General", "Nested"]);
-    expect(sections[0]?.fields.map((field) => [field.label, field.kind])).toEqual([
-      ["Enabled", "boolean"],
-    ]);
-    expect(sections[1]?.fields.map((field) => [field.label, field.kind])).toEqual([
-      ["Mode", "select"],
-      ["Retries", "number"],
-      ["Names", "string-list"],
-      ["Map", "json"],
-    ]);
-  });
-
+describe("settings JSONC helpers", () => {
   it("uses path edits so comments and unrelated JSONC stay intact", () => {
     const original = `{
   "enabled": true,
@@ -77,7 +62,7 @@ describe("settings schema helpers", () => {
       properties: { enabled: { type: "boolean", default: false } },
     }, ["enabled"])).toEqual({ exists: true, value: false });
 
-    expect(settingsDefaultValue("pix", {
+    expect(settingsDefaultValue("desktop", {
       type: "object",
       properties: {
         autocomplete: {
@@ -93,9 +78,76 @@ describe("settings schema helpers", () => {
     }, ["enabled"])).toEqual({ exists: true, value: true });
   });
 
+  it("uses TUI runtime DCP omission defaults instead of the starter config template", () => {
+    const dcpSchema: SettingsSchema = {
+      type: "object",
+      properties: {
+        dcp: {
+          type: "object",
+          properties: {
+            compress: {
+              type: "object",
+              properties: {
+                nudgeFrequency: { type: "number" },
+                summaryBuffer: { type: "boolean" },
+                protectedTools: { type: "array", items: { type: "string" } },
+                autoCandidates: {
+                  type: "object",
+                  properties: {
+                    enabled: { type: "boolean" },
+                    minMessages: { type: "number" },
+                    minTokens: { type: "number" },
+                  },
+                },
+                messageMode: {
+                  type: "object",
+                  properties: {
+                    enabled: { type: "boolean" },
+                    mediumTokens: { type: "number" },
+                    highTokens: { type: "number" },
+                    maxSuggestions: { type: "number" },
+                  },
+                },
+                autoCompress: {
+                  type: "object",
+                  properties: {
+                    summarizerFallbackModels: { type: "array", items: { type: "string" } },
+                  },
+                },
+              },
+            },
+            modelOverrides: { type: "object" },
+            debugLog: {
+              type: "object",
+              properties: {
+                maxBytes: { type: "number" },
+                maxBackups: { type: "number" },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "nudgeFrequency"])).toEqual({ exists: true, value: 2 });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "summaryBuffer"])).toEqual({ exists: true, value: true });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "protectedTools"])).toEqual({ exists: true, value: ["compress", "write", "edit"] });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCandidates", "enabled"])).toEqual({ exists: true, value: true });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCandidates", "minMessages"])).toEqual({ exists: true, value: 6 });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCandidates", "minTokens"])).toEqual({ exists: true, value: 1500 });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "messageMode", "enabled"])).toEqual({ exists: true, value: true });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "messageMode", "mediumTokens"])).toEqual({ exists: true, value: 500 });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "messageMode", "highTokens"])).toEqual({ exists: true, value: 5000 });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "messageMode", "maxSuggestions"])).toEqual({ exists: true, value: 5 });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCompress", "summarizerFallbackModels"])).toEqual({ exists: true, value: [] });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "modelOverrides"])).toEqual({ exists: true, value: {} });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "debugLog", "maxBytes"])).toEqual({ exists: true, value: 5 * 1024 * 1024 });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "debugLog", "maxBackups"])).toEqual({ exists: true, value: 3 });
+  });
+
   it("keeps edits typed while an older save is in flight", () => {
     const latest: SettingsDraftDocument = {
-      path: "/home/user/.config/pi/pix.jsonc",
+      path: "/home/user/.config/pi/pix-desktop.jsonc",
       content: '{ "enabled": true }\n',
       exists: true,
       schema: "{}",

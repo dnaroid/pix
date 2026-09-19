@@ -2,6 +2,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import * as os from "node:os"
 import { parse as parseJsonc, type ParseError } from "jsonc-parser"
+import { DEFAULT_DCP_CONFIG } from "./defaults.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -105,68 +106,6 @@ type DeepPartial<T> = T extends Array<infer U>
   : T extends object
     ? { [K in keyof T]?: DeepPartial<T[K]> }
     : T
-
-// ---------------------------------------------------------------------------
-// Defaults
-// ---------------------------------------------------------------------------
-
-const DEFAULT_CONFIG: DcpConfig = {
-  enabled: true,
-  debug: false,
-  issues: [],
-  manualMode: {
-    enabled: false,
-  },
-  compress: {
-    maxContextPercent: 0.65,
-    minContextPercent: 0.40,
-    modelMaxContextPercent: {},
-    modelMinContextPercent: {},
-    summaryBuffer: true,
-    nudgeFrequency: 2,
-    iterationNudgeThreshold: 8,
-    nudgeForce: "soft",
-    protectedTools: ["compress", "write", "edit"],
-    protectTags: false,
-    protectUserMessages: false,
-    autoCandidates: {
-      enabled: true,
-      minContextPercent: 0.40,
-      keepRecentTurns: 1,
-      minMessages: 6,
-      minTokens: 1500,
-    },
-    messageMode: {
-      enabled: true,
-      minContextPercent: 0.40,
-      keepRecentTurns: 1,
-      mediumTokens: 500,
-      highTokens: 5000,
-      maxSuggestions: 5,
-    },
-    autoCompress: {
-      enabled: false,
-      patience: 2,
-      summarizerModel: [],
-      summarizerFallbackModels: [],
-      timeoutMs: 20000,
-    },
-  },
-  strategies: {
-    emergencyCurrentTurnPruning: {
-      enabled: true,
-      hardContextPercent: 0.82,
-      targetContextPercent: 0.70,
-      patience: 2,
-      keepRecentToolPairs: 8,
-      minOutputTokens: 500,
-      maxSuggestions: 8,
-      protectedTools: [],
-    },
-  },
-  protectedFilePatterns: [],
-  modelOverrides: {},
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -497,7 +436,7 @@ export interface LoadConfigOptions {
  */
 export function loadConfig(options: LoadConfigOptions = {}): DcpConfig {
   // Layer 1: defaults (deep clone so we never mutate the constant)
-  let config: DcpConfig = structuredClone(DEFAULT_CONFIG)
+  let config: DcpConfig = structuredClone(DEFAULT_DCP_CONFIG) as DcpConfig
   const issues: string[] = []
 
   const homeDir = options.homeDir ?? os.homedir()

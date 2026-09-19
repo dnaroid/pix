@@ -127,38 +127,38 @@ const DictationLanguageModelConfig = Type.Object(
 
 const DictationConfig = Type.Object(
 	{
-		apiKey: Type.Optional(Type.String({ description: "Deepgram API key used by terminal and desktop voice input. Store it in the user config (~/.config/pi/pix.jsonc); project-level .pi/pix.jsonc does not override this secret." })),
+		apiKey: Type.Optional(Type.String({ description: "Deepgram API key used by terminal voice input. Store it in the TUI user config (~/.config/pi/pix.jsonc); project-level .pi/pix.jsonc does not override this secret. Pix Desktop uses pix-desktop.jsonc instead." })),
 		language: Type.Optional(Type.String({ description: "Selected language code, e.g. 'en' or 'ru'." })),
 		model: Type.Optional(Type.String({ description: "Deepgram speech-to-text model. Defaults to 'nova-3'." })),
 		languages: Type.Optional(Type.Record(Type.String(), DictationLanguageModelConfig, { description: "Available dictation languages keyed by local language code." })),
 	},
-	{ description: "Voice dictation (Deepgram) configuration. Uses dictation.apiKey from the user pix config, with DEEPGRAM_API_KEY as a compatibility fallback." },
+	{ description: "Terminal voice dictation (Deepgram) configuration. Uses dictation.apiKey from the TUI user Pix config, with DEEPGRAM_API_KEY as a compatibility fallback." },
 );
 
 const DesktopConfig = Type.Object(
 	{
 		externalEditor: Type.Optional(Type.String({
-			description: "External editor used by Pix Desktop project explorer. Known aliases include zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted.",
+			description: "Legacy external-editor preference retained for config compatibility. Pix Desktop reads its independent pix-desktop.jsonc profile instead.",
 		})),
 		git: Type.Optional(Type.Object(
 			{
 				reviewModelRef: Type.Optional(Type.String({
-					description: "Model reference used by Pix Desktop and TUI for LLM review of Git diffs, optionally with a :thinking suffix.",
+					description: "Model reference used by TUI Git diff review, optionally with a :thinking suffix. Desktop has an independent value in pix-desktop.jsonc.",
 				})),
 				reviewFallbackModels: Type.Optional(Type.Array(Type.String(), {
 					description: "Ordered fallback model references used for Git diff review.",
 				})),
 				commitMessageModelRef: Type.Optional(Type.String({
-					description: "Model reference used by Pix Desktop and TUI to generate Git commit messages, optionally with a :thinking suffix.",
+					description: "Model reference used by TUI Git commit-message generation, optionally with a :thinking suffix. Desktop has an independent value in pix-desktop.jsonc.",
 				})),
 				commitMessageFallbackModels: Type.Optional(Type.Array(Type.String(), {
 					description: "Ordered fallback model references used for Git commit-message generation.",
 				})),
 			},
-			{ description: "Pix Git/Source Control LLM preferences shared by Desktop and TUI." },
+			{ description: "TUI Git helper preferences kept under the historical desktop.git namespace." },
 		)),
 	},
-	{ description: "Pix Desktop preferences; the nested git model settings are also consumed by TUI Git helpers for compatibility." },
+	{ description: "Compatibility namespace for TUI-side preferences. Pix Desktop itself reads ~/.config/pi/pix-desktop.jsonc." },
 );
 
 // ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ export const PixConfigSchema = Type.Object(
 		visibleModels: Type.Optional(Type.Array(Type.String({
 			description: "Provider/model identifier shown in Pix model pickers.",
 		}), {
-			description: "User-level whitelist shared by Pix TUI and Desktop model pickers. Omit to show every available model.",
+			description: "TUI user-level model-picker whitelist. Omit to show every available model. Pix Desktop stores its own whitelist in pix-desktop.jsonc.",
 		})),
 		thinkingByModel: Type.Optional(Type.Record(Type.String(), Type.Union([
 			Type.Literal("off"),
@@ -185,7 +185,7 @@ export const PixConfigSchema = Type.Object(
 			Type.Literal("xhigh"),
 			Type.Literal("max"),
 		]), {
-			description: "User-level last-applied thinking level per provider/model, shared by Pix TUI and Desktop model pickers.",
+			description: "TUI user-level last-applied thinking level per provider/model. Pix Desktop stores its own preferences in pix-desktop.jsonc.",
 		})),
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		outputFilters: Type.Optional(OutputFiltersConfig),

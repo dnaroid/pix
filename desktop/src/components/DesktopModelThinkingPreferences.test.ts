@@ -6,7 +6,9 @@ import overlaysSource from "./DesktopOverlays.svelte?raw";
 import pickerSource from "./ModelThinkingPicker.svelte?raw";
 
 describe("Desktop model thinking preferences", () => {
-  it("loads the shared user preference map into the combined picker", () => {
+  it("loads the Desktop-only user preference map into the combined picker", () => {
+    expect(preferenceSource).toContain('read_user_config", { kind: "desktop" }');
+    expect(preferenceSource).not.toContain('read_user_config", { kind: "pix" }');
     expect(preferenceSource).toContain("modelThinkingPreferencesFromPixConfig(document.content)");
     expect(overlaysViewModelSource).toContain("rememberedThinkingByModel: options.preferences.rememberedThinkingByModel");
     expect(overlaysViewModelSource).toContain("onVisibleModelsChange: options.preferences.saveVisibleModelRefs");

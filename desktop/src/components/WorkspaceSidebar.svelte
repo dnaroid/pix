@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Folder from "@lucide/svelte/icons/folder";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
@@ -82,6 +83,7 @@
   };
   let {
     workspace,
+    settingsConfigOptions,
     tasks,
     loading,
     saving,
@@ -143,6 +145,7 @@
     onRefreshKnowledge,
   }: {
     workspace: string;
+    settingsConfigOptions: SessionConfigOption[];
     tasks: ProjectTask[];
     loading: boolean;
     saving: boolean;
@@ -696,7 +699,7 @@
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">
-          <SettingsPanel onIndicatorChange={(error) => settingsPanelError = error} />
+          <SettingsPanel configOptions={settingsConfigOptions} onIndicatorChange={(error) => settingsPanelError = error} />
         </div>
       {/if}
     </div>

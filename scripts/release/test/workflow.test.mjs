@@ -64,6 +64,7 @@ test("release configuration includes the self-contained runtime and signed Deskt
   assert.equal(config.plugins.updater.windows.installMode, "passive");
   const build = readFileSync(join(root, "scripts/release/build-desktop.mjs"), "utf8");
   assert.match(build, /env\.CI = "true"/u);
+  assert.match(build, /env\.VITE_PIX_DESKTOP_UPDATER = "1"/u);
   assert.match(build, /"bundled-runtime"/u);
   assert.match(build, /TAURI_SIGNING_PRIVATE_KEY/u);
   assert.match(build, /TAURI_BUILD_TIMEOUT_MS = 35 \* 60_000/u);

@@ -5,6 +5,7 @@
  *
  * Outputs:
  *   schemas/pix.json
+ *   schemas/pix-desktop.json
  *   schemas/pi-tools-suite.json
  *   schemas/tasks.json
  */
@@ -13,6 +14,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PixConfigSchema } from "../src/schemas/pix-schema.js";
+import { PixDesktopConfigSchema } from "../src/schemas/pix-desktop-schema.js";
 import { PiToolsSuiteConfigSchema } from "../src/schemas/pi-tools-suite-schema.js";
 import { ProjectTasksSchema } from "../src/schemas/tasks-schema.js";
 
@@ -25,6 +27,7 @@ const checkOnly = process.argv.includes("--check");
 
 const schemas = [
 	{ name: "pix.json", schema: PixConfigSchema },
+	{ name: "pix-desktop.json", schema: PixDesktopConfigSchema },
 	{ name: "pi-tools-suite.json", schema: PiToolsSuiteConfigSchema },
 	{ name: "tasks.json", schema: ProjectTasksSchema },
 ];

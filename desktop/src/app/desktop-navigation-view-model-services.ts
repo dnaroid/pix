@@ -27,6 +27,7 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
 
   const sidebar = createDesktopSidebarViewModel({
     workspace: options.workspace,
+    configOptions: options.displayedConfigOptions,
     canUseSession: () => options.presentation.canUseSession,
     gitAssistantReady: () => options.status() === "ready" && options.clientAvailable() && !!options.workspace(),
     anyPromptRunning: () => options.presentation.anyPromptRunning,

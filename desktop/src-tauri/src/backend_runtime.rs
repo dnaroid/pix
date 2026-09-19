@@ -36,6 +36,7 @@ impl BackendRuntime {
         }
     }
 
+    #[cfg(any(test, feature = "bundled-runtime"))]
     fn bundled(root: &Path) -> Result<Self, String> {
         let app = root.join("app");
         let runtime = Self {
