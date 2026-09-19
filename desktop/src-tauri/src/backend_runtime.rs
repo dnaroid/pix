@@ -10,6 +10,7 @@ use std::{
 pub struct BackendRuntime {
     node: PathBuf,
     entry: PathBuf,
+    bootstrap: PathBuf,
     extensions: Vec<(&'static str, PathBuf)>,
     bundled_root: Option<PathBuf>,
 }
@@ -44,6 +45,7 @@ impl BackendRuntime {
                 .join("runtime")
                 .join(if cfg!(windows) { "node.exe" } else { "node" }),
             entry: app.join("acp/dist/main.js"),
+            bootstrap: root.join("bootstrap.mjs"),
             extensions: EXTENSIONS
                 .iter()
                 .map(|(key, name)| {
@@ -75,6 +77,7 @@ impl BackendRuntime {
             entry: lookup("PIX_ACP_ENTRY")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| root.join("acp/dist/main.js")),
+            bootstrap: root.join("scripts/release/bootstrap.mjs"),
             extensions: EXTENSIONS
                 .iter()
                 .map(|(key, name)| {
@@ -94,6 +97,7 @@ impl BackendRuntime {
 
     fn validate(&self) -> Result<(), String> {
         require_file(&self.entry)?;
+        require_file(&self.bootstrap)?;
         for (_, path) in &self.extensions {
             require_file(path)?;
         }
@@ -102,6 +106,17 @@ impl BackendRuntime {
 
     pub fn command(&self) -> Result<Command, String> {
         self.command_for(&self.entry)
+    }
+
+    pub(crate) fn bootstrap_command(&self, action: &str) -> Result<Command, String> {
+        let mut command = self.command_for(&self.bootstrap)?;
+        command.arg(action);
+        Ok(command)
+    }
+
+    pub(crate) fn script_command(&self, entry: &Path) -> Result<Command, String> {
+        require_file(entry)?;
+        self.command_for(entry)
     }
 
     #[cfg(feature = "bundled-runtime")]
@@ -124,13 +139,22 @@ impl BackendRuntime {
         if let Some(root) = &self.bundled_root {
             command.env_remove("PIX_ACP_PI_ENTRY");
             command.env_remove("PIX_ACP_PI_BIN");
-            let mut paths = vec![root.join("runtime"), root.join("app/node_modules/.bin")];
+            let mut paths = Vec::new();
+            if let Some(home) = home_dir_from_environment() {
+                paths.push(home.join(".pi/pix-desktop-tools/node_modules/.bin"));
+            }
+            paths.push(root.join("runtime"));
+            paths.push(root.join("app/node_modules/.bin"));
             paths.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
             command.env(
                 "PATH",
                 env::join_paths(paths).map_err(|error| error.to_string())?,
             );
             command.env("PIX_BUNDLED_PI_BIN", root.join("app/node_modules/.bin"));
+            command.env(
+                "PIX_BUNDLED_NPM_CLI",
+                root.join("runtime/npm/bin/npm-cli.js"),
+            );
         }
         #[cfg(windows)]
         {
@@ -139,6 +163,14 @@ impl BackendRuntime {
         }
         Ok(command)
     }
+}
+
+fn home_dir_from_environment() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let value = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"));
+    #[cfg(not(windows))]
+    let value = env::var_os("HOME");
+    value.map(PathBuf::from)
 }
 
 fn require_file(path: &Path) -> Result<(), String> {
@@ -175,6 +207,7 @@ mod tests {
         fn payload(&self) {
             for file in [
                 "release.json",
+                "bootstrap.mjs",
                 "app/.pix-portable.json",
                 "app/acp/dist/main.js",
             ] {
@@ -228,6 +261,7 @@ mod tests {
     fn development_retains_explicit_overrides() {
         let fixture = Fixture::new();
         fixture.payload();
+        fixture.file("app/scripts/release/bootstrap.mjs");
         let runtime = BackendRuntime::development(&fixture.0.join("app"), |key| {
             (key == "PIX_ACP_NODE_BINARY").then(|| OsString::from("custom-node"))
         })

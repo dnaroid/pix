@@ -277,13 +277,10 @@ export function updateWatchedPathStamp(stamps, path, stamp) {
 	return previous === undefined || previous !== stamp;
 }
 
-/** Invoke npm without relying on direct `.cmd` spawning, which modern Node rejects on Windows. */
-export function npmInvocation(args, platform = process.platform, npmExecPath = process.env.npm_execpath) {
+/** Invoke the npm selected by PATH without relying on direct `.cmd` spawning on Windows. */
+export function npmInvocation(args, platform = process.platform, comSpec = process.env.ComSpec ?? "cmd.exe") {
 	if (platform !== "win32") return { command: "npm", args };
-	if (!npmExecPath) {
-		throw new Error("watch:all on Windows must be started through npm so npm_execpath is available");
-	}
-	return { command: process.execPath, args: [npmExecPath, ...args] };
+	return { command: comSpec, args: ["/d", "/s", "/c", "npm", ...args] };
 }
 
 async function watchedPathStamp(path) {

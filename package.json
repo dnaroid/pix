@@ -1,7 +1,7 @@
 {
   "name": "pi-ui-extend",
-  "version": "2.0.4",
-  "private": false,
+  "version": "2.0.5",
+  "private": true,
   "description": "Pix: a workspace-first terminal UI for Pi with tabs, readable tool activity, voice input, and bundled agent tools.",
   "repository": {
     "type": "git",
@@ -37,6 +37,7 @@
     "dist",
     "schemas",
     "skills",
+    "!skills/**/.pi",
     "external/pi-tools-suite/index.ts",
     "external/pi-tools-suite/package.json",
     "external/pi-tools-suite/README.md",

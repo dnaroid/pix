@@ -15,8 +15,16 @@ test("portable launcher preserves cwd, Unicode/spaced/empty args and exit status
   for (const directory of [join(payload, "runtime"), join(payload, "app/bin"), cwd, poison]) await mkdir(directory, { recursive: true });
   const isWindows = process.platform === "win32";
   const binary = join(payload, "runtime", isWindows ? "node.exe" : "node");
-  await copyFile(process.execPath, binary);
-  await chmod(binary, 0o755);
+  if (isWindows) {
+    await copyFile(process.execPath, binary);
+    await chmod(binary, 0o755);
+  } else {
+    // The PATH-selected Node may itself depend on sibling shared libraries
+    // (for example Homebrew's libnode.dylib). A symlink still proves that the
+    // launcher selects runtime/node instead of PATH without assuming that an
+    // arbitrary system Node binary is independently relocatable.
+    await symlink(process.execPath, binary);
+  }
   const launcher = join(payload, isWindows ? "pix.cmd" : "pix");
   await copyFile(join(root, "scripts/release/launchers", isWindows ? "pix.cmd" : "pix"), launcher);
   await chmod(launcher, 0o755);

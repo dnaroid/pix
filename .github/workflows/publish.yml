@@ -20,10 +20,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: npm
+      - name: Show PATH Node and npm
+        run: |
+          node --version
+          npm --version
       - run: npm ci --ignore-scripts
       - run: npm run test:release
       - name: Verify tag and all application versions
@@ -51,14 +51,10 @@ jobs:
             target: windows-x64
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            acp/package-lock.json
-            desktop/package-lock.json
+      - name: Show PATH Node and npm
+        run: |
+          node --version
+          npm --version
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -171,9 +167,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
+      - name: Show PATH Node and npm
+        run: |
+          node --version
+          npm --version
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*

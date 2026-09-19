@@ -9,6 +9,7 @@
   import DesktopOverlays from "./components/DesktopOverlays.svelte";
   import DesktopStatusBar from "./components/DesktopStatusBar.svelte";
   import DesktopUpdateBanner from "./components/DesktopUpdateBanner.svelte";
+  import DesktopBootstrapDialog from "./components/DesktopBootstrapDialog.svelte";
   import { workbenchSessionTabId, type WorkbenchTabId } from "./lib/workbench-tabs";
   import { createTranscriptAttachmentController } from "./app/transcript-attachments";
   import { createTranscriptScrollController } from "./app/transcript-scroll.svelte";
@@ -652,4 +653,5 @@
 </div>
 
 <DesktopOverlays {...overlaysViewModel.props} />
+<DesktopBootstrapDialog onCredentialsChanged={reconnect} />
 <DesktopUpdateBanner {updater} />

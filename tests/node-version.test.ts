@@ -11,7 +11,6 @@ const readText = (path: string): string => readFileSync(join(repoRoot, path), "u
 const readJson = (path: string) => JSON.parse(readText(path));
 const rootPackage = readJson("package.json");
 const supportedRange: string = rootPackage.engines.node;
-const pinnedVersion = readText(".node-version").trim();
 
 // Exercise the shipped launcher, but never load the real app or touch user configuration.
 function runLauncher(t: TestContext, version: string, range = supportedRange) {
@@ -35,9 +34,10 @@ function runLauncher(t: TestContext, version: string, range = supportedRange) {
 }
 
 describe("Node version configuration", () => {
-	it("keeps the exact development pin and nvm mirror aligned", () => {
-		assert.match(pinnedVersion, /^\d+\.\d+\.\d+$/u);
-		assert.equal(readText(".nvmrc").trim(), pinnedVersion);
+	it("has no project-level Node version-manager pins", () => {
+		for (const path of [".node-version", ".nvmrc", ".tool-versions", "mise.toml", ".mise.toml"]) {
+			assert.equal(existsSync(join(repoRoot, path)), false, path);
+		}
 	});
 
 	it("shares the root engine range across packages, lockfiles, and documentation", () => {
@@ -50,7 +50,6 @@ describe("Node version configuration", () => {
 	});
 
 	it("uses the selected PATH runtime without a mise configuration or script wrappers", () => {
-		assert.equal(existsSync(join(repoRoot, ".mise.toml")), false);
 		for (const prefix of ["", "acp/", "desktop/", "external/pi-tools-suite/"]) {
 			for (const [name, script] of Object.entries(readJson(`${prefix}package.json`).scripts)) {
 				assert.doesNotMatch(String(script), /\bmise\b|\bnode@\d/u, `${prefix}${name}`);
@@ -58,26 +57,18 @@ describe("Node version configuration", () => {
 		}
 	});
 
-	it("keeps CI on the shared pin with minimum and upper-edge compatibility entries", () => {
+	it("keeps CI and release jobs on the runner PATH runtime", () => {
 		for (const name of ["check", "publish"]) {
 			const workflow = readText(`.github/workflows/${name}.yml`);
-			assert.match(workflow, /node-version-file: \.node-version/u, name);
-			assert.doesNotMatch(workflow, /\bmise\b/u, name);
+			assert.doesNotMatch(workflow, /actions\/setup-node|node-version(?:-file)?:|matrix\.node|\bmise\b/u, name);
+			assert.match(workflow, /node --version/u, name);
+			assert.match(workflow, /npm --version/u, name);
 		}
-		const minimum = /^>=(\d+\.\d+\.\d+) /u.exec(supportedRange)?.[1];
-		const upperExclusive = / <(\d+)$/u.exec(supportedRange)?.[1];
-		assert.ok(minimum);
-		assert.ok(upperExclusive);
-		const newestSupportedMajor = String(Number(upperExclusive) - 1);
-		const check = readText(".github/workflows/check.yml");
-		assert.ok(check.includes(`node: "${minimum}"`));
-		assert.ok(check.includes(`node: "${newestSupportedMajor}"`));
-		assert.ok(check.includes("node-version: ${{ matrix.node }}"));
 	});
 });
 
 describe("Pix launcher Node version guard", () => {
-	for (const version of new Set(["22.19.0", "22.19.1", "22.20.0", "23.0.0", "24.0.0", "25.0.0", "26.0.0", "26.7.0", pinnedVersion])) {
+	for (const version of new Set(["22.19.0", "22.19.1", "22.20.0", "23.0.0", "24.0.0", "25.0.0", "26.0.0", "26.7.0", process.versions.node])) {
 		it(`accepts supported Node ${version}`, (t) => {
 			const result = runLauncher(t, version);
 			assert.equal(result.status, 0, result.stderr);
@@ -103,7 +94,7 @@ describe("Pix launcher Node version guard", () => {
 	});
 
 	it("fails closed on an unrecognized engine range", (t) => {
-		const result = runLauncher(t, pinnedVersion, ">=22.19.0");
+		const result = runLauncher(t, process.versions.node, ">=22.19.0");
 		assert.equal(result.status, 1);
 		assert.equal(result.stdout, "");
 	});

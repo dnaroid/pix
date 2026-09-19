@@ -514,20 +514,31 @@ Pix implements the Pi extension UI surface for notifications, keyed toasts, widg
 
 ## Development
 
-Use the exact Node.js version in `.node-version` for development and builds;
-`.nvmrc` mirrors it for nvm users. No particular version manager is required:
-all npm scripts use the `node` and `npm` already on your `PATH`.
-The supported runtime range is `>=22.19.0 <27`, shared by Pix, ACP, and Desktop.
-CI checks the pinned version on Linux, macOS, and Windows, plus the minimum
-supported version on Linux.
+Pix does not pin Node through mise, nvm, Volta, or repository version files.
+Development, CI, and release scripts use the `node` and `npm` already selected
+by your system `PATH`. The supported runtime range is `>=22.19.0 <27`, shared
+by Pix, ACP, and Desktop.
+
+When switching to a different Node major, rebuild native addons from a clean
+dependency tree instead of reusing `node_modules`:
+
+```bash
+rm -rf node_modules acp/node_modules desktop/node_modules external/pi-tools-suite/node_modules
+npm ci
+npm ci --prefix acp
+npm ci --prefix desktop
+npm ci --prefix external/pi-tools-suite
+```
 
 ```bash
 git clone https://github.com/dnaroid/pix.git
 cd pix
 
-# Select the version from .node-version using your preferred installation method.
-# With nvm (optional): nvm install && nvm use
+# Use the node/npm currently selected by your shell.
+command -v node
 node --version
+command -v npm
+npm --version
 npm ci
 
 # Run from source

@@ -15,31 +15,19 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Check/build (${{ matrix.os }} / Node ${{ matrix.node }})
+    name: Check/build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [pinned]
-        include:
-          - os: ubuntu-latest
-            node: "22.19.0"
-          - os: ubuntu-latest
-            node: "26"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        if: matrix.node == 'pinned'
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - uses: actions/setup-node@v4
-        if: matrix.node != 'pinned'
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
+      - name: Show PATH Node and npm
+        run: |
+          node --version
+          npm --version
       - uses: oven-sh/setup-bun@v2
         if: runner.os != 'Windows'
       - name: Install Bun on Windows
@@ -60,8 +48,8 @@ jobs:
           cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib backend_runtime
       - run: npm run test:tools-suite
       - name: Install Chromium for browser QA E2E
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 'pinned'
+        if: matrix.os == 'ubuntu-latest'
         run: npx playwright install --with-deps chromium
       - name: Run browser QA mock-page E2E
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 'pinned'
+        if: matrix.os == 'ubuntu-latest'
         run: npm run test:browser-qa-e2e

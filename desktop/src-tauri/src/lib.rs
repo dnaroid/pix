@@ -25,6 +25,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
 mod backend_runtime;
+mod desktop_bootstrap;
 mod desktop_context_menu;
 mod git_operations;
 #[cfg(feature = "bundled-runtime")]
@@ -1615,18 +1616,22 @@ async fn workspace_sidebar_indicator_poll(
 }
 
 #[tauri::command]
-async fn idx_overview(workspace: String) -> Result<IdxOverview, String> {
-    run_blocking(move || idx_overview_from(Path::new(&workspace))).await
+async fn idx_overview(app: AppHandle, workspace: String) -> Result<IdxOverview, String> {
+    run_blocking(move || {
+        let launcher = idx_launcher(&app);
+        idx_overview_from(Path::new(&workspace), launcher)
+    })
+    .await
 }
 
 #[tauri::command]
-async fn idx_query(request: IdxQueryRequest) -> Result<IdxCommandResult, String> {
+async fn idx_query(app: AppHandle, request: IdxQueryRequest) -> Result<IdxCommandResult, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&request.workspace))?;
-        let executable = idx_executable()?;
+        let launcher = idx_launcher(&app)?;
         let args = idx_query_args(&request.query)?;
         run_idx_command(
-            &executable,
+            &launcher,
             &root,
             &args,
             IDX_QUERY_TIMEOUT,
@@ -1637,16 +1642,16 @@ async fn idx_query(request: IdxQueryRequest) -> Result<IdxCommandResult, String>
 }
 
 #[tauri::command]
-async fn idx_inspect(request: IdxInspectRequest) -> Result<IdxCommandResult, String> {
+async fn idx_inspect(app: AppHandle, request: IdxInspectRequest) -> Result<IdxCommandResult, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&request.workspace))?;
         if !root.join(".indexer-cli").is_dir() {
             return Err("this project is not indexed yet; initialize IDX first".to_owned());
         }
-        let executable = idx_executable()?;
+        let launcher = idx_launcher(&app)?;
         let args = idx_inspect_args(&request)?;
         run_idx_command(
-            &executable,
+            &launcher,
             &root,
             &args,
             IDX_QUERY_TIMEOUT,
@@ -1657,16 +1662,16 @@ async fn idx_inspect(request: IdxInspectRequest) -> Result<IdxCommandResult, Str
 }
 
 #[tauri::command]
-async fn idx_knowledge(request: IdxKnowledgeRequest) -> Result<IdxCommandResult, String> {
+async fn idx_knowledge(app: AppHandle, request: IdxKnowledgeRequest) -> Result<IdxCommandResult, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&request.workspace))?;
         if !root.join(".indexer-cli").is_dir() {
             return Err("this project is not indexed yet; initialize IDX first".to_owned());
         }
-        let executable = idx_executable()?;
+        let launcher = idx_launcher(&app)?;
         let args = idx_knowledge_args(&request)?;
         run_idx_command(
-            &executable,
+            &launcher,
             &root,
             &args,
             IDX_QUERY_TIMEOUT,
@@ -4541,15 +4546,50 @@ fn idx_now_ms() -> u64 {
         .min(u64::MAX as u128) as u64
 }
 
-fn idx_executable() -> Result<PathBuf, String> {
-    resolve_named_executable("idx").ok_or_else(|| {
-        "idx is not available in the Desktop environment; install indexer-cli or expose idx in your login-shell PATH"
-            .to_owned()
-    })
+enum IdxLauncher {
+    System(PathBuf),
+    Managed {
+        runtime: backend_runtime::BackendRuntime,
+        entry: PathBuf,
+    },
 }
 
-fn idx_process_command(executable: &Path, root: &Path, args: &[String]) -> Command {
-    let mut command = Command::new(executable);
+impl IdxLauncher {
+    fn display_path(&self) -> &Path {
+        match self {
+            Self::System(path) => path,
+            Self::Managed { entry, .. } => entry,
+        }
+    }
+}
+
+fn idx_launcher(app: &AppHandle) -> Result<IdxLauncher, String> {
+    if let Some(path) = resolve_named_executable("idx") {
+        return Ok(IdxLauncher::System(path));
+    }
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    let Some(entry) = desktop_bootstrap::managed_idx_entry(&home)? else {
+        return Err(
+            "idx is not available in the Desktop environment; install it from Pix first-run setup, install indexer-cli yourself, or expose idx in your login-shell PATH"
+                .to_owned(),
+        );
+    };
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("failed to resolve Pix resources: {error}"))?;
+    let runtime = backend_runtime::BackendRuntime::resolve(&resource_dir)?;
+    Ok(IdxLauncher::Managed { runtime, entry })
+}
+
+fn idx_process_command(launcher: &IdxLauncher, root: &Path, args: &[String]) -> Result<Command, String> {
+    let mut command = match launcher {
+        IdxLauncher::System(executable) => Command::new(executable),
+        IdxLauncher::Managed { runtime, entry } => runtime.script_command(entry)?,
+    };
     command
         .args(args)
         .current_dir(root)
@@ -4557,15 +4597,17 @@ fn idx_process_command(executable: &Path, root: &Path, args: &[String]) -> Comma
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("NO_COLOR", "1");
-    if let Some(path) = package_process_path(executable) {
-        command.env("PATH", path);
+    if let IdxLauncher::System(executable) = launcher {
+        if let Some(path) = package_process_path(executable) {
+            command.env("PATH", path);
+        }
     }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    command
+    Ok(command)
 }
 
 fn read_bounded_idx_stream<R: Read>(mut reader: R, max_bytes: usize) -> (Vec<u8>, bool) {
@@ -4590,13 +4632,13 @@ fn read_bounded_idx_stream<R: Read>(mut reader: R, max_bytes: usize) -> (Vec<u8>
 }
 
 fn run_idx_command(
-    executable: &Path,
+    launcher: &IdxLauncher,
     root: &Path,
     args: &[String],
     timeout: Duration,
     max_bytes: usize,
 ) -> Result<IdxCommandResult, String> {
-    let mut command = idx_process_command(executable, root, args);
+    let mut command = idx_process_command(launcher, root, args)?;
     let mut child = command
         .spawn()
         .map_err(|error| format!("failed to start idx {}: {error}", args.join(" ")))?;
@@ -4682,11 +4724,14 @@ fn interrupt_idx_process(process_id: u32) {
     }
 }
 
-fn idx_overview_from(workspace: &Path) -> Result<IdxOverview, String> {
+fn idx_overview_from(
+    workspace: &Path,
+    launcher: Result<IdxLauncher, String>,
+) -> Result<IdxOverview, String> {
     let root = canonical_workspace(workspace)?;
     let initialized = root.join(".indexer-cli").is_dir();
-    let executable = match idx_executable() {
-        Ok(executable) => executable,
+    let launcher = match launcher {
+        Ok(launcher) => launcher,
         Err(error) => {
             return Ok(IdxOverview {
                 available: false,
@@ -4702,7 +4747,7 @@ fn idx_overview_from(workspace: &Path) -> Result<IdxOverview, String> {
     };
     let mut errors = Vec::new();
     let version = match run_idx_command(
-        &executable,
+        &launcher,
         &root,
         &["--version".to_owned()],
         IDX_COMMAND_TIMEOUT,
@@ -4727,7 +4772,7 @@ fn idx_overview_from(workspace: &Path) -> Result<IdxOverview, String> {
     if !initialized {
         return Ok(IdxOverview {
             available: true,
-            executable: Some(executable.to_string_lossy().into_owned()),
+            executable: Some(launcher.display_path().to_string_lossy().into_owned()),
             version,
             initialized: false,
             index_status: None,
@@ -4738,14 +4783,14 @@ fn idx_overview_from(workspace: &Path) -> Result<IdxOverview, String> {
     }
 
     let index_result = run_idx_command(
-        &executable,
+        &launcher,
         &root,
         &["index".to_owned(), "--status".to_owned()],
         IDX_COMMAND_TIMEOUT,
         128 * 1024,
     );
     let wiki_result = run_idx_command(
-        &executable,
+        &launcher,
         &root,
         &[
             "wiki".to_owned(),
@@ -4796,7 +4841,7 @@ fn idx_overview_from(workspace: &Path) -> Result<IdxOverview, String> {
 
     Ok(IdxOverview {
         available: true,
-        executable: Some(executable.to_string_lossy().into_owned()),
+        executable: Some(launcher.display_path().to_string_lossy().into_owned()),
         version,
         initialized: true,
         index_status,
@@ -5380,10 +5425,10 @@ fn start_idx_operation(
     if request.kind != IdxMaintenanceKind::Init && !root.join(".indexer-cli").is_dir() {
         return Err("this project is not indexed yet; initialize IDX first".to_owned());
     }
-    let executable = idx_executable()?;
+    let launcher = idx_launcher(&app)?;
     let args = idx_operation_args(request.kind);
     let command_label = format!("idx {}", args.join(" "));
-    let mut command = idx_process_command(&executable, &root, &args);
+    let mut command = idx_process_command(&launcher, &root, &args)?;
     let mut child = command
         .spawn()
         .map_err(|error| format!("failed to start {command_label}: {error}"))?;
@@ -7745,6 +7790,10 @@ pub fn run() {
     let app = builder
         .invoke_handler(tauri::generate_handler![
             desktop_context_menu::desktop_edit,
+            desktop_bootstrap::desktop_bootstrap_inspect,
+            desktop_bootstrap::desktop_bootstrap_import_opencode,
+            desktop_bootstrap::desktop_bootstrap_import_codex_api_key,
+            desktop_bootstrap::desktop_bootstrap_install_idx,
             deepgram_token,
             acp_start,
             acp_send,

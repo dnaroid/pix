@@ -10,10 +10,9 @@ remain true when CI or UI-QA tests change.
 ## CI contract
 
 - `check.yml` runs `build-and-test` on Ubuntu, macOS, and Windows for pull requests
-  and `master` pushes only. It also runs the minimum supported Node version on
-  Ubuntu. Release tags do not repeat this matrix.
-- Browser QA E2E runs once on the pinned Ubuntu job, not again on the minimum-Node
-  compatibility job.
+  and `master` pushes only. Each job uses the `node` and `npm` already selected
+  in the runner's system PATH. Release tags do not repeat this matrix.
+- Browser QA E2E runs once on the Ubuntu job.
 - `publish.yml` runs only for `v*` tags or manual dispatch. It has a lightweight
   `release-contract` gate and the three-target native release matrix.
 - The native release matrix does not rerun standalone Rust backend unit tests
@@ -37,15 +36,21 @@ remain true when CI or UI-QA tests change.
 
 ## Node.js version contract
 
-- `.node-version` is the exact development/build pin; `.nvmrc` must mirror it. CI selects this pin with `actions/setup-node` on Ubuntu, macOS, and Windows.
-- Root `package.json` `engines.node` is the authoritative supported runtime range, currently `>=22.19.0 <27`. ACP and Desktop manifests and their lockfile root records must agree with it.
+- The repository does not contain project-level Node version-manager pins such as
+  `.node-version`, `.nvmrc`, `.tool-versions`, or mise Node configuration.
+- Root `package.json` `engines.node` is the authoritative supported runtime range, currently `>=22.19.0 <27`. ACP and Desktop manifests and their lockfile root records must agree with it. Do not add `devEngines` to select a particular Node major.
 - `bin/pix.mjs` reads that range from the installed package metadata and rejects unsupported versions before loading Pix. Its dependency-free check deliberately accepts only the bounded stable range format `>=major.minor.patch <major`; prereleases and an unrecognized range format fail closed.
-- The build-and-test matrix also runs the minimum supported version and the newest supported Node major on Ubuntu. The minimum entry must track the lower bound in `engines.node`; the upper-edge entry must track the highest allowed major below the exclusive upper bound. Neither compatibility run may silently switch to the development pin.
-- npm scripts use the selected `node`/`npm` from `PATH` and must not invoke or require a version manager. The same rule applies to lifecycle hooks, builds, and tests; selecting the environment is the caller's responsibility.
+- npm scripts, CI, and release orchestration use the selected `node`/`npm` from `PATH` and must not invoke or require a version manager. The same rule applies to lifecycle hooks, builds, and tests; selecting the environment is the caller's responsibility.
+- Release packaging downloads the checksum-verified official Node archive matching
+  the current PATH runtime version and bundles that runtime with the artifact. The
+  repository itself does not select that version.
+- After changing Node major versions, native-addon installations are invalidated:
+  remove repository `node_modules` trees and run clean `npm ci` installs before
+  build/test work.
 - Release version synchronization preserves each JSON file's existing LF/CRLF
   convention. Windows checkouts must not fail `release:version:check` merely
   because Git materialized CRLF line endings.
-- `tests/node-version.test.ts` guards pin/manifest/lockfile/CI alignment and launcher boundary behavior. Update the contract and its tests together when changing supported versions.
+- `tests/node-version.test.ts` guards the absence of project pins, manifest/lockfile/CI alignment, PATH-runtime behavior, and launcher boundaries. Update the contract and its tests together when changing supported versions.
 
 ## Deterministic test invariants
 
@@ -63,7 +68,9 @@ remain true when CI or UI-QA tests change.
 
 - `@lydell/node-pty` Windows termination is signal-less: use `kill()` without POSIX signal arguments and release owned ConPTY resources.
 - Windows browser/process cleanup is ownership-scoped. Cleanup helpers must not discover or terminate themselves; owned child roots are terminated recursively and cleanup is verified before returning.
-- Node child-process smoke helpers invoke npm through its JavaScript entrypoint (`process.execPath` + `npm_execpath`) rather than trying to `execFile` `npm.cmd` directly.
+- Node child-process helpers resolve npm from PATH. On Windows, helpers that cannot
+  spawn `npm.cmd` directly invoke `npm` through `cmd.exe /c` while preserving
+  PATH selection.
 
 ## Standalone release-smoke invariants
 
@@ -82,8 +89,6 @@ remain true when CI or UI-QA tests change.
 - `scripts/release/smoke.mjs`
 - `scripts/release/smoke-desktop.mjs`
 - `package.json`
-- `.node-version`
-- `.nvmrc`
 - `acp/package.json`
 - `acp/package-lock.json`
 - `desktop/package.json`

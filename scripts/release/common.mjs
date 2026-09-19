@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 export const version = () => readJson(join(root, "package.json")).version;
-export const nodeVersion = () => readFileSync(join(root, ".node-version"), "utf8").trim();
+export const nodeVersion = () => process.versions.node;
 export const targets = {
   "linux-x64": { platform: "linux", arch: "x64", triple: "x86_64-unknown-linux-gnu", bundles: "appimage,deb" },
   "macos-arm64": { platform: "darwin", arch: "arm64", triple: "aarch64-apple-darwin", bundles: "app,dmg" },
@@ -47,13 +47,10 @@ export function run(command, args, options = {}) {
 }
 
 export function npm(args, options = {}) {
-  const candidates = [process.env.npm_execpath,
-    join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js"),
-    join(dirname(process.execPath), "../lib/node_modules/npm/bin/npm-cli.js")];
-  const cli = candidates.find((path) => path && existsSync(path));
-  if (!cli) throw new Error("Cannot locate npm-cli.js. Run this command through npm run.");
-  // execFile/spawn of npm.cmd is not portable on Windows.
-  return run(process.execPath, [cli, ...args], options);
+  return run("npm", args, {
+    ...(process.platform === "win32" ? { shell: true } : {}),
+    ...options,
+  });
 }
 
 export function outputPaths(name = hostTarget()) {

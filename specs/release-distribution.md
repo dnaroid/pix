@@ -18,10 +18,11 @@ suite is not independently version-bumped.
 - Targets are `linux-x64`, `macos-arm64`, and `windows-x64`. Packaging
   runs natively on each target. Unsupported/cross-host targets fail before output
   cleanup or dependency installation.
-- Node is downloaded from the official HTTPS distribution for `.node-version`.
-  The exact filename must appear once in `SHASUMS256.txt`; its SHA-256 is verified
-  before extraction. `release.json` records the source archive hash and version.
-  This is not a GPG verification or an asset attestation.
+- Node is downloaded from the official HTTPS distribution for the exact stable
+  version currently selected by the release builder's PATH. The repository does
+  not pin that version. The exact filename must appear once in `SHASUMS256.txt`;
+  its SHA-256 is verified before extraction. `release.json` records the source
+  archive hash and version. This is not a GPG verification or an asset attestation.
 - Release preparation removes only the owned compiler outputs (`dist`, and
   `acp/dist` when building Desktop) before compilation. Stale Vosk models and
   obsolete emitted JavaScript must not survive a previous local build. Source
@@ -124,7 +125,7 @@ an entire ACP `node_modules` or every `.ts`/`.wasm` file is not a valid shortcut
 
 The optimization run completed `npm run release:build -- macos-arm64` with exit
 code 0. Both extracted TUI and the native GUI copied from its read-only mounted
-DMG passed isolated smoke checks: pinned Node, native PTY, extensions and retained
+DMG passed isolated smoke checks: bundled Node, native PTY, extensions and retained
 esbuild; Desktop also passed ACP initialize/new/close. The recorded regression run
 passed 1209 root tests, 25 release tests and workflow actionlint. Historical local
 npm-smoke evidence may still exist under `.artifacts`, but npm is no longer a
@@ -158,13 +159,19 @@ files fail with a reinstall diagnostic: never fall back to a build-time checkout
 system Node or development entry overrides. The inherited Pi-entry override is
 removed when starting bundled ACP. Environment updates are child-scoped.
 
+The same resource root contains the Desktop first-run bootstrap helper. The
+checksum-verified Node archive contributes both the Node executable and its npm
+package; npm stays inside pix-runtime/runtime for explicit app-managed tool
+installation and is not exposed as a global prerequisite. See
+desktop-first-run-bootstrap.md for credential migration and managed IDX rules.
+
 Without this feature, existing development/watch workflows retain source paths
 and explicit `PIX_ACP_*` overrides. The base Tauri config stays unbundled for
 those workflows; distributable builds use the release orchestrator, not plain
 `tauri build` or `npm run build:desktop`.
 
-macOS release bundles declare a minimum version of 13.5, matching the Node 24
-binary's deployment target. The release builder sets `CI=true` for unattended
+macOS release bundles declare a minimum version of 13.5. The release builder
+sets `CI=true` for unattended
 DMG generation without Finder/AppleScript customization, including local builds.
 
 Backend resolution/spawning stays within the existing blocking-worker boundary.

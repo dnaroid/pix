@@ -38,7 +38,12 @@ test("CI and release workflows do not duplicate npm/publication work", () => {
   assert.deepEqual(checkWorkflow.on.pull_request.branches, ["master"]);
   assert.ok(checkWorkflow.jobs["build-and-test"]);
   const browserInstall = checkWorkflow.jobs["build-and-test"].steps.find((step) => step.name === "Install Chromium for browser QA E2E");
-  assert.match(browserInstall.if, /matrix\.node == 'pinned'/u);
+  assert.equal(browserInstall.if, "matrix.os == 'ubuntu-latest'");
+  for (const candidate of [workflow, checkWorkflow]) {
+    const serialized = JSON.stringify(candidate);
+    assert.equal(serialized.includes("actions/setup-node"), false);
+    assert.equal(serialized.includes("node-version"), false);
+  }
 });
 
 test("manual release builds cannot publish and only the final release job has contents-write permission", () => {

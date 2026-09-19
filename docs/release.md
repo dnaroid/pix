@@ -14,19 +14,20 @@ TUI and Desktop installers. The contract is in
 | macOS Apple Silicon | `.tar.gz` with `pix` | `.dmg` |
 | Linux x64 | `.tar.gz` with `pix` | `.AppImage` and `.deb` |
 
-Each download contains its own pinned Node.js and dependencies. Users do not need
-Node/npm to launch Pix. Keep the complete TUI directory together and run its
+Each download contains its own Node.js runtime and dependencies. The bundled
+runtime version matches the Node selected from `PATH` on that native release
+builder. Users do not need Node/npm to launch Pix. Keep the complete TUI directory together and run its
 launcher from a terminal; add that directory to PATH or symlink `pix` on Unix.
 Desktop includes ACP and does not require an npm-installed Pix. Git, shells,
 project runtimes, optional helpers and provider credentials remain separate.
-macOS release packages require 13.5 or newer, matching the bundled Node 24 binary.
+macOS release packages require 13.5 or newer.
 Linux bundles are built on Ubuntu 22.04; do not advertise support for older
 glibc/WebKit environments without running additional compatibility tests.
 
 ### Local build
 
-Select a supported Node on PATH (`.node-version` is the CI/build pin), install
-Rust and the platform's [Tauri build prerequisites](https://v2.tauri.app/start/prerequisites/), then run:
+Select a supported Node and npm on PATH, install Rust and the platform's
+[Tauri build prerequisites](https://v2.tauri.app/start/prerequisites/), then run:
 
 ```bash
 npm ci --ignore-scripts
@@ -38,6 +39,10 @@ npm run release:build -- macos-arm64
 # Only the portable TUI archive:
 npm run release:build -- macos-arm64 --tui-only
 ```
+
+After changing Node major versions, remove every repository `node_modules`
+tree and rerun the corresponding `npm ci` commands before building. Native
+addons must be rebuilt for the active Node ABI.
 
 Use the corresponding native machine/runner for each target. Cross-host packaging
 is rejected because native modules must match both CPU and OS. Output is under

@@ -60,6 +60,7 @@ async function finalize(payload, name, node, variant, optimizations) {
     await chmod(join(payload, file), 0o755);
   }
   await copyFile(join(root, "scripts/release/probe.mjs"), join(payload, "verify.mjs"));
+  await copyFile(join(root, "scripts/release/bootstrap.mjs"), join(payload, "bootstrap.mjs"));
   await writeFile(join(payload, "README.txt"), `Pix ${version()} (${name})\n\nRun ./pix (macOS/Linux) or pix.cmd (Windows) from a terminal.\nKeep the whole directory together. No system Node.js or npm is needed.\nGit, shells, and tools for your projects are separate prerequisites.\nSettings and sessions are stored in your user profile, not here.\nUpdates: https://github.com/dnaroid/pix/releases/latest\nReplace the complete directory after closing Pix; do not mix versions.\nDependency licenses are retained in app/node_modules and app/acp/node_modules; Node license: runtime/LICENSE.\n`);
   await writeFile(join(payload, "DEPENDENCIES.json"), `${JSON.stringify(await dependencyInventory(app), null, 2)}\n`);
   await writeFile(join(payload, "OPTIMIZATIONS.json"), `${JSON.stringify(optimizations, null, 2)}\n`);

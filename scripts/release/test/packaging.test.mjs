@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { expectedDigest, nodeArchive } from "../node-runtime.mjs";
-import { hostTarget, root, targetInfo, targets, version } from "../common.mjs";
+import { hostTarget, npm, readJson, root, targetInfo, targets, version } from "../common.mjs";
 import { checksums, expectedBuildAssets, expectedPublishedAssets } from "../checksums.mjs";
 import { syncVersion, versionEdits } from "../sync-version.mjs";
 import { assertDraft, assertPublished, findRelease, waitForRelease } from "../publish-github.mjs";
@@ -22,9 +22,10 @@ test("release matrix names explicit OS/CPU pairs and rejects cross-host dependen
 });
 
 test("Node downloads use exact, safe names for every supported target", () => {
+  const current = process.versions.node;
   for (const { platform, arch } of Object.values(targets)) {
-    const { filename } = nodeArchive("24.21.0", platform, arch);
-    assert.match(filename, /^node-v24\.21\.0-(darwin|linux|win)-(arm64|x64)\.(tar\.gz|zip)$/u);
+    const { filename } = nodeArchive(current, platform, arch);
+    assert.equal(filename, `node-v${current}-${platform === "win32" ? "win" : platform}-${arch}.${platform === "win32" ? "zip" : "tar.gz"}`);
     assert.equal(filename.endsWith(".zip"), platform === "win32");
   }
   for (const version of ["latest", "../24.0.0", "24.0.0-rc.1", "24.0"]) {
@@ -71,6 +72,23 @@ test("checksums reject incomplete or unexpected releases and hash the complete s
 test("all shipped versions match the authoritative root version", () => {
   assert.equal(syncVersion({ check: true }), version());
   assert.throws(() => syncVersion({ check: true, tag: "v999.0.0" }), /does not match/u);
+});
+
+test("GitHub Releases remain the only supported publication channel", () => {
+  const manifest = readJson(join(root, "package.json"));
+  assert.equal(manifest.private, true);
+  assert.equal(manifest.scripts?.["publish-npm"], undefined);
+  assert.equal(manifest.scripts?.prepublishOnly, undefined);
+});
+
+test("npm payload excludes nested Pix runtime state from bundled skills", () => {
+  const packed = JSON.parse(npm(["pack", "--dry-run", "--ignore-scripts", "--json"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  }))[0];
+  const files = packed.files.map((entry) => entry.path);
+  assert.equal(files.some((path) => path.split("/").includes(".pi")), false);
+  assert.ok(files.includes("skills/skill-creator/SKILL.md"));
 });
 
 test("release reruns never replace already published assets", () => {

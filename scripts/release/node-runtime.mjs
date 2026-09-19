@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { nodeVersion, root, run } from "./common.mjs";
 
 export function nodeArchive(version, platform, arch) {
-  if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("Node pin must be an exact stable version");
+  if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("Node runtime version must be an exact stable version");
   if (!["darwin/arm64", "darwin/x64", "linux/x64", "win32/x64"].includes(`${platform}/${arch}`)) {
     throw new Error(`Unsupported Node target: ${platform}/${arch}`);
   }
@@ -35,9 +35,9 @@ async function download(url, path) {
 }
 
 export async function installNode(payload, target) {
-  const pin = nodeVersion();
-  const { stem, filename } = nodeArchive(pin, target.platform, target.arch);
-  const base = `https://nodejs.org/dist/v${pin}`;
+  const version = nodeVersion();
+  const { stem, filename } = nodeArchive(version, target.platform, target.arch);
+  const base = `https://nodejs.org/dist/v${version}`;
   const parent = join(root, ".artifacts/release-downloads");
   await mkdir(parent, { recursive: true });
   const scratch = await mkdtemp(join(parent, "node-"));
@@ -56,7 +56,13 @@ export async function installNode(payload, target) {
     await copyFile(join(scratch, stem, target.platform === "win32" ? "node.exe" : "bin/node"), executable);
     await chmod(executable, 0o755);
     await copyFile(join(scratch, stem, "LICENSE"), join(runtime, "LICENSE"));
-    return { version: pin, filename, sha256: expected };
+    const npmSource = join(
+      scratch,
+      stem,
+      ...(target.platform === "win32" ? ["node_modules", "npm"] : ["lib", "node_modules", "npm"]),
+    );
+    await cp(npmSource, join(runtime, "npm"), { recursive: true });
+    return { version, filename, sha256: expected };
   } finally {
     await rm(scratch, { recursive: true, force: true, maxRetries: 5 });
   }

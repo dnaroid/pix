@@ -132,7 +132,7 @@ try {
   assert.equal(code, 0, stderr);
 }
 }
-console.log(`PIX_RELEASE_RUNTIME_OK: ${manifest.variant}, pinned Node, native PTY, extensions, esbuild${manifest.variant === "desktop" ? ", ACP initialize/new/close" : ""}`);
+console.log(`PIX_RELEASE_RUNTIME_OK: ${manifest.variant}, bundled Node, native PTY, extensions, esbuild${manifest.variant === "desktop" ? ", ACP initialize/new/close" : ""}`);
 // This file is a one-shot release verifier, not an application entry point. Some
 // native dependencies keep process handles alive on Windows even after their
 // verification work has completed. Exit explicitly only after every assertion and

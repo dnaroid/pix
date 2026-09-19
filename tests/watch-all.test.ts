@@ -224,12 +224,11 @@ describe("watch:all filesystem event filtering", () => {
 });
 
 describe("watch:all npm invocation", () => {
-	it("runs npm through its JavaScript entrypoint on Windows", () => {
-		assert.deepEqual(npmInvocation(["run", "build"], "win32", "C:\\npm\\npm-cli.js"), {
-			command: process.execPath,
-			args: ["C:\\npm\\npm-cli.js", "run", "build"],
+	it("uses the npm selected by PATH through cmd.exe on Windows", () => {
+		assert.deepEqual(npmInvocation(["run", "build"], "win32", "C:\\Windows\\System32\\cmd.exe"), {
+			command: "C:\\Windows\\System32\\cmd.exe",
+			args: ["/d", "/s", "/c", "npm", "run", "build"],
 		});
-		assert.throws(() => npmInvocation([], "win32", ""), /must be started through npm/u);
 	});
 
 	it("uses the npm executable directly on Unix", () => {
