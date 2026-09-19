@@ -49,7 +49,7 @@ export async function buildDesktop(name = hostTarget()) {
     cwd: join(root, "desktop"), env, timeout: TAURI_BUILD_TIMEOUT_MS,
   });
   const formats = process.platform === "darwin" ? [["dmg", ".dmg"]]
-    : process.platform === "win32" ? [["nsis", ".exe"], ["msi", ".msi"]]
+    : process.platform === "win32" ? [["nsis", ".exe"]]
       : [["appimage", ".AppImage"], ["deb", ".deb"]];
   for (const [directory, extension] of formats) {
     const files = (await readdir(join(bundleRoot, directory))).filter((file) => file.endsWith(extension));

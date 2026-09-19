@@ -10,10 +10,7 @@ function stringifyJsonLike(original, data) {
 }
 
 export function versionEdits(directory, next) {
-  // Installer-compatible stable versions. Prerelease distribution can be added with an explicit MSI policy.
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(next)) throw new Error("Release version must be stable X.Y.Z");
-  const [major, minor, patch] = next.split(".").map(Number);
-  if (major > 255 || minor > 255 || patch > 65535) throw new Error("Version exceeds Windows MSI limits");
   const edits = new Map();
   for (const prefix of ["", "acp/", "desktop/"]) {
     for (const file of ["package.json", "package-lock.json"]) {

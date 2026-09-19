@@ -10,7 +10,7 @@ Root `package.json` is the authoritative application version. ACP, Desktop,
 Tauri, the Pix Cargo package, and the three npm lockfile root records share it.
 `npm version` runs `scripts/release/sync-version.mjs --stage` before creating its
 commit/tag; `release:version:check` rejects drift. Releases use stable `vX.Y.Z`
-tags and must respect MSI version bounds (255.255.65535). The external tools
+tags. The external tools
 suite is not independently version-bumped.
 
 ## Payload invariants
@@ -174,14 +174,14 @@ performs verification on a worker thread after native Tauri/WebView setup.
 
 ## Artifacts, gates and publishing
 
-The native matrix produces twelve build assets. The eight user-facing downloads
-are three TUI archives, one macOS DMG, Windows NSIS EXE and MSI, and Linux
+The native matrix produces eleven build assets. The seven user-facing downloads
+are three TUI archives, one macOS DMG, one Windows NSIS EXE, and Linux
 AppImage and DEB. Desktop updating adds one macOS `.app.tar.gz` updater bundle
 plus its signature, the Windows NSIS signature, and the Linux AppImage signature.
 The final publish job rejects missing/unexpected assets,
 generates `latest.json` for Tauri Updater, then adds an alphabetically ordered
 `SHA256SUMS`. A complete updater-capable GitHub Release therefore contains
-fourteen files: twelve matrix assets, `latest.json`, and `SHA256SUMS`.
+thirteen files: eleven matrix assets, `latest.json`, and `SHA256SUMS`.
 
 `check.yml` owns PR/master correctness checks and never runs on release tags.
 `publish.yml` is release-only. A lightweight `release-contract` job validates
@@ -302,8 +302,14 @@ support is verified by the native CI jobs, not inferred from a successful macOS
 build. Signing with real certificates still requires a credentialed release run.
 The generic release subprocess ceiling remains 20 minutes, while the single Tauri
 Desktop packaging subprocess gets a 35-minute ceiling because a cold Windows
-Rust build plus NSIS/MSI generation can legitimately exceed 20 minutes. The
+Rust build plus NSIS generation can legitimately exceed 20 minutes. The
 GitHub native job retains its independent 60-minute hard ceiling.
+
+Windows publishes only the NSIS installer. MSI is intentionally omitted because
+the signed Tauri updater feed and native smoke both use NSIS; carrying a second
+installer adds several minutes of packaging time without adding a supported
+update path. Windows NSIS smoke passes encoded installer/destination paths in the
+PowerShell command itself rather than through inherited environment variables.
 
 ## Implementation
 

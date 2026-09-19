@@ -12,6 +12,7 @@ import { assertDraft, findRelease } from "../publish-github.mjs";
 
 test("release matrix names explicit OS/CPU pairs and rejects cross-host dependency copying", () => {
   assert.deepEqual(Object.keys(targets).sort(), ["linux-x64", "macos-arm64", "windows-x64"]);
+  assert.equal(targets["windows-x64"].bundles, "nsis");
   const nativeTarget = Object.entries(targets).find(([, target]) => target.platform === process.platform && target.arch === process.arch)?.[0];
   if (nativeTarget) assert.equal(targetInfo(hostTarget()).arch, process.arch);
   else assert.throws(() => hostTarget(), /Unsupported release host/u);
@@ -46,8 +47,8 @@ test("checksums reject incomplete or unexpected releases and hash the complete s
   t.after(() => rm(directory, { recursive: true, force: true }));
   const buildFiles = expectedBuildAssets("1.2.3");
   const files = expectedAssets("1.2.3");
-  assert.equal(buildFiles.length, 12);
-  assert.equal(files.length, 13);
+  assert.equal(buildFiles.length, 11);
+  assert.equal(files.length, 12);
   assert.equal(new Set(files).size, files.length);
   await assert.rejects(checksums(directory, "1.2.3"), /Incomplete/u);
   for (const file of buildFiles) await writeFile(join(directory, file), file.endsWith(".sig") ? `signature:${file}` : `fixture:${file}`);
@@ -117,7 +118,8 @@ test("version synchronization changes only Pix's Cargo package and all app manif
     await writeFile(join(directory, path), content);
   }
   assert.deepEqual(versionEdits(directory, "2.3.4"), edits);
-  for (const invalid of ["1.0.0-beta.1", "01.0.0", "256.0.0", "1.256.0", "1.2.65536", "../../oops"]) {
+  assert.doesNotThrow(() => versionEdits(directory, "256.256.65536"));
+  for (const invalid of ["1.0.0-beta.1", "01.0.0", "../../oops"]) {
     assert.throws(() => versionEdits(directory, invalid), /version|Version/u);
   }
 });

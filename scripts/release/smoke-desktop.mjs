@@ -6,6 +6,25 @@ import { fileURLToPath } from "node:url";
 import { hostTarget, outputPaths, run, targetInfo, version } from "./common.mjs";
 import { smokePayload } from "./smoke.mjs";
 
+function powershellEncoded(script) {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+function powershellPath(path) {
+  const encoded = Buffer.from(path, "utf16le").toString("base64");
+  return `[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encoded}'))`;
+}
+
+export function nsisPowerShellCommand(executable, destination, uninstall = false) {
+  const argument = uninstall ? "('_?=' + $destination)" : "('/D=' + $destination)";
+  return powershellEncoded([
+    `$executable = ${powershellPath(executable)}`,
+    `$destination = ${powershellPath(destination)}`,
+    `$process = Start-Process -FilePath $executable -ArgumentList @('/S', ${argument}) -Wait -PassThru`,
+    "exit $process.ExitCode",
+  ].join("; "));
+}
+
 async function findInstalledPayload(root) {
   const matches = [];
   async function visit(directory) {
@@ -59,11 +78,11 @@ export async function smokeDesktop(name = hostTarget()) {
     } else {
       const installed = join(scratch, "installed");
       windowsInstall = installed;
-      // /D must be last and must NOT be quoted by NSIS; use an environment-driven PowerShell call.
-      run("powershell.exe", ["-NoProfile", "-Command",
-        "$p = Start-Process -FilePath $env.PIX_SMOKE_INSTALLER -ArgumentList @('/S', ('/D=' + $env.PIX_SMOKE_DEST)) -Wait -PassThru; exit $p.ExitCode"], {
-        env: { ...process.env, PIX_SMOKE_INSTALLER: join(assets, `pix-desktop-${version()}-${name}-setup.exe`), PIX_SMOKE_DEST: installed },
-      });
+      // /D must be last and unquoted for NSIS. Encode the PowerShell command so
+      // installer/destination paths never depend on inherited env or shell quoting.
+      const installer = join(assets, `pix-desktop-${version()}-${name}-setup.exe`);
+      run("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand",
+        nsisPowerShellCommand(installer, installed)]);
       payload = join(installed, "pix-runtime");
       executable = join(installed, "pix-desktop.exe");
     }
@@ -89,9 +108,8 @@ export async function smokeDesktop(name = hostTarget()) {
       const uninstaller = join(windowsInstall, "uninstall.exe");
       // CI owns this temporary installation; undo its registry/shortcut changes too.
       const { existsSync } = await import("node:fs");
-      if (existsSync(uninstaller)) run("powershell.exe", ["-NoProfile", "-Command",
-        "$p = Start-Process -FilePath $env.PIX_UNINSTALLER -ArgumentList @('/S', ('_?=' + $env.PIX_INSTALL_DIR)) -Wait -PassThru; exit $p.ExitCode"],
-      { env: { ...process.env, PIX_UNINSTALLER: uninstaller, PIX_INSTALL_DIR: windowsInstall } });
+      if (existsSync(uninstaller)) run("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand",
+        nsisPowerShellCommand(uninstaller, windowsInstall, true)]);
     }
     await rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

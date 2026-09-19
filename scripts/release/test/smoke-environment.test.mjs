@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { smokeEnvironment, systemEnvironment } from "../smoke-environment.mjs";
+import { nsisPowerShellCommand } from "../smoke-desktop.mjs";
 
 test("smoke keeps OS plumbing but never inherits credentials or runtime overrides", () => {
   assert.deepEqual(systemEnvironment({ SystemRoot: "C:\\Windows", LANG: "en_US.UTF-8", DISPLAY: ":99",
@@ -47,4 +48,13 @@ test("release probe exits explicitly after the success marker", async () => {
   const marker = probe.lastIndexOf("PIX_RELEASE_RUNTIME_OK");
   const exit = probe.lastIndexOf("process.exit(0)");
   assert.ok(marker >= 0 && exit > marker, "The one-shot probe must exit only after all verification succeeds");
+});
+
+test("Windows NSIS smoke encodes paths instead of relying on environment variables", () => {
+  const decoded = Buffer.from(nsisPowerShellCommand("C:\\release path\\pix setup.exe", "C:\\temp path\\installed"), "base64").toString("utf16le");
+  assert.match(decoded, /Start-Process/u);
+  assert.match(decoded, /'\/S'/u);
+  assert.match(decoded, /'\/D='/u);
+  assert.doesNotMatch(decoded, /\$env\./u);
+  assert.doesNotMatch(decoded, /pix setup\.exe/u, "raw installer path must not be interpolated into the script");
 });

@@ -6,7 +6,7 @@ import { targets, version } from "./common.mjs";
 
 export function expectedBuildAssets(releaseVersion) {
   return Object.keys(targets).flatMap((target) => {
-    const extensions = target.startsWith("windows") ? ["-setup.exe", "-setup.exe.sig", ".msi"]
+    const extensions = target.startsWith("windows") ? ["-setup.exe", "-setup.exe.sig"]
       : target.startsWith("macos") ? [".dmg", "-updater.tar.gz", "-updater.tar.gz.sig"]
         : [".AppImage", ".AppImage.sig", ".deb"];
     return [`pix-tui-${releaseVersion}-${target}.${target.startsWith("windows") ? "zip" : "tar.gz"}`,

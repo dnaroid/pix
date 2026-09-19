@@ -10,7 +10,7 @@ TUI and Desktop installers. The contract is in
 
 | Target | TUI | Desktop |
 | --- | --- | --- |
-| Windows x64 | `.zip` with `pix.cmd` | NSIS `-setup.exe` and `.msi` |
+| Windows x64 | `.zip` with `pix.cmd` | NSIS `-setup.exe` |
 | macOS Apple Silicon | `.tar.gz` with `pix` | `.dmg` |
 | Linux x64 | `.tar.gz` with `pix` | `.AppImage` and `.deb` |
 
@@ -102,7 +102,7 @@ and additionally exercise ACP and the native application for Desktop.
 
 The `Release` workflow uses native Ubuntu 22.04 x64, macOS 15 ARM64 and Windows
 2022 x64 runners. `Actions → Release → Run workflow` builds and tests all packages
-without publishing anything. The eight user-facing installers/archives are
+without publishing anything. The seven user-facing installers/archives are
 available as three Actions artifacts. On a version-tag push, the final job waits
 for the full native matrix, validates the complete set, adds `SHA256SUMS`, and
 uploads everything to a draft release. Only then review
@@ -211,7 +211,7 @@ The root `package.json` version is authoritative. Its npm `version` hook synchro
 ACP, Desktop, Tauri, Cargo and lockfile versions and stages them before npm creates
 the release commit/tag. `npm run release:version:check` detects drift; use
 `npm run release:version` to repair manifests after a manual root-version edit.
-Only stable `X.Y.Z` versions within MSI bounds are supported by this release path.
+Only stable `X.Y.Z` versions are supported by this release path.
 Do not bump `external/pi-tools-suite/package.json` unless publishing the suite separately.
 
 `npm pack` is still used internally by `scripts/release/prepare.mjs` to apply the
