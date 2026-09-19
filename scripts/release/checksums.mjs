@@ -14,8 +14,8 @@ export function expectedBuildAssets(releaseVersion) {
   }).sort();
 }
 
-export function expectedAssets(releaseVersion) {
-  return [...expectedBuildAssets(releaseVersion), "latest.json"].sort();
+export function expectedPublishedAssets(releaseVersion) {
+  return [...expectedBuildAssets(releaseVersion).filter((file) => !file.endsWith(".sig")), "latest.json"].sort();
 }
 
 function releaseUrl(releaseVersion, name) {
@@ -54,9 +54,14 @@ export async function checksums(directory, releaseVersion) {
     throw new Error(`Incomplete/unexpected release assets. Expected ${expectedBuild.join(", ")}; got ${buildFiles.join(", ")}`);
   }
   await latestJson(directory, releaseVersion);
-  const files = (await readdir(directory)).filter((file) => file !== "SHA256SUMS").sort();
-  const expected = expectedAssets(releaseVersion);
-  if (JSON.stringify(files) !== JSON.stringify(expected)) throw new Error("Generated updater manifest does not match the release asset contract");
+  const files = expectedPublishedAssets(releaseVersion);
+  for (const file of files) {
+    try {
+      await readFile(join(directory, file));
+    } catch {
+      throw new Error(`Missing public release asset after manifest generation: ${file}`);
+    }
+  }
   const lines = [];
   for (const file of files) lines.push(`${await sha256(join(directory, file))}  ${file}`);
   await writeFile(join(directory, "SHA256SUMS"), `${lines.join("\n")}\n`);

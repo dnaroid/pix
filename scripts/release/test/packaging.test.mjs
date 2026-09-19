@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { expectedDigest, nodeArchive } from "../node-runtime.mjs";
 import { hostTarget, root, targetInfo, targets, version } from "../common.mjs";
-import { checksums, expectedAssets, expectedBuildAssets } from "../checksums.mjs";
+import { checksums, expectedBuildAssets, expectedPublishedAssets } from "../checksums.mjs";
 import { syncVersion, versionEdits } from "../sync-version.mjs";
 import { assertDraft, assertPublished, findRelease, waitForRelease } from "../publish-github.mjs";
 
@@ -46,10 +46,11 @@ test("checksums reject incomplete or unexpected releases and hash the complete s
   const directory = await mkdtemp(join(tmpdir(), "pix-checksums-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const buildFiles = expectedBuildAssets("1.2.3");
-  const files = expectedAssets("1.2.3");
+  const files = expectedPublishedAssets("1.2.3");
   assert.equal(buildFiles.length, 11);
-  assert.equal(files.length, 12);
+  assert.equal(files.length, 9);
   assert.equal(new Set(files).size, files.length);
+  assert.equal(files.some((file) => file.endsWith(".sig")), false);
   await assert.rejects(checksums(directory, "1.2.3"), /Incomplete/u);
   for (const file of buildFiles) await writeFile(join(directory, file), file.endsWith(".sig") ? `signature:${file}` : `fixture:${file}`);
   await checksums(directory, "1.2.3");
@@ -60,6 +61,7 @@ test("checksums reject incomplete or unexpected releases and hash the complete s
   assert.equal(latest.platforms["linux-x86_64"].signature, "signature:pix-desktop-1.2.3-linux-x64.AppImage.sig");
   const expected = (await Promise.all(files.map(async (file) => `${createHash("sha256").update(await readFile(join(directory, file))).digest("hex")}  ${file}`))).join("\n") + "\n";
   assert.equal(await readFile(join(directory, "SHA256SUMS"), "utf8"), expected);
+  assert.doesNotMatch(expected, /\.sig(?:\n|$)/u);
   await checksums(directory, "1.2.3");
   assert.equal(await readFile(join(directory, "SHA256SUMS"), "utf8"), expected);
   await writeFile(join(directory, "unexpected.txt"), "not a release asset");

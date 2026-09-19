@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checksums, expectedAssets } from "./checksums.mjs";
+import { checksums, expectedPublishedAssets } from "./checksums.mjs";
 import { run, version } from "./common.mjs";
 
 export function assertDraft(release, tag) {
@@ -55,7 +55,7 @@ async function publish(directory) {
   }
   if (!release) throw new Error("Created draft is not visible; refusing to upload assets");
   assertDraft(release, tag);
-  const files = [...expectedAssets(version()), "SHA256SUMS"].map((name) => resolve(directory, name));
+  const files = [...expectedPublishedAssets(version()), "SHA256SUMS"].map((name) => resolve(directory, name));
   run("gh", ["release", "upload", tag, ...files, "--repo", repository, "--clobber"]);
   run("gh", ["release", "edit", tag, "--repo", repository, "--draft=false", "--latest"]);
   release = await waitForRelease(repository, tag, token);

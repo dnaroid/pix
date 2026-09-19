@@ -174,14 +174,16 @@ performs verification on a worker thread after native Tauri/WebView setup.
 
 ## Artifacts, gates and publishing
 
-The native matrix produces eleven build assets. The seven user-facing downloads
-are three TUI archives, one macOS DMG, one Windows NSIS EXE, and Linux
-AppImage and DEB. Desktop updating adds one macOS `.app.tar.gz` updater bundle
-plus its signature, the Windows NSIS signature, and the Linux AppImage signature.
-The final publish job rejects missing/unexpected assets,
-generates `latest.json` for Tauri Updater, then adds an alphabetically ordered
-`SHA256SUMS`. A complete updater-capable GitHub Release therefore contains
-thirteen files: eleven matrix assets, `latest.json`, and `SHA256SUMS`.
+The native matrix produces eleven build assets. Three of those are updater `.sig`
+sidecars used only inside CI to populate the `signature` fields in `latest.json`;
+they are not public GitHub Release downloads and are not listed in `SHA256SUMS`.
+The eight public build assets are three TUI archives, one macOS DMG, one macOS
+`.app.tar.gz` updater bundle, one Windows NSIS EXE, and Linux AppImage and DEB.
+The final publish job rejects missing/unexpected build inputs, generates
+`latest.json` from the internal signatures, then hashes only public assets into an
+alphabetically ordered `SHA256SUMS`. A complete updater-capable public GitHub
+Release therefore contains ten files: eight build/updater assets, `latest.json`,
+and `SHA256SUMS`.
 
 `check.yml` owns PR/master correctness checks and never runs on release tags.
 `publish.yml` is release-only. A lightweight `release-contract` job validates
@@ -211,8 +213,9 @@ Windows Authenticode signing. `createUpdaterArtifacts` is enabled for release
 builds. Tauri signs updater artifacts with the private key supplied only through
 `TAURI_SIGNING_PRIVATE_KEY` (or a local ignored key path); the corresponding
 public key is embedded in `tauri.release.conf.json`. `latest.json` references the
-published GitHub Release assets and their signatures for `linux-x86_64`,
-`windows-x86_64` and `darwin-aarch64`. Losing or replacing the
+published GitHub Release assets and embeds their generated signatures for
+`linux-x86_64`, `windows-x86_64` and `darwin-aarch64`; separate `.sig` downloads
+are intentionally omitted. Losing or replacing the
 private updater key without a migration path breaks update continuity for already
 installed Desktop clients. The private key must never be committed.
 

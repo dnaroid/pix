@@ -28,9 +28,12 @@ remain true when CI or UI-QA tests change.
 - GitHub Release builds, shared application versions, signing, complete-asset gates
   and portable update behavior are governed by [`release-distribution.md`](release-distribution.md).
 - Desktop release jobs require the Tauri updater signing key and must emit the
-  signed updater sidecars/bundles expected for their native target. The final
-  release job generates `latest.json` only from a complete three-target matrix;
-  updater signing is independent from optional Apple/Windows OS code signing.
+  signed updater sidecars/bundles expected for their native target. `.sig`
+  sidecars remain internal Actions artifacts: the final release job embeds their
+  contents into `latest.json` but does not publish the sidecars or checksum them
+  as public downloads. The final release job generates `latest.json` only from a
+  complete three-target matrix; updater signing is independent from optional
+  Apple/Windows OS code signing.
 
 ## Node.js version contract
 

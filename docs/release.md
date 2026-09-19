@@ -114,6 +114,10 @@ The final release also contains signed Tauri updater artifacts plus `latest.json
 the latter is generated only after all three native jobs have supplied the exact
 expected asset set.
 
+Tauri's generated `.sig` sidecars are CI inputs, not public downloads. Their text
+is embedded into `latest.json` for updater verification, while the standalone
+`.sig` files are omitted from GitHub Releases and `SHA256SUMS`.
+
 ### Optional signing secrets
 
 Without signing secrets, macOS builds use ad-hoc signatures and Windows installers
