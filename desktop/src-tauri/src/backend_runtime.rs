@@ -40,21 +40,26 @@ impl BackendRuntime {
     #[cfg(any(test, feature = "bundled-runtime"))]
     fn bundled(root: &Path) -> Result<Self, String> {
         let app = root.join("app");
+        let mut extensions: Vec<(&'static str, PathBuf)> = EXTENSIONS
+            .iter()
+            .map(|(key, name)| {
+                (
+                    *key,
+                    app.join(format!("dist/bundled-extensions/{name}/index.js")),
+                )
+            })
+            .collect();
+        extensions.push((
+            "PIX_ACP_TOOLS_SUITE_EXTENSION",
+            app.join("external/pi-tools-suite/index.ts"),
+        ));
         let runtime = Self {
             node: root
                 .join("runtime")
                 .join(if cfg!(windows) { "node.exe" } else { "node" }),
             entry: app.join("acp/dist/main.js"),
             bootstrap: root.join("bootstrap.mjs"),
-            extensions: EXTENSIONS
-                .iter()
-                .map(|(key, name)| {
-                    (
-                        *key,
-                        app.join(format!("dist/bundled-extensions/{name}/index.js")),
-                    )
-                })
-                .collect(),
+            extensions,
             bundled_root: Some(root.to_owned()),
         };
         for path in [
@@ -70,6 +75,23 @@ impl BackendRuntime {
 
     #[cfg(any(test, not(feature = "bundled-runtime")))]
     fn development(root: &Path, lookup: impl Fn(&str) -> Option<OsString>) -> Result<Self, String> {
+        let mut extensions: Vec<(&'static str, PathBuf)> = EXTENSIONS
+            .iter()
+            .map(|(key, name)| {
+                (
+                    *key,
+                    lookup(key).map(PathBuf::from).unwrap_or_else(|| {
+                        root.join(format!("dist/bundled-extensions/{name}/index.js"))
+                    }),
+                )
+            })
+            .collect();
+        extensions.push((
+            "PIX_ACP_TOOLS_SUITE_EXTENSION",
+            lookup("PIX_ACP_TOOLS_SUITE_EXTENSION")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| root.join("external/pi-tools-suite/index.ts")),
+        ));
         let runtime = Self {
             node: lookup("PIX_ACP_NODE_BINARY")
                 .map(PathBuf::from)
@@ -78,17 +100,7 @@ impl BackendRuntime {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| root.join("acp/dist/main.js")),
             bootstrap: root.join("scripts/release/bootstrap.mjs"),
-            extensions: EXTENSIONS
-                .iter()
-                .map(|(key, name)| {
-                    (
-                        *key,
-                        lookup(key).map(PathBuf::from).unwrap_or_else(|| {
-                            root.join(format!("dist/bundled-extensions/{name}/index.js"))
-                        }),
-                    )
-                })
-                .collect(),
+            extensions,
             bundled_root: None,
         };
         runtime.validate()?;
@@ -221,6 +233,7 @@ mod tests {
             for (_, name) in EXTENSIONS {
                 self.file(&format!("app/dist/bundled-extensions/{name}/index.js"));
             }
+            self.file("app/external/pi-tools-suite/index.ts");
         }
     }
     impl Drop for Fixture {
@@ -240,7 +253,7 @@ mod tests {
             command.get_args().next().unwrap(),
             fixture.0.join("app/acp/dist/main.js")
         );
-        assert_eq!(runtime.extensions.len(), 3);
+        assert_eq!(runtime.extensions.len(), 4);
         for (_, path) in runtime.extensions {
             assert!(path.starts_with(&fixture.0));
         }

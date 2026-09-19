@@ -26,7 +26,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - The pointer close affordance is outside the normal Tab sequence because Delete provides keyboard close within the workbench tab composite.
 - New Conversation is the only trailing titlebar action outside the tablist and stays immediately after the last visible workbench tab. Unused titlebar space to its right remains the window-drag region.
 - Activating New Conversation opens/reuses a **UI-only draft conversation tab**. Opening or restoring that draft must not call ACP `session/new`, allocate a Pi runtime, create a session-map record, persist a session id, or render the session-scoped Session inspector. While untouched, its central workspace shows a searchable saved-session selector above the normal composer.
-- A UI-only draft also exposes the same combined model/thinking selector as a real conversation. Desktop obtains draft config options through a read-only, workspace-scoped ACP request that does not create a session-map record or Pi RPC session. Changing model/thinking in the draft updates only draft-local UI state and does not call `session/set_config_option` or `session/new`.
+- A UI-only draft also exposes the same combined model/thinking selector as a real conversation. Desktop obtains draft config options through a read-only, workspace-scoped ACP request that does not create a session-map record or Pi RPC session. The request loads provider registrations from that workspace's extensions and the bundled pi-tools-suite, including Antigravity, without leaking one workspace's providers into another. Changing model/thinking in the draft updates only draft-local UI state and does not call `session/set_config_option` or `session/new`.
 - The embedded selector fills the available transcript height down to the composer. Its heading/search area remains fixed while only the saved-session list scrolls, and each saved conversation occupies one dense row with title and timestamp on the same line.
 - The embedded selector omits sessions already represented by open conversation tabs. Preview/Diff are irrelevant to this filter because they are not sessions.
 - Saved-session selection surfaces mark sessions carrying Pix fork metadata with the same branch/fork affordance used by conversation tabs, so forks stay visually distinguishable both in the titlebar picker and in the draft's embedded selector.
@@ -65,6 +65,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/app/session-tab-closure.ts`
 - `desktop/src/app/desktop-presentation-state.svelte.ts`
 - `acp/src/acp/desktop-commands.ts`
+- `acp/src/acp/draft-model-runtime.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 - `specs/desktop-workbench-tabs.md`
 - `specs/desktop-session-parity.md`

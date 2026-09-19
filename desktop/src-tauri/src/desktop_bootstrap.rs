@@ -25,8 +25,7 @@ pub async fn desktop_bootstrap_inspect(app: AppHandle) -> Result<Value, String> 
             .map(|path| Value::String(path.to_string_lossy().into_owned()))
             .unwrap_or(Value::Null);
         value["idx"]["available"] = Value::Bool(
-            system_idx.is_some()
-                || value["idx"]["installed"].as_bool().unwrap_or(false),
+            system_idx.is_some() || value["idx"]["installed"].as_bool().unwrap_or(false),
         );
         Ok(value)
     })
@@ -104,9 +103,12 @@ pub(crate) fn managed_idx_entry(home: &Path) -> Result<Option<PathBuf>, String> 
         .ok_or_else(|| "managed indexer-cli package does not expose an idx binary".to_owned())?;
     let relative = Path::new(bin);
     if relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
     {
         return Err("managed indexer-cli exposes an unsafe idx path".to_owned());
     }

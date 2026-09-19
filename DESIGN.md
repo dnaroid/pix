@@ -568,6 +568,12 @@ the viewport and asynchronously; transcript rendering and scrolling must never
 wait for filesystem validation. Missing, stale, or unresolvable paths remain
 ordinary text/code rather than clickable file links.
 
+When streaming Markdown rerenders replace a previously confirmed file-link
+candidate, it MUST be restored as a file link in the scheduled render microtask
+before the next paint, rather than flashing back to candidate/plain text.
+Validation remains lazy and asynchronous; a cached confirmation must not cause a
+new filesystem request or block rendering.
+
 ## 15. States
 
 Interactive components MUST account for applicable states:

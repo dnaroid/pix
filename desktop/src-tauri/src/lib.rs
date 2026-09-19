@@ -1642,7 +1642,10 @@ async fn idx_query(app: AppHandle, request: IdxQueryRequest) -> Result<IdxComman
 }
 
 #[tauri::command]
-async fn idx_inspect(app: AppHandle, request: IdxInspectRequest) -> Result<IdxCommandResult, String> {
+async fn idx_inspect(
+    app: AppHandle,
+    request: IdxInspectRequest,
+) -> Result<IdxCommandResult, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&request.workspace))?;
         if !root.join(".indexer-cli").is_dir() {
@@ -1662,7 +1665,10 @@ async fn idx_inspect(app: AppHandle, request: IdxInspectRequest) -> Result<IdxCo
 }
 
 #[tauri::command]
-async fn idx_knowledge(app: AppHandle, request: IdxKnowledgeRequest) -> Result<IdxCommandResult, String> {
+async fn idx_knowledge(
+    app: AppHandle,
+    request: IdxKnowledgeRequest,
+) -> Result<IdxCommandResult, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&request.workspace))?;
         if !root.join(".indexer-cli").is_dir() {
@@ -4585,7 +4591,11 @@ fn idx_launcher(app: &AppHandle) -> Result<IdxLauncher, String> {
     Ok(IdxLauncher::Managed { runtime, entry })
 }
 
-fn idx_process_command(launcher: &IdxLauncher, root: &Path, args: &[String]) -> Result<Command, String> {
+fn idx_process_command(
+    launcher: &IdxLauncher,
+    root: &Path,
+    args: &[String],
+) -> Result<Command, String> {
     let mut command = match launcher {
         IdxLauncher::System(executable) => Command::new(executable),
         IdxLauncher::Managed { runtime, entry } => runtime.script_command(entry)?,

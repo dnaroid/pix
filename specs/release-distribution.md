@@ -154,7 +154,8 @@ raise size budgets or remove smoke assertions merely to make an oversized build 
 `tauri.release.conf.json` enables bundling and copies the prepared payload to
 `pix-runtime/` in application resources. Release builds enable the explicit
 `bundled-runtime` Cargo feature. In that mode `BackendRuntime` resolves Node,
-ACP and all three host extensions only from Tauri's resource directory. Missing
+ACP, all three host extensions, and the bundled pi-tools-suite extension only
+from Tauri's resource directory. Missing
 files fail with a reinstall diagnostic: never fall back to a build-time checkout,
 system Node or development entry overrides. The inherited Pi-entry override is
 removed when starting bundled ACP. Environment updates are child-scoped.

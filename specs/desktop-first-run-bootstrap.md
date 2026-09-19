@@ -16,7 +16,7 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 
 ## Runtime boundary
 
-- A release Desktop already contains the pinned Node runtime, Pi coding agent, ACP backend, Pix extensions, and pi-tools-suite source/skills needed by sessions. First-run verifies that packaged boundary; it does not install Pi or the tools suite globally.
+- A release Desktop already contains the pinned Node runtime, Pi coding agent, ACP backend, Pix extensions, and pi-tools-suite source/skills needed by sessions. Desktop passes the bundled pi-tools-suite extension explicitly to both ACP draft model discovery and materialized Pi sessions, so providers such as Antigravity do not depend on a prior global tools-suite install. First-run verifies that packaged boundary; it does not install Pi or the tools suite globally.
 - The release payload also contains bootstrap.mjs plus npm from the same checksum-verified official Node archive as the bundled Node executable. npm is an implementation detail for explicit managed-tool installation and is not added to the user's system PATH.
 - Development builds resolve the same bootstrap helper from the checkout and keep their existing source/runtime overrides.
 - Missing packaged runtime/bootstrap files fail with the existing reinstall diagnostic rather than falling back to build-machine files or silently installing global prerequisites.

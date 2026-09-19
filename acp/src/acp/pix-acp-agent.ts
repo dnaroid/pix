@@ -182,6 +182,7 @@ import {
 	type DesktopUserMessageActionResponse,
 	type ForkMessagesResponse,
 } from "./desktop-commands.js";
+import { createDesktopDraftModelRuntime } from "./draft-model-runtime.js";
 import {
 	bashExecutionErrorUpdate,
 	bashExecutionResultUpdate,
@@ -344,6 +345,10 @@ export interface PixAcpAgentOptions {
 	readonly sessionTitleExtensionPath?: string;
 	/** Bundled Desktop workspace-mutation recorder / undo bridge. */
 	readonly workspaceUndoExtensionPath?: string;
+	/** Bundled pi-tools-suite extension, including Antigravity model providers. */
+	readonly toolsSuiteExtensionPath?: string;
+	/** Agent resource directory override for hermetic draft-catalog tests. */
+	readonly agentDir?: string;
 	readonly logger: Logger;
 	/** Path of the persistent ACP↔pi session map file. */
 	readonly sessionMapPath: string;
@@ -400,7 +405,7 @@ export class PixAcpAgent {
 	private readonly loadDesktopQueues: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
 	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
-	private draftModelRuntime: Promise<ModelRuntime> | undefined;
+	private readonly draftModelRuntimes = new Map<string, Promise<ModelRuntime>>();
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
@@ -1544,6 +1549,7 @@ export class PixAcpAgent {
 			this.options.questionExtensionPath,
 			this.options.sessionTitleExtensionPath,
 			this.options.workspaceUndoExtensionPath,
+			this.options.toolsSuiteExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
 		));
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
@@ -2055,10 +2061,17 @@ export class PixAcpAgent {
 	}
 
 	private async desktopDraftConfig(params: DesktopDraftConfigRequest): Promise<DesktopDraftConfigResponse> {
-		let pending = this.draftModelRuntime;
+		const workspaceKey = resolve(params.cwd);
+		let pending = this.draftModelRuntimes.get(workspaceKey);
 		if (!pending) {
-			pending = ModelRuntime.create({ allowModelNetwork: false, refreshOnCreate: false });
-			this.draftModelRuntime = pending;
+			pending = createDesktopDraftModelRuntime({
+				cwd: workspaceKey,
+				...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
+				...(this.options.toolsSuiteExtensionPath
+					? { additionalExtensionPaths: [this.options.toolsSuiteExtensionPath] }
+					: {}),
+			});
+			this.draftModelRuntimes.set(workspaceKey, pending);
 		}
 
 		let modelRuntime: ModelRuntime;
@@ -2066,7 +2079,7 @@ export class PixAcpAgent {
 			modelRuntime = await pending;
 			await modelRuntime.refresh({ allowNetwork: false });
 		} catch (error) {
-			if (this.draftModelRuntime === pending) this.draftModelRuntime = undefined;
+			if (this.draftModelRuntimes.get(workspaceKey) === pending) this.draftModelRuntimes.delete(workspaceKey);
 			throw new RequestError(ERROR_SERVER, `failed to load draft model catalogue: ${stringifyUnknown(error)}`);
 		}
 
@@ -2859,12 +2872,14 @@ function piClientOptions(
 	questionExtensionPath?: string,
 	sessionTitleExtensionPath?: string,
 	workspaceUndoExtensionPath?: string,
+	toolsSuiteExtensionPath?: string,
 	ignoreContextFiles = false,
 ): PiRpcClientOptions {
 	const args = [
 		...(questionExtensionPath ? ["--extension", questionExtensionPath] : []),
 		...(sessionTitleExtensionPath ? ["--extension", sessionTitleExtensionPath] : []),
 		...(workspaceUndoExtensionPath ? ["--extension", workspaceUndoExtensionPath] : []),
+		...(toolsSuiteExtensionPath ? ["--extension", toolsSuiteExtensionPath] : []),
 		...(ignoreContextFiles ? ["--no-context-files"] : []),
 	];
 	const base = {

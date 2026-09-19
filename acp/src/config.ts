@@ -11,6 +11,7 @@
  *   PIX_ACP_QUESTION_EXTENSION  Desktop-owned bundled question extension path
  *   PIX_ACP_SESSION_TITLE_EXTENSION  bundled session-title extension path
  *   PIX_ACP_WORKSPACE_UNDO_EXTENSION  bundled session-scoped workspace-undo bridge
+ *   PIX_ACP_TOOLS_SUITE_EXTENSION  bundled pi-tools-suite extension path
  */
 
 import { homedir } from "node:os";
@@ -33,6 +34,7 @@ export interface AdapterConfig {
 	readonly questionExtensionPath?: string;
 	readonly sessionTitleExtensionPath?: string;
 	readonly workspaceUndoExtensionPath?: string;
+	readonly toolsSuiteExtensionPath?: string;
 }
 
 export interface AdapterConfigInput {
@@ -42,12 +44,14 @@ export interface AdapterConfigInput {
 	readonly questionExtensionPath?: string | undefined;
 	readonly sessionTitleExtensionPath?: string | undefined;
 	readonly workspaceUndoExtensionPath?: string | undefined;
+	readonly toolsSuiteExtensionPath?: string | undefined;
 }
 
 export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterConfig {
 	const questionExtensionPath = input.questionExtensionPath?.trim();
 	const sessionTitleExtensionPath = input.sessionTitleExtensionPath?.trim();
 	const workspaceUndoExtensionPath = input.workspaceUndoExtensionPath?.trim();
+	const toolsSuiteExtensionPath = input.toolsSuiteExtensionPath?.trim();
 	return {
 		piEntry: input.piEntry?.trim() ? input.piEntry.trim() : defaultPiEntryPath(),
 		logLevel: parseLogLevel(input.logLevel),
@@ -55,6 +59,7 @@ export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterCon
 		...(questionExtensionPath ? { questionExtensionPath } : {}),
 		...(sessionTitleExtensionPath ? { sessionTitleExtensionPath } : {}),
 		...(workspaceUndoExtensionPath ? { workspaceUndoExtensionPath } : {}),
+		...(toolsSuiteExtensionPath ? { toolsSuiteExtensionPath } : {}),
 	};
 }
 
@@ -66,5 +71,6 @@ export function adapterConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Adap
 		questionExtensionPath: env["PIX_ACP_QUESTION_EXTENSION"],
 		sessionTitleExtensionPath: env["PIX_ACP_SESSION_TITLE_EXTENSION"],
 		workspaceUndoExtensionPath: env["PIX_ACP_WORKSPACE_UNDO_EXTENSION"],
+		toolsSuiteExtensionPath: env["PIX_ACP_TOOLS_SUITE_EXTENSION"],
 	});
 }

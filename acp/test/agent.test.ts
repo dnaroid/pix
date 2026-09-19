@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -23,6 +23,7 @@ import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
+	PIX_DRAFT_CONFIG_METHOD,
 	PIX_BASH_METHOD,
 	PIX_CLEAR_TODOS_METHOD,
 	PIX_AGENT_CONTROL_METHOD,
@@ -41,6 +42,7 @@ import {
 	type DesktopQueueStateResponse,
 	type DesktopAgentControlResponse,
 	type DesktopDcpStatsResponse,
+	type DesktopDraftConfigResponse,
 	type DesktopRuntimeStatusResponse,
 	type DesktopQueuedUserMessage,
 } from "../src/acp/desktop-commands.js";
@@ -771,11 +773,12 @@ test("session/new applies the Pix no-context-files setting to the Pi RPC process
 	assert.deepEqual(options[0]?.args, ["--no-context-files"]);
 });
 
-test("Desktop sessions explicitly load the bundled question, session-title, and workspace-undo extensions", async () => {
+test("Desktop sessions explicitly load all bundled extensions", async () => {
 	const { adapter, options } = createTestAdapter({
 		questionExtensionPath: "/opt/pix/question/index.js",
 		sessionTitleExtensionPath: "/opt/pix/session-title/index.js",
 		workspaceUndoExtensionPath: "/opt/pix/workspace-undo/index.js",
+		toolsSuiteExtensionPath: "/opt/pix/pi-tools-suite/index.ts",
 		loadDefaultModel: () => ({
 			provider: "openai-codex",
 			modelId: "gpt-5.6-sol",
@@ -801,10 +804,69 @@ test("Desktop sessions explicitly load the bundled question, session-title, and 
 			"/opt/pix/session-title/index.js",
 			"--extension",
 			"/opt/pix/workspace-undo/index.js",
+			"--extension",
+			"/opt/pix/pi-tools-suite/index.ts",
 			"--thinking",
 			"high",
 		],
 	});
+});
+
+test("Desktop draft config includes bundled and workspace extension models without starting a Pi session", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pix-acp-draft-models-"));
+	const workspaceWithExtension = join(root, "with-extension");
+	const workspaceWithoutExtension = join(root, "without-extension");
+	const extensionDir = join(workspaceWithExtension, ".pi", "extensions", "workspace-provider");
+	const bundledExtensionPath = join(root, "bundled-provider.ts");
+	const agentDir = join(root, "agent");
+	try {
+		await mkdir(extensionDir, { recursive: true });
+		await mkdir(workspaceWithoutExtension, { recursive: true });
+		function extensionSource(provider: string, model: string): string {
+			return `
+export default function registerDraftProvider(pi) {
+	pi.registerProvider("${provider}", {
+		baseUrl: "https://example.invalid",
+		apiKey: "test-key",
+		api: "openai-completions",
+		models: [{
+			id: "${model}",
+			name: "Draft model",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1024,
+			maxTokens: 256,
+		}],
+	});
+}
+`;
+		}
+		await writeFile(
+			join(extensionDir, "index.ts"),
+			extensionSource("workspace-provider", "workspace-model"),
+			"utf8",
+		);
+		await writeFile(
+			bundledExtensionPath,
+			extensionSource("bundled-provider", "bundled-model"),
+			"utf8",
+		);
+
+		const harness = createTestAdapter({ agentDir, toolsSuiteExtensionPath: bundledExtensionPath });
+		const withExtension = await connect(harness.adapter, (cx) =>
+			cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspaceWithExtension })) as DesktopDraftConfigResponse;
+		const withoutExtension = await connect(harness.adapter, (cx) =>
+			cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspaceWithoutExtension })) as DesktopDraftConfigResponse;
+
+		assert.match(JSON.stringify(withExtension.configOptions), /bundled-provider\/bundled-model/u);
+		assert.match(JSON.stringify(withoutExtension.configOptions), /bundled-provider\/bundled-model/u);
+		assert.match(JSON.stringify(withExtension.configOptions), /workspace-provider\/workspace-model/u);
+		assert.doesNotMatch(JSON.stringify(withoutExtension.configOptions), /workspace-provider\/workspace-model/u);
+		assert.equal(harness.clients.length, 0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 });
 
 test("Desktop publishes provisional and generated session titles from pi state", async () => {

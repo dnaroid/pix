@@ -1,6 +1,11 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Attachment } from "../lib/attachments";
 import { renderMermaidDiagram } from "../lib/mermaid";
+import {
+  FileLinkValidationCache,
+  type FileLinkScope,
+  type FileLinkValidator,
+} from "./file-link-validation-cache";
 
 interface MarkdownContentActionOptions {
   readonly externalLinkIconTemplate: () => HTMLSpanElement | undefined;
@@ -29,6 +34,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
 
   return function markdownContent(node: HTMLElement, _renderedHtml: string) {
     let generation = 0;
+    let destroyed = false;
+    const fileLinkValidationCache = new FileLinkValidationCache();
     let mediaObserver: IntersectionObserver | undefined;
     let diagramObserver: IntersectionObserver | undefined;
     let fileLinkObserver: IntersectionObserver | undefined;
@@ -53,11 +60,33 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         "[data-project-file-candidate], [data-local-file-candidate]",
       ));
       const validate = (candidate: HTMLElement) => {
-        if (candidate.dataset.fileValidationState) return;
         void validateFileLink(candidate);
       };
+      const unvalidated = candidates.filter((candidate) => {
+        const target = fileLinkTarget(candidate);
+        if (!target) {
+          invalidateFileLink(candidate);
+          return false;
+        }
+        const cached = fileLinkValidationCache.peek(target.scope, target.path, target.validator);
+        if (cached === true) {
+          replaceFileLinkCandidate(candidate, target);
+          return false;
+        }
+        if (cached === false) {
+          invalidateFileLink(candidate);
+          return false;
+        }
+        if (cached) {
+          // The preceding visible candidate started this request. Attach the
+          // regenerated candidate without starting another filesystem check.
+          validate(candidate);
+          return false;
+        }
+        return true;
+      });
       if (typeof IntersectionObserver === "undefined") {
-        for (const candidate of candidates) validate(candidate);
+        for (const candidate of unvalidated) validate(candidate);
         return;
       }
       fileLinkObserver = new IntersectionObserver((entries, observer) => {
@@ -67,50 +96,41 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           validate(entry.target);
         }
       }, { rootMargin: "320px 0px" });
-      for (const candidate of candidates) fileLinkObserver.observe(candidate);
+      for (const candidate of unvalidated) fileLinkObserver.observe(candidate);
     }
 
     async function validateFileLink(candidate: HTMLElement): Promise<void> {
-      const projectPath = candidate.dataset.projectFileCandidate;
-      const localPath = candidate.dataset.localFileCandidate;
-      const path = projectPath ?? localPath;
-      const validator = projectPath ? options.onValidateProjectFile() : options.onValidateLocalFile();
-      if (!path || !validator) {
-        candidate.dataset.fileValidationState = "invalid";
-        delete candidate.dataset.projectFileCandidate;
-        delete candidate.dataset.localFileCandidate;
-        return;
-      }
-
-      candidate.dataset.fileValidationState = "loading";
+      const target = fileLinkTarget(candidate);
+      if (!target) return;
       let exists = false;
       try {
-        exists = await validator(path);
+        exists = await fileLinkValidationCache.validate(target.scope, target.path, target.validator);
       } catch {
         exists = false;
       }
-      if (!node.contains(candidate)) return;
+      if (destroyed || !node.contains(candidate) || !isCurrentFileLinkTarget(candidate, target)) return;
       if (!exists) {
-        candidate.dataset.fileValidationState = "invalid";
-        delete candidate.dataset.projectFileCandidate;
-        delete candidate.dataset.localFileCandidate;
+        invalidateFileLink(candidate);
         return;
       }
+      replaceFileLinkCandidate(candidate, target);
+    }
 
-      const link = document.createElement("a");
-      link.href = "#";
-      link.title = `${projectPath ? "Preview" : "Open"} ${path}`;
-      if (projectPath) {
-        link.dataset.projectFile = path;
-        const startLine = candidate.dataset.projectFileStartLine;
-        const endLine = candidate.dataset.projectFileEndLine;
-        if (startLine) link.dataset.projectFileStartLine = startLine;
-        if (endLine) link.dataset.projectFileEndLine = endLine;
-      } else {
-        link.dataset.localFile = path;
-      }
-      while (candidate.firstChild) link.append(candidate.firstChild);
-      candidate.replaceWith(link);
+    function fileLinkTarget(candidate: HTMLElement): FileLinkTarget | undefined {
+      const projectPath = candidate.dataset.projectFileCandidate;
+      const localPath = candidate.dataset.localFileCandidate;
+      const scope: FileLinkScope = projectPath ? "project" : "local";
+      const path = projectPath ?? localPath;
+      const validator = projectPath ? options.onValidateProjectFile() : options.onValidateLocalFile();
+      if (!path || !validator) return undefined;
+      return { scope, path, validator, projectPath };
+    }
+
+    function isCurrentFileLinkTarget(candidate: HTMLElement, target: FileLinkTarget): boolean {
+      const current = fileLinkTarget(candidate);
+      return current?.scope === target.scope
+        && current.path === target.path
+        && current.validator === target.validator;
     }
 
     function observeMedia(scheduledGeneration: number): void {
@@ -276,6 +296,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         scheduleRender();
       },
       destroy() {
+        destroyed = true;
         generation += 1;
         fileLinkObserver?.disconnect();
         mediaObserver?.disconnect();
@@ -284,6 +305,36 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       },
     };
   };
+}
+
+interface FileLinkTarget {
+  readonly scope: FileLinkScope;
+  readonly path: string;
+  readonly validator: FileLinkValidator;
+  readonly projectPath: string | undefined;
+}
+
+function invalidateFileLink(candidate: HTMLElement): void {
+  candidate.dataset.fileValidationState = "invalid";
+  delete candidate.dataset.projectFileCandidate;
+  delete candidate.dataset.localFileCandidate;
+}
+
+function replaceFileLinkCandidate(candidate: HTMLElement, target: FileLinkTarget): void {
+  const link = document.createElement("a");
+  link.href = "#";
+  link.title = `${target.projectPath ? "Preview" : "Open"} ${target.path}`;
+  if (target.projectPath) {
+    link.dataset.projectFile = target.path;
+    const startLine = candidate.dataset.projectFileStartLine;
+    const endLine = candidate.dataset.projectFileEndLine;
+    if (startLine) link.dataset.projectFileStartLine = startLine;
+    if (endLine) link.dataset.projectFileEndLine = endLine;
+  } else {
+    link.dataset.localFile = target.path;
+  }
+  while (candidate.firstChild) link.append(candidate.firstChild);
+  candidate.replaceWith(link);
 }
 
 function showMermaidError(canvas: HTMLElement, diagram: HTMLElement) {
