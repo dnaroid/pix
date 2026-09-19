@@ -9,6 +9,12 @@ export function assertDraft(release, tag) {
   }
 }
 
+export function assertPublished(release, tag) {
+  if (release.tag_name !== tag || release.draft === true || release.prerelease === true) {
+    throw new Error(`Release did not publish as stable latest: ${tag}`);
+  }
+}
+
 export async function findRelease(repository, tag, token, fetcher = fetch) {
   // The by-tag endpoint only guarantees published releases. Authenticated listings include drafts.
   for (let page = 1; page <= 100; page++) {
@@ -42,7 +48,11 @@ async function publish(directory) {
   assertDraft(release, tag);
   const files = [...expectedAssets(version()), "SHA256SUMS"].map((name) => resolve(directory, name));
   run("gh", ["release", "upload", tag, ...files, "--repo", repository, "--clobber"]);
-  console.log(`Draft ${tag} now contains the complete verified matrix. Review signing status and publish it from GitHub Releases.`);
+  run("gh", ["release", "edit", tag, "--repo", repository, "--draft=false", "--latest"]);
+  release = await findRelease(repository, tag, token);
+  if (!release) throw new Error("Published release is not visible after publication");
+  assertPublished(release, tag);
+  console.log(`Published ${tag} with the complete verified matrix and marked it Latest.`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

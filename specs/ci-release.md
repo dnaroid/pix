@@ -19,7 +19,7 @@ remain true when CI or UI-QA tests change.
 - The native release matrix does not rerun standalone Rust backend unit tests
   after packaging: the installed Desktop smoke exercises the bundled backend on
   each target, while ordinary CI owns source-level Rust checks.
-- GitHub Release creation depends only on successful native release artifacts.
+- GitHub Release publication depends only on successful native release artifacts.
   There is no npm publish job, registry credential/OIDC path, or npm-package
   smoke gate.
 - `npm pack` remains an internal release-preparation primitive used to apply the

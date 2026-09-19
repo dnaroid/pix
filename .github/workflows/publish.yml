@@ -183,7 +183,7 @@ jobs:
         run: |
           node scripts/release/sync-version.mjs --check --tag
           node scripts/release/checksums.mjs .artifacts/release-assets
-      - name: Create or update draft GitHub Release
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release/publish-github.mjs .artifacts/release-assets

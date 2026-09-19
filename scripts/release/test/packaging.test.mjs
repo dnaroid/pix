@@ -8,7 +8,7 @@ import { expectedDigest, nodeArchive } from "../node-runtime.mjs";
 import { hostTarget, root, targetInfo, targets, version } from "../common.mjs";
 import { checksums, expectedAssets, expectedBuildAssets } from "../checksums.mjs";
 import { syncVersion, versionEdits } from "../sync-version.mjs";
-import { assertDraft, findRelease } from "../publish-github.mjs";
+import { assertDraft, assertPublished, findRelease } from "../publish-github.mjs";
 
 test("release matrix names explicit OS/CPU pairs and rejects cross-host dependency copying", () => {
   assert.deepEqual(Object.keys(targets).sort(), ["linux-x64", "macos-arm64", "windows-x64"]);
@@ -75,6 +75,9 @@ test("release reruns never replace already published assets", () => {
   assert.doesNotThrow(() => assertDraft({ tag_name: "v1.2.3", draft: true }, "v1.2.3"));
   assert.throws(() => assertDraft({ tag_name: "v1.2.3", draft: false }, "v1.2.3"), /Refusing/u);
   assert.throws(() => assertDraft({ tag_name: "v1.2.4", draft: true }, "v1.2.3"), /Refusing/u);
+  assert.doesNotThrow(() => assertPublished({ tag_name: "v1.2.3", draft: false, prerelease: false }, "v1.2.3"));
+  assert.throws(() => assertPublished({ tag_name: "v1.2.3", draft: true, prerelease: false }, "v1.2.3"), /did not publish/u);
+  assert.throws(() => assertPublished({ tag_name: "v1.2.3", draft: false, prerelease: true }, "v1.2.3"), /did not publish/u);
 });
 
 test("draft discovery paginates authenticated listings and fails closed on API errors", async () => {

@@ -4,7 +4,7 @@ Use this checklist before publishing a Pix GitHub Release so installs work on ma
 
 ## Downloadable TUI and Desktop releases
 
-One stable `vX.Y.Z` tag produces a **draft GitHub Release** containing portable
+One stable `vX.Y.Z` tag produces a **published GitHub Release** containing portable
 TUI and Desktop installers. The contract is in
 [`specs/release-distribution.md`](../specs/release-distribution.md).
 
@@ -104,13 +104,11 @@ The `Release` workflow uses native Ubuntu 22.04 x64, macOS 15 ARM64 and Windows
 2022 x64 runners. `Actions → Release → Run workflow` builds and tests all packages
 without publishing anything. The seven user-facing installers/archives are
 available as three Actions artifacts. On a version-tag push, the final job waits
-for the full native matrix, validates the complete set, adds `SHA256SUMS`, and
-uploads everything to a draft release. Only then review
-the release notes/signing status and click **Publish release** in GitHub.
-
-The draft is intentional: an unsigned or incomplete first build must not silently
-become the public latest version. Reruns can replace draft assets, but the release
-script refuses to overwrite published assets. Publish a new version for fixes.
+for the full native matrix, validates the complete set, adds `SHA256SUMS`, uploads
+everything to a temporary draft, and only after the complete upload succeeds
+publishes it as the public **Latest** release. A failed or incomplete matrix never
+becomes public. The release script refuses to overwrite an already published
+release; publish a new version for fixes.
 Checksums detect damaged downloads; they do not replace trusted code signatures.
 The final release also contains signed Tauri updater artifacts plus `latest.json`;
 the latter is generated only after all three native jobs have supplied the exact
@@ -170,7 +168,7 @@ The GitHub Actions workflows have two different responsibilities and they stay s
 - `check.yml` runs the cross-platform correctness matrix on pull requests and
   `master` pushes. It does not run on release tags.
 - `publish.yml` is release-only: a lightweight release-contract check followed by
-  the three native standalone package jobs and, for tag pushes, Draft GitHub Release creation.
+  the three native standalone package jobs and, for tag pushes, verified GitHub Release publication.
 - Native release smoke remains mandatory because it validates the relocated TUI
   archive and installed Desktop application, not source or npm-package behavior.
 
@@ -190,7 +188,7 @@ Windows process tests have additional invariants:
 Current implementation:
 
 - `.github/workflows/check.yml` owns PR/master correctness checks.
-- `.github/workflows/publish.yml` owns tag/manual release packaging and Draft Release creation.
+- `.github/workflows/publish.yml` owns tag/manual release packaging and stable Release publication.
 - `scripts/release/smoke.mjs` and `smoke-desktop.mjs` validate the actual standalone artifacts.
 
 ## Create a release version

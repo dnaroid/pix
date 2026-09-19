@@ -188,10 +188,11 @@ thirteen files: eleven matrix assets, `latest.json`, and `SHA256SUMS`.
 release tests and version/tag alignment, then `build-release` runs the three native
 targets. Each runner prepares, packages, audits and smoke-tests its real artifacts
 before upload. `github-release` waits only for the native release matrix, has the
-only `contents: write` permission, validates the tag/repository, and creates or
-updates a draft release. Reruns may replace draft assets but never published
-assets. Manual dispatch produces Actions artifacts but cannot create a GitHub
-Release. There is no npm publication gate or registry dependency.
+only `contents: write` permission, validates the tag/repository, creates a draft,
+uploads the complete verified asset set, then publishes it as the stable GitHub
+Latest release. Failed/incomplete matrices remain non-public. Reruns may replace
+draft assets but never published assets. Manual dispatch produces Actions artifacts
+but cannot create a GitHub Release. There is no npm publication gate or registry dependency.
 
 ## Signing and updates
 
@@ -315,7 +316,7 @@ PowerShell command itself rather than through inherited environment variables.
 
 - `scripts/release/`: preparation, Node downloads, signing, installers, smoke and publication.
 - `.github/workflows/check.yml`: PR/master correctness matrix.
-- `.github/workflows/publish.yml`: release contract, native matrix and Draft Release creation.
+- `.github/workflows/publish.yml`: release contract, native matrix and stable Release publication.
 - `desktop/src-tauri/src/backend_runtime.rs`, `release_smoke.rs`, `lib.rs` and release config: resource-backed host.
 - `src/app/cli/release-update.ts`, `portable-update.ts`,
   `portable-update-helper.ts`, `update.ts`, TUI command actions and ACP update
