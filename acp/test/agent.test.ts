@@ -773,8 +773,11 @@ test("session/new applies the Pix no-context-files setting to the Pi RPC process
 	assert.deepEqual(options[0]?.args, ["--no-context-files"]);
 });
 
-test("Desktop sessions explicitly load all bundled extensions", async () => {
+test("Desktop sessions explicitly load all bundled extensions", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-session-extensions-"));
+	t.after(() => rm(agentDir, { recursive: true, force: true }));
 	const { adapter, options } = createTestAdapter({
+		agentDir,
 		questionExtensionPath: "/opt/pix/question/index.js",
 		sessionTitleExtensionPath: "/opt/pix/session-title/index.js",
 		workspaceUndoExtensionPath: "/opt/pix/workspace-undo/index.js",
@@ -812,18 +815,8 @@ test("Desktop sessions explicitly load all bundled extensions", async () => {
 	});
 });
 
-test("Desktop draft config includes bundled and workspace extension models without starting a Pi session", async () => {
-	const root = mkdtempSync(join(tmpdir(), "pix-acp-draft-models-"));
-	const workspaceWithExtension = join(root, "with-extension");
-	const workspaceWithoutExtension = join(root, "without-extension");
-	const extensionDir = join(workspaceWithExtension, ".pi", "extensions", "workspace-provider");
-	const bundledExtensionPath = join(root, "bundled-provider.ts");
-	const agentDir = join(root, "agent");
-	try {
-		await mkdir(extensionDir, { recursive: true });
-		await mkdir(workspaceWithoutExtension, { recursive: true });
-		function extensionSource(provider: string, model: string): string {
-			return `
+function draftProviderExtensionSource(provider: string, model: string): string {
+	return `
 export default function registerDraftProvider(pi) {
 	pi.registerProvider("${provider}", {
 		baseUrl: "https://example.invalid",
@@ -841,15 +834,26 @@ export default function registerDraftProvider(pi) {
 	});
 }
 `;
-		}
+}
+
+test("Desktop draft config includes bundled and workspace extension models without starting a Pi session", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pix-acp-draft-models-"));
+	const workspaceWithExtension = join(root, "with-extension");
+	const workspaceWithoutExtension = join(root, "without-extension");
+	const extensionDir = join(workspaceWithExtension, ".pi", "extensions", "workspace-provider");
+	const bundledExtensionPath = join(root, "bundled-provider.ts");
+	const agentDir = join(root, "agent");
+	try {
+		await mkdir(extensionDir, { recursive: true });
+		await mkdir(workspaceWithoutExtension, { recursive: true });
 		await writeFile(
 			join(extensionDir, "index.ts"),
-			extensionSource("workspace-provider", "workspace-model"),
+			draftProviderExtensionSource("workspace-provider", "workspace-model"),
 			"utf8",
 		);
 		await writeFile(
 			bundledExtensionPath,
-			extensionSource("bundled-provider", "bundled-model"),
+			draftProviderExtensionSource("bundled-provider", "bundled-model"),
 			"utf8",
 		);
 
@@ -863,7 +867,51 @@ export default function registerDraftProvider(pi) {
 		assert.match(JSON.stringify(withoutExtension.configOptions), /bundled-provider\/bundled-model/u);
 		assert.match(JSON.stringify(withExtension.configOptions), /workspace-provider\/workspace-model/u);
 		assert.doesNotMatch(JSON.stringify(withoutExtension.configOptions), /workspace-provider\/workspace-model/u);
+
+		const addedExtensionDir = join(workspaceWithExtension, ".pi", "extensions", "added-provider");
+		await mkdir(addedExtensionDir, { recursive: true });
+		await writeFile(
+			join(addedExtensionDir, "index.ts"),
+			draftProviderExtensionSource("added-provider", "added-model"),
+			"utf8",
+		);
+		const reloaded = await connect(harness.adapter, (cx) =>
+			cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspaceWithExtension })) as DesktopDraftConfigResponse;
+		assert.match(JSON.stringify(reloaded.configOptions), /added-provider\/added-model/u);
 		assert.equal(harness.clients.length, 0);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("Desktop uses an installed pi-tools-suite instead of loading the bundled copy twice", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pix-acp-installed-tools-suite-"));
+	const workspace = join(root, "workspace");
+	const agentDir = join(root, "agent");
+	const installedExtensionDir = join(agentDir, "extensions", "pi-tools-suite");
+	const bundledExtensionPath = join(root, "bundled-provider.ts");
+	try {
+		await mkdir(workspace, { recursive: true });
+		await mkdir(installedExtensionDir, { recursive: true });
+		await writeFile(
+			join(installedExtensionDir, "index.ts"),
+			draftProviderExtensionSource("installed-provider", "installed-model"),
+			"utf8",
+		);
+		await writeFile(
+			bundledExtensionPath,
+			draftProviderExtensionSource("bundled-provider", "bundled-model"),
+			"utf8",
+		);
+
+		const harness = createTestAdapter({ agentDir, toolsSuiteExtensionPath: bundledExtensionPath });
+		const draft = await connect(harness.adapter, (cx) =>
+			cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspace })) as DesktopDraftConfigResponse;
+		assert.match(JSON.stringify(draft.configOptions), /installed-provider\/installed-model/u);
+		assert.doesNotMatch(JSON.stringify(draft.configOptions), /bundled-provider\/bundled-model/u);
+
+		await connect(harness.adapter, (cx) => cx.buildSession(workspace).start());
+		assert.equal(harness.options[0]?.args?.includes(bundledExtensionPath) ?? false, false);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

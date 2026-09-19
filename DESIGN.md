@@ -163,6 +163,11 @@ Prefer subtle but legible differences between `background`, `card`, `popover`,
 and `sidebar`, with borders strong enough to define pane geometry without
 becoming bright outlines.
 
+Before the frontend bundle renders, the native window and initial document MUST
+paint with the `background` color for the current system color scheme. In
+particular, a dark-system launch must not expose the webview's default white
+surface while Pix is starting.
+
 ## 5. Typography
 
 Primary UI font: **Outfit**.
@@ -561,6 +566,9 @@ The transcript MUST NOT use top/bottom gradient fading or CSS masking to obscure
 content near the scroll edges. Content should remain fully opaque up to the pane
 boundaries; separation from surrounding chrome should come from layout,
 spacing, and borders instead.
+
+The transcript's jump-to-latest indicator MUST be visible only when the pane
+can scroll and the current position is not near its bottom.
 
 Automatically detected file-like Markdown text MUST remain non-interactive until
 the target is validated as an existing file. Perform that validation lazily near

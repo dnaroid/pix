@@ -8,6 +8,23 @@ type TranscriptScrollOptions = {
   content: () => HTMLDivElement | null;
 };
 
+type ScrollMetrics = Pick<HTMLDivElement, "clientHeight" | "scrollHeight" | "scrollTop">;
+
+export function reconcileTranscriptResize(
+  followsLatest: boolean,
+  pane: ScrollMetrics,
+): { followsLatest: boolean; scrollToLatest: boolean } {
+  // Preserve follow mode across content growth: the resize has already moved
+  // the bottom, so recomputing from the old scrollTop would turn it off before
+  // the scheduled scroll can catch up.
+  if (followsLatest) return { followsLatest: true, scrollToLatest: true };
+
+  // A collapsed tool block can clamp scrollTop to the bottom (including zero
+  // when overflow disappears) without emitting a scroll event.
+  const isNearBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight <= BOTTOM_THRESHOLD_PX;
+  return { followsLatest: isNearBottom, scrollToLatest: false };
+}
+
 export function createTranscriptScrollController(options: TranscriptScrollOptions) {
   let followsLatest = $state(true);
   let frame = 0;
@@ -73,12 +90,19 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     const pane = options.pane();
     const content = options.content();
     if (!pane || typeof ResizeObserver === "undefined") return;
+    let connected = true;
     const observer = new ResizeObserver(() => {
-      if (followsLatest) scheduleScrollToLatest();
+      if (!connected || pane !== options.pane()) return;
+      const reconciliation = reconcileTranscriptResize(followsLatest, pane);
+      followsLatest = reconciliation.followsLatest;
+      if (reconciliation.scrollToLatest) scheduleScrollToLatest();
     });
     observer.observe(pane);
     if (content) observer.observe(content);
-    return () => observer.disconnect();
+    return () => {
+      connected = false;
+      observer.disconnect();
+    };
   });
 
   function dispose(): void {

@@ -5,7 +5,6 @@
   import CopyIcon from "@lucide/svelte/icons/copy";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
   import GitFork from "@lucide/svelte/icons/git-fork";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import PanelTopOpen from "@lucide/svelte/icons/panel-top-open";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import { onDestroy, tick } from "svelte";
@@ -301,12 +300,6 @@
           {/key}
         {/if}
       {/each}
-      {#if promptRunning}
-        <div class="flex min-h-5 items-center gap-1.5 py-0.5 text-xs text-muted-foreground" aria-label="Pix is working">
-          <LoaderCircle class="h-3 w-3 animate-spin text-primary/75 motion-reduce:animate-none" aria-hidden="true" />
-          <span>working</span>
-        </div>
-      {/if}
     </div>
     {/if}
   </div>

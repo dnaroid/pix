@@ -25,6 +25,7 @@ import statusSource from "./StatusBar.svelte?raw";
 import markdownSource from "./MarkdownText.svelte?raw";
 import terminalSource from "./TerminalView.svelte?raw";
 import toolResultSource from "./ToolResult.svelte?raw";
+import transcriptSource from "./TranscriptPane.svelte?raw";
 
 describe("desktop visual regressions", () => {
   it("keeps the composer placeholder on one visual line", () => {
@@ -74,6 +75,19 @@ describe("desktop visual regressions", () => {
     );
     expect(statusSource).not.toContain('>Session</span>');
     expect(statusSource).toContain('sessionActivityOpen ? "text-foreground" : activityToneClass()');
+  });
+
+  it("uses the ready ACP dot for active-conversation work without a transcript-bottom spinner", () => {
+    expect(statusSource).toContain('status === "ready" && promptRunning');
+    expect(statusSource).toContain('"bg-primary connection-activity"');
+    expect(statusSource).toContain('"ACP ready; active conversation working"');
+    expect(statusSource).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(statusSource).toContain(".connection-activity { animation: none; }");
+
+    expect(transcriptSource).not.toContain('aria-label="Pix is working"');
+    expect(transcriptSource).not.toContain('LoaderCircle from "@lucide/svelte/icons/loader-circle"');
+    expect(transcriptSource).toContain("promptRunning: () => promptRunning");
+    expect(transcriptSource).toContain("disabled={promptRunning || operationRunning}");
   });
 
   it("keeps project and Git branch between context and usage status chrome", () => {

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
 	createAgentSessionServices,
@@ -9,6 +10,24 @@ export interface DesktopDraftModelRuntimeOptions {
 	readonly cwd: string;
 	readonly agentDir?: string;
 	readonly additionalExtensionPaths?: readonly string[];
+}
+
+export interface DesktopToolsSuiteExtensionOptions {
+	readonly agentDir?: string;
+	readonly bundledExtensionPath?: string;
+}
+
+/**
+ * Prefer the agent's installed pi-tools-suite when present so Desktop matches
+ * TUI extension precedence and never loads a second copy of the suite.
+ */
+export function desktopToolsSuiteExtensionPath(
+	options: DesktopToolsSuiteExtensionOptions,
+): string | undefined {
+	if (!options.bundledExtensionPath) return undefined;
+	const agentDir = options.agentDir ?? getAgentDir();
+	const installedExtensionPath = join(agentDir, "extensions", "pi-tools-suite");
+	return existsSync(installedExtensionPath) ? undefined : options.bundledExtensionPath;
 }
 
 /**

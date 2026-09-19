@@ -548,6 +548,7 @@ describe.serial("subagent type config", () => {
 		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-5.6-sol", "zai/glm-5.3"]);
+		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
 		expect(config.types["frontier-review"].notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*", "zai/glm-5.3"]);
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-5.6-luna")).toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-5.6-sol")).not.toContain("- frontier-review:");

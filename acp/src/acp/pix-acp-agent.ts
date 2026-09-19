@@ -182,7 +182,10 @@ import {
 	type DesktopUserMessageActionResponse,
 	type ForkMessagesResponse,
 } from "./desktop-commands.js";
-import { createDesktopDraftModelRuntime } from "./draft-model-runtime.js";
+import {
+	createDesktopDraftModelRuntime,
+	desktopToolsSuiteExtensionPath,
+} from "./draft-model-runtime.js";
 import {
 	bashExecutionErrorUpdate,
 	bashExecutionResultUpdate,
@@ -405,7 +408,6 @@ export class PixAcpAgent {
 	private readonly loadDesktopQueues: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
 	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
-	private readonly draftModelRuntimes = new Map<string, Promise<ModelRuntime>>();
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
@@ -1542,6 +1544,12 @@ export class PixAcpAgent {
 		defaultModel?: PixDefaultModel,
 	): Promise<AgentSessionState> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
+		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
+			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
+			...(this.options.toolsSuiteExtensionPath
+				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
+				: {}),
+		});
 		const pi = this.options.createPiClient(piClientOptions(
 			this.options.piEntry,
 			cwd,
@@ -1549,7 +1557,7 @@ export class PixAcpAgent {
 			this.options.questionExtensionPath,
 			this.options.sessionTitleExtensionPath,
 			this.options.workspaceUndoExtensionPath,
-			this.options.toolsSuiteExtensionPath,
+			toolsSuiteExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
 		));
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
@@ -2062,24 +2070,24 @@ export class PixAcpAgent {
 
 	private async desktopDraftConfig(params: DesktopDraftConfigRequest): Promise<DesktopDraftConfigResponse> {
 		const workspaceKey = resolve(params.cwd);
-		let pending = this.draftModelRuntimes.get(workspaceKey);
-		if (!pending) {
-			pending = createDesktopDraftModelRuntime({
-				cwd: workspaceKey,
-				...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
-				...(this.options.toolsSuiteExtensionPath
-					? { additionalExtensionPaths: [this.options.toolsSuiteExtensionPath] }
-					: {}),
-			});
-			this.draftModelRuntimes.set(workspaceKey, pending);
-		}
+		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
+			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
+			...(this.options.toolsSuiteExtensionPath
+				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
+				: {}),
+		});
 
 		let modelRuntime: ModelRuntime;
 		try {
-			modelRuntime = await pending;
+			modelRuntime = await createDesktopDraftModelRuntime({
+				cwd: workspaceKey,
+				...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
+				...(toolsSuiteExtensionPath
+					? { additionalExtensionPaths: [toolsSuiteExtensionPath] }
+					: {}),
+			});
 			await modelRuntime.refresh({ allowNetwork: false });
 		} catch (error) {
-			if (this.draftModelRuntimes.get(workspaceKey) === pending) this.draftModelRuntimes.delete(workspaceKey);
 			throw new RequestError(ERROR_SERVER, `failed to load draft model catalogue: ${stringifyUnknown(error)}`);
 		}
 

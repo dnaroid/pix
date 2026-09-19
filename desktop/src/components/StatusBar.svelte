@@ -90,11 +90,18 @@
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
   const activityTone = $derived(sessionActivityTone(sessionActivity, promptRunning, sessionNeedsInput));
   const activityLabel = $derived(sessionActivityLabel(sessionActivity, promptRunning, sessionNeedsInput));
+  const activeConversationWorking = $derived(status === "ready" && promptRunning);
 
   function connectionLabel(value: ConnectionStatus): string {
     if (value === "ready") return "ACP";
     if (value === "starting") return "starting…";
     return value;
+  }
+
+  function connectionActivityLabel(value: ConnectionStatus, working: boolean): string {
+    if (working) return "ACP ready; active conversation working";
+    if (value === "ready") return "ACP ready";
+    return `ACP ${connectionLabel(value)}`;
   }
 
   function configValues(option: SessionConfigOption): ConfigValue[] {
@@ -123,10 +130,16 @@
     "flex items-center gap-2",
     status === "error" && "text-destructive",
   ]}>
-    <span class={[
-      "h-1.5 w-1.5 rounded-full bg-status",
-      status === "error" && "bg-destructive",
-    ]}></span>
+    <span
+      class={[
+        "h-1.5 w-1.5 rounded-full bg-status",
+        activeConversationWorking && "bg-primary connection-activity",
+        status === "error" && "bg-destructive",
+      ]}
+      role={activeConversationWorking ? "img" : undefined}
+      aria-label={activeConversationWorking ? connectionActivityLabel(status, activeConversationWorking) : undefined}
+      title={connectionActivityLabel(status, activeConversationWorking)}
+    ></span>
     <span class="max-[760px]:hidden">{connectionLabel(status)}</span>
   </div>
 
@@ -258,3 +271,17 @@
     </button>
   </div>
 </footer>
+
+<style>
+  .connection-activity {
+    animation: connection-activity-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes connection-activity-pulse {
+    50% { opacity: 0.55; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connection-activity { animation: none; }
+  }
+</style>

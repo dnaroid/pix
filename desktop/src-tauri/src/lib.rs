@@ -30,6 +30,7 @@ mod desktop_context_menu;
 mod git_operations;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
+mod startup_theme;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -7770,6 +7771,9 @@ pub fn run() {
         .manage(SidebarIndicatorState::default())
         .manage(IdxOperationState::default())
         .setup(|app| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                startup_theme::apply_to(&main_window);
+            }
             app.manage(AttachmentPathState::new(app.handle()));
             #[cfg(feature = "bundled-runtime")]
             release_smoke::start_if_requested(app).map_err(std::io::Error::other)?;

@@ -125,9 +125,11 @@ describe.serial("model-pool selection contract", () => {
 	test("oracle uses a strong candidate inside the pool, preferring an independent provider", () => {
 		const { config } = fixture();
 		const task = { id: "o", task: "Second opinion", subagentType: "oracle" };
-		const models = ["openai-codex/gpt-5.6-sol", "zai/glm-5.3"];
+		const models = ["openai-codex/gpt-6-astra", "zai/glm-5.3"];
 		const selected = resolveAgentTaskConfig(task, config, { parentModel: "openai-codex/gpt-5.6-luna", preset: { models } });
 		expect(selected.task.model).toBe("zai/glm-5.3");
+		const astra = resolveAgentTaskConfig(task, config, { parentModel: "zai/glm-5-turbo", preset: { models: ["openai-codex/gpt-6-astra"] } });
+		expect(astra.task.model).toBe("openai-codex/gpt-6-astra");
 		const sameProvider = resolveAgentTaskConfig(task, config, { parentModel: "zai/glm-5-turbo", preset: { models: ["zai/glm-5.3"] } });
 		expect(sameProvider.task.model).toBe("zai/glm-5.3");
 		expect(() => resolveAgentTaskConfig(task, config, { preset: { models: ["zai/glm-5-turbo"] } })).toThrow(/pool/i);

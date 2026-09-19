@@ -20,6 +20,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - A persisted fork session is identified from Pi's native parent-session metadata. ACP exposes `pix.isFork` and, when available from its existing map records, the safe ACP-only `pix.parentSessionId` session-list metadata value to Desktop; no parent path is exposed. Workbench tabs render a branch icon beside fork titles.
 - Conversation tabs are `kind: "session"` members of `WorkbenchTabs`. Preview and Git Diff may appear between them visually, but those UI-only tabs never enter the session id arrays used by `buildTabSessions`, restore metadata, saved-session selection, or ACP/TUI synchronization.
 - The active conversation runtime and the selected workbench surface are distinct concepts. While Preview/Git Diff is selected, the current session remains the underlying active runtime and keeps its activity/status state. Selecting a conversation tab activates/loads that session and selects the shared `conversation-workspace` panel.
+- The StatusBar ACP connection dot reflects only that underlying active conversation runtime: when ACP is ready and its active-session-scoped prompt is running, the dot uses the semantic primary color with a restrained pulse (static primary with reduced motion). Preview/Git Diff therefore retain this indication for their underlying active runtime; background conversation activity remains represented only by its existing tab status dot. The transcript does not duplicate this state with a bottom `working` line.
 - The unified workbench tablist owns Left/Right, Home/End, Delete, and middle-click behavior across every visible tab. Arrow/Home/End move focus only; Enter/Space activate through native button behavior.
 - Closing a running conversation from the close button, Delete, or middle-click requires explicit confirmation. Confirming closes the ACP session through the existing `session/close` teardown path; cancelling leaves the tab and run untouched.
 - Session close still chooses/loads a valid fallback conversation runtime when the active session is removed. The visible workbench focus fallback may be a neighboring Preview/Git Diff tab; in that case Pix keeps the fallback conversation runtime active underneath that UI-only surface.
@@ -51,6 +52,8 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 
 ## Related files
 
+- `desktop/src/components/StatusBar.svelte`
+- `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/SessionStartView.svelte`
 - `desktop/src/components/PromptComposer.svelte`
@@ -73,6 +76,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 
 ## Verification
 
+- `desktop/src/components/DesktopVisualRegressions.test.ts` verifies that active-session work is shown by the ready ACP dot, respects reduced motion, and is not duplicated by a transcript-bottom spinner.
 - `desktop/src/lib/session-tabs.test.ts` covers session membership/restoration/replacement plus deterministic fork-tree sibling, nested, malformed/orphan, and flat-search row behavior independently of UI-only workbench tabs.
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed workbench ordering without changing session identity.
 - `desktop/src/app/workbench-model.test.ts` covers fork metadata propagation into workbench session tabs.
