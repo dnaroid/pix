@@ -1,3 +1,4 @@
+import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { REPO_DISCOVERY_TOOLS, REPO_KNOWLEDGE_TOOL_DESCRIPTION } from "../tool-descriptions";
 import { commandAvailable, directoryExists, findProjectRoot, hasAvailableIndexedProjectRoot } from "../lib/project.js";
@@ -22,6 +23,7 @@ const REPO_KNOWLEDGE_ACTIONS = [
 	"impact",
 	"catalog",
 	"record",
+	"prepare",
 	"verify",
 	"relate",
 	"remove",
@@ -80,6 +82,9 @@ type RepoKnowledgeParams = {
 	relationAction?: KnowledgeRelationAction;
 	relationKind?: KnowledgeRelationKind;
 	targetPaths?: string[];
+	receiptPath?: string;
+	selectorsPath?: string;
+	checks?: string[];
 	sourceReviewed?: boolean;
 	evidenceReviewed?: boolean;
 	metadataOnlyConfirmed?: boolean;
@@ -405,12 +410,52 @@ function normalizedStrings(value: unknown): string[] {
 	return [...new Set(value.filter((item): item is string => nonEmpty(item)).map((item) => item.trim()))];
 }
 
+function invalidProjectRelativePath(value: string): boolean {
+	const slashNormalized = value.split("\\").join("/");
+	return (
+		value.includes("\0") ||
+		/^[A-Za-z]:/.test(value) ||
+		path.posix.isAbsolute(slashNormalized) ||
+		path.win32.isAbsolute(value) ||
+		slashNormalized.split("/").includes("..")
+	);
+}
+
+function canonicalProjectRelativePath(projectRoot: string, value: string): string | undefined {
+	if (invalidProjectRelativePath(value)) return undefined;
+
+	try {
+		const canonicalRoot = realpathSync(projectRoot);
+		let existingAncestor = path.resolve(canonicalRoot, value);
+		const missingSegments: string[] = [];
+		while (true) {
+			try {
+				lstatSync(existingAncestor);
+				break;
+			} catch {}
+			const parent = path.dirname(existingAncestor);
+			if (parent === existingAncestor) return undefined;
+			missingSegments.unshift(path.basename(existingAncestor));
+			existingAncestor = parent;
+		}
+
+		const canonicalPath = path.resolve(realpathSync(existingAncestor), ...missingSegments);
+		const relativePath = path.relative(canonicalRoot, canonicalPath);
+		if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+			return undefined;
+		}
+		return relativePath.split(path.sep).join("/");
+	} catch {
+		return undefined;
+	}
+}
+
 function positiveBounded(value: number | undefined, fallback: number, maximum: number): number {
 	if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return fallback;
 	return Math.min(value, maximum);
 }
 
-function buildRepoKnowledgeArgs(params: RepoKnowledgeParams): string[] | string {
+function buildRepoKnowledgeArgs(params: RepoKnowledgeParams, projectRoot: string): string[] | string {
 	if (!REPO_KNOWLEDGE_ACTIONS.includes(params.action)) {
 		return `Invalid repo_knowledge action. Use one of: ${REPO_KNOWLEDGE_ACTIONS.join(", ")}.`;
 	}
@@ -420,6 +465,9 @@ function buildRepoKnowledgeArgs(params: RepoKnowledgeParams): string[] | string 
 	const paths = normalizedStrings(params.paths);
 	const topics = normalizedStrings(params.topics);
 	const targets = normalizedStrings(params.targetPaths);
+	const receiptPath = params.receiptPath?.trim();
+	const selectorsPath = params.selectorsPath?.trim();
+	const checks = normalizedStrings(params.checks);
 
 	switch (params.action) {
 		case "context": {
@@ -483,10 +531,27 @@ function buildRepoKnowledgeArgs(params: RepoKnowledgeParams): string[] | string 
 			for (const topic of topics) args.push("--topic", topic);
 			return args;
 		}
-		case "verify":
+		case "prepare": {
+			if (!sourcePath) return "repo_knowledge action=prepare requires path.";
+			const canonicalSelectorsPath = selectorsPath ? canonicalProjectRelativePath(projectRoot, selectorsPath) : undefined;
+			const canonicalReceiptPath = receiptPath ? canonicalProjectRelativePath(projectRoot, receiptPath) : undefined;
+			if (selectorsPath && !canonicalSelectorsPath) return "repo_knowledge prepare refused: selectorsPath must stay project-relative.";
+			if (receiptPath && !canonicalReceiptPath) return "repo_knowledge prepare refused: receiptPath must stay project-relative.";
+			const args = ["wiki", "prepare", "--path", sourcePath];
+			if (canonicalSelectorsPath) args.push("--selectors", canonicalSelectorsPath);
+			if (canonicalReceiptPath) args.push("--output", canonicalReceiptPath);
+			return args;
+		}
+		case "verify": {
 			if (!sourcePath) return "repo_knowledge action=verify requires path.";
+			if (!receiptPath) return "repo_knowledge action=verify requires receiptPath for a reviewed version 1 receipt.";
+			const canonicalReceiptPath = canonicalProjectRelativePath(projectRoot, receiptPath);
+			if (!canonicalReceiptPath) return "repo_knowledge verify refused: receiptPath must stay project-relative.";
 			if (params.evidenceReviewed !== true) return "repo_knowledge verify refused: inspect the primary source and relevant code/tests first, then retry with evidenceReviewed=true.";
-			return ["wiki", "verify", "--path", sourcePath];
+			const args = ["wiki", "verify", "--path", sourcePath, "--receipt", canonicalReceiptPath];
+			for (const check of checks) args.push("--check", check);
+			return args;
+		}
 		case "relate": {
 			if (!sourcePath) return "repo_knowledge action=relate requires path.";
 			if (params.evidenceReviewed !== true) return "repo_knowledge relate refused: review concrete evidence first; semantic/graph similarity alone is insufficient. Retry with evidenceReviewed=true.";
@@ -520,11 +585,10 @@ async function executeRepoKnowledge(
 	profile: RepoDiscoveryProfile,
 ) {
 	if (signal?.aborted) return textResult("repo_knowledge cancelled");
-	const idxArgs = buildRepoKnowledgeArgs(params);
-	if (typeof idxArgs === "string") return textResult(idxArgs, true, { action: params.action });
-
 	const indexedProject = ensureIndexedProject(ctx.cwd, "repo_knowledge");
 	if (indexedProject.error) return textResult(indexedProject.error, true, { projectRoot: indexedProject.projectRoot, action: params.action });
+	const idxArgs = buildRepoKnowledgeArgs(params, indexedProject.projectRoot);
+	if (typeof idxArgs === "string") return textResult(idxArgs, true, { action: params.action });
 
 	const result = await runQueuedIdx(indexedProject.projectRoot, () =>
 		pi.exec("idx", idxArgs, { cwd: indexedProject.projectRoot, signal, timeout: 180_000 }),
@@ -541,7 +605,7 @@ async function executeRepoKnowledge(
 
 	return textResult(truncated.text, exitCode !== 0, {
 		action: params.action,
-		mutating: REPO_KNOWLEDGE_MUTATING_ACTIONS.has(params.action),
+		mutating: REPO_KNOWLEDGE_MUTATING_ACTIONS.has(params.action) || (params.action === "prepare" && nonEmpty(params.receiptPath)),
 		command: ["idx", ...idxArgs],
 		cwd: indexedProject.projectRoot,
 		exitCode,
@@ -622,10 +686,10 @@ function repoKnowledgeParameters(profile: RepoDiscoveryProfile) {
 			action: {
 				type: "string",
 				enum: [...REPO_KNOWLEDGE_ACTIONS],
-				description: "Knowledge action. record/verify/relate/remove mutate idx knowledge metadata; source spec files are edited with normal file tools.",
+				description: "Knowledge action. prepare may write a draft receipt; record/verify/relate/remove mutate idx knowledge metadata. Source spec files are edited with normal file tools.",
 			},
 			query: stringSchema("Behavior/contract query for context or search."),
-			path: stringSchema("Project-relative primary knowledge path for show/record/verify/relate/remove."),
+			path: stringSchema("Project-relative primary knowledge path for show/record/prepare/verify/relate/remove."),
 			paths: { type: "array", items: stringSchema("Project-relative task-changed path"), description: "Task-scoped changed paths for impact. Prefer this over whole-worktree fallback." },
 			classification: { type: "string", enum: ["spec", "spec-like", "meta-index", "design-only", "guide", "other"] },
 			behaviorType: { type: "string", enum: ["as-is", "change", "mixed", "unknown"] },
@@ -647,8 +711,15 @@ function repoKnowledgeParameters(profile: RepoDiscoveryProfile) {
 			relationAction: { type: "string", enum: ["add", "remove"] },
 			relationKind: { type: "string", enum: ["implements", "tests", "related", "supersedes", "superseded-by"] },
 			targetPaths: { type: "array", items: stringSchema("Reviewed relation target path") },
+			receiptPath: stringSchema("prepare: optional project-relative output for a new draft; verify: required reviewed version 1 receipt path."),
+			selectorsPath: stringSchema("prepare only: optional project-relative JSON evidence selector map."),
+			checks: {
+				type: "array",
+				items: stringSchema("Explicit local evidence command for verify --check"),
+				description: "verify only: commands explicitly authorized for local execution in the project root. Commands embedded in receipts are never executed.",
+			},
 			sourceReviewed: { type: "boolean", description: "Required true for record only after reading/classifying the source document." },
-			evidenceReviewed: { type: "boolean", description: "Required true for verify/relate only after reviewing concrete primary source + relevant code/tests/evidence." },
+			evidenceReviewed: { type: "boolean", description: "Required true for verify/relate only after reviewing concrete primary source + relevant code/tests/evidence; prepare alone is never verification." },
 			metadataOnlyConfirmed: { type: "boolean", description: "Required true for remove; confirms only idx metadata is removed and the source file stays untouched." },
 			...outputProperties,
 			...(profile === "native-compact" ? {

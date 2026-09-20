@@ -46,10 +46,24 @@ Read/query actions:
 - `impact` — review known and uncovered contract impact for this task's changed
   paths (preferred) or a Git base fallback.
 
+Verification uses an explicit receipt lifecycle. `prepare` returns or writes an
+unaccepted version 1 receipt draft. Review and complete that draft against the
+final source, relation map, code, tests, and limitations before passing its path
+to `verify`. Optional `checks` are the only commands locally executed by verify;
+commands imported in a receipt are attestations and are never executed.
+
 Metadata mutation actions are explicit: `record`, `relate`, `verify`, and
 `remove`. They do not edit primary documents. The wrapper requires a source
 review acknowledgement before `record`, concrete semantic evidence review before
-`relate`/`verify`, and an explicit metadata-only acknowledgement before `remove`.
+`relate`/`verify`, a reviewed receipt path before `verify`, and an explicit
+metadata-only acknowledgement before `remove`.
+
+The compact wrapper does not expose every `idx wiki` maintenance subcommand.
+Use the shell with the project root as `cwd` for durable review obligations
+(`idx wiki review collect/list/resolve`), the deterministic gate
+(`idx wiki check`), and optional portable declarations (`idx wiki manifest`).
+Manifests declare metadata and relations; they never carry verification receipts
+or baselines.
 
 For a **material behavior-changing implementation** in repo-aware mode, the
 model-facing contract is:
@@ -59,12 +73,22 @@ model-facing contract is:
    If no suitable primary contract exists, create a focused spec with the normal
    Edit/Write/`apply_patch` tools before recording its metadata.
 3. After implementation, run task-scoped `repo_knowledge` `impact` on the files
-   changed by this task; review uncovered paths and new/moved documents.
+   changed by this task; review uncovered paths and new/moved documents. Persist
+   obligations with `idx wiki review collect <paths...> --scope <task>` when the
+   decision must survive the session, resolve each with reviewer/rationale/evidence,
+   and use `idx wiki check <paths...> --scope <task>` as the CI gate.
 4. Repair only evidence-backed relations. Similarity or graph proximity alone
    never authorizes a durable relation, and a reviewed no-impact result is valid.
-5. `record` means classified/indexed, **not verified**. Run `verify` only after
-   reading the primary source and checking relevant code/tests/evidence. Changed
-   code never automatically rewrites spec semantics.
+5. `record` means classified/indexed, **not verified**. Run `prepare`, perform a
+   substantive review, complete the receipt, and only then run `verify` with
+   `receiptPath`. Preparation alone never verifies. Changed code never
+   automatically rewrites spec semantics.
+
+Freshness reports exact hash-bound review state, not semantic truth. Retrieval is
+bounded to indexed content: output may be truncated, hybrid mode may degrade with
+diagnostics, and an empty result does not prove that no contract exists. The
+knowledge workflow has no hidden generative LLM judge; semantic decisions remain
+the reviewer's responsibility.
 
 Mechanical refactors, typo/formatting edits, exact renames, and other changes
 that do not alter project behavior do not require this knowledge-maintenance

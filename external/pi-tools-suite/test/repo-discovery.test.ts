@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -111,7 +111,11 @@ describe("repo discovery output truncation", () => {
 
 	test("repo_knowledge maps compact read actions and guards semantic mutations", async () => {
 		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-knowledge-actions-"));
+		const outsideRoot = mkdtempSync(path.join(tmpdir(), "repo-knowledge-outside-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
+		mkdirSync(path.join(projectRoot, "artifacts"));
+		symlinkSync(outsideRoot, path.join(projectRoot, "outside-link"));
+		symlinkSync(path.join(outsideRoot, "missing"), path.join(projectRoot, "dangling-outside-link"));
 		const binDir = path.join(projectRoot, "bin");
 		mkdirSync(binDir);
 		const idxPath = path.join(binDir, "idx");
@@ -149,16 +153,51 @@ describe("repo discovery output truncation", () => {
 				"wiki", "impact", "src/session.ts", "src/refresh-worker.ts", "--semantic-limit", "5",
 			]);
 
+			const prepare = await knowledge.execute("prepare", {
+				action: "prepare",
+				path: "docs/session.md",
+				selectorsPath: "artifacts/session-selectors.json",
+				receiptPath: "artifacts/session-receipt.json",
+			}, undefined, undefined, { cwd: projectRoot });
+			expect(prepare.isError).toBe(false);
+			expect(prepare.details?.mutating).toBe(true);
+			expect(calls[2]).toEqual([
+				"wiki", "prepare", "--path", "docs/session.md", "--selectors", "artifacts/session-selectors.json", "--output", "artifacts/session-receipt.json",
+			]);
+
 			for (const guarded of [
 				{ action: "record", path: "docs/session.md", classification: "spec", behaviorType: "as-is", lifecycle: "active" },
 				{ action: "verify", path: "docs/session.md" },
+				{ action: "verify", path: "docs/session.md", receiptPath: "artifacts/session-receipt.json" },
+				{ action: "verify", path: "docs/session.md", receiptPath: "/tmp/session-receipt.json", evidenceReviewed: true },
+				{ action: "verify", path: "docs/session.md", receiptPath: "C:session-receipt.json", evidenceReviewed: true },
+				{ action: "verify", path: "docs/session.md", receiptPath: "C:\\temp\\session-receipt.json", evidenceReviewed: true },
+				{ action: "verify", path: "docs/session.md", receiptPath: "\\\\server\\share\\session-receipt.json", evidenceReviewed: true },
+				{ action: "prepare", path: "docs/session.md", receiptPath: "../session-receipt.json" },
+				{ action: "prepare", path: "docs/session.md", selectorsPath: "..\\session-selectors.json" },
+				{ action: "prepare", path: "docs/session.md", receiptPath: "outside-link/session-receipt.json" },
+				{ action: "prepare", path: "docs/session.md", receiptPath: "dangling-outside-link/session-receipt.json" },
 				{ action: "relate", path: "docs/session.md", relationAction: "add", relationKind: "implements", targetPaths: ["src/session.ts"] },
 				{ action: "remove", path: "docs/session.md" },
 			]) {
 				const result = await knowledge.execute("guard", guarded, undefined, undefined, { cwd: projectRoot });
 				expect(result.isError).toBe(true);
 			}
-			expect(calls).toHaveLength(2);
+			expect(calls).toHaveLength(3);
+
+			const verify = await knowledge.execute("verify", {
+				action: "verify",
+				path: "docs/session.md",
+				receiptPath: "artifacts/session-receipt.json",
+				checks: ["bun test test/session.test.ts", "npm run typecheck"],
+				evidenceReviewed: true,
+			}, undefined, undefined, { cwd: projectRoot });
+			expect(verify.isError).toBe(false);
+			expect(verify.details?.mutating).toBe(true);
+			expect(calls[3]).toEqual([
+				"wiki", "verify", "--path", "docs/session.md", "--receipt", "artifacts/session-receipt.json",
+				"--check", "bun test test/session.test.ts", "--check", "npm run typecheck",
+			]);
 
 			const relate = await knowledge.execute("relate", {
 				action: "relate",
@@ -170,12 +209,13 @@ describe("repo discovery output truncation", () => {
 			}, undefined, undefined, { cwd: projectRoot });
 			expect(relate.isError).toBe(false);
 			expect(relate.details?.mutating).toBe(true);
-			expect(calls[2]).toEqual([
+			expect(calls[4]).toEqual([
 				"wiki", "relate", "--path", "docs/session.md", "--add-code", "src/session.ts",
 			]);
 		} finally {
 			process.env.PATH = previousPath;
 			rmSync(projectRoot, { recursive: true, force: true });
+			rmSync(outsideRoot, { recursive: true, force: true });
 		}
 	});
 

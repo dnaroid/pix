@@ -111,11 +111,22 @@ describe("tool descriptions", () => {
 		].join("\n");
 		expect(promptText).toContain("only when idx is available and the project is indexed");
 		expect(promptText).toContain("Before a material behavior change");
-		expect(promptText).toContain("create a focused new spec");
-		expect(promptText).toContain("task's changed paths");
-		expect(promptText).toContain("record is classification, not verification");
-		expect(promptText).toContain("reviewed no-impact outcome is valid");
-		expect(promptText).toContain("changed code never auto-rewrites spec semantics");
+		expect(promptText).toContain("create a focused primary spec");
+		expect(promptText).toContain("task-scoped action=impact");
+		expect(promptText).toContain("action=record classifies metadata but never verifies semantics");
+		expect(promptText).toContain("action=prepare never verifies");
+		expect(promptText).toContain("action=verify with receiptPath");
+		expect(promptText).toContain("commands embedded in a receipt are never executed");
+		expect(promptText).toContain("reviewed no-impact is valid");
+		expect(promptText).toContain("idx wiki review collect/list/resolve");
+		expect(promptText).toContain("idx wiki check");
+		expect(promptText).toContain("manifests declare metadata/relations and never import verification");
+		expect(promptText).toContain("empty result does not prove no contract exists");
+		expect(promptText).toContain("no hidden generative LLM judge");
+		expect(promptText).toContain("changed code never rewrites spec semantics automatically");
+		for (const guideline of REPO_KNOWLEDGE_TOOL_DESCRIPTION.promptGuidelines) {
+			expect(guideline).toContain("repo_knowledge");
+		}
 
 		const claudeRepo = CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO;
 		const claudePlain = CLAUDE_ALIAS_TOOL_DESCRIPTIONS;

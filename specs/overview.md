@@ -58,6 +58,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [ui-qa-agent](./ui-qa-agent.md) | Self-contained browser/TUI/desktop UI QA agent |
 | [model-selector-fallbacks](./model-selector-fallbacks.md) | Ordered fallback arrays for singular model selectors |
 | [context-gateway](./context-gateway.md) | Context Gateway (observe-only result chain) |
+| [repo-knowledge-agent-workflow](./repo-knowledge-agent-workflow.md) | Agent workflow for indexed retrieval, receipt verification, and durable knowledge review |
 | [todo-repo-knowledge-finalization](./todo-repo-knowledge-finalization.md) | Todo repo knowledge finalization reminder |
 
 **TUI renderer (`src/`)**
