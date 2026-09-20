@@ -111,7 +111,7 @@ describe("desktop session subagents", () => {
 
   it("formats only the latest activity label", () => {
     expect(formatSessionSubagentActivity({ label: "Grep", at: "2026-01-01T00:01:02Z" })).toBe("Grep");
-    expect(formatSessionSubagentActivity({ label: " Thinking ", at: "invalid" })).toBe("Thinking");
+    expect(formatSessionSubagentActivity({ label: " Thinking ", at: "invalid" })).toBe("thinking");
     expect(formatSessionSubagentActivity(undefined)).toBeUndefined();
   });
 

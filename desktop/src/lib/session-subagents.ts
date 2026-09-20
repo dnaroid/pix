@@ -114,7 +114,9 @@ export function formatSessionSubagentActivity(
   activity: SessionSubagentActivity | undefined,
 ): string | undefined {
   if (!activity) return undefined;
-  return activity.label.trim() || undefined;
+  const label = activity.label.trim();
+  if (!label) return undefined;
+  return label.toLowerCase() === "thinking" ? "thinking" : label;
 }
 
 function formatSessionSubagentDurationSince(value: string, now: number): string | undefined {

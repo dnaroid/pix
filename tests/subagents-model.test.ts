@@ -48,7 +48,7 @@ describe("subagent activity", () => {
 
 	it("formats only the activity label", () => {
 		assert.equal(formatSubagentLastActivity({ label: "Grep", at: "2026-09-08T12:00:00.000Z" }), "Grep");
-		assert.equal(formatSubagentLastActivity({ label: " Thinking ", at: "invalid" }), "Thinking");
+		assert.equal(formatSubagentLastActivity({ label: " Thinking ", at: "invalid" }), "thinking");
 		assert.equal(formatSubagentLastActivity(undefined), undefined);
 	});
 
