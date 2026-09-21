@@ -8,6 +8,10 @@
   cancellation, teardown, and shared mutable state.
 - Add deterministic tests for dangerous concurrency/lifecycle cases when the
   change is race-prone.
+- Put agent/review/verification scratch output under `.pi/artifacts/` (or
+  another appropriate `.pi/` subdirectory). Do not create a repository-root
+  `artifacts/` directory. The existing `.artifacts/` paths are reserved for
+  build/release tooling.
 - Before changing DCP full-history reads or retry validation, read
   `specs/dcp-statistics.md#lazy-tail-retry-invariant`. Lazy `getBranch()` is a
   partial JSONL presentation tail, not pure ancestry. Keep both the positive
