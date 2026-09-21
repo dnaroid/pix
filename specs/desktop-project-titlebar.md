@@ -18,10 +18,18 @@ without blocking desktop interactions.
 
 ## Behavior
 
-- The window title bar does not contain a project selector. On macOS the webview
-  still extends into the native title bar and reserves the existing traffic-light
-  inset; conversation tabs remain in the 36 px header and empty title-bar space
-  remains draggable.
+- The window title bar does not contain a project selector. Instead, immediately
+  after the platform/native-control inset it shows a compact non-interactive
+  colored square with a two-letter abbreviation for the active project before
+  the workbench tabs. The square fill follows the same project identity color as
+  the status-bar project name and recent-project folders, including
+  `.pi/workspace.jsonc` overrides and
+  the deterministic full-path fallback hue. On macOS the webview still extends
+  into the native title bar and reserves the existing traffic-light inset;
+  conversation tabs remain in the 36 px header and empty title-bar space remains
+  draggable.
+  Hovering the square shows the full project name; it does not expose the full
+  workspace path in that titlebar tooltip.
 - The `Project` sidebar view starts with a compact project switcher above the file
   explorer. It shows the active project, keeps an explicit chevron affordance at
   the right edge of the row, and opens an inline menu of at most 20 recent projects.
@@ -59,14 +67,15 @@ without blocking desktop interactions.
   can close it through the sidebar component handle.
 - The Project activity-rail icon is neutral and follows the same active/muted
   foreground treatment as the other Activity Bar icons. The active project name
-  in the bottom status bar uses the project identity color instead, while its Git
-  branch suffix remains muted. The Project switcher's active row is text-only
-  before its chevron (no leading folder icon) and stays neutral;
+  in the bottom status bar and the two-letter titlebar badge use the project
+  identity color instead, while its Git branch suffix remains muted. The Project
+  switcher's active row is text-only before its chevron (no leading folder icon)
+  and stays neutral;
   recent-project folders remain identity-colored so different projects stay easy
   to distinguish.
 - Hovering the compact project/branch identity in the bottom status bar shows
   the full active workspace path.
-- The status-bar project name and recent-project folders use a stable fallback hue
+- The titlebar badge, status-bar project name, and recent-project folders use a stable fallback hue
   derived from the normalized full project path rather than only its basename.
   Windows drive and UNC identities are compared case-insensitively.
 - A project may override the fallback identity color in `.pi/workspace.jsonc`:
@@ -152,12 +161,13 @@ without blocking desktop interactions.
 - `desktop/src/lib/project-colors.ts`
 - `desktop/src/app/project-workspace.test.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
+- `desktop/src/components/DesktopTitlebar.svelte`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification
 
 - `desktop/src/lib/recent-projects.test.ts` covers normalized full-path fallback
-  identity.
+  identity and two-letter project abbreviations.
 - `desktop/src/app/project-workspace.test.ts` covers URL precedence over stale
   storage and retaining the URL workspace when storage fails; Rust tests cover
   QA workspace validation and URL query encoding/replacement.
@@ -172,8 +182,10 @@ without blocking desktop interactions.
 - `desktop/src/components/WorkspaceSidebar.test.ts` verifies that the Activity
   Bar project icon stays neutral, `ProjectSwitcher.test.ts` verifies that the
   active Project-switcher row stays neutral, and
-  `DesktopVisualRegressions.test.ts` verifies that the status-bar project label
-  owns the identity color while the Git branch remains muted.
+  `WorkbenchTabs.test.ts` verifies the titlebar badge appears before tabs and is
+  wired to project identity color, while `DesktopVisualRegressions.test.ts`
+  verifies that the status-bar project label owns the identity color while the
+  Git branch remains muted.
 - Rust tests in `desktop/src-tauri/src/lib.rs` cover atomic workspace-config
   replacement and stale compare-and-swap rejection.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and

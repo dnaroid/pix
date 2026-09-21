@@ -635,7 +635,12 @@
 <svelte:head><title>Pix Desktop</title></svelte:head>
 
 <div class="grid h-full grid-rows-[36px_minmax(0,1fr)_28px] bg-background text-foreground">
-  <DesktopTitlebar {isMacOS} workbench={titlebarViewModel.workbench} selector={titlebarViewModel.selector} />
+  <DesktopTitlebar
+    {isMacOS}
+    project={titlebarViewModel.project}
+    workbench={titlebarViewModel.workbench}
+    selector={titlebarViewModel.selector}
+  />
 
   <div class="flex min-h-0 min-w-0">
     <DesktopSidebar bind:instance={workspaceSidebar} props={sidebarViewModel.props} />

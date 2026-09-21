@@ -3,6 +3,7 @@ import {
   MAX_RECENT_PROJECTS,
   buildRecentProjects,
   parseRecentProjects,
+  projectAbbreviation,
   projectWindowRoute,
   projectWindowUrl,
   projectFolderHue,
@@ -29,6 +30,13 @@ describe("recent projects", () => {
     expect(projectName("/projects/pix")).toBe("pix");
     expect(projectName("C:\\projects\\pix")).toBe("pix");
     expect(projectName("\\\\server\\projects\\pix")).toBe("pix");
+  });
+
+  it("derives compact two-letter project abbreviations", () => {
+    expect(projectAbbreviation("/projects/pi-ui-extend")).toBe("PI");
+    expect(projectAbbreviation("/projects/my-project")).toBe("MP");
+    expect(projectAbbreviation("/projects/pix")).toBe("PI");
+    expect(projectAbbreviation("/projects/x")).toBe("XX");
   });
 
   it("shows the containing directory without repeating the project basename", () => {

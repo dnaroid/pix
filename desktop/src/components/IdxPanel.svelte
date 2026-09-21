@@ -182,7 +182,7 @@
       aria-label="Refresh IDX state"
       onclick={refresh}
       disabled={loading || overviewRefreshRunning || installingIdx}
-    ><RefreshCw class={["h-3.5 w-3.5", loading || overviewRefreshRunning ? "animate-spin" : ""]} aria-hidden="true" /></button>
+    ><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
   </div>
 
   <div class="flex h-8 items-stretch border-b border-sidebar-border bg-chrome px-1.5" role="tablist" aria-label="IDX views">

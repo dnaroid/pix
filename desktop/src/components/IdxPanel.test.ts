@@ -17,4 +17,20 @@ describe("IdxPanel managed installation", () => {
     expect(runtimeSource).toContain("await refreshOverview()");
     expect(runtimeSource).toContain("get installingIdx() { return installingIdx; }");
   });
+
+  it("keeps periodic overview polling spaced after completion and visually quiet", () => {
+    expect(runtimeSource).toContain('import { startCompletionSpacedPoll } from "../lib/completion-spaced-poll"');
+    expect(runtimeSource).toContain("const stopOverviewPoll = startCompletionSpacedPoll({");
+    expect(runtimeSource).toContain("task: refreshOverview");
+    expect(runtimeSource).toContain("stopOverviewPoll();");
+    expect(runtimeSource).not.toContain("window.setInterval(() => {");
+    expect(panelSource).toContain('loading ? "animate-spin" : ""');
+    expect(panelSource).not.toContain('loading || overviewRefreshRunning ? "animate-spin" : ""');
+  });
+
+  it("does not restart the full workspace load when the same workspace prop is invalidated again", () => {
+    expect(runtimeSource).toContain("let observedWorkspace: string | undefined;");
+    expect(runtimeSource).toContain("if (requestWorkspace === observedWorkspace) return;");
+    expect(runtimeSource).toContain("observedWorkspace = requestWorkspace;");
+  });
 });

@@ -13,6 +13,7 @@ import {
   type IdxOverview,
 } from "../lib/idx";
 import { installManagedIdx } from "../lib/desktop-bootstrap";
+import { startCompletionSpacedPoll } from "../lib/completion-spaced-poll";
 
 interface IdxPanelRuntimeControllerOptions {
   readonly workspace: () => string;
@@ -31,9 +32,12 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
   let disposed = false;
   let overviewRefreshQueued = false;
   let overviewRefreshGeneration = 0;
+  let observedWorkspace: string | undefined;
 
   $effect(() => {
     const requestWorkspace = options.workspace();
+    if (requestWorkspace === observedWorkspace) return;
+    observedWorkspace = requestWorkspace;
     const generation = ++loadGeneration;
     queueMicrotask(() => {
       if (!disposed && generation === loadGeneration) void loadWorkspace(requestWorkspace, generation);
@@ -174,9 +178,15 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
 
   function start(refreshBlocked: () => boolean = () => false): () => void {
     const unlisteners: Array<() => void> = [];
-    const refreshTimer = window.setInterval(() => {
-      if (!loading && !overviewRefreshRunning && !refreshBlocked() && !runningOperation()) void refreshOverview();
-    }, 30_000);
+    const stopOverviewPoll = startCompletionSpacedPoll({
+      delayMs: 30_000,
+      shouldRun: () => !disposed
+        && !loading
+        && !overviewRefreshRunning
+        && !refreshBlocked()
+        && !runningOperation(),
+      task: refreshOverview,
+    });
     void listen<IdxOperationOutputEvent>(IDX_OPERATION_OUTPUT_EVENT, ({ payload }) => {
       if (disposed) return;
       operations = operations.map((operation) => operation.id === payload.operationId
@@ -195,7 +205,7 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
       loadGeneration += 1;
       overviewRefreshGeneration += 1;
       overviewRefreshQueued = false;
-      window.clearInterval(refreshTimer);
+      stopOverviewPoll();
       for (const unlisten of unlisteners) unlisten();
     };
   }

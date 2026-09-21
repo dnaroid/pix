@@ -93,7 +93,7 @@
       <section class="space-y-2" aria-labelledby="project-color-heading">
         <div>
           <h2 id="project-color-heading" class="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Identity color</h2>
-          <p class="mt-1 text-xs leading-4 text-muted-foreground">Used by the status-bar project name and recent-project folders.</p>
+          <p class="mt-1 text-xs leading-4 text-muted-foreground">Used by the titlebar badge, status-bar project name, and recent-project folders.</p>
         </div>
 
         <div class="grid grid-cols-2 gap-2">

@@ -7,6 +7,28 @@ export function projectName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? "workspace";
 }
 
+/** Compact two-letter identity used in Desktop application chrome. */
+export function projectAbbreviation(path: string): string {
+  const name = projectName(path).normalize("NFKC");
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 0) return "WS";
+
+  const characters = (value: string) => Array.from(value);
+  if (words.length === 1) {
+    const letters = characters(words[0]!);
+    return `${letters[0] ?? "W"}${letters[1] ?? letters[0] ?? "S"}`.toUpperCase();
+  }
+
+  // A short leading token in a longer technical project name is commonly the
+  // project's own acronym (for example "pi-ui-extend" -> "PI").
+  const firstWord = characters(words[0]!);
+  if (words.length >= 3 && firstWord.length === 2) return firstWord.join("").toUpperCase();
+
+  const first = firstWord[0] ?? "W";
+  const second = characters(words[1]!)[0] ?? first;
+  return `${first}${second}`.toUpperCase();
+}
+
 /** Parent directory shown under the project name, without repeating the basename. */
 export function projectParentPath(path: string): string {
   let value = path;

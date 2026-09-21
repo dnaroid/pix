@@ -1,11 +1,14 @@
 import type { ComponentProps } from "svelte";
 import DesktopTitlebar from "../components/DesktopTitlebar.svelte";
+import { projectAbbreviation, projectFolderHue, projectName } from "../lib/recent-projects";
 
 type TitlebarProps = ComponentProps<typeof DesktopTitlebar>;
 type WorkbenchProps = TitlebarProps["workbench"];
 type SelectorProps = NonNullable<TitlebarProps["selector"]>;
 
 export function createDesktopTitlebarViewModel(options: {
+  workspace: () => string;
+  workspaceColor: () => string | undefined;
   newSessionShortcut: () => WorkbenchProps["newSessionShortcut"];
   tabs: () => WorkbenchProps["tabs"];
   activeId: () => WorkbenchProps["activeId"];
@@ -24,6 +27,18 @@ export function createDesktopTitlebarViewModel(options: {
   selectSession: SelectorProps["onSelect"];
   closeSelector: SelectorProps["onClose"];
 }) {
+  const project = $derived.by<TitlebarProps["project"]>(() => {
+    const workspace = options.workspace();
+    if (!workspace) return null;
+    return {
+      path: workspace,
+      name: projectName(workspace),
+      abbreviation: projectAbbreviation(workspace),
+      hue: projectFolderHue(workspace),
+      color: options.workspaceColor(),
+    };
+  });
+
   const workbench = $derived.by<WorkbenchProps>(() => ({
     tabs: options.tabs(),
     activeId: options.activeId(),
@@ -54,6 +69,7 @@ export function createDesktopTitlebarViewModel(options: {
   });
 
   return {
+    get project() { return project; },
     get workbench() { return workbench; },
     get selector() { return selector; },
   };

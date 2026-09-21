@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import navigationViewModelSource from "../app/desktop-navigation-view-model-services.ts?raw";
 import titlebarViewModelSource from "../app/desktop-titlebar-view-model.svelte.ts?raw";
 import sessionTabClosureSource from "../app/session-tab-closure.ts?raw";
 import workbenchControllerSource from "../app/workbench-controller.ts?raw";
@@ -25,6 +26,19 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(titlebarSource).toContain("<WorkbenchTabs {...workbench} />");
     expect(titlebarViewModelSource).toContain("tabs: options.tabs()");
     expect(titlebarSource).not.toContain("<WorkspaceEditorTabs");
+  });
+
+  it("shows the active project's colored two-letter identity before the workbench tabs", () => {
+    expect(titlebarSource).toContain("data-project-badge");
+    expect(titlebarSource).toContain("{project.abbreviation}");
+    expect(titlebarSource.indexOf("data-project-badge")).toBeLessThan(titlebarSource.indexOf("<WorkbenchTabs {...workbench} />"));
+    expect(titlebarSource).toContain("style:--project-titlebar-color={project.color}");
+    expect(titlebarSource).toContain("style:--project-titlebar-hue={project.hue}");
+    expect(titlebarSource).toContain("background-color: var(--project-titlebar-color");
+    expect(titlebarSource).toContain("title={project.name}");
+    expect(titlebarSource).not.toContain("title={project.path}");
+    expect(titlebarViewModelSource).toContain("projectAbbreviation(workspace)");
+    expect(navigationViewModelSource).toContain("projectColors.get(options.workspace())");
   });
 
   it("keeps pointer close outside the normal Tab sequence and supports Delete plus middle-click close", () => {
