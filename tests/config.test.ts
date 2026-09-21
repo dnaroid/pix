@@ -55,6 +55,13 @@ describe("config helpers", () => {
 		const parsedCreated = parse(created) as {
 			$schema?: string;
 			defaultModel?: { modelRef?: string; fallbackModels?: string[]; thinking?: string };
+			modelRouting?: {
+				enabled?: boolean;
+				modelRef?: string;
+				fallbackModels?: string[];
+				defaultTier?: string;
+				tiers?: Array<{ id?: string; modelRef?: string; thinking?: string }>;
+			};
 			promptEnhancer?: { modelRef?: string; fallbackModels?: string[] };
 			autocomplete?: { modelRef?: string; fallbackModels?: string[] };
 			desktop?: {
@@ -75,6 +82,22 @@ describe("config helpers", () => {
 			fallbackModels: [],
 			thinking: "medium",
 		});
+		assert.equal(parsedCreated.modelRouting?.enabled, false);
+		assert.equal(parsedCreated.modelRouting?.modelRef, "openrouter/~typesafe/jev-latest");
+		assert.deepEqual(parsedCreated.modelRouting?.fallbackModels, []);
+		assert.equal(parsedCreated.modelRouting?.defaultTier, "standard");
+		assert.deepEqual(parsedCreated.modelRouting?.tiers?.map((tier) => [tier.id, tier.thinking]), [
+			["simple", "minimal"],
+			["standard", "medium"],
+			["complex", "high"],
+			["expert", "xhigh"],
+		]);
+		assert.deepEqual(parsedCreated.modelRouting?.tiers?.map((tier) => tier.modelRef), [
+			"openrouter/~openai/gpt-luna-latest",
+			"openrouter/~openai/gpt-terra-latest",
+			"openrouter/~openai/gpt-sol-latest",
+			"openrouter/~openai/gpt-astra-latest",
+		]);
 		assert.deepEqual(parsedCreated.promptEnhancer, {
 			modelRef: "openai-codex/gpt-5.6-luna",
 			fallbackModels: [],
@@ -118,6 +141,9 @@ describe("config helpers", () => {
 		assert.equal(config.autocomplete.maxPromptTokens, 1200);
 		assert.equal(config.autocomplete.includeRecentMessages, 0);
 		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-5.6-sol:medium");
+		assert.equal(config.modelRouting.enabled, false);
+		assert.equal(config.modelRouting.modelRef, "openrouter/~typesafe/jev-latest");
+		assert.equal(config.modelRouting.defaultTier, "standard");
 		assert.equal(config.modelColors.rules["zai/*"], "success");
 		assert.equal(config.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);
@@ -211,6 +237,16 @@ describe("config helpers", () => {
 		mkdirSync(testConfigDir, { recursive: true });
 		writeFileSync(testConfigPath, `{
 			"defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
+			"modelRouting": {
+				"enabled": true,
+				"modelRef": "openrouter/~typesafe/jev-latest",
+				"fallbackModels": ["openrouter/router-fallback"],
+				"defaultTier": "standard",
+				"tiers": [
+					{ "id": "standard", "description": "Normal work.", "modelRef": "openrouter/~openai/gpt-terra-latest", "thinking": "medium" },
+					{ "id": "complex", "description": "Complex work.", "modelRef": "openrouter/~openai/gpt-sol-latest", "thinking": "high" }
+				]
+			},
 			"autocomplete": { "modelRef": "zai/global-complete" },
 			"dictation": { "apiKey": "dg-user-key" },
 			"maxProjectSessions": 50,
@@ -220,6 +256,7 @@ describe("config helpers", () => {
 		mkdirSync(join(projectDir, ".pi"), { recursive: true });
 		writeFileSync(getProjectPixConfigPath(projectDir), `{
 			"ignoreContextFiles": true,
+			"modelRouting": { "defaultTier": "complex" },
 			"autocomplete": { "modelRef": "zai/project-complete" },
 			"dictation": { "apiKey": "dg-project-key", "model": "nova-3" }
 		}`);
@@ -228,6 +265,11 @@ describe("config helpers", () => {
 
 		assert.equal(getProjectPixConfigPath(projectDir), join(projectDir, ".pi", "pix.jsonc"));
 		assert.equal(resolveDefaultModelRef(loaded), "openai-codex/gpt-5.5:medium");
+		assert.equal(loaded.modelRouting.enabled, true);
+		assert.equal(loaded.modelRouting.modelRef, "openrouter/~typesafe/jev-latest");
+		assert.deepEqual(loaded.modelRouting.fallbackModels, ["openrouter/router-fallback"]);
+		assert.equal(loaded.modelRouting.defaultTier, "complex");
+		assert.deepEqual(loaded.modelRouting.tiers.map((tier) => tier.id), ["standard", "complex"]);
 		assert.equal(loaded.autocomplete.modelRef, "zai/project-complete");
 		assert.equal(loaded.ignoreContextFiles, true);
 		assert.equal(loaded.maxProjectSessions, 50);

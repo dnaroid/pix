@@ -368,6 +368,7 @@
     draftConfigAvailable: () => draftConfigOptions.length > 0,
     refreshDraftConfig,
     draftModelOverride: () => modelConfig.draftModelOverride,
+    routeDraftModel: modelConfig.routeDraftModel,
     clearPrompt: () => promptText = "",
     invalidateAttachmentDraft,
     focusComposer: () => promptComposer?.focus(),

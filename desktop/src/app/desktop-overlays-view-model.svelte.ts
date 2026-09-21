@@ -37,7 +37,7 @@ export function createDesktopOverlaysViewModel(options: {
         onClose: () => options.commands.setPicker(null),
       } : null,
       modelThinking: options.modelConfig.pickerOpen ? {
-        configOptions: options.displayedConfigOptions(),
+        configOptions: options.modelConfig.pickerConfigOptions(options.displayedConfigOptions()),
         visibleModelRefs: options.preferences.visibleModelRefs,
         rememberedThinkingByModel: options.preferences.rememberedThinkingByModel,
         disabled: !options.canUseSession()

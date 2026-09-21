@@ -5,9 +5,13 @@ import {
 	PIX_GIT_ASSIST_METHOD,
 	PIX_CLEAR_TODOS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
+	PIX_MODEL_ROUTING_STATUS_METHOD,
+	PIX_MODEL_ROUTE_METHOD,
 	PIX_REGISTRY_ACTION_METHOD,
 	PIX_TOOL_RESULT_METHOD,
 	parseDesktopDraftConfigRequest,
+	parseDesktopModelRoutingStatusRequest,
+	parseDesktopModelRouteRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopRegistryActionRequest,
 	parseDesktopToolResultRequest,
@@ -32,6 +36,34 @@ test("desktop draft config is workspace-scoped and does not require a session id
 	assert.throws(() => parseDesktopDraftConfigRequest({ cwd: "" }));
 	assert.throws(() => parseDesktopDraftConfigRequest({ cwd: "/workspace", refreshModelUsage: "yes" }));
 	assert.throws(() => parseDesktopDraftConfigRequest({}));
+});
+
+test("desktop model routing is workspace-scoped and validates first-prompt metadata", () => {
+	assert.equal(PIX_MODEL_ROUTING_STATUS_METHOD, "pix/model/routing_status");
+	assert.deepEqual(parseDesktopModelRoutingStatusRequest({ cwd: "/workspace" }), { cwd: "/workspace" });
+	assert.throws(() => parseDesktopModelRoutingStatusRequest({ cwd: "" }));
+	assert.equal(PIX_MODEL_ROUTE_METHOD, "pix/model/route");
+	assert.deepEqual(parseDesktopModelRouteRequest({
+		cwd: "/workspace",
+		prompt: "Implement the subsystem",
+		attachmentCount: 2,
+	}), {
+		cwd: "/workspace",
+		prompt: "Implement the subsystem",
+		attachmentCount: 2,
+	});
+	assert.deepEqual(parseDesktopModelRouteRequest({
+		cwd: "/workspace",
+		prompt: "",
+		attachmentCount: 1.9,
+	}), {
+		cwd: "/workspace",
+		prompt: "",
+		attachmentCount: 1,
+	});
+	assert.throws(() => parseDesktopModelRouteRequest({ cwd: "", prompt: "x", attachmentCount: 0 }));
+	assert.throws(() => parseDesktopModelRouteRequest({ cwd: "/workspace", prompt: "x", attachmentCount: -1 }));
+	assert.throws(() => parseDesktopModelRouteRequest({ cwd: "/workspace", prompt: "x", attachmentCount: "1" }));
 });
 
 test("desktop tool-result lazy route is session/tool-call scoped and drops arbitrary path-like extras", () => {

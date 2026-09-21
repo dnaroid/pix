@@ -30,6 +30,7 @@ type DesktopSessionTransitionServicesOptions = {
   draftConfigAvailable: () => boolean;
   refreshDraftConfig: () => void | Promise<void>;
   draftModelOverride: () => DraftModelOverride;
+  routeDraftModel: (prompt: string, attachmentCount: number, signal?: AbortSignal) => Promise<DraftModelOverride>;
   clearPrompt: () => void;
   invalidateAttachmentDraft: () => void;
   focusComposer: () => void | Promise<void>;
@@ -65,6 +66,7 @@ export function createDesktopSessionTransitionServices(
     draftConfigAvailable: options.draftConfigAvailable,
     refreshDraftConfig: options.refreshDraftConfig,
     draftModelOverride: options.draftModelOverride,
+    routeDraftModel: options.routeDraftModel,
     clearPrompt: options.clearPrompt,
     invalidateAttachmentDraft: options.invalidateAttachmentDraft,
     focusComposer: options.focusComposer,

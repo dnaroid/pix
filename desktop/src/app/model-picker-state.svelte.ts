@@ -29,6 +29,7 @@ export function createModelPickerState(options: ModelConfigOptions, draftConfig:
     const activeSessionId = options.activeSessionId();
     options.closeCommandPicker();
     if (draftOwner && draftConfig.configOptions.length === 0) await draftConfig.refresh();
+    else if (!draftOwner) await draftConfig.refreshRoutingAvailability();
     await options.preferences.waitForVisibleModelsSave();
     if (
       options.operationRunning()

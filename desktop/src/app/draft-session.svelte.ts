@@ -23,6 +23,7 @@ type DraftSessionOptions = {
   draftConfigAvailable: () => boolean;
   refreshDraftConfig: () => void | Promise<void>;
   draftModelOverride: () => DraftModelOverride;
+  routeDraftModel: (prompt: string, attachmentCount: number, signal?: AbortSignal) => Promise<DraftModelOverride>;
   clearPrompt: () => void;
   invalidateAttachmentDraft: () => void;
   focusComposer: () => void | Promise<void>;
@@ -45,9 +46,12 @@ export function createDraftSession(options: DraftSessionOptions) {
   let touched = $state(false);
   let materializing = $state(false);
   let materializationGeneration = 0;
+  let materializationController: AbortController | null = null;
 
   function invalidateMaterialization(): void {
     materializationGeneration += 1;
+    materializationController?.abort();
+    materializationController = null;
     materializing = false;
   }
 
@@ -85,7 +89,7 @@ export function createDraftSession(options: DraftSessionOptions) {
     await options.focusComposer();
   }
 
-  async function materialize(): Promise<string | null> {
+  async function materialize(prompt?: string, attachmentCount = 0): Promise<string | null> {
     if (!active) return options.activeSessionId();
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
@@ -93,6 +97,9 @@ export function createDraftSession(options: DraftSessionOptions) {
       return null;
     }
     const generation = ++materializationGeneration;
+    const controller = new AbortController();
+    materializationController?.abort();
+    materializationController = controller;
     let createdSessionId: string | null = null;
     materializing = true;
     options.setErrorMessage(null);
@@ -109,7 +116,14 @@ export function createDraftSession(options: DraftSessionOptions) {
     };
 
     try {
-      const created = await requestClient.newSession(requestWorkspace, options.draftModelOverride() ?? undefined);
+      const routed = prompt !== undefined
+        ? await options.routeDraftModel(prompt, attachmentCount, controller.signal)
+        : null;
+      if (abandoned() || controller.signal.aborted) return null;
+      const created = await requestClient.newSession(
+        requestWorkspace,
+        routed ?? options.draftModelOverride() ?? undefined,
+      );
       createdSessionId = created.sessionId;
       if (abandoned()) {
         discardCreatedSession(created.sessionId);
@@ -146,7 +160,10 @@ export function createDraftSession(options: DraftSessionOptions) {
       ) options.reportError(error);
       return null;
     } finally {
-      if (generation === materializationGeneration) materializing = false;
+      if (generation === materializationGeneration) {
+        if (materializationController === controller) materializationController = null;
+        materializing = false;
+      }
     }
   }
 

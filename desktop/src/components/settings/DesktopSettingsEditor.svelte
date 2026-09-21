@@ -12,6 +12,7 @@
   import type { ModelThinkingModel } from "../../lib/model-thinking";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
   import SettingsModelList from "./SettingsModelList.svelte";
+  import SettingsModelRoutingTiers, { type ModelRoutingTierDraft } from "./SettingsModelRoutingTiers.svelte";
   import SettingsModelSelect from "./SettingsModelSelect.svelte";
   import SettingsModelVisibility from "./SettingsModelVisibility.svelte";
   import SettingsNumberInput from "./SettingsNumberInput.svelte";
@@ -85,6 +86,30 @@
         keywords: [model.name, `${model.provider} ${model.modelId}`, level],
       })),
   ]));
+  const routingTiers = $derived.by<ModelRoutingTierDraft[]>(() => {
+    const value = effective(["modelRouting", "tiers"]);
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((entry): ModelRoutingTierDraft[] => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const tier = entry as Record<string, unknown>;
+      if (
+        typeof tier.id !== "string"
+        || typeof tier.description !== "string"
+        || typeof tier.modelRef !== "string"
+        || typeof tier.thinking !== "string"
+      ) return [];
+      return [{
+        id: tier.id,
+        description: tier.description,
+        modelRef: tier.modelRef,
+        thinking: tier.thinking,
+      }];
+    });
+  });
+  const routingTierOptions = $derived(routingTiers.map((tier) => ({
+    value: tier.id,
+    label: tier.id,
+  })));
 
   function has(path: readonly string[]): boolean {
     return settingsHasValue(parsed, path);
@@ -188,6 +213,74 @@
       onReset={() => reset(["defaultModel", "fallbackModels"])}
     >
       <SettingsModelList value={list(["defaultModel", "fallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["defaultModel", "fallbackModels"], value)} />
+    </SettingsFieldRow>
+
+    <SettingsFieldRow
+      label="Automatic model routing"
+      description="Expose Auto for new drafts and route the first real prompt to a semantic task tier before the session is created."
+      explicit={has(["modelRouting", "enabled"])}
+      defaultLabel={defaultLabel(["modelRouting", "enabled"])}
+      onReset={() => reset(["modelRouting", "enabled"])}
+    >
+      <SettingsSwitch value={bool(["modelRouting", "enabled"])} onChange={(value) => set(["modelRouting", "enabled"], value)} />
+    </SettingsFieldRow>
+
+    <SettingsFieldRow
+      label="Router model"
+      description="Short classification call used only by Auto. The default is OpenRouter Jev Latest."
+      explicit={has(["modelRouting", "modelRef"])}
+      defaultLabel={defaultLabel(["modelRouting", "modelRef"])}
+      onReset={() => reset(["modelRouting", "modelRef"])}
+    >
+      <SettingsModelSelect
+        value={text(["modelRouting", "modelRef"])}
+        {models}
+        ariaLabel="Router model"
+        onChange={(value) => set(["modelRouting", "modelRef"], value)}
+      />
+    </SettingsFieldRow>
+
+    <SettingsFieldRow
+      label="Router fallbacks"
+      description="Ordered models tried when the primary router is unavailable or returns no valid tier."
+      explicit={has(["modelRouting", "fallbackModels"])}
+      defaultLabel={defaultLabel(["modelRouting", "fallbackModels"])}
+      onReset={() => reset(["modelRouting", "fallbackModels"])}
+    >
+      <SettingsModelList
+        value={list(["modelRouting", "fallbackModels"])}
+        {models}
+        addLabel="Add router fallback"
+        onChange={(value) => set(["modelRouting", "fallbackModels"], value)}
+      />
+    </SettingsFieldRow>
+
+    <SettingsFieldRow
+      label="Routing fallback tier"
+      description="Deterministic tier used if every router model fails or returns an invalid choice."
+      explicit={has(["modelRouting", "defaultTier"])}
+      defaultLabel={defaultLabel(["modelRouting", "defaultTier"])}
+      onReset={() => reset(["modelRouting", "defaultTier"])}
+    >
+      <SettingsSelect
+        value={text(["modelRouting", "defaultTier"])}
+        options={routingTierOptions}
+        onChange={(value) => set(["modelRouting", "defaultTier"], value)}
+      />
+    </SettingsFieldRow>
+
+    <SettingsFieldRow
+      label="Routing tiers"
+      description="Semantic task classes available to the router. Each tier owns its target model and thinking level."
+      explicit={has(["modelRouting", "tiers"])}
+      defaultLabel={defaultLabel(["modelRouting", "tiers"])}
+      onReset={() => reset(["modelRouting", "tiers"])}
+    >
+      <SettingsModelRoutingTiers
+        value={routingTiers}
+        {models}
+        onChange={(value) => set(["modelRouting", "tiers"], value)}
+      />
     </SettingsFieldRow>
 
     <SettingsFieldRow

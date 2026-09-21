@@ -536,6 +536,11 @@ export class AppPopupMenuController {
 		if (!selected) return true;
 
 		if (selected.direct) return true;
+		if (selected.value.kind === "auto") {
+			this.host.setInput("/model");
+			this.host.render();
+			return true;
+		}
 		this.host.setInput(`/model ${selected.value.ref}:${selected.thinkingLevel}`);
 		this.host.render();
 		return true;
@@ -829,7 +834,8 @@ export class AppPopupMenuController {
 	}
 
 	private selectedModelThinkingLevels(): ThinkingLevel[] {
-		const model = this.modelMenu.selectedItem()?.value.model;
+		const selected = this.modelMenu.selectedItem()?.value;
+		const model = selected && selected.kind !== "auto" && "model" in selected ? selected.model : undefined;
 		if (!model) return ["off"];
 		const supported = getSupportedThinkingLevels(model);
 		const levels = THINKING_LEVELS.filter((level) => supported.includes(level));

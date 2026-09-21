@@ -42,7 +42,7 @@ export class AcpPixExtensions {
     cwd: string,
     selection?: DraftSessionConfig,
     refreshModelUsage = false,
-  ): Promise<{ configOptions: SessionConfigOption[]; modelUsageRefresh: RuntimeStatus["modelUsageRefresh"]; modelUsage?: RuntimeStatus["modelUsage"] }> {
+  ): Promise<{ configOptions: SessionConfigOption[]; modelUsageRefresh: RuntimeStatus["modelUsageRefresh"]; modelUsage?: RuntimeStatus["modelUsage"]; modelRoutingEnabled: boolean }> {
     const response = await this.request<unknown>("pix/session/draft_config", {
       cwd,
       ...(selection ? { modelRef: selection.modelRef, thinkingLevel: selection.thinkingLevel } : {}),
@@ -60,7 +60,46 @@ export class AcpPixExtensions {
       configOptions: response.configOptions as SessionConfigOption[],
       modelUsageRefresh: runtime.modelUsageRefresh,
       ...(runtime.modelUsage ? { modelUsage: runtime.modelUsage } : {}),
+      modelRoutingEnabled: response.modelRoutingEnabled === true,
     };
+  }
+
+  async routeModel(
+    cwd: string,
+    prompt: string,
+    attachmentCount: number,
+    signal?: AbortSignal,
+  ): Promise<{ tierId: string; modelRef: string; thinkingLevel: string; fallback: boolean; routerModelRef?: string }> {
+    const response = await this.request<unknown>(
+      "pix/model/route",
+      { cwd, prompt, attachmentCount },
+      null,
+      signal,
+    );
+    if (
+      !isRecord(response)
+      || typeof response.tierId !== "string"
+      || typeof response.modelRef !== "string"
+      || typeof response.thinkingLevel !== "string"
+      || typeof response.fallback !== "boolean"
+    ) {
+      throw new Error("pix/model/route returned an invalid response");
+    }
+    return {
+      tierId: response.tierId,
+      modelRef: response.modelRef,
+      thinkingLevel: response.thinkingLevel,
+      fallback: response.fallback,
+      ...(typeof response.routerModelRef === "string" ? { routerModelRef: response.routerModelRef } : {}),
+    };
+  }
+
+  async modelRoutingStatus(cwd: string): Promise<{ enabled: boolean }> {
+    const response = await this.request<unknown>("pix/model/routing_status", { cwd });
+    if (!isRecord(response) || typeof response.enabled !== "boolean") {
+      throw new Error("pix/model/routing_status returned an invalid response");
+    }
+    return { enabled: response.enabled };
   }
 
   async sessionHistory(sessionId: string, full = false, cursor?: string): Promise<LazySessionHistory> {

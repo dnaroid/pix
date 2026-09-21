@@ -110,8 +110,16 @@ describe("ACP JSON-RPC client", () => {
       method: "pix/session/draft_config",
       params: { cwd: "/workspace" },
     });
-    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { configOptions: [] } });
-    await expect(loading).resolves.toEqual({ configOptions: [], modelUsageRefresh: "skipped" });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { configOptions: [], modelRoutingEnabled: true },
+    });
+    await expect(loading).resolves.toEqual({
+      configOptions: [],
+      modelUsageRefresh: "skipped",
+      modelRoutingEnabled: true,
+    });
 
     const quota = client.draftConfig("/workspace", {
       modelRef: "openai-codex/gpt-5.6-sol",
@@ -145,6 +153,58 @@ describe("ACP JSON-RPC client", () => {
       modelUsageRefresh: "ready",
       modelUsage: { modelKey: "gpt-5.6-sol" },
     });
+    await client.dispose();
+  });
+
+  it("routes a draft first prompt through the private model-routing method", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const routing = client.routeModel("/workspace", "Implement the subsystem", 2);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/model/route",
+      params: {
+        cwd: "/workspace",
+        prompt: "Implement the subsystem",
+        attachmentCount: 2,
+      },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: {
+        tierId: "complex",
+        modelRef: "openai-codex/gpt-5.6-sol",
+        thinkingLevel: "high",
+        fallback: false,
+        routerModelRef: "openrouter/~typesafe/jev-latest",
+      },
+    });
+    await expect(routing).resolves.toEqual({
+      tierId: "complex",
+      modelRef: "openai-codex/gpt-5.6-sol",
+      thinkingLevel: "high",
+      fallback: false,
+      routerModelRef: "openrouter/~typesafe/jev-latest",
+    });
+    await client.dispose();
+  });
+
+  it("checks model-routing availability without loading a draft model catalogue", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const status = client.modelRoutingStatus("/workspace");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/model/routing_status",
+      params: { cwd: "/workspace" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { enabled: true },
+    });
+    await expect(status).resolves.toEqual({ enabled: true });
     await client.dispose();
   });
 

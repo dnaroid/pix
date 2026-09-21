@@ -14,6 +14,8 @@ export type AppPopupActionControllerHost = {
 	isDraftTabActive?(): boolean;
 	materializeDraftSession?(): Promise<AgentSessionRuntime | undefined>;
 	selectDraftModel?(model: SessionModel, thinkingLevel: ThinkingLevel): void;
+	selectDraftModelAuto?(): void;
+	openDraftModelAuto?(): Promise<void>;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	isRunning(): boolean;
@@ -134,9 +136,17 @@ export class AppPopupActionController {
 
 		this.popupMenus.closeModelSelection();
 		if (!scope.runtime && this.host.isDraftTabActive?.()) {
-			this.host.selectDraftModel?.(selected.value.model, selected.thinkingLevel);
-			this.persistThinkingPreference(selected.value.ref, selected.thinkingLevel);
+			if (selected.value.kind === "auto") {
+				this.host.selectDraftModelAuto?.();
+			} else {
+				this.host.selectDraftModel?.(selected.value.model, selected.thinkingLevel);
+				this.persistThinkingPreference(selected.value.ref, selected.thinkingLevel);
+			}
 			this.host.render();
+			return true;
+		}
+		if (selected.value.kind === "auto") {
+			await this.host.openDraftModelAuto?.();
 			return true;
 		}
 		if (!selected.direct) {
@@ -174,12 +184,14 @@ export class AppPopupActionController {
 	private toggleSelectedModelVisibility(): boolean {
 		const selected = this.popupMenus.selectedModel();
 		if (!selected) return false;
+		if (selected.value.kind === "auto") return true;
 		if (selected.value.current) {
 			this.host.showToast("The current model must remain visible", "warning");
 			return true;
 		}
 
-		const allAvailableRefs = this.menuItems.getModelMenuItems("", true).map((item) => item.value.ref);
+		const allAvailableRefs = this.menuItems.getModelMenuItems("", true)
+			.flatMap((item) => item.value.kind === "auto" ? [] : [item.value.ref]);
 		const configured = this.host.visibleModels();
 		const visible = new Set(configured === undefined ? allAvailableRefs : configured);
 		const wasVisible = visible.has(selected.value.ref);

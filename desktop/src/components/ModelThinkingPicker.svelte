@@ -7,6 +7,7 @@
   import { activateModalDialog } from "../lib/modal-dialog";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import {
+    AUTO_MODEL_REF,
     clampThinkingLevel,
     modelThinkingConfigState,
     type ModelThinkingModel,
@@ -47,7 +48,7 @@
   const thinkingByModel = new Map<string, string>();
 
   const pickerModels = $derived(visibilityMode
-    ? config.models
+    ? config.models.filter((model) => model.ref !== AUTO_MODEL_REF)
     : config.models.filter((model) => modelIsVisible(model)));
   const filteredModels = $derived(fuzzySearch(
     pickerModels.map((model) => ({
@@ -61,6 +62,7 @@
   const selectedModel = $derived(
     config.models.find((model) => model.ref === selectedModelRef) ?? config.currentModel ?? config.models[0],
   );
+  const selectedAuto = $derived(selectedModel?.ref === AUTO_MODEL_REF);
   const dirty = $derived(
     !!selectedModel
       && (selectedModel.ref !== config.currentModel?.ref || selectedThinking !== config.currentThinking),
@@ -132,6 +134,7 @@
   }
 
   function modelIsVisible(model: ModelThinkingModel): boolean {
+    if (model.ref === AUTO_MODEL_REF) return true;
     return model.current || visibleRefs === undefined || visibleRefs.includes(model.ref);
   }
 
@@ -352,9 +355,15 @@
     {#if !visibilityMode}<div class="border-t border-border px-3.5 py-3">
       <div class="mb-2 flex min-w-0 items-baseline justify-between gap-3">
         <span class="text-xs font-medium text-foreground">Thinking</span>
-        {#if selectedModel}<span class="truncate text-xs text-muted-foreground">{selectedModel.name}</span>{/if}
+        {#if selectedAuto}
+          <span class="truncate text-xs text-muted-foreground">Chosen by routing tier</span>
+        {:else if selectedModel}
+          <span class="truncate text-xs text-muted-foreground">{selectedModel.name}</span>
+        {/if}
       </div>
-      <div class="flex flex-wrap gap-1" role="radiogroup" aria-label="Thinking level">
+      {#if selectedAuto}
+        <p class="text-xs leading-4 text-muted-foreground">The first prompt selects a semantic tier, target model, and tier thinking level before the session is created.</p>
+      {:else}<div class="flex flex-wrap gap-1" role="radiogroup" aria-label="Thinking level">
         {#each selectedModel?.thinkingLevels ?? ["off"] as level, index (level)}
           <button
             class={[
@@ -372,13 +381,17 @@
             onkeydown={(event) => handleThinkingKeydown(event, index)}
           >{level}</button>
         {/each}
-      </div>
+      </div>{/if}
     </div>{/if}
 
     <footer class="flex min-w-0 items-center justify-between gap-3 border-t border-border/60 px-3.5 py-2.5">
       <p class="min-w-0 truncate text-xs text-muted-foreground">
         {#if visibilityMode}
           Changes save immediately · Shift+Tab returns to selection
+        {:else if selectedAuto}
+          <span class="text-tool-info">Auto</span>
+          <span class="px-1 text-muted-foreground/70">·</span>
+          <span>routes the first prompt</span>
         {:else if selectedModel}
           <span class={modelDisplayToneClass(selectedModel.tone)}>{selectedModel.name}</span>
           <span class="px-1 text-muted-foreground/70">·</span>

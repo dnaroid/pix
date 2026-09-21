@@ -1,6 +1,18 @@
 export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json",
   "defaultModel": { "modelRef": "openai-codex/gpt-5.6-sol", "fallbackModels": [], "thinking": "medium" },
+  "modelRouting": {
+    "enabled": false,
+    "modelRef": "openrouter/~typesafe/jev-latest",
+    "fallbackModels": [],
+    "defaultTier": "standard",
+    "tiers": [
+      { "id": "simple", "description": "Simple questions, lookups, explanations, and small localized edits.", "modelRef": "openrouter/~openai/gpt-luna-latest", "thinking": "minimal" },
+      { "id": "standard", "description": "Normal implementation work, routine debugging, and moderate multi-file changes.", "modelRef": "openrouter/~openai/gpt-terra-latest", "thinking": "medium" },
+      { "id": "complex", "description": "Complex debugging, architecture, broad refactors, and tasks with multiple interacting systems.", "modelRef": "openrouter/~openai/gpt-sol-latest", "thinking": "high" },
+      { "id": "expert", "description": "Exceptionally difficult, ambiguous, or high-risk work requiring maximum reasoning depth.", "modelRef": "openrouter/~openai/gpt-astra-latest", "thinking": "xhigh" }
+    ]
+  },
   "ignoreContextFiles": false,
   "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": [] },
   "autocomplete": {

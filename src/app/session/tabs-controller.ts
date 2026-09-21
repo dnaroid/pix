@@ -544,11 +544,11 @@ export class AppTabsController {
 		await this.saveTabs();
 	}
 
-	materializeActiveDraftTab(): Promise<AgentSessionRuntime | undefined> {
-		return this.runLifecycleMutation((generation) => this.materializeActiveDraftTabMutation(generation));
+	materializeActiveDraftTab(modelRefOverride?: string): Promise<AgentSessionRuntime | undefined> {
+		return this.runLifecycleMutation((generation) => this.materializeActiveDraftTabMutation(generation, modelRefOverride));
 	}
 
-	private async materializeActiveDraftTabMutation(generation: number): Promise<AgentSessionRuntime | undefined> {
+	private async materializeActiveDraftTabMutation(generation: number, modelRefOverride?: string): Promise<AgentSessionRuntime | undefined> {
 		if (this.pendingActiveTabId) return undefined;
 		const tab = this.activeTab();
 		if (!tab?.draft) return this.host.runtime();
@@ -567,7 +567,7 @@ export class AppTabsController {
 
 		let newRuntime: AgentSessionRuntime | undefined;
 		try {
-			newRuntime = await this.host.createRuntimeForNewSession(this.host.draftModelOverrideRef?.());
+			newRuntime = await this.host.createRuntimeForNewSession(modelRefOverride ?? this.host.draftModelOverrideRef?.());
 			if (!this.ownsDraftLifecycle(tab.id, generation)) {
 				await this.disposeRuntimeIfOrphan(newRuntime);
 				return undefined;

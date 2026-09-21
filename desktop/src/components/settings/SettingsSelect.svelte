@@ -7,10 +7,12 @@
     value,
     options,
     onChange,
+    ariaLabel,
   }: {
     value: string;
     options: readonly SettingsSelectOption[];
     onChange: (value: string) => void;
+    ariaLabel?: string;
   } = $props();
 
   const configuredOnly = $derived(value.length > 0 && !options.some((option) => option.value === value));
@@ -20,6 +22,7 @@
   <select
     class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong py-0 pr-7 pl-2 text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30"
     {value}
+    aria-label={ariaLabel}
     onchange={(event) => onChange((event.currentTarget as HTMLSelectElement).value)}
   >
     {#if configuredOnly}<option value={value}>{value} · Configured</option>{/if}

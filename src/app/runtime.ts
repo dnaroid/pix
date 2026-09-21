@@ -393,13 +393,34 @@ export async function refreshPixModelRuntimeForStartup(
  * while preserving lazy session materialization until the first prompt.
  */
 export async function createPixDraftModelCatalog(options: { cwd: string; agentDir?: string }): Promise<SessionModel[]> {
+	const handle = await createPixDraftModelRuntime(options);
+	try {
+		return [...handle.modelRuntime.getAvailableSnapshot()] as SessionModel[];
+	} finally {
+		handle.dispose();
+	}
+}
+
+export interface PixDraftModelRuntimeHandle {
+	readonly modelRuntime: ModelRuntime;
+	dispose(): void;
+}
+
+/**
+ * Build a sessionless model runtime with the same extension/provider discovery
+ * used by UI-only draft tabs. Callers may use it for short stateless requests
+ * (for example first-prompt model routing) without creating session history.
+ */
+export async function createPixDraftModelRuntime(options: { cwd: string; agentDir?: string }): Promise<PixDraftModelRuntimeHandle> {
 	const agentDir = options.agentDir ?? getAgentDir();
 	await ensurePiToolsSuiteExtensionInstalledOnce({ agentDir });
 	const bundledExtensionPaths = await getBundledExtensionPathsAsync();
 	const modelRuntime = await ModelRuntime.create({
 		authPath: join(agentDir, "auth.json"),
 		modelsPath: join(agentDir, "models.json"),
-		allowModelNetwork: false,
+		// Draft catalog reads stay cache-only because refreshOnCreate is false.
+		// First-prompt routing may explicitly refresh one missing router provider.
+		allowModelNetwork: true,
 		refreshOnCreate: false,
 	});
 	const services = await createAgentSessionServices({
@@ -418,14 +439,17 @@ export async function createPixDraftModelCatalog(options: { cwd: string; agentDi
 		},
 	});
 
-	try {
-		return [...services.modelRuntime.getAvailableSnapshot()] as SessionModel[];
-	} finally {
-		// Draft discovery needs extension provider registrations, but it does not
-		// own a session. Invalidate the temporary extension runtime so event-bus
-		// subscriptions and captured ctx/pi handles cannot outlive discovery.
-		services.resourceLoader.getExtensions().runtime.invalidate("Draft model catalog discovery completed");
-	}
+	let disposed = false;
+	return {
+		modelRuntime: services.modelRuntime,
+		dispose: () => {
+			if (disposed) return;
+			disposed = true;
+			// Stateless draft work needs extension provider registrations to
+			// remain live until the request settles, but never beyond it.
+			services.resourceLoader.getExtensions().runtime.invalidate("Draft model runtime completed");
+		},
+	};
 }
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {

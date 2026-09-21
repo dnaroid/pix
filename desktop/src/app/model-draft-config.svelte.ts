@@ -1,9 +1,11 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { RuntimeStatus } from "../lib/acp-client";
 import {
+  AUTO_MODEL_REF,
   applyLocalModelThinkingSelection,
   clampThinkingLevel,
   modelThinkingConfigState,
+  withAutoModelRoutingOption,
 } from "../lib/model-thinking";
 import type { ModelConfigOptions } from "./model-config-options";
 
@@ -12,8 +14,12 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
   let modelOverride = $state<{ modelRef: string; thinkingLevel: string } | null>(null);
   let runtimeStatus = $state<RuntimeStatus | undefined>(undefined);
   let modelUsageRefreshing = $state(false);
+  let autoRoutingAvailable = $state(false);
+  let autoRoutingSelected = $state(false);
+  let routedTierId = $state<string | undefined>(undefined);
   let generation = 0;
   let usageGeneration = 0;
+  let routingStatusGeneration = 0;
 
   async function refreshUsage(
     modelRef?: string,
@@ -58,6 +64,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     const requestWorkspace = options.workspace();
     if (!requestClient || !requestWorkspace || !options.statusReady()) return;
     const requestGeneration = ++generation;
+    const preserveAutoSelection = autoRoutingSelected;
     try {
       const response = await requestClient.draftConfig(requestWorkspace);
       if (
@@ -66,9 +73,14 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
         || requestWorkspace !== options.workspace()
         || !options.draftSessionTabOpen()
       ) return;
-      configOptions = response.configOptions;
+      autoRoutingAvailable = response.modelRoutingEnabled;
+      autoRoutingSelected = autoRoutingAvailable && preserveAutoSelection;
+      routedTierId = undefined;
+      configOptions = withAutoModelRoutingOption(response.configOptions, autoRoutingAvailable, autoRoutingSelected);
       const state = modelThinkingConfigState(configOptions);
-      if (state.currentModel) void refreshUsage(state.currentModel.ref, state.currentThinking);
+      if (state.currentModel && state.currentModel.ref !== AUTO_MODEL_REF) {
+        void refreshUsage(state.currentModel.ref, state.currentThinking);
+      }
     } catch (error) {
       if (
         requestGeneration === generation
@@ -79,16 +91,53 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     }
   }
 
+  async function refreshRoutingAvailability(): Promise<void> {
+    const requestClient = options.client();
+    const requestWorkspace = options.workspace();
+    if (!requestClient || !requestWorkspace || !options.statusReady()) return;
+    const requestGeneration = ++routingStatusGeneration;
+    try {
+      const response = await requestClient.modelRoutingStatus(requestWorkspace);
+      if (
+        requestGeneration !== routingStatusGeneration
+        || requestClient !== options.client()
+        || requestWorkspace !== options.workspace()
+      ) return;
+      autoRoutingAvailable = response.enabled;
+      if (!autoRoutingAvailable) {
+        autoRoutingSelected = false;
+        routedTierId = undefined;
+      }
+    } catch {
+      if (requestGeneration === routingStatusGeneration) autoRoutingAvailable = false;
+    }
+  }
+
   function reset(): void {
     configOptions = [];
     modelOverride = null;
     runtimeStatus = undefined;
     modelUsageRefreshing = false;
+    autoRoutingAvailable = false;
+    autoRoutingSelected = false;
+    routedTierId = undefined;
     generation += 1;
     usageGeneration += 1;
+    routingStatusGeneration += 1;
   }
 
   function applySelection(modelRef: string, thinkingLevel: string): string {
+    if (modelRef === AUTO_MODEL_REF) {
+      if (!autoRoutingAvailable) throw new Error("Automatic model routing is disabled.");
+      autoRoutingSelected = true;
+      routedTierId = undefined;
+      modelOverride = null;
+      runtimeStatus = undefined;
+      configOptions = withAutoModelRoutingOption(configOptions, true, true);
+      return "off";
+    }
+    autoRoutingSelected = false;
+    routedTierId = undefined;
     configOptions = applyLocalModelThinkingSelection(configOptions, modelRef, thinkingLevel);
     const state = modelThinkingConfigState(configOptions);
     modelOverride = { modelRef, thinkingLevel: state.currentThinking };
@@ -97,6 +146,10 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
   }
 
   function applyConfigValue(configId: string, value: string): void {
+    if (configId === "model" && value === AUTO_MODEL_REF) {
+      applySelection(AUTO_MODEL_REF, "off");
+      return;
+    }
     const state = modelThinkingConfigState(configOptions);
     const modelRef = configId === "model" ? value : state.currentModel?.ref;
     if (!modelRef) throw new Error("Model selection is unavailable.");
@@ -111,16 +164,44 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     void refreshUsage(modelRef, next.currentThinking, true);
   }
 
+  async function route(prompt: string, attachmentCount: number, signal?: AbortSignal): Promise<{ modelRef: string; thinkingLevel: string } | null> {
+    if (!autoRoutingAvailable || !autoRoutingSelected) return null;
+    const requestClient = options.client();
+    const requestWorkspace = options.workspace();
+    if (!requestClient || !requestWorkspace || !options.statusReady()) return null;
+    const requestGeneration = generation;
+    const response = await requestClient.routeModel(requestWorkspace, prompt, attachmentCount, signal);
+    if (
+      requestGeneration !== generation
+      || requestClient !== options.client()
+      || requestWorkspace !== options.workspace()
+      || !options.draftSessionTabActive()
+      || !autoRoutingSelected
+    ) return null;
+    routedTierId = response.tierId;
+    return { modelRef: response.modelRef, thinkingLevel: response.thinkingLevel };
+  }
+
+  function pickerConfigOptions(source: readonly SessionConfigOption[], draftOwner: boolean): SessionConfigOption[] {
+    return withAutoModelRoutingOption(source, autoRoutingAvailable, draftOwner && autoRoutingSelected);
+  }
+
   return {
     get configOptions() { return configOptions; },
     get modelOverride() { return modelOverride; },
     get runtimeStatus() { return runtimeStatus; },
     get modelUsageRefreshing() { return modelUsageRefreshing; },
+    get autoRoutingAvailable() { return autoRoutingAvailable; },
+    get autoRoutingSelected() { return autoRoutingSelected; },
+    get routedTierId() { return routedTierId; },
     refresh,
+    refreshRoutingAvailability,
     refreshUsage,
     reset,
     applySelection,
     applyConfigValue,
+    route,
+    pickerConfigOptions,
   };
 }
 

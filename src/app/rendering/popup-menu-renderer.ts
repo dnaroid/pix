@@ -179,6 +179,9 @@ export class PopupMenuRenderer {
 				target: { kind: "model-visibility-clear" },
 			});
 			lines.push({ text: "  ↑/↓ model · Enter show/hide · Shift+Tab select", variant: "muted" });
+		} else if (menu.selectedItem()?.value.kind === "auto") {
+			lines.push({ text: "  Thinking  routed by selected tier", variant: "muted" });
+			lines.push({ text: "  ↑/↓ model · Enter apply · Shift+Tab manage", variant: "muted" });
 		} else if (menu.selectedItem()) {
 			const thinkingPrefix = "  Thinking  ← ";
 			const thinkingSuffix = " →";
@@ -363,6 +366,7 @@ export class PopupMenuRenderer {
 	}
 
 	private modelMenuItemColor(value: ModelMenuValue): string {
+		if (value.kind === "auto") return this.host.theme.colors.info;
 		const configuredColor = this.host.modelColors
 			? resolveModelColor(value.ref, this.host.modelColors)
 			: undefined;

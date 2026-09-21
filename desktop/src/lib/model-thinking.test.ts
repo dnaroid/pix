@@ -1,6 +1,12 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
-import { applyLocalModelThinkingSelection, clampThinkingLevel, modelThinkingConfigState } from "./model-thinking";
+import {
+  AUTO_MODEL_REF,
+  applyLocalModelThinkingSelection,
+  clampThinkingLevel,
+  modelThinkingConfigState,
+  withAutoModelRoutingOption,
+} from "./model-thinking";
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -80,5 +86,21 @@ describe("model + thinking config", () => {
     expect(state.currentThinking).toBe("medium");
     expect(state.currentThinkingLevels).toEqual(["off", "minimal", "low", "medium"]);
     expect(modelThinkingConfigState(configOptions).currentModel?.ref).toBe("openai-codex/gpt-5.6-sol");
+  });
+
+  it("adds a draft-only Auto route without mutating the source ACP options", () => {
+    const routed = withAutoModelRoutingOption(configOptions, true, true);
+    const state = modelThinkingConfigState(routed);
+    expect(state.currentModel?.ref).toBe(AUTO_MODEL_REF);
+    expect(state.currentThinking).toBe("off");
+    expect(state.currentThinkingLevels).toEqual(["off"]);
+    expect(state.models[0]?.ref).toBe(AUTO_MODEL_REF);
+    expect(modelThinkingConfigState(configOptions).currentModel?.ref).toBe("openai-codex/gpt-5.6-sol");
+  });
+
+  it("removes Auto cleanly when routing is disabled", () => {
+    const routed = withAutoModelRoutingOption(configOptions, true, true);
+    const disabled = withAutoModelRoutingOption(routed, false, false);
+    expect(modelThinkingConfigState(disabled).models.some((model) => model.ref === AUTO_MODEL_REF)).toBe(false);
   });
 });

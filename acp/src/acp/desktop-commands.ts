@@ -31,6 +31,8 @@ export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
 export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
 export const PIX_DCP_STATS_METHOD = "pix/session/dcp_stats";
 export const PIX_DRAFT_CONFIG_METHOD = "pix/session/draft_config";
+export const PIX_MODEL_ROUTING_STATUS_METHOD = "pix/model/routing_status";
+export const PIX_MODEL_ROUTE_METHOD = "pix/model/route";
 export const PIX_BASH_METHOD = "pix/session/bash";
 export const PIX_CLEAR_TODOS_METHOD = "pix/session/clear_todos";
 
@@ -49,6 +51,29 @@ export interface DesktopDraftConfigResponse {
 	readonly configOptions: SessionConfigOption[];
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
+	readonly modelRoutingEnabled?: boolean;
+}
+
+export interface DesktopModelRouteRequest {
+	readonly cwd: string;
+	readonly prompt: string;
+	readonly attachmentCount: number;
+}
+
+export interface DesktopModelRoutingStatusRequest {
+	readonly cwd: string;
+}
+
+export interface DesktopModelRoutingStatusResponse {
+	readonly enabled: boolean;
+}
+
+export interface DesktopModelRouteResponse {
+	readonly tierId: string;
+	readonly modelRef: string;
+	readonly thinkingLevel: string;
+	readonly fallback: boolean;
+	readonly routerModelRef?: string;
 }
 
 export interface DesktopBashRequest extends DesktopSessionRequest {
@@ -365,6 +390,35 @@ export function parseDesktopDraftConfigRequest(value: unknown): DesktopDraftConf
 		...(value.thinkingLevel === undefined ? {} : { thinkingLevel: value.thinkingLevel }),
 		...(value.refreshModelUsage === undefined ? {} : { refreshModelUsage: value.refreshModelUsage }),
 	};
+}
+
+export function parseDesktopModelRouteRequest(value: unknown): DesktopModelRouteRequest {
+	if (
+		!isRecord(value)
+		|| typeof value.cwd !== "string"
+		|| value.cwd.trim().length === 0
+		|| typeof value.prompt !== "string"
+		|| typeof value.attachmentCount !== "number"
+		|| !Number.isFinite(value.attachmentCount)
+		|| value.attachmentCount < 0
+	) {
+		throw new RequestError(
+			ERROR_INVALID_PARAMS,
+			"pix/model/route requires cwd, prompt, and a non-negative attachmentCount",
+		);
+	}
+	return {
+		cwd: value.cwd,
+		prompt: value.prompt,
+		attachmentCount: Math.floor(value.attachmentCount),
+	};
+}
+
+export function parseDesktopModelRoutingStatusRequest(value: unknown): DesktopModelRoutingStatusRequest {
+	if (!isRecord(value) || typeof value.cwd !== "string" || value.cwd.trim().length === 0) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/model/routing_status requires cwd");
+	}
+	return { cwd: value.cwd };
 }
 
 export function parseDesktopResumePathRequest(value: unknown): DesktopResumePathRequest {

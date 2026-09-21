@@ -1,7 +1,12 @@
-import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import type {
+  SessionConfigOption,
+  SessionConfigSelectGroup,
+  SessionConfigSelectOption,
+} from "@agentclientprotocol/sdk";
 import { modelRefTone, type ModelDisplayTone } from "./model-display";
 
 export const CANONICAL_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const AUTO_MODEL_REF = "pix:auto";
 
 export interface ModelThinkingModel {
   readonly ref: string;
@@ -112,6 +117,73 @@ export function applyLocalModelThinkingSelection(
       };
     }
     return option;
+  });
+}
+
+/** Add/remove the UI-only Auto routing row without mutating ACP live-session options. */
+export function withAutoModelRoutingOption(
+  configOptions: readonly SessionConfigOption[],
+  enabled: boolean,
+  selected: boolean,
+): SessionConfigOption[] {
+  if (!enabled) {
+    return configOptions.map((option) => {
+      if (option.id !== "model" || option.type !== "select") return { ...option };
+      const grouped = option.options.some((entry) => "options" in entry);
+      const nextOptions = grouped
+        ? (option.options as SessionConfigSelectGroup[])
+            .filter((group) => group.group !== "pix-routing")
+            .map((group) => ({
+              ...group,
+              options: group.options.filter((entry) => String(entry.value) !== AUTO_MODEL_REF),
+            }))
+        : (option.options as SessionConfigSelectOption[])
+            .filter((entry) => String(entry.value) !== AUTO_MODEL_REF);
+      const firstValue = nextOptions.flatMap((entry) => (
+        "options" in entry ? entry.options.map((item) => String(item.value)) : [String(entry.value)]
+      ))[0];
+      return {
+        ...option,
+        currentValue: String(option.currentValue) === AUTO_MODEL_REF ? firstValue ?? "" : option.currentValue,
+        options: nextOptions,
+      };
+    });
+  }
+  return configOptions.map((option) => {
+    if (option.id === "model" && option.type === "select") {
+      const autoOption: SessionConfigSelectOption = {
+        value: AUTO_MODEL_REF,
+        name: "Auto",
+        _meta: { "pix.thinkingLevels": ["off"] },
+      };
+      const grouped = option.options.some((entry) => "options" in entry);
+      const nextOptions = grouped
+        ? [{
+            group: "pix-routing",
+            name: "Automatic",
+            options: [autoOption],
+          } satisfies SessionConfigSelectGroup, ...(option.options as SessionConfigSelectGroup[])
+            .filter((group) => group.group !== "pix-routing")
+            .map((group) => ({
+              ...group,
+              options: group.options.filter((entry) => String(entry.value) !== AUTO_MODEL_REF),
+            }))]
+        : [autoOption, ...(option.options as SessionConfigSelectOption[])
+            .filter((entry) => String(entry.value) !== AUTO_MODEL_REF)];
+      return {
+        ...option,
+        currentValue: selected ? AUTO_MODEL_REF : option.currentValue,
+        options: nextOptions,
+      };
+    }
+    if (selected && option.id === "thought_level" && option.type === "select") {
+      return {
+        ...option,
+        currentValue: "off",
+        options: [{ value: "off", name: "auto" }],
+      };
+    }
+    return { ...option };
   });
 }
 

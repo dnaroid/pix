@@ -235,6 +235,37 @@ describe("AppPopupActionController model visibility", () => {
 		assert.equal(await controller.submitActivePopupMenu(), true);
 		assert.deepEqual(remembered, [["openai-codex/gpt-5.6-sol", "xhigh"]]);
 	});
+
+	it("turns a live-session Auto choice into a new Auto draft instead of mutating the session", async () => {
+		let openedAutoDraft = 0;
+		let commandRan = false;
+		const popupMenus = {
+			syncActivePopupMenu: () => "model",
+			modelVisibilityModeActive: () => false,
+			selectedModelThinking: () => ({
+				value: { kind: "auto", ref: "pix:auto", current: false, visible: true },
+				thinkingLevel: "off",
+				direct: true,
+				source: "model",
+			}),
+			closeModelSelection: () => {},
+		} as unknown as AppPopupMenuController;
+		const controller = new AppPopupActionController(
+			host({
+				runtime: () => ({ session: {} }) as never,
+				openDraftModelAuto: async () => { openedAutoDraft += 1; },
+			}),
+			popupMenus,
+			{ runModelThinkingCommand: async () => { commandRan = true; } } as unknown as AppCommandController,
+			{} as AppMenuItemsController,
+			{} as AppQueuedMessageController,
+			{} as AppWorkspaceActionsController,
+		);
+
+		assert.equal(await controller.submitActivePopupMenu(), true);
+		assert.equal(openedAutoDraft, 1);
+		assert.equal(commandRan, false);
+	});
 });
 
 function host(overrides: Partial<AppPopupActionControllerHost> = {}): AppPopupActionControllerHost {

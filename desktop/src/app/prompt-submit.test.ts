@@ -3,6 +3,70 @@ import type { AcpClient } from "../lib/acp-client";
 import { createPromptSubmit } from "./prompt-submit";
 
 describe("createPromptSubmit terminal commands", () => {
+  it("passes the first normal draft prompt to model routing before materialization", async () => {
+    let promptText = "Implement the subsystem";
+    const promptAttachments: never[] = [];
+    let activeSessionId: string | null = null;
+    const materializeDraftSession = vi.fn(async () => {
+      activeSessionId = "session-auto";
+      return activeSessionId;
+    });
+    const runPromptRequest = vi.fn(async () => {});
+    const client = {} as AcpClient;
+    const submit = createPromptSubmit({
+      client: () => client,
+      sessionMutationRunning: () => false,
+      sessionHistoryLoading: () => false,
+      waitForAttachmentDraftSettled: async () => {},
+      attachmentDraftKey: () => "draft",
+      attachmentGeneration: () => 1,
+      promptText: () => promptText,
+      promptAttachments: () => promptAttachments,
+      setPromptText: (text: string) => { promptText = text; },
+      activeSessionId: () => activeSessionId,
+      draftSessionTabActive: () => true,
+      materializeDraftSession,
+      activeSessionRuntimeReady: () => true,
+      promptRunning: () => false,
+      openSessionStartTab: async () => {},
+      enhancePromptDraft: async () => {},
+      importConversationPath: async () => {},
+      chooseImportSession: async () => {},
+      requestLocalTextInput: async () => undefined,
+      deferDraft: async () => {},
+      resumeConversationPath: async () => {},
+      openSessionSelector: () => {},
+      openJumpPicker: async () => {},
+      openHistoryPicker: async () => {},
+      showDesktopHotkeys: () => {},
+      reloadResources: async () => {},
+      forkConversation: async () => {},
+      openInteractiveTerminal: async () => {},
+      closeProjectSelector: () => {},
+      closeSessionSelector: () => {},
+      applyModelSlashCommand: async () => {},
+      applyThinkingSlashCommand: async () => {},
+      setCommandPicker: () => {},
+      displayedConfigOptions: () => [],
+      queueDraftForCurrentRun: async () => {},
+      imagePromptSupported: () => true,
+      invalidateAttachmentDraft: () => {},
+      nextLocalMessageId: () => "local:1",
+      appendUserMessage: () => {},
+      scrollToLatest: async () => {},
+      prompts: { runPromptRequest } as never,
+      refreshAutocompleteSettings: async () => {},
+      refreshSessions: async () => {},
+      setErrorMessage: () => {},
+      reportError: (error: unknown) => { throw error; },
+    });
+
+    await submit.submit();
+
+    expect(materializeDraftSession).toHaveBeenCalledWith("Implement the subsystem", 0);
+    expect(runPromptRequest).toHaveBeenCalled();
+  });
+
   it("opens !! in the interactive terminal without materializing or queueing a Pi session", async () => {
     let promptText = "!!  git status  ";
     const bash = vi.fn(async () => {});

@@ -35,6 +35,38 @@ Example:
     "fallbackModels": [],
     "thinking": "medium"
   },
+  "modelRouting": {
+    "enabled": false,
+    "modelRef": "openrouter/~typesafe/jev-latest",
+    "fallbackModels": [],
+    "defaultTier": "standard",
+    "tiers": [
+      {
+        "id": "simple",
+        "description": "Simple questions, lookups, explanations, and small localized edits.",
+        "modelRef": "openrouter/~openai/gpt-luna-latest",
+        "thinking": "minimal"
+      },
+      {
+        "id": "standard",
+        "description": "Normal implementation work, routine debugging, and moderate multi-file changes.",
+        "modelRef": "openrouter/~openai/gpt-terra-latest",
+        "thinking": "medium"
+      },
+      {
+        "id": "complex",
+        "description": "Complex debugging, architecture, broad refactors, and tasks with multiple interacting systems.",
+        "modelRef": "openrouter/~openai/gpt-sol-latest",
+        "thinking": "high"
+      },
+      {
+        "id": "expert",
+        "description": "Exceptionally difficult, ambiguous, or high-risk work requiring maximum reasoning depth.",
+        "modelRef": "openrouter/~openai/gpt-astra-latest",
+        "thinking": "xhigh"
+      }
+    ]
+  },
   "promptEnhancer": {
     "modelRef": "openai-codex/gpt-5.6-luna",
     "fallbackModels": []
@@ -65,6 +97,32 @@ Example:
 
 Project settings override the user profile. Use `/settings` to inspect the
 effective settings summary and `/reload` after changing resources.
+
+### Automatic first-prompt model routing
+
+`modelRouting` is shared conceptually by TUI and Desktop but configured in
+their separate profiles. It is disabled by default. When enabled, new
+sessionless drafts expose an `Auto` model choice. Selecting `Auto` routes only
+the first real user prompt, then creates the session directly with the chosen
+tier's `modelRef` and `thinking`; resumed and existing sessions are never
+re-routed.
+
+The primary router defaults to OpenRouter Jev Latest. Jev is called through
+OpenRouter's Decisions API as a semantic choice over the configured tier
+`id`/`description` pairs. `fallbackModels` are ordinary router models tried
+in order if the primary router cannot decide. `defaultTier` is the deterministic
+fallback when every router attempt fails. Target model refs are not shown to the
+router, so changing the concrete model behind a semantic tier does not change
+the routing vocabulary.
+
+When routing is enabled, `Auto` is visible in the normal model picker as well
+as the New Conversation draft picker. Selecting `Auto` from an existing
+conversation does not re-route that conversation; Pix opens or reuses a New
+Conversation draft and enables Auto there.
+
+Desktop exposes the same fields in Settings → Models, including editable tier
+rows. The router provider needs valid credentials independently of the target
+tier providers.
 
 ## Desktop configuration
 

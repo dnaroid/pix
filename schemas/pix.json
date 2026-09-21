@@ -65,6 +65,96 @@
       },
       "description": "Default model selection for new sessions."
     },
+    "modelRouting": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable Auto in the new-session model picker and route the first real prompt before session creation."
+        },
+        "modelRef": {
+          "type": "string",
+          "description": "Primary router model. OpenRouter Jev Latest is available as openrouter/~typesafe/jev-latest."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered router-model fallbacks tried if the primary routing request fails."
+        },
+        "defaultTier": {
+          "type": "string",
+          "description": "Tier id used deterministically when all router models fail or return an invalid decision."
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "description",
+              "modelRef",
+              "thinking"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable semantic tier id used by the router, e.g. simple, standard, complex, or expert.",
+                "pattern": "^[a-z][a-z0-9_-]*$"
+              },
+              "description": {
+                "type": "string",
+                "description": "Semantic description sent to the router when choosing this tier.",
+                "minLength": 1
+              },
+              "modelRef": {
+                "type": "string",
+                "description": "Provider/model selected when the router chooses this tier.",
+                "minLength": 1
+              },
+              "thinking": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "off"
+                  },
+                  {
+                    "type": "string",
+                    "const": "minimal"
+                  },
+                  {
+                    "type": "string",
+                    "const": "low"
+                  },
+                  {
+                    "type": "string",
+                    "const": "medium"
+                  },
+                  {
+                    "type": "string",
+                    "const": "high"
+                  },
+                  {
+                    "type": "string",
+                    "const": "xhigh"
+                  },
+                  {
+                    "type": "string",
+                    "const": "max"
+                  }
+                ],
+                "description": "Default model thinking budget level."
+              }
+            },
+            "description": "One semantic automatic model-routing tier."
+          },
+          "minItems": 1,
+          "description": "Semantic target tiers the router may select."
+        }
+      },
+      "description": "Optional first-prompt automatic model routing. Disabled by default."
+    },
     "visibleModels": {
       "type": "array",
       "items": {

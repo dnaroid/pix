@@ -90,14 +90,21 @@ describe("AppInputActionController", () => {
 		const runtime = { session } as AgentSessionRuntime;
 		let activeRuntime: AgentSessionRuntime | undefined;
 		let materializeCalls = 0;
+		let routedPrompt: string | undefined;
+		let materializedModelRef: string | undefined;
 		let submittedSession: AgentSession | undefined;
 		const controller = new AppInputActionController(
 			{
 				runtime: () => activeRuntime,
 				inputScopeKey: () => "draft-tab",
 				isDraftTabActive: () => activeRuntime === undefined,
-				materializeDraftSession: async () => {
+				routeDraftModelForPrompt: async (prompt, attachmentCount) => {
+					routedPrompt = `${prompt}:${attachmentCount}`;
+					return "target/complex:high";
+				},
+				materializeDraftSession: async (modelRefOverride) => {
 					materializeCalls += 1;
+					materializedModelRef = modelRefOverride;
 					activeRuntime = runtime;
 					return runtime;
 				},
@@ -139,6 +146,8 @@ describe("AppInputActionController", () => {
 		await (controller as unknown as { submitInput(): Promise<void> }).submitInput();
 
 		assert.equal(materializeCalls, 1);
+		assert.equal(routedPrompt, "first prompt:0");
+		assert.equal(materializedModelRef, "target/complex:high");
 		assert.equal(submittedSession, session);
 		assert.equal(inputEditor.text, "");
 	});

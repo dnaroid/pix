@@ -12,6 +12,11 @@ export interface DesktopDraftModelRuntimeOptions {
 	readonly additionalExtensionPaths?: readonly string[];
 }
 
+export interface DesktopDraftModelRuntimeHandle {
+	readonly modelRuntime: ModelRuntime;
+	dispose(): void;
+}
+
 export interface DesktopToolsSuiteExtensionOptions {
 	readonly agentDir?: string;
 	readonly bundledExtensionPath?: string;
@@ -35,17 +40,20 @@ export function desktopToolsSuiteExtensionPath(
  *
  * Loading services (rather than a bare ModelRuntime) is important: extensions
  * such as pi-tools-suite register their own providers while resources load.
- * The temporary extension runtime is invalidated once registration finishes;
- * no AgentSession or session file is created.
+ * The returned handle keeps that temporary extension runtime alive while the
+ * caller inspects or streams through registered providers; dispose() then
+ * invalidates it. No AgentSession or session file is created.
  */
 export async function createDesktopDraftModelRuntime(
 	options: DesktopDraftModelRuntimeOptions,
-): Promise<ModelRuntime> {
+): Promise<DesktopDraftModelRuntimeHandle> {
 	const agentDir = options.agentDir ?? getAgentDir();
 	const modelRuntime = await ModelRuntime.create({
 		authPath: join(agentDir, "auth.json"),
 		modelsPath: join(agentDir, "models.json"),
-		allowModelNetwork: false,
+		// The normal Desktop draft catalog explicitly refreshes cache-only.
+		// Auto routing may opt into a one-provider network refresh on demand.
+		allowModelNetwork: true,
 		refreshOnCreate: false,
 	});
 	const additionalExtensionPaths = [...(options.additionalExtensionPaths ?? [])];
@@ -62,9 +70,13 @@ export async function createDesktopDraftModelRuntime(
 		},
 	});
 
-	try {
-		return services.modelRuntime;
-	} finally {
-		services.resourceLoader.getExtensions().runtime.invalidate("Desktop draft model discovery completed");
-	}
+	let disposed = false;
+	return {
+		modelRuntime: services.modelRuntime,
+		dispose: () => {
+			if (disposed) return;
+			disposed = true;
+			services.resourceLoader.getExtensions().runtime.invalidate("Desktop draft model runtime completed");
+		},
+	};
 }

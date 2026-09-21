@@ -16,7 +16,7 @@ Keep Desktop model and thinking selection available while the agent is running, 
 
 ## Behavior
 
-- Desktop keeps the combined model/thinking picker enabled while the active session is processing a prompt.
+- Desktop keeps the combined model/thinking picker enabled while the active session is processing a prompt. When first-prompt model routing is enabled, the live picker also exposes `Auto`; selecting it opens or reuses the UI-only New Conversation draft and stages routing there instead of mutating the active live session.
 - The same picker is visible on a UI-only New Conversation draft before its first prompt. In that state the selection is staged locally from the sessionless draft config catalogue; it does not require an active session runtime and does not send `session/set_config_option`. The catalogue loads workspace and bundled extensions without creating an `AgentSession`, so extension-registered providers such as pi-tools-suite's Antigravity models are selectable before materialization.
 - Each draft catalogue request reloads extension discovery, so newly added workspace providers do not require an ACP backend restart. Changes to an already-loaded extension module follow Pi's normal module-cache lifecycle.
 - When pi-tools-suite is already installed in the Pi agent directory, Desktop uses that discovered copy instead of also loading the packaged copy. Without an installed copy, Desktop loads the packaged suite explicitly.

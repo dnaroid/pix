@@ -31,6 +31,7 @@ export function createDesktopModelServices(options: DesktopModelServicesOptions)
     setActiveConfigOptions: options.state.setConfigOptions,
     draftSessionTabOpen: () => options.draftSession().open,
     draftSessionTabActive: () => options.draftSession().active,
+    openDraftSessionTab: () => options.draftSession().openStartTab(),
     operationRunning: options.operationRunning,
     changingConfig: options.changingConfig,
     closeCommandPicker: options.closeCommandPicker,

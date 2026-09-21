@@ -51,8 +51,11 @@ describe("SessionStartView", () => {
     expect(openStart).toBeGreaterThanOrEqual(0);
     expect(materializeStart).toBeGreaterThan(openStart);
     expect(draftSource.slice(openStart, materializeStart)).not.toContain(".newSession(");
-    expect(draftSource.slice(materializeStart)).toContain("requestClient.newSession(requestWorkspace");
-    expect(promptSubmitSource).toContain("sessionId = await options.materializeDraftSession()");
+    const materialize = draftSource.slice(materializeStart);
+    expect(materialize).toContain("await options.routeDraftModel(prompt, attachmentCount, controller.signal)");
+    expect(materialize).toContain("requestClient.newSession(");
+    expect(materialize.indexOf("requestClient.newSession(")).toBeGreaterThan(materialize.indexOf("await options.routeDraftModel("));
+    expect(promptSubmitSource).toContain("sessionId = await options.materializeDraftSession(");
     expect(workbenchBuilderSource).toContain("draftSession: options.draft.active");
   });
 

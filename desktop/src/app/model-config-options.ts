@@ -16,6 +16,7 @@ export type ModelConfigOptions = {
   setActiveConfigOptions: (options: SessionConfigOption[]) => void;
   draftSessionTabOpen: () => boolean;
   draftSessionTabActive: () => boolean;
+  openDraftSessionTab: () => Promise<void>;
   operationRunning: () => boolean;
   changingConfig: () => string | null;
   closeCommandPicker: () => void;

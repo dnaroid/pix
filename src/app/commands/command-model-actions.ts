@@ -77,16 +77,22 @@ export class ModelCommandActions {
 		const scope = captureCommandScope(this.host);
 		const modelRef = argumentsText.trim();
 		if (!modelRef) {
-			const selected = await this.host.showMenu(this.host.getModelMenuItems(""), {
+			const selected = await this.host.showMenu(
+				this.host.getModelMenuItems("").filter((item) => item.value.kind !== "auto"),
+				{
 				title: "Select default model",
 				placeholder: "Search models",
 				emptyText: "No matching models",
-			});
+				},
+			);
 			if (!isCommandScopeActive(this.host, scope)) return;
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
 				this.host.render();
 				return;
+			}
+			if (selected.kind === "auto") {
+				throw new Error("Auto is a routing mode for new drafts, not a default model.");
 			}
 
 			this.saveDefaultModel(this.host.modelRef(selected.model));

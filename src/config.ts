@@ -66,6 +66,21 @@ export type DefaultModelConfig = {
 	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 };
 
+export type ModelRoutingTier = {
+	id: string;
+	description: string;
+	modelRef: string;
+	thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+};
+
+export type ModelRoutingConfig = {
+	enabled: boolean;
+	modelRef: string;
+	fallbackModels: string[];
+	defaultTier: string;
+	tiers: ModelRoutingTier[];
+};
+
 export type ModelThinkingPreferences = Record<
 	string,
 	"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
@@ -100,6 +115,7 @@ export type PixConfig = {
 	toolRenderer: ToolRendererConfig;
 	outputFilters: OutputFiltersConfig;
 	defaultModel?: DefaultModelConfig;
+	modelRouting: ModelRoutingConfig;
 	/** User-level whitelist for model pickers. Undefined means show every available model. */
 	visibleModels?: string[];
 	/** Last applied thinking level for each model in the TUI picker. Desktop uses pix-desktop.jsonc. */
@@ -184,6 +200,39 @@ const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
 	maxTokens: 48,
 	maxPromptTokens: 1200,
 	includeRecentMessages: 0,
+};
+
+const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
+	enabled: false,
+	modelRef: "openrouter/~typesafe/jev-latest",
+	fallbackModels: [],
+	defaultTier: "standard",
+	tiers: [
+		{
+			id: "simple",
+			description: "Simple questions, lookups, explanations, and small localized edits.",
+			modelRef: "openrouter/~openai/gpt-luna-latest",
+			thinking: "minimal",
+		},
+		{
+			id: "standard",
+			description: "Normal implementation work, routine debugging, and moderate multi-file changes.",
+			modelRef: "openrouter/~openai/gpt-terra-latest",
+			thinking: "medium",
+		},
+		{
+			id: "complex",
+			description: "Complex debugging, architecture, broad refactors, and tasks with multiple interacting systems.",
+			modelRef: "openrouter/~openai/gpt-sol-latest",
+			thinking: "high",
+		},
+		{
+			id: "expert",
+			description: "Exceptionally difficult, ambiguous, or high-risk work requiring maximum reasoning depth.",
+			modelRef: "openrouter/~openai/gpt-astra-latest",
+			thinking: "xhigh",
+		},
+	],
 };
 
 const DEFAULT_MODEL_COLORS: ModelColorsConfig = {
@@ -314,6 +363,41 @@ function extractDefaultModelConfig(raw: unknown): DefaultModelConfig | undefined
 		modelRef: normalizedModel.modelRef,
 		fallbackModels: modelFallbackList(configured.fallbackModels),
 		...(thinking === undefined ? {} : { thinking }),
+	};
+}
+
+function extractModelRoutingConfig(raw: unknown, fallback: ModelRoutingConfig): ModelRoutingConfig | undefined {
+	if (!isPlainObject(raw) || !isPlainObject(raw.modelRouting)) return undefined;
+	const configured = raw.modelRouting;
+	const configuredTiers = Array.isArray(configured.tiers)
+		? configured.tiers.flatMap((value): ModelRoutingTier[] => {
+			if (!isPlainObject(value)) return [];
+			const id = nonEmptyString(value.id)?.toLowerCase();
+			const description = nonEmptyString(value.description);
+			const modelRef = nonEmptyString(value.modelRef);
+			const thinking = normalizeThinkingLevel(value.thinking);
+			if (!id || !/^[a-z][a-z0-9_-]*$/u.test(id) || !description || !modelRef || !thinking) return [];
+			return [{ id, description, modelRef, thinking }];
+		})
+		: [];
+	const tiers = configuredTiers.length > 0
+		? [...new Map(configuredTiers.map((tier) => [tier.id, tier])).values()]
+		: fallback.tiers.map((tier) => ({ ...tier }));
+	const requestedDefaultTier = nonEmptyString(configured.defaultTier)?.toLowerCase();
+	const fallbackDefaultTier = tiers.some((tier) => tier.id === fallback.defaultTier)
+		? fallback.defaultTier
+		: tiers[0]?.id ?? "";
+	const defaultTier = requestedDefaultTier && tiers.some((tier) => tier.id === requestedDefaultTier)
+		? requestedDefaultTier
+		: fallbackDefaultTier;
+	return {
+		enabled: typeof configured.enabled === "boolean" ? configured.enabled : fallback.enabled,
+		modelRef: nonEmptyString(configured.modelRef) ?? fallback.modelRef,
+		fallbackModels: Object.prototype.hasOwnProperty.call(configured, "fallbackModels")
+			? modelFallbackList(configured.fallbackModels)
+			: [...fallback.fallbackModels],
+		defaultTier,
+		tiers,
 	};
 }
 
@@ -479,11 +563,20 @@ export function defaultPixConfig(): PixConfig {
 		outputFilters: { patterns: [...DEFAULT_OUTPUT_FILTERS.patterns] },
 		promptEnhancer: { ...DEFAULT_PROMPT_ENHANCER, fallbackModels: [...DEFAULT_PROMPT_ENHANCER.fallbackModels] },
 		autocomplete: { ...DEFAULT_AUTOCOMPLETE, fallbackModels: [...DEFAULT_AUTOCOMPLETE.fallbackModels] },
+		modelRouting: cloneModelRoutingConfig(DEFAULT_MODEL_ROUTING),
 		modelColors: { rules: { ...DEFAULT_MODEL_COLORS.rules } },
 		iconTheme: { name: resolveAppIconThemeNameFromEnv() },
 		dictation: cloneDictationConfig(DEFAULT_DICTATION),
 		ignoreContextFiles: false,
 		maxProjectSessions: 0,
+	};
+}
+
+function cloneModelRoutingConfig(config: ModelRoutingConfig): ModelRoutingConfig {
+	return {
+		...config,
+		fallbackModels: [...config.fallbackModels],
+		tiers: config.tiers.map((tier) => ({ ...tier })),
 	};
 }
 
@@ -515,6 +608,7 @@ function pixConfigFromParsed(
 	const toolRenderer = extractToolRendererConfig(parsed) ?? fallback.toolRenderer;
 	const outputFilters = extractOutputFiltersConfig(parsed) ?? fallback.outputFilters;
 	const defaultModel = extractDefaultModelConfig(parsed) ?? fallback.defaultModel;
+	const modelRouting = extractModelRoutingConfig(parsed, fallback.modelRouting) ?? cloneModelRoutingConfig(fallback.modelRouting);
 	const visibleModels = options.allowVisibleModels === false
 		? fallback.visibleModels
 		: extractVisibleModelsConfig(parsed) ?? fallback.visibleModels;
@@ -535,6 +629,7 @@ function pixConfigFromParsed(
 		toolRenderer,
 		outputFilters,
 		...(defaultModel === undefined ? {} : { defaultModel }),
+		modelRouting,
 		...(visibleModels === undefined ? {} : { visibleModels: [...visibleModels] }),
 		...(thinkingByModel === undefined ? {} : { thinkingByModel: { ...thinkingByModel } }),
 		promptEnhancer,

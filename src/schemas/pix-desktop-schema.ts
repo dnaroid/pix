@@ -25,6 +25,30 @@ const DefaultModelConfig = Type.Object(
 	{ description: "Default model selection for new Desktop sessions." },
 );
 
+const ModelRoutingTier = Type.Object(
+	{
+		id: Type.String({
+			description: "Stable semantic tier id used by the router, e.g. simple, standard, complex, or expert.",
+			pattern: "^[a-z][a-z0-9_-]*$",
+		}),
+		description: Type.String({ description: "Semantic description sent to the router when choosing this tier.", minLength: 1 }),
+		modelRef: Type.String({ description: "Provider/model selected when the router chooses this tier.", minLength: 1 }),
+		thinking: ThinkingLevel,
+	},
+	{ description: "One semantic automatic model-routing tier." },
+);
+
+const ModelRoutingConfig = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean({ description: "Enable Auto for new Desktop drafts and route the first real prompt before session creation." })),
+		modelRef: Type.Optional(Type.String({ description: "Primary router model. OpenRouter Jev Latest is available as openrouter/~typesafe/jev-latest." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered router-model fallbacks." })),
+		defaultTier: Type.Optional(Type.String({ description: "Tier id used if every router model fails or returns an invalid choice." })),
+		tiers: Type.Optional(Type.Array(ModelRoutingTier, { minItems: 1, description: "Semantic target tiers the router may select." })),
+	},
+	{ description: "Optional first-prompt automatic model routing. Disabled by default." },
+);
+
 const PromptEnhancerConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Model used for prompt enhancement." })),
@@ -92,6 +116,7 @@ export const PixDesktopConfigSchema = Type.Object(
 			description: "Disable AGENTS.md / CLAUDE.md discovery for Desktop sessions. A project .pi/pix-desktop.jsonc value overrides the user default.",
 		})),
 		defaultModel: Type.Optional(DefaultModelConfig),
+		modelRouting: Type.Optional(ModelRoutingConfig),
 		visibleModels: Type.Optional(Type.Array(Type.String({ description: "Provider/model identifier shown in the Desktop model picker." }), {
 			description: "Desktop-only user model-picker whitelist. Omit to show every available model.",
 		})),

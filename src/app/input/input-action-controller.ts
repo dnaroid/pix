@@ -19,7 +19,8 @@ export type AppInputActionControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
 	inputScopeKey?(): string | undefined;
 	isDraftTabActive?(): boolean;
-	materializeDraftSession?(): Promise<AgentSessionRuntime | undefined>;
+	routeDraftModelForPrompt?(prompt: string, attachmentCount: number): Promise<string | undefined>;
+	materializeDraftSession?(modelRefOverride?: string): Promise<AgentSessionRuntime | undefined>;
 	isRunning(): boolean;
 	isSessionSwitching(): boolean;
 	inputEditor(): InputEditor;
@@ -225,7 +226,9 @@ export class AppInputActionController {
 
 		let runtime = this.host.runtime();
 		if (!runtime && this.host.isDraftTabActive?.()) {
-			runtime = await this.host.materializeDraftSession?.();
+			const routedModelRef = await this.host.routeDraftModelForPrompt?.(promptText, images.length);
+			if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
+			runtime = await this.host.materializeDraftSession?.(routedModelRef);
 			if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
 			if (!runtime) return;
 		}

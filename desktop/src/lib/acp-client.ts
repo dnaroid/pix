@@ -126,6 +126,14 @@ export class AcpClient {
     return this.pix.draftConfig(cwd, selection, refreshModelUsage);
   }
 
+  routeModel(cwd: string, prompt: string, attachmentCount: number, signal?: AbortSignal) {
+    return this.pix.routeModel(cwd, prompt, attachmentCount, signal);
+  }
+
+  modelRoutingStatus(cwd: string) {
+    return this.pix.modelRoutingStatus(cwd);
+  }
+
   loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse> {
     return this.request("session/load", {
       sessionId,

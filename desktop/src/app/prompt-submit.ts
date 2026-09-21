@@ -22,7 +22,7 @@ type PromptSubmitOptions = {
   setPromptText: (text: string) => void;
   activeSessionId: () => string | null;
   draftSessionTabActive: () => boolean;
-  materializeDraftSession: () => Promise<string | null>;
+  materializeDraftSession: (prompt?: string, attachmentCount?: number) => Promise<string | null>;
   activeSessionRuntimeReady: () => boolean;
   promptRunning: () => boolean;
   openSessionStartTab: () => void | Promise<void>;
@@ -196,7 +196,10 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
 
     if (!sessionId) {
       if (!options.draftSessionTabActive()) return;
-      sessionId = await options.materializeDraftSession();
+      sessionId = await options.materializeDraftSession(
+        terminalCommand?.kind === "chat" ? undefined : text,
+        terminalCommand?.kind === "chat" ? 0 : attachments.length,
+      );
       if (!sessionId) return;
       draftKey = options.attachmentDraftKey();
       draftGeneration = options.attachmentGeneration();

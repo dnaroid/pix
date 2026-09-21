@@ -564,12 +564,20 @@ export type SlashCommand = {
 export type SessionModel = NonNullable<AgentSession["model"]>;
 export type SessionTreeNode = ReturnType<SessionManager["getTree"]>[number];
 
-export type ModelMenuValue = {
-	model: SessionModel;
-	ref: string;
-	current: boolean;
-	visible?: boolean;
-};
+export type ModelMenuValue =
+	| {
+		kind: "model";
+		model: SessionModel;
+		ref: string;
+		current: boolean;
+		visible?: boolean;
+	}
+	| {
+		kind: "auto";
+		ref: "pix:auto";
+		current: boolean;
+		visible: true;
+	};
 
 export type ScopedSessionModel = {
 	model: SessionModel;

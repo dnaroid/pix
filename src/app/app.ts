@@ -43,8 +43,9 @@ import { AppAutocompleteController } from "./input/autocomplete-controller.js";
 import { AppQueuedMessageController } from "./session/queued-message-controller.js";
 import { AppRequestHistory } from "./session/request-history.js";
 import { AppRenderController } from "./rendering/render-controller.js";
-import { createPixDraftModelCatalog, createPixRuntime, type CreatePixRuntimeOptions } from "./runtime.js";
+import { createPixDraftModelCatalog, createPixDraftModelRuntime, createPixRuntime, type CreatePixRuntimeOptions } from "./runtime.js";
 import { parseModelRef } from "./model/model-ref.js";
+import { routeModelForPrompt, routingDefaultTier } from "./model/model-routing.js";
 import { ScreenStyler } from "./screen/screen-styler.js";
 import { AppScrollController, type AppScrollState } from "./screen/scroll-controller.js";
 import { searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "./session/session-search.js";
@@ -189,6 +190,9 @@ export class PiUiExtendApp {
 	private draftModelRef: string | undefined;
 	private draftThinkingLevel: ThinkingLevel = "off";
 	private draftModelOverrideRef: string | undefined;
+	private draftAutoRouting = false;
+	private draftRoutedTierId: string | undefined;
+	private draftModelRoutingController: AbortController | undefined;
 	private draftModelCatalogLoaded = false;
 	private draftModelCatalogLoad: Promise<void> | undefined;
 	private draftModelCatalogGeneration = 0;
@@ -329,6 +333,7 @@ export class PiUiExtendApp {
 		}, this.pixConfig.dictation);
 		this.menuItems = new AppMenuItemsController({
 			runtime: () => this.runtime,
+			modelRoutingAvailable: () => this.pixConfig.modelRouting.enabled && !this.options.modelRef,
 			draftModelState: () => this.draftModelState(),
 			visibleModels: () => this.pixConfig.visibleModels,
 			getBuiltinSlashCommands: () => this.slashCommands,
@@ -661,6 +666,8 @@ export class PiUiExtendApp {
 				isDraftTabActive: () => this.tabsController.isDraftTabActive(),
 				materializeDraftSession: () => this.tabsController.materializeActiveDraftTab(),
 				selectDraftModel: (model, thinkingLevel) => this.selectDraftModel(model, thinkingLevel),
+				selectDraftModelAuto: () => this.selectDraftModelAuto(),
+				openDraftModelAuto: () => this.openDraftModelAuto(),
 				getBuiltinSlashCommands: () => this.slashCommands,
 				isRunning: () => this.running,
 				setInput: (value) => this.setInput(value),
@@ -810,7 +817,8 @@ export class PiUiExtendApp {
 				runtime: () => this.runtime,
 				inputScopeKey: () => this.tabsController.activeInputTabId(),
 				isDraftTabActive: () => this.tabsController.isDraftTabActive(),
-				materializeDraftSession: () => this.tabsController.materializeActiveDraftTab(),
+				routeDraftModelForPrompt: (prompt, attachmentCount) => this.routeDraftModelForPrompt(prompt, attachmentCount),
+				materializeDraftSession: (modelRefOverride) => this.tabsController.materializeActiveDraftTab(modelRefOverride),
 				isRunning: () => this.running,
 				isSessionSwitching: () => this.tabsController.isSwitching(),
 				inputEditor: () => this.inputEditor,
@@ -1013,14 +1021,17 @@ export class PiUiExtendApp {
 		if (generation !== this.draftModelCatalogGeneration) return;
 		this.draftModelCatalogLoaded = true;
 		this.draftModels = models;
-		if (!this.draftModelOverrideRef) this.resetDraftModelSelection();
+		if (!this.draftModelOverrideRef && !this.draftAutoRouting) this.resetDraftModelSelection();
 		if (!this.running) return;
 		this.modelUsageController.observeSession(this.runtime?.session);
 		this.render();
 	}
 
 	private resetDraftModelSelection(): void {
+		this.abortDraftModelRouting();
 		this.draftModelOverrideRef = undefined;
+		this.draftRoutedTierId = undefined;
+		this.draftAutoRouting = false;
 		const configuredRef = this.options.modelRef ?? resolveDefaultModelRef(this.pixConfig);
 		if (configuredRef) {
 			try {
@@ -1041,6 +1052,9 @@ export class PiUiExtendApp {
 
 	private selectDraftModel(model: SessionModel, thinkingLevel: ThinkingLevel): void {
 		if (!this.tabsController.isDraftTabActive()) return;
+		this.abortDraftModelRouting();
+		this.draftAutoRouting = false;
+		this.draftRoutedTierId = undefined;
 		const ref = `${model.provider}/${model.id}`;
 		this.draftModelRef = ref;
 		this.draftThinkingLevel = thinkingLevel;
@@ -1049,17 +1063,100 @@ export class PiUiExtendApp {
 		this.setStatus("new conversation");
 	}
 
-	private draftModelState(): { models: readonly SessionModel[]; modelRef?: string; thinkingLevel: ThinkingLevel } | undefined {
+	private selectDraftModelAuto(): void {
+		if (!this.tabsController.isDraftTabActive() || !this.pixConfig.modelRouting.enabled || this.options.modelRef) return;
+		this.abortDraftModelRouting();
+		this.draftAutoRouting = true;
+		this.draftRoutedTierId = undefined;
+		this.draftModelRef = undefined;
+		this.draftThinkingLevel = "off";
+		this.draftModelOverrideRef = undefined;
+		this.modelUsageController.observeSession(undefined);
+		this.setStatus("new conversation");
+	}
+
+	private async openDraftModelAuto(): Promise<void> {
+		if (!this.pixConfig.modelRouting.enabled || this.options.modelRef) return;
+		await this.tabsController.openNewTab();
+		if (!this.tabsController.isDraftTabActive()) return;
+		this.popupMenus.closeDraftSessionSelectorForTabLifecycle();
+		this.selectDraftModelAuto();
+		this.render();
+	}
+
+	private async routeDraftModelForPrompt(prompt: string, attachmentCount: number): Promise<string | undefined> {
+		if (!this.tabsController.isDraftTabActive() || !this.draftAutoRouting || !this.pixConfig.modelRouting.enabled) return undefined;
+		const inputTabId = this.tabsController.activeInputTabId();
+		this.abortDraftModelRouting();
+		const controller = new AbortController();
+		this.draftModelRoutingController = controller;
+		this.setStatus("routing model");
+		this.render();
+		let decision = { tier: routingDefaultTier(this.pixConfig.modelRouting), fallback: true };
+		try {
+			const handle = await createPixDraftModelRuntime({ cwd: this.options.cwd });
+			try {
+				decision = await routeModelForPrompt(
+					handle.modelRuntime,
+					this.pixConfig.modelRouting,
+					prompt,
+					attachmentCount,
+					controller.signal,
+				);
+			} finally {
+				handle.dispose();
+			}
+		} catch {
+			// Deterministic fallback tier keeps Auto usable when the router
+			// provider is unavailable or its credentials are not configured.
+		} finally {
+			if (this.draftModelRoutingController === controller) this.draftModelRoutingController = undefined;
+		}
+		if (
+			controller.signal.aborted
+			|| !this.tabsController.isDraftTabActive()
+			|| this.tabsController.activeInputTabId() !== inputTabId
+			|| !this.draftAutoRouting
+		) return undefined;
+		this.draftRoutedTierId = decision.tier.id;
+		this.setStatus(`Auto · ${decision.tier.id}`);
+		this.render();
+		return `${decision.tier.modelRef}:${decision.tier.thinking}`;
+	}
+
+	private abortDraftModelRouting(): void {
+		this.draftModelRoutingController?.abort();
+		this.draftModelRoutingController = undefined;
+	}
+
+	private draftModelState(): {
+		models: readonly SessionModel[];
+		modelRef?: string;
+		thinkingLevel: ThinkingLevel;
+		autoRoutingAvailable?: boolean;
+		autoRoutingSelected?: boolean;
+	} | undefined {
 		if (!this.tabsController.isDraftTabActive()) return undefined;
 		return {
 			models: this.draftModels,
 			...(this.draftModelRef ? { modelRef: this.draftModelRef } : {}),
 			thinkingLevel: this.draftThinkingLevel,
+			autoRoutingAvailable: this.pixConfig.modelRouting.enabled && !this.options.modelRef,
+			autoRoutingSelected: this.draftAutoRouting,
 		};
 	}
 
 	private draftModelStatus(): { modelLabel: string; thinkingLabel: string } | undefined {
 		const state = this.draftModelState();
+		if (this.draftAutoRouting) {
+			const tier = this.draftRoutedTierId
+				? this.pixConfig.modelRouting.tiers.find((candidate) => candidate.id === this.draftRoutedTierId)
+				: undefined;
+			return {
+				modelLabel: tier ? `Auto · ${tier.id}` : "Auto",
+				thinkingLabel: tier?.thinking ?? "auto",
+			};
+		}
 		if (!state?.modelRef) return undefined;
 		return { modelLabel: state.modelRef, thinkingLabel: state.thinkingLevel };
 	}
@@ -1081,6 +1178,11 @@ export class PiUiExtendApp {
 		replaceRecord(this.pixConfig.dictation as unknown as MutableRecord, config.dictation as unknown as MutableRecord);
 		if (config.defaultModel === undefined) delete this.pixConfig.defaultModel;
 		else this.pixConfig.defaultModel = { ...config.defaultModel };
+		this.pixConfig.modelRouting = {
+			...config.modelRouting,
+			fallbackModels: [...config.modelRouting.fallbackModels],
+			tiers: config.modelRouting.tiers.map((tier) => ({ ...tier })),
+		};
 		if (config.visibleModels === undefined) delete this.pixConfig.visibleModels;
 		else this.pixConfig.visibleModels = [...config.visibleModels];
 		if (config.thinkingByModel === undefined) delete this.pixConfig.thinkingByModel;
@@ -1144,6 +1246,7 @@ export class PiUiExtendApp {
 	}
 
 	private async activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void> {
+		this.abortDraftModelRouting();
 		this.extensionUiController.cancelCustomUi(this.activeExtensionUiScope());
 		void this.voiceController.stopRecording();
 		this.runtime = runtime;
@@ -1159,6 +1262,7 @@ export class PiUiExtendApp {
 	}
 
 	private deactivateRuntimeForDraft(): void {
+		this.abortDraftModelRouting();
 		const runtime = this.runtime;
 		if (!runtime) return;
 		const scopeKey = this.activeExtensionUiScope();

@@ -18,6 +18,7 @@ import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
 import desktopSettingsEditorSource from "./settings/DesktopSettingsEditor.svelte?raw";
 import settingsModelListSource from "./settings/SettingsModelList.svelte?raw";
+import settingsModelRoutingTiersSource from "./settings/SettingsModelRoutingTiers.svelte?raw";
 import settingsModelSelectSource from "./settings/SettingsModelSelect.svelte?raw";
 import settingsModelVisibilitySource from "./settings/SettingsModelVisibility.svelte?raw";
 import settingsNumberInputSource from "./settings/SettingsNumberInput.svelte?raw";
@@ -215,6 +216,14 @@ describe("desktop visual regressions", () => {
     expect(commandAvailability).not.toContain("promptRunning");
   });
 
+  it("exposes Auto in live model pickers and moves that choice to a new routed draft", () => {
+    expect(modelPickerStateSource).toContain("await draftConfig.refreshRoutingAvailability()");
+    expect(overlaysViewModelSource).toContain("options.modelConfig.pickerConfigOptions(options.displayedConfigOptions())");
+    expect(modelConfigActionsSource).toContain('if (!picker.draft && modelRef === AUTO_MODEL_REF)');
+    expect(modelConfigActionsSource).toContain("await options.openDraftSessionTab()");
+    expect(modelConfigActionsSource).toContain('draftConfig.applySelection(AUTO_MODEL_REF, "off")');
+  });
+
   it("uses curated settings editors and keeps native number chrome suppressed", () => {
     expect(settingsSource).toContain('import DesktopSettingsEditor from "./settings/DesktopSettingsEditor.svelte"');
     expect(settingsSource).toContain('import ToolsSuiteSettingsEditor from "./settings/ToolsSuiteSettingsEditor.svelte"');
@@ -250,6 +259,18 @@ describe("desktop visual regressions", () => {
     expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');
+  });
+
+  it("exposes semantic first-prompt model routing in curated Desktop settings", () => {
+    expect(desktopSettingsEditorSource).toContain('label="Automatic model routing"');
+    expect(desktopSettingsEditorSource).toContain('label="Router model"');
+    expect(desktopSettingsEditorSource).toContain('label="Router fallbacks"');
+    expect(desktopSettingsEditorSource).toContain('label="Routing fallback tier"');
+    expect(desktopSettingsEditorSource).toContain('label="Routing tiers"');
+    expect(desktopSettingsEditorSource).toContain("<SettingsModelRoutingTiers");
+    expect(settingsModelRoutingTiersSource).toContain('placeholder="semantic id"');
+    expect(settingsModelRoutingTiersSource).toContain("<SettingsModelSelect");
+    expect(settingsModelRoutingTiersSource).toContain("options={THINKING_OPTIONS}");
   });
 
   it("keeps Desktop voice settings to the API key, language code, and speech model", () => {

@@ -111,6 +111,8 @@ import {
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
+	PIX_MODEL_ROUTING_STATUS_METHOD,
+	PIX_MODEL_ROUTE_METHOD,
 	PIX_BASH_METHOD,
 	PIX_CLEAR_TODOS_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
@@ -131,6 +133,8 @@ import {
 	PIX_USER_MESSAGE_ACTION_METHOD,
 	parseDesktopEnhancePromptRequest,
 	parseDesktopDraftConfigRequest,
+	parseDesktopModelRoutingStatusRequest,
+	parseDesktopModelRouteRequest,
 	parseDesktopBashRequest,
 	parseDesktopAgentControlRequest,
 	parseDesktopSessionRequest,
@@ -153,6 +157,10 @@ import {
 	type DesktopDcpStatsResponse,
 	type DesktopDraftConfigRequest,
 	type DesktopDraftConfigResponse,
+	type DesktopModelRoutingStatusRequest,
+	type DesktopModelRoutingStatusResponse,
+	type DesktopModelRouteRequest,
+	type DesktopModelRouteResponse,
 	type DesktopBashRequest,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
@@ -192,6 +200,11 @@ import {
 	bashExecutionStartUpdate,
 } from "./bash-execution.js";
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
+import {
+	defaultRoutingDecision,
+	loadModelRoutingConfig,
+	routeModelWithRuntime,
+} from "./model-routing.js";
 import { EventTranslator } from "./event-translator.js";
 import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
 import {
@@ -484,6 +497,12 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_DRAFT_CONFIG_METHOD, parseDesktopDraftConfigRequest, (ctx) =>
 				this.desktopDraftConfig(ctx.params),
+			)
+			.onRequest(PIX_MODEL_ROUTING_STATUS_METHOD, parseDesktopModelRoutingStatusRequest, (ctx) =>
+				this.desktopModelRoutingStatus(ctx.params),
+			)
+			.onRequest(PIX_MODEL_ROUTE_METHOD, parseDesktopModelRouteRequest, (ctx) =>
+				this.desktopRouteModel(ctx.params, ctx.signal),
 			)
 			.onRequest(PIX_BASH_METHOD, parseDesktopBashRequest, (ctx) =>
 				this.desktopBash(ctx.params),
@@ -2068,7 +2087,10 @@ export class PixAcpAgent {
 		};
 	}
 
-	private async desktopDraftConfig(params: DesktopDraftConfigRequest): Promise<DesktopDraftConfigResponse> {
+	private async desktopRouteModel(params: DesktopModelRouteRequest, signal: AbortSignal): Promise<DesktopModelRouteResponse> {
+		const config = loadModelRoutingConfig(params.cwd);
+		const fallback = defaultRoutingDecision(config);
+		if (!config.enabled) return fallback;
 		const workspaceKey = resolve(params.cwd);
 		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
 			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
@@ -2076,76 +2098,111 @@ export class PixAcpAgent {
 				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
 				: {}),
 		});
-
-		let modelRuntime: ModelRuntime;
 		try {
-			modelRuntime = await createDesktopDraftModelRuntime({
+			const handle = await createDesktopDraftModelRuntime({
+				cwd: workspaceKey,
+				...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
+				...(toolsSuiteExtensionPath ? { additionalExtensionPaths: [toolsSuiteExtensionPath] } : {}),
+			});
+			try {
+				return await routeModelWithRuntime(handle.modelRuntime, config, params.prompt, params.attachmentCount, signal);
+			} finally {
+				handle.dispose();
+			}
+		} catch {
+			return fallback;
+		}
+	}
+
+	private desktopModelRoutingStatus(params: DesktopModelRoutingStatusRequest): DesktopModelRoutingStatusResponse {
+		return { enabled: loadModelRoutingConfig(params.cwd).enabled };
+	}
+
+	private async desktopDraftConfig(params: DesktopDraftConfigRequest): Promise<DesktopDraftConfigResponse> {
+		const workspaceKey = resolve(params.cwd);
+		const modelRoutingEnabled = loadModelRoutingConfig(params.cwd).enabled;
+		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
+			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
+			...(this.options.toolsSuiteExtensionPath
+				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
+				: {}),
+		});
+
+		let handle: Awaited<ReturnType<typeof createDesktopDraftModelRuntime>>;
+		try {
+			handle = await createDesktopDraftModelRuntime({
 				cwd: workspaceKey,
 				...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
 				...(toolsSuiteExtensionPath
 					? { additionalExtensionPaths: [toolsSuiteExtensionPath] }
 					: {}),
 			});
-			await modelRuntime.refresh({ allowNetwork: false });
+			await handle.modelRuntime.refresh({ allowNetwork: false });
 		} catch (error) {
 			throw new RequestError(ERROR_SERVER, `failed to load draft model catalogue: ${stringifyUnknown(error)}`);
 		}
 
-		const models = [...modelRuntime.getAvailableSnapshot()] as PiModel[];
-		const configured = this.loadDefaultModel(params.cwd);
-		let current: PiModel | undefined;
-		let selectedDefault = configured;
-		const requestedModel = params.modelRef ? parseModelValue(params.modelRef) : undefined;
-		if (params.modelRef && !requestedModel) {
-			throw new RequestError(ERROR_INVALID_PARAMS, `invalid draft model reference ${params.modelRef}`);
-		}
-		if (requestedModel) {
-			current = models.find((model) => model.provider === requestedModel.provider && model.id === requestedModel.modelId)
-				?? modelRuntime.getModel(requestedModel.provider, requestedModel.modelId) as PiModel | undefined;
-			if (!current) throw new RequestError(ERROR_INVALID_PARAMS, `unknown draft model ${params.modelRef}`);
-			if (!models.some((model) => model.provider === current!.provider && model.id === current!.id)) models.push(current);
-			selectedDefault = undefined;
-		} else {
-			for (const candidate of defaultModelCandidates(configured)) {
-				if (!candidate) continue;
-				const match = models.find((model) => model.provider === candidate.provider && model.id === candidate.modelId);
-				if (!match) continue;
-				current = match;
-				selectedDefault = candidate;
-				break;
+		const modelRuntime = handle.modelRuntime;
+		try {
+			const models = [...modelRuntime.getAvailableSnapshot()] as PiModel[];
+			const configured = this.loadDefaultModel(params.cwd);
+			let current: PiModel | undefined;
+			let selectedDefault = configured;
+			const requestedModel = params.modelRef ? parseModelValue(params.modelRef) : undefined;
+			if (params.modelRef && !requestedModel) {
+				throw new RequestError(ERROR_INVALID_PARAMS, `invalid draft model reference ${params.modelRef}`);
 			}
-			if (!current && configured) {
-				current = modelRuntime.getModel(configured.provider, configured.modelId) as PiModel | undefined;
-				selectedDefault = configured;
-				if (current && !models.some((model) => model.provider === current!.provider && model.id === current!.id)) {
-					models.push(current);
+			if (requestedModel) {
+				current = models.find((model) => model.provider === requestedModel.provider && model.id === requestedModel.modelId)
+					?? modelRuntime.getModel(requestedModel.provider, requestedModel.modelId) as PiModel | undefined;
+				if (!current) throw new RequestError(ERROR_INVALID_PARAMS, `unknown draft model ${params.modelRef}`);
+				if (!models.some((model) => model.provider === current!.provider && model.id === current!.id)) models.push(current);
+				selectedDefault = undefined;
+			} else {
+				for (const candidate of defaultModelCandidates(configured)) {
+					if (!candidate) continue;
+					const match = models.find((model) => model.provider === candidate.provider && model.id === candidate.modelId);
+					if (!match) continue;
+					current = match;
+					selectedDefault = candidate;
+					break;
+				}
+				if (!current && configured) {
+					current = modelRuntime.getModel(configured.provider, configured.modelId) as PiModel | undefined;
+					selectedDefault = configured;
+					if (current && !models.some((model) => model.provider === current!.provider && model.id === current!.id)) {
+						models.push(current);
+					}
 				}
 			}
-		}
-		current ??= models[0];
-		if (!current) return { configOptions: [], modelUsageRefresh: "unavailable" };
+			current ??= models[0];
+			if (!current) return { configOptions: [], modelUsageRefresh: "unavailable", modelRoutingEnabled };
 
-		const levels = supportedThinkingLevels(current);
-		if (params.thinkingLevel && !levels.includes(params.thinkingLevel)) {
-			throw new RequestError(ERROR_INVALID_PARAMS, `${params.modelRef ?? `${current.provider}/${current.id}`} does not support ${params.thinkingLevel} thinking`);
+			const levels = supportedThinkingLevels(current);
+			if (params.thinkingLevel && !levels.includes(params.thinkingLevel)) {
+				throw new RequestError(ERROR_INVALID_PARAMS, `${params.modelRef ?? `${current.provider}/${current.id}`} does not support ${params.thinkingLevel} thinking`);
+			}
+			const thinkingLevel = params.thinkingLevel ?? selectedDefault?.thinkingLevel ?? levels[0] ?? "off";
+			const modelUsage = params.refreshModelUsage
+				? await this.querySessionModelUsage(`draft:${params.cwd}`, {
+					model: current,
+					thinkingLevel,
+					sessionId: "draft",
+					isStreaming: false,
+				})
+				: { refresh: "skipped" as const };
+			return {
+				configOptions: [
+					modelOption(current, models),
+					thoughtLevelOption(thinkingLevel, levels),
+				],
+				modelUsageRefresh: modelUsage.refresh,
+				...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
+				modelRoutingEnabled,
+			};
+		} finally {
+			handle.dispose();
 		}
-		const thinkingLevel = params.thinkingLevel ?? selectedDefault?.thinkingLevel ?? levels[0] ?? "off";
-		const modelUsage = params.refreshModelUsage
-			? await this.querySessionModelUsage(`draft:${params.cwd}`, {
-				model: current,
-				thinkingLevel,
-				sessionId: "draft",
-				isStreaming: false,
-			})
-			: { refresh: "skipped" as const };
-		return {
-			configOptions: [
-				modelOption(current, models),
-				thoughtLevelOption(thinkingLevel, levels),
-			],
-			modelUsageRefresh: modelUsage.refresh,
-			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
-		};
 	}
 
 	private querySessionModelUsage(sessionId: string, state: PiSessionState): Promise<ModelUsageRefreshResult> {

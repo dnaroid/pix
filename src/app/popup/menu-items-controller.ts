@@ -23,10 +23,13 @@ import type {
 
 export type AppMenuItemsControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
+	modelRoutingAvailable?(): boolean;
 	draftModelState?(): {
 		models: readonly SessionModel[];
 		modelRef?: string;
 		thinkingLevel?: ThinkingLevel;
+		autoRoutingAvailable?: boolean;
+		autoRoutingSelected?: boolean;
 	} | undefined;
 	visibleModels(): readonly string[] | undefined;
 	getBuiltinSlashCommands(): readonly SlashCommand[];
@@ -76,6 +79,8 @@ export class AppMenuItemsController {
 	}
 
 	getModelMenuItems(query: string, includeHidden = false): PopupMenuItem<ModelMenuValue>[] {
+		const draft = this.host.runtime() ? undefined : this.host.draftModelState?.();
+		const autoRoutingAvailable = draft?.autoRoutingAvailable ?? this.host.modelRoutingAvailable?.() ?? false;
 		const visibleModels = this.host.visibleModels();
 		const models = [...this.getModelMenuModels()]
 			.filter((model) => includeHidden || this.isVisibleModel(model, visibleModels))
@@ -94,17 +99,28 @@ export class AppMenuItemsController {
 			const current = this.isCurrentModel(model);
 			const visible = current || visibleModels === undefined || visibleModels.includes(ref);
 			return {
-				value: { model, ref, current, visible },
+				value: { kind: "model", model, ref, current, visible },
 				label: ref,
 				aliases: [model.id, model.name, model.provider],
 				keywords: [model.name, `${model.provider} ${model.id}`],
 			};
 		});
 
+		if (autoRoutingAvailable && !includeHidden) {
+			items.unshift({
+				value: { kind: "auto", ref: "pix:auto", current: draft?.autoRoutingSelected === true, visible: true },
+				label: "Auto",
+				aliases: ["automatic", "routing", "router"],
+				keywords: ["task complexity model routing tier"],
+			});
+		}
+
 		return fuzzySearch(items, query).map((match) => ({
 			value: match.value,
-			label: `${match.value.ref}${match.value.current ? ` ${APP_ICONS.check}` : ""}`,
-			description: match.value.model.name,
+			label: `${match.value.kind === "auto" ? "Auto" : match.value.ref}${match.value.current ? ` ${APP_ICONS.check}` : ""}`,
+			description: match.value.kind === "auto"
+				? (draft ? "Route the first prompt by task complexity" : "Start a new Auto-routed conversation")
+				: match.value.model.name,
 			labelHighlightRanges: labelHighlightRangesFromMatch(match.matchedText, match.matchedRanges, match.label),
 		}));
 	}

@@ -60,6 +60,30 @@ const DefaultModelConfig = Type.Object(
 	{ description: "Default model selection for new sessions." },
 );
 
+const ModelRoutingTier = Type.Object(
+	{
+		id: Type.String({
+			description: "Stable semantic tier id used by the router, e.g. simple, standard, complex, or expert.",
+			pattern: "^[a-z][a-z0-9_-]*$",
+		}),
+		description: Type.String({ description: "Semantic description sent to the router when choosing this tier.", minLength: 1 }),
+		modelRef: Type.String({ description: "Provider/model selected when the router chooses this tier.", minLength: 1 }),
+		thinking: DefaultThinkingSelection,
+	},
+	{ description: "One semantic automatic model-routing tier." },
+);
+
+const ModelRoutingConfig = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean({ description: "Enable Auto in the new-session model picker and route the first real prompt before session creation." })),
+		modelRef: Type.Optional(Type.String({ description: "Primary router model. OpenRouter Jev Latest is available as openrouter/~typesafe/jev-latest." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered router-model fallbacks tried if the primary routing request fails." })),
+		defaultTier: Type.Optional(Type.String({ description: "Tier id used deterministically when all router models fail or return an invalid decision." })),
+		tiers: Type.Optional(Type.Array(ModelRoutingTier, { minItems: 1, description: "Semantic target tiers the router may select." })),
+	},
+	{ description: "Optional first-prompt automatic model routing. Disabled by default." },
+);
+
 const PromptEnhancerConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Model used for prompt enhancement." })),
@@ -171,6 +195,7 @@ export const PixConfigSchema = Type.Object(
 		ignoreContextFiles: Type.Optional(Type.Boolean({ description: "Disable AGENTS.md / CLAUDE.md discovery for sessions started in this project, equivalent to pi --no-context-files." })),
 		maxProjectSessions: Type.Optional(Type.Number({ description: "Maximum number of pi session JSONL files to retain per project. Set to 0 to disable automatic session deletion.", minimum: 0 })),
 		defaultModel: Type.Optional(DefaultModelConfig),
+		modelRouting: Type.Optional(ModelRoutingConfig),
 		visibleModels: Type.Optional(Type.Array(Type.String({
 			description: "Provider/model identifier shown in Pix model pickers.",
 		}), {

@@ -1,5 +1,6 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import {
+  AUTO_MODEL_REF,
   clampThinkingLevel,
   modelThinkingConfigState,
 } from "../lib/model-thinking";
@@ -14,12 +15,23 @@ export function createModelConfigActions(
   picker: ModelPickerState,
 ) {
   async function applySelection(modelRef: string, thinkingLevel: string): Promise<void> {
+    if (!picker.draft && modelRef === AUTO_MODEL_REF) {
+      if (!draftConfig.autoRoutingAvailable) throw new Error("Automatic model routing is disabled.");
+      picker.close();
+      await options.openDraftSessionTab();
+      if (!options.draftSessionTabActive()) return;
+      if (draftConfig.configOptions.length === 0) await draftConfig.refresh();
+      draftConfig.applySelection(AUTO_MODEL_REF, "off");
+      return;
+    }
     if (picker.draft) {
       if (!options.draftSessionTabActive() || options.operationRunning()) {
         throw new Error("Model and thinking settings are unavailable right now.");
       }
       const currentThinking = draftConfig.applySelection(modelRef, thinkingLevel);
-      await options.preferences.rememberThinkingPreference(modelRef, currentThinking);
+      if (modelRef !== AUTO_MODEL_REF) {
+        await options.preferences.rememberThinkingPreference(modelRef, currentThinking);
+      }
       return;
     }
 

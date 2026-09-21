@@ -14,7 +14,7 @@ describe("draft-session concurrency guards", () => {
     expect(presentationStateSource).toContain(
       "const sessionMutationRunning = $derived(options.operationRunning() || options.draft.materializing)",
     );
-    const materializeStart = draftSource.indexOf("async function materialize()");
+    const materializeStart = draftSource.indexOf("async function materialize(prompt?: string, attachmentCount = 0)");
     const materializeEnd = draftSource.indexOf("function deactivate()", materializeStart);
     const materialize = draftSource.slice(materializeStart, materializeEnd);
     expect(materialize).toContain("materializing = true");
@@ -46,9 +46,11 @@ describe("draft-session concurrency guards", () => {
 
   it("loads and applies model selection on the UI-only draft before materializing a session", () => {
     expect(modelDraftConfigSource).toContain("const response = await requestClient.draftConfig(requestWorkspace)");
-    expect(modelDraftConfigSource).toContain("configOptions = response.configOptions");
+    expect(modelDraftConfigSource).toContain("withAutoModelRoutingOption(response.configOptions");
     expect(modelDraftConfigSource).toContain("configOptions = applyLocalModelThinkingSelection(configOptions, modelRef, thinkingLevel)");
-    expect(draftSource).toContain("requestClient.newSession(requestWorkspace, options.draftModelOverride() ?? undefined)");
+    expect(draftSource).toContain("await options.routeDraftModel(prompt, attachmentCount, controller.signal)");
+    expect(draftSource).toContain("routed ?? options.draftModelOverride() ?? undefined");
+    expect(draftSource).toContain("materializationController?.abort()");
 
     const activateStart = draftSource.indexOf("function activate(");
     const activateEnd = draftSource.indexOf("async function openStartTab", activateStart);

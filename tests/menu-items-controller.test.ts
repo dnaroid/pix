@@ -125,6 +125,43 @@ describe("AppMenuItemsController queue menu", () => {
 		]);
 	});
 
+	it("adds Auto only for an enabled draft and does not select it by default", () => {
+		const models = [model("openai-codex", "gpt-5.5", "GPT")];
+		const controller = new AppMenuItemsController({
+			...host(undefined),
+			draftModelState: () => ({
+				models: models as never,
+				modelRef: "openai-codex/gpt-5.5",
+				thinkingLevel: "high",
+				autoRoutingAvailable: true,
+				autoRoutingSelected: false,
+			}),
+		});
+
+		const items = controller.getModelMenuItems("");
+		assert.equal(items[0]?.value.kind, "auto");
+		assert.equal(items[0]?.label, "Auto");
+		assert.equal(items[0]?.value.current, false);
+		assert.equal(items[1]?.label, `openai-codex/gpt-5.5 ${APP_ICONS.check}`);
+	});
+
+	it("also exposes Auto from a live session when routing is enabled", () => {
+		const current = model("openai-codex", "gpt-5.5", "GPT");
+		const runtime = {
+			session: { model: current, scopedModels: [], thinkingLevel: "medium" },
+			services: { modelRuntime: { getAvailableSnapshot: () => [current] } },
+		} as unknown as AgentSessionRuntime;
+		const controller = new AppMenuItemsController({
+			...host(runtime),
+			modelRoutingAvailable: () => true,
+		});
+
+		const items = controller.getModelMenuItems("");
+		assert.equal(items[0]?.label, "Auto");
+		assert.equal(items[0]?.description, "Start a new Auto-routed conversation");
+		assert.equal(items[0]?.value.current, false);
+	});
+
 	it("filters model pickers by visibleModels while management mode exposes hidden models", () => {
 		const models = [
 			model("zai", "glm-5-turbo", "GLM"),
