@@ -101,19 +101,16 @@
       <div class="max-h-44 overflow-y-auto border-t border-sidebar-border/70 py-1">
         {#each visibleScripts as script (script.name)}
           <button
-            class="group flex min-h-8 w-full cursor-pointer items-start gap-2 px-2.5 py-1 text-left hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            class="group flex h-7 w-full cursor-pointer items-center gap-2 px-2.5 text-left hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
             title={`Run ${script.name}`}
             disabled={startingScript !== null || terminalActionId !== null}
             onclick={() => void runScript(script)}
           >
-            <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md text-muted-foreground group-hover:text-primary">
+            <span class="grid h-5 w-5 shrink-0 place-items-center rounded-md text-muted-foreground group-hover:text-primary">
               <Play class={["h-3 w-3", startingScript === script.name ? "animate-pulse" : ""]} aria-hidden="true" />
             </span>
-            <span class="min-w-0 flex-1">
-              <span class="block truncate font-mono text-xs font-medium text-foreground">{script.name}</span>
-              <span class="block truncate font-mono text-xs leading-3.5 text-muted-foreground" title={script.command}>{script.command}</span>
-            </span>
+            <span class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground">{script.name}</span>
           </button>
         {/each}
         {#if visibleScripts.length === 0}<div class="px-3 py-4 text-center text-xs text-muted-foreground">No matching scripts.</div>{/if}

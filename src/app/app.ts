@@ -189,6 +189,9 @@ export class PiUiExtendApp {
 	private draftModelRef: string | undefined;
 	private draftThinkingLevel: ThinkingLevel = "off";
 	private draftModelOverrideRef: string | undefined;
+	private draftModelCatalogLoaded = false;
+	private draftModelCatalogLoad: Promise<void> | undefined;
+	private draftModelCatalogGeneration = 0;
 
 	constructor(options: AppOptions) {
 		this.options = options;
@@ -259,6 +262,7 @@ export class PiUiExtendApp {
 			}),
 			draftModelOverrideRef: () => this.draftModelOverrideRef,
 			resetDraftModelSelection: () => this.resetDraftModelSelection(),
+			ensureDraftModelCatalog: () => this.ensureDraftModelCatalog(),
 			deactivateRuntimeForDraft: () => this.deactivateRuntimeForDraft(),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			activateRuntime: (runtime, options) => this.activateRuntime(runtime, options),
@@ -986,16 +990,33 @@ export class PiUiExtendApp {
 	private async loadStartupConfig(): Promise<void> {
 		await yieldToEventLoop();
 		this.applyPixConfig(loadPixConfig(this.options.cwd));
-		await this.refreshDraftModelCatalog();
+		this.resetDraftModelSelection();
 	}
 
-	private async refreshDraftModelCatalog(): Promise<void> {
+	private ensureDraftModelCatalog(): void {
+		if (this.draftModelCatalogLoaded || this.draftModelCatalogLoad) return;
+		const generation = ++this.draftModelCatalogGeneration;
+		const pending = this.refreshDraftModelCatalog(generation);
+		this.draftModelCatalogLoad = pending;
+		void pending.finally(() => {
+			if (this.draftModelCatalogLoad === pending) this.draftModelCatalogLoad = undefined;
+		});
+	}
+
+	private async refreshDraftModelCatalog(generation: number): Promise<void> {
+		let models: SessionModel[];
 		try {
-			this.draftModels = await createPixDraftModelCatalog({ cwd: this.options.cwd });
+			models = await createPixDraftModelCatalog({ cwd: this.options.cwd });
 		} catch {
-			this.draftModels = [];
+			models = [];
 		}
-		this.resetDraftModelSelection();
+		if (generation !== this.draftModelCatalogGeneration) return;
+		this.draftModelCatalogLoaded = true;
+		this.draftModels = models;
+		if (!this.draftModelOverrideRef) this.resetDraftModelSelection();
+		if (!this.running) return;
+		this.modelUsageController.observeSession(this.runtime?.session);
+		this.render();
 	}
 
 	private resetDraftModelSelection(): void {

@@ -11,6 +11,7 @@
 
   let {
     questionMode,
+    requiresPreview,
     previewing,
     allQuestionsComplete,
     currentQuestion,
@@ -26,6 +27,7 @@
     onChoiceKeydown,
   }: {
     questionMode: QuestionComposerMode;
+    requiresPreview: boolean;
     previewing: boolean;
     allQuestionsComplete: boolean;
     currentQuestion: DesktopQuestion | undefined;
@@ -79,23 +81,25 @@
         <span>{question.label}</span>
       </button>
     {/each}
-    <button
-      class={[
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 text-xs font-medium transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-        previewing
-          ? "border-border bg-panel-strong text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-panel-hover hover:text-foreground",
-      ]}
-      type="button"
-      role="tab"
-      id={`question-composer-tab-${questionMode.questions.length}`}
-      data-question-tab={questionMode.questions.length}
-      aria-selected={previewing}
-      aria-controls="question-composer-panel"
-      tabindex={previewing ? 0 : -1}
-      onclick={() => onSelectTab(questionMode.questions.length)}
-      onkeydown={(event) => onTabKeydown(event, questionMode.questions.length)}
-    ><Eye class="size-3" aria-hidden="true" />Preview</button>
+    {#if requiresPreview}
+      <button
+        class={[
+          "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 text-xs font-medium transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
+          previewing
+            ? "border-border bg-panel-strong text-foreground"
+            : "border-transparent text-muted-foreground hover:bg-panel-hover hover:text-foreground",
+        ]}
+        type="button"
+        role="tab"
+        id={`question-composer-tab-${questionMode.questions.length}`}
+        data-question-tab={questionMode.questions.length}
+        aria-selected={previewing}
+        aria-controls="question-composer-panel"
+        tabindex={previewing ? 0 : -1}
+        onclick={() => onSelectTab(questionMode.questions.length)}
+        onkeydown={(event) => onTabKeydown(event, questionMode.questions.length)}
+      ><Eye class="size-3" aria-hidden="true" />Preview</button>
+    {/if}
   </div>
 </div>
 

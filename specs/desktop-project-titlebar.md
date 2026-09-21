@@ -30,6 +30,8 @@ without blocking desktop interactions.
   draggable.
   Hovering the square shows the full project name; it does not expose the full
   workspace path in that titlebar tooltip.
+  The square is non-interactive chrome and keeps the normal arrow cursor rather
+  than exposing an I-beam/text-selection cursor over its abbreviation.
 - The `Project` sidebar view starts with a compact project switcher above the file
   explorer. It shows the active project, keeps an explicit chevron affordance at
   the right edge of the row, and opens an inline menu of at most 20 recent projects.

@@ -31,7 +31,7 @@
   {#if project}
     <div class="flex shrink-0 items-center pr-1.5" data-tauri-drag-region>
       <span
-        class="project-titlebar-badge grid h-6 w-6 place-items-center rounded-sm border border-border font-mono text-xs font-semibold"
+        class="project-titlebar-badge grid h-6 w-6 cursor-default select-none place-items-center rounded-sm border border-border font-mono text-xs font-semibold"
         style:--project-titlebar-hue={project.hue}
         style:--project-titlebar-color={project.color}
         title={project.name}

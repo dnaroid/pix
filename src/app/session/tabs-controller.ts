@@ -69,6 +69,7 @@ export type AppTabsControllerHost = {
 	createRuntimeForSession(sessionPath: string): Promise<AgentSessionRuntime>;
 	draftModelOverrideRef?(): string | undefined;
 	resetDraftModelSelection?(): void;
+	ensureDraftModelCatalog?(): void;
 	deactivateRuntimeForDraft?(): void;
 	awaitCurrentSessionExtensions?(runtime?: AgentSessionRuntime): Promise<void>;
 	activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void>;
@@ -357,6 +358,15 @@ export class AppTabsController {
 		const paths = saved?.tabs.map((tab) => resolve(tab.path)).filter((path) => existsSync(path)) ?? [];
 		const activePath = saved?.activePath ? resolve(saved.activePath) : undefined;
 		const sessionPath = activePath && paths.includes(activePath) ? activePath : paths[0];
+		if (saved && sessionPath) {
+			const placeholders = this.restoredTabs(saved);
+			if (placeholders.length > 0) {
+				this.tabItems.splice(0, this.tabItems.length, ...placeholders);
+				this.activeTabId = placeholders.find((tab) => tab.sessionPath && resolve(tab.sessionPath) === sessionPath)?.id
+					?? placeholders[0]?.id;
+				this.host.render();
+			}
+		}
 		this.startupRuntimePlan = sessionPath ? { sessionPath } : null;
 		return this.startupRuntimePlan;
 	}
@@ -1483,6 +1493,7 @@ export class AppTabsController {
 		else this.host.closeDraftSessionSelector?.();
 		if (this.pendingActiveTabId === tab.id) this.pendingActiveTabId = undefined;
 		this.host.render();
+		this.host.ensureDraftModelCatalog?.();
 	}
 
 	private clearStartupTabPlaceholders(): void {

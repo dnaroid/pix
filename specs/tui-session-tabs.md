@@ -93,6 +93,15 @@ user actually sends work to the agent.
 - Restored real tabs remain ordered and selected by the existing snapshot
   rules; the draft is a transient TUI surface layered on top of that
   real-session membership model.
+- On startup, once the persisted tab snapshot has been read, Pix publishes the
+  saved tab strip immediately instead of waiting for the active Pi runtime to
+  finish loading. The selected saved tab acts as startup chrome while its
+  runtime/session history continues initializing.
+- Building the sessionless draft model catalogue is not part of the restored
+  real-session startup critical path. Pix loads that catalogue lazily only
+  after a UI-only draft tab becomes active, and the draft is rendered before
+  that background discovery starts. This keeps extension-backed draft model
+  selection available without delaying saved tab visibility.
 
 ## Concurrency and ownership invariants
 

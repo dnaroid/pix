@@ -1693,6 +1693,7 @@ describe("AppTabsController", () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-draft-startup-"));
 		const tabsPath = join(dir, "tabs.json");
 		let selectorOpens = 0;
+		let draftCatalogLoads = 0;
 		let newRuntimeCalls = 0;
 		const controller = new AppTabsController({
 			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
@@ -1718,6 +1719,9 @@ describe("AppTabsController", () => {
 			openDraftSessionSelector: () => {
 				selectorOpens += 1;
 			},
+			ensureDraftModelCatalog: () => {
+				draftCatalogLoads += 1;
+			},
 			addEntry: () => {},
 			showToast: () => {},
 			render: () => {},
@@ -1733,9 +1737,55 @@ describe("AppTabsController", () => {
 		assert.equal(controller.tabs()[0]?.draft, true);
 		assert.equal(controller.tabs()[0]?.sessionPath, undefined);
 		assert.equal(selectorOpens, 1);
+		assert.equal(draftCatalogLoads, 1);
 		const saved = JSON.parse(await readFile(tabsPath, "utf8")) as { tabs: unknown[]; activePath?: string };
 		assert.deepEqual(saved.tabs, []);
 		assert.equal(saved.activePath, undefined);
+	});
+
+	it("publishes saved tab chrome before the startup runtime is created", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-startup-placeholders-"));
+		const sessionPath = join(dir, "saved.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(sessionPath, "", "utf8");
+		await writeFile(tabsPath, JSON.stringify({
+			version: 4,
+			cwd: dir,
+			tabs: [{ path: sessionPath, title: "Saved work" }],
+			activePath: sessionPath,
+		}), "utf8");
+		let renders = 0;
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => undefined,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("saved", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => { renders += 1; },
+		});
+		const tabs = controller as unknown as { filePath: () => string };
+		tabs.filePath = () => tabsPath;
+
+		assert.deepEqual(await controller.prepareStartupRuntime(), { sessionPath });
+		assert.equal(controller.tabs().length, 1);
+		assert.equal(controller.tabs()[0]?.title, "Saved work");
+		assert.equal(controller.tabs()[0]?.sessionPath, sessionPath);
+		assert.equal(controller.tabs()[0]?.status, "active");
+		assert.equal(renders, 1);
 	});
 
 	it("materializes the active draft in place while its runtime is loading", async () => {

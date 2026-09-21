@@ -24,6 +24,7 @@ import settingsSectionNavSource from "./settings/SettingsSectionNav.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
 import markdownSource from "./MarkdownText.svelte?raw";
 import terminalSource from "./TerminalView.svelte?raw";
+import tauriLibSource from "../../src-tauri/src/lib.rs?raw";
 import toolResultSource from "./ToolResult.svelte?raw";
 import transcriptSource from "./TranscriptPane.svelte?raw";
 
@@ -88,6 +89,12 @@ describe("desktop visual regressions", () => {
     expect(transcriptSource).not.toContain('LoaderCircle from "@lucide/svelte/icons/loader-circle"');
     expect(transcriptSource).toContain("promptRunning: () => promptRunning");
     expect(transcriptSource).toContain("disabled={promptRunning || operationRunning}");
+  });
+
+  it("keeps the jump-to-latest arrow translucent over transcript content", () => {
+    expect(transcriptSource).toContain("bg-panel-strong/70");
+    expect(transcriptSource).toContain("backdrop-blur-sm");
+    expect(transcriptSource).toContain("hover:bg-panel-hover/90");
   });
 
   it("keeps project and Git branch between context and usage status chrome", () => {
@@ -218,9 +225,16 @@ describe("desktop visual regressions", () => {
     expect(desktopSettingsEditorSource).not.toContain('placeholder="provider/model"');
     expect(desktopSettingsEditorSource).not.toContain("SettingsStringList");
     expect(desktopSettingsEditorSource).not.toContain('label="Remembered thinking by model"');
-    expect(settingsModelSelectSource).toContain("<optgroup label={provider}>");
+    expect(settingsModelSelectSource).toContain("searchSettingsModelOptions");
+    expect(settingsModelSelectSource).toContain('role="combobox"');
+    expect(settingsModelSelectSource).toContain('placeholder="Filter models…"');
     expect(settingsModelListSource).toContain("availableToAdd");
+    expect(settingsModelListSource).toContain("<SettingsModelSelect");
+    expect(settingsModelListSource).not.toContain("<select");
     expect(settingsModelVisibilitySource).toContain("Choose visible models");
+    expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
+    expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
+    expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');
   });
 
   it("keeps Desktop voice settings to the API key, language code, and speech model", () => {
@@ -232,6 +246,26 @@ describe("desktop visual regressions", () => {
     expect(desktopSettingsEditorSource).not.toContain('"label": "English"');
     expect(desktopSettingsEditorSource).toContain("LANGUAGE_OPTIONS");
     expect(desktopSettingsEditorSource).toContain("SPEECH_MODEL_OPTIONS");
+  });
+
+  it("keeps package terminals interactive, scrollable, bounded, and script rows compact", () => {
+    expect(terminalSource).toContain("const TERMINAL_SCROLLBACK_LINES = 5_000;");
+    expect(terminalSource).toContain('cursorStyle: "bar"');
+    expect(terminalSource).toContain("cursorWidth: 2");
+    expect(terminalSource).toContain('cursorInactiveStyle: "none"');
+    expect(terminalSource).toContain("terminal.options.cursorBlink = false");
+    expect(terminalSource).toContain("data-terminal-caret");
+    expect(terminalSource).toContain("currentTerminal.buffer.active.cursorX");
+    expect(terminalSource).toContain("currentTerminal.buffer.active.cursorY");
+    expect(terminalSource).toContain("bind:this={scrollTrack}");
+    expect(terminalSource).toContain("scrollbarVisible");
+    expect(terminalSource).toContain("currentTerminal.scrollToLine");
+    expect(terminalSource).toContain("scrollbar-width: none");
+    expect(tauriLibSource).toContain('command.arg("-f")');
+    expect(tauriLibSource).toContain('command.env("PROMPT", "pix:%1~ $ ")');
+    expect(packageScriptsSource).toContain("{script.name}");
+    expect(packageScriptsSource).not.toContain("{script.command}");
+    expect(packageScriptsSource).not.toContain("title={script.command}");
   });
 
   it("keeps desktop typography on the compact IDE scale with a 12px minimum", async () => {

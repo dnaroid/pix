@@ -4,6 +4,7 @@ export type PackageTerminalKind = "script" | "shell";
 
 export const PACKAGE_TERMINAL_OUTPUT_EVENT = "package-terminal://output";
 export const PACKAGE_TERMINAL_EXIT_EVENT = "package-terminal://exit";
+export const PACKAGE_TERMINAL_OUTPUT_MAX_CHARS = 512_000;
 
 export interface PackageScript {
   readonly name: string;
@@ -73,7 +74,7 @@ export function packageTerminalStatusLabel(terminal: Pick<PackageTerminalSnapsho
   return terminal.exitCode === undefined ? "Exited" : `Exited · ${terminal.exitCode}`;
 }
 
-export function appendTerminalOutput(current: string, chunk: string, maxChars = 512_000): string {
+export function appendTerminalOutput(current: string, chunk: string, maxChars = PACKAGE_TERMINAL_OUTPUT_MAX_CHARS): string {
   const combined = `${current}${chunk}`;
   return combined.length <= maxChars ? combined : combined.slice(combined.length - maxChars);
 }
@@ -81,5 +82,5 @@ export function appendTerminalOutput(current: string, chunk: string, maxChars = 
 export function filterPackageScripts(scripts: readonly PackageScript[], query: string): PackageScript[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...scripts];
-  return scripts.filter((script) => `${script.name}\n${script.command}`.toLowerCase().includes(needle));
+  return scripts.filter((script) => script.name.toLowerCase().includes(needle));
 }

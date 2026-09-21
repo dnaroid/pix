@@ -536,6 +536,7 @@
   {#if questionMode}
     <PromptQuestionnairePanel
       {questionMode}
+      requiresPreview={questionnaireController.requiresPreview}
       previewing={questionnaireController.previewing}
       allQuestionsComplete={questionnaireController.allQuestionsComplete}
       currentQuestion={questionnaireController.currentQuestion}
@@ -654,7 +655,13 @@
             class="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
             type="submit"
             disabled={questionMode.addingImages || !questionnaireController.currentDraftIsComplete()}
-          >{questionMode.state.activeTab === questionMode.questions.length - 1 ? "Preview" : "Next"}<ChevronRight class="size-3.5" aria-hidden="true" /></button>
+          >
+            {#if !questionnaireController.requiresPreview}
+              Submit answer
+            {:else}
+              {questionMode.state.activeTab === questionMode.questions.length - 1 ? "Preview" : "Next"}<ChevronRight class="size-3.5" aria-hidden="true" />
+            {/if}
+          </button>
         {/if}
       </div>
     {/if}

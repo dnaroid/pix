@@ -31,6 +31,7 @@ describe("WorkbenchTabs desktop interaction", () => {
   it("shows the active project's colored two-letter identity before the workbench tabs", () => {
     expect(titlebarSource).toContain("data-project-badge");
     expect(titlebarSource).toContain("{project.abbreviation}");
+    expect(titlebarSource).toContain("cursor-default select-none");
     expect(titlebarSource.indexOf("data-project-badge")).toBeLessThan(titlebarSource.indexOf("<WorkbenchTabs {...workbench} />"));
     expect(titlebarSource).toContain("style:--project-titlebar-color={project.color}");
     expect(titlebarSource).toContain("style:--project-titlebar-hue={project.hue}");

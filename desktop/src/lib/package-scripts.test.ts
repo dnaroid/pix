@@ -7,13 +7,13 @@ import {
 } from "./package-scripts";
 
 describe("package scripts helpers", () => {
-  it("filters scripts by name and command", () => {
+  it("filters scripts by name only for the compact list", () => {
     const scripts = [
       { name: "dev", command: "vite" },
       { name: "test", command: "vitest run" },
     ];
     expect(filterPackageScripts(scripts, "dev").map((script) => script.name)).toEqual(["dev"]);
-    expect(filterPackageScripts(scripts, "vitest").map((script) => script.name)).toEqual(["test"]);
+    expect(filterPackageScripts(scripts, "vitest")).toEqual([]);
   });
 
   it("formats run and terminal status labels", () => {

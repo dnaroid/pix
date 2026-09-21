@@ -40,6 +40,7 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 - Public JSONC schemas keep fallback arrays optional for backward compatibility with existing files. Loaders normalize an omitted fallback field to `[]` whenever the corresponding resolved selector exists.
 - Default config files explicitly write fallback arrays so newly created configs document the invariant.
 - Save/upsert operations that change a primary selector preserve its existing fallback array, or create `[]` when none exists.
+- Desktop Settings model controls use the shared fuzzy matcher rather than native select substring/type-ahead behavior. Primary selectors, fallback replacement and add controls, Git review/commit selectors (including thinking suffixes), and the visible-model chooser match and rank against model ref, model id, display name, and provider. Existing configured refs that are absent from the live catalog remain representable and searchable.
 
 ## Execution contract
 
@@ -77,11 +78,16 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 - `src/schemas/pix-schema.ts`
 - `src/schemas/pix-desktop-schema.ts`
 - `src/schemas/pi-tools-suite-schema.ts`
+- `desktop/src/components/settings/SettingsModelSelect.svelte`
+- `desktop/src/components/settings/SettingsModelList.svelte`
+- `desktop/src/components/settings/SettingsModelVisibility.svelte`
+- `desktop/src/lib/settings-model-search.ts`
 
 ## Verification
 
 - Config tests assert default and legacy selectors resolve with explicit arrays.
 - Runtime tests assert default-model candidate ordering and that resumed/explicit models do not gain fallback candidates.
 - Helper tests cover fallback execution for lookup and the existing session-title/DCP/sub-agent chains; autocomplete/prompt/Git paths share the same ordered-candidate rule and are exercised by their focused suites, including TUI Git inheritance and explicit fallback clearing.
+- Desktop settings tests cover fuzzy matching by ref/id/name/provider and source-level wiring of searchable model selectors, fallback add controls, Git selectors, and visible-model filtering.
 - Root Pix, ACP, and pi-tools-suite typechecks must pass.
 - Generated JSON schemas must be up to date.

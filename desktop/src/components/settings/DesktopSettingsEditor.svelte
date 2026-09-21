@@ -68,12 +68,21 @@
 
   const parsed = $derived(parseSettingsSource(source).value);
   const gitModelOptions = $derived.by(() => models.flatMap((model) => [
-    { value: model.ref, label: `${model.name} · Default thinking` },
+    {
+      value: model.ref,
+      label: `${model.name} · Default thinking`,
+      description: model.ref,
+      aliases: [model.ref, model.modelId, model.provider, "default thinking"],
+      keywords: [model.name, `${model.provider} ${model.modelId}`],
+    },
     ...model.thinkingLevels
       .filter((level) => level !== "off")
       .map((level) => ({
         value: `${model.ref}:${level}`,
         label: `${model.name} · ${level === "xhigh" ? "Extra high" : level}`,
+        description: `${model.ref}:${level}`,
+        aliases: [model.ref, model.modelId, model.provider, level, level === "xhigh" ? "extra high" : level],
+        keywords: [model.name, `${model.provider} ${model.modelId}`, level],
       })),
   ]));
 
@@ -359,7 +368,7 @@
       defaultLabel={defaultLabel(["desktop", "git", "reviewModelRef"])}
       onReset={() => reset(["desktop", "git", "reviewModelRef"])}
     >
-      <SettingsSelect value={text(["desktop", "git", "reviewModelRef"])} options={gitModelOptions} onChange={(value) => set(["desktop", "git", "reviewModelRef"], value)} />
+      <SettingsModelSelect value={text(["desktop", "git", "reviewModelRef"])} options={gitModelOptions} ariaLabel="Review model" onChange={(value) => set(["desktop", "git", "reviewModelRef"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow
       label="Review fallbacks"
@@ -376,7 +385,7 @@
       defaultLabel={defaultLabel(["desktop", "git", "commitMessageModelRef"])}
       onReset={() => reset(["desktop", "git", "commitMessageModelRef"])}
     >
-      <SettingsSelect value={text(["desktop", "git", "commitMessageModelRef"])} options={gitModelOptions} onChange={(value) => set(["desktop", "git", "commitMessageModelRef"], value)} />
+      <SettingsModelSelect value={text(["desktop", "git", "commitMessageModelRef"])} options={gitModelOptions} ariaLabel="Commit message model" onChange={(value) => set(["desktop", "git", "commitMessageModelRef"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow
       label="Commit message fallbacks"

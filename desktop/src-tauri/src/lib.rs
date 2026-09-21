@@ -6165,7 +6165,23 @@ fn shell_terminal_command() -> Result<(CommandBuilder, String, String), String> 
         .unwrap_or("shell")
         .to_owned();
     let command_label = executable.to_string_lossy().into_owned();
-    Ok((CommandBuilder::new(executable), label, command_label))
+    let mut command = CommandBuilder::new(&executable);
+    match label.as_str() {
+        "zsh" => {
+            command.arg("-f");
+            command.env("PS1", "pix:%1~ $ ");
+            command.env("PROMPT", "pix:%1~ $ ");
+            command.env("RPROMPT", "");
+        }
+        "bash" => {
+            command.args(["--noprofile", "--norc"]);
+            command.env("PS1", r"pix:\W $ ");
+        }
+        _ => {
+            command.env("PS1", "pix:$ ");
+        }
+    }
+    Ok((command, label, command_label))
 }
 
 #[cfg(windows)]
@@ -8467,7 +8483,23 @@ mod tests {
             shell_terminal_command().expect("build shell terminal");
         assert!(!label.trim().is_empty());
         assert!(!command_label.trim().is_empty());
-        assert_eq!(command.get_argv().len(), 1);
+        let argv = command.get_argv();
+        let argv = argv
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        match label.as_str() {
+            "zsh" => assert_eq!(argv, vec![command_label.clone(), "-f".to_owned()]),
+            "bash" => assert_eq!(
+                argv,
+                vec![
+                    command_label.clone(),
+                    "--noprofile".to_owned(),
+                    "--norc".to_owned(),
+                ]
+            ),
+            _ => assert_eq!(argv.len(), 1),
+        }
     }
 
     #[test]

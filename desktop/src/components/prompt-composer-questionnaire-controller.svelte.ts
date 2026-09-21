@@ -33,9 +33,10 @@ export function createPromptComposerQuestionnaireController(
   let modeActive = false;
   let restoreFocusElement: HTMLElement | null = null;
 
+  const requiresPreview = $derived.by(() => (options.mode()?.questions.length ?? 0) > 1);
   const previewing = $derived.by(() => {
     const mode = options.mode();
-    return !!mode && mode.state.activeTab === mode.questions.length;
+    return !!mode && requiresPreview && mode.state.activeTab === mode.questions.length;
   });
   const currentQuestion = $derived.by(() => {
     const mode = options.mode();
@@ -90,6 +91,10 @@ export function createPromptComposerQuestionnaireController(
     const mode = options.mode();
     if (!mode) return false;
     if (mode.addingImages) return true;
+    if (!requiresPreview) {
+      if (allQuestionsComplete) mode.onSubmit(mode.state);
+      return true;
+    }
     if (previewing) {
       if (allQuestionsComplete) mode.onSubmit(mode.state);
       return true;
@@ -178,7 +183,7 @@ export function createPromptComposerQuestionnaireController(
   function handleTabKeydown(event: KeyboardEvent, index: number): void {
     const mode = options.mode();
     if (!mode) return;
-    const tabCount = mode.questions.length + 1;
+    const tabCount = mode.questions.length + (requiresPreview ? 1 : 0);
     let nextIndex: number;
     if (event.key === "ArrowRight") nextIndex = (index + 1) % tabCount;
     else if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabCount) % tabCount;
@@ -280,6 +285,7 @@ export function createPromptComposerQuestionnaireController(
   }
 
   return {
+    get requiresPreview() { return requiresPreview; },
     get previewing() { return previewing; },
     get currentQuestion() { return currentQuestion; },
     get currentDraft() { return currentDraft; },

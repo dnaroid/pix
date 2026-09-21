@@ -19,7 +19,7 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - Load Pix's bundled question extension in Desktop-owned Pi RPC sessions.
 - Bridge a validated private question payload through Pi RPC and ACP.
 - Present one to five single- or multi-select questions, predefined choices, custom text, and custom image attachments inside the bottom composer while leaving the transcript visible.
-- Support direct question tabs, a permanent final Preview tab, edit, submit, cancel, safe cancellation during reconnect or shutdown, and session ownership when the user changes conversation tabs.
+- Support direct question tabs, a final Preview tab for multi-question questionnaires, edit, submit, cancel, safe cancellation during reconnect or shutdown, and session ownership when the user changes conversation tabs.
 - Keep existing TUI behavior and ordinary ACP form elicitation schema/answer semantics unchanged.
 
 ## Non-goals
@@ -31,10 +31,10 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 ## Behavior
 
 1. When an agent invokes `question`, the normal bottom composer switches in place to questionnaire mode; no overlay is opened and the transcript remains usable.
-2. Tabs above the composer content represent each question and a final Preview. Completed question tabs carry a completion mark and every tab remains directly selectable for editing.
+2. Tabs above the composer content represent each question. Questionnaires with more than one question also have a final Preview tab; a single-question questionnaire omits Preview and submits directly from that question once its answer is complete. Completed question tabs carry a completion mark and every visible tab remains directly selectable for editing.
 3. A question tab shows its prompt and predefined choices. Single-select questions use radio controls. Questions with `multiple: true` use checkboxes and may combine predefined choices with `Something else…`; selecting the latter activates the composer's textarea plus its image choose/paste/remove/preview interactions.
 4. A multi-select question defaults to at least one and at most every available answer, including the implicit custom answer. Optional `minSelections` and `maxSelections` constrain that count. An enabled custom answer counts as one selection and is complete only when it has non-empty text and/or images.
-5. Preview lists every answer, highlights missing answers, and links back to each question. `Submit answers` is available only there and is disabled until all questions are complete.
+5. For multi-question questionnaires, Preview lists every answer, highlights missing answers, and links back to each question. `Submit answers` is available only there and is disabled until all questions are complete. A single-question questionnaire instead exposes `Submit answer` on its question view and does not render an answer preview.
 6. Cancel returns a user-canceled tool result; reconnect, shutdown, malformed payloads, and unsupported responses also cancel rather than inventing an answer. Normal chat submission is unavailable in questionnaire mode.
 7. Custom images are previewed locally and returned as Pi image content. Desktop limits a questionnaire to 10 images, 25 MB per image, and 50 MB total.
 8. A session-scoped elicitation belongs to the `sessionId` carried by ACP. If that session becomes inactive, its questionnaire/form UI is hidden without resolving or moving the request; the owning session's top-tab activity remains in warning state. Activating the owning session restores the pending UI. Another active tab keeps its ordinary composer/drop behavior instead of inheriting the inactive session's question state.
