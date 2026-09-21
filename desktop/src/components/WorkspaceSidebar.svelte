@@ -93,10 +93,12 @@
     sessionReady,
     gitAssistantReady,
     registrySnapshot,
+    registryProjectInitialized,
     registryBackgroundSync,
     registryLoading,
     registryActionId,
     gitSnapshot,
+    gitUninitialized,
     gitLoading,
     gitError,
     gitActionId,
@@ -130,9 +132,11 @@
     onSaveProjectColor,
     onReload,
     onRegistryRefresh,
+    onRegistryInitializeProject,
     onRegistryAction,
     onRegistryProjectChange,
     onGitRefresh,
+    onGitInitialize,
     onGitOpenDiff,
     onGitStage,
     onGitUnstage,
@@ -155,10 +159,12 @@
     sessionReady: boolean;
     gitAssistantReady: boolean;
     registrySnapshot: RegistrySnapshot | undefined;
+    registryProjectInitialized: boolean | undefined;
     registryBackgroundSync: RegistryBackgroundSyncState;
     registryLoading: boolean;
     registryActionId: string | null;
     gitSnapshot: GitSnapshot | undefined;
+    gitUninitialized: boolean;
     gitLoading: boolean;
     gitError: string | null;
     gitActionId: string | null;
@@ -197,9 +203,11 @@
     onSaveProjectColor: (color: string | undefined) => Promise<string | undefined>;
     onReload: () => void;
     onRegistryRefresh: () => void;
+    onRegistryInitializeProject: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
     onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
     onGitRefresh: () => void;
+    onGitInitialize: () => void;
     onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onGitStage: (path?: string) => Promise<boolean>;
     onGitUnstage: (path?: string) => void;
@@ -650,6 +658,7 @@
           <GitPanel
             {workspace}
             snapshot={gitSnapshot}
+            uninitialized={gitUninitialized}
             loading={gitLoading}
             error={gitError}
             actionId={gitActionId}
@@ -657,6 +666,7 @@
             workflow={gitWorkflow}
             {gitAssistantReady}
             onRefresh={onGitRefresh}
+            onInitialize={onGitInitialize}
             onOpenDiff={onGitOpenDiff}
             onStage={onGitStage}
             onUnstage={onGitUnstage}
@@ -672,10 +682,12 @@
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
           <RegistryPanel
             snapshot={registrySnapshot}
+            projectInitialized={registryProjectInitialized}
             loading={registryLoading}
             disabled={!sessionReady}
             actionId={registryActionId}
             onRefresh={onRegistryRefresh}
+            onInitializeProject={onRegistryInitializeProject}
             onAction={onRegistryAction}
             onOpenProjectArtifact={openRegistryProjectArtifact}
           />

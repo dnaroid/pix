@@ -2,6 +2,7 @@
   import Activity from "@lucide/svelte/icons/activity";
   import BookOpenCheck from "@lucide/svelte/icons/book-open-check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Download from "@lucide/svelte/icons/download";
   import FileText from "@lucide/svelte/icons/file-text";
   import Link2 from "@lucide/svelte/icons/link-2";
   import Play from "@lucide/svelte/icons/play";
@@ -66,6 +67,7 @@
   const overview = $derived(runtime.overview);
   const loading = $derived(runtime.loading);
   const overviewRefreshRunning = $derived(runtime.overviewRefreshRunning);
+  const installingIdx = $derived(runtime.installingIdx);
   const error = $derived(runtime.error);
   const runningOperation = $derived(runtime.runningOperation);
   const visibleOperation = $derived(runtime.visibleOperation);
@@ -99,6 +101,7 @@
   const knowledgeNeedsAttention = $derived(idxKnowledgeNeedsAttention(overview?.wikiStatus));
 
   const refresh = runtime.refresh;
+  const installIdx = runtime.installIdx;
   const startOperation = runtime.startOperation;
   const stopOperation = runtime.stopOperation;
   const runQuery = queryController.runQuery;
@@ -178,7 +181,7 @@
       title="Refresh IDX state"
       aria-label="Refresh IDX state"
       onclick={refresh}
-      disabled={loading || overviewRefreshRunning}
+      disabled={loading || overviewRefreshRunning || installingIdx}
     ><RefreshCw class={["h-3.5 w-3.5", loading || overviewRefreshRunning ? "animate-spin" : ""]} aria-hidden="true" /></button>
   </div>
 
@@ -209,7 +212,16 @@
       <div class="px-4 py-10 text-center">
         <ScanSearch class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">IDX is not available</p>
-        <p class="mx-auto mt-1 max-w-80 text-xs leading-4 text-muted-foreground">Install indexer-cli or expose <span class="font-mono">idx</span> in your login-shell PATH, then refresh.</p>
+        <p class="mx-auto mt-1 max-w-80 text-xs leading-4 text-muted-foreground">Install <span class="font-mono">indexer-cli</span> into Pix's private tools directory. Nothing is installed globally.</p>
+        <button
+          class="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          type="button"
+          disabled={installingIdx}
+          onclick={() => void installIdx()}
+        >
+          {#if installingIdx}<RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{:else}<Download class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+          {installingIdx ? "Installing IDX…" : "Install IDX"}
+        </button>
       </div>
     {:else if overview && !overview.initialized}
       <div class="px-4 py-10 text-center">

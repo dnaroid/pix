@@ -1,597 +1,248 @@
-<div align="center">
-
 # Pix
 
-**A workspace-first terminal UI for [Pi](https://github.com/badlogic/pi-mono) — built for real coding sessions, not terminal log archaeology.**
+**A workspace-first coding UI for [Pi](https://github.com/badlogic/pi-mono) —
+available as a terminal TUI and a native Desktop app.**
 
-Tabs, readable tool activity, session navigation, local voice input, an interactive shell, and a bundled toolkit for repository-scale agent work.
+Persistent workspaces, readable agent activity, project tools, Source Control,
+repository intelligence, voice input and a bundled toolkit for serious coding
+sessions.
 
 [![check](https://github.com/dnaroid/pix/actions/workflows/check.yml/badge.svg)](https://github.com/dnaroid/pix/actions/workflows/check.yml)
 
-</div>
+<!-- markdownlint-disable MD013 -->
 
 ![Pix workspace with tabs, compact thinking and tool activity, and live status](assets/screenshots/pix-overview.png)
 
 ## Start
 
-Download the TUI archive or Desktop installer for your OS/CPU from
-[GitHub Releases](https://github.com/dnaroid/pix/releases). Standalone releases
-include their own Node.js runtime and Pix dependencies, so Node/npm is not an
-installation prerequisite.
+Download the latest **TUI** archive or **Pix Desktop** installer for your OS/CPU
+from [GitHub Releases](https://github.com/dnaroid/pix/releases).
 
-For TUI, extract the complete archive and run `pix` (macOS/Linux) or `pix.cmd`
-(Windows) from a terminal. For Desktop, install or launch the native package for
-your platform.
+Stable release packages contain their own Node.js runtime and Pix dependencies;
+Node/npm is not an end-user prerequisite.
+
+### Give the installation to an LLM
+
+Paste this into a coding agent with terminal/web access:
+
+```text
+Install and configure the latest stable Pix from https://github.com/dnaroid/pix
+for this machine. Follow
+https://github.com/dnaroid/pix/blob/master/docs/llm-install.md exactly.
+Detect OS/CPU, preserve Pi/Pix config and sessions, remove only confirmed legacy
+Pix installs/wrappers, install the matching GitHub Release assets, verify them
+against SHA256SUMS, configure without overwriting credentials, and verify both
+TUI and Desktop when this platform has official assets.
+```
+
+Full agent contract: **[LLM installation](docs/llm-install.md)**.
+
+Manual install/update/legacy cleanup:
+**[Installing Pix](docs/installation.md)**.
+
+## TUI or Desktop?
+
+| | Pix TUI | Pix Desktop |
+| --- | --- | --- |
+| Interface | terminal-native workspace | native Tauri/Svelte workbench |
+| Sessions | persistent project-scoped tabs | persistent conversation/workbench tabs |
+| Project files | file links and agent tools | dedicated Project Explorer + Preview |
+| Git | `/code-review`, `/commit-message` | full Source Control panel |
+| Tasks | durable suite todos | project task manager + session links |
+| Registry | `/registry` commands | dedicated Registry panel |
+| IDX | repository tools / commands | IDX status, install/init, queries and Spec Wiki UI |
+| Shell | inline `!` and raw `!!` terminal | package scripts + interactive terminals |
+| Configuration | `pix.jsonc` | independent `pix-desktop.jsonc` |
+
+You can install either frontend or both. Pix Desktop bundles its own Pix/ACP
+runtime and does not require the TUI.
 
 ## Why Pix?
 
-Pi provides the agent runtime, models, tools, skills, extensions, and persistent sessions. Pix keeps that SDK-native foundation and replaces the stock interface with a renderer designed around long, tool-heavy coding work.
+- **See the work, not the noise.** Thinking, reads, searches, edits, failures,
+  todos and sub-agents get purpose-built presentation instead of raw log spam.
+- **Keep projects organized.** Sessions, tasks, files, Git state and project
+  resources stay attached to the workspace you are actually editing.
+- **Stay in flow.** Search commands, run local shells, open files, paste images,
+  dictate prompts and use model-backed helper workflows without leaving Pix.
+- **Use the models you want.** Pix keeps Pi's provider ecosystem, model
+  switching, thinking levels and persistent session format.
+- **Bring repository-scale tools.** The bundled `pi-tools-suite` adds indexed
+  discovery, AST tools, LSP diagnostics, parallel agents, durable planning,
+  context compression, registry workflows and more.
 
-- **See the work, not the noise.** Thinking and tool calls are compact rows that expand on demand. Mutating tools, searches, failures, todos, and sub-agents are visually distinct.
-- **Keep projects organized.** Tabs are scoped to the working directory and survive restarts. Search, resume, fork, clone, jump through, import, export, share, or delete sessions without leaving the terminal.
-- **Stay in flow.** Run quick commands with `!`, open a raw interactive terminal with `!!`, paste images, follow file links, dictate in English or Russian, and improve a prompt before sending it.
-- **Know what the agent is doing.** The status area exposes model, thinking level, context, usage, workspace, todos, sub-agents, voice state, and prompt actions — with mouse targets where useful.
-- **Bring a serious toolkit.** Pix ships with `pi-tools-suite`: 21 integrated modules for indexed repository discovery, AST edits, LSP diagnostics, parallel agents, durable todos, context compression, web access, provider accounts, and more.
-- **Use the models you want.** Pix runs on Pi's provider ecosystem and supports model switching, scoped model lists, per-model thinking levels, usage views, autocomplete, and fallback-aware helper workflows.
+Pix is not a separate agent protocol replacing Pi. It runs on the Pi SDK, so Pi
+models, tools, skills, extensions and sessions remain part of the same
+ecosystem.
 
-Pix is not a separate agent protocol or an RPC wrapper around Pi. It runs on the Pi SDK, so the runtime, session format, extensions, skills, prompts, and tools remain part of the same ecosystem.
+## Pix Desktop
 
-## The interface
+Pix Desktop turns the same Pi/Pix runtime into an IDE-like native workbench.
 
-### A workspace, not a transcript
+The Activity Bar provides:
 
-- **Persistent tabs** for independent tasks in the same project.
-- **Lazy session loading** so restoring a workspace does not eagerly start every runtime.
-- **Compact activity rows** with configurable previews, colors, expansion, and output filtering.
-- **Dedicated todo and sub-agent panels** instead of dumping orchestration state into chat.
-- **Mouse-aware navigation** for tabs, status actions, scrolling, expandable blocks, menus, links, and the scrollbar.
-- **Rich terminal content** including Markdown, code blocks, diffs, file links, images, toasts, widgets, dialogs, and custom extension UI.
-- **Dark and light themes**, configurable model colors, and Nerd Font icons with graceful fallbacks.
+- **Tasks** — project-local tasks in `.pi/tasks.jsonc`, attachments and linked
+  sessions;
+- **Project** — keyboard-friendly file tree, Preview and external-editor actions;
+- **Source Control** — initialize Git, stage/unstage, diff, review, commit,
+  publish/push and safe repository tools;
+- **Registry** — initialize `.pi`, configure private Git-backed resources and
+  synchronize project tasks/plans/TODO;
+- **Package Scripts** — package-manager scripts and interactive terminals;
+- **IDX** — install managed IDX when missing, initialize a project index, query
+  code/knowledge and maintain Spec Wiki metadata;
+- **Settings** — Desktop-specific models, voice, editor and Git preferences.
+
+Desktop production releases use the signed native Tauri updater.
+
+Configuration is intentionally separate from the TUI:
+
+```text
+~/.config/pi/pix-desktop.jsonc
+<workspace>/.pi/pix-desktop.jsonc
+```
+
+See **[Pix Desktop](docs/desktop.md)** for installation, first-run behavior,
+workspace details and troubleshooting.
+
+**Linux AppImage opens a blank window?** If stderr contains
+`Could not create default EGL display: EGL_BAD_PARAMETER`, use the documented
+[Wayland/Mesa workaround](docs/desktop.md#linux-appimage-blank-window-egl_bad_parameter).
+
+## Pix TUI
+
+Pix TUI keeps coding-agent work dense without turning the terminal into a raw
+transcript.
+
+- persistent project-scoped tabs;
+- lazy session restore;
+- searchable command picker;
+- expandable thinking/tool rows;
+- structured todo and sub-agent panels;
+- images, Markdown, diffs and file links;
+- inline local shell (`!`) and raw terminal (`!!`);
+- voice input and prompt helpers;
+- mouse-aware navigation and status actions.
 
 ![Pix with three project-scoped session tabs](assets/screenshots/pix-tabs.png)
 
-### Commands are searchable
-
-Type `/` to open the command picker. Continue typing to filter built-in commands and commands contributed by extensions.
-
-![Pix searchable command picker](assets/screenshots/pix-command-menu.png)
-
-### Agent activity stays readable
-
-Pix gives different kinds of work different visual weight:
-
-- thinking can remain collapsed until you need it;
-- reads and searches show concise previews;
-- edits and patches are expanded by default;
-- long shell output can show its tail while the command runs;
-- failures remain visible;
-- tool rows can be expanded or collapsed with the mouse;
-- todo and sub-agent state is rendered as structured UI.
-
-All of this is configurable per exact tool name or wildcard such as `repo_*` and `ast_*`.
-
-**Adaptive plans keep dependencies, blockers, ownership, and the active step visible:**
-
-![Pix adaptive todo plan with hierarchy and blockers](assets/screenshots/pix-adaptive-todo.png)
-
-**Parallel sub-agents report live status without taking over the main session:**
-
-![Pix running parallel sub-agents alongside the main implementation plan](assets/screenshots/pix-subagents.png)
-
-## Bundled: pi-tools-suite
-
-On startup, Pix tries to link the bundled suite into the active Pi agent directory (normally `~/.pi/agent/extensions/pi-tools-suite`). An existing non-symlink installation is preserved. Suite modules are designed to work without Pix-specific UI where they are loaded; suite-spawned sub-agents intentionally use an isolated, minimal extension set.
-
-| Capability | Included modules | What it adds |
-| --- | --- | --- |
-| Parallel work | `async-subagents` | Isolated asynchronous agents, presets, model fallback routing, result artifacts, `/ultrawork`, and `/hyperplan`. |
-| Repository intelligence | `repo-discovery` | Indexed architecture, structure, AST, semantic search, symbol explanation, and dependency/caller tools when the repository has an `.indexer-cli` index. |
-| Structural code changes | `ast-grep` | Language-aware AST search, rewrite previews, and explicit AST mutation tools. |
-| Fast feedback | `lsp`, `comment-checker` | Project-trusted language-server diagnostics and a guard against low-quality AI-style code comments. |
-| Durable planning | `todo` | Hierarchical todos with blockers, owners, persistence, scoped resumes, and per-task thinking levels. |
-| Context control | `dcp` | Explicit compression and context pruning for long sessions, including sidecar state. |
-| Local web access | `web-search` | Web search and page extraction through a local Ollama instance. |
-| Providers and quotas | `antigravity-auth`, `opencode-import`, `usage` | Antigravity OAuth/account failover, OpenCode credential import, and multi-provider usage views. |
-| Reusable workflows | `prompt-commands`, `resource-registry`, `session-name` | Prompt-command CRUD, private Git-backed skill/agent install/update/push/remote-remove/local-uninstall with reload-on-change, project-scoped `.pi/tasks.jsonc` + `.pi/plans/` + `.pi/TODO.md` sync, a Desktop Registry sidebar for status/actions/configuration, and session naming. |
-| Model compatibility | `coding-discipline`, `model-tools`, `codex-reasoning-fix` | Model-specific discipline and vision lookup, compatibility aliases, and a Codex reasoning payload workaround. |
-| Agent session context | `session-recovery` | Bounded session overview/search/section tools so agents can recover prior context. |
-| Payload hygiene | `context-gateway`, `truncation-metadata-normalizer`, `credential-firewall` | Observe-only result-chain gateway, opt-in truncation-metadata cleanup, and an opt-in secret firewall. |
-
-Every module can be disabled. Optional integrations only activate when their requirements are available — for example, repository tools require an index, web tools require local Ollama web search, and LSP servers must be configured and trusted.
-
-Suite configuration is loaded from:
-
-1. `~/.config/pi/pi-tools-suite.jsonc`
-2. `$PI_CONFIG_DIR/pi-tools-suite.jsonc`, when set
-3. the nearest project `.pi/pi-tools-suite.jsonc`
-
-Later files override earlier ones. Disable modules with `disabledModules`, `PI_TOOLS_SUITE_DISABLED_MODULES`, or disable the entire suite with `PI_TOOLS_SUITE_DISABLED=1`. DCP settings are intentionally user-scoped and belong in the shared user configuration.
-
-## What you can build with it
-
-| Workflow | Pix advantage |
-| --- | --- |
-| Explore an unfamiliar repository | Start with an indexed architecture map, search behavior semantically, inspect symbols, and trace dependencies without flooding context with entire files. |
-| Run a large refactor | Combine repository discovery, AST-aware changes, LSP feedback, workspace undo, and a structured todo plan. |
-| Investigate several hypotheses | Launch focused sub-agents in parallel, keep working, and inspect compact result artifacts when they finish. |
-| Carry a task across many sessions | Persist tabs and todos, search session history, fork from an earlier message, and compress old context without losing the active objective. |
-| Work across providers | Switch models and thinking levels, scope the model picker, import supported accounts, inspect quotas, and use fallback-aware sub-agent presets. |
-| Keep your hands in the terminal | Run quick shell commands inline, use a full interactive TTY when needed, paste images, dictate prompts, and open file links directly. |
-
-## Install
-
-### Download a ready-to-run release
-
-[GitHub Releases](https://github.com/dnaroid/pix/releases) contains published
-portable TUI archives and Pix Desktop installers when a release has completed
-the native build/verification pipeline. Choose **TUI** or **Desktop** and your
-OS/CPU: Windows x64, macOS Apple Silicon, or Linux x64.
-
-These packages contain Node.js and the Pix/ACP runtime; no separate Node/npm
-installation is required to launch them. For TUI, extract the whole archive and
-run `pix` (macOS/Linux) or `pix.cmd` (Windows) from your terminal. For Desktop,
-use the `.dmg`, Windows installer, `.AppImage`, or `.deb` for your system.
-Portable TUI installs can later update themselves with `pix update`: the command
-downloads the matching GitHub Release archive, verifies `SHA256SUMS`, smoke-tests
-the staged runtime, and replaces the installation after the updater exits.
-Packaged Desktop checks the signed Tauri update feed on startup and offers an
-Update/Restart flow in the app; development builds do not run that updater.
-Git, tools needed by your projects, provider credentials and optional voice/
-clipboard helpers are separate. Unsigned/ad-hoc builds may show OS warnings;
-check the release notes before installing. See the [release guide](docs/release.md)
-for building, signing, checksums and updates.
-
-### Requirements
-
-- macOS, Linux, or Windows terminal with 256-color support
-- provider credentials supported by Pi, unless you only use locally configured models
-
-For source development only, use **Node.js `>=22.19.0 <27`** plus npm and Rust/Tauri
-tooling as required by the build you are running. End-user GitHub Release packages
-do not require a separately installed Node.js runtime.
-
-Recommended:
-
-- **JetBrainsMono Nerd Font** for the intended icons; `pix install` can install it for the current user
-- a terminal with mouse reporting and Kitty keyboard protocol support for the richest interaction
-- Linux clipboard helper: `wl-clipboard` on Wayland or `xclip`/`xsel` on X11
-
-Optional:
-
-- a Deepgram API key in `dictation.apiKey` inside the relevant frontend profile (`~/.config/pi/pix.jsonc` for TUI, `~/.config/pi/pix-desktop.jsonc` for Desktop); `DEEPGRAM_API_KEY` remains supported as a fallback. Desktop exchanges the key through Deepgram `/v1/auth/grant`, so its key must have Member-or-higher authorization.
-- an audio recorder for terminal dictation: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux
-- `tmux` and `rsvg-convert` only if you want to regenerate README screenshots
-- Ollama with web search enabled for the bundled `web_search` and `web_fetch` tools
-- language servers for the LSP module (see [LSP setup](external/pi-tools-suite/README.md#lsp-setup) for install commands and ready-to-paste configs for popular servers, including Svelte, Vue, Go, clangd, Lua, and bash)
-
-### First-run checklist
-
-1. Start Pix once. It creates non-secret configuration templates when missing:
-   - `~/.config/pi/pix.jsonc`
-   - `~/.config/pi/pi-tools-suite.jsonc`
-2. Configure at least one model provider:
-   - With an existing OpenCode setup, start Pix and run `/opencode-import`; review [OpenCode migration](#opencode-migration) before using `--force`.
-   - Otherwise run `npx @earendil-works/pi-coding-agent`, use `/login` in the stock Pi TUI, then exit. Environment-based provider API keys also work.
-3. Start Pix, use `/model` to select an available model, and follow any startup authentication diagnostic.
-4. Configure only the optional integrations you need; none are required for normal model conversations.
-
-Pix checks the Nerd Font/runtime helpers on startup and keeps graceful fallbacks
-when optional helpers are unavailable.
-
-### Start options
-
-```text
-pix [--cwd <path>] [--no-session] [--session <path>]
-    [--theme dark|light] [--model <provider/model[:thinking]>]
-```
-
-Examples:
+Type `/` for the live command list.
 
 ```bash
 pix --cwd .
-pix --cwd ../pi-mono --theme light
-pix --cwd . --model anthropic/claude-sonnet-4-20250514:medium
+pix --cwd ../another-project --theme light
 pix --cwd . --no-session
 ```
 
-## Models and accounts
+Detailed interaction/session/command guide:
+**[Using Pix TUI](docs/usage.md)**.
 
-Pix uses Pi's model and authentication stores. Environment-based API keys and credentials already configured for Pi are available to Pix.
+## Bundled pi-tools-suite
 
-| Credential or integration | Required? | Setup | Notes |
-| --- | --- | --- | --- |
-| Model provider | **Yes**, unless the selected model needs no credentials | Run the stock Pi TUI with `npx @earendil-works/pi-coding-agent`, use `/login`, then `/reload` in Pix; or set a provider-supported environment key | Pix does not yet implement Pi's interactive `/login` and `/logout` dialogs. |
-| Existing OpenCode accounts | No; migration shortcut | Run `/opencode-import` in Pix | Imports only the credential types listed below and preserves existing Pi entries by default. |
-| Model-backed helpers | No | Review `promptEnhancer`, `autocomplete`, and `sessionTitle` in TUI `pix.jsonc` or Desktop Settings (`pix-desktop.jsonc`) | Each configured helper model needs credentials for its own provider; it need not use the main session provider. |
-| Ollama/Tavily web access | No | Use local Ollama without a cloud key, set `OLLAMA_API_KEY`/`TAVILY_API_KEY`, or run `/web-credentials` | Stored keys live in `~/.config/pi/pi-tools-suite-credentials.json` with mode `0600`. |
-| Context7 documentation skill | No | Export `CONTEXT7_API_KEY` | The skill fails before making a network request when the variable is absent. |
-| Telegram task connector | No | Configure `telegramConnector.botToken` + `telegramConnector.chatId`, or `PIX_TELEGRAM_BOT_TOKEN` + `PIX_TELEGRAM_CHAT_ID` | Completion/question notifications; reply to continue the exact live session, or use `/new <task>` for a fresh session. |
+Pix ships with a bundled suite of repository and agent-workflow extensions.
 
-`pix install` reports whether these sources appear configured, but never displays, copies, or overwrites token values.
+| Capability | Examples |
+| --- | --- |
+| Parallel work | async sub-agents, presets, fallback routing, `/ultrawork`, `/hyperplan` |
+| Repository intelligence | IDX architecture/structure/semantic/symbol/dependency tools |
+| Structural changes | AST search/rewrite, LSP diagnostics, comment checks |
+| Durable work | hierarchical todos, session recovery, project resource Registry |
+| Context control | DCP compression/pruning and context-gateway tooling |
+| Providers/integrations | usage, Antigravity, OpenCode import, web access, Telegram |
 
-### OpenCode migration
+Modules remain independently configurable; optional integrations activate only
+when their dependencies/credentials exist.
 
-Run this inside Pix after the bundled tools suite loads:
+Suite configuration:
 
 ```text
-/opencode-import
+~/.config/pi/pi-tools-suite.jsonc
+$PI_CONFIG_DIR/pi-tools-suite.jsonc
+<workspace>/.pi/pi-tools-suite.jsonc
 ```
 
-Supported mappings are deliberately narrow:
+More configuration details:
+**[Configuration and accounts](docs/configuration.md)**.
 
-- OpenAI OAuth → Pi's `openai-codex` provider
-- OpenAI API key → Pi's `openai` provider
-- GitHub Copilot OAuth → `github-copilot`
-- Z.ai/Zhipu-compatible credentials → `zai`
-- an OpenCode Antigravity account → Pi's Antigravity provider
+## Installation and updates
 
-By default the command reads `$OPENCODE_AUTH_CONTENT`, `$OPENCODE_DATA_DIR/auth.json`, or the XDG/default OpenCode data path, plus the corresponding OpenCode Antigravity account file. It writes to Pi's active agent directory (`$PI_CODING_AGENT_DIR` when set), preserves existing provider entries, and reloads Pix only after a successful write. Use `/opencode-import --force` only when you intentionally want supported existing entries replaced. Explicit source and destination paths are available through `/opencode-import --path <file>`, `--auth-path <file>`, and `--antigravity-path <file>`.
+Official release targets currently include:
 
-OpenCode model/provider definitions, default-model choices, MCP servers, plugins, instructions, and tool settings are **not** migrated because their formats and security assumptions do not map safely. Recreate those settings in Pix/Pi and `pi-tools-suite.jsonc` as needed. No secret is imported during `pix install` itself.
+- Windows x64 — TUI ZIP + Desktop NSIS installer;
+- macOS Apple Silicon — TUI tarball + Desktop DMG;
+- Linux x64 — TUI tarball + Desktop AppImage/DEB.
 
-- Run `/antigravity-add-account` to add an Antigravity OAuth account, then use `/antigravity-account` and `/antigravity-status` to manage it.
-- Use `/model`, `/scoped-models`, and `/thinking` to control the active runtime.
-- Use `/default-model`, `/default-thinking`, and `/autocomplete` to change defaults for new sessions.
-- Use `/usage` or the clickable usage status to inspect locally available quota data.
+Release assets include `SHA256SUMS`.
 
-Provider availability and thinking levels depend on the selected model. Pix does not upload private repository data merely to populate the model or usage UI; normal model requests still follow the provider you choose.
+Portable TUI:
 
-## Everyday interaction
-
-### Prompts
-
-- **Enter** sends the current prompt.
-- **Shift+Enter** inserts a newline.
-- **Tab** accepts autocomplete or the selected popup item.
-- `/enhance` — or the status-bar magic wand — improves the current draft with the configured helper model.
-- `/queue <message>` stores a delayed message you can send later from the queue menu.
-- Prompt history is searchable with `/history` and navigable with Up/Down when no popup owns those keys.
-
-Pix can provide inline, model-backed autocomplete with configurable debounce, timeout, token budget, and recent-message context.
-
-### Local shell
-
-```text
-!git status
-!npm test
-!!npm run dev
-!!python
+```bash
+pix install --check
+pix update --check
+pix update
 ```
 
-- `!command` runs a shell command and renders the result in chat. It is local UI activity and is not saved to the Pi session.
-- While it runs, submit editor text to its stdin; use `Ctrl-C` to interrupt.
-- `!!command` opens a raw interactive terminal for REPLs, TUIs, debuggers, and development servers. Exit it to return to Pix.
+Packaged Desktop updates through its native update UI.
 
-### Git helpers
+Read the complete OS-specific guide before replacing an existing installation:
+**[Installing Pix](docs/installation.md)**.
 
-- `/code-review` reviews staged, unstaged, and untracked Git changes with the configured review model and prints the findings locally in the TUI.
-- `/commit-message` generates a message from staged changes, shows the full message, and asks for confirmation before running `git commit`. If the staged diff changes before confirmation completes, Pix refuses the commit and asks you to regenerate the message.
-- These helpers use the existing `desktop.git.reviewModelRef` / `reviewFallbackModels` and `desktop.git.commitMessageModelRef` / `commitMessageFallbackModels` settings for compatibility. `/commit-message` never stages changes or bypasses Git hooks.
+## Configuration and providers
 
-### Images, clipboard, and files
-
-- Paste an image from the clipboard with `Ctrl+V`/`Cmd+V` in supported terminals.
-- Add image/file references to prompts and open detected file links from rendered output.
-- `/copy` copies the last assistant message.
-- Pix integrates with the native clipboard on macOS and Windows and common Wayland/X11 helpers on Linux.
-
-### Voice input
-
-Put the Deepgram key in the user Pix config:
-
-```jsonc
-{
-  "dictation": {
-    "apiKey": "your-deepgram-api-key"
-  }
-}
-```
-
-For TUI, the file is `~/.config/pi/pix.jsonc`. Keep the key in this user config rather than a project `.pi/pix.jsonc`; project config is intentionally not allowed to override the secret. `DEEPGRAM_API_KEY` remains supported as a compatibility fallback when `dictation.apiKey` is not set.
-
-Then press `Ctrl+G` or click the microphone in the terminal status area to start/stop dictation. Pix streams microphone audio to Deepgram Nova-3 and inserts finalized text into the editor so you can review it before sending. The default dictation languages are English and Russian and can be changed with the existing language control.
-
-Pix Desktop exposes the same voice-input action directly in the message composer, but uses its independent `~/.config/pi/pix-desktop.jsonc` profile. The desktop client uses Nova-3 by default and sends `dictation.language` directly as the Deepgram language code; there is no separate Desktop language-label registry. It requests a short-lived Deepgram token from the local Tauri backend; the permanent API key is read from the Desktop profile (or the environment fallback) by Rust and is never exposed to the WebView. Deepgram requires the key used for `/v1/auth/grant` to have Member-or-higher authorization. Configure it under **Settings → Desktop → Voice → Deepgram API key**.
-
-Voice audio is sent to Deepgram while recording. Pix no longer downloads or installs local speech-recognition models.
-
-### Workspace undo
-
-Pix records supported agent file mutations against the user message that started them. Open that message's action menu and choose **Undo changes** to rewind the session branch and restore the recorded workspace changes. It is a safety net, not a replacement for version control.
-
-## Sessions and tabs
-
-Pix stores a tab workspace per working directory. Reopening the same `--cwd` restores its tabs, active tab, drafts, queued messages, and session references.
-
-- `/new_tab` opens a fresh session without replacing the current tab.
-- `/resume` opens a session picker or accepts a session path.
-- `/search` searches session contents and opens a match in a new tab.
-- `/fork`, `/clone`, `/tree`, and `/jump` support branching and navigation inside session history.
-- `/export` writes HTML by default or JSONL when given a `.jsonl` path.
-- `/import` resumes a JSONL session; `/share` publishes a secret GitHub gist.
-- `/compact` manually summarizes older context; the DCP suite module provides finer-grained context compression.
-- `/delete` permanently removes a session and its DCP sidecar after confirmation.
-
-Set `maxProjectSessions` in Pix configuration to prune old session files automatically for each project; `0` keeps them indefinitely.
-
-## Command reference
-
-Type `/` for the live, searchable list. Extensions can add more commands than the core set below.
-
-| Area | Commands |
-| --- | --- |
-| Renderer and resources | `/settings`, `/hotkeys`, `/reload`, `/changelog`, `/update` |
-| Models | `/model`, `/default-model`, `/scoped-models`, `/thinking`, `/default-thinking`, `/autocomplete` |
-| Project context | `/no-context-files`, `/compact` |
-| Prompt workflow | `/enhance`, `/queue`, `/copy` |
-| Git | `/code-review`, `/commit-message` |
-| Sessions | `/new`, `/new_tab`, `/resume`, `/name`, `/session`, `/search`, `/history`, `/jump`, `/tree` |
-| Branching and files | `/fork`, `/clone`, `/delete`, `/export`, `/import`, `/share` |
-| Status | `/usage` |
-| Process | `/quit`, `/exit` |
-
-Useful suite commands include `/todos`, `/todos-persist`, `/todos-scope`, `/sub-status`, `/sub-stop`, `/ultrawork`, `/hyperplan`, `/subagent-preset`, `/usage`, `/dcp`, `/idx-init`, `/idx-update`, `/opencode-import`, `/antigravity-add-account`, and `/registry`.
-
-### Keyboard and mouse
-
-| Input | Action |
-| --- | --- |
-| `Enter` | Send a message or run the selected command |
-| `Shift+Enter` | Insert a newline |
-| `Tab` | Accept autocomplete / selected popup item |
-| `Esc` | Close a popup or abort running work |
-| `Up` / `Down` | Navigate history or the active popup |
-| `PageUp` / `PageDown` | Scroll the conversation by page |
-| `Cmd+Up` / `Cmd+Down` | Alternative page scrolling in supported terminals |
-| `Ctrl+C` | Interrupt running work; press again while an abort is in progress to stop Pix |
-| `Ctrl+D` | Quit when the editor is empty |
-| `Ctrl+L` | Redraw the screen |
-| `Ctrl+G` | Toggle voice recording |
-| `Ctrl+V` / `Cmd+V` | Paste a clipboard image when supported |
-| Mouse wheel / scrollbar | Scroll the conversation or active popup |
-| Click | Switch tabs; expand activity; follow links; activate visible status actions |
-
-Use `/hotkeys` for the authoritative in-app summary for your installed version.
-
-## Configuration
-
-Pix creates a commented JSONC file on first launch:
+TUI user configuration:
 
 ```text
 ~/.config/pi/pix.jsonc
 ```
 
-A project can override it with:
+Desktop user configuration:
 
 ```text
-<workspace>/.pi/pix.jsonc
+~/.config/pi/pix-desktop.jsonc
 ```
 
-Both support the published schema:
+Pix uses Pi provider credentials. Authenticate through stock Pi `/login`,
+provider-supported environment/API-key sources, or supported migration flows such
+as `/opencode-import`. Pix installation itself never needs to print or overwrite
+provider secrets.
 
-```jsonc
-{
-  "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
-  "defaultModel": {
-    "modelRef": "openai-codex/gpt-5.6-sol",
-    "fallbackModels": [],
-    "thinking": "medium"
-  },
-  "toolRenderer": {
-    "default": { "previewLines": 0 },
-    "tools": {
-      "shell": { "previewLines": 6, "direction": "tail" },
-      "repo_*": { "previewLines": 6, "direction": "head" },
-      "apply_patch": { "defaultExpanded": true }
-    }
-  },
-  "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": [] },
-  "autocomplete": {
-    "modelRef": "zai/glm-5-turbo",
-    "fallbackModels": [],
-    "debounceMs": 350,
-    "timeoutMs": 3000
-  },
-  "sessionTitle": {
-    "modelRef": "openai-codex/gpt-5.6-luna",
-    "fallbackModels": ["zai/glm-5-turbo"]
-  },
-  "dictation": { "language": "en" },
-  "ignoreContextFiles": false,
-  "maxProjectSessions": 0
-}
-```
+See **[Configuration and accounts](docs/configuration.md)** for schemas, model
+helpers, OpenCode migration, voice input, LSP/web/Telegram setup and context-file
+behavior.
 
-Pix Desktop does **not** inherit either TUI file above. Its Settings panel owns a
-separate user profile at `~/.config/pi/pix-desktop.jsonc`, with project overrides
-at `<workspace>/.pi/pix-desktop.jsonc`, using
-`https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json`. The Desktop schema
-contains only settings consumed by Desktop or its ACP backend (models,
-autocomplete/prompt enhancement, session titles, voice input, model-picker
-preferences, external editor, and Source Control helpers); terminal renderer,
-theme, and other TUI-only settings remain in `pix.jsonc`.
+## Documentation
 
-Singular model selectors resolve with an explicit ordered fallback array, even
-when it is empty. Existing configs that omit the array remain compatible and
-normalize to `[]`. Pix uses `fallbackModels` for object selectors; Desktop Git
-uses `reviewFallbackModels` and `commitMessageFallbackModels` beside the
-corresponding primary model refs.
-
-Configurable areas include:
-
-- default model and thinking level;
-- scoped model selection and per-model colors;
-- tool visibility, expansion, preview length/direction, and semantic colors;
-- assistant output filters using globs or regex literals;
-- autocomplete, prompt enhancement, and automatic session-title models;
-- dictation languages and model download URLs;
-- icon theme;
-- loading of project `AGENTS.md`/`CLAUDE.md` files;
-- per-project session retention.
-
-Use `/settings` to inspect the effective settings summary and `/reload` after changing resources. Some command-driven settings update the relevant config file directly.
-
-### Ignoring legacy context files
-
-If a legacy project already contains an `AGENTS.md` or `CLAUDE.md` that should not be loaded, the simplest project-local workaround for both Pi and Pix is an empty override file in the same directory:
-
-```bash
-touch AGENTS.override.md
-```
-
-Pi and Pix load `AGENTS.override.md` instead of `AGENTS.md`/`CLAUDE.md` from that directory. To keep this local without changing the repository:
-
-```bash
-echo AGENTS.override.md >> .git/info/exclude
-```
-
-To disable discovery of all context files, including files in parent directories:
-
-- start Pi with `pi --no-context-files` (or `pi -nc`);
-- in Pix, run `/no-context-files on`. Pix saves `"ignoreContextFiles": true` to `<workspace>/.pi/pix.jsonc`.
-
-Start a new session or restart Pix after changing this setting. Use `/no-context-files off` to enable context-file loading again.
-
-## Updates
-
-```bash
-# Check only
-pix update --check
-
-# Install the latest published Pix and align the global Pi CLI
-pix update
-
-# Reinstall even when the version appears current
-pix update --force
-```
-
-Inside Pix, `/update` performs a check and explains the shell command needed for installation. Restart Pix after an update.
-
-## Troubleshooting
-
-### Icons look wrong
-
-Run `pix install`, configure your terminal to use **JetBrainsMono Nerd Font**, and restart the terminal. Pix falls back to plain glyphs, but the intended UI uses Nerd Font icons.
-
-### Clipboard images do not paste on Linux
-
-Install `wl-clipboard` on Wayland or `xclip`/`xsel` on X11, then run `pix install --check`.
-
-### Voice input is unavailable
-
-Ensure `dictation.apiKey` is set in the active frontend profile (`~/.config/pi/pix.jsonc` for TUI or `~/.config/pi/pix-desktop.jsonc` for Desktop), or set the compatibility fallback `DEEPGRAM_API_KEY` in the environment that launches Pix. For Desktop, an HTTP 403 while requesting the short-lived token usually means the configured Deepgram key does not have Member-or-higher authorization required by `/v1/auth/grant`; update/create the key in Deepgram and save it under **Settings → Desktop → Voice**. Terminal voice input also needs an audio recorder: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux. Pix Desktop additionally needs microphone permission from the operating system. Voice support can be omitted without affecting the rest of Pix.
-
-### A provider login dialog is missing
-
-Pix does not yet implement Pi's interactive `/login` and `/logout` dialogs. Authenticate in the stock `pi` TUI or configure the provider's supported environment/API-key storage, then run `/reload`.
-
-### Repository discovery tools are absent
-
-Those tools register only when Pix is launched from a repository with an `.indexer-cli` index. Run `/idx-init` to initialize the current repository, then `/reload`. If Pix was started elsewhere with `--cwd`, restart it from the project directory first:
-
-```bash
-cd /path/to/project
-pix
-```
-
-When `indexer-cli` is installed and available on `PATH`, Pix checks it at startup and runs its official updater when needed. Pix silently skips this check when `idx` is absent. `/idx-update` remains available for a manual retry; neither flow refreshes a project's index.
-
-### An extension behaves differently
-
-Pix supports Pi SDK extensions, including toasts, widgets, menus, dialogs, custom UI, and terminal input hooks. Extensions that assume private internals or a specific stock renderer may still need adaptation. Use `ctx.hasUI` guards for code that also runs headlessly.
-
-## For extension authors
-
-The package exports the renderer-facing SDK from both entry points:
-
-```ts
-import type { PixExtensionUIContext } from "pi-ui-extend";
-// or
-import type { PixExtensionUIContext } from "pi-ui-extend/sdk";
-```
-
-Pix implements the Pi extension UI surface for notifications, keyed toasts, widgets, above-input content, menus, dialogs, custom full-screen UI, editor text, terminal input hooks, theme helpers, and status updates. The published declarations are available in [`dist/sdk.d.ts`](dist/sdk.d.ts).
+| Document | Purpose |
+| --- | --- |
+| [Installing Pix](docs/installation.md) | manual GitHub Release install, checksums, legacy cleanup, updates |
+| [LLM installation](docs/llm-install.md) | copy/paste agent command and safe OS-aware execution contract |
+| [Pix Desktop](docs/desktop.md) | Desktop features, configuration, updater and Linux AppImage workaround |
+| [Using Pix TUI](docs/usage.md) | prompts, shell, sessions, commands, bundled tools |
+| [Configuration and accounts](docs/configuration.md) | models, credentials, voice, tools-suite and project config |
+| [Troubleshooting](docs/troubleshooting.md) | fonts, clipboard, voice, providers, IDX and Desktop launch issues |
+| [Extension authors](docs/extensions.md) | renderer SDK entry points and extension UI contract |
+| [Development](docs/development.md) | source checkout, tests/builds and project layout |
+| [Release guide](docs/release.md) | maintainer packaging, native release verification and publishing |
 
 ## Development
 
-Pix does not pin Node through mise, nvm, Volta, or repository version files.
-Development, CI, and release scripts use the `node` and `npm` already selected
-by your system `PATH`. The supported runtime range is `>=22.19.0 <27`, shared
-by Pix, ACP, and Desktop.
-
-When switching to a different Node major, rebuild native addons from a clean
-dependency tree instead of reusing `node_modules`:
-
-```bash
-rm -rf node_modules acp/node_modules desktop/node_modules external/pi-tools-suite/node_modules
-npm ci
-npm ci --prefix acp
-npm ci --prefix desktop
-npm ci --prefix external/pi-tools-suite
-```
+Source development requires **Node.js `>=22.19.0 <27`**; native Desktop builds also
+need Rust and the platform's Tauri prerequisites.
 
 ```bash
 git clone https://github.com/dnaroid/pix.git
 cd pix
-
-# Use the node/npm currently selected by your shell.
-command -v node
-node --version
-command -v npm
-npm --version
 npm ci
-
-# Run from source
 npm run dev -- --cwd /path/to/project
-
-# Typecheck and test
-npm run check
-
-# Validate the bundled suite
-npm run test:tools-suite
-
-# Build the publishable renderer
-npm run build:pix
-
-# Watch Pix, ACP, the bundled suite, and Desktop
-npm run watch:all
 ```
 
-`watch:all` rebuilds only the affected project parts. It keeps the last working
-Desktop process alive while changes compile, then replaces it only after the
-entire queued build succeeds. A failed build is reported without replacing the
-running Desktop. Desktop web changes rebuild the Vite bundle first and then
-invalidate the native Tauri asset embedding before the replacement app starts.
-
-Regenerate the README screenshots without accounts or live model traffic:
-
-```bash
-node --import tsx scripts/capture-readme-screenshots.ts
-```
-
-The capture script runs the real renderer against the local test `MockModel` in an isolated tmux server and temporary home directory.
-
-## Project layout
-
-```text
-src/                         Pix renderer and SDK bridge
-external/pi-tools-suite/     bundled headless tools and extensions
-schemas/                     published JSON schemas
-skills/                      packaged agent skills
-docs/                        release documentation
-tests/                       unit, integration, and PTY tests
-scripts/                     build, release, sync, and capture tooling
-acp/                         pix-acp: ACP adapter embedding pi into editors like Zed (own install; `npm run check:acp`)
-```
+See **[Development](docs/development.md)** for ACP/Desktop dependency trees,
+watch mode, checks and release-building boundaries.
 
 ---
 
-<div align="center">
-
-**If your coding agent lives in the terminal, give it a workspace.**
+**If your coding agent lives in a project, give it a workspace.**
 
 ```bash
 pix --cwd .
 ```
-
-</div>

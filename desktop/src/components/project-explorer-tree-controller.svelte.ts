@@ -1,4 +1,4 @@
-import { tick } from "svelte";
+import { tick, untrack } from "svelte";
 import { isTypeaheadKey, linearFocusIndex, typeaheadFocusIndex } from "../lib/keyboard-navigation";
 import {
   flattenProjectTree,
@@ -27,36 +27,44 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     focusedPath: null as string | null,
   });
   let generation = 0;
+  let observedWorkspace: string | undefined;
+  let observedRefreshKey: number | undefined;
   let typeaheadQuery = "";
   let typeaheadTimer: number | null = null;
 
   $effect(() => {
     const currentWorkspace = options.workspace();
-    options.refreshKey();
+    const currentRefreshKey = options.refreshKey();
+    const workspaceChanged = currentWorkspace !== observedWorkspace;
+    const refreshChanged = currentRefreshKey !== observedRefreshKey;
+    observedWorkspace = currentWorkspace;
+    observedRefreshKey = currentRefreshKey;
+    if (!workspaceChanged && !refreshChanged) return;
+
     const nextGeneration = ++generation;
-    let cancelled = false;
-    state.entriesByDirectory = {};
-    state.expandedDirectories = [];
-    state.loadingDirectories = [];
-    state.errorByDirectory = {};
-    state.selectedPath = null;
-    state.focusedPath = null;
-    options.clearDrag();
-    queueMicrotask(() => {
-      if (!cancelled && nextGeneration === generation) options.onHealthChange(null);
+    const refreshPaths = untrack(() => {
+      if (workspaceChanged) {
+        state.entriesByDirectory = {};
+        state.expandedDirectories = [];
+        state.selectedPath = null;
+        state.focusedPath = null;
+      }
+      state.loadingDirectories = [];
+      state.errorByDirectory = {};
+      options.clearDrag();
+      return workspaceChanged ? [""] : ["", ...new Set(state.expandedDirectories)];
     });
-    // Keep root loading outside dependency collection so request state cannot
-    // retrigger the whole explorer reset while a directory request is in flight.
+    queueMicrotask(() => {
+      if (nextGeneration === generation) options.onHealthChange(null);
+    });
+    // Keep directory loading outside dependency collection so request state cannot
+    // retrigger the explorer lifecycle while a request is in flight.
     if (currentWorkspace) {
       queueMicrotask(() => {
-        if (!cancelled && nextGeneration === generation) void loadDirectory("", nextGeneration);
+        if (nextGeneration !== generation) return;
+        for (const path of refreshPaths) void loadDirectory(path, nextGeneration);
       });
     }
-    return () => {
-      cancelled = true;
-      if (generation === nextGeneration) generation += 1;
-      options.onHealthChange(null);
-    };
   });
 
   function rows() {
@@ -187,6 +195,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function dispose(): void {
+    generation += 1;
+    options.onHealthChange(null);
     if (typeaheadTimer !== null) window.clearTimeout(typeaheadTimer);
     typeaheadTimer = null;
   }

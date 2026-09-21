@@ -34,6 +34,10 @@ while project selection/open state remains separate from transient focus.
   short accumulated query and wraps to the next visible matching entry name.
 - Opening a file updates persistent selected-file styling; moving focus alone
   never changes that selection.
+- Refreshing project files updates the root and currently expanded directories
+  in place. It preserves expanded directories, the selected file, focus state,
+  and existing rows while refresh requests are in flight. A full tree-state
+  reset happens only when the workspace itself changes.
 - `Shift+Enter` opens the focused file or directory in the configured external
   editor. The pointer hover icon remains available but is removed from the normal
   Tab sequence so every tree row does not add a second Tab stop.

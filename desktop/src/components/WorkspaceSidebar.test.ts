@@ -64,4 +64,13 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain('registryBackgroundSync.phase !== "idle"');
     expect(sidebarSource).toContain("onRegistryProjectChange(artifact)");
   });
+
+  it("wires explicit Git and Registry project initialization actions", () => {
+    expect(sidebarSource).toContain("uninitialized={gitUninitialized}");
+    expect(sidebarSource).toContain("onInitialize={onGitInitialize}");
+    expect(sidebarSource).toContain("projectInitialized={registryProjectInitialized}");
+    expect(sidebarSource).toContain("onInitializeProject={onRegistryInitializeProject}");
+    expect(sidebarViewModelSource).toContain("onGitInitialize: () => void options.git.initialize()");
+    expect(sidebarViewModelSource).toContain("onRegistryInitializeProject: () => void options.registry.initializeProject()");
+  });
 });

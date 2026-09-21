@@ -1,5 +1,6 @@
 <script lang="ts">
   import Database from "@lucide/svelte/icons/database";
+  import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CircleArrowDown from "@lucide/svelte/icons/circle-arrow-down";
   import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
@@ -39,18 +40,22 @@
 
   let {
     snapshot,
+    projectInitialized,
     loading,
     disabled,
     actionId,
     onRefresh,
+    onInitializeProject,
     onAction,
     onOpenProjectArtifact,
   }: {
     snapshot: RegistrySnapshot | undefined;
+    projectInitialized: boolean | undefined;
     loading: boolean;
     disabled: boolean;
     actionId: string | null;
     onRefresh: () => void;
+    onInitializeProject: () => void;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
     onOpenProjectArtifact: (artifact: RegistryProjectArtifact) => void;
   } = $props();
@@ -234,7 +239,17 @@
   </div>
 
   <div class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-    {#if loading && !snapshot}
+    {#if projectInitialized === false}
+      <div class="rounded-md border border-sidebar-border bg-panel px-3 py-5 text-center">
+        <FolderPlus class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
+        <p class="text-xs font-medium text-foreground">Project Registry state is not initialized</p>
+        <p class="mx-auto mt-1 max-w-72 text-xs leading-4 text-muted-foreground">Create <span class="font-mono">.pi</span> with an empty task document plus plans and task-attachment directories.</p>
+        <button class="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={actionId !== null} onclick={onInitializeProject}>
+          {#if actionId === "initialize-project"}<RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{:else}<FolderPlus class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+          {actionId === "initialize-project" ? "Initializing…" : "Initialize project Registry"}
+        </button>
+      </div>
+    {:else if loading && !snapshot}
       <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RefreshCw class="h-4 w-4 animate-spin" aria-hidden="true" />Checking registry…</div>
     {:else if snapshot && !snapshot.configured}
       <div class="rounded-md border border-sidebar-border bg-panel px-3 py-4 text-center">

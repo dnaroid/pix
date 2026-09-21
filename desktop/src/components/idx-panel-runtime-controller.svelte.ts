@@ -12,6 +12,7 @@ import {
   type IdxOperationSnapshot,
   type IdxOverview,
 } from "../lib/idx";
+import { installManagedIdx } from "../lib/desktop-bootstrap";
 
 interface IdxPanelRuntimeControllerOptions {
   readonly workspace: () => string;
@@ -24,6 +25,7 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
   let operations = $state<IdxOperationSnapshot[]>([]);
   let loading = $state(false);
   let overviewRefreshRunning = $state(false);
+  let installingIdx = $state(false);
   let error = $state<string | null>(null);
   let loadGeneration = 0;
   let disposed = false;
@@ -104,6 +106,20 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
     if (loading || overviewRefreshRunning || disposed) return;
     const generation = ++loadGeneration;
     void loadWorkspace(options.workspace(), generation);
+  }
+
+  async function installIdx(): Promise<void> {
+    if (disposed || installingIdx) return;
+    installingIdx = true;
+    error = null;
+    try {
+      await installManagedIdx();
+      if (!disposed) await refreshOverview();
+    } catch (caught) {
+      if (!disposed) error = errorMessage(caught);
+    } finally {
+      if (!disposed) installingIdx = false;
+    }
   }
 
   async function startOperation(kind: IdxMaintenanceKind): Promise<void> {
@@ -189,12 +205,14 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
     get operations() { return operations; },
     get loading() { return loading; },
     get overviewRefreshRunning() { return overviewRefreshRunning; },
+    get installingIdx() { return installingIdx; },
     get error() { return error; },
     get runningOperation() { return runningOperation(); },
     get visibleOperation() { return visibleOperation(); },
     get indexReady() { return Boolean(overview?.available && overview.initialized); },
     refresh,
     refreshOverview,
+    installIdx,
     startOperation,
     stopOperation,
     setError,

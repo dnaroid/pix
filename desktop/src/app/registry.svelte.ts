@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { AcpClient } from "../lib/acp-client";
 import {
   registrySnapshotFromSessionState,
@@ -29,7 +30,10 @@ type RegistryStoreOptions = {
 
 export function createRegistryStore(options: RegistryStoreOptions) {
   let snapshot = $state<RegistrySnapshot | undefined>(undefined);
+  let projectInitialized = $state<boolean | undefined>(undefined);
   let actionId = $state<string | null>(null);
+  let projectStateLoadGeneration = 0;
+  let lifecycleGeneration = 0;
   let backgroundSyncState = $state<RegistryBackgroundSyncState>({
     phase: "idle",
     dirtyScopes: [],
@@ -65,6 +69,55 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     if (next.configured) backgroundSync.retry();
     else backgroundSync.reset();
     return true;
+  }
+
+  async function refreshProjectInitialization(): Promise<void> {
+    const workspace = options.workspace();
+    const requestGeneration = ++projectStateLoadGeneration;
+    if (!workspace) {
+      projectInitialized = undefined;
+      return;
+    }
+    try {
+      const initialized = await invoke<boolean>("project_pi_initialized", { workspace });
+      if (requestGeneration !== projectStateLoadGeneration || options.workspace() !== workspace) return;
+      projectInitialized = initialized;
+    } catch (error) {
+      if (requestGeneration === projectStateLoadGeneration && options.workspace() === workspace) options.reportError(error);
+    }
+  }
+
+  async function initializeProject(): Promise<boolean> {
+    const workspace = options.workspace();
+    const requestGeneration = lifecycleGeneration;
+    const current = () => requestGeneration === lifecycleGeneration && options.workspace() === workspace;
+    if (!workspace || actionId !== null || backgroundSyncState.phase === "syncing") return false;
+
+    actionId = "initialize-project";
+    options.setOperationRunning(true);
+    options.setErrorMessage(null);
+    let initialized = false;
+    try {
+      await invoke("initialize_project_pi", { workspace });
+      if (!current()) return false;
+      projectInitialized = true;
+      await Promise.all([
+        Promise.resolve(options.loadProjectTasks(workspace)),
+        Promise.resolve(options.loadProjectDocuments(workspace)),
+      ]);
+      initialized = current();
+      return initialized;
+    } catch (error) {
+      if (current()) options.reportError(error);
+      return false;
+    } finally {
+      if (current()) {
+        actionId = null;
+        options.setOperationRunning(false);
+        backgroundSync.retry();
+        if (initialized) refresh();
+      }
+    }
   }
 
   async function runAction(request: RegistryActionRequest, nextActionId: string): Promise<void> {
@@ -106,11 +159,15 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   }
 
   function refresh(): void {
+    void refreshProjectInitialization();
     void runAction({ action: "refresh" }, "refresh");
   }
 
   function reset(): void {
+    lifecycleGeneration += 1;
+    projectStateLoadGeneration += 1;
     snapshot = undefined;
+    projectInitialized = undefined;
     actionId = null;
     backgroundSync.reset();
   }
@@ -121,9 +178,12 @@ export function createRegistryStore(options: RegistryStoreOptions) {
 
   return {
     get snapshot() { return snapshot; },
+    get projectInitialized() { return projectInitialized; },
     get actionId() { return actionId; },
     get backgroundSyncState() { return backgroundSyncState; },
     handleSessionState,
+    refreshProjectInitialization,
+    initializeProject,
     runAction,
     refresh,
     scheduleProjectSync,

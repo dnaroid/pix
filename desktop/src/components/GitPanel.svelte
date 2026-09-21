@@ -13,11 +13,11 @@
   import GitCommitComposer from "./GitCommitComposer.svelte";
   import GitRepositoryTools from "./GitRepositoryTools.svelte";
 
-  let { workspace, snapshot, loading, error, actionId, llmActionId, gitAssistantReady, workflow,
-    onRefresh, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
-    workspace: string; snapshot: GitSnapshot | undefined; loading: boolean; error: string | null;
+  let { workspace, snapshot, uninitialized, loading, error, actionId, llmActionId, gitAssistantReady, workflow,
+    onRefresh, onInitialize, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
+    workspace: string; snapshot: GitSnapshot | undefined; uninitialized: boolean; loading: boolean; error: string | null;
     actionId: string | null; llmActionId: string | null; gitAssistantReady: boolean; workflow: GitPanelWorkflow;
-    onRefresh: () => void; onOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
+    onRefresh: () => void; onInitialize: () => void; onOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onStage: (path?: string) => Promise<boolean>; onUnstage: (path?: string) => void;
     onCommit: (message: string, pushAfterCommit?: boolean) => Promise<boolean>; onPush: () => void;
     onSwitchBranch: (branch: string) => void; onCreateBranch: (branch: string) => void;
@@ -109,6 +109,16 @@
         <GitChangesSection changes={unstaged} scope="unstaged" {query} {busy} {onOpenDiff} onToggle={(path) => void onStage(path)} onDiscard={(path) => void workflow.onRepositoryAction("discard", path)} />
       {/if}
       {#key workspace}<GitRepositoryTools {snapshot} {busy} {workflow} {onCreateBranch} />{/key}
+    {:else if uninitialized}
+      <div class="px-3 py-8 text-center">
+        <GitBranch class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
+        <p class="text-xs font-medium text-foreground">Git is not initialized</p>
+        <p class="mx-auto mt-1 max-w-64 text-xs leading-4 text-muted-foreground">Create a repository for this project with <span class="font-mono">main</span> as the initial branch.</p>
+        <button class="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={busy || loading} onclick={onInitialize}>
+          {#if actionId === "init"}<RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{:else}<GitBranch class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+          {actionId === "init" ? "Initializing…" : "Initialize Git"}
+        </button>
+      </div>
     {:else if loading}<p class="px-3 py-4 text-xs text-muted-foreground" role="status">Reading Git status…</p>
     {:else if !error}<p class="px-3 py-4 text-xs text-muted-foreground">Open a Git repository to use Source Control.</p>{/if}
   </div>

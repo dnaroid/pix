@@ -20,6 +20,8 @@ paths.
 - Project provenance in `.pi/registry.json`.
 - Portable synchronization of `.pi/tasks.jsonc` together with the regular files
   referenced from `.pi/task-attachments`.
+- Pix Desktop local project-state initialization for workspaces that do not yet
+  have a `.pi` directory.
 
 ## Remote layout
 
@@ -87,6 +89,12 @@ Those portable markers are not written to the local project task file.
 13. A retryable ACP busy race returns to `pending`. Other thrown background-sync
     failures become an `error` state and retain the dirty artifacts. A later
     local edit or foreground Registry action can retry that retained state.
+14. Pix Desktop checks local `.pi` initialization independently from remote
+    Registry configuration and ACP session readiness. When `.pi` is absent, the
+    Registry panel offers **Initialize project Registry**. The local action
+    creates `.pi/tasks.jsonc` as an empty version-one task document plus
+    `.pi/plans/` and `.pi/task-attachments/`, then reloads project tasks and
+    documents. Remote Registry setup remains a separate action.
 
 ## Compatibility
 
@@ -113,12 +121,18 @@ Those portable markers are not written to the local project task file.
 - The sidebar's cheap Registry task check hashes the same normalized task bundle
   as Registry provenance, including referenced attachment bytes, so a completed
   background push can converge back to a clean local indicator.
+- Desktop project-state initialization is explicit and idempotent. Existing
+  `.pi/tasks.jsonc` content is never overwritten, and `.pi` plus scaffold
+  subdirectories must be regular project-owned directories rather than symbolic
+  links escaping the workspace.
 
 ## Related files
 
 - `external/pi-tools-suite/src/resource-registry/index.ts`
 - `external/pi-tools-suite/test/resource-registry.test.ts`
 - `desktop/src-tauri/src/lib.rs`
+- `desktop/src/app/registry.svelte.ts`
+- `desktop/src/components/RegistryPanel.svelte`
 - `docs/desktop-task-manager.md`
 - `specs/desktop-attachments.md`
 
@@ -128,13 +142,16 @@ Those portable markers are not written to the local project task file.
   portable task attachments, attachment-only status changes, stale remote
   attachment removal, conflicts, and existing project-state/TUI behavior.
 - Desktop Rust task persistence tests cover reference-based local attachment
-  pruning after successful task-document writes.
+  pruning after successful task-document writes and idempotent `.pi` skeleton
+  initialization without overwriting an existing task document.
 - Desktop coordinator tests cover debounce, scope coalescing, busy deferral,
   changes during an in-flight push, retained error state, and foreground-lock
   independence.
-- Sidebar tests cover pending/syncing/error presentation and the shared animated
-  indicator. Rust coverage verifies that the fast Registry check uses task
-  attachment bytes when comparing the `tasks` project artifact.
+- Registry store/panel tests cover local initialization without a ready ACP
+  session and workspace-lifecycle guards. Sidebar tests cover
+  pending/syncing/error presentation, initialization wiring and the shared
+  animated indicator. Rust coverage verifies that the fast Registry check uses
+  task attachment bytes when comparing the `tasks` project artifact.
 
 ## Risks / unknowns
 

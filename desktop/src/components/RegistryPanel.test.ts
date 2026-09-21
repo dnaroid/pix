@@ -8,4 +8,11 @@ describe("RegistryPanel refresh lifecycle", () => {
     expect(sidebarSource).toContain('title="Refresh registry"');
     expect(sidebarSource).toContain("onclick={onRegistryRefresh}");
   });
+
+  it("offers local .pi initialization before remote registry configuration", () => {
+    expect(panelSource).toContain("projectInitialized === false");
+    expect(panelSource).toContain("Initialize project Registry");
+    expect(panelSource).toContain("onclick={onInitializeProject}");
+    expect(panelSource).toContain('actionId === "initialize-project"');
+  });
 });

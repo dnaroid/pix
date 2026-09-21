@@ -23,4 +23,12 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain('entry.name.startsWith(".")');
     expect(explorerSource).toContain("opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100");
   });
+
+  it("refreshes in place without collapsing expanded directories", () => {
+    expect(treeControllerSource).toContain("const workspaceChanged = currentWorkspace !== observedWorkspace");
+    expect(treeControllerSource).toContain("if (!workspaceChanged && !refreshChanged) return");
+    expect(treeControllerSource).toContain('return workspaceChanged ? [""] : ["", ...new Set(state.expandedDirectories)]');
+    expect(treeControllerSource).toContain("if (workspaceChanged) {");
+    expect(treeControllerSource).toContain("state.expandedDirectories = []");
+  });
 });

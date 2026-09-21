@@ -13,8 +13,14 @@ type GitWorkspaceStoreOptions = {
   nextWorkbenchAuxOrder: () => number;
 };
 
+type GitRepositoryState = {
+  initialized: boolean;
+  repositoryRoot?: string;
+};
+
 export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let snapshot = $state<GitSnapshot | undefined>(undefined);
+  let uninitialized = $state(false);
   let statusBranch = $state<string | undefined>(undefined);
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -39,6 +45,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     loadGeneration += 1;
     statusBranchGeneration += 1;
     snapshot = undefined;
+    uninitialized = false;
     statusBranch = undefined;
     loading = false;
     error = null;
@@ -62,6 +69,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       const next = await invoke<GitSnapshot>("git_status", { workspace });
       if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
       snapshot = next;
+      uninitialized = false;
       statusBranchGeneration += 1;
       statusBranch = next.detached || next.branch === "HEAD" ? undefined : next.branch;
       const review = reviewResult;
@@ -73,8 +81,12 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       }
     } catch (reason) {
       if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
+      const detail = reason instanceof Error ? reason.message : String(reason);
+      const repositoryState = await invoke<GitRepositoryState>("git_repository_state", { workspace }).catch(() => undefined);
+      if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
       snapshot = undefined;
-      error = reason instanceof Error ? reason.message : String(reason);
+      uninitialized = repositoryState?.initialized === false && !repositoryState.repositoryRoot;
+      error = uninitialized ? null : detail;
     } finally {
       if (requestGeneration === loadGeneration && options.workspace() === workspace) loading = false;
     }
@@ -200,6 +212,10 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
 
   function push(): void {
     void runMutation("push", "git_push", {}, { success: "Branch pushed successfully." });
+  }
+
+  function initialize(): Promise<boolean> {
+    return runMutation("init", "git_initialize", {}, { success: "Git repository initialized on main." });
   }
 
   function switchBranch(branch: string): void {
@@ -331,6 +347,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
 
   return {
     get snapshot() { return snapshot; },
+    get uninitialized() { return uninitialized; },
     get statusBranch() { return statusBranch; },
     get loading() { return loading; },
     get error() { return error; },
@@ -354,6 +371,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     unstage,
     commit,
     push,
+    initialize,
     switchBranch,
     createBranch,
     requestDiff,

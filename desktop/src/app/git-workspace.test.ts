@@ -28,6 +28,50 @@ beforeEach(() => { invoke.mockReset(); vi.stubGlobal("window", { confirm: vi.fn(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Git commit transaction and lifecycle", () => {
+  it("detects an uninitialized workspace and initializes it explicitly", async () => {
+    const { store, snapshot } = fixture();
+    let initialized = false;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "git_status") {
+        if (!initialized) throw new Error("fatal: not a git repository");
+        return snapshot;
+      }
+      if (command === "git_repository_state") return { initialized: false };
+      if (command === "git_initialize") {
+        initialized = true;
+        return undefined;
+      }
+    });
+
+    await store.refresh();
+    expect(store.snapshot).toBeUndefined();
+    expect(store.uninitialized).toBe(true);
+    expect(store.error).toBeNull();
+
+    await expect(store.initialize()).resolves.toBe(true);
+    expect(store.uninitialized).toBe(false);
+    expect(store.snapshot).toEqual(snapshot);
+    expect(store.notice).toMatch(/initialized on main/i);
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+      "git_status",
+      "git_repository_state",
+      "git_initialize",
+      "git_status",
+    ]);
+  });
+
+  it("does not offer nested initialization when the workspace belongs to a parent repository", async () => {
+    const { store } = fixture();
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "git_status") throw new Error("Git repository root is /parent");
+      if (command === "git_repository_state") return { initialized: false, repositoryRoot: "/parent" };
+    });
+
+    await store.refresh();
+    expect(store.uninitialized).toBe(false);
+    expect(store.error).toContain("Git repository root is /parent");
+  });
+
   it("commits then pushes under one lock, never implicitly staging", async () => {
     const { store } = fixture();
     await store.refresh();

@@ -37,7 +37,7 @@ Expose repository intelligence and Spec Wiki maintenance from Pix Desktop withou
 
 - The Workspace activity rail contains an **IDX** view. Its wider content width is clamped so the main workspace keeps a usable minimum width.
 - The activity-rail IDX icon participates in the shared Desktop sidebar-indicator service. It shows info while maintenance is running, warning when current/proposed knowledge is not fully fresh or needs semantic maintenance, and error for unseen failed/timed-out maintenance or IDX health failures. `unresolved refs` alone do not trigger the warning dot. See `desktop-sidebar-indicators.md` for polling and acknowledgement semantics.
-- The overview resolves a system/login-shell idx first, then Pix's optional managed ~/.pi/pix-desktop-tools/node_modules/indexer-cli entry. Managed IDX is launched with Pix's bundled Node so native modules use the matching Node ABI. IDX is reported unavailable when neither source exists. A project is initialized when its canonical workspace contains .indexer-cli; first-run may install the CLI but never initializes project state implicitly.
+- The overview resolves a system/login-shell idx first, then Pix's optional managed ~/.pi/pix-desktop-tools/node_modules/indexer-cli entry. Managed IDX is launched with Pix's bundled Node so native modules use the matching Node ABI. IDX is reported unavailable when neither source exists. In that state, the IDX panel offers an explicit **Install IDX** action that reuses Desktop's managed installer, installs only into Pix's private tools directory with bundled Node/npm, and refreshes the overview when installation completes. A project is initialized when its canonical workspace contains .indexer-cli; installing IDX never initializes project state implicitly.
 - Knowledge statistics show the parsed `current/proposed` primary count as **Current**, compare **Fresh** against that set, keep **Review** explicit, label path-like misses as **Unresolved refs** with neutral treatment, and report non-current primary entries separately as archived.
 - Maintenance actions are fixed to: initialize, update index, full reindex, dry run, doctor, knowledge audit, knowledge discovery, and knowledge catalog. Every command runs with the canonical workspace as its working directory.
 - Only one IDX maintenance operation may run for a workspace at a time. Stdout/stderr stream into the panel; the retained per-operation log is bounded, completed operation history is bounded per window, and operations time out rather than running forever.
@@ -75,7 +75,7 @@ Expose repository intelligence and Spec Wiki maintenance from Pix Desktop withou
 
 ## Verification
 
-- Desktop IDX helper tests cover overview-field parsing, current/archive counts, semantic attention rules, knowledge issue/candidate parsing, and file references with optional line ranges.
+- Desktop IDX helper/panel tests cover overview-field parsing, current/archive counts, semantic attention rules, knowledge issue/candidate parsing, file references with optional line ranges, and the managed-install unavailable state.
 - Rust unit tests cover event payload serialization, typed query/inspect argument construction, overview parsing, knowledge review gates, and project-file link validation. TypeScript helper tests cover post-start operation reconciliation.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and the Desktop Tauri Rust unit tests.
 

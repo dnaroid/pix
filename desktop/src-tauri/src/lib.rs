@@ -912,6 +912,14 @@ struct GitSnapshot {
     remotes: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitRepositoryState {
+    initialized: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository_root: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum GitDiffScope {
@@ -1441,6 +1449,16 @@ async fn git_status(workspace: String) -> Result<GitSnapshot, String> {
 }
 
 #[tauri::command]
+async fn git_repository_state(workspace: String) -> Result<GitRepositoryState, String> {
+    run_blocking(move || git_repository_state_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn git_initialize(workspace: String) -> Result<(), String> {
+    run_blocking(move || git_initialize_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
 async fn git_current_branch(workspace: String) -> Result<Option<String>, String> {
     run_blocking(move || git_current_branch_from(Path::new(&workspace))).await
 }
@@ -1487,6 +1505,16 @@ async fn git_create_branch(workspace: String, branch: String) -> Result<(), Stri
 #[tauri::command]
 async fn list_project_documents(workspace: String) -> Result<ProjectDocumentsSnapshot, String> {
     run_blocking(move || list_project_documents_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn project_pi_initialized(workspace: String) -> Result<bool, String> {
+    run_blocking(move || project_pi_initialized_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn initialize_project_pi(workspace: String) -> Result<(), String> {
+    run_blocking(move || initialize_project_pi_from(Path::new(&workspace))).await
 }
 
 #[tauri::command]
@@ -2398,6 +2426,57 @@ fn git_repository_root(workspace: &Path) -> Result<PathBuf, String> {
         ));
     }
     Ok(root)
+}
+
+fn git_repository_state_from(workspace: &Path) -> Result<GitRepositoryState, String> {
+    let root = canonical_workspace(workspace)?;
+    git_repository_state_from_root(&root)
+}
+
+fn git_repository_state_from_root(root: &Path) -> Result<GitRepositoryState, String> {
+    if root.join(".git").exists() {
+        let repository = git_repository_root(root)?;
+        return Ok(GitRepositoryState {
+            initialized: true,
+            repository_root: Some(repository.to_string_lossy().into_owned()),
+        });
+    }
+
+    let output = git_output_raw(root, &["rev-parse", "--show-toplevel"])?;
+    if !output.status.success() {
+        return Ok(GitRepositoryState {
+            initialized: false,
+            repository_root: None,
+        });
+    }
+    let reported = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if reported.is_empty() {
+        return Err("Git did not report a repository root".to_owned());
+    }
+    let repository = fs::canonicalize(&reported)
+        .map_err(|error| format!("failed to resolve Git repository root {reported}: {error}"))?;
+    Ok(GitRepositoryState {
+        initialized: repository == root,
+        repository_root: Some(repository.to_string_lossy().into_owned()),
+    })
+}
+
+fn git_initialize_from(workspace: &Path) -> Result<(), String> {
+    let root = canonical_workspace(workspace)?;
+    let state = git_repository_state_from_root(&root)?;
+    if state.initialized {
+        return Ok(());
+    }
+    if let Some(repository_root) = state.repository_root {
+        return Err(format!(
+            "This project is inside the Git repository at {repository_root}. Open that repository root as the Pix project instead of creating a nested repository."
+        ));
+    }
+    let output = git_output_raw(&root, &["init", "-b", "main"])?;
+    if !output.status.success() {
+        return Err(git_command_error("Git init", &output));
+    }
+    Ok(())
 }
 
 fn git_output_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
@@ -7122,6 +7201,96 @@ fn canonical_project_directory(root: &Path, directory: &Path) -> Result<PathBuf,
     Ok(canonical)
 }
 
+fn project_pi_initialized_from(workspace: &Path) -> Result<bool, String> {
+    let root = canonical_workspace(workspace)?;
+    let project_directory = root.join(".pi");
+    if !project_directory.exists() {
+        return Ok(false);
+    }
+    let metadata = fs::symlink_metadata(&project_directory)
+        .map_err(|error| format!("failed to inspect {}: {error}", project_directory.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(".pi must be a project-owned directory".to_owned());
+    }
+    canonical_project_directory(&root, &project_directory)?;
+    Ok(true)
+}
+
+fn ensure_project_pi_subdirectory(
+    root: &Path,
+    project_directory: &Path,
+    name: &str,
+) -> Result<(), String> {
+    let directory = project_directory.join(name);
+    if !directory.exists() {
+        fs::create_dir(&directory)
+            .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
+    }
+    let metadata = fs::symlink_metadata(&directory)
+        .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(".pi/{name} must be a project-owned directory"));
+    }
+    let canonical = fs::canonicalize(&directory)
+        .map_err(|error| format!("failed to resolve {}: {error}", directory.display()))?;
+    if !canonical.starts_with(root) {
+        return Err(format!(".pi/{name} resolves outside the workspace"));
+    }
+    Ok(())
+}
+
+fn initialize_project_tasks_file(project_directory: &Path) -> Result<(), String> {
+    let target = project_directory.join("tasks.jsonc");
+    let mut serialized = serde_json::to_vec_pretty(&empty_task_document())
+        .map_err(|error| format!("failed to encode .pi/tasks.jsonc: {error}"))?;
+    serialized.push(b'\n');
+
+    let mut file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "failed to create project task skeleton {}: {error}",
+                target.display()
+            ))
+        }
+    };
+    let write_result = (|| {
+        file.write_all(&serialized)
+            .map_err(|error| format!("failed to write project task skeleton: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("failed to flush project task skeleton: {error}"))?;
+        sync_directory(project_directory)?;
+        Ok(())
+    })();
+    write_result
+}
+
+fn initialize_project_pi_from(workspace: &Path) -> Result<(), String> {
+    let root = canonical_workspace(workspace)?;
+    let project_directory = root.join(".pi");
+    if !project_directory.exists() {
+        fs::create_dir(&project_directory).map_err(|error| {
+            format!("failed to create {}: {error}", project_directory.display())
+        })?;
+    }
+    let metadata = fs::symlink_metadata(&project_directory)
+        .map_err(|error| format!("failed to inspect {}: {error}", project_directory.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(".pi must be a project-owned directory".to_owned());
+    }
+    let project_directory = canonical_project_directory(&root, &project_directory)?;
+
+    ensure_project_pi_subdirectory(&root, &project_directory, "plans")?;
+    ensure_project_pi_subdirectory(&root, &project_directory, "task-attachments")?;
+    initialize_project_tasks_file(&project_directory)?;
+    Ok(())
+}
+
 fn empty_task_document() -> ProjectTaskDocument {
     ProjectTaskDocument {
         schema: Some(PROJECT_TASKS_SCHEMA_URL.to_owned()),
@@ -7825,6 +7994,8 @@ pub fn run() {
             list_project_directory,
             open_in_external_editor,
             git_status,
+            git_repository_state,
+            git_initialize,
             git_current_branch,
             git_diff,
             git_stage,
@@ -7841,6 +8012,8 @@ pub fn run() {
             git_switch_branch,
             git_create_branch,
             list_project_documents,
+            project_pi_initialized,
+            initialize_project_pi,
             write_project_markdown,
             read_home_file,
             home_file_exists,
@@ -8452,6 +8625,42 @@ mod tests {
         git_output(workspace, &["add", "tracked.txt"]).expect("stage initial file");
         git_output(workspace, &["commit", "--no-gpg-sign", "-m", "initial"])
             .expect("create initial commit");
+    }
+
+    #[test]
+    fn initializes_git_repository_on_main_and_refuses_nested_repository_creation() {
+        let workspace = temporary_workspace("git-initialize");
+        let before = git_repository_state_from(&workspace).expect("inspect plain workspace");
+        assert!(!before.initialized);
+        assert!(before.repository_root.is_none());
+
+        git_initialize_from(&workspace).expect("initialize Git repository");
+        let after = git_repository_state_from(&workspace).expect("inspect initialized repository");
+        assert!(after.initialized);
+        assert_eq!(
+            after.repository_root,
+            Some(
+                fs::canonicalize(&workspace)
+                    .expect("canonical workspace")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        let snapshot = git_status_from(&workspace).expect("read initialized repository");
+        assert_eq!(snapshot.branch, "main");
+        assert!(snapshot.head.is_none());
+        git_initialize_from(&workspace).expect("reinitialization is idempotent");
+
+        let nested = workspace.join("nested");
+        fs::create_dir(&nested).expect("create nested project");
+        let nested_state = git_repository_state_from(&nested).expect("inspect nested project");
+        assert!(!nested_state.initialized);
+        assert_eq!(nested_state.repository_root, after.repository_root);
+        assert!(git_initialize_from(&nested)
+            .expect_err("nested Git initialization should fail")
+            .contains("inside the Git repository"));
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
     #[test]
@@ -9182,6 +9391,35 @@ mod tests {
         assert!(!workspace.join(".pi/tasks.json").exists());
         let actual = read_project_tasks_from(&workspace, 1024 * 1024).expect("read tasks");
         assert_eq!(actual, expected);
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn initializes_project_pi_skeleton_without_overwriting_existing_tasks() {
+        let workspace = temporary_workspace("project-pi-initialize");
+        assert!(!project_pi_initialized_from(&workspace).expect("inspect project state"));
+
+        initialize_project_pi_from(&workspace).expect("initialize project .pi");
+        assert!(project_pi_initialized_from(&workspace).expect("inspect initialized project state"));
+        assert!(workspace.join(".pi/plans").is_dir());
+        assert!(workspace.join(".pi/task-attachments").is_dir());
+        assert_eq!(
+            read_project_tasks_from(&workspace, 1024 * 1024).expect("read skeleton tasks"),
+            empty_task_document()
+        );
+
+        let tasks_path = workspace.join(".pi/tasks.jsonc");
+        let existing = format!(
+            "// keep this project-owned comment\n{}",
+            fs::read_to_string(&tasks_path).expect("read generated tasks")
+        );
+        fs::write(&tasks_path, &existing).expect("customize generated tasks");
+        initialize_project_pi_from(&workspace).expect("reinitialize project .pi");
+        assert_eq!(
+            fs::read_to_string(&tasks_path).expect("read preserved tasks"),
+            existing
+        );
+
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
