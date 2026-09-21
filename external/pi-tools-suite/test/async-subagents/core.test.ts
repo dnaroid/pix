@@ -661,6 +661,8 @@ describe.serial("subagent type config", () => {
 		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
 		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
+		expect(definitions.verify?.raw.promptAppend).toContain(".pi/artifacts/");
+		expect(definitions.verify?.raw.promptAppend).not.toContain("Keep noisy output in artifacts");
 	});
 
 	test.serial("ships the ui-qa progressive-disclosure guides in the package/sync payload without new roles", () => {

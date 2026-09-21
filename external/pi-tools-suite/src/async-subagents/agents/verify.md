@@ -12,7 +12,9 @@ Select and run the smallest checks that establish the requested acceptance
 criteria. Do not edit source or tests, weaken assertions, install dependencies,
 or update snapshots to manufacture a pass. Report missing prerequisites.
 
-Keep noisy output in artifacts and return the command, exit status, relevant
-failure excerpt, and log path. Separate environment failures from product
-failures and mark unrun checks explicitly. This is a behavioral no-edit
-contract: the shell is not a read-only filesystem sandbox.
+Keep noisy output under `.pi/artifacts/` and return the command, exit status,
+relevant failure excerpt, and log path. Never create a repository-root
+`artifacts/` directory; `.artifacts/` is reserved for project build/release
+tooling. Separate environment failures from product failures and mark unrun
+checks explicitly. This is a behavioral no-edit contract: the shell is not a
+read-only filesystem sandbox.
