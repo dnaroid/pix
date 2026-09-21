@@ -9,13 +9,17 @@ export type AgentPauseControllerHost = {
 	isCurrentSession(session: AgentSession): boolean;
 };
 
-type ShouldStopAfterTurn = NonNullable<AgentSession["agent"]["shouldStopAfterTurn"]>;
+type FinishTurn = NonNullable<AgentSession["agent"]["finishTurn"]>;
+type FinishTurnArgs = Parameters<FinishTurn>;
 
 type AgentSessionInternals = {
 	_isAgentRunActive: boolean;
-	_systemPromptOverride?: unknown;
+	_agentRunAbortRequested: boolean;
+	_runSystemPromptOptions?: unknown;
 	_handlePostAgentRun(): Promise<boolean>;
+	_runBeforeSettleBoundary(): Promise<boolean>;
 	_flushPendingBashMessages(): void;
+	_flushPendingCustomMessages(): void;
 	_emitAgentSettled(): Promise<void>;
 };
 
@@ -25,15 +29,16 @@ type SessionPauseRecord = {
 	pauseSettled?: Promise<void>;
 	resolvePauseSettled?: () => void;
 	originalHandlePostAgentRun: () => Promise<boolean>;
+	originalRunBeforeSettleBoundary: () => Promise<boolean>;
 };
 
 /**
  * Implements a turn-boundary pause without interrupting an active tool batch.
  *
- * The pinned SDK exposes Agent.shouldStopAfterTurn and Agent.continue(), but not a
+ * The pinned SDK exposes Agent.finishTurn and Agent.continue(), but not a
  * session-level continuation method. The small private adapter below mirrors the
- * bookkeeping in AgentSession._runAgentPrompt so resumed runs still get retries,
- * compaction, queue draining, isStreaming, and agent_settled behavior.
+ * AgentSession 0.87 _runAgentPrompt lifecycle so resumed runs retain retries,
+ * compaction, before-settle extensions, queue draining, and settlement behavior.
  */
 export class AgentPauseController {
 	private readonly records = new WeakMap<AgentSession, SessionPauseRecord>();
@@ -48,11 +53,12 @@ export class AgentPauseController {
 			state: "idle",
 			pauseBoundaryReached: false,
 			originalHandlePostAgentRun: internals._handlePostAgentRun.bind(session),
+			originalRunBeforeSettleBoundary: internals._runBeforeSettleBoundary.bind(session),
 		};
 		this.records.set(session, record);
 		session.subscribe((event) => {
-			if (event.type === "agent_start" && record.state === "paused") {
-				// A new prompt supersedes a paused continuation.
+			if (event.type === "agent_start" && (record.state === "paused" || record.state === "resuming")) {
+				// A new prompt (including a resumed run) supersedes the paused state.
 				this.setState(record, "idle");
 			}
 		});
@@ -65,41 +71,72 @@ export class AgentPauseController {
 			}
 		};
 
-		const originalShouldStopAfterTurn = session.agent.shouldStopAfterTurn;
-		const shouldStopAfterTurn: ShouldStopAfterTurn = async (context, signal) => {
-			if (await originalShouldStopAfterTurn?.(context, signal)) {
+		const originalFinishTurn = session.agent.finishTurn;
+		const finishTurn = (async (turn: FinishTurnArgs[0], signal: FinishTurnArgs[1]) => {
+			const priorDecision = await originalFinishTurn?.(turn, signal);
+			if (priorDecision?.action === "end") {
 				if (record.state === "pause-requested") {
 					record.pauseBoundaryReached = false;
 					this.setState(record, "idle");
 				}
-				return true;
+				return priorDecision;
 			}
+			// A previous hook's explicit continuation can end on an assistant
+			// message. Agent.continue() cannot restart from that transcript shape,
+			// so let the requested turn run and keep waiting for the next boundary.
+			if (priorDecision?.action === "continue") return priorDecision;
 
-			if (record.state !== "pause-requested") return false;
+			if (record.state !== "pause-requested" || signal?.aborted
+				|| turn.message.stopReason === "aborted" || turn.message.stopReason === "error") {
+				return priorDecision;
+			}
 			record.pauseBoundaryReached = true;
-			return true;
-		};
-		session.agent.shouldStopAfterTurn = shouldStopAfterTurn;
+			return { action: "end" };
+		}) as FinishTurn;
+		session.agent.finishTurn = finishTurn;
 
 		internals._handlePostAgentRun = async () => {
 			if (record.state === "paused") return false;
 
 			const pauseBoundaryReached = record.pauseBoundaryReached;
-			record.pauseBoundaryReached = false;
 			const shouldContinue = await record.originalHandlePostAgentRun();
+			if (internals._agentRunAbortRequested) {
+				this.clearPauseRequest(record);
+				return false;
+			}
 			if (pauseBoundaryReached || record.state === "pause-requested") {
-				if (shouldContinue || this.canContinue(session)) {
-					record.pauseSettled = new Promise<void>((resolve) => {
-						record.resolvePauseSettled = resolve;
-					});
-					this.setState(record, "paused");
-					this.host.showToast("Agent paused after the current turn", "success");
+				record.pauseBoundaryReached = false;
+				if (shouldContinue) {
+					this.pause(record);
 					return false;
 				}
-				this.setState(record, "idle");
+				// 0.87 runs agent_before_settle after post-run bookkeeping. Let that
+				// boundary commit its drafts and queues before deciding whether this
+				// otherwise-resumable turn is a real pause.
 				return false;
 			}
 			return shouldContinue;
+		};
+
+		internals._runBeforeSettleBoundary = async () => {
+			if (record.state === "paused") return false;
+			if (internals._agentRunAbortRequested) {
+				this.clearPauseRequest(record);
+				return false;
+			}
+			const shouldContinue = await record.originalRunBeforeSettleBoundary();
+			if (record.state !== "pause-requested") return shouldContinue;
+			if (internals._agentRunAbortRequested) {
+				this.clearPauseRequest(record);
+				return false;
+			}
+			record.pauseBoundaryReached = false;
+			if (shouldContinue || this.canContinue(session)) {
+				this.pause(record);
+			} else {
+				this.setState(record, "idle");
+			}
+			return false;
 		};
 	}
 
@@ -153,17 +190,24 @@ export class AgentPauseController {
 			}
 			const internals = this.sessionInternals(session);
 			internals._isAgentRunActive = true;
+			internals._agentRunAbortRequested = false;
 			try {
 				// Continue exactly as AgentSession._runAgentPrompt would.
 				await session.agent.continue();
 				while (this.host.isCurrentSession(session)) {
-					const shouldContinue = await record.originalHandlePostAgentRun();
-					if (!shouldContinue || !this.host.isCurrentSession(session)) break;
+					const shouldContinue = await internals._handlePostAgentRun();
+					if (shouldContinue) {
+						if (internals._agentRunAbortRequested) break;
+						await session.agent.continue();
+						continue;
+					}
+					if (internals._agentRunAbortRequested || !await internals._runBeforeSettleBoundary()) break;
 					await session.agent.continue();
 				}
 			} finally {
-				internals._systemPromptOverride = undefined;
+				internals._runSystemPromptOptions = undefined;
 				internals._flushPendingBashMessages();
+				internals._flushPendingCustomMessages();
 				await internals._emitAgentSettled();
 			}
 		} catch (error) {
@@ -171,7 +215,7 @@ export class AgentPauseController {
 			this.host.showToast(`Could not continue agent: ${errorMessage(error)}`, "error");
 			return;
 		}
-		this.setState(record, "idle");
+		if (record.state === "resuming") this.setState(record, "idle");
 	}
 
 	private setState(record: SessionPauseRecord, state: AgentPauseState): void {
@@ -189,6 +233,19 @@ export class AgentPauseController {
 		}
 	}
 
+	private pause(record: SessionPauseRecord): void {
+		record.pauseSettled = new Promise<void>((resolve) => {
+			record.resolvePauseSettled = resolve;
+		});
+		this.setState(record, "paused");
+		this.host.showToast("Agent paused after the current turn", "success");
+	}
+
+	private clearPauseRequest(record: SessionPauseRecord): void {
+		record.pauseBoundaryReached = false;
+		if (record.state === "pause-requested") this.setState(record, "idle");
+	}
+
 	private canContinue(session: AgentSession): boolean {
 		const messages = session.agent.state.messages;
 		const lastMessage = messages[messages.length - 1];
@@ -198,10 +255,13 @@ export class AgentPauseController {
 	private sessionInternals(session: AgentSession): AgentSessionInternals {
 		const internals = session as unknown as Partial<AgentSessionInternals>;
 		if (typeof internals._handlePostAgentRun !== "function"
+			|| typeof internals._runBeforeSettleBoundary !== "function"
 			|| typeof internals._flushPendingBashMessages !== "function"
+			|| typeof internals._flushPendingCustomMessages !== "function"
 			|| typeof internals._emitAgentSettled !== "function"
 			|| typeof internals._isAgentRunActive !== "boolean"
-			|| !("_systemPromptOverride" in internals)) {
+			|| typeof internals._agentRunAbortRequested !== "boolean"
+			|| !("_runSystemPromptOptions" in internals)) {
 			throw new Error("Agent pause is incompatible with this pi SDK version");
 		}
 		return internals as AgentSessionInternals;

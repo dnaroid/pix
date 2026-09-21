@@ -32,4 +32,34 @@ describe("model completion", () => {
 		expect(result).toBe(expected);
 		expect(registeredProviderLookup).toBeFalse();
 	});
+
+	test("normalizes Context before invoking a legacy custom provider stream", async () => {
+		const model = { provider: "custom", id: "test-model" } as any;
+		const context = { systemPrompt: "Follow instructions", tools: [{ name: "lookup" }], messages: [] } as any;
+		const expected = { content: [{ type: "text", text: "ok" }] } as any;
+
+		const result = await completeWithModelRegistry(
+			{
+				getRegisteredProviderConfig() {
+					return {
+						streamSimple(_model: unknown, receivedContext: any) {
+							expect(receivedContext.systemPrompt).toBeUndefined();
+							expect(receivedContext.tools).toBeUndefined();
+							expect(receivedContext.messages).toHaveLength(1);
+							expect(receivedContext.messages[0]).toMatchObject({
+								role: "system",
+								content: "Follow instructions",
+								toolsAdded: context.tools,
+							});
+							return { result: async () => expected };
+						},
+					};
+				},
+			},
+			model,
+			context,
+		);
+
+		expect(result).toBe(expected);
+	});
 });

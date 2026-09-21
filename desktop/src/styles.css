@@ -290,6 +290,7 @@ html, body, #app {
 button, textarea, select, input { font: inherit; }
 button { white-space: nowrap; }
 button, select, textarea, input { letter-spacing: inherit; }
+textarea { resize: none; }
 :where(
   button:not(:disabled),
   select:not(:disabled),

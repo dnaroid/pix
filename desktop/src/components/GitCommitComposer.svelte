@@ -4,9 +4,10 @@
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Upload from "@lucide/svelte/icons/upload";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { loadGitCommitDraft, saveGitCommitDraft, stagedGitChanges, type GitSnapshot, type GitDiffScope } from "../lib/git";
   import { gitPushBlockedReason } from "../lib/git-workflow";
+  import { autosizeTextarea } from "../lib/textarea";
 
   let { workspace, snapshot, busy, llmActionId, gitAssistantReady, actionId, onStage, onCommit, onGenerateCommitMessage, onReview }: {
     workspace: string; snapshot: GitSnapshot; busy: boolean; llmActionId: string | null;
@@ -21,6 +22,7 @@
   let generating = $state(false);
   let submitting = $state(false);
   let draftNotice = $state("");
+  let messageTextarea = $state<HTMLTextAreaElement>();
   let draftVersion = 0;
   let disposed = false;
   const staged = $derived(stagedGitChanges(snapshot).length);
@@ -33,14 +35,25 @@
   const commitHint = $derived(conflicts ? "Resolve conflicts before committing" : staged === 0
     ? "Stage files or use Stage all & generate" : !message.trim() ? "Write or generate a commit message" : "Commit staged changes only");
 
-  onMount(() => { message = loadGitCommitDraft(localStorage, workspace); });
+  onMount(() => {
+    message = loadGitCommitDraft(localStorage, workspace);
+    void syncMessageTextareaHeight();
+  });
   onDestroy(() => { disposed = true; });
+
+  async function syncMessageTextareaHeight(): Promise<void> {
+    await tick();
+    if (!disposed && messageTextarea) {
+      autosizeTextarea(messageTextarea, { minHeight: 64, maxHeight: 160 });
+    }
+  }
 
   function edit(value: string): void {
     message = value;
     draftVersion += 1;
     draftNotice = "";
     saveGitCommitDraft(localStorage, workspace, value);
+    void syncMessageTextareaHeight();
   }
 
   async function generate(): Promise<void> {
@@ -72,7 +85,10 @@
       if (await onCommit(submitted.trim(), push)) {
         // Clear only the submitted draft; another mounted panel may own a newer one.
         if (loadGitCommitDraft(localStorage, workspace) === submitted) saveGitCommitDraft(localStorage, workspace, "");
-        if (!disposed && message === submitted) message = "";
+        if (!disposed && message === submitted) {
+          message = "";
+          void syncMessageTextareaHeight();
+        }
       }
     } finally {
       if (!disposed) submitting = false;
@@ -99,7 +115,8 @@
     <label for="git-commit-message" class="font-medium text-foreground">Commit message</label>
     <span>{staged} staged · review {reviewScope}</span>
   </div>
-  <textarea id="git-commit-message" class="block h-20 min-h-16 max-h-40 w-full resize-y rounded-md border border-input bg-panel-strong px-2 py-1.5 font-mono text-xs leading-4 text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
+  <textarea id="git-commit-message" class="block min-h-16 max-h-40 w-full overflow-y-hidden rounded-md border border-input bg-panel-strong px-2 py-1.5 font-mono text-xs leading-4 text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
+    bind:this={messageTextarea}
     aria-label="Commit message" placeholder="Describe what changed…" value={message} disabled={submitting || actionId === "commit"}
     oninput={(event) => edit(event.currentTarget.value)}
     onkeydown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void commit(!event.shiftKey && !pushBlocked); } }}

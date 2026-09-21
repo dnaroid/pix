@@ -59,6 +59,7 @@ function parseDcpContextMap(value) {
  *   pauseSettled?: Promise<void>;
  *   resolvePauseSettled?: () => void;
  *   originalHandlePostAgentRun: () => Promise<boolean>;
+ *   originalRunBeforeSettleBoundary: () => Promise<boolean>;
  * }>} */
 const records = new WeakMap();
 
@@ -66,10 +67,13 @@ const records = new WeakMap();
 function sessionInternals(session) {
 	const internals = session;
 	if (typeof internals._handlePostAgentRun !== "function"
+		|| typeof internals._runBeforeSettleBoundary !== "function"
 		|| typeof internals._flushPendingBashMessages !== "function"
+		|| typeof internals._flushPendingCustomMessages !== "function"
 		|| typeof internals._emitAgentSettled !== "function"
 		|| typeof internals._isAgentRunActive !== "boolean"
-		|| !("_systemPromptOverride" in internals)) {
+		|| typeof internals._agentRunAbortRequested !== "boolean"
+		|| !("_runSystemPromptOptions" in internals)) {
 		throw new Error("Agent pause is incompatible with this pi SDK version");
 	}
 	return internals;
@@ -85,6 +89,7 @@ function bindPause(session) {
 		state: "idle",
 		pauseBoundaryReached: false,
 		originalHandlePostAgentRun: internals._handlePostAgentRun.bind(session),
+		originalRunBeforeSettleBoundary: internals._runBeforeSettleBoundary.bind(session),
 	};
 	records.set(session, record);
 
@@ -108,37 +113,65 @@ function bindPause(session) {
 		}
 	};
 
-	const originalShouldStopAfterTurn = session.agent.shouldStopAfterTurn;
-	session.agent.shouldStopAfterTurn = async (context, signal) => {
-		if (await originalShouldStopAfterTurn?.(context, signal)) {
+	const originalFinishTurn = session.agent.finishTurn;
+	session.agent.finishTurn = async (turn, signal) => {
+		const priorDecision = await originalFinishTurn?.(turn, signal);
+		if (priorDecision?.action === "end") {
 			if (record.state === "pause-requested") {
 				record.pauseBoundaryReached = false;
 				record.state = "idle";
 			}
-			return true;
+			return priorDecision;
 		}
-		if (record.state !== "pause-requested") return false;
+		// An explicit continuation can leave an assistant-tail transcript that
+		// Agent.continue() cannot restart, so wait for the next turn boundary.
+		if (priorDecision?.action === "continue") return priorDecision;
+		if (record.state !== "pause-requested" || signal?.aborted
+			|| turn.message.stopReason === "aborted" || turn.message.stopReason === "error") {
+			return priorDecision;
+		}
 		record.pauseBoundaryReached = true;
-		return true;
+		return { action: "end" };
 	};
 
 	internals._handlePostAgentRun = async () => {
 		if (record.state === "paused") return false;
 		const pauseBoundaryReached = record.pauseBoundaryReached;
-		record.pauseBoundaryReached = false;
 		const shouldContinue = await record.originalHandlePostAgentRun();
+		if (internals._agentRunAbortRequested) {
+			clearPauseRequest(record);
+			return false;
+		}
 		if (pauseBoundaryReached || record.state === "pause-requested") {
-			if (shouldContinue || canContinue(session)) {
-				record.pauseSettled = new Promise((resolve) => {
-					record.resolvePauseSettled = resolve;
-				});
-				record.state = "paused";
+			record.pauseBoundaryReached = false;
+			if (shouldContinue) {
+				pause(record);
 				return false;
 			}
-			record.state = "idle";
+			// AgentSession 0.87 executes agent_before_settle after post-run
+			// bookkeeping. Preserve that boundary before deciding whether the
+			// turn can be resumed.
 			return false;
 		}
 		return shouldContinue;
+	};
+
+	internals._runBeforeSettleBoundary = async () => {
+		if (record.state === "paused") return false;
+		if (internals._agentRunAbortRequested) {
+			clearPauseRequest(record);
+			return false;
+		}
+		const shouldContinue = await record.originalRunBeforeSettleBoundary();
+		if (record.state !== "pause-requested") return shouldContinue;
+		if (internals._agentRunAbortRequested) {
+			clearPauseRequest(record);
+			return false;
+		}
+		record.pauseBoundaryReached = false;
+		if (shouldContinue || canContinue(session)) pause(record);
+		else record.state = "idle";
+		return false;
 	};
 
 	return record;
@@ -149,6 +182,18 @@ function canContinue(session) {
 	const messages = session.agent.state.messages;
 	const lastMessage = messages[messages.length - 1];
 	return Boolean(lastMessage && lastMessage.role !== "assistant") || session.agent.hasQueuedMessages();
+}
+
+function pause(record) {
+	record.pauseSettled = new Promise((resolve) => {
+		record.resolvePauseSettled = resolve;
+	});
+	record.state = "paused";
+}
+
+function clearPauseRequest(record) {
+	record.pauseBoundaryReached = false;
+	if (record.state === "pause-requested") record.state = "idle";
 }
 
 /** @param {AgentSession} session */
@@ -178,18 +223,26 @@ async function continueSession(session, record) {
 	await record.pauseSettled;
 	const internals = sessionInternals(session);
 	internals._isAgentRunActive = true;
+	internals._agentRunAbortRequested = false;
 	try {
 		await session.agent.continue();
-		while (await record.originalHandlePostAgentRun()) {
+		while (true) {
+			const shouldContinue = await internals._handlePostAgentRun();
+			if (shouldContinue) {
+				if (internals._agentRunAbortRequested) break;
+				await session.agent.continue();
+				continue;
+			}
+			if (internals._agentRunAbortRequested || !await internals._runBeforeSettleBoundary()) break;
 			await session.agent.continue();
 		}
 	} finally {
-		internals._systemPromptOverride = undefined;
+		internals._runSystemPromptOptions = undefined;
 		internals._flushPendingBashMessages();
-		internals._flushPendingCustomMessages?.();
+		internals._flushPendingCustomMessages();
 		await internals._emitAgentSettled();
 	}
-	record.state = "idle";
+	if (record.state === "resuming") record.state = "idle";
 }
 
 const originalPrompt = AgentSession.prototype.prompt;
@@ -230,7 +283,7 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 		return;
 	}
 	// Bind the turn-boundary hook before the normal prompt starts. Agent captures
-	// shouldStopAfterTurn when it builds the loop config, so installing the hook
+	// finishTurn when it builds the loop config, so installing the hook
 	// only when the Pause button is clicked is too late for the already-running
 	// turn and the pause request would never be observed.
 	bindPause(this);

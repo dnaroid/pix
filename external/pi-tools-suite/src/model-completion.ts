@@ -6,6 +6,7 @@ import type {
 	ModelsApiStreamOptions,
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
@@ -26,6 +27,6 @@ export async function completeWithModelRegistry(
 
 	const providerConfig = modelRegistry?.getRegisteredProviderConfig?.(model.provider);
 	const simpleOptions = options as SimpleStreamOptions | undefined;
-	if (providerConfig?.streamSimple) return providerConfig.streamSimple(model, context, simpleOptions).result();
+	if (providerConfig?.streamSimple) return providerConfig.streamSimple(model, normalizeContext(context), simpleOptions).result();
 	return completeSimple(model, context, simpleOptions);
 }

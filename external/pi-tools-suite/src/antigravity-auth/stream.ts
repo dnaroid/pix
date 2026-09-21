@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { calculateCost, createAssistantMessageEventStream, type AssistantMessage, type AssistantMessageEventStream, type Context, type SimpleStreamOptions, type ToolCall } from "@earendil-works/pi-ai";
+import { calculateCost, createAssistantMessageEventStream, type AssistantMessage, type AssistantMessageEventStream, type JsonObject, type JsonValue, type SimpleStreamOptions, type ToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { ALL_ACCOUNTS_EXHAUSTED_MARKER, API_ID, ENDPOINT_PROD, PROVIDER_ID, STREAM_ENDPOINTS } from "./constants";
 import { clampAccountIndex, decodeApiKey, getPiAuthPath, getStoredAccounts, readJsonFile } from "./auth-store";
 import { getAntigravityHeaders, getModelHeaderStyle } from "./headers";
@@ -28,6 +28,23 @@ function mapStopReason(reason?: string): "stop" | "length" | "error" {
 		default:
 			return "error";
 	}
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+	if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.every(isJsonValue);
+	return isJsonObject(value);
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const prototype = Object.getPrototypeOf(value);
+	return (prototype === Object.prototype || prototype === null) && Object.values(value).every(isJsonValue);
+}
+
+function toolCallArguments(args: unknown): JsonObject {
+	return isJsonObject(args) ? args : {};
 }
 
 function isFailoverCandidate(status: number | undefined, body: string): boolean {
@@ -138,7 +155,7 @@ async function resolveAntigravityApiKey(optionsApiKey?: string): Promise<{ auth:
 	throw new Error(`No Antigravity OAuth account found in Pi auth: ${getPiAuthPath()}.`);
 }
 
-export function streamAntigravity(model: AntigravityModel, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
+export function streamAntigravity(model: AntigravityModel, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();
 	(async () => {
 		const output: AssistantMessage = {
@@ -264,7 +281,7 @@ export function streamAntigravity(model: AntigravityModel, context: Context, opt
 							type: "toolCall",
 							id: part.functionCall.id || `${part.functionCall.name ?? "tool"}_${randomUUID()}`,
 							name: part.functionCall.name ?? "",
-							arguments: part.functionCall.args ?? {},
+							arguments: toolCallArguments(part.functionCall.args),
 							...(thoughtSignature ? { thoughtSignature } : {}),
 						};
 						output.content.push(toolCall);

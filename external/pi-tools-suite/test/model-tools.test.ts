@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -39,6 +39,7 @@ class FakePi {
 
 const tempDirs: string[] = [];
 const originalPreserveSelection = process.env.PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION;
+const originalLegacyPreserveSelection = process.env.MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION;
 function tempDir(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "model-tools-test-"));
 	tempDirs.push(dir);
@@ -55,10 +56,17 @@ async function expectRejectsWithMessage(promise: Promise<unknown>, message: stri
 	throw new Error(`Expected rejection containing ${message}`);
 }
 
+beforeEach(() => {
+	delete process.env.PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION;
+	delete process.env.MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION;
+});
+
 afterEach(() => {
 	builtinExecutions.length = 0;
 	if (originalPreserveSelection === undefined) delete process.env.PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION;
 	else process.env.PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION = originalPreserveSelection;
+	if (originalLegacyPreserveSelection === undefined) delete process.env.MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION;
+	else process.env.MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION = originalLegacyPreserveSelection;
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 

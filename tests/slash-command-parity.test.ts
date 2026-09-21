@@ -20,6 +20,7 @@ const EXPECTED_PI_COMMANDS = [
 	"export",
 	"import",
 	"share",
+	"bug",
 	"copy",
 	"name",
 	"session",
@@ -41,7 +42,7 @@ const EXPECTED_PI_COMMANDS = [
 const EXPLICITLY_DEFERRED_COMMANDS = new Set<string>();
 
 /** Commands deliberately unsupported in Pix Desktop by product decision. */
-const INTENTIONALLY_UNSUPPORTED_COMMANDS = new Set(["trust", "login", "logout"]);
+const INTENTIONALLY_UNSUPPORTED_COMMANDS = new Set(["trust", "login", "logout", "bug"]);
 
 /** TUI slash commands whose workflow already exists as first-class Desktop UI rather than a Desktop slash command. */
 const TUI_COMMANDS_WITH_DESKTOP_UI_EQUIVALENTS = new Set(["code-review", "commit-message"]);
@@ -57,7 +58,7 @@ function desktopCommandNames(): string[] {
 }
 
 describe("slash command parity", () => {
-	it("pins the Pi 0.85.1 built-in catalog so upgrades cannot silently drift", () => {
+	it("pins the Pi 0.87.0 built-in catalog so upgrades cannot silently drift", () => {
 		assert.deepEqual(PI_SLASH_COMMANDS.map((command) => command.name), [...EXPECTED_PI_COMMANDS]);
 	});
 

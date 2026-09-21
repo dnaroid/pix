@@ -26,7 +26,7 @@ describe("Context Gateway recovery run identity", () => {
 		expect(identity.testedPackage.sourceSha256).toMatch(sha256);
 		expect(identity.testedPackage.sourceFileCount).toBeGreaterThan(10);
 		for (const hash of Object.values(identity.hashes)) expect(hash).toMatch(sha256);
-		expect(identity.sdk.piCodingAgentVersion).toBe("0.85.1");
+		expect(identity.sdk.piCodingAgentVersion).toBe("0.87.0");
 		expect(identity.runtime.command).toBe("pi");
 		expect(identity.runtime.bun).toBeTruthy();
 		expect(identity.effectiveConfig).toMatchObject({

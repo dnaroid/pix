@@ -116,7 +116,7 @@ export const PIX_RENDERER_COMMAND_NAMES = new Set([
 ]);
 
 /** Commands intentionally excluded from Pix Desktop rather than awaiting a port. */
-export const PIX_UNSUPPORTED_COMMAND_NAMES = new Set(["trust", "login", "logout"]);
+export const PIX_UNSUPPORTED_COMMAND_NAMES = new Set(["trust", "login", "logout", "bug"]);
 
 /**
  * Parse the first word of a prompt as a built-in command.

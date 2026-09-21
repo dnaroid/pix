@@ -8,6 +8,7 @@ import modelPickerStateSource from "../app/model-picker-state.svelte.ts?raw";
 import composerSource from "./PromptComposer.svelte?raw";
 import diffViewSource from "./DiffView.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
+import gitCommitComposerSource from "./GitCommitComposer.svelte?raw";
 import idxSource from "./IdxPanel.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
@@ -32,6 +33,20 @@ describe("desktop visual regressions", () => {
   it("keeps the composer placeholder on one visual line", () => {
     expect(composerSource).toContain('"Ask Pix anything…"');
     expect(composerSource).toContain("[&::placeholder]:whitespace-nowrap");
+  });
+
+  it("hides native textarea resize handles and auto-sizes the commit message", async () => {
+    // @ts-expect-error Node fs import in Vitest runner
+    const fs = (await import(/* @vite-ignore */ "node:fs")).default;
+    // @ts-expect-error Node path import in Vitest runner
+    const path = (await import(/* @vite-ignore */ "node:path")).default;
+    // @ts-expect-error Node __dirname in Vitest runner
+    const stylesPath = path.resolve(__dirname, "../styles.css");
+    const styles = fs.readFileSync(stylesPath, "utf-8");
+
+    expect(styles).toMatch(/textarea\s*\{\s*resize:\s*none;\s*\}/);
+    expect(gitCommitComposerSource).toContain("autosizeTextarea(messageTextarea, { minHeight: 64, maxHeight: 160 })");
+    expect(gitCommitComposerSource).not.toContain("resize-y");
   });
 
   it("normalizes modal elicitation select and action buttons", () => {

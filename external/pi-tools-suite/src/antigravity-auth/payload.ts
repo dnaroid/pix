@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { AssistantMessage, Context, ImageContent, Message, SimpleStreamOptions, TextContent, Tool, ToolResultMessage } from "@earendil-works/pi-ai";
+import {
+	getCurrentSystemPrompt,
+	getCurrentTools,
+	type AssistantMessage,
+	type ImageContent,
+	type Message,
+	type SimpleStreamOptions,
+	type TextContent,
+	type Tool,
+	type ToolResultMessage,
+	type TranscriptContext,
+} from "@earendil-works/pi-ai";
 import { DEFAULT_PROJECT_ID, MIN_THOUGHT_SIGNATURE_LENGTH, SKIP_THOUGHT_SIGNATURE } from "./constants";
 import { getModelHeaderStyle } from "./headers";
 import type { AntigravityContent, AntigravityModel, AntigravityPart, HeaderStyle } from "./types";
@@ -57,7 +68,7 @@ function replayFunctionCallThoughtSignature(message: AssistantMessage, model: An
 	return isGemini3Model(actualModel) ? SKIP_THOUGHT_SIGNATURE : undefined;
 }
 
-function convertMessages(model: AntigravityModel, context: Context): AntigravityContent[] {
+function convertMessages(model: AntigravityModel, context: TranscriptContext): AntigravityContent[] {
 	const contents: AntigravityContent[] = [];
 	const actualModel = resolveActualModel(model, undefined).actualModel;
 	const includeIds = requiresToolCallId(actualModel);
@@ -446,7 +457,7 @@ function resolveActualModel(
 	return { actualModel: effective };
 }
 
-export function buildPayload(model: AntigravityModel, context: Context, options?: SimpleStreamOptions): Record<string, unknown> {
+export function buildPayload(model: AntigravityModel, context: TranscriptContext, options?: SimpleStreamOptions): Record<string, unknown> {
 	const { actualModel, thinkingConfig } = resolveActualModel(model, options);
 	const headerStyle = getModelHeaderStyle(model);
 	const thinkingBudget = Number(thinkingConfig?.thinkingBudget ?? thinkingConfig?.thinking_budget ?? 0);
@@ -461,10 +472,11 @@ export function buildPayload(model: AntigravityModel, context: Context, options?
 		contents: convertMessages(model, context),
 		generationConfig,
 	};
-	if (context.systemPrompt?.trim()) {
-		request.systemInstruction = { role: "user", parts: [{ text: sanitizeText(context.systemPrompt) }] };
+	const systemPrompt = getCurrentSystemPrompt(context.messages);
+	if (systemPrompt.trim()) {
+		request.systemInstruction = { role: "user", parts: [{ text: sanitizeText(systemPrompt) }] };
 	}
-	const tools = convertTools(context.tools);
+	const tools = convertTools(getCurrentTools(context.messages));
 	if (tools) request.tools = tools;
 
 	const payload: Record<string, unknown> = {

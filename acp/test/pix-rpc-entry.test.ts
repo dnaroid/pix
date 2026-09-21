@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-test("Pix RPC installs the pause hook before starting a normal prompt", async () => {
+test("Pix RPC installs the finishTurn pause hook before starting a normal prompt", async () => {
 	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
 	const promptPatchStart = source.indexOf("AgentSession.prototype.prompt =");
 	assert.notEqual(promptPatchStart, -1, "prompt patch must exist");
@@ -16,8 +16,21 @@ test("Pix RPC installs the pause hook before starting a normal prompt", async ()
 	assert.notEqual(originalPromptIndex, -1, "normal prompts must delegate to AgentSession.prompt");
 	assert.ok(
 		bindIndex < originalPromptIndex,
-		"pause hook must be installed before AgentSession captures shouldStopAfterTurn for the run",
+		"pause hook must be installed before AgentSession captures finishTurn for the run",
 	);
+});
+
+test("Pix RPC pauses through finishTurn while preserving an existing end decision", async () => {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	assert.match(source, /const originalFinishTurn = session\.agent\.finishTurn/u);
+	assert.match(source, /session\.agent\.finishTurn = async \(turn, signal\)/u);
+	assert.match(source, /if \(priorDecision\?\.action === "end"\)/u);
+	assert.match(source, /if \(priorDecision\?\.action === "continue"\) return priorDecision/u);
+	assert.match(source, /return \{ action: "end" \};/u);
+	assert.doesNotMatch(source, /shouldStopAfterTurn/u);
+	assert.match(source, /_runSystemPromptOptions/u);
+	assert.match(source, /_flushPendingCustomMessages/u);
+	assert.match(source, /_runBeforeSettleBoundary/u);
 });
 
 test("Pix RPC clears todos through the handler, never a prompt, and acknowledges only completion", async () => {

@@ -397,6 +397,10 @@ Toolbar actions SHOULD generally be quiet until hover/active state.
 
 Inputs SHOULD use semantic border/input/ring tokens.
 
+Textareas MUST NOT expose the browser's native resize handle. Persistent editor
+surfaces own their geometry, and compact textareas that need to grow should do so
+automatically up to a bounded height before enabling internal scrolling.
+
 Normalize native selects used inside designed application surfaces. A semantic
 background does not remove platform bevels or gradients by itself: use
 `appearance-none`, preserve the native select semantics, reserve space for a

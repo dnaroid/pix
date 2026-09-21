@@ -1,6 +1,5 @@
 import { getAgentDir, type AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { copyTextToClipboard } from "../screen/clipboard.js";
-import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import type { Entry } from "../types.js";
 import {
@@ -88,8 +87,7 @@ export class AppWorkspaceActionsController {
 		if (!runtime) return;
 
 		const branchUserEntries = runtime.session.sessionManager.getBranch().flatMap((sessionEntry) => {
-			if (sessionEntry.type !== "message") return [];
-			if (!isRecord(sessionEntry.message) || sessionEntry.message.role !== "user") return [];
+			if (sessionEntry.type !== "message" || sessionEntry.message.role !== "user") return [];
 			return [{ entryId: sessionEntry.id }];
 		});
 		if (branchUserEntries.length === 0) return;
@@ -261,8 +259,7 @@ export class AppWorkspaceActionsController {
 		const mutations: WorkspaceMutation[] = [];
 		let messagesWithoutLogs = 0;
 		for (const branchEntry of branch.slice(startIndex)) {
-			if (branchEntry.type !== "message") continue;
-			if (!isRecord(branchEntry.message) || branchEntry.message.role !== "user") continue;
+			if (branchEntry.type !== "message" || branchEntry.message.role !== "user") continue;
 
 			const visibleEntry = this.findUserEntryBySessionEntryId(branchEntry.id);
 			const hasMutationLog = visibleEntry?.workspaceMutations !== undefined || this.hasWorkspaceMutationsForSessionEntry(branchEntry.id);

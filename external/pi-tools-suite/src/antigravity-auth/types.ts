@@ -9,7 +9,8 @@ export type AntigravityPart = {
 	thoughtSignature?: string;
 	thought_signature?: string;
 	inlineData?: { mimeType: string; data: string };
-	functionCall?: { id?: string; name?: string; args?: Record<string, unknown> };
+	/** Parsed provider JSON is untrusted at the response boundary. */
+	functionCall?: { id?: string; name?: string; args?: unknown };
 	functionResponse?: { id?: string; name?: string; response?: Record<string, unknown> };
 };
 

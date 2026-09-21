@@ -54,6 +54,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 - `refreshNextFailoverCredential(attempted)`: iterates accounts offset 1..N skipping already-attempted indices, refreshes the first that succeeds, persists; if all fail, rethrows the last error. `[confirmed by code: oauth.ts]`
 
 ### Streaming + failover — `streamAntigravity`
+- Consumes Pi's canonical `TranscriptContext`: the current system prompt and tool declarations are replayed from transcript system messages before constructing the provider request. `[confirmed by code: payload.ts; confirmed by tests]`
 - Resolves an API key: uses stored `access` if not expired, else calls `refreshStoredAntigravityCredential`; throws `No Antigravity OAuth account found in Pi auth: <path>` otherwise. `[confirmed by code: stream.ts resolveAntigravityApiKey]`
 - Sends `POST {endpoint}/v1internal:streamGenerateContent?alt=sse`. Antigravity-style content requests are normalized to the captured agy CLI 1.1.24 identity: bearer auth, JSON content type, `Accept-Encoding: gzip`, and `User-Agent: antigravity/cli/1.1.24 (...)`; legacy `X-Goog-Api-Client`, `Client-Metadata`, `X-Goog-User-Project`, `anthropic-beta`, and `Accept` are stripped even when injected through host options. Endpoint list: `gemini-cli` models use `[ENDPOINT_PROD]`; others use `STREAM_ENDPOINTS` (daily, prod), trying next endpoint only on non-failover 404/5xx. `[confirmed by code: stream.ts, headers.ts, constants.ts; confirmed by tests]`
 - On a **failover-candidate** response (HTTP 429; body containing `quota_exhausted`/`resource_exhausted`/`rate limit`/etc.; or `model_capacity_exhausted`/`overloaded`/`busy`; or 5xx with `unavailable`/`try again`/`busy`): calls `refreshNextFailoverCredential`, switches `access` + `project`, emits a `switch` status, and retries. `[confirmed by code: stream.ts isFailoverCandidate/isLimitFailoverCandidate]`
@@ -125,6 +126,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 
 - `external/pi-tools-suite/test/antigravity-auth.test.ts` (`bun:test`, `describe.serial "Antigravity account rotation"`): `[confirmed by tests]`
   - Antigravity reasoning levels are clamped to the provider's supported `high` maximum.
+  - Canonical Pi transcript system messages replay the active system prompt and tool declarations into the Antigravity payload.
   - Model catalog test pins the exact registered model id order (current catalog + legacy aliases + Gemini CLI mirrors, no image-output models).
   - Deterministic payload mapping tests pin every new public id → live route/budget combination (3.5/3.6/3.7/3.8 Flash tiers, 3.1 Pro low/agent, GPT-OSS, Sonnet/Opus thinking) and assert legacy Antigravity and Gemini CLI routes are unchanged.
   - OAuth client credentials preserved across refresh.

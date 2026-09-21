@@ -186,6 +186,89 @@ test("lazy session manager preserves summary usage added by SDK 0.81", async (t)
 	assert.deepEqual(branchSummary?.type === "branch_summary" ? branchSummary.usage : undefined, usage);
 });
 
+test("lazy session manager appends model-attributed usage with the SDK return shape", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-append-usage-"));
+	t.after(async () => {
+		await rm(dir, { force: true, recursive: true });
+	});
+
+	const sessionPath = join(dir, "session.jsonl");
+	await writeFile(sessionPath, [
+		JSON.stringify({ type: "session", version: 3, id: "session-usage", timestamp: "2026-01-01T00:00:00.000Z", cwd: dir }),
+		JSON.stringify({ type: "message", id: "user-1", parentId: null, timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: "first", timestamp: 1 } }),
+		"",
+	].join("\n"), "utf8");
+
+	const usage = { input: 4, output: 2, cacheRead: 1, cacheWrite: 0, totalTokens: 7, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 1 });
+	const entry = manager.appendUsage("cache_warm", "test-provider", "test-model", usage, "warm cache");
+
+	assert.equal(entry.type, "usage");
+	assert.equal(entry.parentId, "user-1");
+	assert.equal(entry.kind, "cache_warm");
+	assert.equal(entry.note, "warm cache");
+	assert.deepEqual(entry.usage, usage);
+	assert.equal(manager.getLeafId(), entry.id);
+	assert.deepEqual(manager.buildSessionContext().messages.map((message) => message.role), ["user"]);
+});
+
+test("lazy session manager projects full context edits without hydrating its presentation tail", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-context-edit-"));
+	t.after(async () => {
+		await rm(dir, { force: true, recursive: true });
+	});
+
+	const sessionPath = join(dir, "session.jsonl");
+	await writeFile(sessionPath, [
+		JSON.stringify({ type: "session", version: 3, id: "session-edits", timestamp: "2026-01-01T00:00:00.000Z", cwd: dir }),
+		JSON.stringify({ type: "message", id: "system", parentId: null, timestamp: "2026-01-01T00:00:01.000Z", message: { role: "system", content: "base instructions", timestamp: 1 } }),
+		JSON.stringify({ type: "message", id: "user-old", parentId: "system", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "user", content: "replace me", timestamp: 2 } }),
+		JSON.stringify({ type: "message", id: "side-user", parentId: "user-old", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "user", content: "side branch", timestamp: 3 } }),
+		JSON.stringify({ type: "message", id: "active-user", parentId: "user-old", timestamp: "2026-01-01T00:00:04.000Z", message: { role: "user", content: "active branch", timestamp: 4 } }),
+		"",
+	].join("\n"), "utf8");
+
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 1 });
+	assert.deepEqual(manager.getBranch().map((entry) => entry.id), ["active-user"]);
+
+	const editId = manager.appendContextEdit("user-old", { content: "edited ancestor" });
+	const projection = manager.buildSessionProjection();
+	assert.deepEqual(projection.messages.map((message) => message.role), ["system", "user", "user"]);
+	assert.deepEqual(projection.messages.map((message) => "content" in message ? message.content : undefined), ["base instructions", "edited ancestor", "active branch"]);
+	assert.equal(projection.entries.find((entry) => entry.sourceEntry.id === editId)?.messages.length, 0);
+	assert.deepEqual(manager.getBranch().map((entry) => entry.id), ["active-user", editId]);
+
+	assert.throws(() => manager.appendContextEdit("side-user", { content: "must reject inactive branch" }), /not on the active branch/);
+	assert.throws(() => manager.appendContextEdit("user-old", {} as never), /must be null or contain string\/array content/);
+});
+
+test("lazy session manager snapshots the canonical system state when compacting", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-compaction-system-"));
+	t.after(async () => {
+		await rm(dir, { force: true, recursive: true });
+	});
+
+	const sessionPath = join(dir, "session.jsonl");
+	await writeFile(sessionPath, [
+		JSON.stringify({ type: "session", version: 3, id: "session-compaction", timestamp: "2026-01-01T00:00:00.000Z", cwd: dir }),
+		JSON.stringify({ type: "message", id: "system", parentId: null, timestamp: "2026-01-01T00:00:01.000Z", message: { role: "system", content: "base instructions", timestamp: 1 } }),
+		JSON.stringify({ type: "message", id: "user", parentId: "system", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "user", content: "compact this", timestamp: 2 } }),
+		"",
+	].join("\n"), "utf8");
+
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 1 });
+	const compactionId = manager.appendCompaction("summary", null, 10);
+	const compaction = manager.getEntry(compactionId);
+	if (!compaction || compaction.type !== "compaction") throw new Error("Expected compaction entry");
+
+	assert.equal(compaction.firstKeptEntryId, compactionId);
+	assert.equal(compaction.systemMessage?.role, "system");
+	assert.equal(compaction.systemMessage?.content, "base instructions");
+	assert.equal(typeof compaction.systemMessage?.timestamp, "number");
+	assert.deepEqual(manager.buildSessionProjection().messages.map((message) => message.role), ["system", "compactionSummary"]);
+	assert.deepEqual(manager.getBranch().map((entry) => entry.id), ["user", compactionId]);
+});
+
 test("lazy session manager does not publish a phantom in-memory entry when append persistence fails", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-append-fail-"));
 	t.after(async () => {

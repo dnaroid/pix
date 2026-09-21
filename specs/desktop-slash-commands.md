@@ -52,6 +52,7 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 - The combined picker keeps fuzzy search on the model list and presents the selected model's supported thinking levels as a compact keyboard-navigable row below it. Model selection and thinking selection remain provisional until Apply.
 - Status-bar values and model/thinking picker labels use the TUI's semantic color policy: shipped `modelColors` defaults for Z.AI/OpenAI Codex/Antigravity, stable provider-palette fallback for other providers, and rank-based thinking colors from `off` through `max`.
 - Known renderer-owned commands that reach ACP are rejected clearly and never become ordinary model prompts. Unknown runtime commands continue to Pi's native slash-command handling.
+- Pi's interactive `/bug` issue-reporting flow is intentionally excluded from Pix Desktop alongside `/trust`, `/login`, and `/logout`; ACP does not expose the matching interactive/browser workflow.
 - Extension commands and input hooks that consume a prompt without starting an agent run still complete the ACP turn, including prompts with attachments.
 - The composer popup opens only for a slash command name at the end of the current draft, supports fuzzy ranking and keyboard navigation, keeps textarea focus, and exposes listbox semantics.
 - Enter executes commands with no required input. Optional hints still add a trailing space on Tab completion, while argument-free interactive commands open their picker. Commands with required input remain in the composer unless Desktop supplies a matching picker.
@@ -91,6 +92,6 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 
 ## Risks / unknowns
 
-- `/tree`, `/settings`, `/import`, `/share`, `/trust`, `/login`, and `/logout` still require additional APIs or Desktop UI.
+- `/tree`, `/settings`, `/import`, `/share`, `/trust`, `/login`, `/logout`, and `/bug` still require additional APIs or Desktop UI.
 - Desktop `/reload` relies on the private `pix/session/reload` extension RPC rather than a public Pi RPC reload command.
 - Desktop `/new` replaces the active ACP runtime; true `/new_tab` behavior needs a separate multi-runtime tab lifecycle.

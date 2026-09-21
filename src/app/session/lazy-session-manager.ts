@@ -6,16 +6,20 @@ import { createInterface } from "node:readline";
 
 import {
 	buildContextEntries as buildSdkContextEntries,
-	buildSessionContext,
+	buildSessionProjection as buildSdkSessionProjection,
 	SessionManager,
+	type ContextEditEntry,
 	type NewSessionOptions,
 	type SessionContext,
 	type SessionEntry,
 	type SessionHeader,
+	type SessionProjection,
 } from "@earendil-works/pi-coding-agent";
-import type { Usage } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage, type Usage } from "@earendil-works/pi-ai";
 
 import { isRecord } from "../guards.js";
+
+type UsageEntry = ReturnType<SessionManager["appendUsage"]>;
 
 const CURRENT_SESSION_VERSION = 3;
 const DEFAULT_TAIL_ENTRY_COUNT = 180;
@@ -210,17 +214,18 @@ class LazySessionManager implements SessionManagerFacade {
 	buildContextEntries(): SessionEntry[] {
 		if (this.hydrated) return this.hydrated.buildContextEntries();
 		if (this.tailStartOffset > 0) return this.completeContextManager().buildContextEntries();
-		const entries = this.contextEntries();
-		const byId = new Map(entries.map((entry) => [entry.id, entry]));
-		return buildSdkContextEntries(entries, entries.at(-1)?.id ?? null, byId);
+		return buildSdkContextEntries(this.entries, this.leafId, this.byId);
+	}
+
+	buildSessionProjection(): SessionProjection {
+		if (this.hydrated) return this.hydrated.buildSessionProjection();
+		if (this.tailStartOffset > 0) return this.completeContextManager().buildSessionProjection();
+		return buildSdkSessionProjection(this.entries, this.leafId, this.byId);
 	}
 
 	buildSessionContext(): SessionContext {
-		if (this.hydrated) return this.hydrated.buildSessionContext();
-		if (this.tailStartOffset > 0) return this.completeContextManager().buildSessionContext();
-		const entries = this.contextEntries();
-		const byId = new Map(entries.map((entry) => [entry.id, entry]));
-		return buildSessionContext(entries, entries.at(-1)?.id ?? null, byId);
+		const { messages, thinkingLevel, model } = this.buildSessionProjection();
+		return { messages, thinkingLevel, model };
 	}
 
 	getSessionName(): string | undefined {
@@ -314,13 +319,36 @@ class LazySessionManager implements SessionManagerFacade {
 		return this.appendEntry(this.newEntry("model_change", { provider, modelId }));
 	}
 
-	appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: T, fromHook?: boolean, usage?: Usage): string {
+	appendUsage(kind: string, provider: string, model: string, usage: Usage, note?: string): UsageEntry {
+		if (this.hydrated) return this.hydrated.appendUsage(kind, provider, model, usage, note);
+		const payload: Record<string, unknown> = { kind, provider, model, usage };
+		if (note) payload.note = note;
+		const entry = this.newEntry("usage", payload) as UsageEntry;
+		this.appendEntry(entry);
+		return entry;
+	}
+
+	appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string | null, tokensBefore: number, details?: T, fromHook?: boolean, usage?: Usage): string {
 		if (this.hydrated) return this.hydrated.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook, usage);
-		const payload: Record<string, unknown> = { summary, firstKeptEntryId, tokensBefore };
+		const timestamp = new Date().toISOString();
+		const id = this.createEntryId();
+		const systemMessage = getCurrentSystemMessage(this.buildSessionProjection().messages);
+		const payload: Record<string, unknown> = {
+			summary,
+			firstKeptEntryId: firstKeptEntryId ?? id,
+			tokensBefore,
+		};
 		if (details !== undefined) payload.details = details;
 		if (fromHook !== undefined) payload.fromHook = fromHook;
 		if (usage !== undefined) payload.usage = usage;
-		return this.appendEntry(this.newEntry("compaction", payload));
+		if (systemMessage) payload.systemMessage = { ...systemMessage, timestamp: new Date(timestamp).getTime() };
+		return this.appendEntry({
+			type: "compaction",
+			id,
+			parentId: this.leafId,
+			timestamp,
+			...payload,
+		} as SessionEntry);
 	}
 
 	appendCustomEntry(customType: string, data?: unknown): string {
@@ -340,6 +368,28 @@ class LazySessionManager implements SessionManagerFacade {
 		const payload: Record<string, unknown> = { customType, content, display };
 		if (details !== undefined) payload.details = details;
 		return this.appendEntry(this.newEntry("custom_message", payload));
+	}
+
+	appendContextEdit(targetId: string, replacement: ContextEditEntry["replacement"]): string {
+		if (this.hydrated) return this.hydrated.appendContextEdit(targetId, replacement);
+
+		// The SDK validates that the target belongs to the selected branch. The
+		// presentation tail cannot prove that for either old ancestors or side
+		// branches, so use the separate full-context manager without hydrating the
+		// lazy UI facade.
+		const manager = this.completeContextManager();
+		try {
+			const id = manager.appendContextEdit(targetId, replacement);
+			const entry = manager.getEntry(id);
+			if (!entry) throw new Error(`Appended context edit ${id} was not found`);
+			this.recordPersistedEntry(entry);
+			return id;
+		} catch (error) {
+			// SessionManager mutates before persistence; do not retain that failed
+			// companion state as model context when the lazy facade stayed unchanged.
+			this.contextManager = undefined;
+			throw error;
+		}
 	}
 
 	private hydrate(): SessionManager {
@@ -409,11 +459,15 @@ class LazySessionManager implements SessionManagerFacade {
 		// unchanged; otherwise extensions that treat append success as a commit
 		// boundary can observe a phantom entry that never reached the JSONL file.
 		appendFileSync(this.sessionFilePath, `${JSON.stringify(entry)}\n`, "utf8");
+		this.recordPersistedEntry(entry);
+		return entry.id;
+	}
+
+	private recordPersistedEntry(entry: SessionEntry): void {
 		this.entries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
 		this.contextManager = undefined;
-		return entry.id;
 	}
 
 	private newEntry(type: string, payload: Record<string, unknown>): SessionEntry {
@@ -434,15 +488,6 @@ class LazySessionManager implements SessionManagerFacade {
 		return randomUUID();
 	}
 
-	private contextEntries(): SessionEntry[] {
-		const entries = this.entries.filter((entry) => entry.type !== "label");
-		const start = contextStartIndex(entries);
-		const selected = entries.slice(start);
-		return selected.map((entry, index) => ({
-			...entry,
-			parentId: index === 0 ? null : selected[index - 1]!.id,
-		} as SessionEntry));
-	}
 }
 
 function createSessionHeader(cwd: string): SessionHeader {
@@ -676,17 +721,4 @@ function branchEntries(entries: readonly SessionEntry[], leafId: string | undefi
 		cursor = entry.parentId;
 	}
 	return branch.reverse();
-}
-
-function contextStartIndex(entries: readonly SessionEntry[]): number {
-	const userIndex = entries.findIndex((entry) => entry.type === "message" && entry.message.role === "user");
-	if (userIndex < 0) return 0;
-
-	let start = userIndex;
-	while (start > 0) {
-		const previous = entries[start - 1];
-		if (!previous || (previous.type !== "model_change" && previous.type !== "thinking_level_change" && previous.type !== "compaction" && previous.type !== "branch_summary" && previous.type !== "custom")) break;
-		start -= 1;
-	}
-	return start;
 }

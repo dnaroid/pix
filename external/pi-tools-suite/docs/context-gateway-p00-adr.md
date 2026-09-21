@@ -4,7 +4,7 @@
 
 > Status: accepted implementation decision for future Context Gateway work.
 > This ADR does not enable Gateway, change user configuration, or certify rollout.
-> Evidence baseline: repository `daa1b06`, installed Pi SDK `0.85.1`, 7 September 2026.
+> Evidence baseline: repository `daa1b06`, refreshed against installed Pi SDK `0.87.0`, 21 September 2026.
 
 ## Context
 
@@ -22,8 +22,8 @@ That order is unsuitable for Gateway enforce mode:
   provider hooks, including the intentionally late provider firewall.
 
 P00 tests also prove that throwing from a result handler is fail-open, and that
-an in-flight extension tool can cross an extension reload: the old wrapper then
-fails on its stale runner while the new runner handles the resulting error.
+an in-flight extension tool can cross an extension reload: Pi 0.87 preserves the
+original tool completion while the new runner handles its `tool_result` event.
 Therefore current active-runner state is not an origin binding.
 
 ## Decision
@@ -153,12 +153,12 @@ also bind the originating session/workspace and attempt/runtime epoch before an
 await boundary. The active tab or current extension runner after execution is
 not authoritative.
 
-The installed SDK currently makes extension reload during an in-flight custom
-tool a limited path: `wrapRegisteredTool()` touches the old runner after the
-tool returns and can turn the original completion into a stale-runner error.
-Gateway strict-enforce support for such cross-reload executions is therefore
-**not claimed**. Wrapper-level capture may preserve permitted bytes as an
-orphaned source, but it must not fabricate a successful delivered result.
+The installed SDK currently lets an in-flight custom tool complete across an
+extension reload. Pi 0.87 delivers and persists that original result, then runs
+`tool_result` handling through the newly loaded extension runner. Gateway
+strict-enforce support for such cross-reload executions is still **not claimed**:
+the execution and observation epochs differ, so any future capture/store path
+must bind host-owned origin identity rather than infer it from the active runner.
 
 At the app layer, tab ownership already uses runtime/session/generation guards.
 Gateway bindings should use equivalent host-owned identity rather than the

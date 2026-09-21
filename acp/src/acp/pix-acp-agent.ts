@@ -1752,7 +1752,7 @@ export class PixAcpAgent {
 			session.queueRevision += 1;
 			void this.notifyDesktopQueueState(session);
 		}
-		if (event.type === "message_start" && isRecord(event.message) && event.message.role === "user") {
+		if (event.type === "message_start" && event.message.role === "user") {
 			const text = queuedUserMessageText(event.message);
 			const index = session.trackedSteeringMessages.findIndex((message) => message.promptText === text);
 			if (index >= 0) {
@@ -3241,7 +3241,7 @@ function takeTrackedSteeringMessage(
 	return tracked.splice(targetIndex, 1)[0];
 }
 
-function queuedUserMessageText(message: Record<string, unknown>): string {
+function queuedUserMessageText(message: { readonly content: unknown }): string {
 	const content = message.content;
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";

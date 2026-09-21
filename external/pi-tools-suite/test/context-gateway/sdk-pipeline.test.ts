@@ -632,7 +632,7 @@ describe("context gateway P00: installed SDK tool_result pipeline", () => {
 		expect(jsonl).toContain('"isError":true');
 	});
 
-	test("reloading extensions during an in-flight tool call routes finalization through the new runner and invalidates the old wrapper", async () => {
+	test("reloading extensions during an in-flight tool call preserves its result and routes finalization through the new runner", async () => {
 		const root = mkdtempSync(join(tmpdir(), "context-gateway-p00-reload-"));
 		const sessionDir = join(root, "sessions");
 		const agentDir = join(root, "agent");
@@ -710,14 +710,14 @@ describe("context gateway P00: installed SDK tool_result pipeline", () => {
 		expect(newResults).toBe(1);
 		expect(contexts).toHaveLength(2);
 		const secondContext = JSON.stringify(contexts[1]);
-		expect(secondContext).not.toContain("P00_ORIGINAL_LATE_RESULT");
-		expect(secondContext).toContain("stale after session replacement or reload");
-		expect(secondContext).toContain('"isError":true');
+		expect(secondContext).toContain("P00_ORIGINAL_LATE_RESULT");
+		expect(secondContext).not.toContain("stale after session replacement or reload");
+		expect(secondContext).toContain('"isError":false');
 		const sessionFile = sessionManager.getSessionFile();
 		expect(sessionFile).toBeTruthy();
 		const jsonl = readFileSync(sessionFile!, "utf8");
-		expect(jsonl).not.toContain("P00_ORIGINAL_LATE_RESULT");
-		expect(jsonl).toContain("stale after session replacement or reload");
+		expect(jsonl).toContain("P00_ORIGINAL_LATE_RESULT");
+		expect(jsonl).not.toContain("stale after session replacement or reload");
 	});
 
 	test("native manual compaction has its own session_before_compact -> session_compact lifecycle", async () => {

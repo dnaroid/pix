@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from "@cortexkit/antigravity-auth-core";
+import { normalizeContext } from "@earendil-works/pi-ai";
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const originalNodeEnv = process.env.NODE_ENV;
@@ -160,6 +161,38 @@ describe.serial("Antigravity account rotation", () => {
 
 		const request = payload.request as { generationConfig: { thinkingConfig: Record<string, unknown> } };
 		expect(request.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "high", includeThoughts: true });
+	});
+
+	test.serial("replays the current system prompt and tools from the Pi transcript", async () => {
+		const { buildPayload } = await import("../src/antigravity-auth/payload.js");
+		const tool = (name: string) => ({
+			name,
+			description: `${name} description`,
+			parameters: { type: "object", properties: {} },
+		});
+		const context = normalizeContext({
+			systemPrompt: "Base instructions",
+			tools: [tool("old_tool")],
+			messages: [
+				{
+					role: "system",
+					content: "Updated instructions",
+					toolsAdded: [tool("new_tool")],
+					toolsRemoved: [{ name: "old_tool" }],
+					timestamp: 1,
+				},
+				{ role: "user", content: "hello", timestamp: 2 },
+			],
+		});
+
+		const payload = buildPayload(antigravityModelStub("gemini-3-flash-preview"), context);
+		const request = payload.request as {
+			systemInstruction: { parts: Array<{ text: string }> };
+			tools: Array<{ functionDeclarations: Array<{ name: string }> }>;
+		};
+		expect(request.systemInstruction.parts[0]?.text).toContain("Base instructions");
+		expect(request.systemInstruction.parts[0]?.text).toContain("Updated instructions");
+		expect(request.tools[0]?.functionDeclarations.map((declaration) => declaration.name)).toEqual(["new_tool"]);
 	});
 
 	test.serial("preserves Antigravity OAuth client credentials when Pi auth storage refreshes", async () => {
@@ -335,6 +368,26 @@ describe.serial("Antigravity account rotation", () => {
 
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("stream ended without a finish reason");
+	});
+
+	test.serial("accepts only JSON object function-call arguments", async () => {
+		const agentDir = tempDir();
+		writeJson(path.join(agentDir, "auth.json"), { antigravity: antigravityCredential() });
+		(globalThis as any).fetch = async (input: RequestInfo | URL) => {
+			if (String(input).includes("/v1internal:streamGenerateContent")) {
+				return new Response('data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"lookup","args":["not-an-object"]}}]},"finishReason":"STOP"}]}}\n\n', {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}
+			throw new Error(`Unexpected fetch ${input}`);
+		};
+
+		const { provider, model } = await loadProvider(agentDir);
+		const result = await runSimpleStream(provider, model);
+
+		expect(result.stopReason).toBe("toolUse");
+		expect(result.content).toContainEqual(expect.objectContaining({ type: "toolCall", name: "lookup", arguments: {} }));
 	});
 
 	test.serial("notifies the UI when an Antigravity model turn fails without auth", async () => {

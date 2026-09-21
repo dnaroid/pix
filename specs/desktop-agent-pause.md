@@ -40,7 +40,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - Desktop uses the private `pix/session/agent_control` ACP request with `state`, `pause`, and `continue` actions.
 - A successful `continue` response includes the final ACP `stopReason` from the resumed run after it settles, alongside the resulting agent-control state. Desktop uses that settled reason for the same completion/error classification as a normal prompt; `state` and `pause` responses do not need a stop reason.
 - ACP publishes session-scoped state changes over the existing private `pix/session-state` notification on the `agent-control` channel.
-- The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the TUI pause algorithm with `Agent.shouldStopAfterTurn` and `Agent.continue()`.
+- The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the turn-boundary pause algorithm by wrapping `Agent.finishTurn` and using `Agent.continue()`. Existing explicit `continue` decisions remain authoritative, so a pause request stays pending until the next boundary that can be resumed through `Agent.continue()`.
 - Explicit `PIX_ACP_PI_ENTRY` overrides remain supported, but a replacement entry must implement the Pix control shim for Desktop pause/continue to work.
 
 ## Related files
@@ -65,5 +65,5 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 
 ## Risks / compatibility
 
-- The turn-boundary implementation intentionally relies on private `AgentSession` bookkeeping because the pinned Pi RPC API does not expose pause/continue. The shim validates the expected private surface and must be reviewed when the Pi SDK is upgraded.
+- The turn-boundary implementation intentionally relies on private `AgentSession` bookkeeping because the pinned Pi RPC API does not expose pause/continue. The 0.87 adapter mirrors `_runAgentPrompt`, including `_runSystemPromptOptions`, pending custom-message flushing, cancellation, and `agent_before_settle`; its validated private surface must be reviewed when the Pi SDK is upgraded.
 - Provider `max_tokens` responses that end on an assistant message are not considered resumable by `Agent.continue()` and therefore do not show Continue; the resumable limit case is the agent-loop turn/request boundary that leaves a user/tool-result tail or queued message.

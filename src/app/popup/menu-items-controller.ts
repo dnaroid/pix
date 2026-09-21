@@ -6,7 +6,6 @@ import { THINKING_LEVELS } from "../constants.js";
 import { APP_ICONS } from "../icons.js";
 import { buildUserMessageJumpItems, createSessionInfoMenuItemsLoader, filterUserMessageJumpItems, type SessionInfoMenuItemsLoader } from "./popup-menu-controller.js";
 import { getResourceSlashCommands, getSlashCommandMatches, parseSlashInput } from "../commands/slash-commands.js";
-import { isRecord } from "../guards.js";
 import { renderUserMessageContent } from "../rendering/message-content.js";
 import { sessionHistoryFullBranchEntries } from "../session/pix-system-message.js";
 import type {
@@ -166,7 +165,7 @@ export class AppMenuItemsController {
 					.map((entry) => [entry.sessionEntryId, entry]),
 			);
 			const sources = entries.flatMap((entry) => {
-				if (entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "user") return [];
+				if (entry.type !== "message" || entry.message.role !== "user") return [];
 				const text = renderUserMessageContent(entry.message.content);
 				if (!text) return [];
 				const loaded = loadedBySessionEntryId.get(entry.id);

@@ -88,8 +88,12 @@ not reassuring zero counters or a claim that persistence is healthy.
 
 The runtime and report must distinguish a presentation cursor (`getBranch()` on
 a lazy manager) from full provider context and the complete journal branch.
-Current `LazySessionManager.buildSessionContext()` reconstructs full context;
+`LazySessionManager.buildSessionProjection()` and
+`LazySessionManager.buildSessionContext()` reconstruct canonical full active
+context (including context edits) without hydrating the presentation facade;
 DCP reads the full branch to bind exact entry identities and replay the journal.
+Lazy compaction records snapshot the resolved system message at their boundary,
+matching the SDK projection contract.
 Stats, startup replay and explicit sweep use the full-branch reader too.
 
 Full reads capture session/leaf identity. Because the lazy full-history reader

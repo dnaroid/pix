@@ -6,17 +6,18 @@ import { APP_ICONS } from "../src/app/icons.js";
 import { AgentPauseController } from "../src/app/session/agent-pause-controller.js";
 
 describe("AgentPauseController", () => {
-	it("requests a stop only after a tool-producing turn", async () => {
+	it("requests an end only after a completed turn and pauses after before-settle", async () => {
 		const fixture = pauseFixture();
 		fixture.controller.bind(fixture.session);
 
 		await fixture.controller.toggle(fixture.session);
 		assert.equal(fixture.controller.state(fixture.session), "pause-requested");
 
-		const shouldStop = await fixture.agent.shouldStopAfterTurn?.({ toolResults: [{}] } as never, new AbortController().signal);
-		assert.equal(shouldStop, true);
+		const decision = await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
+		assert.deepEqual(decision, { action: "end" });
 		assert.equal(fixture.controller.state(fixture.session), "pause-requested");
 		assert.equal(await fixture.internals._handlePostAgentRun(), false);
+		assert.equal(await fixture.internals._runBeforeSettleBoundary(), false);
 		assert.equal(fixture.controller.state(fixture.session), "paused");
 		assert.equal(fixture.controller.statusWidgetText(fixture.session), APP_ICONS.play);
 		assert.equal(fixture.postRunCalls(), 1);
@@ -27,10 +28,11 @@ describe("AgentPauseController", () => {
 		fixture.controller.bind(fixture.session);
 		await fixture.controller.toggle(fixture.session);
 
-		const shouldStop = await fixture.agent.shouldStopAfterTurn?.({ toolResults: [] } as never, new AbortController().signal);
+		const decision = await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [] } as never, new AbortController().signal);
 		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
 
-		assert.equal(shouldStop, true);
+		assert.deepEqual(decision, { action: "end" });
 		assert.equal(fixture.controller.state(fixture.session), "idle");
 	});
 
@@ -39,8 +41,9 @@ describe("AgentPauseController", () => {
 		fixture.controller.bind(fixture.session);
 		await fixture.controller.toggle(fixture.session);
 
-		await fixture.agent.shouldStopAfterTurn?.({ toolResults: [] } as never, new AbortController().signal);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [] } as never, new AbortController().signal);
 		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
 
 		assert.equal(fixture.controller.state(fixture.session), "paused");
 	});
@@ -57,23 +60,34 @@ describe("AgentPauseController", () => {
 		assert.equal(fixture.controller.state(fixture.session), "paused");
 	});
 
-	it("preserves an existing stop-after-turn policy", async () => {
-		const fixture = pauseFixture({ existingShouldStop: true });
+	it("preserves an existing end decision as authoritative", async () => {
+		const fixture = pauseFixture({ existingFinish: "end" });
 		fixture.controller.bind(fixture.session);
 		await fixture.controller.toggle(fixture.session);
 
-		const shouldStop = await fixture.agent.shouldStopAfterTurn?.({ toolResults: [{}] } as never, new AbortController().signal);
+		const decision = await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
 
-		assert.equal(shouldStop, true);
+		assert.deepEqual(decision, { action: "end" });
 		assert.equal(fixture.controller.state(fixture.session), "idle");
+	});
+
+	it("preserves an existing continue decision while waiting for the next pausable boundary", async () => {
+		const fixture = pauseFixture({ existingFinish: "continue" });
+		fixture.controller.bind(fixture.session);
+
+		assert.deepEqual(await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [] } as never), { action: "continue" });
+		await fixture.controller.toggle(fixture.session);
+		assert.deepEqual(await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [] } as never), { action: "continue" });
+		assert.equal(fixture.controller.state(fixture.session), "pause-requested");
 	});
 
 	it("continues through session bookkeeping and returns to idle", async () => {
 		const fixture = pauseFixture();
 		fixture.controller.bind(fixture.session);
 		await fixture.controller.toggle(fixture.session);
-		await fixture.agent.shouldStopAfterTurn?.({ toolResults: [{}] } as never, new AbortController().signal);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
 		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
 		await fixture.internals._emitAgentSettled();
 
 		await fixture.controller.toggle(fixture.session);
@@ -89,12 +103,13 @@ describe("AgentPauseController", () => {
 		const fixture = pauseFixture();
 		fixture.controller.bind(fixture.session);
 		await fixture.controller.toggle(fixture.session);
-		await fixture.agent.shouldStopAfterTurn?.({ toolResults: [{}] } as never, new AbortController().signal);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
 
 		await fixture.controller.toggle(fixture.session);
 		assert.equal(fixture.continueCalls(), 0);
 
 		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
 		const resume = fixture.controller.toggle(fixture.session);
 		await Promise.resolve();
 		assert.equal(fixture.continueCalls(), 0);
@@ -107,8 +122,9 @@ describe("AgentPauseController", () => {
 		const fixture = pauseFixture();
 		fixture.controller.bind(fixture.session);
 		await fixture.controller.toggle(fixture.session);
-		await fixture.agent.shouldStopAfterTurn?.({ toolResults: [{}] } as never, new AbortController().signal);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
 		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
 
 		const resume = fixture.controller.toggle(fixture.session);
 		fixture.setCurrentSession(false);
@@ -124,8 +140,9 @@ describe("AgentPauseController", () => {
 		const fixture = pauseFixture({ continueError: new Error("resume failed") });
 		fixture.controller.bind(fixture.session);
 		await fixture.controller.toggle(fixture.session);
-		await fixture.agent.shouldStopAfterTurn?.({ toolResults: [{}] } as never, new AbortController().signal);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
 		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
 		await fixture.internals._emitAgentSettled();
 
 		await fixture.controller.toggle(fixture.session);
@@ -133,9 +150,21 @@ describe("AgentPauseController", () => {
 		assert.equal(fixture.controller.state(fixture.session), "paused");
 		assert.ok(fixture.toasts.some((toast) => toast.kind === "error" && toast.message.includes("resume failed")));
 	});
+
+	it("does not convert cancellation into a pause", async () => {
+		const fixture = pauseFixture();
+		fixture.controller.bind(fixture.session);
+		await fixture.controller.toggle(fixture.session);
+		fixture.internals._agentRunAbortRequested = true;
+
+		await fixture.internals._handlePostAgentRun();
+
+		assert.equal(fixture.controller.state(fixture.session), "idle");
+		assert.equal(await fixture.internals._runBeforeSettleBoundary(), false);
+	});
 });
 
-function pauseFixture(options: { existingShouldStop?: boolean; continueError?: Error; lastMessageRole?: "assistant" | "toolResult"; hasQueuedMessages?: boolean; postRunResult?: boolean } = {}) {
+function pauseFixture(options: { existingFinish?: "continue" | "end"; continueError?: Error; lastMessageRole?: "assistant" | "toolResult"; hasQueuedMessages?: boolean; postRunResult?: boolean } = {}) {
 	let continueCalls = 0;
 	let postRunCalls = 0;
 	let settledCalls = 0;
@@ -147,9 +176,9 @@ function pauseFixture(options: { existingShouldStop?: boolean; continueError?: E
 			isStreaming: true,
 			messages: [{ role: options.lastMessageRole ?? "toolResult" }],
 		},
-		shouldStopAfterTurn: options.existingShouldStop === undefined
+		finishTurn: options.existingFinish === undefined
 			? undefined
-			: async () => options.existingShouldStop!,
+			: async () => ({ action: options.existingFinish! }),
 		continue: async () => {
 			continueCalls += 1;
 			if (options.continueError) throw options.continueError;
@@ -164,12 +193,15 @@ function pauseFixture(options: { existingShouldStop?: boolean; continueError?: E
 			return () => {};
 		},
 		_isAgentRunActive: false,
-		_systemPromptOverride: undefined,
+		_agentRunAbortRequested: false,
+		_runSystemPromptOptions: undefined,
 		_handlePostAgentRun: async () => {
 			postRunCalls += 1;
 			return options.postRunResult ?? false;
 		},
+		_runBeforeSettleBoundary: async () => options.hasQueuedMessages ?? false,
 		_flushPendingBashMessages: () => {},
+		_flushPendingCustomMessages: () => {},
 		_emitAgentSettled: async () => {
 			settledCalls += 1;
 			internals._isAgentRunActive = false;
