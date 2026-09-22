@@ -32,7 +32,7 @@ export class AppToastController {
 	showToast(message: string, kind: ToastKind = "info", options: AppToastOptions = {}): void {
 		const scopeKey = this.normalizeScopeKey(options.scopeKey ?? this.host.activeScope?.());
 		const toast = this.toastForScope(scopeKey);
-		const action = options.variant === "dialog" ? undefined : options.action;
+		const action = options.action;
 		const toastId = toast.show(message, kind, options.variant ? { variant: options.variant } : {});
 		if (action) this.actionsForScope(scopeKey).set(toastId, action);
 		if (kind === "error" || options.variant === "dialog") {

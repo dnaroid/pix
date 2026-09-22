@@ -1,6 +1,7 @@
 import { loadPiToolsSuiteConfig } from "./config";
 import { publishContextInventoryState } from "./context-inventory";
 import { publishStartupModuleList } from "./startup-section";
+import { isPixOwnedHost } from "./lib/native-pi-tui.js";
 
 type ExtensionAPI = any;
 
@@ -10,7 +11,7 @@ type ExtensionModule = {
 	default: ExtensionFactory;
 };
 
-export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule> }> = [
+export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule>; cleanPiOnly?: boolean }> = [
 	{ name: "coding-discipline", load: () => import("./coding-discipline/index") },
 	{ name: "ast-grep", load: () => import("./ast-grep/index") },
 	{ name: "async-subagents", load: () => import("./async-subagents/index") },
@@ -21,6 +22,7 @@ export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule>
 	{ name: "repo-discovery", load: () => import("./repo-discovery/index") },
 	{ name: "antigravity-auth", load: () => import("./antigravity-auth/index") },
 	{ name: "opencode-import", load: () => import("./opencode-import/index") },
+	{ name: "question", load: () => import("./question/index"), cleanPiOnly: true },
 	{ name: "todo", load: () => import("./todo/index") },
 	{ name: "model-tools", load: () => import("./model-tools/index") },
 	{ name: "usage", load: () => import("./usage/index") },
@@ -51,6 +53,7 @@ export default async function piToolsSuite(pi: ExtensionAPI) {
 
 	for (const module of MODULES) {
 		if (disabledModules.has(module.name)) continue;
+		if (module.cleanPiOnly && isPixOwnedHost()) continue;
 
 		try {
 			const loaded = await module.load();

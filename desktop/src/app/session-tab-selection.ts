@@ -74,6 +74,7 @@ export function createSessionTabSelection(options: SessionTabControllerOptions) 
       if (sourceSessionId) {
         options.state.setSessionTranscript(sourceSessionId, options.state.transcript);
         await requestClient.closeSession(sourceSessionId);
+        options.state.deleteSessionTranscript(sourceSessionId);
         if (
           requestClient !== options.client()
           || requestWorkspace !== options.workspace()

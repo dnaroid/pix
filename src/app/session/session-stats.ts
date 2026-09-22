@@ -41,6 +41,10 @@ export function aggregateSessionStats(entries: readonly SessionEntry[], base: Se
 	}
 
 	for (const entry of entries) {
+		if (entry.type === "usage") {
+			addUsage(entry.usage);
+			continue;
+		}
 		if (entry.type === "compaction" || entry.type === "branch_summary") {
 			addUsage(entry.usage);
 			continue;

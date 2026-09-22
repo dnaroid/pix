@@ -148,6 +148,37 @@ export interface ModelUsageStatus {
 
 export type ModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
 
+export interface SessionUsageTotals {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly totalTokens: number;
+  readonly cost: number;
+}
+
+export interface SessionUsageProvider {
+  readonly provider: string;
+  readonly totals: SessionUsageTotals;
+  readonly models: readonly SessionUsageModel[];
+}
+
+export interface SessionUsageModel {
+  readonly model: string;
+  readonly totals: SessionUsageTotals;
+}
+
+export interface SessionUsageReport {
+  readonly totals: SessionUsageTotals;
+  readonly providers: readonly SessionUsageProvider[];
+  readonly unattributed: SessionUsageTotals;
+}
+
+export interface SessionUsageStatus {
+  readonly sessionId: string;
+  readonly usage: SessionUsageReport;
+}
+
 export interface RuntimeStatus {
   readonly sessionId: string;
   readonly context?: ContextUsageStatus;

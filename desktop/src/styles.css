@@ -46,14 +46,17 @@
   --color-code-border: var(--code-border);
   --color-selection: var(--selection);
   --color-selection-foreground: var(--selection-foreground);
-  --color-tool-warning: var(--tool-warning);
+  --color-tool-agent: var(--tool-agent);
+  --color-tool-context: var(--tool-context);
+  --color-tool-execute: var(--tool-execute);
+  --color-tool-inspect: var(--tool-inspect);
+  --color-tool-interact: var(--tool-interact);
   --color-tool-mutation: var(--tool-mutation);
+  --color-tool-neutral: var(--tool-neutral);
   --color-tool-search: var(--tool-search);
   --color-tool-success: var(--tool-success);
+  --color-tool-warning: var(--tool-warning);
   --color-tool-info: var(--tool-info);
-  --color-tool-accent: var(--tool-accent);
-  --color-tool-muted: var(--tool-muted);
-  --color-tool-title: var(--tool-title);
   --color-tool-error: var(--tool-error);
   --color-model-openai: var(--model-openai);
   --color-thinking-xhigh: var(--thinking-xhigh);
@@ -133,14 +136,18 @@
   --prompt: var(--primary);
   --danger: var(--destructive);
   --status: #697655;
-  --tool-warning: #9a631d;
+  /* Tool-name colors describe the operation; outcome/diagnostic colors stay separate below. */
+  --tool-agent: #6046a5;
+  --tool-context: #64748b;
+  --tool-execute: #9a631d;
+  --tool-inspect: #246b8e;
+  --tool-interact: #315f9f;
   --tool-mutation: #8c526a;
+  --tool-neutral: #5d6978;
   --tool-search: #68578c;
   --tool-success: #47794c;
+  --tool-warning: #9a631d;
   --tool-info: #246b8e;
-  --tool-accent: #315f9f;
-  --tool-muted: #64748b;
-  --tool-title: #5d6978;
   --tool-error: #a44949;
   --model-openai: #75671f;
   --thinking-xhigh: #cf333d;
@@ -206,14 +213,17 @@
     --selection: color-mix(in srgb, var(--primary) 48%, var(--background));
     --selection-foreground: var(--foreground);
     --status: #98c379;
-    --tool-warning: #e5c07b;
+    --tool-agent: #a78bfa;
+    --tool-context: #8b93a7;
+    --tool-execute: #e5c07b;
+    --tool-inspect: #56b6c2;
+    --tool-interact: #7aa2f7;
     --tool-mutation: #c678dd;
+    --tool-neutral: #c8ccd4;
     --tool-search: #61afef;
     --tool-success: #98c379;
+    --tool-warning: #e5c07b;
     --tool-info: #56b6c2;
-    --tool-accent: #7aa2f7;
-    --tool-muted: #8b93a7;
-    --tool-title: #c8ccd4;
     --tool-error: #e06c75;
     --model-openai: #c8b45a;
     --thinking-xhigh: #ff8a86;
@@ -300,11 +310,43 @@ textarea { resize: none; }
 ) {
   cursor: pointer;
 }
-@layer base {
-  :focus-visible {
-    outline: none;
-    --tw-ring-shadow: 0 0 #0000;
-  }
+/*
+ * Desktop keyboard focus should stay discoverable without looking like a
+ * browser-default selection rectangle. Keep it inside the control geometry,
+ * suppress utility-layer ring shadows, and use a restrained semantic ring.
+ * Mouse focus remains unaffected because this only applies to :focus-visible.
+ */
+:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--ring) 42%, transparent);
+  outline-offset: -2px;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-inset-ring-shadow: 0 0 #0000;
+}
+
+:where(
+  textarea,
+  select,
+  input:not([type="checkbox"]):not([type="radio"])
+):focus-visible {
+  outline-color: color-mix(in srgb, var(--ring) 64%, transparent);
+  outline-offset: -1px;
+}
+/* Text-entry controls keep their caret and native focus semantics without a
+ * distracting global focus frame. Other controls retain the keyboard focus
+ * treatment above. */
+:where(
+  textarea,
+  select,
+  input:not([type="checkbox"]):not([type="radio"])
+):focus {
+  outline: none;
+  outline-offset: 0;
+  border-color: transparent;
+  box-shadow: none;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-inset-ring-shadow: 0 0 #0000;
 }
 ::selection {
   color: var(--selection-foreground);

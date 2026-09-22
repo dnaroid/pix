@@ -3,7 +3,7 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
-  import type { ModelUsageLimitWindow, RuntimeStatus } from "../lib/acp-client";
+  import type { ModelUsageLimitWindow, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import {
     clampUsagePercent,
     contextUsageTone,
@@ -14,6 +14,12 @@
     modelUsageWindowWillExhaustBeforeReset,
     type UsageTone,
   } from "../lib/runtime-status";
+  import {
+    formatSessionUsageCost,
+    formatSessionUsageTokens,
+    sessionUsageHasValue,
+  } from "../lib/session-usage";
+  import { modelDisplayToneClass, modelRefTone } from "../lib/model-display";
 
   let {
     status,
@@ -22,12 +28,14 @@
     workspaceBranch,
     workspaceHue,
     workspaceColor,
-    refreshingModelUsage = false,
     loadingDcpStats = false,
+    sessionUsage,
+    loadingSessionUsage = false,
+    sessionUsageAvailable = false,
     compressingContext = false,
     compressionAvailable = true,
     canCompressContext = true,
-    onRefreshModelUsage,
+    onOpenSessionUsage,
     onOpenDcpStats,
     onCompressContext,
   }: {
@@ -37,18 +45,21 @@
     workspaceBranch?: string;
     workspaceHue?: number;
     workspaceColor?: string;
-    refreshingModelUsage?: boolean;
     loadingDcpStats?: boolean;
+    sessionUsage?: SessionUsageReport;
+    loadingSessionUsage?: boolean;
+    sessionUsageAvailable?: boolean;
     compressingContext?: boolean;
     compressionAvailable?: boolean;
     canCompressContext?: boolean;
-    onRefreshModelUsage: () => void;
+    onOpenSessionUsage: () => void;
     onOpenDcpStats: () => void;
     onCompressContext: () => void;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
   let dcpOpen = $state(false);
+  let usageOpen = $state(false);
   let now = $state(Date.now());
   const contextPercent = $derived(status?.context?.percent);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
@@ -61,13 +72,15 @@
   });
 
   function closeOutside(event: PointerEvent): void {
-    if (!dcpOpen || root?.contains(event.target as Node)) return;
+    if ((!dcpOpen && !usageOpen) || root?.contains(event.target as Node)) return;
     dcpOpen = false;
+    usageOpen = false;
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && dcpOpen) {
+    if (event.key === "Escape" && (dcpOpen || usageOpen)) {
       dcpOpen = false;
+      usageOpen = false;
       event.stopPropagation();
     }
   }
@@ -75,7 +88,17 @@
   function toggleDcp(): void {
     const opening = !dcpOpen;
     dcpOpen = opening;
+    if (opening) usageOpen = false;
     if (opening) onOpenDcpStats();
+  }
+
+  function toggleUsage(): void {
+    const opening = !usageOpen;
+    usageOpen = opening;
+    if (opening) {
+      dcpOpen = false;
+      onOpenSessionUsage();
+    }
   }
 
   function contextTitle(): string {
@@ -219,40 +242,108 @@
       </div>
     {/if}
 
-    {#if status?.modelUsage}
-      <button
-        class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-        type="button"
-        title="Refresh model usage limits"
-        aria-label="Refresh model usage limits"
-        aria-busy={refreshingModelUsage}
-        onclick={onRefreshModelUsage}
-      >
-        <span class="font-sans text-xs text-muted-foreground max-[900px]:hidden">Usage</span>
-        {#if status.modelUsage.accountEmail}
-          <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{status.modelUsage.accountEmail}</span>
-        {/if}
-        {#each usageWindowItems as { label, window } (label)}
-            {@const tone = modelUsageTone(window.remainingPercent)}
-            {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
-            <span class="flex items-center gap-1" title={limitTitle(label, window)}>
-              {#if usageWindowItems.length > 1}
-                <span class="text-muted-foreground">{label === "H" ? "Hourly" : "Weekly"}</span>
-              {/if}
-              <span class="relative h-1.5 w-8 overflow-hidden rounded-sm bg-border" aria-hidden="true">
-                <span
-                  class={["absolute inset-y-0 left-0 rounded-sm", toneFillClass(tone)]}
-                  style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
-                ></span>
+    {#if sessionUsageAvailable || status?.modelUsage}
+      <div class="relative shrink-0">
+        <button
+          class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          type="button"
+          title="Session usage and cost"
+          aria-label="Session usage and cost"
+          aria-haspopup="dialog"
+          aria-expanded={usageOpen}
+          aria-controls="runtime-usage-popover"
+          onclick={toggleUsage}
+        >
+          <span class="font-sans text-xs text-muted-foreground max-[900px]:hidden">Usage</span>
+          {#if sessionUsage && sessionUsage.totals.cost > 0}
+            <span class="text-foreground">{formatSessionUsageCost(sessionUsage.totals.cost)}</span>
+          {/if}
+          {#if status?.modelUsage?.accountEmail}
+            <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{status.modelUsage.accountEmail}</span>
+          {/if}
+          {#each usageWindowItems as { label, window } (label)}
+              {@const tone = modelUsageTone(window.remainingPercent)}
+              {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
+              <span class="flex items-center gap-1" title={limitTitle(label, window)}>
+                {#if usageWindowItems.length > 1}
+                  <span class="text-muted-foreground">{label === "H" ? "Hourly" : "Weekly"}</span>
+                {/if}
+                <span class="relative h-1.5 w-8 overflow-hidden rounded-sm bg-border" aria-hidden="true">
+                  <span
+                    class={["absolute inset-y-0 left-0 rounded-sm", toneFillClass(tone)]}
+                    style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
+                  ></span>
+                </span>
+                <span class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%</span>
+                {#if exhaustsEarly}
+                  <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
+                {/if}
+                <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
               </span>
-              <span class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%</span>
-              {#if exhaustsEarly}
-                <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
+          {/each}
+        </button>
+
+        {#if usageOpen}
+          <div
+            id="runtime-usage-popover"
+            class="absolute right-0 bottom-[calc(100%+0.375rem)] z-50 w-[min(360px,calc(100vw-16px))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
+            role="dialog"
+            aria-label="Session usage and cost"
+          >
+            <header class="border-b border-border px-3 py-2">
+              <div class="text-xs font-medium text-foreground">Session usage</div>
+              <div class="mt-0.5 font-mono text-xs text-muted-foreground">
+                {#if sessionUsage}
+                  {formatSessionUsageCost(sessionUsage.totals.cost)} · {formatSessionUsageTokens(sessionUsage.totals.totalTokens)} tokens
+                {:else if loadingSessionUsage}
+                  Loading recorded usage…
+                {:else if sessionUsageAvailable}
+                  Usage has not been loaded yet.
+                {:else}
+                  No live session yet.
+                {/if}
+              </div>
+            </header>
+            <div class="max-h-[min(460px,60vh)] overflow-y-auto px-3 py-2.5 text-xs">
+              {#if loadingSessionUsage && !sessionUsage}
+                <div class="flex items-center gap-1.5 text-muted-foreground" aria-live="polite">
+                  <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+                  <span>Loading session usage…</span>
+                </div>
+              {:else if sessionUsage}
+                <section class="space-y-2.5">
+                  {#if sessionUsage.providers.length === 0 && !sessionUsageHasValue(sessionUsage.unattributed)}
+                    <p class="text-muted-foreground">No billable usage has been recorded for this session yet.</p>
+                  {:else}
+                    {#each sessionUsage.providers as provider (provider.provider)}
+                      <div>
+                        <div class="mb-1 text-xs font-medium text-muted-foreground">{provider.provider}</div>
+                        <div class="space-y-1">
+                          {#each provider.models as model (`${provider.provider}/${model.model}`)}
+                            <div class="flex min-w-0 items-center justify-between gap-3 font-mono tabular-nums">
+                              <span
+                                class={["min-w-0 truncate font-medium", modelDisplayToneClass(modelRefTone(`${provider.provider}/${model.model}`))]}
+                                title={`${provider.provider}/${model.model}`}
+                              >{model.model}</span>
+                              <span class="shrink-0 text-foreground">{formatSessionUsageTokens(model.totals.totalTokens)} · {formatSessionUsageCost(model.totals.cost)}</span>
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/each}
+                    {#if sessionUsageHasValue(sessionUsage.unattributed)}
+                      <div class="flex items-center justify-between gap-3 border-t border-border pt-2 text-muted-foreground">
+                        <span>Unattributed</span>
+                        <span class="font-mono tabular-nums">{formatSessionUsageTokens(sessionUsage.unattributed.totalTokens)} · {formatSessionUsageCost(sessionUsage.unattributed.cost)}</span>
+                      </div>
+                    {/if}
+                  {/if}
+                </section>
               {/if}
-              <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
-            </span>
-        {/each}
-      </button>
+            </div>
+          </div>
+        {/if}
+      </div>
     {/if}
   </div>
 {/if}

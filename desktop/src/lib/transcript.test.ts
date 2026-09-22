@@ -422,8 +422,8 @@ describe("transcript display groups", () => {
     });
   });
 
-  it("marks pending and running groups active while preserving failures", () => {
-    const [pendingGroup, runningGroup, failedGroup, completedGroup] = groupTranscriptItems([
+  it("uses group lifecycle status without inheriting child failures", () => {
+    const [pendingGroup, runningGroup, mixedGroup, failedOnlyGroup, completedGroup] = groupTranscriptItems([
       toolItem("pending", "pending"),
       { type: "message", id: "break:1", role: "assistant", text: "break", attachments: [] },
       toolItem("running", "in_progress"),
@@ -431,12 +431,15 @@ describe("transcript display groups", () => {
       toolItem("failed", "failed"),
       toolItem("still-pending", "pending"),
       { type: "message", id: "break:3", role: "assistant", text: "break", attachments: [] },
+      toolItem("failed-only", "failed"),
+      { type: "message", id: "break:4", role: "assistant", text: "break", attachments: [] },
       toolItem("completed", "completed"),
     ]).filter((item) => item.type === "activity-group");
 
     expect(pendingGroup).toMatchObject({ status: "pending", active: true });
     expect(runningGroup).toMatchObject({ status: "in_progress", active: true });
-    expect(failedGroup).toMatchObject({ status: "failed", active: true });
+    expect(mixedGroup).toMatchObject({ status: "pending", active: true });
+    expect(failedOnlyGroup).toMatchObject({ status: "completed", active: false });
     expect(completedGroup).toMatchObject({ status: "completed", active: false });
   });
 

@@ -30,6 +30,7 @@ export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
 export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
 export const PIX_DCP_STATS_METHOD = "pix/session/dcp_stats";
+export const PIX_SESSION_USAGE_METHOD = "pix/session/usage";
 export const PIX_DRAFT_CONFIG_METHOD = "pix/session/draft_config";
 export const PIX_MODEL_ROUTING_STATUS_METHOD = "pix/model/routing_status";
 export const PIX_MODEL_ROUTE_METHOD = "pix/model/route";
@@ -149,6 +150,37 @@ export interface DesktopDcpContextMap {
 export interface DesktopDcpStatsResponse {
 	readonly sessionId: string;
 	readonly dcpStats?: string;
+}
+
+export interface DesktopSessionUsageTotals {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead: number;
+	readonly cacheWrite: number;
+	readonly totalTokens: number;
+	readonly cost: number;
+}
+
+export interface DesktopSessionUsageProvider {
+	readonly provider: string;
+	readonly totals: DesktopSessionUsageTotals;
+	readonly models: readonly DesktopSessionUsageModel[];
+}
+
+export interface DesktopSessionUsageModel {
+	readonly model: string;
+	readonly totals: DesktopSessionUsageTotals;
+}
+
+export interface DesktopSessionUsageReport {
+	readonly totals: DesktopSessionUsageTotals;
+	readonly providers: readonly DesktopSessionUsageProvider[];
+	readonly unattributed: DesktopSessionUsageTotals;
+}
+
+export interface DesktopSessionUsageResponse {
+	readonly sessionId: string;
+	readonly usage: DesktopSessionUsageReport;
 }
 
 export interface DesktopSessionHistoryRequest extends DesktopSessionRequest {

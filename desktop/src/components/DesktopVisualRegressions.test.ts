@@ -29,6 +29,7 @@ import markdownSource from "./MarkdownText.svelte?raw";
 import terminalSource from "./TerminalView.svelte?raw";
 import tauriLibSource from "../../src-tauri/src/lib.rs?raw";
 import toolResultSource from "./ToolResult.svelte?raw";
+import transcriptActivityGroupSource from "./TranscriptActivityGroup.svelte?raw";
 import transcriptSource from "./TranscriptPane.svelte?raw";
 
 describe("desktop visual regressions", () => {
@@ -67,7 +68,20 @@ describe("desktop visual regressions", () => {
     expect(diffViewSource).toContain("var(--tool-info)");
   });
 
-  it("keeps global focus-visible reset in base layer so component utilities win", async () => {
+  it("keeps tool diagnostics on child rows instead of promoting them to the activity-group summary", () => {
+    expect(transcriptActivityGroupSource).toContain("attention={toolAttention}");
+    expect(transcriptActivityGroupSource).toContain("<ToolStatusIcon status={item.status} lifecycleOnly class=");
+    expect(transcriptActivityGroupSource).not.toContain("toolGroupAttention");
+  });
+
+  it("keeps active thinking emphasis in the activity header only", () => {
+    expect(transcriptActivityGroupSource).toContain('data-activity-active={label.active}');
+    expect(transcriptActivityGroupSource).toContain('class={label.active ? "font-medium text-primary" : "font-normal text-muted-foreground/85"}');
+    expect(transcriptActivityGroupSource).toContain('<Brain class="h-3 w-3 shrink-0 text-muted-foreground/65"');
+    expect(transcriptActivityGroupSource).toContain('data-activity-thought-label class="text-muted-foreground/85"');
+  });
+
+  it("uses one restrained global keyboard-focus treatment across Desktop", async () => {
     // @ts-expect-error Node fs import in Vitest runner
     const fs = (await import(/* @vite-ignore */ "node:fs")).default;
     // @ts-expect-error Node path import in Vitest runner
@@ -75,7 +89,13 @@ describe("desktop visual regressions", () => {
     // @ts-expect-error Node __dirname in Vitest runner
     const filePath = path.resolve(__dirname, "../styles.css");
     const content = fs.readFileSync(filePath, "utf-8");
-    expect(content).toMatch(/@layer\s+base\s*\{[^}]*:focus-visible\s*\{[^}]*outline:\s*none;[^}]*\}\s*\}/);
+    expect(content).toContain("outline: 1px solid color-mix(in srgb, var(--ring) 42%, transparent);");
+    expect(content).toContain("outline-offset: -2px;");
+    expect(content).toContain("--tw-ring-shadow: 0 0 #0000;");
+    expect(content).toContain("outline-color: color-mix(in srgb, var(--ring) 64%, transparent);");
+    expect(content).not.toMatch(/@layer\s+base\s*\{[^}]*:focus-visible\s*\{[^}]*outline:\s*none;/);
+    expect(markdownSource).not.toContain("outline: 2px solid var(--ring)");
+    expect(transcriptSource).not.toContain(".message-action-item:focus-visible { outline: 2px solid var(--ring)");
   });
 
   it("preserves visible focus ring on idx context input controls", () => {
@@ -117,7 +137,7 @@ describe("desktop visual regressions", () => {
   it("keeps project and Git branch between context and usage status chrome", () => {
     const context = runtimeStatusSource.indexOf("title={contextTitle()}");
     const workspace = runtimeStatusSource.indexOf("data-runtime-workspace");
-    const usage = runtimeStatusSource.indexOf('title="Refresh model usage limits"');
+    const usage = runtimeStatusSource.indexOf('title="Session usage and cost"');
     expect(context).toBeGreaterThanOrEqual(0);
     expect(workspace).toBeGreaterThan(context);
     expect(usage).toBeGreaterThan(workspace);
@@ -129,10 +149,23 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("{#if status || workspaceName}");
   });
 
+  it("opens recorded session spend from Usage instead of refreshing account quota", () => {
+    expect(runtimeStatusSource).toContain('title="Session usage and cost"');
+    expect(runtimeStatusSource).toContain('aria-label="Session usage and cost"');
+    expect(runtimeStatusSource).toContain("onOpenSessionUsage()");
+    expect(runtimeStatusSource).toContain("provider.models as model");
+    expect(runtimeStatusSource).toContain("modelDisplayToneClass(modelRefTone");
+    expect(runtimeStatusSource).not.toContain("of session");
+    expect(runtimeStatusSource).not.toContain("Account quota now");
+    expect(runtimeStatusSource).not.toContain('title="Refresh model usage limits"');
+    expect(runtimeStatusSource).not.toContain("onclick={onRefreshModelUsage}");
+    expect(statusBarViewModelSource).toContain("refreshActiveSessionUsage");
+    expect(statusBarViewModelSource).not.toContain("refreshDraftModelUsage");
+  });
+
   it("keeps workspace identity and selected-model limits visible for UI-only drafts", () => {
     expect(statusBarViewModelSource).toContain("runtimeStatus = options.modelConfig.draftRuntimeStatus");
-    expect(statusBarViewModelSource).toContain("modelUsageRefreshing = options.modelConfig.draftModelUsageRefreshing");
-    expect(statusBarViewModelSource).toContain("options.modelConfig.refreshDraftModelUsage()");
+    expect(statusBarViewModelSource).not.toContain("options.modelConfig.refreshDraftModelUsage()");
     expect(modelDraftConfigSource).toContain("void refreshUsage(modelRef, state.currentThinking, true)");
     expect(modelDraftConfigSource).not.toContain("refreshModelUsage: true");
     expect(modelDraftConfigSource).toContain("}, true);");

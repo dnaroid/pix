@@ -5,9 +5,8 @@
   import { SvelteSet } from "svelte/reactivity";
   import type { Attachment } from "../lib/attachments";
   import { isUserBashTool, toolPresentation } from "../lib/tool-presentation";
-  import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
+  import { toolLspAttention } from "../lib/tool-output";
   import {
-    activityEntryActive,
     activityGroupDuration,
     activityGroupPresentationLabels,
     formatTranscriptDuration,
@@ -38,7 +37,6 @@
   // not keep their Markdown, diffs or attachment components mounted offscreen.
   const expandedEntries = new SvelteSet(initiallyOpen);
   const labels = $derived(activityGroupPresentationLabels(item.entries));
-  const attention = $derived(toolGroupAttention(item.tools));
   const durationMs = $derived(activityGroupDuration(item, nowMs));
 
   function toggleEntry(event: Event, entry: ActivityEntry): void {
@@ -55,11 +53,11 @@
 <details
   bind:open={expanded}
   data-transcript-entry-id={item.id}
-  class={["transcript-entry group/activity w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80", gapClass, item.status === "failed" && "text-destructive"]}
+  class={["transcript-entry group/activity w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80", gapClass]}
 >
   <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/activity:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-    <ToolStatusIcon status={item.status} {attention} class="h-3 w-3 opacity-75" />
+    <ToolStatusIcon status={item.status} lifecycleOnly class="h-3 w-3 opacity-75" />
     <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
       <span class="min-w-0 truncate">
         {#each labels as label, index (label.name)}
@@ -79,13 +77,12 @@
     <div class="mt-1 ml-[7px] space-y-0.5 border-l border-code-border pl-2.5">
       {#each item.entries as entry (entry.id)}
         {#if entry.type === "message"}
-          {@const active = activityEntryActive(entry)}
           <details class="group/thought" data-activity-entry-id={entry.id} open={expandedEntries.has(entry.id)} ontoggle={(event) => toggleEntry(event, entry)}>
             <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/thought:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-              <Brain class={["h-3 w-3 shrink-0", active ? "text-primary" : "text-primary/65"]} aria-hidden="true" />
+              <Brain class="h-3 w-3 shrink-0 text-muted-foreground/65" aria-hidden="true" />
               <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
-                <span class={active ? "font-medium text-primary" : "text-muted-foreground/85"}>thinking</span>
+                <span data-activity-thought-label class="text-muted-foreground/85">thinking</span>
                 {#if entry.startedAtMs !== undefined && entry.endedAtMs !== undefined}
                   <span class="shrink-0 text-muted-foreground/45">{formatTranscriptDuration(entry.endedAtMs - entry.startedAtMs)}</span>
                 {/if}
@@ -143,12 +140,12 @@
 
 <style>
   .transcript-entry { content-visibility: auto; contain-intrinsic-size: auto 120px; }
-  .tool-name[data-tool-tone="accent"] { color: var(--tool-accent); }
-  .tool-name[data-tool-tone="info"] { color: var(--tool-info); }
-  .tool-name[data-tool-tone="muted"] { color: var(--tool-muted); }
+  .tool-name[data-tool-tone="agent"] { color: var(--tool-agent); }
+  .tool-name[data-tool-tone="context"] { color: var(--tool-context); }
+  .tool-name[data-tool-tone="execute"] { color: var(--tool-execute); }
+  .tool-name[data-tool-tone="inspect"] { color: var(--tool-inspect); }
+  .tool-name[data-tool-tone="interact"] { color: var(--tool-interact); }
   .tool-name[data-tool-tone="mutation"] { color: var(--tool-mutation); }
+  .tool-name[data-tool-tone="neutral"] { color: var(--tool-neutral); }
   .tool-name[data-tool-tone="search"] { color: var(--tool-search); }
-  .tool-name[data-tool-tone="success"] { color: var(--tool-success); }
-  .tool-name[data-tool-tone="title"] { color: var(--tool-title); }
-  .tool-name[data-tool-tone="warning"] { color: var(--tool-warning); }
 </style>

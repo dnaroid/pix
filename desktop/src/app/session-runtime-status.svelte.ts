@@ -1,4 +1,4 @@
-import type { ContextUsageStatus, RuntimeStatus } from "../lib/acp-client";
+import type { ContextUsageStatus, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
 import { parseContextUsageStatus } from "../lib/acp-response-parsers";
 import { newerDcpContextMap, parseDcpContextMap } from "../lib/dcp-context-map";
 import {
@@ -26,9 +26,12 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   let statuses = $state<Map<string, RuntimeStatus>>(new Map());
   let modelUsageRefreshing = $state<Set<string>>(new Set());
   let dcpStatsRefreshing = $state<Set<string>>(new Set());
+  let sessionUsageBySession = $state<Map<string, SessionUsageReport>>(new Map());
+  let sessionUsageRefreshing = $state<Set<string>>(new Set());
 
   const statusGenerationsBySession = new Map<string, RuntimeStatusGenerations>();
   const dcpStatsRequestGenerations = new Map<string, number>();
+  const sessionUsageRequestGenerations = new Map<string, number>();
   let lifecycleGeneration = 0;
 
   async function refreshStatus(sessionId: string, refreshModelUsage = false): Promise<void> {
@@ -194,6 +197,39 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     }
   }
 
+  async function refreshSessionUsage(sessionId: string): Promise<void> {
+    const requestClient = options.client();
+    if (!requestClient || !options.isReady(sessionId) || sessionUsageRefreshing.has(sessionId)) return;
+
+    const requestLifecycleGeneration = lifecycleGeneration;
+    const generation = (sessionUsageRequestGenerations.get(sessionId) ?? 0) + 1;
+    sessionUsageRequestGenerations.set(sessionId, generation);
+    const refreshing = new Set(sessionUsageRefreshing);
+    refreshing.add(sessionId);
+    sessionUsageRefreshing = refreshing;
+    try {
+      const next = await requestClient.sessionUsage(sessionId);
+      if (
+        requestLifecycleGeneration !== lifecycleGeneration
+        || requestClient !== options.client()
+        || !options.isReady(sessionId)
+        || sessionUsageRequestGenerations.get(sessionId) !== generation
+        || next.sessionId !== sessionId
+      ) return;
+      const nextUsage = new Map(sessionUsageBySession);
+      nextUsage.set(sessionId, next.usage);
+      sessionUsageBySession = nextUsage;
+    } catch {
+      // Billing inspection is best-effort; keep the last successfully loaded snapshot.
+    } finally {
+      if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client()
+        || sessionUsageRequestGenerations.get(sessionId) !== generation) return;
+      const next = new Set(sessionUsageRefreshing);
+      next.delete(sessionId);
+      sessionUsageRefreshing = next;
+    }
+  }
+
   function forget(sessionId: string): void {
     const generations = statusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS;
     // Keep a monotonic tombstone. Deleting this entry would let an old request
@@ -203,6 +239,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       quota: generations.quota + 1,
     });
     dcpStatsRequestGenerations.set(sessionId, (dcpStatsRequestGenerations.get(sessionId) ?? 0) + 1);
+    sessionUsageRequestGenerations.set(sessionId, (sessionUsageRequestGenerations.get(sessionId) ?? 0) + 1);
     if (statuses.has(sessionId)) {
       const next = new Map(statuses);
       next.delete(sessionId);
@@ -218,24 +255,40 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       next.delete(sessionId);
       dcpStatsRefreshing = next;
     }
+    if (sessionUsageBySession.has(sessionId)) {
+      const next = new Map(sessionUsageBySession);
+      next.delete(sessionId);
+      sessionUsageBySession = next;
+    }
+    if (sessionUsageRefreshing.has(sessionId)) {
+      const next = new Set(sessionUsageRefreshing);
+      next.delete(sessionId);
+      sessionUsageRefreshing = next;
+    }
   }
 
   function reset(): void {
     lifecycleGeneration += 1;
     statusGenerationsBySession.clear();
     dcpStatsRequestGenerations.clear();
+    sessionUsageRequestGenerations.clear();
     statuses = new Map();
     modelUsageRefreshing = new Set();
     dcpStatsRefreshing = new Set();
+    sessionUsageBySession = new Map();
+    sessionUsageRefreshing = new Set();
   }
 
   return {
     get statuses() { return statuses; },
     get modelUsageRefreshing() { return modelUsageRefreshing; },
     get dcpStatsRefreshing() { return dcpStatsRefreshing; },
+    get sessionUsageBySession() { return sessionUsageBySession; },
+    get sessionUsageRefreshing() { return sessionUsageRefreshing; },
     handleSessionState,
     refreshStatus,
     refreshDcpStats,
+    refreshSessionUsage,
     forget,
     reset,
   };

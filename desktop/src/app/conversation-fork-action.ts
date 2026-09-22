@@ -44,6 +44,7 @@ export function createForkConversation(options: ConversationBranchActionsOptions
       if (!config.keepSourceOpen) {
         await requestClient.closeSession(sourceSessionId);
         sourceClosed = true;
+        options.state.deleteSessionTranscript(sourceSessionId);
         options.forgetRuntime(sourceSessionId);
         options.clearSessionActivity(sourceSessionId);
       }

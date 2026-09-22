@@ -48,17 +48,11 @@ export function createDesktopStatusBarViewModel(options: {
     const changingConfig = options.changingConfig();
     const promptRunning = options.promptRunning();
     let runtimeStatus: StatusBarProps["runtimeStatus"];
-    let modelUsageRefreshing = false;
     if (draft) {
       runtimeStatus = options.modelConfig.draftRuntimeStatus;
-      modelUsageRefreshing = options.modelConfig.draftModelUsageRefreshing;
     } else if (sessionId) {
       runtimeStatus = options.runtime.statuses.get(sessionId);
-      modelUsageRefreshing = options.runtime.modelUsageRefreshing.has(sessionId);
     }
-    const refreshModelUsage = draft
-      ? () => void options.modelConfig.refreshDraftModelUsage()
-      : options.sessionCoordinator.refreshActiveModelUsage;
 
     return {
       status: options.status(),
@@ -75,7 +69,9 @@ export function createDesktopStatusBarViewModel(options: {
         && (draft ? options.draftConfigAvailable() : runtimeReady),
       modelThinkingOpen: options.modelConfig.pickerOpen,
       runtimeStatus,
-      modelUsageRefreshing,
+      sessionUsage: sessionId ? options.runtime.sessionUsageBySession.get(sessionId) : undefined,
+      sessionUsageRefreshing: sessionId ? options.runtime.sessionUsageRefreshing.has(sessionId) : false,
+      sessionUsageAvailable: !!sessionId,
       dcpStatsRefreshing: sessionId ? options.runtime.dcpStatsRefreshing.has(sessionId) : false,
       dcpCompressionRunning: sessionId ? options.dcp.sessionIds.has(sessionId) : false,
       dcpCompressionAvailable: compressionAvailable,
@@ -97,7 +93,7 @@ export function createDesktopStatusBarViewModel(options: {
       commandPaletteShortcut: options.commandPaletteShortcut(),
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),
       onOpenModelThinking: options.modelConfig.openPicker,
-      onRefreshModelUsage: refreshModelUsage,
+      onOpenSessionUsage: () => void options.sessionCoordinator.refreshActiveSessionUsage(),
       onOpenDcpStats: () => void options.sessionCoordinator.refreshActiveDcpStats(),
       onCompressDcpContext: () => void options.dcp.compress(),
       onNavigateMessages: () => void options.navigation.openJumpPicker(""),

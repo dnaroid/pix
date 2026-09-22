@@ -380,6 +380,37 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("requests session usage independently without refreshing provider quota", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const reading = client.sessionUsage("session-1");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/usage",
+      params: { sessionId: "session-1" },
+    });
+    const result = {
+      sessionId: "session-1",
+      usage: {
+        totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05 },
+        providers: [{
+          provider: "openai-codex",
+          totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05 },
+          models: [{
+            model: "gpt-5.6-sol",
+            totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05 },
+          }],
+        }],
+        unattributed: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },
+      },
+    };
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result });
+    await expect(reading).resolves.toEqual(result);
+
+    await client.dispose();
+  });
+
   it("routes registry GUI actions through the private ACP registry method", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

@@ -123,7 +123,7 @@ export class AppTabsController {
 	private historyLoadGeneration = 0;
 	private historyInvalidationGeneration = 0;
 	private runtimeOwnershipGeneration = 0;
-	private lifecycleGeneration = 0;
+	private lifecycleGenerationValue = 0;
 	private lifecycleMutationRunning = false;
 	private saveTabsWriteTail: Promise<void> = Promise.resolve();
 	private startupSavedTabs: PersistedTabState | null | undefined;
@@ -137,6 +137,10 @@ export class AppTabsController {
 
 	constructor(private readonly host: AppTabsControllerHost) {}
 
+	get lifecycleGeneration(): number {
+		return this.lifecycleGenerationValue;
+	}
+
 	private runLifecycleMutation<T>(operation: (generation: number) => Promise<T>): Promise<T> {
 		return new Promise<T>((resolveOperation, rejectOperation) => {
 			const run = (): void => {
@@ -147,7 +151,7 @@ export class AppTabsController {
 					return;
 				}
 				this.lifecycleMutationRunning = true;
-				const generation = ++this.lifecycleGeneration;
+				const generation = ++this.lifecycleGenerationValue;
 				let result: Promise<T>;
 				try {
 					result = operation(generation);
@@ -168,13 +172,13 @@ export class AppTabsController {
 
 	private isLifecycleOwner(generation: number, runtime: AgentSessionRuntime, session: AgentSession): boolean {
 		return this.host.isRunning()
-			&& generation === this.lifecycleGeneration
+			&& generation === this.lifecycleGenerationValue
 			&& this.host.runtime() === runtime
 			&& runtime.session === session;
 	}
 
 	cancelPendingLifecycleWork(): void {
-		this.lifecycleGeneration += 1;
+		this.lifecycleGenerationValue += 1;
 		this.cancelHistoryLoad();
 		this.pendingActiveTabId = undefined;
 		this.clearRuntimeSubscriptions();
@@ -686,7 +690,7 @@ export class AppTabsController {
 
 	private ownsDraftLifecycle(tabId: string, generation: number): boolean {
 		return this.host.isRunning()
-			&& generation === this.lifecycleGeneration
+			&& generation === this.lifecycleGenerationValue
 			&& this.activeTabId === tabId
 			&& this.pendingActiveTabId === tabId
 			&& this.tabItems.some((tab) => tab.id === tabId && tab.draft === true);
@@ -884,7 +888,7 @@ export class AppTabsController {
 			this.host.render();
 			return false;
 		}
-		if (generation !== this.lifecycleGeneration
+		if (generation !== this.lifecycleGenerationValue
 			|| this.host.runtime() !== previousRuntime
 			|| (forkRuntime !== previousRuntime && previousRuntime.session !== previousSession)) {
 			await this.disposeRuntimeIfOrphan(forkRuntime);
@@ -1104,7 +1108,7 @@ export class AppTabsController {
 			targetRuntime = await this.runtimeForTab(target);
 			if (!targetRuntime) throw new Error("Could not load tab runtime");
 			if (
-				generation !== this.lifecycleGeneration
+				generation !== this.lifecycleGenerationValue
 				|| this.activeTabId !== draft.id
 				|| this.pendingActiveTabId !== target.id
 			) throw new Error("Tab ownership changed while loading the runtime");
@@ -1376,7 +1380,7 @@ export class AppTabsController {
 		const isCancelled = (): boolean => ownershipGeneration === undefined
 			|| !this.host.isRunning()
 			|| historyGeneration !== this.historyLoadGeneration
-			|| lifecycleGeneration !== this.lifecycleGeneration
+			|| lifecycleGeneration !== this.lifecycleGenerationValue
 			|| this.pendingActiveTabId !== undefined
 			|| this.activeTabId !== tabId
 			|| this.host.runtime() !== runtime
@@ -1734,7 +1738,7 @@ export class AppTabsController {
 		ownershipGeneration: number,
 		lifecycleGeneration: number,
 	): Promise<void> {
-		if (lifecycleGeneration !== this.lifecycleGeneration) return;
+		if (lifecycleGeneration !== this.lifecycleGenerationValue) return;
 		if (tabId !== this.activeTabId || this.pendingActiveTabId !== undefined || this.host.runtime() !== runtime) return;
 		if (!this.isRuntimeOwnedByTab(tabId, runtime, session, ownershipGeneration)) return;
 		if (!this.tabIdsNeedingHistoryReload.has(tabId)) return;
@@ -2133,7 +2137,7 @@ export class AppTabsController {
 			this.loadSessionTitles(sessionPaths),
 			this.loadForkedSessionPaths(sessionPaths),
 		]);
-		if (!this.host.isRunning() || lifecycleGeneration !== this.lifecycleGeneration) return;
+		if (!this.host.isRunning() || lifecycleGeneration !== this.lifecycleGenerationValue) return;
 		if (titles.size === 0 && forkedSessionPaths.size === 0) return;
 
 		let changed = false;

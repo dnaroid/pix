@@ -126,6 +126,7 @@ import {
 	PIX_REQUEST_HISTORY_METHOD,
 	PIX_RESUME_PATH_METHOD,
 	PIX_RUNTIME_STATUS_METHOD,
+	PIX_SESSION_USAGE_METHOD,
 	PIX_SESSION_IMAGE_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
@@ -177,6 +178,8 @@ import {
 	type DesktopRequestHistoryResponse,
 	type DesktopRuntimeStatusRequest,
 	type DesktopRuntimeStatusResponse,
+	type DesktopSessionUsageReport,
+	type DesktopSessionUsageResponse,
 	type DesktopModelUsageStatus,
 	type DesktopSessionHistoryRequest,
 	type DesktopSessionHistoryResponse,
@@ -310,6 +313,7 @@ interface AgentSessionState {
 	readonly pi: PiClient;
 	readonly client: ClientCaller;
 	readonly translator: EventTranslator;
+	unsubscribeEvents: (() => void) | undefined;
 	activeRun: ActiveRun | undefined;
 	agentControlState: DesktopAgentControlState;
 	builtinRunning: boolean;
@@ -494,6 +498,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_DCP_STATS_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopDcpStats(ctx.params),
+			)
+			.onRequest(PIX_SESSION_USAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopSessionUsage(ctx.params),
 			)
 			.onRequest(PIX_DRAFT_CONFIG_METHOD, parseDesktopDraftConfigRequest, (ctx) =>
 				this.desktopDraftConfig(ctx.params),
@@ -1586,6 +1593,7 @@ export class PixAcpAgent {
 			pi,
 			client,
 			translator,
+			unsubscribeEvents: undefined,
 			activeRun: undefined,
 			agentControlState: "idle",
 			builtinRunning: false,
@@ -1608,10 +1616,11 @@ export class PixAcpAgent {
 		// during RPC startup is delivered instead of being dropped.
 		this.sessions.set(acpSessionId, session);
 		const unsubscribeEvents = pi.onEvent((event) => this.onPiEvent(session, event));
+		session.unsubscribeEvents = unsubscribeEvents;
 		try {
 			await pi.start();
 		} catch (error) {
-			unsubscribeEvents();
+			this.unsubscribeSessionEvents(session);
 			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
 			void pi.stop().catch(() => {});
 			throw new RequestError(
@@ -1620,7 +1629,7 @@ export class PixAcpAgent {
 			);
 		}
 		if (this.disposed) {
-			unsubscribeEvents();
+			this.unsubscribeSessionEvents(session);
 			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
 			await pi.stop().catch(() => {});
 			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
@@ -1843,6 +1852,10 @@ export class PixAcpAgent {
 	private onPiExit(session: AgentSessionState, error: Error): void {
 		if (this.sessions.get(session.acpSessionId) !== session) return;
 		this.sessions.delete(session.acpSessionId);
+		this.pendingDesktopNewSessions.delete(session.acpSessionId);
+		this.desktopDeferredToolResults.delete(session.acpSessionId);
+		this.desktopDeferredImages.delete(session.acpSessionId);
+		this.unsubscribeSessionEvents(session);
 		this.options.logger.warn(`session ${session.acpSessionId}: ${error.message}`);
 		this.rejectActiveRun(session, error);
 		session.pendingDialogIds.clear();
@@ -2085,6 +2098,15 @@ export class PixAcpAgent {
 			sessionId: session.acpSessionId,
 			...(dcpStats ? { dcpStats } : {}),
 		};
+	}
+
+	private async desktopSessionUsage(params: DesktopSessionRequest): Promise<DesktopSessionUsageResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+
+		const treeState = await session.pi.getTree();
+		const usage = await aggregatePixSessionUsage(allTreeEntries(treeState.tree));
+		return { sessionId: session.acpSessionId, usage };
 	}
 
 	private async desktopRouteModel(params: DesktopModelRouteRequest, signal: AbortSignal): Promise<DesktopModelRouteResponse> {
@@ -2855,6 +2877,14 @@ export class PixAcpAgent {
 		await session.pi.stop().catch((error: unknown) => {
 			this.options.logger.warn(`pi stop failed: ${stringifyUnknown(error)}`);
 		});
+		this.unsubscribeSessionEvents(session);
+	}
+
+	private unsubscribeSessionEvents(session: AgentSessionState): void {
+		const unsubscribe = session.unsubscribeEvents;
+		if (!unsubscribe) return;
+		session.unsubscribeEvents = undefined;
+		unsubscribe();
 	}
 
 	private resolveActiveRun(session: AgentSessionState, stopReason: StopReason): boolean {
@@ -3063,6 +3093,10 @@ type SharedDcpStatsModule = {
 	}) => string;
 };
 
+type SharedSessionUsageModule = {
+	aggregateSessionUsage?: (entries: readonly unknown[]) => DesktopSessionUsageReport;
+};
+
 function dcpTokensSavedFromStats(stats: PiSessionStats): number | undefined {
 	const value = stats.pixDcpTokensSaved;
 	return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -3106,6 +3140,23 @@ async function queryPixModelUsage(state: PiSessionState): Promise<ModelUsageRefr
 	} catch {
 		return { refresh: "failed" };
 	}
+}
+
+async function aggregatePixSessionUsage(entries: readonly unknown[]): Promise<DesktopSessionUsageReport> {
+	const moduleUrl = new URL("../../../dist/app/session/session-usage.js", import.meta.url).href;
+	const usage = await import(moduleUrl) as SharedSessionUsageModule;
+	if (!usage.aggregateSessionUsage) throw new Error("Pix session usage module is unavailable");
+	return usage.aggregateSessionUsage(entries);
+}
+
+function allTreeEntries(tree: readonly PiSessionTreeNode[]): readonly Record<string, unknown>[] {
+	const entries: Record<string, unknown>[] = [];
+	const visit = (node: PiSessionTreeNode): void => {
+		entries.push(node.entry);
+		for (const child of node.children) visit(child);
+	};
+	for (const node of tree) visit(node);
+	return entries;
 }
 
 function activeTreeBranchEntries(tree: readonly PiSessionTreeNode[], leafId: string | null): readonly Record<string, unknown>[] {

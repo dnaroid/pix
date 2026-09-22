@@ -84,6 +84,11 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     if (sessionId) await options.runtime.refreshDcpStats(sessionId);
   }
 
+  async function refreshActiveSessionUsage(): Promise<void> {
+    const sessionId = options.state.sessionId;
+    if (sessionId) await options.runtime.refreshSessionUsage(sessionId);
+  }
+
   function clearActivity(sessionId: string): void {
     options.activity.clear(sessionId);
     options.metadata.clear(sessionId);
@@ -104,6 +109,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     handleState,
     refreshActiveModelUsage,
     refreshActiveDcpStats,
+    refreshActiveSessionUsage,
     clearActivity,
     forgetRuntime,
   };

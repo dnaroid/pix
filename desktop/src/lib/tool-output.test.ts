@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   mutationDiffPresentations,
   mutationOutputLines,
-  toolGroupAttention,
   toolLspAttention,
 } from "./tool-output";
 import type { ToolItem } from "./transcript";
@@ -85,7 +84,7 @@ describe("mutation diff presentation", () => {
 });
 
 describe("mutation diagnostics presentation", () => {
-  it("matches TUI LSP attention severity and aggregates groups", () => {
+  it("matches TUI LSP attention severity on concrete tool rows", () => {
     const warning = mutationTool({
       name: "apply_patch",
       content: "Success\n\nLSP diagnostics:\n\n✅ typescript: no diagnostics",
@@ -97,7 +96,6 @@ describe("mutation diagnostics presentation", () => {
 
     expect(toolLspAttention(warning)).toBe("warning");
     expect(toolLspAttention(error)).toBe("error");
-    expect(toolGroupAttention([warning, error])).toBe("error");
   });
 
   it("styles LSP and comment-checker lines while preserving order", () => {

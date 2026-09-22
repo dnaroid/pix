@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RuntimeStatus } from "../lib/acp-client";
+import type { RuntimeStatus, SessionUsageStatus } from "../lib/acp-client";
 import { createSessionRuntimeStatus } from "./session-runtime-status.svelte";
 
 function deferred<T>() {
@@ -15,15 +15,22 @@ function status(tokens: number, dcpStats?: string): RuntimeStatus {
 function setup() {
   const requests: ReturnType<typeof deferred<RuntimeStatus>>[] = [];
   const stats: ReturnType<typeof deferred<{ dcpStats: string }>>[] = [];
+  const usage: ReturnType<typeof deferred<SessionUsageStatus>>[] = [];
   const client = {
     runtimeStatus() { const request = deferred<RuntimeStatus>(); requests.push(request); return request.promise; },
     dcpStats() { const request = deferred<{ dcpStats: string }>(); stats.push(request); return request.promise; },
+    sessionUsage() { const request = deferred<SessionUsageStatus>(); usage.push(request); return request.promise; },
   };
   const store = createSessionRuntimeStatus({
     client: () => client as unknown as NonNullable<ReturnType<Parameters<typeof createSessionRuntimeStatus>[0]["client"]>>,
     isReady: () => true,
   });
-  return { store, requests, stats };
+  return { store, requests, stats, usage };
+}
+
+function usageStatus(cost: number): SessionUsageStatus {
+  const totals = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost };
+  return { sessionId: "a", usage: { totals, providers: [], unattributed: { ...totals, cost: 0, totalTokens: 0, input: 0, output: 0 } } };
 }
 
 describe("runtime status lifecycle", () => {
@@ -80,6 +87,21 @@ describe("runtime status lifecycle", () => {
       await current;
       expect(store.statuses.get("a")?.dcpStats).toBe("current");
       expect(store.dcpStatsRefreshing.has("a")).toBe(false);
+    });
+
+    it(`${invalidate} rejects stale session-usage completion and its cleanup`, async () => {
+      const { store, usage } = setup();
+      const old = store.refreshSessionUsage("a");
+      if (invalidate === "forget") store.forget("a"); else store.reset();
+      const current = store.refreshSessionUsage("a");
+      usage[0]!.resolve(usageStatus(9));
+      await old;
+      expect(store.sessionUsageBySession.has("a")).toBe(false);
+      expect(store.sessionUsageRefreshing.has("a")).toBe(true);
+      usage[1]!.resolve(usageStatus(1));
+      await current;
+      expect(store.sessionUsageBySession.get("a")?.totals.cost).toBe(1);
+      expect(store.sessionUsageRefreshing.has("a")).toBe(false);
     });
   }
 

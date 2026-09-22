@@ -84,10 +84,10 @@
 </script>
 
 <nav class="flex min-w-0 flex-1 items-end overflow-hidden" aria-label="Workbench tabs">
-  <div class="flex min-w-0 max-w-full flex-[0_1_auto] items-end">
+  <div class="flex min-w-0 w-fit flex-[0_1_auto] items-end">
     <div
       bind:this={tablist}
-      class="flex w-fit min-w-0 max-w-[calc(100%-32px)] items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      class="flex min-w-0 w-max flex-[0_1_auto] items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label="Open workbench tabs"
       aria-orientation="horizontal"
@@ -96,7 +96,7 @@
         {@const active = tab.id === activeId}
         <div
           class={[
-            "group relative -mb-px h-8 min-w-[120px] max-w-[240px] flex-[0_1_220px] overflow-hidden rounded-t-sm border transition-colors max-[760px]:basis-[200px]",
+            "group relative -mb-px h-8 min-w-[120px] w-[220px] flex-[0_1_220px] overflow-hidden rounded-t-sm border transition-colors max-[760px]:w-[200px] max-[760px]:basis-[200px]",
             active
               ? "border-border border-b-background bg-background"
               : "border-transparent hover:bg-chrome-hover",

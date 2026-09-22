@@ -36,6 +36,7 @@ import {
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_RESUME_PATH_METHOD,
 	PIX_RUNTIME_STATUS_METHOD,
+	PIX_SESSION_USAGE_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
 	PIX_SESSION_IMAGE_METHOD,
 	PIX_TOOL_RESULT_METHOD,
@@ -44,6 +45,7 @@ import {
 	type DesktopDcpStatsResponse,
 	type DesktopDraftConfigResponse,
 	type DesktopRuntimeStatusResponse,
+	type DesktopSessionUsageResponse,
 	type DesktopQueuedUserMessage,
 } from "../src/acp/desktop-commands.js";
 import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
@@ -162,6 +164,10 @@ class FakePiClient implements PiClient {
 	state: PiSessionState;
 	private listeners: PiEventListener[] = [];
 	private exitListeners: ((error: Error) => void)[] = [];
+
+	get eventListenerCount(): number {
+		return this.listeners.length;
+	}
 
 	constructor(state: Partial<PiSessionState> = {}) {
 		const n = ++fakeSessionCounter;
@@ -1551,6 +1557,67 @@ test("Pix Desktop loads DCP statistics only through the on-demand DCP request", 
 	});
 });
 
+test("Pix Desktop loads whole-session spend on demand without provider quota I/O", async () => {
+	let quotaQueries = 0;
+	const { adapter, clients } = createTestAdapter({
+		queryModelUsage: async () => {
+			quotaQueries += 1;
+			return { refresh: "unavailable" };
+		},
+	});
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-session-usage").start();
+		const pi = clients[0]!;
+		pi.treeState = {
+			leafId: "agent-usage",
+			tree: [
+				{
+					entry: {
+						type: "message", id: "assistant", parentId: null, timestamp: new Date().toISOString(),
+						message: {
+							role: "assistant", provider: "openai-codex", model: "gpt-5.6-sol",
+							content: [], stopReason: "stop", timestamp: Date.now(),
+							usage: {
+								input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150,
+								cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0, total: 0.033 },
+							},
+						},
+					},
+					children: [
+						{
+							entry: {
+								type: "usage", id: "agent-usage", parentId: "assistant", timestamp: new Date().toISOString(),
+								kind: "async-subagent", provider: "anthropic", model: "claude-sonnet",
+								usage: {
+									input: 200, output: 40, cacheRead: 10, cacheWrite: 0, totalTokens: 250,
+									cost: { input: 0.02, output: 0.04, cacheRead: 0.005, cacheWrite: 0, total: 0.065 },
+								},
+							},
+							children: [],
+						},
+					],
+				},
+			],
+		};
+
+		const response = await cx.request(PIX_SESSION_USAGE_METHOD, {
+			sessionId: session.sessionId,
+		}) as DesktopSessionUsageResponse;
+
+		assert.equal(response.sessionId, session.sessionId);
+		assert.equal(response.usage.totals.totalTokens, 400);
+		assert.ok(Math.abs(response.usage.totals.cost - 0.098) < 1e-9);
+		assert.equal(response.usage.providers[0]?.provider, "anthropic");
+		assert.equal(response.usage.providers[0]?.models[0]?.model, "claude-sonnet");
+		assert.equal(response.usage.providers[0]?.models[0]?.totals.totalTokens, 250);
+		assert.equal(response.usage.providers[1]?.provider, "openai-codex");
+		assert.equal(response.usage.providers[1]?.models[0]?.model, "gpt-5.6-sol");
+		assert.equal(response.usage.providers[1]?.models[0]?.totals.totalTokens, 150);
+		assert.equal(pi.getTreeCalls, 1);
+		assert.equal(quotaQueries, 0);
+	});
+});
+
 test("Pix Desktop deduplicates concurrent quota refreshes for one session model route", async () => {
 	let release!: () => void;
 	const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -1647,10 +1714,19 @@ test("session/prompt fails fast when the pi process dies mid-run", async () => {
 		const session = await cx.buildSession("/tmp").start();
 		const pending = session.prompt("hello");
 		const pi = clients[0]!;
+		const deferredCaches = adapter as unknown as {
+			desktopDeferredToolResults: Map<string, Map<string, unknown>>;
+			desktopDeferredImages: Map<string, Map<string, unknown>>;
+		};
+		deferredCaches.desktopDeferredToolResults.set(session.sessionId, new Map([["tool", {}]]));
+		deferredCaches.desktopDeferredImages.set(session.sessionId, new Map([["image", {}]]));
 		await waitFor(() => pi.promptCalls.length === 1);
 		pi.emit({ type: "agent_start" });
 		// No agent_settled will ever arrive; only the exit watch can finish it.
 		pi.emitExit(new Error("pi process exited unexpectedly (signal SIGKILL)"));
+		assert.equal(pi.eventListenerCount, 0);
+		assert.equal(deferredCaches.desktopDeferredToolResults.has(session.sessionId), false);
+		assert.equal(deferredCaches.desktopDeferredImages.has(session.sessionId), false);
 		return pending.then(
 			() => "resolved",
 			(error: unknown) => (error as Error).message,
@@ -1838,6 +1914,7 @@ test("session/close stops the pi client and unregisters the session", async () =
 		await cx.request("session/close", { sessionId: session.sessionId });
 		assert.equal(adapter.sessionCount, 0);
 		assert.equal(clients[0].started, false);
+		assert.equal(clients[0].eventListenerCount, 0);
 	});
 });
 

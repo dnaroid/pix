@@ -1,15 +1,22 @@
 <script lang="ts">
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import type { ComponentProps } from "svelte";
   import SessionSelector from "./SessionSelector.svelte";
   import WorkbenchTabs from "./WorkbenchTabs.svelte";
 
   let {
     isMacOS,
+    restartAvailable = false,
+    restartPending = false,
+    onRestart,
     project,
     workbench,
     selector,
   }: {
     isMacOS: boolean;
+    restartAvailable?: boolean;
+    restartPending?: boolean;
+    onRestart?: () => void;
     project: {
       path: string;
       name: string;
@@ -49,6 +56,21 @@
       <SessionSelector {...selector} />
     {/if}
   </div>
+
+  {#if restartAvailable}
+    <div class="flex shrink-0 items-center px-2">
+      <button
+        type="button"
+        class="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait disabled:opacity-60"
+        title={restartPending ? "Restarting Desktop…" : "Restart Desktop to use the newly built version"}
+        aria-label={restartPending ? "Restarting Desktop" : "Restart Desktop to use the newly built version"}
+        disabled={restartPending}
+        onclick={onRestart}
+      >
+        <RotateCw class={["h-4 w-4", restartPending ? "animate-spin" : ""]} aria-hidden="true" />
+      </button>
+    </div>
+  {/if}
 </header>
 
 <style>

@@ -50,6 +50,27 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).toContain("if (!closed) return;");
   });
 
+  it("shrink-wraps the tablist and New Conversation while allowing only the tablist to shrink", () => {
+    const tablistStart = source.indexOf('role="tablist"');
+    const newConversation = source.lastIndexOf("data-session-new");
+    const dragRegion = source.indexOf("data-tauri-drag-region");
+
+    expect(source).toContain("min-w-0 w-fit flex-[0_1_auto]");
+    expect(source).toContain("min-w-0 w-max flex-[0_1_auto]");
+    expect(source).not.toContain("flex-[1_1_auto]");
+    expect(source).not.toContain("max-w-[calc(");
+    expect(source).toContain("w-6 shrink-0");
+    expect(tablistStart).toBeGreaterThanOrEqual(0);
+    expect(newConversation).toBeGreaterThan(tablistStart);
+    expect(dragRegion).toBeGreaterThan(newConversation);
+  });
+
+  it("matches every tab's intrinsic preferred width to its flex basis", () => {
+    expect(source).toContain("min-w-[120px] w-[220px] flex-[0_1_220px]");
+    expect(source).toContain("max-[760px]:w-[200px] max-[760px]:basis-[200px]");
+    expect(source).not.toContain("max-w-[240px]");
+  });
+
   it("keeps session-only lifecycle semantics while Preview/Diff are ordinary UI tabs", () => {
     expect(workbenchControllerSource).toContain('if (tab.kind === "session")');
     expect(workbenchControllerSource).toContain("options.closeSessionTab(tab.sessionId, preferredNextSessionId)");

@@ -4,7 +4,7 @@
   import Command from "@lucide/svelte/icons/command";
   import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
-  import type { RuntimeStatus } from "../lib/acp-client";
+  import type { RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
   import {
@@ -30,7 +30,9 @@
     canConfigure,
     modelThinkingOpen,
     runtimeStatus,
-    modelUsageRefreshing,
+    sessionUsage,
+    sessionUsageRefreshing,
+    sessionUsageAvailable,
     dcpStatsRefreshing,
     dcpCompressionRunning,
     dcpCompressionAvailable,
@@ -45,7 +47,7 @@
     commandPaletteShortcut,
     onSetConfig,
     onOpenModelThinking,
-    onRefreshModelUsage,
+    onOpenSessionUsage,
     onOpenDcpStats,
     onCompressDcpContext,
     onNavigateMessages,
@@ -64,7 +66,9 @@
     canConfigure: boolean;
     modelThinkingOpen: boolean;
     runtimeStatus?: RuntimeStatus;
-    modelUsageRefreshing: boolean;
+    sessionUsage?: SessionUsageReport;
+    sessionUsageRefreshing: boolean;
+    sessionUsageAvailable: boolean;
     dcpStatsRefreshing: boolean;
     dcpCompressionRunning: boolean;
     dcpCompressionAvailable: boolean;
@@ -79,7 +83,7 @@
     commandPaletteShortcut?: string;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
-    onRefreshModelUsage: () => void;
+    onOpenSessionUsage: () => void;
     onOpenDcpStats: () => void;
     onCompressDcpContext: () => void;
     onNavigateMessages: () => void;
@@ -179,12 +183,14 @@
       {workspaceBranch}
       {workspaceHue}
       {workspaceColor}
-      refreshingModelUsage={modelUsageRefreshing}
+      {sessionUsage}
+      loadingSessionUsage={sessionUsageRefreshing}
+      {sessionUsageAvailable}
       loadingDcpStats={dcpStatsRefreshing}
       compressingContext={dcpCompressionRunning}
       compressionAvailable={dcpCompressionAvailable}
       {canCompressContext}
-      onRefreshModelUsage={onRefreshModelUsage}
+      onOpenSessionUsage={onOpenSessionUsage}
       {onOpenDcpStats}
       onCompressContext={onCompressDcpContext}
     />

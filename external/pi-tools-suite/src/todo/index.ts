@@ -8,6 +8,7 @@ import { replayFromBranch } from "./state/replay.js";
 import { ACTIVE_STATUSES, isTaskBlocked, selectVisibleTasks } from "./state/selectors.js";
 import { applyTaskMutation } from "./state/state-reducer.js";
 import { getState, replaceState } from "./state/store.js";
+import { clearTodoNativeWidget, updateTodoNativeWidget } from "./native-tui.js";
 import {
 	activateTodoStateScope,
 	appendTodoStateSnapshot,
@@ -276,6 +277,7 @@ export default function (pi: ExtensionAPI) {
 			},
 			afterCommit: async (state, ctx, info) => {
 				if (todoThinkingEnabled) applyTodoThinkingAfterCommit(state, ctx, info);
+				updateTodoNativeWidget(ctx, info.committedState);
 				try {
 					const sync = syncPersistedPlan(ctx.cwd, info.committedState);
 					if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
@@ -459,6 +461,7 @@ export default function (pi: ExtensionAPI) {
 		replaceState(autoClear.state);
 		appendTodoStateSnapshot(pi as any, action, params as Record<string, unknown>);
 		publishTodoState(pi as any, ctx, action, params as Record<string, unknown>);
+		updateTodoNativeWidget(ctx, autoClear.state);
 		if (todoThinkingEnabled) applyTodoThinkingAfterCommit(result.state, ctx, { action, params });
 		try {
 			const sync = syncPersistedPlan(ctx.cwd, autoClear.state);
@@ -533,6 +536,7 @@ export default function (pi: ExtensionAPI) {
 		replaceState(loaded.state);
 		if (todoThinkingEnabled) syncTodoThinkingBaseline(loaded.state, ctx);
 		publishTodoState(pi as any, ctx);
+		updateTodoNativeWidget(ctx, loaded.state);
 		if (persisted && loaded.cleared) syncPersistedPlan(ctx.cwd, loaded.state);
 		lastNudgedSignature = undefined;
 		if (persisted) {
@@ -550,6 +554,7 @@ export default function (pi: ExtensionAPI) {
 		replaceState(state);
 		if (todoThinkingEnabled) syncTodoThinkingBaseline(state, ctx);
 		publishTodoState(pi as any, ctx);
+		updateTodoNativeWidget(ctx, state);
 		lastNudgedSignature = undefined;
 	});
 
@@ -559,11 +564,13 @@ export default function (pi: ExtensionAPI) {
 		replaceState(state);
 		if (todoThinkingEnabled) syncTodoThinkingBaseline(state, ctx);
 		publishTodoState(pi as any, ctx);
+		updateTodoNativeWidget(ctx, state);
 		lastNudgedSignature = undefined;
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		clearNudgeTimer();
+		clearTodoNativeWidget(ctx);
 	});
 
 	pi.on("model_select", async (event) => {

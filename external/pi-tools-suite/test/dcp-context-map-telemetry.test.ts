@@ -99,10 +99,14 @@ describe("cached DCP projection token map", () => {
     };
     const getter = (globalThis as any)[Symbol.for("pix.dcp.runtime-stats")];
     await emit("session_start");
+    const sessionSymbol = Symbol.for("pix.dcp.session-runtime-stats");
+    const sessionGetter = ctx.sessionManager[sessionSymbol];
+    expect(typeof sessionGetter).toBe("function");
     const messages = [{ role: "user", content: "hello", id: "e1", timestamp: 1 }];
     await emit("context", { messages });
     const first = getter().contextMap;
     expect(first?.tokenEstimates.retained).toBeGreaterThan(0);
+    expect(sessionGetter().contextMap).toBe(first);
     const before = reads;
     expect(getter().contextMap).toBe(first);
     expect(reads).toBe(before);
@@ -125,5 +129,6 @@ describe("cached DCP projection token map", () => {
     release([]);
     await shuttingDown.catch(() => {});
     expect(getter().contextMap).toBeUndefined();
+    expect(ctx.sessionManager[sessionSymbol]).toBeUndefined();
   });
 });

@@ -54,12 +54,6 @@ export function toolLspAttention(tool: Pick<ToolItem, "content" | "kind" | "name
   return tool.content.split("\n").some((line) => lspDiagnosticSeverity(line) === "error") ? "error" : "warning";
 }
 
-export function toolGroupAttention(tools: readonly ToolItem[]): ToolAttention | undefined {
-  const attentions = tools.map(toolLspAttention);
-  if (attentions.includes("error")) return "error";
-  return attentions.includes("warning") ? "warning" : undefined;
-}
-
 export function mutationOutputLines(content: string): ToolOutputLine[] {
   let inLspSection = false;
   let inCommentChecker = false;

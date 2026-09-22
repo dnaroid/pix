@@ -10,15 +10,23 @@
   let {
     status,
     attention,
+    lifecycleOnly = false,
     class: className = "h-3 w-3",
   }: {
     status: ToolCallStatus;
     attention?: ToolAttention;
+    lifecycleOnly?: boolean;
     class?: string;
   } = $props();
 </script>
 
-{#if status === "failed"}
+{#if lifecycleOnly && status === "in_progress"}
+  <LoaderCircle class={`${className} animate-spin text-primary motion-reduce:animate-none`} aria-hidden="true" />
+{:else if lifecycleOnly && status === "pending"}
+  <Circle class={`${className} text-muted-foreground`} aria-hidden="true" />
+{:else if lifecycleOnly}
+  <CircleCheck class={`${className} text-muted-foreground`} aria-hidden="true" />
+{:else if status === "failed"}
   <CircleX class={`${className} text-destructive`} aria-hidden="true" />
 {:else if status === "in_progress"}
   <LoaderCircle class={`${className} animate-spin text-primary motion-reduce:animate-none`} aria-hidden="true" />

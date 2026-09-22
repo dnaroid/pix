@@ -128,26 +128,35 @@ function renderDialogToastOverlay(
 
 	const maxDialogWidth = Math.max(1, Math.min(width - 4, 72));
 	const closeLabel = `[${APP_ICONS.close}]`;
+	const actionLabel = compactToastActionLabel(state);
 	const wrappedLines = dialogMessageLines(state.message, Math.max(1, maxDialogWidth - 4));
 	const requiredWidth = Math.max(
 		16,
 		stringDisplayWidth(closeLabel) + 4,
+		...(actionLabel ? [stringDisplayWidth(actionLabel) + 4] : []),
 		...wrappedLines.map((line) => stringDisplayWidth(line) + 4),
 	);
 	const dialogWidth = Math.min(maxDialogWidth, Math.max(16, requiredWidth));
 	const bodyWidth = Math.max(1, dialogWidth - 4);
 	const bodyLines = dialogMessageLines(state.message, bodyWidth);
-	const bodyRows = Math.max(0, maxRows - 2);
+	const includeAction = actionLabel !== undefined && maxRows >= 4;
+	const bodyRows = Math.max(0, maxRows - 2 - (includeAction ? 1 : 0));
 	const visibleBodyLines = bodyLines.slice(0, bodyRows);
 	const includeBottom = maxRows > 1;
+	const innerWidth = Math.max(0, dialogWidth - 4);
+	const renderedActionLabel = actionLabel ? padOrTrimPlain(actionLabel, innerWidth).trimEnd() : "";
+	const actionWidth = stringDisplayWidth(renderedActionLabel);
+	const actionLeftPadding = includeAction ? Math.max(0, innerWidth - actionWidth) : 0;
+	const actionContent = includeAction ? `${" ".repeat(actionLeftPadding)}${renderedActionLabel}` : "";
 	const dialogRows = [
-		toastRow(dialogTopLine(closeLabel, dialogWidth)),
-		...visibleBodyLines.map((line) => toastRow(`│ ${padOrTrimPlain(line, bodyWidth)} │`, `│ ${padOrTrimPlain(stripToastAnsi(line), bodyWidth)} │`)),
-		...(includeBottom ? [toastRow(`╰${"─".repeat(Math.max(0, dialogWidth - 2))}╯`)] : []),
+		{ ...toastRow(dialogTopLine(closeLabel, dialogWidth)), action: "close" as const },
+		...visibleBodyLines.map((line) => ({ ...toastRow(`│ ${padOrTrimPlain(line, bodyWidth)} │`, `│ ${padOrTrimPlain(stripToastAnsi(line), bodyWidth)} │`), action: "body" as const })),
+		...(includeAction ? [{ ...toastRow(`│ ${padOrTrimPlain(actionContent, innerWidth)} │`), action: "action" as const }] : []),
+		...(includeBottom ? [{ ...toastRow(`╰${"─".repeat(Math.max(0, dialogWidth - 2))}╯`), action: "body" as const }] : []),
 	].slice(0, maxRows);
 	const leftWidth = Math.max(0, width - dialogWidth - 2);
 	const column = leftWidth + 1;
-	const style = toastStyle(state, theme);
+	const style = dialogToastStyle(state, theme);
 	const closeStartColumn = column + 1 + dialogTopCloseOffset(closeLabel, dialogWidth);
 	const closeEndColumn = closeStartColumn + stringDisplayWidth(closeLabel);
 
@@ -157,16 +166,50 @@ function renderDialogToastOverlay(
 		column,
 		text: row.text,
 		output: colorToastLine(row.output, dialogWidth, { ...style, bold: true }),
-		target: index === 0
+		target: row.action === "close"
 			? { kind: "toast", id: state.id, action: "close", startColumn: closeStartColumn, endColumn: closeEndColumn }
-			: { kind: "toast", id: state.id, action: "body", startColumn: column, endColumn: column + dialogWidth },
+			: row.action === "action"
+				? { kind: "toast", id: state.id, action: "action", startColumn: column + 2 + actionLeftPadding, endColumn: column + 2 + actionLeftPadding + actionWidth }
+				: { kind: "toast", id: state.id, action: "body", startColumn: column, endColumn: column + dialogWidth },
 	}));
 }
 
 function dialogMessageLines(message: string, maxWidth: number): string[] {
 	const safeMaxWidth = Math.max(1, maxWidth);
-	const lines = sanitizeToastText(message).split("\n").flatMap((line) => wrapDisplayLine(line, safeMaxWidth));
+	const lines = sanitizeToastText(message).split("\n").flatMap((line) => wrapDialogAnsiLine(line, safeMaxWidth));
 	return lines.length > 0 ? lines : [""];
+}
+
+/**
+ * `wrapDisplayLine()` correctly ignores SGR sequences for width accounting but
+ * intentionally treats them as zero-width bytes. If a colored span crosses a
+ * wrap boundary, the terminal would therefore keep that style on the first
+ * row's frame/padding while the continuation row loses it. Dialog rows need
+ * each physical row to be self-contained: close the active message style before
+ * the frame and re-open it at the start of the continuation.
+ */
+function wrapDialogAnsiLine(line: string, width: number): string[] {
+	const chunks = wrapDisplayLine(line, width);
+	if (chunks.length <= 1) return chunks;
+
+	let activeSgr = "";
+	return chunks.map((chunk) => {
+		const rendered = `${activeSgr}${chunk}`;
+		activeSgr = activeSgrAfter(chunk, activeSgr);
+		return activeSgr ? `${rendered}${ANSI_RESET}` : rendered;
+	});
+}
+
+function activeSgrAfter(text: string, initial: string): string {
+	let active = initial;
+	for (const match of text.matchAll(/\x1b\[([\d;:]*)m/gu)) {
+		const sequence = match[0];
+		const params = match[1] ?? "";
+		const codes = params.replaceAll(":", ";").split(";").filter(Boolean);
+		if (codes.length === 0 || (codes.length === 1 && codes[0] === "0")) active = "";
+		else active = sequence;
+	}
+	return active;
 }
 
 function toastRow(output: string, text = output): { output: string; text: string } {
@@ -236,4 +279,14 @@ function toastKindStyle(kind: ToastKind, theme: Theme): { foreground: string; ba
 function toastStyle(state: AppToastEntry, theme: Theme): { foreground: string; background: string } {
 	const style = toastKindStyle(state.kind, theme);
 	return hasToastAnsiColor(state.message) ? { ...style, background: "#000000" } : style;
+}
+
+function dialogToastStyle(state: AppToastEntry, theme: Theme): { foreground: string; background: string } {
+	if (hasToastAnsiColor(state.message)) {
+		return {
+			foreground: theme.colors.popupForeground,
+			background: theme.colors.popupBackground,
+		};
+	}
+	return toastKindStyle(state.kind, theme);
 }

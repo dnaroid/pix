@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -37,6 +37,7 @@ import type { LiveAgent, SubagentsLiveStateEvent } from "./types.js";
 import type { AgentState } from "./core/types.js";
 import { publishStartupSection } from "../startup-section.js";
 import { publishRpcSessionState } from "../lib/rpc-session-state.js";
+import { clearSubagentsNativeWidget, updateSubagentsNativeWidget } from "./native-tui.js";
 
 function isTerminalAgentStatus(status: AgentState["status"]): boolean {
 	return status === "done" || status === "failed" || status === "stopped";
@@ -139,7 +140,7 @@ export default function (pi: ExtensionAPI) {
 	const subagentOverlay = new SubagentOverlay(liveAgents);
 	let sawAutoUltraworkCandidate = false;
 	let currentSessionFile: string | undefined;
-	let currentSessionStateContext: Parameters<typeof publishRpcSessionState>[0];
+	let currentSessionStateContext: ExtensionContext | undefined;
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
 	publishSubagentPresetsStartupSection();
 
@@ -156,6 +157,7 @@ export default function (pi: ExtensionAPI) {
 			pi.events?.emit?.(SUBAGENTS_LIVE_COUNT_EVENT, { count: liveState.count });
 			pi.events?.emit?.(SUBAGENTS_LIVE_STATE_EVENT, liveState);
 			publishRpcSessionState(currentSessionStateContext, SUBAGENTS_LIVE_STATE_EVENT, liveState);
+			updateSubagentsNativeWidget(currentSessionStateContext, liveState);
 			updateCompletionWatcher();
 		} catch (error) {
 			ignoreStaleExtensionContextError(error);
@@ -303,6 +305,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (event, ctx) => {
 		try {
+			clearSubagentsNativeWidget(ctx);
 			subagentOverlay.dispose();
 			if (completionWatchTimer) {
 				clearInterval(completionWatchTimer);

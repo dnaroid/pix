@@ -152,7 +152,16 @@ try {
 
   const inactiveTimerCount = await page.evaluate(() => window.activitySmoke.timerCount);
   await page.evaluate(() => window.activitySmoke.startLive());
-  assert.equal(await page.locator('[data-activity-name="thinking"]').getAttribute("data-activity-active"), "true");
+  const activeThinkingHeader = page.locator('[data-activity-name="thinking"]');
+  assert.equal(await activeThinkingHeader.getAttribute("data-activity-active"), "true");
+  await outerSummary.click();
+  const childThinking = page.locator("[data-activity-thought-label]");
+  await page.waitForFunction(() => document.querySelector("[data-activity-thought-label]") !== null);
+  assert.equal(await childThinking.count(), 1);
+  const headerThinkingColor = await activeThinkingHeader.evaluate((node) => getComputedStyle(node).color);
+  const childThinkingColor = await childThinking.evaluate((node) => getComputedStyle(node).color);
+  assert.notEqual(childThinkingColor, headerThinkingColor, "expanded thinking row must not duplicate active header emphasis");
+  await outerSummary.click();
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "<0.1s");
   assert.equal(await page.evaluate(() => window.activitySmoke.timerCount), inactiveTimerCount + 1, "one pane clock serves live groups");
   await page.evaluate(() => window.activitySmoke.advanceClock(1_300));
@@ -192,7 +201,7 @@ try {
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 2);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: "passed", scenarios: ["lazy DOM", "per-tool hydration", "duplicate toggles",
-    "late result after collapse", "session replacement", "live highlights and duration", "duration freeze and timer teardown",
+    "late result after collapse", "session replacement", "header-only live highlights and duration", "duration freeze and timer teardown",
     "keyboard disclosure", "large collapsed history"], stress }, null, 2));
 } finally {
   await browser?.close();

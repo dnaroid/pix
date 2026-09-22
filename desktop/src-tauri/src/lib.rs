@@ -76,11 +76,100 @@ const PIX_DESKTOP_CONFIG_SCHEMA_URL: &str =
     "https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json";
 const PI_TOOLS_SUITE_SCHEMA_URL: &str =
     "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json";
+const PIX_DESKTOP_WATCH_STATE_ENV: &str = "PIX_DESKTOP_WATCH_STATE";
+const MAX_DESKTOP_WATCH_STATE_BYTES: u64 = 4 * 1024;
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static WORKSPACE_CONFIG_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DesktopWatchState {
+    version: u8,
+    target: PathBuf,
+    stale: bool,
+}
+
+/// Read the bounded, atomically replaced state file supplied only by `watch:all` debug launches.
+fn desktop_watch_state() -> Result<Option<DesktopWatchState>, String> {
+    if !cfg!(debug_assertions) {
+        return Ok(None);
+    }
+    let Some(path) = desktop_watch_state_path() else {
+        return Ok(None);
+    };
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("could not read desktop watch state: {error}"))?;
+    if !metadata.is_file() || metadata.len() > MAX_DESKTOP_WATCH_STATE_BYTES {
+        return Err("desktop watch state is not a bounded regular file".to_string());
+    }
+    let bytes =
+        fs::read(path).map_err(|error| format!("could not read desktop watch state: {error}"))?;
+    let state = parse_desktop_watch_state(&bytes)?;
+    Ok(Some(state))
+}
+
+fn parse_desktop_watch_state(bytes: &[u8]) -> Result<DesktopWatchState, String> {
+    let state: DesktopWatchState = serde_json::from_slice(bytes)
+        .map_err(|error| format!("invalid desktop watch state: {error}"))?;
+    if state.version != 1 || !state.target.is_absolute() {
+        return Err("invalid desktop watch state target".to_string());
+    }
+    Ok(state)
+}
+
+fn desktop_watch_state_path() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    env::var_os(PIX_DESKTOP_WATCH_STATE_ENV).map(PathBuf::from)
+}
+
+fn desktop_watch_restart_target() -> Result<Option<PathBuf>, String> {
+    let Some(state) = desktop_watch_state()? else {
+        return Ok(None);
+    };
+    if !state.stale {
+        return Ok(None);
+    }
+    let target = fs::canonicalize(&state.target)
+        .map_err(|error| format!("desktop restart target is unavailable: {error}"))?;
+    if !fs::metadata(&target)
+        .map_err(|error| format!("desktop restart target is unavailable: {error}"))?
+        .is_file()
+    {
+        return Err("desktop restart target is not an executable file".to_string());
+    }
+    let current = env::current_exe()
+        .and_then(fs::canonicalize)
+        .map_err(|error| format!("could not identify the running desktop: {error}"))?;
+    Ok((target != current).then_some(target))
+}
+
+fn desktop_watch_restart_request_path() -> Option<PathBuf> {
+    desktop_watch_state_path().map(|path| path.with_extension("restart"))
+}
+
+#[tauri::command]
+fn desktop_watch_restart_available() -> Result<bool, String> {
+    Ok(desktop_watch_restart_target()?.is_some())
+}
+
+#[tauri::command]
+fn desktop_watch_restart(app: AppHandle) -> Result<(), String> {
+    if desktop_watch_restart_target()?.is_none() {
+        return Ok(());
+    }
+    let Some(request_path) = desktop_watch_restart_request_path() else {
+        return Ok(());
+    };
+    fs::write(&request_path, b"restart\n")
+        .map_err(|error| format!("could not request desktop restart: {error}"))?;
+    app.exit(0);
+    Ok(())
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -8016,6 +8105,8 @@ pub fn run() {
             desktop_bootstrap::desktop_bootstrap_import_opencode,
             desktop_bootstrap::desktop_bootstrap_import_codex_api_key,
             desktop_bootstrap::desktop_bootstrap_install_idx,
+            desktop_watch_restart_available,
+            desktop_watch_restart,
             deepgram_token,
             acp_start,
             acp_send,
@@ -8138,6 +8229,35 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_only_versioned_absolute_desktop_watch_targets() {
+        let target = env::temp_dir().join("pix-desktop");
+        let state = parse_desktop_watch_state(
+            &serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "target": target,
+                "stale": true,
+            }))
+            .expect("serialize watch state"),
+        )
+        .expect("valid watch state");
+        assert!(state.stale);
+        assert!(
+            parse_desktop_watch_state(br#"{"version":1,"target":"relative","stale":true}"#)
+                .is_err()
+        );
+        assert!(parse_desktop_watch_state(
+            &serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "target": env::temp_dir().join("pix"),
+                "stale": false,
+                "extra": 1,
+            }))
+            .expect("serialize invalid watch state")
+        )
+        .is_err());
+    }
 
     #[test]
     fn serializes_idx_operation_events_for_frontend_payloads() {

@@ -5,4 +5,5 @@ export interface DcpStatisticsInput {
   historyStatus?: "full" | "unavailable";
 }
 export function collectDcpStatistics(input: DcpStatisticsInput): any;
+export function collectDcpStatisticsAsync(input: DcpStatisticsInput, options?: { chunkSize?: number }): Promise<any>;
 export function formatDcpStatistics(input: DcpStatisticsInput): string;

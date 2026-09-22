@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { constants as fsConstants, existsSync, watch } from "node:fs";
-import { chmod, copyFile, cp, mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,38 @@ const RESTART_DEBOUNCE_MS = 750;
 const STARTUP_GRACE_MS = 800;
 const COMMAND_FAILURE_TAIL_BYTES = 16 * 1024;
 const NATIVE_ICON_PATH = "desktop/src-tauri/icons";
+const DESKTOP_WATCH_STATE_FILE = "desktop-watch-state.json";
+const DESKTOP_RESTART_REQUEST_FILE = "desktop-watch-state.restart";
+const DESKTOP_WATCH_STATE_MAX_BYTES = 4 * 1024;
+const DESKTOP_RESTART_POLL_MS = 100;
+
+/** A deliberately small, atomically-published handoff from watch:all to a running debug Desktop. */
+export function desktopWatchState(target, stale) {
+	const state = JSON.stringify({ version: 1, target, stale: Boolean(stale) });
+	if (Buffer.byteLength(state) > DESKTOP_WATCH_STATE_MAX_BYTES) throw new Error("desktop watch state exceeds its size limit");
+	return `${state}\n`;
+}
+
+export async function writeDesktopWatchState(path, target, stale) {
+	const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+	await writeFile(temporaryPath, desktopWatchState(target, stale), { mode: 0o600 });
+	await rename(temporaryPath, path);
+}
+
+export function parseDesktopWatchState(value) {
+	if (!value || typeof value !== "object") return undefined;
+	const { version, target, stale } = value;
+	if (version !== 1 || typeof target !== "string" || typeof stale !== "boolean") return undefined;
+	return { target, stale };
+}
+
+async function readDesktopWatchState(path) {
+	try {
+		return parseDesktopWatchState(JSON.parse(await readFile(path, "utf8")));
+	} catch {
+		return undefined;
+	}
+}
 
 export const PARTS = Object.freeze({
 	SUITE: "suite",
@@ -157,7 +189,9 @@ export function createBuildPlan(changedParts, options = {}) {
 	const steps = PART_ORDER.filter((part) => parts.has(part));
 	return {
 		steps,
-		restartDesktop: steps.some((part) => part !== PARTS.SUITE),
+		// Only a native build produces a new launchable Desktop artifact. Pix/ACP-only work
+		// remains available to a subsequently rebuilt Desktop without disturbing this one.
+		restartDesktop: steps.includes(PARTS.NATIVE),
 	};
 }
 
@@ -394,7 +428,7 @@ async function stopDesktopAppProcess(appPid) {
 	}
 }
 
-class WatchAllSupervisor {
+export class WatchAllSupervisor {
 	constructor() {
 		this.watchers = [];
 		this.pendingParts = new Set();
@@ -404,6 +438,8 @@ class WatchAllSupervisor {
 		this.initialBuild = true;
 		this.hasNativeBuild = false;
 		this.restartPending = false;
+		this.desktopRestarting = false;
+		this.desktopRevision = 0;
 		this.buildTimer = undefined;
 		this.restartTimer = undefined;
 		this.activeCommand = undefined;
@@ -416,12 +452,19 @@ class WatchAllSupervisor {
 		this.executableSequence = 0;
 		this.watchedPathStamps = new Map();
 		this.lastBuildFailure = undefined;
+		this.desktopWatchStatePath = undefined;
+		this.desktopRestartRequestPath = undefined;
+		this.restartRequestTimer = undefined;
+		this.restartRequestPolling = false;
 	}
 
 	async start() {
 		// `ps` reports macOS temporary paths through their canonical `/private/var/...` spelling.
 		// Canonicalize our copy root too so exact executable-path PID discovery remains reliable.
 		this.tempDirectory = await realpath(await mkdtemp(join(tmpdir(), "pix-watch-all-")));
+		this.desktopWatchStatePath = join(this.tempDirectory, DESKTOP_WATCH_STATE_FILE);
+		this.desktopRestartRequestPath = join(this.tempDirectory, DESKTOP_RESTART_REQUEST_FILE);
+		this.restartRequestTimer = setInterval(() => void this.consumeDesktopRestartRequest(), DESKTOP_RESTART_POLL_MS);
 		await this.seedWatchedPathStamps(NATIVE_ICON_PATH);
 		this.startWatchers();
 		this.queueParts(PART_ORDER, "initial build", { immediate: true });
@@ -515,7 +558,7 @@ class WatchAllSupervisor {
 			succeeded = true;
 			if (this.lastBuildFailure) console.error("[watch:all] recovered from previous build failure");
 			this.lastBuildFailure = undefined;
-			if (plan.restartDesktop) this.restartPending = true;
+			if (plan.restartDesktop) await this.publishDesktopBuild();
 			console.error("[watch:all] build cycle succeeded");
 		} catch (error) {
 			if (!this.stopping) {
@@ -537,15 +580,55 @@ class WatchAllSupervisor {
 		}
 
 		this.building = false;
+		if (this.restartPending) this.scheduleDesktopRestart();
 		if (this.pendingParts.size > 0 && !this.stopping) {
 			this.buildTimer = setTimeout(() => void this.runQueuedBuild(), DEBOUNCE_MS);
-		} else if (succeeded && this.restartPending && !this.stopping) {
+		}
+	}
+
+	/** Initial output launches Desktop; later native output is offered to the existing process on request. */
+	async publishDesktopBuild() {
+		if (!this.desktopExecutable || !this.desktopWatchStatePath) {
+			throw new Error("no successfully built desktop executable is available");
+		}
+		this.desktopRevision += 1;
+		if (this.desktopProcess) {
+			await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, true);
+			console.error("[watch:all] desktop build is ready; use Restart in its titlebar when ready");
+			return;
+		}
+		await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, false);
+		this.restartPending = true;
+		this.scheduleDesktopRestart();
+	}
+
+	/** Consume the one-way restart marker written by the running Desktop without making it manage processes. */
+	async consumeDesktopRestartRequest() {
+		if (this.restartRequestPolling || this.stopping || !this.desktopRestartRequestPath) return;
+		if (!existsSync(this.desktopRestartRequestPath)) return;
+		this.restartRequestPolling = true;
+		try {
+			const state = this.desktopWatchStatePath
+				? await readDesktopWatchState(this.desktopWatchStatePath)
+				: undefined;
+			if (!state?.stale) {
+				await rm(this.desktopRestartRequestPath, { force: true });
+				return;
+			}
+			// The Desktop request may arrive between artifact capture and state publication.
+			// Restart into the supervisor's newest captured artifact instead of discarding it.
+			await rm(this.desktopRestartRequestPath, { force: true });
+			this.restartPending = true;
 			this.scheduleDesktopRestart();
+		} catch (error) {
+			console.error(`[watch:all] could not process desktop restart request: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			this.restartRequestPolling = false;
 		}
 	}
 
 	scheduleDesktopRestart() {
-		if (this.stopping || this.building || this.pendingParts.size > 0 || !this.restartPending) return;
+		if (this.stopping || this.building || this.desktopRestarting || this.pendingParts.size > 0 || !this.restartPending) return;
 		clearTimeout(this.restartTimer);
 		// The first launch can happen immediately. Once Desktop is running, wait for a quiet period so
 		// agent-driven bursts of edits/builds collapse into one visible application restart.
@@ -560,12 +643,23 @@ class WatchAllSupervisor {
 	}
 
 	async runDesktopRestart() {
-		if (this.stopping || this.building || this.pendingParts.size > 0 || !this.restartPending) return;
+		if (this.stopping || this.building || this.desktopRestarting || this.pendingParts.size > 0 || !this.restartPending) return;
+		this.desktopRestarting = true;
+		const revision = this.desktopRevision;
+		let deferred = false;
 		try {
-			const restarted = await this.restartDesktop();
-			if (restarted) this.restartPending = false;
+			const restarted = await this.restartDesktop(revision);
+			if (restarted && revision === this.desktopRevision) this.restartPending = false;
+			else deferred = true;
 		} catch (error) {
 			console.error(`[watch:all] desktop restart failed: ${error instanceof Error ? error.message : String(error)}`);
+			// A user-requested handoff has already exited the old app. Do not spin on a
+			// persistent spawn/state error; the next successful Desktop build can recover.
+			if (revision === this.desktopRevision) this.restartPending = false;
+			else deferred = true;
+		} finally {
+			this.desktopRestarting = false;
+			if (deferred && this.restartPending) this.scheduleDesktopRestart();
 		}
 	}
 
@@ -703,7 +797,7 @@ class WatchAllSupervisor {
 			cwd: REPO_ROOT,
 			stdio: "inherit",
 			detached: process.platform !== "win32",
-			env: process.env,
+			env: { ...process.env, PIX_DESKTOP_WATCH_STATE: this.desktopWatchStatePath },
 		});
 		return {
 			process: child,
@@ -729,7 +823,7 @@ class WatchAllSupervisor {
 		await stopProcessTree(instance.process);
 	}
 
-	async restartDesktop() {
+	async restartDesktop(expectedRevision = this.desktopRevision) {
 		if (!this.desktopExecutable) throw new Error("no successfully built desktop executable is available");
 		const previous = this.desktopProcess
 			? { process: this.desktopProcess, appPid: this.desktopAppPid }
@@ -741,7 +835,7 @@ class WatchAllSupervisor {
 			this.desktopProcess = undefined;
 			this.desktopAppPid = undefined;
 			await this.stopDesktopInstance(previous);
-			if (this.stopping || this.pendingParts.size > 0) {
+			if (this.stopping || this.building || this.pendingParts.size > 0 || expectedRevision !== this.desktopRevision) {
 				if (!this.stopping) {
 					console.error("[watch:all] desktop restart deferred because newer changes were queued while stopping the previous process");
 				}
@@ -749,6 +843,9 @@ class WatchAllSupervisor {
 			}
 		} else {
 			console.error("[watch:all] starting the newly built desktop");
+		}
+		if (this.desktopWatchStatePath) {
+			await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, false);
 		}
 		const candidate = this.spawnDesktopCandidate();
 		this.candidateProcess = candidate.process;
@@ -787,7 +884,7 @@ class WatchAllSupervisor {
 					throw new Error(`new desktop process ${candidate.appPid} exited during startup`);
 				}
 			}
-			if (this.stopping || this.pendingParts.size > 0) {
+			if (this.stopping || this.building || this.pendingParts.size > 0 || expectedRevision !== this.desktopRevision) {
 				if (!this.stopping) {
 					console.error("[watch:all] desktop restart deferred because newer changes were queued during startup");
 				}
@@ -818,6 +915,7 @@ class WatchAllSupervisor {
 		this.stopping = true;
 		clearTimeout(this.buildTimer);
 		clearTimeout(this.restartTimer);
+		clearInterval(this.restartRequestTimer);
 		for (const watcher of this.watchers) watcher.close();
 		if (this.activeCommand) await stopProcessTree(this.activeCommand);
 		if (this.candidateProcess) {

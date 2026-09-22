@@ -17,21 +17,29 @@ import type { AppPopupActionController } from "../src/app/popup/popup-action-con
 import type { AppPopupMenuController } from "../src/app/popup/popup-menu-controller.js";
 import type { AppScrollController } from "../src/app/screen/scroll-controller.js";
 import { APP_ICONS } from "../src/app/icons.js";
+import { THEMES } from "../src/theme.js";
 
 describe("AppMouseController", () => {
 	it("shows detailed DCP stats as a dialog toast when context status is clicked", async () => {
-		let toast: { message: string; kind: string; variant?: string; durationMs?: number } | undefined;
+		let toast: { message: string; kind: string; variant?: string; durationMs?: number; action?: { label: string; onSelect: () => void } } | undefined;
+		const commands: Array<[string, string]> = [];
 		const session = {
+			model: { provider: "fixture", id: "model", contextWindow: 1000 },
 			getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
 			sessionManager: { getBranch: () => [] },
+			isStreaming: false,
+			isCompacting: false,
 		} as never;
 		const controller = new AppMouseController(
 			fakeHost({
 				runtimeSession: () => session,
-				showToast: (message, kind, options) => { toast = { message, kind, variant: options?.variant, durationMs: options?.durationMs }; },
+				showToast: (message, kind, options) => { toast = { message, kind, variant: options?.variant, durationMs: options?.durationMs, action: options?.action }; },
 			}),
 			fakePopupMenus(),
-			fakePopupActions(),
+			fakePopupActions({
+				resourceSlashCommandAvailable: () => true,
+				runResourceSlashCommandFromUi: async (name, args) => { commands.push([name, args]); return true; },
+			}),
 			fakeScrollController(),
 			fakeCommandController(),
 		);
@@ -41,11 +49,110 @@ describe("AppMouseController", () => {
 		await delay(0);
 
 		assert.equal(toast?.kind, "info");
-		assert.match(toast?.message ?? "", /DCP Session Statistics:/);
-		assert.match(toast?.message ?? "", /History projection \(active branch\)/);
-		assert.match(toast?.message ?? "", /unknown \(not zero\)/);
+		const message = (toast?.message ?? "").replace(/\x1b\[[\d;:]*m/gu, "");
+		assert.match(message, /DCP session statistics/);
+		assert.match(message, /Context\s+10% · 100 \/ 1K tokens/);
+		assert.match(message, /Occupied ~100/);
+		assert.match(message, /Free ~900/);
+		assert.match(message, /Measured gain unknown/);
 		assert.equal(toast?.variant, "dialog");
 		assert.equal(toast?.durationMs, undefined);
+		assert.equal(toast?.action?.label, "Compress");
+		toast?.action?.onSelect();
+		await delay(0);
+		assert.deepEqual(commands, [["dcp", "compress"]]);
+	});
+
+	it("suppresses a DCP dialog when its branch or model owner changes during the read", async () => {
+		const completions: Array<(branch: readonly unknown[]) => void> = [];
+		let leafId = "leaf-a";
+		const session = {
+			model: { provider: "fixture", id: "model", contextWindow: 1000 },
+			getContextUsage: () => ({ tokens: 100, contextWindow: 1000 }),
+			sessionManager: {
+				getSessionId: () => "session-a",
+				getLeafId: () => leafId,
+				readFullBranchEntries: () => new Promise<readonly unknown[]>((resolve) => { completions.push(resolve); }),
+			},
+		} as never;
+		const shown: string[] = [];
+		const controller = new AppMouseController(
+			fakeHost({ runtimeSession: () => session, showToast: (message) => { shown.push(message); } }),
+			fakePopupMenus(), fakePopupActions(), fakeScrollController(), fakeCommandController(),
+		);
+		controller.statusContextTarget = { row: 5, startColumn: 1, endColumn: 6 };
+
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: true });
+		leafId = "leaf-b";
+		completions.shift()?.([]);
+		await delay(0);
+
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: true });
+		(session as { model: unknown }).model = { provider: "fixture", id: "replacement", contextWindow: 1000 };
+		completions.shift()?.([]);
+		await delay(0);
+
+		assert.deepEqual(shown, []);
+	});
+
+	it("suppresses a DCP dialog after an A→B→A tab lifecycle while its read is pending", async () => {
+		let complete: ((branch: readonly unknown[]) => void) | undefined;
+		let lifecycleGeneration = 1;
+		const session = {
+			model: { provider: "fixture", id: "model", contextWindow: 1000 },
+			getContextUsage: () => ({ tokens: 100, contextWindow: 1000 }),
+			sessionManager: {
+				getSessionId: () => "session-a",
+				getLeafId: () => "leaf-a",
+				readFullBranchEntries: () => new Promise<readonly unknown[]>((resolve) => { complete = resolve; }),
+			},
+		} as never;
+		const shown: string[] = [];
+		const controller = new AppMouseController(
+			fakeHost({
+				runtimeSession: () => session,
+				tabsLifecycleGeneration: () => lifecycleGeneration,
+				showToast: (message) => { shown.push(message); },
+			}),
+			fakePopupMenus(), fakePopupActions(), fakeScrollController(), fakeCommandController(),
+		);
+		controller.statusContextTarget = { row: 5, startColumn: 1, endColumn: 6 };
+
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: true });
+		lifecycleGeneration += 2;
+		complete?.([]);
+		await delay(0);
+
+		assert.deepEqual(shown, []);
+	});
+
+	it("shows only the newest DCP dialog when deferred clicks finish out of order", async () => {
+		const completions: Array<(branch: readonly unknown[]) => void> = [];
+		const session = {
+			model: { provider: "fixture", id: "model", contextWindow: 1000 },
+			getContextUsage: () => ({ tokens: 100, contextWindow: 1000 }),
+			sessionManager: {
+				getSessionId: () => "session-a",
+				getLeafId: () => "leaf-a",
+				readFullBranchEntries: () => new Promise<readonly unknown[]>((resolve) => { completions.push(resolve); }),
+			},
+		} as never;
+		const shown: string[] = [];
+		const controller = new AppMouseController(
+			fakeHost({ runtimeSession: () => session, showToast: (message) => { shown.push(message); } }),
+			fakePopupMenus(), fakePopupActions(), fakeScrollController(), fakeCommandController(),
+		);
+		controller.statusContextTarget = { row: 5, startColumn: 1, endColumn: 6 };
+
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: true });
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: true });
+		assert.equal(completions.length, 2);
+		completions[1]?.([]);
+		await delay(0);
+		completions[0]?.([]);
+		await delay(0);
+
+		assert.equal(shown.length, 1);
 	});
 
 	it("dismisses dialog toasts only from their close target", () => {
@@ -224,10 +331,32 @@ describe("AppMouseController", () => {
 		assert.equal(newTabCount, 1);
 	});
 
-	it("refreshes model usage when clicking its status target", () => {
-		let refreshCount = 0;
+	it("shows compact model-level session usage, including subagent calls, when clicking Usage", async () => {
+		let toast: { message: string; kind: string; variant?: string } | undefined;
+		const session = {
+			sessionManager: {
+				getSessionId: () => "session-usage",
+				getEntries: () => [
+					{
+						type: "message",
+						message: {
+							role: "assistant", provider: "openai-codex", model: "gpt-5.6-sol",
+							usage: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: { total: 0.05 } },
+						},
+					},
+					{
+						type: "usage", kind: "async-subagent", provider: "anthropic", model: "claude-sonnet",
+						usage: { input: 200, output: 40, cacheRead: 10, cacheWrite: 0, totalTokens: 250, cost: { total: 0.15 } },
+					},
+				],
+			},
+		} as never;
 		const controller = new AppMouseController(
-			fakeHost({ refreshModelUsageStatus: () => { refreshCount += 1; } }),
+			fakeHost({
+				runtimeSession: () => session,
+				modelColors: () => ({ rules: { "openai-codex/*": "modelOpenAI", "anthropic/*": "warning" } }),
+				showToast: (message, kind, options) => { toast = { message, kind, variant: options?.variant }; },
+			}),
 			fakePopupMenus(),
 			fakePopupActions(),
 			fakeScrollController(),
@@ -237,8 +366,16 @@ describe("AppMouseController", () => {
 
 		controller.handleMouse({ button: 0, x: 18, y: 5, released: false });
 		controller.handleMouse({ button: 0, x: 18, y: 5, released: true });
+		await delay(0);
 
-		assert.equal(refreshCount, 1);
+		assert.equal(toast?.kind, "info");
+		assert.equal(toast?.variant, "dialog");
+		const plain = (toast?.message ?? "").replace(/\x1b\[[\d;:]*m/gu, "");
+		assert.match(plain, /Session usage\n\$0\.200 · 400 tokens/);
+		assert.match(plain, /anthropic\n\s+claude-sonnet\s+250 · \$0\.150/);
+		assert.match(plain, /openai-codex\n\s+gpt-5\.6-sol\s+150 · \$0\.050/);
+		assert.doesNotMatch(plain, /agents|of session|quota|remaining|used/i);
+		assert.match(toast?.message ?? "", /\x1b\[[\d;]*38;2;/u);
 	});
 
 	it("queues the editor input when clicking the draft queue status button", () => {
@@ -1022,6 +1159,9 @@ function fakeHost(overrides: Partial<AppMouseControllerHost> = {}): AppMouseCont
 		setSubagentsPanelExpanded: () => {},
 		setStatus: () => {},
 		runtimeSession: () => undefined,
+		tabsLifecycleGeneration: () => 0,
+		theme: () => THEMES.dark,
+		modelColors: () => ({ rules: {} }),
 		cwd: () => undefined,
 		enhancePrompt: () => {},
 		openNewTab: () => {},
@@ -1033,7 +1173,6 @@ function fakeHost(overrides: Partial<AppMouseControllerHost> = {}): AppMouseCont
 		showToast: () => {},
 		dismissToast: () => {},
 		activateToastAction: () => false,
-		refreshModelUsageStatus: () => {},
 		scrollConversationQuick: () => {},
 		copyTextToClipboard: () => {},
 		handleExtensionInputMouse: () => false,
@@ -1062,7 +1201,12 @@ function fakePopupMenus(overrides: Partial<AppPopupMenuController> = {}): AppPop
 }
 
 function fakePopupActions(overrides: Partial<AppPopupActionController> = {}): AppPopupActionController {
-	return { submitActivePopupMenu: () => {}, ...overrides } as unknown as AppPopupActionController;
+	return {
+		submitActivePopupMenu: () => {},
+		resourceSlashCommandAvailable: () => false,
+		runResourceSlashCommandFromUi: async () => false,
+		...overrides,
+	} as unknown as AppPopupActionController;
 }
 
 function fakeCommandController(overrides: Partial<AppCommandController> = {}): AppCommandController {

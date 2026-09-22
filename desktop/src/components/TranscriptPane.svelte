@@ -377,7 +377,6 @@
   .message-action-item:hover { background: var(--accent); }
   .message-action-item.danger { color: var(--destructive); }
   .message-action-item.danger:hover { background: color-mix(in srgb, var(--destructive) 10%, transparent); }
-  .message-action-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .message-action-item:disabled { cursor: default; opacity: 0.4; }
 
 </style>

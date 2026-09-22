@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import {
 	PARTS,
+	WatchAllSupervisor,
 	appendCommandOutputTail,
 	classifyChange,
 	createBuildPlan,
+	desktopWatchState,
+	parseDesktopWatchState,
 	desktopAppBundlePath,
 	desktopArtifactDestination,
 	desktopBundleDirectory,
@@ -73,6 +78,13 @@ describe("watch:all build planning", () => {
 		assert.deepEqual(createBuildPlan([PARTS.ACP], { hasNativeBuild: false }), {
 			steps: [PARTS.ACP, PARTS.WEB, PARTS.NATIVE],
 			restartDesktop: true,
+		});
+	});
+
+	it("does not replace Desktop for builds that produce no new artifact", () => {
+		assert.deepEqual(createBuildPlan([PARTS.ACP], { hasNativeBuild: true }), {
+			steps: [PARTS.ACP],
+			restartDesktop: false,
 		});
 	});
 
@@ -143,6 +155,113 @@ describe("watch:all desktop artifact selection", () => {
 			"/t/a.app",
 		);
 		assert.equal(selectDesktopAppBundle([]), undefined);
+	});
+});
+
+describe("watch:all Desktop restart handoff", () => {
+	it("publishes a bounded state with the new artifact and explicit stale flag", () => {
+		assert.equal(
+			desktopWatchState("/tmp/pix-desktop-2", true),
+			'{"version":1,"target":"/tmp/pix-desktop-2","stale":true}\n',
+		);
+		assert.throws(() => desktopWatchState("x".repeat(5_000), true), /size limit/u);
+	});
+
+	it("accepts only valid supervisor state", () => {
+		assert.deepEqual(
+			parseDesktopWatchState(JSON.parse(desktopWatchState("/tmp/pix-desktop-2", true))),
+			{ target: "/tmp/pix-desktop-2", stale: true },
+		);
+		assert.equal(parseDesktopWatchState({ version: 2, target: "/tmp/pix", stale: true }), undefined);
+	});
+
+	it("schedules the initial Desktop launch after the successful build has finished", async () => {
+		const temporaryDirectory = await mkdtemp(join(tmpdir(), "watch-all-test-"));
+		const supervisor = new WatchAllSupervisor();
+		const buildingStates: boolean[] = [];
+		supervisor.desktopWatchStatePath = join(temporaryDirectory, "desktop-watch-state.json");
+		supervisor.pendingParts.add(PARTS.WEB);
+		supervisor.runBuildStep = async (step: string) => {
+			if (step === PARTS.NATIVE) supervisor.desktopExecutable = "/tmp/pix-desktop";
+		};
+		supervisor.scheduleDesktopRestart = () => buildingStates.push(supervisor.building);
+
+		try {
+			await supervisor.runQueuedBuild();
+			assert.deepEqual(buildingStates, [true, false]);
+		} finally {
+			await rm(temporaryDirectory, { recursive: true, force: true });
+		}
+	});
+
+	it("honors a restart request that arrives while a newer artifact is being published", async () => {
+		const temporaryDirectory = await mkdtemp(join(tmpdir(), "watch-all-test-"));
+		const supervisor = new WatchAllSupervisor();
+		const statePath = join(temporaryDirectory, "desktop-watch-state.json");
+		const requestPath = join(temporaryDirectory, "desktop-watch-state.restart");
+		let scheduled = false;
+		supervisor.desktopWatchStatePath = statePath;
+		supervisor.desktopRestartRequestPath = requestPath;
+		supervisor.desktopExecutable = "/tmp/pix-desktop-new";
+		supervisor.scheduleDesktopRestart = () => { scheduled = true; };
+		await writeFile(statePath, desktopWatchState("/tmp/pix-desktop-previous", true));
+		await writeFile(requestPath, "restart\n");
+
+		try {
+			await supervisor.consumeDesktopRestartRequest();
+			assert.equal(scheduled, true);
+			assert.equal(existsSync(requestPath), false);
+		} finally {
+			await rm(temporaryDirectory, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps a newer Desktop revision pending when a restart finishes concurrently", async () => {
+		const supervisor = new WatchAllSupervisor();
+		let rescheduled = false;
+		supervisor.restartPending = true;
+		supervisor.desktopRevision = 4;
+		supervisor.restartDesktop = async () => {
+			supervisor.desktopRevision = 5;
+			return true;
+		};
+		supervisor.scheduleDesktopRestart = () => { rescheduled = true; };
+
+		await supervisor.runDesktopRestart();
+
+		assert.equal(supervisor.restartPending, true);
+		assert.equal(supervisor.desktopRestarting, false);
+		assert.equal(rescheduled, true);
+	});
+
+	it("does not spin after a restart failure", async () => {
+		const supervisor = new WatchAllSupervisor();
+		let rescheduled = false;
+		supervisor.restartPending = true;
+		supervisor.restartDesktop = async () => { throw new Error("cannot launch"); };
+		supervisor.scheduleDesktopRestart = () => { rescheduled = true; };
+
+		await supervisor.runDesktopRestart();
+
+		assert.equal(supervisor.restartPending, false);
+		assert.equal(rescheduled, false);
+	});
+
+	it("retries a newer revision when the previous restart fails", async () => {
+		const supervisor = new WatchAllSupervisor();
+		let rescheduled = false;
+		supervisor.restartPending = true;
+		supervisor.desktopRevision = 4;
+		supervisor.restartDesktop = async () => {
+			supervisor.desktopRevision = 5;
+			throw new Error("cannot launch previous artifact");
+		};
+		supervisor.scheduleDesktopRestart = () => { rescheduled = true; };
+
+		await supervisor.runDesktopRestart();
+
+		assert.equal(supervisor.restartPending, true);
+		assert.equal(rescheduled, true);
 	});
 });
 

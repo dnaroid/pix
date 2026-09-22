@@ -185,8 +185,6 @@
   }
   .markdown-text :global(a:focus-visible) {
     border-radius: var(--radius-sm);
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
   }
   .markdown-text :global(.markdown-media) {
     display: flex;

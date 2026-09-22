@@ -9,6 +9,10 @@ import type {
   QueueSource,
   QueueState,
   RuntimeStatus,
+  SessionUsageProvider,
+  SessionUsageReport,
+  SessionUsageStatus,
+  SessionUsageTotals,
 } from "./acp-client-types";
 
 import { parseDcpContextMap } from "./dcp-context-map";
@@ -60,6 +64,50 @@ export function parseContextUsageStatus(value: unknown): ContextUsageStatus {
     tokens: value.tokens === null ? null : Number(value.tokens),
     contextWindow: Number(value.contextWindow),
     percent: value.percent === null ? null : Number(value.percent),
+  };
+}
+
+export function parseSessionUsageStatus(value: unknown): SessionUsageStatus {
+  if (!isRecord(value) || typeof value.sessionId !== "string") {
+    throw new Error("pix/session/usage returned an invalid response");
+  }
+  return { sessionId: value.sessionId, usage: parseSessionUsageReport(value.usage) };
+}
+
+function parseSessionUsageReport(value: unknown): SessionUsageReport {
+  if (!isRecord(value) || !Array.isArray(value.providers)) throw new Error("invalid Pix session usage");
+  return {
+    totals: parseSessionUsageTotals(value.totals),
+    providers: value.providers.map(parseSessionUsageProvider),
+    unattributed: parseSessionUsageTotals(value.unattributed),
+  };
+}
+
+function parseSessionUsageProvider(value: unknown): SessionUsageProvider {
+  if (!isRecord(value) || typeof value.provider !== "string" || !Array.isArray(value.models)) {
+    throw new Error("invalid Pix session usage provider");
+  }
+  return {
+    provider: value.provider,
+    totals: parseSessionUsageTotals(value.totals),
+    models: value.models.map(parseSessionUsageModel),
+  };
+}
+
+function parseSessionUsageModel(value: unknown): SessionUsageProvider["models"][number] {
+  if (!isRecord(value) || typeof value.model !== "string") throw new Error("invalid Pix session usage model");
+  return { model: value.model, totals: parseSessionUsageTotals(value.totals) };
+}
+
+function parseSessionUsageTotals(value: unknown): SessionUsageTotals {
+  if (!isRecord(value)) throw new Error("invalid Pix session usage totals");
+  const fields = ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"] as const;
+  if (!fields.every((field) => isFiniteNumber(value[field]) && Number(value[field]) >= 0)) {
+    throw new Error("invalid Pix session usage totals");
+  }
+  return {
+    input: Number(value.input), output: Number(value.output), cacheRead: Number(value.cacheRead),
+    cacheWrite: Number(value.cacheWrite), totalTokens: Number(value.totalTokens), cost: Number(value.cost),
   };
 }
 

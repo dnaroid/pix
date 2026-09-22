@@ -18,7 +18,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 
 - Carry the programmatic tool name and raw input from ACP into the desktop transcript.
 - Display a lowercase, bold tool name followed by compact, normal-weight arguments.
-- Use the default TUI color role for each built-in tool family in light and dark themes.
+- Use semantic operation roles for tool-name colors in light and dark themes, separate from outcome/diagnostic colors.
 - Keep expandable tool result bodies while allowing thinking and tool calls to share one Desktop activity group.
 - Show successful mutation diffs for live and replayed edit/write/apply-patch calls.
 - Keep the final tool text after the diff so LSP diagnostics and comment-checker notices appended by pi-tools-suite remain visible.
@@ -37,18 +37,19 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Read ranges use the TUI `path:offset+limit` form.
 - Shell commands collapse whitespace to one line.
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.
-- Mutation, search, warning, success, info, accent, muted, and default tool-name roles use the TUI default palette.
+- Tool names use operation roles (`inspect`, `search`, `mutation`, `execute`, `interact`, `context`, `agent`, `neutral`) rather than outcome roles such as success or warning; subagent calls use a distinct agent color rather than muted text.
 - Legacy ACP updates without a programmatic name or raw input fall back to splitting the existing title.
 - Consecutive thinking and tool entries share one collapsible activity group until a visible user, assistant, or system message boundary.
 - Collapsed activity headers list normalized presentation names plus `thinking` once in first-seen order (for example `thinking, todo, repo_knowledge` even when a name occurs more than once).
-- Names with a currently active occurrence are emphasized with the semantic primary color; completed/inactive names stay muted. A live thought is active only when it has a recorded start and no recorded end, so replay data without timing metadata is not presented as live.
-- Expanding an activity group preserves the original interleaving of thinking blocks and individual tool calls.
+- Names with a currently active occurrence are emphasized with the semantic primary color in the activity-group header; completed/inactive header names stay muted. A live thought is active only when it has a recorded start and no recorded end, so replay data without timing metadata is not presented as live.
+- Expanding an activity group preserves the original interleaving of thinking blocks and individual tool calls. Child `thinking` rows stay muted even while live; current-activity emphasis is represented once, in the group header, like any other active tool name.
 - The group itself does not hydrate tool bodies. Individual result disclosures hydrate on demand; closed groups/results do not mount their expensive Markdown, diffs, or attachment content. Reopening retains individual disclosure state within the same session, while switching sessions resets it even when replay IDs match.
 - A completed edit result patch is preferred because it carries full context. Otherwise explicit ACP diff content is used; when both are absent (notably session replay), edit and write diffs are reconstructed from recorded raw input.
 - Apply-patch input is rendered as one diff surface for both `*** Begin Patch` and unified-diff forms.
 - Failed mutations do not present their requested patch as an applied diff.
 - The mutation result text follows the diff and preserves all text blocks in order, including normal success output, `LSP diagnostics:`, and `comment-checker` notices.
 - Completed mutation rows with LSP output use an alert icon: error-colored when diagnostics contain an error, otherwise warning-colored, matching the TUI rule.
+- Activity-group summaries represent only group lifecycle (pending/running/completed) with neutral pending/completed indicators. They do not inherit failed/success outcome color or LSP warning/error attention from child tool rows; those signals stay on the concrete child call that produced them.
 - LSP headers/alerts, error lines, warning lines, hints, and clean diagnostic lines receive semantic colors; comment-checker headings use the warning role.
 
 ## Related files

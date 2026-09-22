@@ -1,6 +1,6 @@
 import type { ToolItem } from "./transcript";
 
-export type ToolTone = "accent" | "info" | "muted" | "mutation" | "search" | "success" | "title" | "warning";
+export type ToolTone = "agent" | "context" | "execute" | "inspect" | "interact" | "mutation" | "neutral" | "search";
 
 export interface ToolPresentation {
   readonly name: string;
@@ -34,7 +34,7 @@ export function toolPresentation(tool: ToolHeaderSource): ToolPresentation {
   return {
     name,
     args: headerArgs(name, tool.rawInput) || argsFromTitle(tool.title, name),
-    tone: toolTone(name),
+    tone: toolTone(name, tool.kind, tool.rawInput),
   };
 }
 
@@ -49,19 +49,35 @@ export function isUserBashTool(tool: ToolHeaderSource): boolean {
   return typeof args?.excludeFromContext === "boolean";
 }
 
-export function toolTone(toolName: string): ToolTone {
+export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown): ToolTone {
   const name = normalizedName(toolName);
-  if (["apply_patch", "edit", "multiedit", "write", "ast_apply"].includes(name)) return "mutation";
-  if (["bash", "shell", "shell_command"].includes(name) || name.startsWith("repo_")) return "warning";
-  if (["read", "ls"].includes(name)) return "success";
+  const kind = normalizedName(toolKind ?? "");
+  if (name === "repo_knowledge") {
+    const input = asRecord(rawInput);
+    const action = input ? stringValue(input, ["action"]) : undefined;
+    if (action && ["record", "verify", "relate", "remove"].includes(action)) return "mutation";
+    if (action === "search") return "search";
+    return "inspect";
+  }
   if (
-    name.startsWith("ast_")
-    || ["web_search", "web_fetch", "grep", "find", "glob", "skill"].includes(name)
+    ["apply_patch", "edit", "multiedit", "write", "ast_apply", "create_file", "update_file", "delete_file", "remove_file", "move_file", "rename_file"].includes(name)
+    || ["edit", "mutation", "write"].includes(kind)
+  ) return "mutation";
+  if (["bash", "shell", "shell_command", "exec", "execute", "run_command"].includes(name) || kind === "execute") return "execute";
+  if (
+    (name.startsWith("ast_") && name !== "ast_apply")
+    || ["web_search", "grep", "find", "glob", "search", "repo_search"].includes(name)
+    || kind === "search"
   ) return "search";
-  if (name === "compress") return "info";
-  if (["question", "todo"].includes(name)) return "accent";
-  if (name === "subagents") return "muted";
-  return "title";
+  if (
+    ["read", "read_file", "ls", "list", "cat", "open", "stat", "web_fetch", "architecture", "structure", "ast", "explain", "deps", "read_output"].includes(name)
+    || name.startsWith("repo_")
+    || ["read", "fetch"].includes(kind)
+  ) return "inspect";
+  if (["question"].includes(name)) return "interact";
+  if (["compress", "todo", "get_plan", "update_plan", "project", "projects", "skill", "skills"].includes(name)) return "context";
+  if (["subagent", "subagents", "agent", "agents", "task"].includes(name)) return "agent";
+  return "neutral";
 }
 
 export function toolPresentationName(tool: Pick<ToolItem, "kind" | "name" | "title">): string {

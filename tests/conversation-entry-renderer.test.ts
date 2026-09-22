@@ -712,6 +712,41 @@ describe("ConversationViewport super-compact tools", () => {
 
 
 describe("ConversationViewport cache behavior", () => {
+	it("keeps render caches only for the current terminal width", () => {
+		const viewport = new ConversationViewport({
+			entries: [{ id: "assistant-resize", kind: "assistant", text: "alpha beta gamma" }],
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			outputFilters: [],
+			superCompactTools: false,
+			isDynamicConversationBlock: () => false,
+			renderInlineUserMessageMenu: () => [],
+		} as ConversationViewportHost);
+
+		const cacheState = viewport as unknown as {
+			cachedWidth: number | undefined;
+			blockCache: Map<string, unknown>;
+			layoutCache: unknown;
+		};
+		viewport.slice(80, 0, 10);
+		const width80Layout = cacheState.layoutCache;
+		assert.equal(cacheState.cachedWidth, 80);
+		assert.equal(cacheState.blockCache.size, 1);
+
+		viewport.slice(81, 0, 10);
+		const width81Layout = cacheState.layoutCache;
+		assert.equal(cacheState.cachedWidth, 81);
+		assert.equal(cacheState.blockCache.size, 1);
+		assert.notEqual(width81Layout, width80Layout);
+
+		viewport.slice(80, 0, 10);
+		assert.equal(cacheState.cachedWidth, 80);
+		assert.equal(cacheState.blockCache.size, 1);
+		assert.notEqual(cacheState.layoutCache, width80Layout);
+	});
+
 	it("keeps queued messages out of entries()", () => {
 		const viewport = new ConversationViewport({
 			entries: [{ id: "assistant-1", kind: "assistant", text: "hello" }],

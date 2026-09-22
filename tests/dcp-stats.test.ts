@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatDcpStatsToast, loadDcpStatsToast } from "../src/app/rendering/dcp-stats.js";
-import { collectDcpStatistics, formatDcpStatistics } from "../external/pi-tools-suite/src/dcp/statistics.js";
+import { formatDcpStatsDialog, formatDcpStatsToast, loadDcpStatsDialog, loadDcpStatsToast } from "../src/app/rendering/dcp-stats.js";
+import { collectDcpStatistics, collectDcpStatisticsAsync, formatDcpStatistics } from "../external/pi-tools-suite/src/dcp/statistics.js";
+import { THEMES } from "../src/theme.js";
 
 const custom = (customType: string, data: unknown) => ({ type: "custom", customType, data });
 const init = custom("dcp-journal", { schemaVersion: 1, kind: "init", operationId: "init-one", previousOperationId: null });
@@ -19,6 +20,31 @@ function session(branch: any[], manager: any = {}) {
 }
 
 describe("DCP shared statistics", () => {
+	it("cooperatively collects the same statistics as the synchronous reducer", async () => {
+		const branch = [init, delta({ blocks: [
+			{ id: 1, active: true, summaryTokenEstimate: 20, commitMetrics: metrics("auto:1", "auto", 50) },
+		] }), diag("epoch"), diag("request", { id: "request", reminder: true, snapshot }), diag("completion", { id: "request", reminder: true, ignored: 0 })];
+		assert.deepEqual(await collectDcpStatisticsAsync({ branch, model }, { chunkSize: 1 }), collectDcpStatistics({ branch, model }));
+	});
+
+	it("yields to timers while loading a large dialog history and suppresses a changed owner", async () => {
+		const branch = [init, ...Array.from({ length: 2_000 }, () => custom("dcp-nudge", { event: "emitted" }))];
+		const s = session([], { readFullBranchEntries: async () => branch });
+		let timerRan = false;
+		const timer = new Promise<void>((resolve) => setTimeout(() => { timerRan = true; resolve(); }, 0));
+		const loading = loadDcpStatsDialog(s, THEMES.dark).then((result) => {
+			assert.equal(timerRan, true, "the timer must run before dialog loading completes");
+			return result;
+		});
+		await timer;
+		assert.equal(timerRan, true);
+		assert.notEqual(await loading, undefined);
+
+		const changed = session([], { readFullBranchEntries: async () => branch });
+		setTimeout(() => { changed.model = { ...model, id: "new-owner" }; }, 0);
+		assert.equal(await loadDcpStatsDialog(changed, THEMES.dark), undefined);
+	});
+
   it("reports actual journal commits, not blocks-as-operations; measures auto gains without tool results", () => {
     const branch = [init, delta({ blocks: [
       { id: 1, active: false, summaryTokenEstimate: 80, createdByToolCallId: "call-a", commitMetrics: metrics("manual:call-a", "manual", 500) },
@@ -109,6 +135,86 @@ describe("DCP shared statistics", () => {
     assert.match(await loading, /full history could not be read/);
     assert.equal(syncReads, 0);
     assert.match(await loadDcpStatsToast(s), /chain verified/);
+  });
+
+  it("renders dialog runtime data with unavailable history without synchronously reading a lazy cursor", async () => {
+    let syncReads = 0;
+    let cursorReads = 0;
+    const s = session([], {
+      readFullBranchEntriesSync() { syncReads++; return [init]; },
+      getBranch() { cursorReads++; return [init]; },
+    });
+    s.sessionManager[Symbol.for("pix.dcp.session-runtime-stats")] = () => ({
+      tokensSaved: 321,
+      contextMap: { revision: 1, sessionEpoch: 0, generatedAt: 1, tokenEstimates: { retained: 10, candidate: 20, protected: 30, compressed: 40 } },
+    });
+
+    const text = (await loadDcpStatsDialog(s, THEMES.dark) ?? "").replace(/\x1b\[[\d;:]*m/gu, "");
+    assert.equal(syncReads, 0);
+    assert.equal(cursorReads, 0);
+    assert.match(text, /DCP saved ~321/);
+    assert.match(text, /Candidates ~20/);
+    assert.match(text, /full history unavailable/);
+  });
+
+  it("renders the Pix DCP dialog with live capacity categories and compact Desktop metrics", () => {
+    const branch = [init, delta({ blocks: [
+      { id: 1, active: true, summaryTokenEstimate: 50, autoSummaryRepresentation: "model", commitMetrics: metrics("auto:1", "auto", 1_500) },
+    ] }), diag("epoch"), diag("request", { id: "x", snapshot })];
+    const text = formatDcpStatsDialog(session(branch), THEMES.dark, {
+      branch,
+      runtimeStats: {
+        tokensSaved: 24_680,
+        contextMap: {
+          revision: 3, sessionEpoch: 0, generatedAt: 1_700_000_000_000,
+          tokenEstimates: { retained: 5_000, candidate: 7_000, protected: 3_000, compressed: 1_000 },
+        },
+      },
+    });
+    const plain = text.replace(/\x1b\[[\d;:]*m/gu, "");
+    assert.match(plain, /DCP session statistics/);
+    assert.match(plain, /Context\s+20% · 20K \/ 100K tokens/);
+    assert.match(plain, /Other ~9K/);
+    assert.match(plain, /Candidates ~7K/);
+    assert.match(plain, /Protected ~3K/);
+    assert.match(plain, /Summaries ~1K/);
+    assert.match(plain, /Free ~80K/);
+    assert.match(plain, /DCP saved ~24\.7K\s+Measured gain 1\.5K · 1 commits/);
+    assert.match(plain, /Last projection\s+50K → 20K · ~30K reduction/);
+    assert.match(plain, /Journal blocks\s+1 active · 0 retired/);
+  });
+
+  it("reads live DCP telemetry only from the owning session manager bridge", () => {
+    const s = session([init]);
+    const other = session([init]);
+    const symbol = Symbol.for("pix.dcp.session-runtime-stats");
+    s.sessionManager[symbol] = () => ({
+      tokensSaved: 3210,
+      contextMap: {
+        revision: 1, sessionEpoch: 0, generatedAt: 1,
+        tokenEstimates: { retained: 1000, candidate: 2000, protected: 3000, compressed: 4000 },
+      },
+    });
+    other.sessionManager[symbol] = () => ({ tokensSaved: 999_999 });
+
+    const text = formatDcpStatsDialog(s, THEMES.dark, { branch: [init] })
+      .replace(/\x1b\[[\d;:]*m/gu, "");
+    assert.match(text, /DCP saved ~3\.21K/);
+    assert.match(text, /Candidates ~2K/);
+    assert.doesNotMatch(text, /999K|1M/);
+  });
+
+  it("does not infer free capacity in the Pix DCP dialog when SDK usage is unknown", () => {
+    const s = session([init]);
+    s.getContextUsage = () => ({ tokens: null, contextWindow: 100_000 });
+    const text = formatDcpStatsDialog(s, THEMES.dark, {
+      branch: [init],
+      runtimeStats: { contextMap: { revision: 1, sessionEpoch: 0, generatedAt: 1, tokenEstimates: { retained: 1, candidate: 1, protected: 0, compressed: 0 } } },
+    }).replace(/\x1b\[[\d;:]*m/gu, "");
+    assert.match(text, /Context\s+unknown/);
+    assert.match(text, /Capacity unknown/);
+    assert.match(text, /free space is not inferred/i);
+    assert.doesNotMatch(text, /Free ~/);
   });
 
   for (const [name, branch] of [

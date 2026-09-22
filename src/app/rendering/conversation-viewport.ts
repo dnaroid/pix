@@ -43,19 +43,21 @@ export type ConversationEntryBlockPosition = {
 };
 
 export class ConversationViewport {
-	private readonly blockCachesByWidth = new Map<number, Map<string, ConversationBlockCache>>();
-	private readonly layoutCachesByWidth = new Map<number, ViewportLayoutCache>();
+	private cachedWidth: number | undefined;
+	private readonly blockCache = new Map<string, ConversationBlockCache>();
+	private layoutCache: ViewportLayoutCache | undefined;
 
 	constructor(private readonly host: ConversationViewportHost) {}
 
 	clear(): void {
-		this.blockCachesByWidth.clear();
-		this.layoutCachesByWidth.clear();
+		this.cachedWidth = undefined;
+		this.blockCache.clear();
+		this.layoutCache = undefined;
 	}
 
 	deleteEntry(entryId: string): void {
-		for (const blockCache of this.blockCachesByWidth.values()) blockCache.delete(entryId);
-		for (const layoutCache of this.layoutCachesByWidth.values()) layoutCache.dirtyEntryIds.add(entryId);
+		this.blockCache.delete(entryId);
+		this.layoutCache?.dirtyEntryIds.add(entryId);
 	}
 
 	lineCount(width: number): number {
@@ -194,14 +196,15 @@ export class ConversationViewport {
 	}
 
 	private layoutForWidth(width: number): ViewportLayoutCache {
+		this.ensureWidth(width);
 		const entries = this.host.entries;
 		const superCompactTools = Boolean(this.host.superCompactTools);
 		const allThinkingExpanded = Boolean(this.host.allThinkingExpanded);
 
-		let layout = this.layoutCachesByWidth.get(width);
+		let layout = this.layoutCache;
 		if (!layout) {
 			layout = this.buildLayout(entries, width, superCompactTools, allThinkingExpanded);
-			this.layoutCachesByWidth.set(width, layout);
+			this.layoutCache = layout;
 		} else if (this.layoutStructureChanged(layout, entries, superCompactTools, allThinkingExpanded)) {
 			const synced = this.syncLayoutStructure(layout, entries, width, superCompactTools, allThinkingExpanded);
 			if (!synced) {
@@ -209,7 +212,7 @@ export class ConversationViewport {
 					? layout
 					: undefined;
 				layout = this.buildLayout(entries, width, superCompactTools, allThinkingExpanded, previousLayout);
-				this.layoutCachesByWidth.set(width, layout);
+				this.layoutCache = layout;
 			}
 		}
 		this.refreshDirtyLayoutEntries(layout, width);
@@ -348,12 +351,15 @@ export class ConversationViewport {
 	}
 
 	private blockCacheForWidth(width: number): Map<string, ConversationBlockCache> {
-		let blockCache = this.blockCachesByWidth.get(width);
-		if (!blockCache) {
-			blockCache = new Map();
-			this.blockCachesByWidth.set(width, blockCache);
-		}
-		return blockCache;
+		this.ensureWidth(width);
+		return this.blockCache;
+	}
+
+	private ensureWidth(width: number): void {
+		if (this.cachedWidth === width) return;
+		this.cachedWidth = width;
+		this.blockCache.clear();
+		this.layoutCache = undefined;
 	}
 
 	private refreshDynamicLayoutEntries(layout: ViewportLayoutCache, width: number): void {

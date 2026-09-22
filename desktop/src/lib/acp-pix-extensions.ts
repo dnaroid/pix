@@ -1,7 +1,7 @@
 import type { ContentBlock, SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk";
 import { isAgentControlState, type AgentControlAction } from "./agent-control";
 import type { RegistryActionRequest } from "./registry";
-import { isRecord, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus } from "./acp-response-parsers";
+import { isRecord, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
 import type {
   AgentControlStatus,
   AutocompleteSettings,
@@ -16,6 +16,7 @@ import type {
   QueueItem,
   QueueState,
   RuntimeStatus,
+  SessionUsageStatus,
   UserMessageAction,
   UserMessageActionResult,
 } from "./acp-client-types";
@@ -193,6 +194,10 @@ export class AcpPixExtensions {
       throw new Error("pix/session/dcp_stats returned an invalid response");
     }
     return { sessionId: response.sessionId, ...(typeof response.dcpStats === "string" ? { dcpStats: response.dcpStats } : {}) };
+  }
+
+  async sessionUsage(sessionId: string): Promise<SessionUsageStatus> {
+    return parseSessionUsageStatus(await this.request<unknown>("pix/session/usage", { sessionId }, null));
   }
 
   async bash(

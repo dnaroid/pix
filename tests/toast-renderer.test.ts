@@ -5,7 +5,7 @@ import { APP_ICONS } from "../src/app/icons.js";
 import type { AppToastEntry } from "../src/app/rendering/toast-controller.js";
 import { renderToastOverlays } from "../src/app/rendering/toast-renderer.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
-import { THEMES } from "../src/theme.js";
+import { ANSI_RESET, ansiStylePrefix, colorize, THEMES } from "../src/theme.js";
 
 describe("renderToastOverlays", () => {
 	it("renders multiline toasts as compact overlay rows", () => {
@@ -90,6 +90,58 @@ describe("renderToastOverlays", () => {
 		assert.equal(overlays.every((overlay) => overlay.column > 1), true);
 		assert.equal(overlays.every((overlay) => overlay.column + stringDisplayWidth(overlay.text) <= 80), true);
 	});
+
+	it("reserves a targeted action row inside dialog toasts", () => {
+		const overlays = renderToastOverlays([
+			toast("DCP session statistics\nContext 40%\n████████░░", "dialog", "Compress"),
+		], 80, 6, THEMES.dark);
+
+		const action = overlays.find((overlay) => overlay.target?.action === "action");
+		assert.ok(action);
+		assert.ok(action.text.includes("[Compress]"));
+		const localStart = (action.target?.startColumn ?? action.column) - action.column;
+		const localEnd = (action.target?.endColumn ?? action.column) - action.column;
+		assert.equal(action.text.slice(localStart, localEnd), "[Compress]");
+	});
+
+	it("keeps uncolored text readable in ANSI-rich dialog toasts", () => {
+		for (const theme of [THEMES.dark, THEMES.light]) {
+			const overlays = renderToastOverlays([
+				toast("plain \x1b[38;2;212;179;94mcolored\x1b[0m default", "dialog"),
+			], 80, 4, theme);
+			const body = overlays.find((overlay) => overlay.target?.action === "body" && overlay.text.includes("plain"));
+			assert.ok(body);
+			assert.ok(body.output.includes(rgbAnsi("38", theme.colors.popupForeground)));
+			assert.ok(body.output.includes(rgbAnsi("48", theme.colors.popupBackground)));
+			assert.ok(body.output.includes("\x1b[38;2;212;179;94mcolored\x1b[0m"));
+			assert.ok(body.output.includes(`\x1b[0m\x1b[1;${rgbAnsi("38", theme.colors.popupForeground)};${rgbAnsi("48", theme.colors.popupBackground)}m`));
+		}
+	});
+
+	it("carries wrapped ANSI color to continuation rows without coloring the frame", () => {
+		const theme = THEMES.dark;
+		const message = colorize(
+			"Prepared snapshot candidates are advisory, not deletions, and this sentence must wrap across rows.",
+			{ foreground: theme.colors.muted },
+		);
+		const overlays = renderToastOverlays([toast(message, "dialog")], 44, 8, theme);
+		const bodyRows = overlays.filter((overlay) => overlay.target?.action === "body" && overlay.text.startsWith("│"));
+		assert.ok(bodyRows.length >= 2);
+
+		const mutedCode = rgbAnsi("38", theme.colors.muted);
+		const dialogPrefix = ansiStylePrefix({
+			foreground: theme.colors.popupForeground,
+			background: theme.colors.popupBackground,
+			bold: true,
+		});
+		for (const body of bodyRows) {
+			const mutedIndex = body.output.indexOf(mutedCode);
+			assert.ok(mutedIndex >= 0, "wrapped continuation should retain the message color");
+			const borderIndex = body.output.lastIndexOf("│");
+			const restoredDialogStyle = body.output.lastIndexOf(`${ANSI_RESET}${dialogPrefix}`, borderIndex);
+			assert.ok(restoredDialogStyle > mutedIndex, "message color must reset before the right frame");
+		}
+	});
 });
 
 function toast(message: string, variant?: AppToastEntry["variant"], actionLabel?: string): AppToastEntry {
@@ -101,4 +153,9 @@ function toast(message: string, variant?: AppToastEntry["variant"], actionLabel?
 		...(variant ? { variant } : {}),
 		...(actionLabel ? { action: { label: actionLabel } } : {}),
 	};
+}
+
+function rgbAnsi(kind: "38" | "48", hex: string): string {
+	const value = hex.replace(/^#/, "");
+	return `${kind};2;${Number.parseInt(value.slice(0, 2), 16)};${Number.parseInt(value.slice(2, 4), 16)};${Number.parseInt(value.slice(4, 6), 16)}`;
 }

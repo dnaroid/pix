@@ -31,6 +31,7 @@ import {
 	writeStructuredResult,
 } from "../lib.js";
 import { spawnAgentWithRetry } from "../core/retry.js";
+import { recordSubagentUsage } from "../core/usage.js";
 import { DEFAULT_SPAWN_WATCH_SECONDS, DEFAULT_UPDATE_INTERVAL_SECONDS, INLINE_RENDERING } from "../constants.js";
 import { formatAgentStatus } from "../format.js";
 import { getLiveRun } from "../live.js";
@@ -212,6 +213,7 @@ export function registerSpawnTool(
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const parentSessionManager = ctx.sessionManager;
 			const parentSession = typeof ctx.sessionManager?.getSessionFile === "function"
 				? ctx.sessionManager.getSessionFile()
 				: undefined;
@@ -344,7 +346,10 @@ export function registerSpawnTool(
 							details: partialDetails,
 						});
 					},
-					onRpcEvent: (event) => onAgentRpcEvent?.(runDir, task.id, event),
+				onRpcEvent: (event) => {
+					recordSubagentUsage(parentSessionManager, event, task.id);
+					onAgentRpcEvent?.(runDir, task.id, event);
+				},
 				});
 			}
 

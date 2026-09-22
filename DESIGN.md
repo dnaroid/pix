@@ -125,6 +125,12 @@ Use primary for:
 - meaningful selected emphasis;
 - small active indicators when neutral styling is insufficient.
 
+Keyboard focus in the Desktop workbench SHOULD read like application chrome,
+not a browser selection box. Preserve `:focus-visible` for keyboard access, but
+keep routine controls to a thin, restrained, inset semantic ring. Text-entry
+controls should not add a focus ring. Avoid thick external rectangles or
+glowing rings around ordinary buttons, tabs, rail icons, links, and menu rows.
+
 Do NOT use primary for every button, every icon, every navigation item, or passive status text.
 
 ### Neutral surfaces
@@ -406,7 +412,10 @@ background does not remove platform bevels or gradients by itself: use
 `appearance-none`, preserve the native select semantics, reserve space for a
 Lucide chevron, and verify the closed control in light and dark desktop WebViews.
 
-Focused controls MUST have a visible focus state.
+Focused controls MUST have a visible focus state. Text-entry controls (`input`,
+`textarea`, and `select`) are the exception: they MUST retain native focus and
+caret semantics without a global outline, border, or ring frame. Buttons and
+other keyboard-navigated controls retain the visible focus treatment.
 
 Composer surfaces may read as a distinct card-like work surface, but should not become visually heavier than the transcript/content above them.
 

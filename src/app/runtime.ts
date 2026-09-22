@@ -25,6 +25,7 @@ import type { AppOptions, ScopedSessionModel, SessionModel, ThinkingLevel } from
 
 const BUNDLED_QUESTION_EXTENSION_NAME = "question";
 const PI_TOOLS_SUITE_EXTENSION_NAME = "pi-tools-suite";
+const PIX_HOST_RUNTIME_SYMBOL = Symbol.for("pix.host.runtime");
 const BUNDLED_EXTENSIONS_DIR = resolve(
 	dirname(fileURLToPath(import.meta.url)),
 	"..",
@@ -406,12 +407,17 @@ export interface PixDraftModelRuntimeHandle {
 	dispose(): void;
 }
 
+function markPixHostRuntime(): void {
+	(globalThis as typeof globalThis & { [PIX_HOST_RUNTIME_SYMBOL]?: boolean })[PIX_HOST_RUNTIME_SYMBOL] = true;
+}
+
 /**
  * Build a sessionless model runtime with the same extension/provider discovery
  * used by UI-only draft tabs. Callers may use it for short stateless requests
  * (for example first-prompt model routing) without creating session history.
  */
 export async function createPixDraftModelRuntime(options: { cwd: string; agentDir?: string }): Promise<PixDraftModelRuntimeHandle> {
+	markPixHostRuntime();
 	const agentDir = options.agentDir ?? getAgentDir();
 	await ensurePiToolsSuiteExtensionInstalledOnce({ agentDir });
 	const bundledExtensionPaths = await getBundledExtensionPathsAsync();
@@ -453,6 +459,7 @@ export async function createPixDraftModelRuntime(options: { cwd: string; agentDi
 }
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
+	markPixHostRuntime();
 	const agentDir = getAgentDir();
 	const reusableServices = reusableRuntimeServices(runtimeOptions.reuseServicesFrom, options.cwd, agentDir);
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {

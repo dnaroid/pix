@@ -40,6 +40,7 @@
     createDesktopNotificationService,
   } from "./lib/desktop-notifications";
   import { createDesktopUpdater } from "./app/desktop-updater.svelte";
+  import { createDesktopWatchRestart } from "./app/desktop-watch-restart.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
@@ -75,6 +76,7 @@
   const errors = createErrorState();
   const reportError = errors.report;
   const updater = createDesktopUpdater();
+  const desktopWatchRestart = createDesktopWatchRestart();
 
   const transcriptScroll = createTranscriptScrollController({
     activeSessionId: () => activeSessionId,
@@ -629,6 +631,7 @@
   onMount(() => installDesktopContextMenu({ reportError }));
   onMount(desktopLifecycle.start);
   onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
+  onMount(desktopWatchRestart.start);
 
 </script>
 
@@ -638,6 +641,9 @@
 <div class="grid h-full grid-rows-[36px_minmax(0,1fr)_28px] bg-background text-foreground">
   <DesktopTitlebar
     {isMacOS}
+    restartAvailable={desktopWatchRestart.available}
+    restartPending={desktopWatchRestart.restarting}
+    onRestart={desktopWatchRestart.restart}
     project={titlebarViewModel.project}
     workbench={titlebarViewModel.workbench}
     selector={titlebarViewModel.selector}

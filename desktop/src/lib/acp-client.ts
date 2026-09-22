@@ -38,6 +38,7 @@ import type {
   QueueItem,
   QueueState,
   RuntimeStatus,
+  SessionUsageStatus,
   UserMessageAction,
   UserMessageActionResult,
 } from "./acp-client-types";
@@ -69,6 +70,10 @@ export type {
   QueueSource,
   QueueState,
   RuntimeStatus,
+  SessionUsageProvider,
+  SessionUsageReport,
+  SessionUsageStatus,
+  SessionUsageTotals,
   UserMessageAction,
   UserMessageActionResult,
 } from "./acp-client-types";
@@ -302,6 +307,10 @@ export class AcpClient {
 
   autocompleteSettings(sessionId: string): Promise<AutocompleteSettings> {
     return this.pix.autocompleteSettings(sessionId);
+  }
+
+  sessionUsage(sessionId: string): Promise<SessionUsageStatus> {
+    return this.pix.sessionUsage(sessionId);
   }
 
   cancel(sessionId: string): Promise<void> {

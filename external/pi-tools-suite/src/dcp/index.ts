@@ -79,8 +79,10 @@ import { createBudgetedAutoCompressionBlock } from "./auto-compress-budget.js"
 import { compressionPlanningTokens, outstandingCompressionTokens, resetCompressionProgress, routineRecoveryTokens, trackCompressionProgress } from "./compression-progress.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction, invalidateDcpStateOwner } from "./state-transaction.js"
 import { captureDcpContextTokenEstimates, projectDcpContextMapTelemetry } from "./context-map-telemetry.js"
+import { clearDcpNativeWidget, updateDcpNativeWidget } from "./native-tui.js"
 
 const PIX_DCP_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.runtime-stats")
+const PIX_DCP_SESSION_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.session-runtime-stats")
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -167,12 +169,23 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	let contextMapRevision = 0
 	let contextMapPass = 0
 	let contextMap: ReturnType<typeof projectDcpContextMapTelemetry> | undefined
-	// This process-local bridge is read-only. Its map is produced only by the
-	// existing context pass, never by Desktop inspection or a streaming delta.
-	runtimeGlobals[PIX_DCP_RUNTIME_STATS_SYMBOL] = () => ({
+	const sessionRuntimeStatsGetter = () => ({
 		tokensSaved: state.tokensSaved,
 		contextMap: contextMap?.sessionEpoch === state.sessionEpoch ? contextMap : undefined,
 	})
+	const publishSessionRuntimeStats = (ctx: ExtensionContext) => {
+		const manager = ctx.sessionManager as typeof ctx.sessionManager & Record<symbol, unknown>
+		manager[PIX_DCP_SESSION_RUNTIME_STATS_SYMBOL] = sessionRuntimeStatsGetter
+	}
+	const clearSessionRuntimeStats = (ctx: ExtensionContext) => {
+		const manager = ctx.sessionManager as typeof ctx.sessionManager & Record<symbol, unknown>
+		if (manager[PIX_DCP_SESSION_RUNTIME_STATS_SYMBOL] === sessionRuntimeStatsGetter) {
+			delete manager[PIX_DCP_SESSION_RUNTIME_STATS_SYMBOL]
+		}
+	}
+	// This process-local bridge is read-only. Its map is produced only by the
+	// existing context pass, never by Desktop inspection or a streaming delta.
+	runtimeGlobals[PIX_DCP_RUNTIME_STATS_SYMBOL] = sessionRuntimeStatsGetter
 	let journalMirror: DcpJournalMirror | undefined
 	let journalSupported = false
 	let journalBlockedReason: string | undefined
@@ -310,14 +323,21 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			warnedProgress.clear()
 			resetDiagnostics("owner-changed")
 	}
-	pi.on("model_select", invalidateOwner)
+	pi.on("model_select", (_event, ctx) => {
+		invalidateOwner()
+		updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
+	})
 	pi.on("session_tree", async (_event, ctx) => {
 		invalidateOwner()
 		resetState(state)
 		if (config.manualMode.enabled) state.manualMode = true
 		await loadJournalState(ctx, false)
+		updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
 	})
-	pi.on("session_compact", invalidateOwner)
+	pi.on("session_compact", (_event, ctx) => {
+		invalidateOwner()
+		updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
+	})
 	const appendNudgeTelemetry = (
 		event: "emitted" | "upgraded" | "reapplied",
 		type: DcpNudgeType,
@@ -364,6 +384,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 	// ── 5. session_start: restore state from session entries ──────────────────
 	pi.on("session_start", async (event, ctx) => {
+		publishSessionRuntimeStats(ctx)
 		contextMap = undefined
 		contextMapPass++
 		resetState(state)
@@ -395,11 +416,14 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				)
 			} catch { /* Headless mode. */ }
 		}
+		updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
 	})
 
 	// Journal operations are committed at the mutation boundary; shutdown does
 	// not write a full runtime snapshot.
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
+		clearSessionRuntimeStats(ctx)
+		clearDcpNativeWidget(ctx)
 		contextMap = undefined
 		contextMapPass++
 		routinePressureTracker.reset()
@@ -481,7 +505,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			})
 			state.totalToolCallCount++
 		}
-
+		if (event.toolName === "compress") updateDcpNativeWidget(_ctx, state.tokensSaved, contextMap)
 	})
 
 	// ── 10. context: apply pruning and inject nudges ──────────────────────────
@@ -539,6 +563,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					)
 					: undefined
 			}
+			updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
 			return { messages }
 		}
 
@@ -1437,6 +1462,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			ambiguous: pending?.ambiguous ?? false,
 			state: summarizeDcpState(state, effectiveConfig),
 		}, ctx)
+		updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
 	})
 
 	// message_end is emitted for the finalized assistant message after the
@@ -1444,6 +1470,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	// one unambiguous request shape (or identical retries) is safe to promote.
 	pi.on("message_end", async (event, ctx) => {
 		if (event.message?.role !== "assistant") return
+		updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
 		const effectiveConfig = configForContext(ctx)
 		if (!effectiveConfig.enabled) {
 			providerEvidenceTracker.reset()
@@ -1532,5 +1559,6 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}))
 		providerEvidenceCommitQueue = commit
 		await commit
+		updateDcpNativeWidget(ctx, state.tokensSaved, contextMap)
 	})
 }

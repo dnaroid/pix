@@ -78,13 +78,42 @@ provider-seen evidence, freshness grants or patience into a resumed runtime.
 
 ## Full branch and owner boundaries
 
-The TUI uses `loadDcpStatsToast()` with an async full-branch read when supported;
-it does not hydrate the lazy UI cursor synchronously on click. ACP continues to
-supply the complete active branch from its existing async tree request. The
-explicit synchronous formatter remains available for already-loaded branches
-and diagnostics. A failed full reader never falls back to a truncated tail.
+The TUI uses `loadDcpStatsToast()` and `loadDcpStatsDialog()` with an async
+full-branch read when supported; neither hydrates the lazy UI cursor
+synchronously on click. If the dialog manager has no async full reader, it
+still renders live runtime/context-map data with history marked unavailable.
+After that read, dialog statistics replay cooperatively on the main thread in
+bounded chunks, yielding to a macrotask between chunks; this is not off-thread
+work and a large history is not rescanned. Owner identity is checked again
+after aggregation, so an owner change during a yield cannot publish a stale
+dialog. ACP continues to supply the complete active branch from its existing async tree
+request. The explicit synchronous formatter remains available for
+already-loaded branches and diagnostics. A failed full reader never falls back
+to a truncated tail. Dialog loads cancel (`undefined`) on owner changes, and
+the mouse controller generations each click: only the newest completion for an
+unchanged session/manager/session ID/leaf/model may publish a dialog.
 Invalid/missing journal chains and incomplete histories display unknown values,
-not reassuring zero counters or a claim that persistence is healthy.
+not reassuring zero counters or a claim that persistence is healthy. Pix also
+suppresses a pending dialog if the tab lifecycle generation changes, including
+an A→B→A return with the same session owner.
+
+Pix TUI's context-status popup presents the same compact DCP context view as the
+Desktop inspector: a bounded capacity map from live SDK tokens/context window,
+prepared-projection categories for retained/candidate/protected/summary token
+volume, live `tokensSaved`, measured commit gain, last projection and journal
+block state. Prepared categories remain approximate and are fitted to live
+occupancy; missing SDK capacity never invents free space. For Pix TUI the
+lightweight getter is attached to the owning session manager so retained
+background-tab runtimes cannot leak telemetry into the active tab; Desktop's
+one-session-per-process ACP bridge remains unchanged. Reading either getter does
+not trigger a history scan or a new pruning pass. Durable journal statistics
+still use the on-demand full-branch read above. When the `/dcp` resource command
+is available and the session is idle, the popup exposes `Compress`, routed
+through the normal resource-command path without clearing the editor or adding
+the usual slash command echo row.
+ANSI-colored popup content is row-contained: wrapped continuations retain their
+message color, while each physical row restores the dialog style before padding
+and the frame so color cannot leak into the border.
 
 The runtime and report must distinguish a presentation cursor (`getBranch()` on
 a lazy manager) from full provider context and the complete journal branch.

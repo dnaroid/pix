@@ -8,7 +8,7 @@ describe("toolPresentation", () => {
       kind: "read",
       title: "Read src/main.ts",
       rawInput: { path: "src/main.ts", offset: 12, limit: 20 },
-    })).toEqual({ name: "read", args: "src/main.ts:12+20", tone: "success" });
+    })).toEqual({ name: "read", args: "src/main.ts:12+20", tone: "inspect" });
   });
 
   it("formats commands and collapses whitespace", () => {
@@ -17,7 +17,7 @@ describe("toolPresentation", () => {
       kind: "execute",
       title: "Bash: npm test",
       rawInput: { command: "npm test\n  -- --run" },
-    })).toEqual({ name: "bash", args: "npm test -- --run", tone: "warning" });
+    })).toEqual({ name: "bash", args: "npm test -- --run", tone: "execute" });
   });
 
   it("formats repository tool arguments in TUI order", () => {
@@ -29,7 +29,7 @@ describe("toolPresentation", () => {
     })).toEqual({
       name: "repo_search",
       args: "target: tool rendering · args: [--exclude-tests] · maxLines: 50",
-      tone: "warning",
+      tone: "search",
     });
   });
 
@@ -37,7 +37,7 @@ describe("toolPresentation", () => {
     expect(toolPresentation({ kind: "read", title: "Read src/legacy.ts" })).toEqual({
       name: "read",
       args: "src/legacy.ts",
-      tone: "success",
+      tone: "inspect",
     });
   });
 
@@ -77,11 +77,25 @@ describe("toolTone", () => {
     expect(toolTone("ast_grep")).toBe("search");
   });
 
-  it("uses the TUI tones for built-in tool families", () => {
+  it("uses operation roles instead of outcome semantics for tool families", () => {
+    expect(toolTone("read_file")).toBe("inspect");
     expect(toolTone("web_search")).toBe("search");
-    expect(toolTone("compress")).toBe("info");
-    expect(toolTone("question")).toBe("accent");
-    expect(toolTone("subagents")).toBe("muted");
-    expect(toolTone("custom_tool")).toBe("title");
+    expect(toolTone("shell")).toBe("execute");
+    expect(toolTone("compress")).toBe("context");
+    expect(toolTone("question")).toBe("interact");
+    expect(toolTone("subagents")).toBe("agent");
+    expect(toolTone("custom_tool")).toBe("neutral");
+  });
+
+  it("uses ACP tool kind as a semantic fallback", () => {
+    expect(toolTone("vendor_reader", "read")).toBe("inspect");
+    expect(toolTone("vendor_runner", "execute")).toBe("execute");
+    expect(toolTone("vendor_editor", "edit")).toBe("mutation");
+  });
+
+  it("colors multi-action repository knowledge by the requested operation", () => {
+    expect(toolTone("repo_knowledge", "other", { action: "context" })).toBe("inspect");
+    expect(toolTone("repo_knowledge", "other", { action: "search" })).toBe("search");
+    expect(toolTone("repo_knowledge", "other", { action: "record" })).toBe("mutation");
   });
 });

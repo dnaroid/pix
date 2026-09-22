@@ -393,7 +393,7 @@ export class PiUiExtendApp {
 			formatContextUsagePercent: (session) => this.statusController.formatContextUsagePercent(session),
 			roundedContextUsagePercent: (session) => this.statusController.roundedContextUsagePercent(session),
 			contextUsagePercentColor: (percent) => this.statusController.contextUsagePercentColor(percent),
-			modelUsageStatusLabel: () => this.modelUsageController.statusLabel(),
+			modelUsageStatusLabel: () => this.modelUsageController.statusLabel() || (this.runtime?.session ? "Usage" : ""),
 			promptEnhancerStatusWidgetText: () => this.promptEnhancer.statusWidgetText(),
 			promptEnhancerStatusWidgetActive: () => this.promptEnhancer.statusWidgetActive(),
 			promptEnhancerStatusWidgetEnabled: () => this.promptEnhancer.statusWidgetEnabled(),
@@ -736,6 +736,9 @@ export class PiUiExtendApp {
 				},
 				setStatus: (status) => this.setStatus(status),
 				runtimeSession: () => this.runtime?.session,
+				tabsLifecycleGeneration: () => this.tabsController.lifecycleGeneration,
+				theme: () => this.theme,
+				modelColors: () => this.pixConfig.modelColors,
 				cwd: () => this.options.cwd,
 				enhancePrompt: () => this.promptEnhancer.enhancePrompt(),
 				openNewTab: () => {
@@ -757,7 +760,6 @@ export class PiUiExtendApp {
 				showToast: (message, kind, options) => this.showToast(message, kind, options),
 				dismissToast: (toastId) => this.toastController.dismissToast(toastId),
 				activateToastAction: (toastId) => this.toastController.activateAction(toastId),
-				refreshModelUsageStatus: () => this.refreshModelUsageStatusFromClick(),
 				refreshUserMessageJumpMenuItems: () => this.menuItems.refreshUserMessageJumpMenuItems(),
 				queueInputFromStatus: () => {
 					void this.inputActions.queueInputFromEditor().catch((error) => {
@@ -1588,34 +1590,6 @@ export class PiUiExtendApp {
 			const message = error instanceof Error ? error.message : String(error);
 			this.showToast(`Could not update terminal bell notifications: ${message}`, "error");
 		}
-	}
-
-	private refreshModelUsageStatusFromClick(): void {
-		const refresh = this.modelUsageController.refreshNow();
-		if (refresh.kind === "unsupported") {
-			this.showToast("Usage limits are unavailable for this model", "warning");
-			return;
-		}
-
-		if (refresh.kind === "in-flight") {
-			this.showToast("Usage limits refresh already in progress", "info");
-			return;
-		}
-
-		this.showToast("Refreshing model usage limits…", "info");
-		void refresh.promise.then((result) => {
-			if (result === "refreshed") {
-				this.showToast("Model usage limits refreshed", "success");
-				return;
-			}
-
-			if (result === "unavailable") {
-				this.showToast("Usage limits are unavailable for this model", "warning");
-				return;
-			}
-
-			this.showToast("Failed to refresh model usage limits", "error");
-		});
 	}
 
 	private showToast(message: string, kind: ToastKind = "info", options?: AppToastOptions): void {

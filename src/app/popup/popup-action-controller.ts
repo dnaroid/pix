@@ -117,6 +117,32 @@ export class AppPopupActionController {
 		if (this.isScopeActive(scope)) this.host.render();
 	}
 
+	resourceSlashCommandAvailable(name: string): boolean {
+		return this.menuItems.getResourceSlashCommands().some((command) => command.name === name);
+	}
+
+	/** Run an extension/resource command from host chrome without clearing the
+	 * editor or adding the normal slash-command echo row. */
+	async runResourceSlashCommandFromUi(name: string, argumentsText: string): Promise<boolean> {
+		const scope = this.captureScope();
+		const command = this.menuItems.getResourceSlashCommands().find((candidate) => candidate.name === name);
+		if (!command || !scope.session) return false;
+		if (scope.session.isStreaming || scope.session.isCompacting) {
+			this.host.showToast(`/${name} is available when the session is idle`, "warning");
+			return false;
+		}
+		try {
+			await this.executeResourceSlashCommand(command, argumentsText, scope.session);
+		} catch (error) {
+			if (!this.isScopeActive(scope)) return false;
+			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
+			this.host.showToast(`/${name} failed`, "error");
+			this.host.setSessionStatus(this.host.runtime()?.session);
+		}
+		if (this.isScopeActive(scope)) this.host.render();
+		return true;
+	}
+
 	private async submitSelectedSlashCommand(): Promise<boolean> {
 		const selected = this.popupMenus.selectedSlashCommand();
 		if (!selected) return false;

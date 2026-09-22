@@ -4,6 +4,8 @@ import type { ConversationViewport } from "../rendering/conversation-viewport.js
 import type { EditorLayoutRenderer } from "../rendering/editor-layout-renderer.js";
 import type { ImageContent, InputEditor } from "../../input-editor.js";
 import type { ToastEntry, ToastVariant } from "../../ui.js";
+import { colorize, type Theme } from "../../theme.js";
+import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import type { AppPopupActionController } from "../popup/popup-action-controller.js";
 import type { AppPopupMenuController } from "../popup/popup-menu-controller.js";
@@ -38,7 +40,9 @@ import type {
 	StatusVoiceLanguageTarget,
 	StatusVoiceMicTarget,
 } from "../types.js";
-import { loadDcpStatsToast } from "../rendering/dcp-stats.js";
+import { loadDcpStatsDialog } from "../rendering/dcp-stats.js";
+import { formatSessionUsageText, loadSessionUsageReport } from "../session/session-usage.js";
+import { modelProviderThemeColor } from "../rendering/status-line-renderer.js";
 import { detectFileLinks, type RenderedLink } from "./file-links.js";
 import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -85,6 +89,9 @@ export type AppMouseControllerHost = {
 	setSubagentsPanelExpanded(expanded: boolean): void;
 	setStatus(status: string): void;
 	runtimeSession(): AgentSession | undefined;
+	tabsLifecycleGeneration(): number;
+	theme(): Theme;
+	modelColors(): ModelColorsConfig;
 	cwd(): string | undefined;
 	openFileLink?(link: RenderedLink): boolean;
 	openImageContent?(image: ImageContent): boolean;
@@ -95,10 +102,9 @@ export type AppMouseControllerHost = {
 	switchToTab(tabId: string): void;
 	closeTab(tabId: string): void;
 	toastEntry(toastId: number): ToastEntry | undefined;
-	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant }): void;
+	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant; action?: { label: string; onSelect: () => void } }): void;
 	dismissToast(toastId: number): void;
 	activateToastAction(toastId: number): boolean;
-	refreshModelUsageStatus(): void | Promise<void>;
 	refreshUserMessageJumpMenuItems?(): Promise<void>;
 	queueInputFromStatus?(): void | Promise<void>;
 	pasteInternalClipboard?(): void;
@@ -150,6 +156,8 @@ export class AppMouseController {
 	private clickFlash: ClickFlash | undefined;
 	private clickFlashTimer: ReturnType<typeof setTimeout> | undefined;
 	private clickFlashDirty = false;
+	private dcpStatsDialogRequestGeneration = 0;
+	private sessionUsageDialogRequestGeneration = 0;
 	private renderedConversationFrame: {
 		bodyHeight: number;
 		topRow: number;
@@ -623,19 +631,64 @@ export class AppMouseController {
 
 		const session = this.host.runtimeSession();
 		if (!session) return false;
+		const requestGeneration = ++this.dcpStatsDialogRequestGeneration;
+		const lifecycleGeneration = this.host.tabsLifecycleGeneration();
 		const model = session.model;
-		const sessionId = session.sessionManager.getSessionId?.();
-		void loadDcpStatsToast(session).then((message) => {
-			if (this.host.runtimeSession() !== session || session.model !== model || session.sessionManager.getSessionId?.() !== sessionId) return;
-			this.host.showToast(message, "info", { variant: "dialog" });
+		const manager = session.sessionManager;
+		const sessionId = manager.getSessionId?.();
+		const leafId = manager.getLeafId?.();
+		void loadDcpStatsDialog(session, this.host.theme()).then((message) => {
+			if (message === undefined
+				|| requestGeneration !== this.dcpStatsDialogRequestGeneration
+				|| this.host.tabsLifecycleGeneration() !== lifecycleGeneration
+				|| this.host.runtimeSession() !== session
+				|| session.sessionManager !== manager
+				|| session.model !== model
+				|| manager.getSessionId?.() !== sessionId
+				|| manager.getLeafId?.() !== leafId) return;
+			const canCompress = !session.isStreaming && !session.isCompacting && this.popupActions.resourceSlashCommandAvailable("dcp");
+			this.host.showToast(message, "info", {
+				variant: "dialog",
+				...(canCompress ? { action: { label: "Compress", onSelect: () => { void this.popupActions.runResourceSlashCommandFromUi("dcp", "compress"); } } } : {}),
+			});
 		});
 		return true;
 	}
 
 	private handleStatusModelUsageClick(event: MouseEvent): boolean {
 		if (!this.statusTargetContains(this.statusModelUsageTarget, event)) return false;
-
-		void this.host.refreshModelUsageStatus();
+		const session = this.host.runtimeSession();
+		if (!session) {
+			this.host.showToast("Session usage\nNo session has started yet.", "info", { variant: "dialog" });
+			return true;
+		}
+		const requestGeneration = ++this.sessionUsageDialogRequestGeneration;
+		const lifecycleGeneration = this.host.tabsLifecycleGeneration();
+		const manager = session.sessionManager;
+		const sessionId = manager.getSessionId?.();
+		void loadSessionUsageReport(session).then((report) => {
+			if (requestGeneration !== this.sessionUsageDialogRequestGeneration
+				|| this.host.tabsLifecycleGeneration() !== lifecycleGeneration
+				|| this.host.runtimeSession() !== session
+				|| session.sessionManager !== manager
+				|| manager.getSessionId?.() !== sessionId) return;
+			const theme = this.host.theme();
+			const modelColors = this.host.modelColors();
+			this.host.showToast(formatSessionUsageText(report, {
+				formatModel: (provider, model) => {
+					const configured = resolveModelColor(`${provider}/${model}`, modelColors);
+					const foreground = configured
+						? resolveColor(configured, theme.colors)
+						: modelProviderThemeColor(provider, theme.colors);
+					return colorize(model, { foreground, bold: true });
+				},
+			}), "info", { variant: "dialog" });
+		}, () => {
+			if (requestGeneration !== this.sessionUsageDialogRequestGeneration
+				|| this.host.tabsLifecycleGeneration() !== lifecycleGeneration
+				|| this.host.runtimeSession() !== session) return;
+			this.host.showToast("Session usage is unavailable.", "warning", { variant: "dialog" });
+		});
 		return true;
 	}
 

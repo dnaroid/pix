@@ -47,7 +47,6 @@ function messageForDisplay(item: MessageItem): MessageItem {
 
 function buildActivityGroup(entries: readonly [ActivityEntry, ...ActivityEntry[]]): ActivityGroupItem {
   const tools: ToolItem[] = [];
-  let failed = false;
   let running = false;
   let pending = false;
   let earliestStart: number | undefined;
@@ -56,7 +55,6 @@ function buildActivityGroup(entries: readonly [ActivityEntry, ...ActivityEntry[]
     const { startedAtMs, endedAtMs } = entry;
     if (entry.type === "tool") {
       tools.push(entry);
-      failed ||= entry.status === "failed";
       running ||= entry.status === "in_progress";
       pending ||= entry.status === "pending";
     } else {
@@ -70,7 +68,7 @@ function buildActivityGroup(entries: readonly [ActivityEntry, ...ActivityEntry[]
     }
   }
   const active = running || pending;
-  const status: ToolCallStatus = failed ? "failed" : running ? "in_progress" : pending ? "pending" : "completed";
+  const status: ToolCallStatus = running ? "in_progress" : pending ? "pending" : "completed";
   const durationMs = active ? undefined : elapsedDuration(earliestStart, latestEnd);
 
   return {

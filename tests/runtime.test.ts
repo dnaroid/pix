@@ -165,6 +165,10 @@ export default function draftProvider(pi) {
 			const models = await createPixDraftModelCatalog({ cwd: root, agentDir });
 
 			assert.ok(models.some((model) => model.provider === "draft-provider" && model.id === "draft-model"));
+			assert.equal(
+				(globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for("pix.host.runtime")],
+				true,
+			);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
