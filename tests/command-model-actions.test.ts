@@ -206,6 +206,23 @@ describe("ModelCommandActions combined selector entry points", () => {
 
 		assert.deepEqual(opened, ["model", "thinking"]);
 	});
+
+	it("accepts Auto as the persisted default-model choice", async () => {
+		const events: string[] = [];
+		const host = {
+			runtime: () => undefined,
+			isRunning: () => true,
+			addEntry: (entry: { text?: string }) => events.push(entry.text ?? ""),
+			setSessionStatus: () => undefined,
+			render: () => undefined,
+		} as unknown as CommandControllerHost;
+
+		await new ModelCommandActions(host).runDefaultModelSlashCommand("auto");
+
+		assert.equal(loadPixConfig().modelRouting.enabled, true);
+		assert.equal(loadPixConfig().modelRouting.default, true);
+		assert.match(events[0] ?? "", /Default model set to Auto/u);
+	});
 });
 
 describe("ModelCommandActions.runDefaultThinkingSlashCommand", () => {

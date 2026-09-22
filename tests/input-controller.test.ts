@@ -160,6 +160,21 @@ describe("AppInputController terminal input", () => {
 		assert.equal(calls.stop, 1);
 	});
 
+	it("uses Ctrl+D as Set default while the model picker owns that shortcut", () => {
+		const { controller, editor, calls } = createController({
+			extensionInputUsesEditor: false,
+			shiftPressed: false,
+			consumeExtensionInput: false,
+			setDefaultResult: true,
+		});
+		editor.setText("");
+
+		controller.handleChunk(Buffer.from(""));
+
+		assert.equal(calls.setDefault, 1);
+		assert.equal(calls.stop, 0);
+	});
+
 	it("uses the injected Command modifier state for raw Backspace", () => {
 		const { controller, editor } = createController({
 			extensionInputUsesEditor: false,
@@ -347,14 +362,20 @@ describe("AppInputController terminal input", () => {
 	});
 });
 
-function createController(options: { extensionInputUsesEditor: boolean; shiftPressed: boolean; commandPressed?: boolean; consumeExtensionInput?: boolean }): {
+function createController(options: {
+	extensionInputUsesEditor: boolean;
+	shiftPressed: boolean;
+	commandPressed?: boolean;
+	consumeExtensionInput?: boolean;
+	setDefaultResult?: boolean;
+}): {
 	controller: AppInputController;
 	editor: InputEditor;
 	calls: {
 		extensionInput: number; enter: number; interrupt: number; escape: number; mouseEvents: unknown[]; render: number;
 		autocompleteSlash: number; voice: number; stop: number; scrollLines: number[]; scrollPages: number[];
 		menuDeltas: number[]; thinkingDeltas: number[]; historyDeltas: number[];
-		moveMenuResult: boolean; moveThinkingResult: boolean; visibilityModeToggles: number; navigateHistoryResult: boolean;
+		moveMenuResult: boolean; moveThinkingResult: boolean; visibilityModeToggles: number; navigateHistoryResult: boolean; setDefault: number;
 	};
 } {
 	const editor = new InputEditor();
@@ -362,7 +383,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		extensionInput: 0, enter: 0, interrupt: 0, escape: 0, mouseEvents: [] as unknown[], render: 0,
 		autocompleteSlash: 0, voice: 0, stop: 0, scrollLines: [] as number[], scrollPages: [] as number[],
 		menuDeltas: [] as number[], thinkingDeltas: [] as number[], historyDeltas: [] as number[],
-		moveMenuResult: false, moveThinkingResult: false, visibilityModeToggles: 0, navigateHistoryResult: false,
+		moveMenuResult: false, moveThinkingResult: false, visibilityModeToggles: 0, navigateHistoryResult: false, setDefault: 0,
 	};
 	const host: InputControllerHost = {
 		inputEditor: editor,
@@ -396,6 +417,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		handleEscape: async () => { calls.escape += 1; },
 		handleDirectPopupInput: () => false,
 		toggleModelVisibilityMode: () => { calls.visibilityModeToggles += 1; return true; },
+		setActiveModelDefault: () => { calls.setDefault += 1; return options.setDefaultResult ?? false; },
 		autocompleteModel: () => false,
 		acceptAutocompleteSuggestion: () => false,
 		autocompleteSlashCommand: () => { calls.autocompleteSlash += 1; },

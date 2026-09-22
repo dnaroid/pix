@@ -37,6 +37,7 @@ Example:
   },
   "modelRouting": {
     "enabled": false,
+    "default": false,
     "modelRef": "openrouter/~typesafe/jev-latest",
     "fallbackModels": [],
     "defaultTier": "standard",
@@ -106,6 +107,11 @@ sessionless drafts expose an `Auto` model choice. Selecting `Auto` routes only
 the first real user prompt, then creates the session directly with the chosen
 tier's `modelRef` and `thinking`; resumed and existing sessions are never
 re-routed.
+
+Set `modelRouting.default` to `true` to make new conversation drafts start in
+`Auto`. The combined model/thinking pickers in both frontends can set either
+`Auto` or the currently staged concrete model + thinking pair as the default
+directly, so editing JSONC is not required.
 
 The primary router defaults to OpenRouter Jev Latest. Jev is called through
 OpenRouter's Decisions API as a semantic choice over the configured tier

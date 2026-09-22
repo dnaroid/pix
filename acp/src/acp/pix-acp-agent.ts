@@ -2115,12 +2115,15 @@ export class PixAcpAgent {
 	}
 
 	private desktopModelRoutingStatus(params: DesktopModelRoutingStatusRequest): DesktopModelRoutingStatusResponse {
-		return { enabled: loadModelRoutingConfig(params.cwd).enabled };
+		const routing = loadModelRoutingConfig(params.cwd);
+		return { enabled: routing.enabled, default: routing.default };
 	}
 
 	private async desktopDraftConfig(params: DesktopDraftConfigRequest): Promise<DesktopDraftConfigResponse> {
 		const workspaceKey = resolve(params.cwd);
-		const modelRoutingEnabled = loadModelRoutingConfig(params.cwd).enabled;
+		const modelRouting = loadModelRoutingConfig(params.cwd);
+		const modelRoutingEnabled = modelRouting.enabled;
+		const modelRoutingDefault = modelRouting.default;
 		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
 			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
 			...(this.options.toolsSuiteExtensionPath
@@ -2176,7 +2179,7 @@ export class PixAcpAgent {
 				}
 			}
 			current ??= models[0];
-			if (!current) return { configOptions: [], modelUsageRefresh: "unavailable", modelRoutingEnabled };
+			if (!current) return { configOptions: [], modelUsageRefresh: "unavailable", modelRoutingEnabled, modelRoutingDefault };
 
 			const levels = supportedThinkingLevels(current);
 			if (params.thinkingLevel && !levels.includes(params.thinkingLevel)) {
@@ -2199,6 +2202,7 @@ export class PixAcpAgent {
 				modelUsageRefresh: modelUsage.refresh,
 				...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
 				modelRoutingEnabled,
+				modelRoutingDefault,
 			};
 		} finally {
 			handle.dispose();

@@ -18,6 +18,7 @@ Pix can optionally expose an `Auto` model choice for a new, still-sessionless dr
 
 - TUI reads `modelRouting` from `pix.jsonc`; Desktop reads the same shape from `pix-desktop.jsonc`. The profiles remain independent.
 - Routing is disabled by default. `enabled: true` only makes `Auto` available in the new-draft model picker; it does not replace the configured default model automatically.
+- `default: true` makes new UI-only conversation drafts start in `Auto`. It defaults to false and is dormant while routing is disabled. An explicit CLI/runtime model override still wins.
 - `modelRef` is the primary router model. The default is `openrouter/~typesafe/jev-latest`.
 - `fallbackModels` is the ordered router-model fallback chain and defaults to `[]`.
 - `defaultTier` is the deterministic semantic tier selected when every router model is unavailable, fails, times out, or returns an invalid decision.
@@ -44,11 +45,12 @@ Pix can optionally expose an `Auto` model choice for a new, still-sessionless dr
 
 ## UI contract
 
-- While `modelRouting.enabled` is true, `Auto` appears in both new-draft and live/existing-session model pickers.
+- While `modelRouting.enabled` is true, `Auto` appears in both new-draft and live/existing-session model pickers and is pinned to the first row even when another model is current or a fuzzy query is active.
 - Selecting `Auto` from a live/existing session never re-routes or mutates that session. It opens or reuses the UI-only New Conversation draft and stages `Auto` there, so routing still applies only to the first prompt of the new conversation.
-- TUI explains that Auto thinking is chosen by the selected tier rather than presenting a fake fixed thinking level.
-- Desktop disables manual thinking while Auto is staged and explains that model + thinking are chosen from the first prompt.
-- Desktop Settings exposes routing enablement, router model, router fallbacks, deterministic fallback tier, and editable tier id/description/model/thinking rows.
+- Before Auto has selected a tier, status bars show only `Auto`; they do not display a placeholder/fake thinking level.
+- TUI explains that Auto thinking is chosen by the selected tier rather than presenting a fake fixed thinking level. The combined picker exposes a clickable `Set default` action and `Ctrl+D`; concrete selections persist the staged model + thinking, while Auto persists `modelRouting.default: true`.
+- Desktop disables manual thinking while Auto is staged and explains that model + thinking are chosen from the first prompt. Its combined picker exposes `Set default` / `Default ✓` for either the staged concrete model+thinking pair or Auto.
+- Desktop Settings exposes routing enablement, the `Auto by default` toggle, router model, router fallbacks, deterministic fallback tier, and editable tier id/description/model/thinking rows.
 
 ## Lifecycle and ownership
 

@@ -240,6 +240,12 @@ export class AppMouseController {
 			return;
 		}
 
+		if (target?.kind === "model-default-set") {
+			this.popupActions.setSelectedModelDefault();
+			this.showClickFlashForEvent(event);
+			return;
+		}
+
 		if (target?.kind === "todo-panel") {
 			this.host.setTodoPanelExpanded(!this.host.getTodoPanelExpanded());
 			this.showClickFlashForEvent(event);

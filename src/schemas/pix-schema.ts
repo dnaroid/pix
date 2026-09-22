@@ -76,6 +76,7 @@ const ModelRoutingTier = Type.Object(
 const ModelRoutingConfig = Type.Object(
 	{
 		enabled: Type.Optional(Type.Boolean({ description: "Enable Auto in the new-session model picker and route the first real prompt before session creation." })),
+		default: Type.Optional(Type.Boolean({ description: "Start new UI-only conversation drafts in Auto routing mode by default." })),
 		modelRef: Type.Optional(Type.String({ description: "Primary router model. OpenRouter Jev Latest is available as openrouter/~typesafe/jev-latest." })),
 		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered router-model fallbacks tried if the primary routing request fails." })),
 		defaultTier: Type.Optional(Type.String({ description: "Tier id used deterministically when all router models fail or return an invalid decision." })),

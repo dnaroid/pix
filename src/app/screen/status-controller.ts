@@ -14,7 +14,7 @@ export type AppStatusControllerHost = {
 	readonly theme: Theme;
 	readonly blinkController: AppBlinkController;
 	runtimeSession(): AgentSession | undefined;
-	draftModelStatus?(): { modelLabel: string; thinkingLabel: string } | undefined;
+	draftModelStatus?(): { modelLabel: string; thinkingLabel?: string } | undefined;
 	render(): void;
 };
 
@@ -45,7 +45,9 @@ export class AppStatusController {
 	currentStatus(): string {
 		if (!this.host.runtimeSession() && (this.status === "new conversation" || this.status === "no session")) {
 			const draft = this.host.draftModelStatus?.();
-			if (draft) return `${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`;
+			if (draft) return draft.thinkingLabel
+				? `${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`
+				: draft.modelLabel;
 		}
 		if (!this.statusFollowsSession) return this.status;
 

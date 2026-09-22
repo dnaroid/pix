@@ -143,6 +143,7 @@ describe("AppMenuItemsController queue menu", () => {
 		assert.equal(items[0]?.label, "Auto");
 		assert.equal(items[0]?.value.current, false);
 		assert.equal(items[1]?.label, `openai-codex/gpt-5.5 ${APP_ICONS.check}`);
+		assert.equal(controller.getModelMenuItems("gpt")[0]?.value.kind, "auto");
 	});
 
 	it("also exposes Auto from a live session when routing is enabled", () => {

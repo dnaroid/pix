@@ -4,6 +4,7 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "defaultModel": { "modelRef": "openai-codex/gpt-5.6-sol", "fallbackModels": [], "thinking": "medium" },
   "modelRouting": {
     "enabled": false,
+    "default": false,
     "modelRef": "openrouter/~typesafe/jev-latest",
     "fallbackModels": [],
     "defaultTier": "standard",

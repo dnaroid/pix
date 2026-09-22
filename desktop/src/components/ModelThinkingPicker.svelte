@@ -12,21 +12,26 @@
     modelThinkingConfigState,
     type ModelThinkingModel,
   } from "../lib/model-thinking";
+  import type { ModelDefaultSelection } from "../lib/model-default-preference";
 
   let {
     configOptions,
     visibleModelRefs,
     rememberedThinkingByModel = {},
+    defaultSelection,
     disabled = false,
     onApply,
+    onSetDefault,
     onVisibleModelsChange,
     onClose,
   }: {
     configOptions: readonly SessionConfigOption[];
     visibleModelRefs?: readonly string[];
     rememberedThinkingByModel?: Readonly<Record<string, string>>;
+    defaultSelection?: ModelDefaultSelection;
     disabled?: boolean;
     onApply: (modelRef: string, thinkingLevel: string) => void | Promise<void>;
+    onSetDefault: (selection: ModelDefaultSelection) => void | Promise<void>;
     onVisibleModelsChange: (modelRefs: readonly string[]) => void | Promise<void>;
     onClose: () => void;
   } = $props();
@@ -40,6 +45,7 @@
   let selectedThinking = $state("off");
   let selectedIndex = $state(0);
   let applying = $state(false);
+  let savingDefault = $state(false);
   let savingVisibility = $state(false);
   let applyError = $state("");
   let visibilityMode = $state(false);
@@ -50,19 +56,31 @@
   const pickerModels = $derived(visibilityMode
     ? config.models.filter((model) => model.ref !== AUTO_MODEL_REF)
     : config.models.filter((model) => modelIsVisible(model)));
-  const filteredModels = $derived(fuzzySearch(
-    pickerModels.map((model) => ({
+  const filteredModels = $derived.by(() => {
+    const auto = visibilityMode ? undefined : pickerModels.find((model) => model.ref === AUTO_MODEL_REF);
+    const models = pickerModels.filter((model) => model.ref !== AUTO_MODEL_REF);
+    const filtered = fuzzySearch(
+      models.map((model) => ({
       value: model,
       label: model.ref,
       aliases: [model.modelId, model.name, model.provider],
       keywords: [model.name, `${model.provider} ${model.modelId}`],
-    })),
-    query,
-  ).map((match) => match.value));
+      })),
+      query,
+    ).map((match) => match.value);
+    return auto ? [auto, ...filtered] : filtered;
+  });
   const selectedModel = $derived(
     config.models.find((model) => model.ref === selectedModelRef) ?? config.currentModel ?? config.models[0],
   );
   const selectedAuto = $derived(selectedModel?.ref === AUTO_MODEL_REF);
+  const selectedIsDefault = $derived.by(() => {
+    if (!selectedModel || !defaultSelection) return false;
+    if (selectedAuto) return defaultSelection.kind === "auto";
+    return defaultSelection.kind === "model"
+      && defaultSelection.modelRef === selectedModel.ref
+      && defaultSelection.thinking === selectedThinking;
+  });
   const dirty = $derived(
     !!selectedModel
       && (selectedModel.ref !== config.currentModel?.ref || selectedThinking !== config.currentThinking),
@@ -93,8 +111,15 @@
     // reads become dependencies of this effect and a row click immediately
     // retriggers the effect, snapping the selection back to the first model.
     untrack(() => {
-      selectedIndex = 0;
-      const first = filteredModels[0];
+      const normalizedQuery = query.trim();
+      selectedIndex = !visibilityMode
+        && normalizedQuery
+        && filteredModels[0]?.ref === AUTO_MODEL_REF
+        && filteredModels.length > 1
+        && !/^(?:auto|automatic|routing|router)/iu.test(normalizedQuery)
+          ? 1
+          : 0;
+      const first = filteredModels[selectedIndex];
       if (first && !visibilityMode) stageModel(first);
     });
   });
@@ -253,6 +278,21 @@
     }
   }
 
+  async function setDefaultSelection(): Promise<void> {
+    if (!selectedModel || disabled || applying || savingDefault) return;
+    savingDefault = true;
+    applyError = "";
+    try {
+      await onSetDefault(selectedAuto
+        ? { kind: "auto" }
+        : { kind: "model", modelRef: selectedModel.ref, thinking: selectedThinking });
+    } catch (error) {
+      applyError = error instanceof Error ? error.message : String(error);
+    } finally {
+      savingDefault = false;
+    }
+  }
+
   function handleBackdropClick(event: MouseEvent): void {
     if (event.target === event.currentTarget) onClose();
   }
@@ -343,8 +383,13 @@
             <strong class={["block truncate font-mono text-xs font-medium", modelDisplayToneClass(model.tone)]}>{model.ref}</strong>
             <small class="mt-0.5 block truncate text-xs text-muted-foreground">{model.name}</small>
           </span>
-          {#if model.current}
-            <span class="shrink-0 text-xs font-medium text-muted-foreground">{visibilityMode ? "current · required" : "current"}</span>
+          {#if model.current || (defaultSelection?.kind === "auto" && model.ref === AUTO_MODEL_REF) || (defaultSelection?.kind === "model" && defaultSelection.modelRef === model.ref)}
+            <span class="shrink-0 text-xs font-medium text-muted-foreground">
+              {#if visibilityMode && model.current}current · required
+              {:else if model.current && ((defaultSelection?.kind === "auto" && model.ref === AUTO_MODEL_REF) || (defaultSelection?.kind === "model" && defaultSelection.modelRef === model.ref))}current · default
+              {:else if model.current}current
+              {:else}default{/if}
+            </span>
           {/if}
         </button>
       {:else}
@@ -405,6 +450,12 @@
           disabled={disabled || applying || savingVisibility}
           onclick={() => void clearVisibleModels()}
         >Clear all</button>{/if}
+        {#if !visibilityMode}<button
+          class="h-7 cursor-pointer rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          type="button"
+          disabled={disabled || applying || savingDefault || !selectedModel || selectedIsDefault}
+          onclick={() => void setDefaultSelection()}
+        >{savingDefault ? "Saving…" : selectedIsDefault ? "Default ✓" : "Set default"}</button>{/if}
         <button
           class="h-7 cursor-pointer rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"

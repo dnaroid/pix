@@ -75,6 +75,7 @@ export type ModelRoutingTier = {
 
 export type ModelRoutingConfig = {
 	enabled: boolean;
+	default: boolean;
 	modelRef: string;
 	fallbackModels: string[];
 	defaultTier: string;
@@ -204,6 +205,7 @@ const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
 
 const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
 	enabled: false,
+	default: false,
 	modelRef: "openrouter/~typesafe/jev-latest",
 	fallbackModels: [],
 	defaultTier: "standard",
@@ -392,6 +394,7 @@ function extractModelRoutingConfig(raw: unknown, fallback: ModelRoutingConfig): 
 		: fallbackDefaultTier;
 	return {
 		enabled: typeof configured.enabled === "boolean" ? configured.enabled : fallback.enabled,
+		default: typeof configured.default === "boolean" ? configured.default : fallback.default,
 		modelRef: nonEmptyString(configured.modelRef) ?? fallback.modelRef,
 		fallbackModels: Object.prototype.hasOwnProperty.call(configured, "fallbackModels")
 			? modelFallbackList(configured.fallbackModels)
@@ -658,10 +661,23 @@ export function savePixDefaultModel(modelRef: string): DefaultModelConfig | unde
 
 	const configPath = PIX_CONFIG_PATH;
 	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{\n}\n";
-	const updated = upsertPixDefaultModelInJsonc(source, modelRef);
+	let updated = upsertPixDefaultModelInJsonc(source, modelRef);
+	updated = upsertPixModelRoutingDefaultInJsonc(updated, false);
 	mkdirSync(dirname(configPath), { recursive: true });
 	writeFileSync(configPath, updated);
 	return extractDefaultModelConfig(parseJsonc(updated));
+}
+
+export function savePixDefaultAutoModel(): ModelRoutingConfig {
+	const configPath = PIX_CONFIG_PATH;
+	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{\n}\n";
+	let updated = upsertPixModelRoutingDefaultInJsonc(source, true);
+	updated = applyEdits(updated, modify(updated, ["modelRouting", "enabled"], true, {
+		formattingOptions: { insertSpaces: true, tabSize: 2 },
+	}));
+	mkdirSync(dirname(configPath), { recursive: true });
+	writeFileSync(configPath, updated);
+	return extractModelRoutingConfig(parseJsonc(updated), DEFAULT_MODEL_ROUTING) ?? cloneModelRoutingConfig(DEFAULT_MODEL_ROUTING);
 }
 
 export function savePixDefaultThinking(thinking: string, fallbackModelRef?: string): DefaultModelConfig | undefined {
@@ -791,6 +807,12 @@ export function upsertPixAutocompleteModelInJsonc(source: string, modelRef: stri
 	let updated = applyEdits(source, modify(source, ["autocomplete", "modelRef"], modelRef.trim(), { formattingOptions }));
 	updated = applyEdits(updated, modify(updated, ["autocomplete", "fallbackModels"], current?.fallbackModels ?? [], { formattingOptions }));
 	return updated;
+}
+
+export function upsertPixModelRoutingDefaultInJsonc(source: string, value: boolean): string {
+	return applyEdits(source, modify(source, ["modelRouting", "default"], value, {
+		formattingOptions: { insertSpaces: true, tabSize: 2 },
+	}));
 }
 
 function normalizeDefaultModelRef(modelRef: string): DefaultModelConfig | undefined {

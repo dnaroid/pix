@@ -106,16 +106,7 @@ export class AppMenuItemsController {
 			};
 		});
 
-		if (autoRoutingAvailable && !includeHidden) {
-			items.unshift({
-				value: { kind: "auto", ref: "pix:auto", current: draft?.autoRoutingSelected === true, visible: true },
-				label: "Auto",
-				aliases: ["automatic", "routing", "router"],
-				keywords: ["task complexity model routing tier"],
-			});
-		}
-
-		return fuzzySearch(items, query).map((match) => ({
+		const matches = fuzzySearch(items, query).map((match) => ({
 			value: match.value,
 			label: `${match.value.kind === "auto" ? "Auto" : match.value.ref}${match.value.current ? ` ${APP_ICONS.check}` : ""}`,
 			description: match.value.kind === "auto"
@@ -123,6 +114,13 @@ export class AppMenuItemsController {
 				: match.value.model.name,
 			labelHighlightRanges: labelHighlightRangesFromMatch(match.matchedText, match.matchedRanges, match.label),
 		}));
+		if (!autoRoutingAvailable || includeHidden) return matches;
+		return [{
+			value: { kind: "auto", ref: "pix:auto", current: draft?.autoRoutingSelected === true, visible: true },
+			label: `Auto${draft?.autoRoutingSelected ? ` ${APP_ICONS.check}` : ""}`,
+			description: draft ? "Route the first prompt by task complexity" : "Start a new Auto-routed conversation",
+			labelHighlightRanges: [],
+		}, ...matches];
 	}
 
 	getThinkingMenuItems(query: string): PopupMenuItem<ThinkingMenuValue>[] {

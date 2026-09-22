@@ -7,6 +7,8 @@ import {
 	loadPixConfig,
 	resolveDefaultModelRef,
 	resolveToolRule,
+	savePixDefaultAutoModel,
+	savePixDefaultModel,
 	savePixThinkingLevelForModel,
 	savePixVisibleModels,
 	type PixConfig,
@@ -685,6 +687,21 @@ export class PiUiExtendApp {
 					const saved = savePixThinkingLevelForModel(modelRef, thinkingLevel);
 					this.pixConfig.thinkingByModel = { ...saved };
 				},
+				saveDefaultModelSelection: (selection) => {
+					if (selection.kind === "auto") {
+						const saved = savePixDefaultAutoModel();
+						this.pixConfig.modelRouting = {
+							...saved,
+							fallbackModels: [...saved.fallbackModels],
+							tiers: saved.tiers.map((tier) => ({ ...tier })),
+						};
+						return;
+					}
+					const saved = savePixDefaultModel(`${selection.modelRef}:${selection.thinkingLevel}`);
+					if (!saved) throw new Error("Model must use provider/model[:thinking] format");
+					this.pixConfig.defaultModel = { ...saved, fallbackModels: [...saved.fallbackModels] };
+					this.pixConfig.modelRouting.default = false;
+				},
 				render: () => this.render(),
 				awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 				afterSessionReplacement: (message) => this.afterSessionReplacement(message),
@@ -873,6 +890,7 @@ export class PiUiExtendApp {
 			handleEscape: () => this.inputActions.handleEscape(),
 			handleDirectPopupInput: (char) => this.popupMenus.handleDirectPopupInput(char),
 			toggleModelVisibilityMode: () => this.popupMenus.toggleModelVisibilityMode(),
+			setActiveModelDefault: () => this.popupActions.setSelectedModelDefault(),
 			autocompleteModel: () => this.popupMenus.autocompleteModel(),
 			acceptAutocompleteSuggestion: () => this.autocompleteController.acceptSuggestion(),
 			autocompleteSlashCommand: () => this.popupMenus.autocompleteSlashCommand(),
@@ -1031,7 +1049,14 @@ export class PiUiExtendApp {
 		this.abortDraftModelRouting();
 		this.draftModelOverrideRef = undefined;
 		this.draftRoutedTierId = undefined;
-		this.draftAutoRouting = false;
+		this.draftAutoRouting = this.pixConfig.modelRouting.enabled
+			&& this.pixConfig.modelRouting.default
+			&& !this.options.modelRef;
+		if (this.draftAutoRouting) {
+			this.draftModelRef = undefined;
+			this.draftThinkingLevel = "off";
+			return;
+		}
 		const configuredRef = this.options.modelRef ?? resolveDefaultModelRef(this.pixConfig);
 		if (configuredRef) {
 			try {
@@ -1146,7 +1171,7 @@ export class PiUiExtendApp {
 		};
 	}
 
-	private draftModelStatus(): { modelLabel: string; thinkingLabel: string } | undefined {
+	private draftModelStatus(): { modelLabel: string; thinkingLabel?: string } | undefined {
 		const state = this.draftModelState();
 		if (this.draftAutoRouting) {
 			const tier = this.draftRoutedTierId
@@ -1154,7 +1179,7 @@ export class PiUiExtendApp {
 				: undefined;
 			return {
 				modelLabel: tier ? `Auto · ${tier.id}` : "Auto",
-				thinkingLabel: tier?.thinking ?? "auto",
+				...(tier ? { thinkingLabel: tier.thinking } : {}),
 			};
 		}
 		if (!state?.modelRef) return undefined;

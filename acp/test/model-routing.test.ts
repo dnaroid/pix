@@ -11,6 +11,7 @@ import {
 describe("Desktop model routing config", () => {
   it("is disabled by default and uses OpenRouter Jev Latest as the router", () => {
     assert.equal(DEFAULT_MODEL_ROUTING.enabled, false);
+    assert.equal(DEFAULT_MODEL_ROUTING.default, false);
     assert.equal(DEFAULT_MODEL_ROUTING.modelRef, "openrouter/~typesafe/jev-latest");
     assert.equal(DEFAULT_MODEL_ROUTING.defaultTier, "standard");
     assert.deepEqual(DEFAULT_MODEL_ROUTING.tiers.map((tier) => [tier.id, tier.thinking]), [
@@ -31,11 +32,13 @@ describe("Desktop model routing config", () => {
     const parsed = modelRoutingConfigFromParsed({
       modelRouting: {
         enabled: true,
+        default: true,
         fallbackModels: ["router/fallback", "router/fallback"],
         defaultTier: "complex",
       },
     }, DEFAULT_MODEL_ROUTING);
     assert.equal(parsed.enabled, true);
+    assert.equal(parsed.default, true);
     assert.equal(parsed.modelRef, "openrouter/~typesafe/jev-latest");
     assert.deepEqual(parsed.fallbackModels, ["router/fallback"]);
     assert.equal(parsed.defaultTier, "complex");

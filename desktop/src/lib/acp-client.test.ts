@@ -113,12 +113,13 @@ describe("ACP JSON-RPC client", () => {
     transport.message({
       jsonrpc: "2.0",
       id: requestAt(transport, 1).id,
-      result: { configOptions: [], modelRoutingEnabled: true },
+      result: { configOptions: [], modelRoutingEnabled: true, modelRoutingDefault: true },
     });
     await expect(loading).resolves.toEqual({
       configOptions: [],
       modelUsageRefresh: "skipped",
       modelRoutingEnabled: true,
+      modelRoutingDefault: true,
     });
 
     const quota = client.draftConfig("/workspace", {
@@ -202,9 +203,9 @@ describe("ACP JSON-RPC client", () => {
     transport.message({
       jsonrpc: "2.0",
       id: requestAt(transport, 1).id,
-      result: { enabled: true },
+      result: { enabled: true, default: false },
     });
-    await expect(status).resolves.toEqual({ enabled: true });
+    await expect(status).resolves.toEqual({ enabled: true, default: false });
     await client.dispose();
   });
 

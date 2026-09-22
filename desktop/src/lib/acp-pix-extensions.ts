@@ -42,7 +42,13 @@ export class AcpPixExtensions {
     cwd: string,
     selection?: DraftSessionConfig,
     refreshModelUsage = false,
-  ): Promise<{ configOptions: SessionConfigOption[]; modelUsageRefresh: RuntimeStatus["modelUsageRefresh"]; modelUsage?: RuntimeStatus["modelUsage"]; modelRoutingEnabled: boolean }> {
+  ): Promise<{
+    configOptions: SessionConfigOption[];
+    modelUsageRefresh: RuntimeStatus["modelUsageRefresh"];
+    modelUsage?: RuntimeStatus["modelUsage"];
+    modelRoutingEnabled: boolean;
+    modelRoutingDefault: boolean;
+  }> {
     const response = await this.request<unknown>("pix/session/draft_config", {
       cwd,
       ...(selection ? { modelRef: selection.modelRef, thinkingLevel: selection.thinkingLevel } : {}),
@@ -61,6 +67,7 @@ export class AcpPixExtensions {
       modelUsageRefresh: runtime.modelUsageRefresh,
       ...(runtime.modelUsage ? { modelUsage: runtime.modelUsage } : {}),
       modelRoutingEnabled: response.modelRoutingEnabled === true,
+      modelRoutingDefault: response.modelRoutingDefault === true,
     };
   }
 
@@ -94,12 +101,12 @@ export class AcpPixExtensions {
     };
   }
 
-  async modelRoutingStatus(cwd: string): Promise<{ enabled: boolean }> {
+  async modelRoutingStatus(cwd: string): Promise<{ enabled: boolean; default: boolean }> {
     const response = await this.request<unknown>("pix/model/routing_status", { cwd });
-    if (!isRecord(response) || typeof response.enabled !== "boolean") {
+    if (!isRecord(response) || typeof response.enabled !== "boolean" || typeof response.default !== "boolean") {
       throw new Error("pix/model/routing_status returned an invalid response");
     }
-    return { enabled: response.enabled };
+    return { enabled: response.enabled, default: response.default };
   }
 
   async sessionHistory(sessionId: string, full = false, cursor?: string): Promise<LazySessionHistory> {

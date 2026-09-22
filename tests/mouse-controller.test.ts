@@ -131,6 +131,22 @@ describe("AppMouseController", () => {
 		assert.equal(clears, 1);
 	});
 
+	it("sets the staged model default from the model picker action row", () => {
+		let defaults = 0;
+		const controller = new AppMouseController(
+			fakeHost(),
+			fakePopupMenus(),
+			fakePopupActions({ setSelectedModelDefault: () => { defaults += 1; return true; } }),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "model-default-set" });
+
+		controller.handleMouse({ button: 0, x: 2, y: 2, released: true });
+
+		assert.equal(defaults, 1);
+	});
+
 	it("opens the session menu when clicking the active tab", () => {
 		let resumeOptions: unknown;
 		let switchCount = 0;

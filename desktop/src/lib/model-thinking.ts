@@ -67,7 +67,11 @@ export function modelThinkingConfigState(configOptions: readonly SessionConfigOp
     }
   }
 
-  models.sort((left, right) => Number(right.current) - Number(left.current) || left.ref.localeCompare(right.ref));
+  models.sort((left, right) => (
+    Number(right.ref === AUTO_MODEL_REF) - Number(left.ref === AUTO_MODEL_REF)
+    || Number(right.current) - Number(left.current)
+    || left.ref.localeCompare(right.ref)
+  ));
   return {
     models,
     currentModel: models.find((model) => model.current),

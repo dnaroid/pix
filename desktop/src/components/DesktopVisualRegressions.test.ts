@@ -5,6 +5,7 @@ import modelDraftConfigSource from "../app/model-draft-config.svelte.ts?raw";
 import overlaysViewModelSource from "../app/desktop-overlays-view-model.svelte.ts?raw";
 import modelConfigActionsSource from "../app/model-config-actions.ts?raw";
 import modelPickerStateSource from "../app/model-picker-state.svelte.ts?raw";
+import modelThinkingPickerSource from "./ModelThinkingPicker.svelte?raw";
 import composerSource from "./PromptComposer.svelte?raw";
 import diffViewSource from "./DiffView.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
@@ -263,6 +264,7 @@ describe("desktop visual regressions", () => {
 
   it("exposes semantic first-prompt model routing in curated Desktop settings", () => {
     expect(desktopSettingsEditorSource).toContain('label="Automatic model routing"');
+    expect(desktopSettingsEditorSource).toContain('label="Auto by default"');
     expect(desktopSettingsEditorSource).toContain('label="Router model"');
     expect(desktopSettingsEditorSource).toContain('label="Router fallbacks"');
     expect(desktopSettingsEditorSource).toContain('label="Routing fallback tier"');
@@ -271,6 +273,12 @@ describe("desktop visual regressions", () => {
     expect(settingsModelRoutingTiersSource).toContain('placeholder="semantic id"');
     expect(settingsModelRoutingTiersSource).toContain("<SettingsModelSelect");
     expect(settingsModelRoutingTiersSource).toContain("options={THINKING_OPTIONS}");
+  });
+
+  it("keeps unresolved Auto at the top without a fake status-bar thinking level", () => {
+    expect(statusSource).toContain('modelThinking.currentModel.ref !== AUTO_MODEL_REF');
+    expect(modelThinkingPickerSource).toContain("const auto = visibilityMode ? undefined : pickerModels.find");
+    expect(modelThinkingPickerSource).toContain("return auto ? [auto, ...filtered] : filtered");
   });
 
   it("keeps Desktop voice settings to the API key, language code, and speech model", () => {

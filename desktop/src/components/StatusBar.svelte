@@ -6,7 +6,7 @@
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { RuntimeStatus } from "../lib/acp-client";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
-  import { modelThinkingConfigState } from "../lib/model-thinking";
+  import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
   import {
     sessionActivityLabel,
     sessionActivityTone,
@@ -162,11 +162,13 @@
           "max-w-[220px] truncate font-medium",
           modelDisplayToneClass(modelThinking.currentModel.tone),
         ]}>{modelThinking.currentModel.name}</span>
-        <span class="text-muted-foreground/50">·</span>
-        <span class={[
-          "font-medium",
-          modelDisplayToneClass(thinkingLevelTone(modelThinking.currentThinking, modelThinking.currentModel.thinkingLevels)),
-        ]}>{modelThinking.currentThinking}</span>
+        {#if modelThinking.currentModel.ref !== AUTO_MODEL_REF}
+          <span class="text-muted-foreground/50">·</span>
+          <span class={[
+            "font-medium",
+            modelDisplayToneClass(thinkingLevelTone(modelThinking.currentThinking, modelThinking.currentModel.thinkingLevels)),
+          ]}>{modelThinking.currentThinking}</span>
+        {/if}
         <ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
     {/if}

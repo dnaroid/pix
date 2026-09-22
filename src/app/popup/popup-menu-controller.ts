@@ -764,6 +764,15 @@ export class AppPopupMenuController {
 
 		this.closeMenusExcept("model");
 		this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(parsedQuery.modelQuery, this.modelVisibilityMode)));
+		if (
+			!this.modelVisibilityMode
+			&& parsedQuery.modelQuery.trim()
+			&& this.modelMenu.items[0]?.value.kind === "auto"
+			&& this.modelMenu.items.length > 1
+			&& !/^(?:auto|automatic|routing|router)/iu.test(parsedQuery.modelQuery.trim())
+		) {
+			this.modelMenu.selectedIndex = 1;
+		}
 		this.syncModelThinkingToSelectedModel();
 		if (parsedQuery.thinkingQuery !== undefined && this.modelThinkingInputQuery !== parsedQuery.thinkingQuery) {
 			this.modelThinkingInputQuery = parsedQuery.thinkingQuery;

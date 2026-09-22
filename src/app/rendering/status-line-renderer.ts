@@ -37,7 +37,7 @@ export type StatusLineRendererHost = {
 	readonly theme: Theme;
 	readonly screenStyler: ScreenStyler;
 	readonly session: AgentSession | undefined;
-	draftModelStatus?(): { modelLabel: string; thinkingLabel: string } | undefined;
+	draftModelStatus?(): { modelLabel: string; thinkingLabel?: string } | undefined;
 	readonly modelColors?: ModelColorsConfig;
 	readonly sessionActivity: SessionActivity;
 	readonly statusDotBright: boolean;
@@ -253,7 +253,9 @@ export class StatusLineRenderer {
 		if (!session) {
 			const draft = this.host.draftModelStatus?.();
 			if (!draft) return undefined;
-			const marker = `${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`;
+			const marker = draft.thinkingLabel
+				? `${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`
+				: draft.modelLabel;
 			const startIndex = statusText.indexOf(marker);
 			if (startIndex < 0) return undefined;
 			return { row, startColumn: startIndex + 1, endColumn: startIndex + draft.modelLabel.length + 1 };
@@ -271,7 +273,7 @@ export class StatusLineRenderer {
 		const session = this.host.session;
 		if (!session) {
 			const draft = this.host.draftModelStatus?.();
-			if (!draft) return undefined;
+			if (!draft?.thinkingLabel) return undefined;
 			const marker = `${APP_ICONS.lightbulb} ${draft.thinkingLabel}`;
 			const markerIndex = statusText.indexOf(marker);
 			if (markerIndex < 0) return undefined;
@@ -417,8 +419,12 @@ export class StatusLineRenderer {
 		if (!session) {
 			const draft = this.host.draftModelStatus?.();
 			if (!draft) return segments;
-			const modelStart = statusText.indexOf(`${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`);
+			const fullLabel = draft.thinkingLabel
+				? `${draft.modelLabel} ${APP_ICONS.lightbulb} ${draft.thinkingLabel}`
+				: draft.modelLabel;
+			const modelStart = statusText.indexOf(fullLabel);
 			this.pushSegment(segments, modelStart, draft.modelLabel.length, this.modelRefColor(draft.modelLabel));
+			if (!draft.thinkingLabel) return segments;
 			const thinkingMarkerStart = statusText.indexOf(`${APP_ICONS.lightbulb} ${draft.thinkingLabel}`);
 			const thinkingStart = thinkingMarkerStart >= 0 ? thinkingMarkerStart + APP_ICONS.lightbulb.length + 1 : -1;
 			this.pushSegment(segments, thinkingStart, draft.thinkingLabel.length, this.thinkingLevelColor(draft.thinkingLabel));

@@ -40,12 +40,14 @@ export function createDesktopOverlaysViewModel(options: {
         configOptions: options.modelConfig.pickerConfigOptions(options.displayedConfigOptions()),
         visibleModelRefs: options.preferences.visibleModelRefs,
         rememberedThinkingByModel: options.preferences.rememberedThinkingByModel,
+        defaultSelection: options.preferences.defaultSelection,
         disabled: !options.canUseSession()
           || options.changingConfig() !== null
           || (options.draftSessionTabActive()
             ? !options.draftConfigAvailable()
             : !options.activeSessionRuntimeReady()),
         onApply: options.modelConfig.applySelection,
+        onSetDefault: options.preferences.saveDefaultSelection,
         onVisibleModelsChange: options.preferences.saveVisibleModelRefs,
         onClose: options.modelConfig.closePicker,
       } : null,

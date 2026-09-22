@@ -266,6 +266,48 @@ describe("AppPopupActionController model visibility", () => {
 		assert.equal(openedAutoDraft, 1);
 		assert.equal(commandRan, false);
 	});
+
+	it("saves the staged concrete model/thinking or Auto as the new-conversation default", () => {
+		const saved: unknown[] = [];
+		let selected: ReturnType<AppPopupMenuController["selectedModelThinking"]> = {
+			value: {
+				kind: "model",
+				model: { provider: "openai", id: "reasoner", name: "Reasoner" } as never,
+				ref: "openai/reasoner",
+				current: false,
+				visible: true,
+			},
+			thinkingLevel: "high",
+			direct: true,
+			source: "model",
+		};
+		const popupMenus = {
+			syncActivePopupMenu: () => "model",
+			modelVisibilityModeActive: () => false,
+			selectedModelThinking: () => selected,
+		} as unknown as AppPopupMenuController;
+		const controller = new AppPopupActionController(
+			host({ saveDefaultModelSelection: (value) => { saved.push(value); } }),
+			popupMenus,
+			{} as AppCommandController,
+			{} as AppMenuItemsController,
+			{} as AppQueuedMessageController,
+			{} as AppWorkspaceActionsController,
+		);
+
+		assert.equal(controller.setSelectedModelDefault(), true);
+		selected = {
+			value: { kind: "auto", ref: "pix:auto", current: false, visible: true },
+			thinkingLevel: "off",
+			direct: true,
+			source: "model",
+		};
+		assert.equal(controller.setSelectedModelDefault(), true);
+		assert.deepEqual(saved, [
+			{ kind: "model", modelRef: "openai/reasoner", thinkingLevel: "high" },
+			{ kind: "auto" },
+		]);
+	});
 });
 
 function host(overrides: Partial<AppPopupActionControllerHost> = {}): AppPopupActionControllerHost {
@@ -282,6 +324,7 @@ function host(overrides: Partial<AppPopupActionControllerHost> = {}): AppPopupAc
 		visibleModels: () => undefined,
 		saveVisibleModels: (refs) => refs,
 		saveThinkingLevelForModel: () => undefined,
+		saveDefaultModelSelection: () => undefined,
 		render: () => undefined,
 		afterSessionReplacement: () => undefined,
 		scrollToConversationEntry: () => false,

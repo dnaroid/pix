@@ -19,6 +19,7 @@ export interface ModelRoutingTier {
 
 export interface ModelRoutingConfig {
   readonly enabled: boolean;
+  readonly default: boolean;
   readonly modelRef: string;
   readonly fallbackModels: readonly string[];
   readonly defaultTier: string;
@@ -39,6 +40,7 @@ export interface ModelRoutingDependencies {
 
 export const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
   enabled: false,
+  default: false,
   modelRef: "openrouter/~typesafe/jev-latest",
   fallbackModels: [],
   defaultTier: "standard",
@@ -82,6 +84,7 @@ export function modelRoutingConfigFromParsed(raw: unknown, fallback: ModelRoutin
       : tiers[0]?.id ?? "standard";
   return {
     enabled: typeof value.enabled === "boolean" ? value.enabled : fallback.enabled,
+    default: typeof value.default === "boolean" ? value.default : fallback.default,
     modelRef: nonEmptyString(value.modelRef) ?? fallback.modelRef,
     fallbackModels: Object.prototype.hasOwnProperty.call(value, "fallbackModels")
       ? modelFallbackList(value.fallbackModels)

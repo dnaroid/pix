@@ -226,6 +226,16 @@
     </SettingsFieldRow>
 
     <SettingsFieldRow
+      label="Auto by default"
+      description="Start each new conversation draft in Auto. An explicit model selection still overrides it."
+      explicit={has(["modelRouting", "default"])}
+      defaultLabel={defaultLabel(["modelRouting", "default"])}
+      onReset={() => reset(["modelRouting", "default"])}
+    >
+      <SettingsSwitch value={bool(["modelRouting", "default"])} onChange={(value) => set(["modelRouting", "default"], value)} />
+    </SettingsFieldRow>
+
+    <SettingsFieldRow
       label="Router model"
       description="Short classification call used only by Auto. The default is OpenRouter Jev Latest."
       explicit={has(["modelRouting", "modelRef"])}

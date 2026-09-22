@@ -98,6 +98,13 @@ describe("model + thinking config", () => {
     expect(modelThinkingConfigState(configOptions).currentModel?.ref).toBe("openai-codex/gpt-5.6-sol");
   });
 
+  it("keeps Auto first even while a concrete model is current", () => {
+    const routed = withAutoModelRoutingOption(configOptions, true, false);
+    const state = modelThinkingConfigState(routed);
+    expect(state.currentModel?.ref).toBe("openai-codex/gpt-5.6-sol");
+    expect(state.models[0]?.ref).toBe(AUTO_MODEL_REF);
+  });
+
   it("removes Auto cleanly when routing is disabled", () => {
     const routed = withAutoModelRoutingOption(configOptions, true, true);
     const disabled = withAutoModelRoutingOption(routed, false, false);

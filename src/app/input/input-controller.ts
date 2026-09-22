@@ -46,6 +46,7 @@ export type InputControllerHost = {
 	handleEscape(): Promise<void>;
 	handleDirectPopupInput(char: string): boolean;
 	toggleModelVisibilityMode(): boolean;
+	setActiveModelDefault?(): boolean;
 	autocompleteModel(): boolean;
 	acceptAutocompleteSuggestion(): boolean;
 	autocompleteSlashCommand(): void;
@@ -595,6 +596,7 @@ export class AppInputController {
 			return;
 		}
 		if (!this.host.inputEditor.isInBracketedPaste && this.handleEditShortcutChar(char)) return;
+		if (char === "" && this.host.setActiveModelDefault?.()) return;
 		if (this.host.handleDirectPopupInput(char)) return;
 		if (char === "\u0004" && this.host.getInput().length === 0) {
 			void this.host.stop();

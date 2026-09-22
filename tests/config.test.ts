@@ -26,6 +26,7 @@ const {
 	resolveModelColor,
 	resolveToolRule,
 	savePixAutocompleteModel,
+	savePixDefaultAutoModel,
 	savePixDefaultModel,
 	savePixDefaultThinking,
 	savePixThinkingLevelForModel,
@@ -33,6 +34,7 @@ const {
 	saveProjectPixIgnoreContextFiles,
 	savePixDictationLanguage,
 	upsertPixDefaultModelInJsonc,
+	upsertPixModelRoutingDefaultInJsonc,
 	upsertPixDefaultThinkingInJsonc,
 	upsertPixAutocompleteModelInJsonc,
 	upsertPixDictationLanguageInJsonc,
@@ -57,6 +59,7 @@ describe("config helpers", () => {
 			defaultModel?: { modelRef?: string; fallbackModels?: string[]; thinking?: string };
 			modelRouting?: {
 				enabled?: boolean;
+				default?: boolean;
 				modelRef?: string;
 				fallbackModels?: string[];
 				defaultTier?: string;
@@ -83,6 +86,7 @@ describe("config helpers", () => {
 			thinking: "medium",
 		});
 		assert.equal(parsedCreated.modelRouting?.enabled, false);
+		assert.equal(parsedCreated.modelRouting?.default, false);
 		assert.equal(parsedCreated.modelRouting?.modelRef, "openrouter/~typesafe/jev-latest");
 		assert.deepEqual(parsedCreated.modelRouting?.fallbackModels, []);
 		assert.equal(parsedCreated.modelRouting?.defaultTier, "standard");
@@ -142,6 +146,7 @@ describe("config helpers", () => {
 		assert.equal(config.autocomplete.includeRecentMessages, 0);
 		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-5.6-sol:medium");
 		assert.equal(config.modelRouting.enabled, false);
+		assert.equal(config.modelRouting.default, false);
 		assert.equal(config.modelRouting.modelRef, "openrouter/~typesafe/jev-latest");
 		assert.equal(config.modelRouting.defaultTier, "standard");
 		assert.equal(config.modelColors.rules["zai/*"], "success");
@@ -153,6 +158,28 @@ describe("config helpers", () => {
 		assert.equal(config.maxProjectSessions, 0);
 		assert.equal(config.dictation.languages.en?.label, "English");
 		assert.equal(config.dictation.languages.ru?.label, "Russian");
+	});
+
+	it("persists Auto as the new-conversation default and concrete model selection clears it", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{
+			"modelRouting": { "enabled": true, "default": false },
+			"defaultModel": { "modelRef": "openai/a", "fallbackModels": ["openai/b"], "thinking": "low" }
+		}`);
+
+		const auto = savePixDefaultAutoModel();
+		assert.equal(auto.enabled, true);
+		assert.equal(auto.default, true);
+		assert.equal(loadPixConfig().modelRouting.default, true);
+
+		const concrete = savePixDefaultModel("openai/c:high");
+		assert.deepEqual(concrete, {
+			modelRef: "openai/c",
+			fallbackModels: ["openai/b"],
+			thinking: "high",
+		});
+		assert.equal(loadPixConfig().modelRouting.default, false);
+		assert.match(upsertPixModelRoutingDefaultInJsonc("{}", true), /"default": true/u);
 	});
 
 	it("loads jsonc config from HOME, partial config, and invalid fallback", () => {

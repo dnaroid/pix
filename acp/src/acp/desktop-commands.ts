@@ -52,6 +52,7 @@ export interface DesktopDraftConfigResponse {
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
 	readonly modelRoutingEnabled?: boolean;
+	readonly modelRoutingDefault?: boolean;
 }
 
 export interface DesktopModelRouteRequest {
@@ -66,6 +67,7 @@ export interface DesktopModelRoutingStatusRequest {
 
 export interface DesktopModelRoutingStatusResponse {
 	readonly enabled: boolean;
+	readonly default: boolean;
 }
 
 export interface DesktopModelRouteResponse {

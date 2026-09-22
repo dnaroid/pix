@@ -7,6 +7,11 @@ import {
   modelThinkingPreferencesFromPixConfig,
   updateModelThinkingPreferenceInPixConfig,
 } from "../lib/model-thinking-preferences";
+import {
+  modelDefaultSelectionFromPixConfig,
+  updateModelDefaultSelectionInPixConfig,
+  type ModelDefaultSelection,
+} from "../lib/model-default-preference";
 import type { SettingsConfigDocument } from "../lib/settings";
 
 type ModelPreferencesStoreOptions = {
@@ -16,6 +21,7 @@ type ModelPreferencesStoreOptions = {
 export function createModelPreferencesStore(options: ModelPreferencesStoreOptions) {
   let visibleModelRefs = $state<string[] | undefined>(undefined);
   let rememberedThinkingByModel = $state<Record<string, string>>({});
+  let defaultSelection = $state<ModelDefaultSelection | undefined>(undefined);
   let visibleModelsSavePromise: Promise<void> | null = null;
 
   async function waitForVisibleModelsSave(): Promise<void> {
@@ -27,9 +33,11 @@ export function createModelPreferencesStore(options: ModelPreferencesStoreOption
       const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "desktop" });
       visibleModelRefs = visibleModelRefsFromPixConfig(document.content);
       rememberedThinkingByModel = modelThinkingPreferencesFromPixConfig(document.content);
+      defaultSelection = modelDefaultSelectionFromPixConfig(document.content);
     } catch {
       visibleModelRefs = undefined;
       rememberedThinkingByModel = {};
+      defaultSelection = undefined;
     }
   }
 
@@ -81,12 +89,31 @@ export function createModelPreferencesStore(options: ModelPreferencesStoreOption
     }
   }
 
+  async function saveDefaultSelection(selection: ModelDefaultSelection): Promise<void> {
+    let document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "desktop" });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const content = updateModelDefaultSelectionInPixConfig(document.content, selection);
+      const result = await invoke<{ written: boolean; document: SettingsConfigDocument }>(
+        "write_user_config_if_unchanged",
+        { kind: "desktop", expectedContent: document.content, content },
+      );
+      if (result.written) {
+        defaultSelection = modelDefaultSelectionFromPixConfig(result.document.content) ?? selection;
+        return;
+      }
+      document = result.document;
+    }
+    throw new Error("Pix settings changed repeatedly while the default model was being saved. Try again.");
+  }
+
   return {
     get visibleModelRefs() { return visibleModelRefs; },
     get rememberedThinkingByModel() { return rememberedThinkingByModel; },
+    get defaultSelection() { return defaultSelection; },
     waitForVisibleModelsSave,
     load,
     saveVisibleModelRefs,
     rememberThinkingPreference,
+    saveDefaultSelection,
   };
 }

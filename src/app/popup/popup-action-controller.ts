@@ -27,6 +27,10 @@ export type AppPopupActionControllerHost = {
 	visibleModels(): readonly string[] | undefined;
 	saveVisibleModels(modelRefs: readonly string[]): readonly string[];
 	saveThinkingLevelForModel(modelRef: string, thinkingLevel: ThinkingLevel): void;
+	saveDefaultModelSelection(selection:
+		| { kind: "auto" }
+		| { kind: "model"; modelRef: string; thinkingLevel: ThinkingLevel }
+	): void;
 	render(): void;
 	afterSessionReplacement(message?: string): void;
 	openSessionInActiveDraftTab?(sessionPath: string): Promise<boolean>;
@@ -179,6 +183,29 @@ export class AppPopupActionController {
 		} catch (error) {
 			this.host.showToast(`Model changed, but thinking preference could not be saved: ${stringifyUnknown(error)}`, "warning");
 		}
+	}
+
+	setSelectedModelDefault(): boolean {
+		if (this.popupMenus.syncActivePopupMenu() !== "model" || this.popupMenus.modelVisibilityModeActive()) return false;
+		const selected = this.popupMenus.selectedModelThinking();
+		if (!selected) return false;
+		try {
+			if (selected.value.kind === "auto") {
+				this.host.saveDefaultModelSelection({ kind: "auto" });
+				this.host.showToast("Auto set as the default for new conversations", "info");
+			} else {
+				this.host.saveDefaultModelSelection({
+					kind: "model",
+					modelRef: selected.value.ref,
+					thinkingLevel: selected.thinkingLevel,
+				});
+				this.host.showToast(`Default model set to ${selected.value.ref}:${selected.thinkingLevel}`, "info");
+			}
+		} catch (error) {
+			this.host.showToast(`Failed to save default model: ${stringifyUnknown(error)}`, "error");
+		}
+		this.host.render();
+		return true;
 	}
 
 	private toggleSelectedModelVisibility(): boolean {

@@ -72,6 +72,7 @@ describe("popup menu header", () => {
 		menu.openWithItems([
 			{
 				value: {
+					kind: "model",
 					model: { provider: "openai", id: "reasoner", reasoning: true } as never,
 					ref: "openai/reasoner",
 					current: true,
@@ -97,6 +98,8 @@ describe("popup menu header", () => {
 			bold: true,
 		}]);
 		assert.match(renderer.styleOverlayLine(2, thinkingLine, 64, menu), ansiColor("38", theme.colors.error));
+		assert.ok(lines.some((line) => line.text.trim() === "Set default" && line.target?.kind === "model-default-set"));
+		assert.ok(lines.some((line) => line.text.includes("Ctrl+D default")));
 	});
 
 	it("keeps the popup menu inset from both screen edges", () => {
@@ -221,7 +224,7 @@ describe("popup menu header", () => {
 		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			getModelMenuItems: () => [{
-				value: { model: { provider: "test", id: "long", name: "Readable model name" } as never, ref: "test/long", current: false },
+				value: { kind: "model", model: { provider: "test", id: "long", name: "Readable model name" } as never, ref: "test/long", current: false },
 				label: "provider/very-long-model-identifier-that-overflows",
 				description: "Readable model name",
 			}],
@@ -237,7 +240,7 @@ describe("popup menu header", () => {
 		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			getModelMenuItems: () => [{
-				value: { model: { provider: "test", id: "long", name: "Readable model name" } as never, ref: "test/long", current: false },
+				value: { kind: "model", model: { provider: "test", id: "long", name: "Readable model name" } as never, ref: "test/long", current: false },
 				label: "provider/very-long-model-identifier-that-overflows",
 				description: "Readable model name",
 			}],
@@ -481,8 +484,8 @@ describe("popup menu header", () => {
 				} : undefined;
 			},
 			getModelMenuItems: () => [
-				{ value: { model: currentModel, ref: "openai/reasoner", current: true }, label: "openai/reasoner", description: "Reasoner" },
-				{ value: { model: plainModel, ref: "plain/chat", current: false }, label: "plain/chat", description: "Chat" },
+				{ value: { kind: "model", model: currentModel, ref: "openai/reasoner", current: true }, label: "openai/reasoner", description: "Reasoner" },
+				{ value: { kind: "model", model: plainModel, ref: "plain/chat", current: false }, label: "plain/chat", description: "Chat" },
 			],
 			getThinkingMenuItems: (query) => query.toLowerCase().startsWith("h")
 				? [{ value: { level: "high", current: false }, label: "high", description: "High reasoning" }]
@@ -491,8 +494,9 @@ describe("popup menu header", () => {
 
 		assert.equal(controller.syncActivePopupMenu(), "model");
 		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "high");
-		assert.match(controller.renderActivePopupMenu(64)[0]?.text ?? "", /Select model & thinking/u);
-		assert.match(controller.renderActivePopupMenu(64).at(-2)?.text ?? "", /Thinking\s+← high →/u);
+		const rendered = controller.renderActivePopupMenu(64);
+		assert.match(rendered[0]?.text ?? "", /Select model & thinking/u);
+		assert.ok(rendered.some((line) => /Thinking\s+← high →/u.test(line.text)));
 
 		assert.equal(controller.moveActiveModelThinkingLevel(1), true);
 		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "xhigh");
@@ -506,6 +510,32 @@ describe("popup menu header", () => {
 		controller.resetInputMenuDismissals();
 		assert.equal(controller.syncActivePopupMenu(), "model");
 		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "xhigh");
+	});
+
+	it("keeps Auto visually first while a concrete fuzzy query stages the matching model", () => {
+		const model = { provider: "openai", id: "gpt-5", name: "GPT-5", reasoning: true } as never;
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			getInput: () => "/model gpt",
+			parseSlashInput: () => ({ commandName: "model", hasArguments: true, arguments: "gpt" }),
+			getModelMenuItems: () => [
+				{
+					value: { kind: "auto", ref: "pix:auto", current: false, visible: true },
+					label: "Auto",
+					description: "Start a new Auto-routed conversation",
+				},
+				{
+					value: { kind: "model", model, ref: "openai/gpt-5", current: false, visible: true },
+					label: "openai/gpt-5",
+					description: "GPT-5",
+				},
+			],
+		});
+
+		assert.equal(controller.syncActivePopupMenu(), "model");
+		const lines = controller.renderActivePopupMenu(64);
+		assert.match(lines[1]?.text ?? "", /Auto/u);
+		assert.equal(controller.selectedModelThinking()?.value.ref, "openai/gpt-5");
 	});
 
 	it("restores remembered thinking per model while current session thinking stays authoritative", () => {
@@ -528,8 +558,8 @@ describe("popup menu header", () => {
 			session: { thinkingLevel: "medium" } as never,
 			rememberedThinkingLevel: (ref) => ref === "openai/current" ? "xhigh" : ref === "openai/other" ? "high" : undefined,
 			getModelMenuItems: () => [
-				{ value: { model: currentModel, ref: "openai/current", current: true }, label: "openai/current" },
-				{ value: { model: otherModel, ref: "openai/other", current: false }, label: "openai/other" },
+				{ value: { kind: "model", model: currentModel, ref: "openai/current", current: true }, label: "openai/current" },
+				{ value: { kind: "model", model: otherModel, ref: "openai/other", current: false }, label: "openai/other" },
 			],
 		});
 
@@ -555,6 +585,7 @@ describe("popup menu header", () => {
 			session: { thinkingLevel: "low" } as never,
 			getModelMenuItems: () => [{
 				value: {
+					kind: "model",
 					model: { provider: "openai", id: "reasoner", reasoning: true } as never,
 					ref: "openai/reasoner",
 					current: true,
@@ -576,12 +607,12 @@ describe("popup menu header", () => {
 		const hiddenModel = { provider: "openai", id: "hidden", name: "Hidden", reasoning: false } as never;
 		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
-			getModelMenuItems: (_query, includeHidden = false) => {
+			getModelMenuItems: (_query, includeHidden = false): PopupMenuItem<ModelMenuValue>[] => {
 				includeHiddenCalls.push(includeHidden);
 				return [
-					{ value: { model: visibleModel, ref: "openai/visible", current: false, visible: true }, label: "openai/visible" },
+					{ value: { kind: "model", model: visibleModel, ref: "openai/visible", current: false, visible: true }, label: "openai/visible" },
 					...(includeHidden
-						? [{ value: { model: hiddenModel, ref: "openai/hidden", current: false, visible: false }, label: "openai/hidden" }]
+						? [{ value: { kind: "model" as const, model: hiddenModel, ref: "openai/hidden", current: false, visible: false }, label: "openai/hidden" }]
 						: []),
 				];
 			},
@@ -739,7 +770,7 @@ describe("popup menu header", () => {
 					arguments: match[2] ?? "",
 				} : undefined;
 			},
-			getModelMenuItems: () => [{ value: { model: { provider: "test", model: "opus" } as never, ref: "test/opus", current: false }, label: "opus" }],
+			getModelMenuItems: () => [{ value: { kind: "model", model: { provider: "test", model: "opus" } as never, ref: "test/opus", current: false }, label: "opus" }],
 		});
 
 		assert.equal(controller.syncActivePopupMenu(), "model");

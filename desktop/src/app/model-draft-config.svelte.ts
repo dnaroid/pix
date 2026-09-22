@@ -20,6 +20,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
   let generation = 0;
   let usageGeneration = 0;
   let routingStatusGeneration = 0;
+  let selectionInitialized = false;
 
   async function refreshUsage(
     modelRef?: string,
@@ -65,6 +66,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     if (!requestClient || !requestWorkspace || !options.statusReady()) return;
     const requestGeneration = ++generation;
     const preserveAutoSelection = autoRoutingSelected;
+    const initializeSelection = !selectionInitialized;
     try {
       const response = await requestClient.draftConfig(requestWorkspace);
       if (
@@ -74,7 +76,9 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
         || !options.draftSessionTabOpen()
       ) return;
       autoRoutingAvailable = response.modelRoutingEnabled;
-      autoRoutingSelected = autoRoutingAvailable && preserveAutoSelection;
+      autoRoutingSelected = autoRoutingAvailable
+        && (preserveAutoSelection || (initializeSelection && response.modelRoutingDefault));
+      selectionInitialized = true;
       routedTierId = undefined;
       configOptions = withAutoModelRoutingOption(response.configOptions, autoRoutingAvailable, autoRoutingSelected);
       const state = modelThinkingConfigState(configOptions);
@@ -121,6 +125,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     autoRoutingAvailable = false;
     autoRoutingSelected = false;
     routedTierId = undefined;
+    selectionInitialized = false;
     generation += 1;
     usageGeneration += 1;
     routingStatusGeneration += 1;
@@ -134,8 +139,10 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
       modelOverride = null;
       runtimeStatus = undefined;
       configOptions = withAutoModelRoutingOption(configOptions, true, true);
+      selectionInitialized = true;
       return "off";
     }
+    selectionInitialized = true;
     autoRoutingSelected = false;
     routedTierId = undefined;
     configOptions = applyLocalModelThinkingSelection(configOptions, modelRef, thinkingLevel);

@@ -6,7 +6,14 @@ import {
 	type CommandControllerHost,
 	type CommandScope,
 } from "./command-host.js";
-import { getProjectPixConfigPath, savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking, saveProjectPixIgnoreContextFiles } from "../../config.js";
+import {
+	getProjectPixConfigPath,
+	savePixAutocompleteModel,
+	savePixDefaultAutoModel,
+	savePixDefaultModel,
+	savePixDefaultThinking,
+	saveProjectPixIgnoreContextFiles,
+} from "../../config.js";
 import { createId } from "../id.js";
 import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
 import { appendPixSystemDisplayEntry } from "../session/pix-system-message.js";
@@ -78,7 +85,7 @@ export class ModelCommandActions {
 		const modelRef = argumentsText.trim();
 		if (!modelRef) {
 			const selected = await this.host.showMenu(
-				this.host.getModelMenuItems("").filter((item) => item.value.kind !== "auto"),
+				this.host.getModelMenuItems(""),
 				{
 				title: "Select default model",
 				placeholder: "Search models",
@@ -91,12 +98,15 @@ export class ModelCommandActions {
 				this.host.render();
 				return;
 			}
-			if (selected.kind === "auto") {
-				throw new Error("Auto is a routing mode for new drafts, not a default model.");
-			}
-
-			this.saveDefaultModel(this.host.modelRef(selected.model));
+			if (selected.kind === "auto") this.saveDefaultAutoModel();
+			else this.saveDefaultModel(this.host.modelRef(selected.model));
 			this.host.render();
+			return;
+		}
+
+		if (modelRef.toLowerCase() === "auto" || modelRef.toLowerCase() === "pix:auto") {
+			this.saveDefaultAutoModel();
+			this.host.setSessionStatus(this.host.runtime()?.session);
 			return;
 		}
 
@@ -406,6 +416,15 @@ export class ModelCommandActions {
 			id: createId("system"),
 			kind: "system",
 			text: `Default model set to ${formatDefaultModelRef(saved)}. New sessions will use it unless --model is provided.`,
+		});
+	}
+
+	private saveDefaultAutoModel(): void {
+		savePixDefaultAutoModel();
+		this.host.addEntry({
+			id: createId("system"),
+			kind: "system",
+			text: "Default model set to Auto. New conversations will route their first prompt by task complexity.",
 		});
 	}
 
