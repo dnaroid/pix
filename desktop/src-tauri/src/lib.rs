@@ -2591,9 +2591,7 @@ fn git_command(root: &Path, args: &[&str]) -> Command {
 
 fn git_output_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
     let mut command = git_command(root, args);
-    command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command
         .output()
         .map_err(|error| format!("failed to run git {}: {error}", args.join(" ")))
@@ -9217,7 +9215,9 @@ mod tests {
             "#!/bin/sh\nnohup sh -c 'sleep 3 > /dev/null 2>&1' &\n",
         )
         .expect("write post-commit hook");
-        let mut permissions = fs::metadata(&hook).expect("read hook metadata").permissions();
+        let mut permissions = fs::metadata(&hook)
+            .expect("read hook metadata")
+            .permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&hook, permissions).expect("make post-commit hook executable");
 

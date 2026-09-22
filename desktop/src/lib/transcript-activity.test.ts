@@ -103,9 +103,11 @@ describe("mixed transcript activity regressions", () => {
     state = applySessionUpdate(state, {
       sessionUpdate: "tool_call_update", toolCallId: "s1", status: "failed",
     }, 400);
-    expect(group(state)).toMatchObject({ id, status: "failed", active: true });
+    expect(group(state)).toMatchObject({ id, status: "in_progress", active: true });
+    expect(group(state).tools.find((entry) => entry.toolCallId === "s1")).toMatchObject({ status: "failed" });
     state = finalizeTranscriptActivity(state, 500);
-    expect(group(state)).toMatchObject({ id, status: "failed", active: false, durationMs: 400 });
+    expect(group(state)).toMatchObject({ id, status: "completed", active: false, durationMs: 400 });
+    expect(group(state).tools.find((entry) => entry.toolCallId === "s1")).toMatchObject({ status: "failed" });
     expect(activityGroupPresentationLabels(group(state).entries).every((label) => !label.active)).toBe(true);
   });
 });

@@ -24,6 +24,7 @@
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"test": "node --import tsx --test \"test/**/*.test.ts\"",
 		"test:stdio": "npm run build --silent && node test/stdio-smoke.mjs",
+		"precheck": "npm --prefix .. run build:pix --silent",
 		"check": "npm run typecheck && npm test && npm run test:stdio"
 	},
 	"dependencies": {
