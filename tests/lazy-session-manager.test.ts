@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+
 import { openLazySessionManager, type LazySessionHistoryReader } from "../src/app/session/lazy-session-manager.js";
 
 test("lazy session manager exposes the tail branch and reads older entries on demand", async (t) => {
@@ -267,6 +269,49 @@ test("lazy session manager snapshots the canonical system state when compacting"
 	assert.equal(typeof compaction.systemMessage?.timestamp, "number");
 	assert.deepEqual(manager.buildSessionProjection().messages.map((message) => message.role), ["system", "compactionSummary"]);
 	assert.deepEqual(manager.getBranch().map((entry) => entry.id), ["user", compactionId]);
+});
+
+test("lazy compaction reuses a canonical system snapshot after a DCP journal append", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-compaction-cache-"));
+	t.after(async () => {
+		await rm(dir, { force: true, recursive: true });
+	});
+
+	const sessionPath = join(dir, "session.jsonl");
+	const retainedTool = { name: "retained", description: "retained tool", parameters: { type: "object" } };
+	await writeFile(sessionPath, [
+		JSON.stringify({ type: "session", version: 3, id: "session-compaction-cache", timestamp: "2026-01-01T00:00:00.000Z", cwd: dir }),
+		JSON.stringify({ type: "message", id: "system-base", parentId: null, timestamp: "2026-01-01T00:00:01.000Z", message: { role: "system", content: "base instructions", timestamp: 1, sections: { policy: "old", removed: "remove me" }, toolsAdded: [{ name: "removed", description: "removed tool", parameters: {} }, retainedTool] } }),
+		JSON.stringify({ type: "message", id: "system-update", parentId: "system-base", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "system", content: "updated instructions", timestamp: 2, sections: { policy: "current", removed: null }, toolsRemoved: [{ name: "removed" }] } }),
+		JSON.stringify({ type: "message", id: "user", parentId: "system-update", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "user", content: "compact this", timestamp: 3 } }),
+		"",
+	].join("\n"), "utf8");
+
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 1 });
+	const projection = manager.buildSessionProjection();
+	assert.deepEqual(projection.messages.map((message) => message.role), ["system", "system", "user"]);
+	const journalId = manager.appendCustomEntry("dcp-journal", { operationId: "context-neutral" });
+
+	const originalOpen = SessionManager.open;
+	SessionManager.open = (() => {
+		throw new Error("appendCompaction must not synchronously hydrate the full session");
+	}) as typeof SessionManager.open;
+	t.after(() => {
+		SessionManager.open = originalOpen;
+	});
+
+	const compactionId = manager.appendCompaction("summary", null, 10);
+	const compaction = manager.getEntry(compactionId);
+	if (!compaction || compaction.type !== "compaction") throw new Error("Expected compaction entry");
+	assert.deepEqual(compaction.systemMessage, {
+		role: "system",
+		content: "base instructions\n\nupdated instructions",
+		sections: { policy: "current" },
+		toolsAdded: [retainedTool],
+		timestamp: compaction.systemMessage?.timestamp,
+	});
+	assert.equal(typeof compaction.systemMessage?.timestamp, "number");
+	assert.deepEqual(manager.getBranch().map((entry) => entry.id), ["user", journalId, compactionId]);
 });
 
 test("lazy session manager does not publish a phantom in-memory entry when append persistence fails", async (t) => {

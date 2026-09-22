@@ -301,6 +301,8 @@ describe("desktop visual regressions", () => {
     expect(terminalSource).toContain("data-terminal-caret");
     expect(terminalSource).toContain("currentTerminal.buffer.active.cursorX");
     expect(terminalSource).toContain("currentTerminal.buffer.active.cursorY");
+    expect(terminalSource).toContain("caretSync.schedule()");
+    expect(terminalSource).toContain("caretSync.cancel()");
     expect(terminalSource).toContain("bind:this={scrollTrack}");
     expect(terminalSource).toContain("scrollbarVisible");
     expect(terminalSource).toContain("currentTerminal.scrollToLine");

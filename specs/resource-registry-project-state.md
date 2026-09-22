@@ -125,6 +125,10 @@ Those portable markers are not written to the local project task file.
   `.pi/tasks.jsonc` content is never overwritten, and `.pi` plus scaffold
   subdirectories must be regular project-owned directories rather than symbolic
   links escaping the workspace.
+- Concurrent Desktop initializers use create-or-inspect directory operations and
+  publish the task skeleton only after it is fully written and flushed. A
+  competing initializer preserves the already-published task document; it never
+  observes or accepts a partially written final file.
 
 ## Related files
 
@@ -142,8 +146,9 @@ Those portable markers are not written to the local project task file.
   portable task attachments, attachment-only status changes, stale remote
   attachment removal, conflicts, and existing project-state/TUI behavior.
 - Desktop Rust task persistence tests cover reference-based local attachment
-  pruning after successful task-document writes and idempotent `.pi` skeleton
-  initialization without overwriting an existing task document.
+  pruning after successful task-document writes, idempotent `.pi` skeleton
+  initialization without overwriting an existing task document, and concurrent
+  initialization with atomic task-skeleton publication.
 - Desktop coordinator tests cover debounce, scope coalescing, busy deferral,
   changes during an in-flight push, retained error state, and foreground-lock
   independence.

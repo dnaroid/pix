@@ -93,7 +93,11 @@ a lazy manager) from full provider context and the complete journal branch.
 context (including context edits) without hydrating the presentation facade;
 DCP reads the full branch to bind exact entry identities and replay the journal.
 Lazy compaction records snapshot the resolved system message at their boundary,
-matching the SDK projection contract.
+matching the SDK projection contract. After a canonical full projection,
+context-neutral DCP journal appends retain that resolved snapshot so the
+following synchronous compaction append does not reopen/read the full JSONL;
+the provider projection itself remains canonical and is not derived from the
+presentation tail.
 Stats, startup replay and explicit sweep use the full-branch reader too.
 
 Full reads capture session/leaf identity. Because the lazy full-history reader

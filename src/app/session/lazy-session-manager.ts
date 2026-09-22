@@ -54,6 +54,12 @@ class LazySessionManager implements SessionManagerFacade {
 	private leafId: string | null = null;
 	private hydrated: SessionManager | undefined;
 	private contextManager: SessionManager | undefined;
+	// This is derived only from the canonical provider projection, never the
+	// presentation tail. A DCP journal append is context-neutral, so retaining
+	// it avoids reopening the complete JSONL synchronously when compaction
+	// immediately snapshots the same system state.
+	private canonicalSystemMessage: ReturnType<typeof getCurrentSystemMessage>;
+	private hasCanonicalSystemMessage = false;
 	private readonly tailEntryCount: number;
 	private tailStartOffset = 0;
 
@@ -113,6 +119,7 @@ class LazySessionManager implements SessionManagerFacade {
 		this.labelsById.clear();
 		this.leafId = null;
 		this.contextManager = undefined;
+		this.clearCanonicalSystemMessage();
 
 		mkdirSync(this.sessionDirPath, { recursive: true });
 		this.sessionFilePath = join(this.sessionDirPath, `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
@@ -219,8 +226,12 @@ class LazySessionManager implements SessionManagerFacade {
 
 	buildSessionProjection(): SessionProjection {
 		if (this.hydrated) return this.hydrated.buildSessionProjection();
-		if (this.tailStartOffset > 0) return this.completeContextManager().buildSessionProjection();
-		return buildSdkSessionProjection(this.entries, this.leafId, this.byId);
+		const projection = this.tailStartOffset > 0
+			? this.completeContextManager().buildSessionProjection()
+			: buildSdkSessionProjection(this.entries, this.leafId, this.byId);
+		this.canonicalSystemMessage = getCurrentSystemMessage(projection.messages);
+		this.hasCanonicalSystemMessage = true;
+		return projection;
 	}
 
 	buildSessionContext(): SessionContext {
@@ -271,6 +282,7 @@ class LazySessionManager implements SessionManagerFacade {
 		}
 		this.leafId = branchFromId;
 		this.contextManager = undefined;
+		this.clearCanonicalSystemMessage();
 	}
 
 	resetLeaf(): void {
@@ -280,6 +292,7 @@ class LazySessionManager implements SessionManagerFacade {
 		}
 		this.leafId = null;
 		this.contextManager = undefined;
+		this.clearCanonicalSystemMessage();
 	}
 
 	createBranchedSession(leafId: string): string | undefined {
@@ -306,7 +319,9 @@ class LazySessionManager implements SessionManagerFacade {
 
 	appendMessage(message: unknown): string {
 		if (this.hydrated) return this.hydrated.appendMessage(message as never);
-		return this.appendEntry(this.newEntry("message", { message }));
+		const id = this.appendEntry(this.newEntry("message", { message }));
+		if (isRecord(message) && message.role === "system") this.clearCanonicalSystemMessage();
+		return id;
 	}
 
 	appendThinkingLevelChange(thinkingLevel: string): string {
@@ -332,7 +347,9 @@ class LazySessionManager implements SessionManagerFacade {
 		if (this.hydrated) return this.hydrated.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook, usage);
 		const timestamp = new Date().toISOString();
 		const id = this.createEntryId();
-		const systemMessage = getCurrentSystemMessage(this.buildSessionProjection().messages);
+		const systemMessage = this.hasCanonicalSystemMessage
+			? this.canonicalSystemMessage
+			: getCurrentSystemMessage(this.buildSessionProjection().messages);
 		const payload: Record<string, unknown> = {
 			summary,
 			firstKeptEntryId: firstKeptEntryId ?? id,
@@ -341,14 +358,23 @@ class LazySessionManager implements SessionManagerFacade {
 		if (details !== undefined) payload.details = details;
 		if (fromHook !== undefined) payload.fromHook = fromHook;
 		if (usage !== undefined) payload.usage = usage;
-		if (systemMessage) payload.systemMessage = { ...systemMessage, timestamp: new Date(timestamp).getTime() };
-		return this.appendEntry({
+		const systemMessageSnapshot = systemMessage
+			? { ...systemMessage, timestamp: new Date(timestamp).getTime() }
+			: undefined;
+		if (systemMessageSnapshot) payload.systemMessage = systemMessageSnapshot;
+		const compaction = {
 			type: "compaction",
 			id,
 			parentId: this.leafId,
 			timestamp,
 			...payload,
-		} as SessionEntry);
+		} as SessionEntry;
+		const appendedId = this.appendEntry(compaction);
+		// A compaction replaces all prior system deltas with this resolved
+		// checkpoint, so it remains the canonical snapshot for a later append.
+		this.canonicalSystemMessage = systemMessageSnapshot;
+		this.hasCanonicalSystemMessage = true;
+		return appendedId;
 	}
 
 	appendCustomEntry(customType: string, data?: unknown): string {
@@ -486,6 +512,11 @@ class LazySessionManager implements SessionManagerFacade {
 			if (!this.byId.has(id)) return id;
 		}
 		return randomUUID();
+	}
+
+	private clearCanonicalSystemMessage(): void {
+		this.canonicalSystemMessage = undefined;
+		this.hasCanonicalSystemMessage = false;
 	}
 
 }

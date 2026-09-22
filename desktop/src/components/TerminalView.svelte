@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import type { FitAddon } from "@xterm/addon-fit";
   import type { ILink, Terminal } from "@xterm/xterm";
+  import { createAnimationFrameCoalescer } from "../lib/animation-frame-coalescer";
 
   type TerminalTextLink = {
     startIndex: number;
@@ -57,6 +58,7 @@
   let caretLeft = $state(0);
   let caretTop = $state(0);
   let caretHeight = $state(0);
+  const caretSync = createAnimationFrameCoalescer(syncCaret);
 
   export function write(data: string): void {
     if (data) terminal?.write(data);
@@ -220,6 +222,8 @@
       if (inputTimer !== null) window.clearTimeout(inputTimer);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       cancelAnimationFrame(scrollbarFrame);
+      scrollbarFrame = 0;
+      caretSync.cancel();
       flushInput();
       resizeObserver.disconnect();
       colorScheme.removeEventListener("change", fitTerminal);
@@ -240,7 +244,7 @@
 
   function scheduleTerminalChromeSync(): void {
     scheduleScrollbarSync();
-    requestAnimationFrame(syncCaret);
+    caretSync.schedule();
   }
 
   function scheduleScrollbarSync(): void {

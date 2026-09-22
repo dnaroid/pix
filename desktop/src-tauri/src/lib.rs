@@ -7238,9 +7238,10 @@ fn ensure_project_pi_subdirectory(
     name: &str,
 ) -> Result<(), String> {
     let directory = project_directory.join(name);
-    if !directory.exists() {
-        fs::create_dir(&directory)
-            .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
+    match fs::create_dir(&directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(format!("failed to create {}: {error}", directory.display())),
     }
     let metadata = fs::symlink_metadata(&directory)
         .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?;
@@ -7261,38 +7262,60 @@ fn initialize_project_tasks_file(project_directory: &Path) -> Result<(), String>
         .map_err(|error| format!("failed to encode .pi/tasks.jsonc: {error}"))?;
     serialized.push(b'\n');
 
-    let mut file = match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&target)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
-        Err(error) => {
-            return Err(format!(
-                "failed to create project task skeleton {}: {error}",
-                target.display()
-            ))
-        }
-    };
+    // Publish with a hard link instead of creating the destination and writing
+    // through it. `hard_link` fails if another initializer has already
+    // published the destination, while readers can only see the fully-synced
+    // temporary file.
+    let sequence = TASK_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = project_directory.join(format!(
+        ".tasks.jsonc.initialize.{}.{}.tmp",
+        std::process::id(),
+        sequence,
+    ));
     let write_result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| {
+                format!(
+                    "failed to create project task skeleton temporary file {}: {error}",
+                    temporary.display()
+                )
+            })?;
         file.write_all(&serialized)
             .map_err(|error| format!("failed to write project task skeleton: {error}"))?;
         file.sync_all()
             .map_err(|error| format!("failed to flush project task skeleton: {error}"))?;
-        sync_directory(project_directory)?;
+        drop(file);
+        match fs::hard_link(&temporary, &target) {
+            Ok(()) => sync_directory(project_directory)?,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(format!(
+                    "failed to publish project task skeleton {}: {error}",
+                    target.display()
+                ))
+            }
+        }
         Ok(())
     })();
+    let _ = fs::remove_file(&temporary);
     write_result
 }
 
 fn initialize_project_pi_from(workspace: &Path) -> Result<(), String> {
     let root = canonical_workspace(workspace)?;
     let project_directory = root.join(".pi");
-    if !project_directory.exists() {
-        fs::create_dir(&project_directory).map_err(|error| {
-            format!("failed to create {}: {error}", project_directory.display())
-        })?;
+    match fs::create_dir(&project_directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => {
+            return Err(format!(
+                "failed to create {}: {error}",
+                project_directory.display()
+            ))
+        }
     }
     let metadata = fs::symlink_metadata(&project_directory)
         .map_err(|error| format!("failed to inspect {}: {error}", project_directory.display()))?;
@@ -9453,6 +9476,59 @@ mod tests {
         );
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn concurrent_project_pi_initialization_publishes_only_complete_task_skeletons() {
+        const WINDOW_COUNT: usize = 32;
+
+        let workspace = Arc::new(temporary_workspace("project-pi-initialize-concurrent"));
+        let start = Arc::new(std::sync::Barrier::new(WINDOW_COUNT + 1));
+        let expected = {
+            let mut bytes = serde_json::to_vec_pretty(&empty_task_document())
+                .expect("encode expected task skeleton");
+            bytes.push(b'\n');
+            bytes
+        };
+        let workers = (0..WINDOW_COUNT)
+            .map(|_| {
+                let workspace = Arc::clone(&workspace);
+                let start = Arc::clone(&start);
+                std::thread::spawn(move || {
+                    start.wait();
+                    initialize_project_pi_from(&workspace).and_then(|()| {
+                        fs::read(workspace.join(".pi/tasks.jsonc")).map_err(|error| {
+                            format!("read concurrently initialized task skeleton: {error}")
+                        })
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+
+        start.wait();
+        for worker in workers {
+            let content = worker
+                .join()
+                .expect("initializer thread did not panic")
+                .expect("concurrent initializer must succeed");
+            assert_eq!(
+                content, expected,
+                "every successful initializer must observe the complete published skeleton"
+            );
+        }
+
+        let artifacts = fs::read_dir(workspace.join(".pi"))
+            .expect("read initialized project directory")
+            .map(|entry| entry.expect("read initialized project entry").file_name())
+            .collect::<Vec<_>>();
+        assert!(
+            artifacts.iter().all(|name| !name
+                .to_string_lossy()
+                .starts_with(".tasks.jsonc.initialize.")),
+            "initialization temporary files must be removed"
+        );
+
+        fs::remove_dir_all(&*workspace).expect("remove temporary workspace");
     }
 
     #[test]
