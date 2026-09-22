@@ -82,6 +82,7 @@ const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60)
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static WORKSPACE_CONFIG_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static GIT_CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 
 #[derive(Deserialize)]
@@ -2568,7 +2569,7 @@ fn git_initialize_from(workspace: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn git_output_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+fn git_command(root: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     command
         .arg("-C")
@@ -2584,12 +2585,54 @@ fn git_output_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, St
         .env("GCM_INTERACTIVE", "Never")
         .env("GIT_EDITOR", "true")
         .env("GIT_SEQUENCE_EDITOR", "true")
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    command
+}
+
+fn git_output_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut command = git_command(root, args);
+    command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     command
         .output()
         .map_err(|error| format!("failed to run git {}: {error}", args.join(" ")))
+}
+
+fn git_output_hook_safe(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let sequence = GIT_CAPTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let prefix = format!("pix-git-{}-{sequence}", std::process::id());
+    let stdout_path = env::temp_dir().join(format!("{prefix}.stdout"));
+    let stderr_path = env::temp_dir().join(format!("{prefix}.stderr"));
+
+    let stdout_file = fs::File::create(&stdout_path)
+        .map_err(|error| format!("failed to create Git stdout capture: {error}"))?;
+    let stderr_file = match fs::File::create(&stderr_path) {
+        Ok(file) => file,
+        Err(error) => {
+            let _ = fs::remove_file(&stdout_path);
+            return Err(format!("failed to create Git stderr capture: {error}"));
+        }
+    };
+
+    let mut command = git_command(root, args);
+    let status = command
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .status();
+
+    let stdout = fs::read(&stdout_path).unwrap_or_default();
+    let stderr = fs::read(&stderr_path).unwrap_or_default();
+    let _ = fs::remove_file(&stdout_path);
+    let _ = fs::remove_file(&stderr_path);
+
+    let status =
+        status.map_err(|error| format!("failed to run git {}: {error}", args.join(" ")))?;
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
@@ -3183,7 +3226,16 @@ fn git_commit_from(workspace: &Path, message: &str) -> Result<(), String> {
             "Commit message is too large (maximum {MAX_GIT_COMMIT_MESSAGE_BYTES} bytes)"
         ));
     }
-    git_output(&root, &["commit", "--no-gpg-sign", "-m", message]).map(|_| ())
+    // Command::output waits for every inherited stdout/stderr pipe to close.
+    // A post-commit hook may intentionally launch background work, so capture
+    // commit output through regular files and wait only for the Git process.
+    let args = ["commit", "--no-gpg-sign", "-m", message];
+    let output = git_output_hook_safe(&root, &args)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(git_command_error("git commit", &output))
+    }
 }
 
 fn git_push_from(workspace: &Path) -> Result<(), String> {
@@ -9146,6 +9198,39 @@ mod tests {
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(remote).expect("remove bare remote");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_commit_does_not_wait_for_background_post_commit_output_handles() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let workspace = temporary_workspace("git-background-post-commit");
+        initialize_git_repository(&workspace);
+        fs::write(workspace.join("tracked.txt"), "after background hook\n")
+            .expect("modify tracked file");
+        git_stage_from(&workspace, Some("tracked.txt")).expect("stage tracked file");
+
+        let hook = workspace.join(".git/hooks/post-commit");
+        fs::write(
+            &hook,
+            "#!/bin/sh\nnohup sh -c 'sleep 3 > /dev/null 2>&1' &\n",
+        )
+        .expect("write post-commit hook");
+        let mut permissions = fs::metadata(&hook).expect("read hook metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&hook, permissions).expect("make post-commit hook executable");
+
+        let started = Instant::now();
+        git_commit_from(&workspace, "Commit without waiting for hook descendant")
+            .expect("commit should complete");
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "commit waited for the background post-commit descendant: {:?}",
+            started.elapsed()
+        );
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
     #[test]
