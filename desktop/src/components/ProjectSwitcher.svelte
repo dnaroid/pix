@@ -18,7 +18,6 @@
     projectName,
     projectParentPath,
   } from "../lib/recent-projects";
-  import ProjectFolderIcon from "./ProjectFolderIcon.svelte";
 
   let {
     workspace,
@@ -300,7 +299,12 @@
               onclick={() => selectProject(project)}
               disabled={currentWindowDisabled}
             >
-              <ProjectFolderIcon project={project} color={projectColors.get(project)} class="h-4 w-4 justify-self-center" />
+              <span
+                class="project-titlebar-badge grid h-5 w-5 place-items-center justify-self-center rounded-sm border border-border font-mono text-xs font-semibold"
+                style:--project-titlebar-hue={projectFolderHue(project)}
+                style:--project-titlebar-color={projectColors.get(project)}
+                aria-hidden="true"
+              >{projectAbbreviation(project)}</span>
               <span class="min-w-0">
                 <strong class="block truncate text-xs font-medium">{projectName(project)}</strong>
                 <small class="block truncate font-mono text-xs leading-4 text-muted-foreground">{projectParentPath(project)}</small>

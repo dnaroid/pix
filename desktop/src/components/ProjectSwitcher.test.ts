@@ -29,6 +29,14 @@ describe("ProjectSwitcher project opening actions", () => {
     expect(switcherSource).not.toContain("invoke(");
   });
 
+  it("renders recent projects with accessible text labels and decorative identity badges", () => {
+    expect(switcherSource).toContain("projectAbbreviation(project)");
+    expect(switcherSource).toContain("projectFolderHue(project)");
+    expect(switcherSource).toContain('aria-hidden="true"');
+    expect(switcherSource).toContain("projectName(project)");
+    expect(switcherSource).not.toContain("ProjectFolderIcon");
+  });
+
   it("reuses the same menu behind the compact titlebar badge", () => {
     expect(switcherSource).toContain('variant?: "sidebar" | "titlebar"');
     expect(switcherSource).toContain('variant === "titlebar"');

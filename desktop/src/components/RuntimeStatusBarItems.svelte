@@ -4,6 +4,11 @@
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { ModelUsageLimitWindow, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
+  import { parseDcpContextMap } from "../lib/dcp-context-map";
+  import {
+    dcpContextMap,
+    type DcpContextMapCellKind,
+  } from "../lib/dcp-context-visualization";
   import {
     clampUsagePercent,
     contextUsageTone,
@@ -61,8 +66,11 @@
   let dcpOpen = $state(false);
   let usageOpen = $state(false);
   let now = $state(Date.now());
+  const WEEKLY_DAY_SEGMENTS = 7;
   const contextPercent = $derived(status?.context?.percent);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
+  const contextMap = $derived(dcpContextMap(status?.context, parseDcpContextMap(status?.dcpContextMap)));
+  const contextLegend = $derived(contextLegendItems());
   const dcpBody = $derived(dcpStatsBody(status?.dcpStats));
   const usageWindowItems = $derived(usageWindows());
 
@@ -118,15 +126,56 @@
     return "text-tool-success";
   }
 
-  function toneFillClass(tone: UsageTone): string {
-    if (tone === "error") return "bg-tool-error";
-    if (tone === "warning") return "bg-tool-warning";
-    return "bg-tool-success";
+  function contextCellClass(kind: DcpContextMapCellKind): string {
+    if (kind === "free") return "bg-border";
+    if (kind === "retained" || kind === "occupied") return "bg-muted-foreground/45";
+    if (kind === "candidate") return "bg-primary";
+    if (kind === "protected") return "bg-tool-info";
+    if (kind === "compressed") return "bg-tool-success";
+    return "bg-muted";
+  }
+
+  function contextLegendItems(): Array<{ kind: DcpContextMapCellKind; label: string; value?: string }> {
+    const categories = contextMap.categoryTokens;
+    if (categories) {
+      return [
+        { kind: "retained", label: "Other occupied", value: `~${formatContextEstimate(categories.retained)}` },
+        { kind: "candidate", label: "Candidates", value: `~${formatContextEstimate(categories.candidate)}` },
+        { kind: "protected", label: "Protected tools", value: `~${formatContextEstimate(categories.protected)}` },
+        { kind: "compressed", label: "Summaries", value: `~${formatContextEstimate(categories.compressed)}` },
+        { kind: "free", label: "Free", value: `~${formatCompactTokens(contextMap.freeTokens ?? 0)}` },
+      ];
+    }
+    if (contextMap.occupiedPercent !== undefined) {
+      return [
+        { kind: "occupied", label: "Occupied", value: `~${formatCompactTokens(contextMap.occupiedTokens ?? 0)}` },
+        { kind: "free", label: "Free", value: `~${formatCompactTokens(contextMap.freeTokens ?? 0)}` },
+      ];
+    }
+    return [{ kind: "unknown", label: "Capacity unknown" }];
+  }
+
+  function formatContextEstimate(tokens: number): string {
+    return tokens > 0 && tokens < 1 ? "<1" : formatCompactTokens(tokens);
+  }
+
+  function weeklyDayLabels(window: ModelUsageLimitWindow): string[] {
+    const durationMs = window.windowSeconds > 0
+      ? window.windowSeconds * 1000
+      : 7 * 24 * 60 * 60 * 1000;
+    const startAt = window.resetAt - durationMs;
+    const segmentMs = durationMs / WEEKLY_DAY_SEGMENTS;
+    return Array.from({ length: WEEKLY_DAY_SEGMENTS }, (_, index) =>
+      new Date(startAt + (index + 0.5) * segmentMs).toLocaleDateString(undefined, { weekday: "short" }),
+    );
   }
 
   function limitTitle(label: "H" | "W", window: ModelUsageLimitWindow): string {
     const name = label === "H" ? "Hourly" : "Weekly";
-    return `${name} limit · ${Math.round(window.remainingPercent)}% remaining · resets ${formatResetDuration(window.resetAt, now)}`;
+    const weeklySlices = label === "W"
+      ? ` · day slices ${weeklyDayLabels(window).join(" · ")} (aggregate quota, not per-day usage)`
+      : "";
+    return `${name} limit · ${Math.round(window.remainingPercent)}% remaining · resets ${formatResetDuration(window.resetAt, now)}${weeklySlices}`;
   }
 
   function usageWindows(): Array<{ label: "H" | "W"; window: ModelUsageLimitWindow }> {
@@ -148,11 +197,10 @@
 {#if status || workspaceName}
   <div bind:this={root} class="flex min-w-0 items-center gap-1" data-runtime-status>
     {#if status?.context || status?.dcpTokensSaved !== undefined}
-      <div class="relative shrink-0">
+      <div class="group relative shrink-0" data-runtime-context>
         <button
           class="flex h-6 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
-          title={contextTitle()}
           aria-label={contextTitle()}
           aria-haspopup="dialog"
           aria-expanded={dcpOpen}
@@ -161,15 +209,39 @@
         >
           <span class="font-sans text-xs text-muted-foreground max-[860px]:hidden">Context</span>
           <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
-          <span class="relative h-1.5 w-10 overflow-hidden rounded-sm bg-border" aria-hidden="true">
-            {#if contextTone && contextPercent !== null && contextPercent !== undefined}
-              <span
-                class={["absolute inset-y-0 left-0 rounded-sm", toneFillClass(contextTone)]}
-                style={`width: ${clampUsagePercent(contextPercent)}%`}
-              ></span>
-            {/if}
+          <span class="flex h-1.5 w-16 overflow-hidden rounded-sm bg-border" aria-hidden="true">
+            {#each contextMap.cells as cell}
+              <span class="flex h-full min-w-0 flex-1">
+                {#each cell.segments as segment}
+                  <span
+                    class={["h-full min-w-0", contextCellClass(segment.kind)]}
+                    style:flex-grow={segment.share}
+                  ></span>
+                {/each}
+              </span>
+            {/each}
           </span>
+          {#if status?.dcpTokensSaved !== undefined}
+            <span class="text-muted-foreground">saved ~{formatCompactTokens(status.dcpTokensSaved)}</span>
+          {/if}
         </button>
+
+        {#if !dcpOpen}
+          <div
+            class="pointer-events-none absolute bottom-[calc(100%+0.375rem)] left-0 z-40 hidden w-max max-w-[min(360px,calc(100vw-16px))] rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
+            role="tooltip"
+          >
+            <div class="font-mono text-xs text-muted-foreground">{contextTitle()}</div>
+            <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Context color legend">
+              {#each contextLegend as item}
+                <span class="inline-flex items-center gap-1">
+                  <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
+                  <span>{item.label}{item.value ? ` ${item.value}` : ""}</span>
+                </span>
+              {/each}
+            </div>
+          </div>
+        {/if}
 
         {#if dcpOpen}
           <div
@@ -265,15 +337,25 @@
                 {#if usageWindowItems.length > 1}
                   <span class="text-muted-foreground">{label === "H" ? "Hourly" : "Weekly"}</span>
                 {/if}
-                <span class="relative h-1.5 w-8 overflow-hidden rounded-sm bg-border" aria-hidden="true">
+                <span
+                  class={["relative h-1.5 overflow-hidden rounded-sm bg-border", label === "W" ? "w-14" : "w-8"]}
+                  aria-hidden="true"
+                >
                   <span
-                    class={["absolute inset-y-0 left-0 rounded-sm", toneFillClass(tone)]}
+                    class="absolute inset-y-0 left-0 rounded-sm bg-muted-foreground/50"
                     style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
                   ></span>
+                  {#if label === "W"}
+                    <span class="absolute inset-0 grid grid-cols-7">
+                      {#each Array.from({ length: WEEKLY_DAY_SEGMENTS }) as _, index}
+                        <i class={index === 0 ? "" : "border-l border-background/80"}></i>
+                      {/each}
+                    </span>
+                  {/if}
                 </span>
                 <span class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%</span>
                 {#if exhaustsEarly}
-                  <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
+                  <TriangleAlert class="h-2.5 w-2.5 text-muted-foreground" aria-label="Projected to exhaust before reset" />
                 {/if}
                 <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
               </span>

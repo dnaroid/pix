@@ -8,7 +8,6 @@ function inspectorOptions(sessionId: string | null, open = true) {
     activeSessionActivity: () => undefined,
     activeTodoSnapshot: () => undefined,
     activeSubagentSnapshot: () => undefined,
-    activeRuntimeStatus: () => undefined,
     canClearTodos: () => false,
     clearSessionTodos: vi.fn(async () => true),
     inspectorPreference: {

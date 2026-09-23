@@ -25,6 +25,7 @@ type RegistryStoreOptions = {
   setErrorMessage: (message: string | null) => void;
   loadProjectTasks: (workspace: string) => void | Promise<void>;
   loadProjectDocuments: (workspace: string) => void | Promise<void>;
+  loadWorkspaceSettings?: (workspace: string) => void | Promise<void>;
   reportError: (error: unknown) => void;
 };
 
@@ -123,6 +124,12 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   async function runAction(request: RegistryActionRequest, nextActionId: string): Promise<void> {
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
+    const workspace = options.workspace();
+    const requestGeneration = lifecycleGeneration;
+    const current = () => requestGeneration === lifecycleGeneration
+      && workspace === options.workspace()
+      && requestClient === options.client()
+      && sessionId === options.activeSessionId();
     if (
       !requestClient
       || !sessionId
@@ -139,18 +146,18 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     options.setErrorMessage(null);
     try {
       await requestClient.registryAction(sessionId, request);
-      if (requestClient !== options.client() || sessionId !== options.activeSessionId()) return;
+      if (!current()) return;
       if (request.action === "pull-project") {
-        const workspace = options.workspace();
+        if (request.scope === "workspace" || request.scope === "project") void options.loadWorkspaceSettings?.(workspace);
         if (request.scope === "tasks" || request.scope === "project") void options.loadProjectTasks(workspace);
         if (request.scope === "plans" || request.scope === "todo" || request.scope === "project") {
           void options.loadProjectDocuments(workspace);
         }
       }
     } catch (error) {
-      if (requestClient === options.client() && sessionId === options.activeSessionId()) options.reportError(error);
+      if (current()) options.reportError(error);
     } finally {
-      if (requestClient === options.client() && sessionId === options.activeSessionId()) {
+      if (current()) {
         actionId = null;
         options.setOperationRunning(false);
         backgroundSync.retry();

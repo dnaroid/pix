@@ -6,6 +6,44 @@ import { createRegistryStore } from "./registry.svelte";
 afterEach(() => vi.useRealTimers());
 
 describe("registry background project sync", () => {
+  it("does not reload the next workspace or unlock its action after a stale pull finishes", async () => {
+    let finishPull!: () => void;
+    const registryAction = vi.fn(() => new Promise<void>((resolve) => { finishPull = resolve; }));
+    const client = { registryAction } as unknown as AcpClient;
+    let workspace = "/one";
+    const loadWorkspaceSettings = vi.fn();
+    const loadProjectTasks = vi.fn();
+    const loadProjectDocuments = vi.fn();
+    const setOperationRunning = vi.fn();
+    const store = createRegistryStore({
+      client: () => client,
+      activeSessionId: () => "session-1",
+      sessionRuntimeReady: () => true,
+      operationRunning: () => false,
+      promptRunning: () => false,
+      sessionHistoryLoading: () => false,
+      workspace: () => workspace,
+      sessionWorkspace: () => workspace,
+      setOperationRunning,
+      setErrorMessage: vi.fn(),
+      loadWorkspaceSettings,
+      loadProjectTasks,
+      loadProjectDocuments,
+      reportError: vi.fn(),
+    });
+
+    const pending = store.runAction({ action: "pull-project", scope: "project" }, "pull-old");
+    workspace = "/two";
+    store.reset();
+    finishPull();
+    await pending;
+
+    expect(loadWorkspaceSettings).not.toHaveBeenCalled();
+    expect(loadProjectTasks).not.toHaveBeenCalled();
+    expect(loadProjectDocuments).not.toHaveBeenCalled();
+    expect(setOperationRunning).toHaveBeenCalledTimes(1);
+  });
+
   it("pushes a debounced project artifact without taking the foreground operation lock", async () => {
     vi.useFakeTimers();
     const registryAction = vi.fn(async () => {});

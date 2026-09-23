@@ -106,7 +106,10 @@ export function createSessionTabClosure(
     }
     if (!closed) return false;
     if (nextSessionId) await loadSession(nextSessionId);
-    else await options.draft.openStartTab();
+    else {
+      options.tabs.forgetActive(options.workspace());
+      await options.draft.openStartTab();
+    }
     return true;
   }
 

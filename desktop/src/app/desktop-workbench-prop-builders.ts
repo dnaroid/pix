@@ -98,7 +98,6 @@ export type WorkbenchInspectorBuilderOptions = {
   activeSessionActivity: () => InspectorProps["summary"];
   activeTodoSnapshot: () => InspectorProps["todoSnapshot"];
   activeSubagentSnapshot: () => InspectorProps["subagentSnapshot"];
-  activeRuntimeStatus: () => InspectorProps["runtimeStatus"];
   canClearTodos: () => boolean;
   clearSessionTodos: (sessionId: string) => Promise<boolean>;
   inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
@@ -277,7 +276,6 @@ export function buildWorkbenchInspectorProps(
       activeSessionId: sessionId,
       sessionTitle: options.activeTitle(),
       summary: options.activeSessionActivity(),
-      runtimeStatus: options.activeRuntimeStatus(),
       todoSnapshot: options.activeTodoSnapshot(),
       subagentSnapshot: options.activeSubagentSnapshot(),
       canClearTodos: options.canClearTodos(),

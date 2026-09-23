@@ -129,6 +129,9 @@ export function createDesktopSidebarViewModel(options: {
     onRegistryInitializeProject: () => void options.registry.initializeProject(),
     onRegistryAction: (request, actionId) => void options.registry.runAction(request, actionId),
     onRegistryProjectChange: options.registry.scheduleProjectSync,
+    onWorkspaceSettingsSave: (workspace) => {
+      if (workspace === options.workspace()) options.registry.scheduleProjectSync("workspace");
+    },
     onGitRefresh: () => void options.git.refresh(),
     onGitInitialize: () => void options.git.initialize(),
     onGitOpenDiff: (path, scope) => void options.git.openDiff(path, scope),

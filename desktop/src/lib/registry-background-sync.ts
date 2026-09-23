@@ -19,7 +19,7 @@ type RegistryBackgroundSyncOptions = {
   retryMs?: number;
 };
 
-const PROJECT_SCOPES: readonly RegistryProjectArtifact[] = ["tasks", "plans", "todo"];
+const PROJECT_SCOPES: readonly RegistryProjectArtifact[] = ["tasks", "plans", "todo", "workspace"];
 const DEFAULT_DEBOUNCE_MS = 900;
 const DEFAULT_RETRY_MS = 1_500;
 

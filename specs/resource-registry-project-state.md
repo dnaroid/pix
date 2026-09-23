@@ -10,13 +10,13 @@ Implemented; this is the current project-state registry contract.
 
 ## Goal
 
-Synchronize project-scoped tasks, plans, and TODO state through the private Git
+Synchronize project-scoped tasks, plans, TODO, and workspace state through the private Git
 registry without making task attachments depend on machine-specific absolute
 paths.
 
 ## Scope
 
-- `/registry push|pull tasks|plans|todo|project`.
+- `/registry push|pull tasks|plans|todo|workspace|project`.
 - Project provenance in `.pi/registry.json`.
 - Portable synchronization of `.pi/tasks.jsonc` together with the regular files
   referenced from `.pi/task-attachments`.
@@ -32,6 +32,7 @@ For project key `<key>`, the registry stores:
   the synchronized task document
 - `projects/<key>/plans/`
 - `projects/<key>/TODO.md`
+- `projects/<key>/workspace.jsonc`
 
 The registry copy of `tasks.jsonc` is transport data. Project-owned attachment
 markers are rebased from local `file://` URIs to
@@ -64,7 +65,8 @@ Those portable markers are not written to the local project task file.
    included.
 8. Pix Desktop owns one background project-state sync coordinator. A successful
    task-document write marks `tasks` dirty; saving `.pi/TODO.md` marks `todo`
-   dirty; saving a file under `.pi/plans/` marks `plans` dirty. The fast sidebar
+   dirty; saving a file under `.pi/plans/` marks `plans` dirty; successful
+   Desktop saves of `.pi/workspace.jsonc` mark `workspace` dirty. The fast sidebar
    Registry poll also reports project artifacts that changed outside those
    Desktop save paths, so agent/external edits enter the same coordinator.
 9. Dirty project-state writes are debounced for approximately 900 ms. Repeated
@@ -98,6 +100,15 @@ Those portable markers are not written to the local project task file.
 15. Saving a TODO or plan never creates a missing `.pi` directory. Those
     project-document writes require the explicit local initialization action,
     so a document edit cannot silently create incomplete Registry state.
+16. `.pi/workspace.jsonc` is a project artifact with the same project-key,
+    provenance, status, conflict confirmation, and push/pull semantics as TODO;
+    its remote path is `projects/<key>/workspace.jsonc`. Pulling it refreshes
+    Desktop project settings; switching back to the scripts panel loads the
+    pulled launch commands. The whole file is synchronized without redaction:
+    do not put credentials or private shell arguments in it unless the private
+    Registry remote is trusted to hold them. The Desktop ACP Registry request
+    validator accepts `workspace` for both `push-project` and `pull-project`,
+    while still rejecting unknown project scopes.
 
 ## Compatibility
 
@@ -150,8 +161,13 @@ Those portable markers are not written to the local project task file.
 
 - `external/pi-tools-suite/src/resource-registry/index.ts`
 - `external/pi-tools-suite/test/resource-registry.test.ts`
+- `acp/src/acp/desktop-commands.ts`
+- `acp/test/desktop-commands.test.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src/app/registry.svelte.ts`
+- `desktop/src/app/registry-store.test.ts`
+- `desktop/src/lib/registry.ts`
+- `desktop/src/lib/registry-background-sync.ts`
 - `desktop/src/components/RegistryPanel.svelte`
 - `docs/desktop-task-manager.md`
 - `specs/desktop-attachments.md`
@@ -176,6 +192,8 @@ Those portable markers are not written to the local project task file.
   pending/syncing/error presentation, initialization wiring and the shared
   animated indicator. Rust coverage verifies that the fast Registry check uses
   task attachment bytes when comparing the `tasks` project artifact.
+- ACP Desktop command tests cover `workspace` push/pull request validation and
+  rejection of unknown scopes before the Registry RPC is dispatched.
 
 ## Risks / unknowns
 

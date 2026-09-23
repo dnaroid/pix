@@ -115,6 +115,13 @@ test("desktop registry actions are session-scoped and validate resource/project 
 		action: "pull-project",
 		scope: "todo",
 	});
+	for (const action of ["push-project", "pull-project"] as const) {
+		assert.deepEqual(parseDesktopRegistryActionRequest({ sessionId: "session-1", action, scope: "workspace" }), {
+			sessionId: "session-1",
+			action,
+			scope: "workspace",
+		});
+	}
 	assert.throws(() => parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "remove", type: "skill", name: "../bad" }));
 	assert.throws(() => parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "pull-project", scope: "skills" }));
 });

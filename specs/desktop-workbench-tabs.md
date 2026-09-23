@@ -17,7 +17,7 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 ## Behavior
 
 - Pix Desktop has one top `WorkbenchTabs` tablist. There is no second nested editor-tab strip inside the central workspace.
-- Conversation tabs are derived from the existing `buildTabSessions` order plus the UI-only draft conversation. Their session membership, Desktop/TUI reconciliation, active-session storage, runtime ownership, and ACP close semantics are unchanged.
+- Conversation tabs are derived from the existing `buildTabSessions` order plus the UI-only draft conversation. Their session membership, restart restore, Desktop/TUI reconciliation, and active-session persistence follow [desktop-session-tabs.md](./desktop-session-tabs.md); the unified workbench layer does not give Preview/Git Diff any role in that state. Runtime ownership and ACP close semantics remain session-owned.
 - Preview and Git Diff are UI-only workbench tabs. They never enter `buildTabSessions`, restored/local session id arrays, saved-session selectors, active-session persistence, ACP session maps, or TUI `pix.tabs` metadata.
 - Preview/Diff are inserted beside the visible tab that opened them when possible while the relative order of the canonical session list remains authoritative. If the opener disappears, the UI-only tab remains workspace-scoped and falls back to a valid location in the same strip.
 - Exactly one workbench tab is visually/ARIA selected. Selecting a session tab activates/loads that conversation and displays `conversation-workspace`. Selecting Preview or Git Diff changes only the visible central work surface; the active conversation runtime remains available in the background for status/review operations.

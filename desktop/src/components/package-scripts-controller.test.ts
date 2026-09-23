@@ -83,4 +83,139 @@ describe("package terminal operation ownership", () => {
     expect(controller.terminals).toEqual([]);
     expect(tauri.invoke).toHaveBeenCalledWith("package_terminal_stop", { windowLabel: "main", terminalId: terminal.id });
   });
+
+  it("runs saved launch commands in the project shell", async () => {
+    const { controller } = fixture();
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === "project_file_exists") return Promise.resolve(true);
+      if (command === "read_project_file") return Promise.resolve({ content: '{"launchCommands":[{"id":"dev","name":"Dev","command":"npm run dev"}]}' });
+      if (command === "package_scripts" || command === "package_terminal_list") return Promise.resolve([]);
+      if (command === "package_terminal_start_shell") return Promise.resolve(terminal);
+      return Promise.resolve(undefined);
+    });
+    controller.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await controller.runLaunchCommand("dev");
+    expect(tauri.invoke).toHaveBeenCalledWith("package_terminal_start_shell", expect.objectContaining({ workspace: "/one" }));
+    expect(tauri.invoke).toHaveBeenCalledWith("package_terminal_write", expect.objectContaining({ terminalId: terminal.id, data: "npm run dev\r" }));
+  });
+
+  it("rebases concurrent launch saves after a compare-and-swap conflict", async () => {
+    const { controller } = fixture();
+    let content = '{"launchCommands":[]}';
+    let firstWrite = true;
+    tauri.invoke.mockImplementation(async (command: string, args: any) => {
+      if (command === "project_file_exists") return true;
+      if (command === "read_project_file") return { content };
+      if (command === "write_project_workspace_config_if_unchanged") {
+        if (firstWrite) {
+          firstWrite = false;
+          content = '{"launchCommands":[{"id":"other","name":"Other","command":"echo other"}]}';
+          return { written: false, document: { content } };
+        }
+        if (args.expectedContent !== content) return { written: false, document: { content } };
+        content = args.content;
+        return { written: true, document: { content } };
+      }
+      return undefined;
+    });
+    const one = controller.saveLaunchCommand({ id: "one", name: "One", command: "echo one" });
+    const two = controller.saveLaunchCommand({ id: "two", name: "Two", command: "echo two" });
+    expect(await one).toBe(true);
+    expect(await two).toBe(true);
+    expect(controller.launchCommands.map((item) => item.id)).toEqual(["other", "one", "two"]);
+  });
+
+  it("clears saved commands and refuses malformed field overwrite", async () => {
+    const { controller } = fixture();
+    let content = '{"launchCommands":[{"id":"a","name":"A","command":"echo a"}]}';
+    tauri.invoke.mockImplementation(async (command: string, args: any) => {
+      if (command === "project_file_exists") return true;
+      if (command === "read_project_file") return { content };
+      if (command === "write_project_workspace_config_if_unchanged") { content = args.content; return { written: true, document: { content } }; }
+      return undefined;
+    });
+    expect(await controller.deleteLaunchCommand("a")).toBe(true);
+    expect(controller.launchCommands).toEqual([]);
+    content = '{"launchCommands":false}';
+    expect(await controller.saveLaunchCommand({ id: "b", name: "B", command: "echo b" })).toBe(false);
+    expect(controller.error).toContain("invalid launchCommands");
+  });
+
+  it("does not let a delayed workspace load replace a newly saved command", async () => {
+    const { controller } = fixture();
+    const oldRead = deferred<{ content: string }>();
+    let reads = 0;
+    tauri.invoke.mockImplementation((command: string, args: { content?: string }) => {
+      if (command === "package_scripts") return Promise.resolve({ exists: false, scripts: [] });
+      if (command === "package_terminal_list") return Promise.resolve([]);
+      if (command === "project_file_exists") return Promise.resolve(true);
+      if (command === "read_project_file") return ++reads === 1 ? oldRead.promise : Promise.resolve({ content: '{"launchCommands":[]}' });
+      if (command === "write_project_workspace_config_if_unchanged") return Promise.resolve({ written: true, document: { content: args.content } });
+      return Promise.resolve(undefined);
+    });
+    controller.refresh();
+    await vi.waitFor(() => expect(reads).toBe(1));
+    expect(await controller.saveLaunchCommand({ id: "new", name: "New", command: "echo new" })).toBe(true);
+    oldRead.resolve({ content: '{"launchCommands":[]}' });
+    await vi.waitFor(() => expect(controller.loading).toBe(false));
+    expect(controller.launchCommands.map((item) => item.id)).toEqual(["new"]);
+  });
+
+  it("does not apply a saved command to a different workspace after a delayed write", async () => {
+    const { controller, setWorkspace } = fixture();
+    const write = deferred<{ written: boolean; document: { content: string } }>();
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === "project_file_exists") return Promise.resolve(false);
+      if (command === "write_project_workspace_config_if_unchanged") return write.promise;
+      return Promise.resolve(undefined);
+    });
+    const saving = controller.saveLaunchCommand({ id: "old", name: "Old", command: "echo old" });
+    await vi.waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith("write_project_workspace_config_if_unchanged", expect.objectContaining({ workspace: "/one" })));
+    setWorkspace("/two");
+    write.resolve({ written: true, document: { content: '{"launchCommands":[{"id":"old","name":"Old","command":"echo old"}]}' } });
+    expect(await saving).toBe(false);
+    expect(controller.launchCommands).toEqual([]);
+  });
+
+  it("keeps running terminals visible when saved commands are malformed", async () => {
+    const { controller } = fixture();
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "package_scripts") return { exists: false, scripts: [] };
+      if (command === "package_terminal_list") return [terminal];
+      if (command === "project_file_exists") return true;
+      if (command === "read_project_file") return { content: '{"launchCommands":false}' };
+      return undefined;
+    });
+    controller.refresh();
+    await vi.waitFor(() => expect(controller.loading).toBe(false));
+    expect(controller.terminals.map((item) => item.id)).toEqual([terminal.id]);
+    expect(controller.error).toContain("invalid launchCommands");
+  });
+
+  it("restarts deleted launch commands as neutral shells rather than rerunning them", async () => {
+    const { controller } = fixture();
+    let content = '{"launchCommands":[{"id":"dev","name":"Dev","command":"npm run dev"}]}';
+    let starts = 0;
+    tauri.invoke.mockImplementation(async (command: string, args: { content?: string }) => {
+      if (command === "package_scripts") return { exists: false, scripts: [] };
+      if (command === "package_terminal_list") return [];
+      if (command === "project_file_exists") return true;
+      if (command === "read_project_file") return { content };
+      if (command === "write_project_workspace_config_if_unchanged") {
+        content = args.content!;
+        return { written: true, document: { content } };
+      }
+      if (command === "package_terminal_start_shell") return { ...terminal, id: `shell-${++starts}` };
+      return undefined;
+    });
+    controller.refresh();
+    await vi.waitFor(() => expect(controller.launchCommands).toHaveLength(1));
+    await controller.runLaunchCommand("dev");
+    const first = controller.terminals[0]!;
+    expect(await controller.deleteLaunchCommand("dev")).toBe(true);
+    await controller.restartTerminal(first);
+    expect(starts).toBe(2);
+    expect(tauri.invoke.mock.calls.filter(([command]) => command === "package_terminal_write")).toHaveLength(1);
+  });
 });

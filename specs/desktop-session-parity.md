@@ -12,15 +12,15 @@ Active implemented contract.
 
 ## Goal
 
-Show the same project sessions and restored open tabs in Pix Desktop that Pix TUI discovers.
+Show the same project sessions in Pix Desktop that Pix TUI discovers while keeping each surface's persisted open-tab choice stable across its own restarts.
 
 ## Scope
 
 - Reconcile native Pi JSONL sessions into the ACP session map during `session/list`.
 - Preserve existing ACP session IDs for already-mapped Pi session files.
 - Preserve whether a native session is a fork so Desktop can match the TUI tab marker.
-- Report the TUI tab snapshot through ACP metadata.
-- Keep Desktop's saved-session chooser separate from restored/open tab membership.
+- Report the TUI tab snapshot through ACP metadata as a compatibility/reconciliation input.
+- Keep Desktop's saved-session chooser separate from restored/open tab membership, and persist Desktop's own ordered real-tab snapshot per workspace.
 
 ## Non-goals
 
@@ -35,7 +35,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - Reconciliation deduplicates by resolved Pi session path and retains an existing ACP ID when present.
 - Reconciliation persists the native parent-session path internally when present. `session/list` exposes a boolean `pix.isFork` and, when the parent is already mapped, its safe ACP id as `pix.parentSessionId` in that session's namespaced metadata; Desktop never receives a parent path.
 - The response carries ordered TUI open-tab session IDs in namespaced ACP metadata.
-- Desktop uses the returned sessions as the source for saved-session discovery. The titlebar still contains only restored TUI tabs, Desktop-opened tabs, and the active session.
+- Desktop uses the returned sessions as the source for saved-session discovery. Restart restoration uses only the persisted Desktop tab snapshot; if none exists, Desktop treats it as empty and opens the draft rather than falling back to TUI tab state. The TUI snapshot remains an input only to later live reconciliation. The titlebar contains the persisted Desktop real tabs, subsequently reconciled TUI tabs, Desktop-opened tabs, and the active session.
 - Desktop and TUI both use UI-only draft tabs for new conversations. A draft is
   not an ACP/Pi session and never participates in `session/list`, restored TUI
   metadata, persisted Desktop active-session ids, or the persisted TUI
@@ -50,7 +50,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 - Without a search query, Desktop saved-session surfaces render the same fork tree as TUI: roots and siblings are sorted by descending `updatedAt`, each child follows its parent, and arbitrary nesting uses monospaced `├─`/`└─`/`│` connectors. Search results remain flat ranked matches while retaining fork markers.
 - When restoring an older mapped session whose persisted history is unavailable, Desktop first waits for the concurrent runtime load. A loadable empty session is retained; only a record whose history and runtime both fail is cleaned up. Runtime-load generations prevent a late completion from repopulating state after that cleanup.
 - Per-session activity indicators may decorate titlebar tabs, but runtime activity never changes restored membership, ordering, close semantics, or saved-session discovery.
-- Missing, malformed, or stale tab snapshots produce no restored tabs and do not break session listing.
+- Missing or malformed TUI tab snapshots do not break session listing. A stale TUI snapshot cannot resurrect a tab during Desktop restart, including when the Desktop snapshot is missing or explicitly empty; both cases restore the draft instead of old real tabs.
 - Overlapping Desktop refreshes cannot apply results from an older workspace or ACP connection.
 - If native discovery fails, mapped ACP sessions remain available.
 
@@ -71,7 +71,7 @@ Show the same project sessions and restored open tabs in Pix Desktop that Pix TU
 
 - ACP tests cover native discovery, stable mapping, cwd filtering, fallback, and safe fork-parent/tab metadata.
 - Session-map tests cover bulk path reconciliation and ID collisions.
-- Desktop unit tests cover metadata parsing, tab ordering, fork-tree ordering/nesting, malformed ancestry, and flat search presentation.
+- Desktop unit tests cover metadata parsing, Desktop tab-snapshot persistence/restart precedence, stale TUI suppression, explicit-empty restore, tab ordering, fork-tree ordering/nesting, malformed ancestry, and flat search presentation.
 - ACP and Desktop checks pass.
 
 ## Risks / unknowns

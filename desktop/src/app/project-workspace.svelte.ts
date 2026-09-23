@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   ACTIVE_SESSIONS_STORAGE_KEY,
   parseActiveSessionIds,
+  parseSessionTabIds,
+  SESSION_TABS_STORAGE_KEY,
 } from "../lib/session-tabs";
 import {
   buildRecentProjects,
@@ -26,12 +28,14 @@ import type { ProjectTreeEntry } from "../lib/project-tree";
 type ProjectWorkspaceStoreOptions = {
   workspace: () => string;
   reportError: (error: unknown) => void;
+  afterSave?: (workspace: string) => void;
 };
 
 type WorkspaceRestore = {
   workspace: string;
   recentProjects: string[];
   activeSessionIds: Map<string, string>;
+  sessionTabIds: Map<string, string[]>;
 };
 
 export function restoreProjectWorkspace(
@@ -50,6 +54,7 @@ export function restoreProjectWorkspace(
         initialWorkspace,
       ),
       activeSessionIds: parseActiveSessionIds(storage.getItem(ACTIVE_SESSIONS_STORAGE_KEY)),
+      sessionTabIds: parseSessionTabIds(storage.getItem(SESSION_TABS_STORAGE_KEY)),
     };
   } catch {
     // The URL is independent of localStorage and must retain its startup precedence.
@@ -57,6 +62,7 @@ export function restoreProjectWorkspace(
       workspace: windowWorkspace ?? "",
       recentProjects: buildRecentProjects([], windowWorkspace),
       activeSessionIds: new Map(),
+      sessionTabIds: new Map(),
     };
   }
 }
@@ -78,7 +84,11 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     refreshColors(recentProjects);
   }
 
-  function restore(): { workspace: string; activeSessionIds: Map<string, string> } {
+  function restore(): {
+    workspace: string;
+    activeSessionIds: Map<string, string>;
+    sessionTabIds: Map<string, string[]>;
+  } {
     const restored = restoreProjectWorkspace(window.location.href, localStorage);
     recentProjects = restored.recentProjects;
     return restored;
@@ -144,6 +154,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
           else next.delete(workspace);
           projectColors = next;
           refreshColors(recentProjects);
+          options.afterSave?.(workspace);
           return undefined;
         }
         current = result.document ?? undefined;

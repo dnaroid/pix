@@ -17,6 +17,8 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 ## Behavior
 
 - Visible conversation sessions remain selected and ordered by the existing `buildTabSessions` / Desktop-TUI parity rules. The unified workbench chrome does not change session membership or backend synchronization.
+- Desktop persists its own ordered visible conversation-tab membership per workspace. On restart, only the Desktop snapshot determines which real session tabs are restored, including an explicit empty list; stale TUI `pix.tabs` metadata must not resurrect sessions that Desktop had closed. Sessions opened only in Desktop are restored as well. A missing Desktop snapshot is treated as an empty snapshot, so startup opens the UI-only draft rather than falling back to TUI tab state. Ordinary TUI changes may still reconcile into the live Desktop tab list after startup.
+- The persisted Desktop active-session id is valid at startup only when it is still a member of the persisted Desktop tab snapshot. If that active id is stale, Desktop falls back to the first still-available persisted tab; if the persisted tab list is empty, startup opens the UI-only draft instead of an old TUI session. Closing the last real Desktop tab clears the persisted active-session pointer.
 - A persisted fork session is identified from Pi's native parent-session metadata. ACP exposes `pix.isFork` and, when available from its existing map records, the safe ACP-only `pix.parentSessionId` session-list metadata value to Desktop; no parent path is exposed. Workbench tabs render a branch icon beside fork titles.
 - Conversation tabs are `kind: "session"` members of `WorkbenchTabs`. Preview and Git Diff may appear between them visually, but those UI-only tabs never enter the session id arrays used by `buildTabSessions`, restore metadata, saved-session selection, or ACP/TUI synchronization.
 - The active conversation runtime and the selected workbench surface are distinct concepts. While Preview/Git Diff is selected, the current session remains the underlying active runtime and keeps its activity/status state. Selecting a conversation tab activates/loads that session and selects the shared `conversation-workspace` panel.
@@ -77,7 +79,8 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 ## Verification
 
 - `desktop/src/components/DesktopVisualRegressions.test.ts` verifies that active-session work is shown by the ready ACP dot, respects reduced motion, and is not duplicated by a transcript-bottom spinner.
-- `desktop/src/lib/session-tabs.test.ts` covers session membership/restoration/replacement plus deterministic fork-tree sibling, nested, malformed/orphan, and flat-search row behavior independently of UI-only workbench tabs.
+- `desktop/src/lib/session-tabs.test.ts` covers session membership/restoration/replacement, Desktop-owned tab snapshot parsing/serialization, stale TUI rejection, explicit-empty restore, active-session fallback, plus deterministic fork-tree sibling, nested, malformed/orphan, and flat-search row behavior independently of UI-only workbench tabs.
+- `desktop/src/app/session-tabs-state.test.ts` covers persistence after open/close mutations and proves that an explicit empty Desktop snapshot suppresses stale TUI tabs across restart.
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed workbench ordering without changing session identity.
 - `desktop/src/app/workbench-model.test.ts` covers fork metadata propagation into workbench session tabs.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers unified roving tab semantics and kind-specific close dispatch.

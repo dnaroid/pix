@@ -29,7 +29,11 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
 
   function applyResponse(response: ListSessionsResponse): void {
     sessions = response.sessions;
-    options.tabs.mergeRestored(restoredTabSessionIds(response));
+    options.tabs.mergeRestored(
+      options.workspace(),
+      restoredTabSessionIds(response),
+      response.sessions.map((session) => session.sessionId),
+    );
   }
 
   async function listNow(): Promise<ListSessionsResponse | null> {

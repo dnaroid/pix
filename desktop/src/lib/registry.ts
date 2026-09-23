@@ -4,7 +4,7 @@ import { fuzzySearch } from "./fuzzy";
 export const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
 
 export type RegistryResourceType = "skill" | "agent" | "project";
-export type RegistryProjectArtifact = "tasks" | "plans" | "todo";
+export type RegistryProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
 export type RegistryStatus =
   | "up-to-date"
   | "update-available"
@@ -58,7 +58,7 @@ export type RegistryActionRequest =
     };
 
 const RESOURCE_TYPES = new Set<RegistryResourceType>(["skill", "agent", "project"]);
-const PROJECT_ARTIFACTS = new Set<RegistryProjectArtifact>(["tasks", "plans", "todo"]);
+const PROJECT_ARTIFACTS = new Set<RegistryProjectArtifact>(["tasks", "plans", "todo", "workspace"]);
 const STATUSES = new Set<RegistryStatus>([
   "up-to-date",
   "update-available",

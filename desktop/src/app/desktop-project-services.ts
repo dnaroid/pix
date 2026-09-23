@@ -41,6 +41,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
   const projectWorkspace = createProjectWorkspaceStore({
     workspace: options.workspace,
     reportError: options.reportError,
+    afterSave: () => registry.scheduleProjectSync("workspace"),
   });
   const preview = createPreviewStore({
     workspace: options.workspace,
@@ -81,6 +82,9 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     setErrorMessage: options.setErrorMessage,
     loadProjectTasks: tasks.load,
     loadProjectDocuments: documents.load,
+    loadWorkspaceSettings: (workspace) => {
+      if (options.workspace() === workspace) projectWorkspace.refreshColors([workspace, ...projectWorkspace.recentProjects]);
+    },
     reportError: options.reportError,
   });
   const git = createGitWorkspaceStore({

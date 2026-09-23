@@ -5,10 +5,13 @@ import {
   buildSessionTree,
   mergeRestoredSessionTabs,
   parseActiveSessionIds,
+  parseSessionTabIds,
   replaceSessionTab,
+  restoreDesktopSessionTabs,
   restoredTabSessionIds,
   sessionIsFork,
   serializeActiveSessionIds,
+  serializeSessionTabIds,
   startupSessionId,
 } from "./session-tabs";
 
@@ -91,27 +94,43 @@ describe("buildSessionTree", () => {
 describe("startupSessionId", () => {
   const sessions = [session("desktop"), session("tui")];
 
-  it("prefers the desktop session that was active when the app closed", () => {
+  it("prefers the desktop session that was active when the app closed and is still open", () => {
     const response: ListSessionsResponse = {
       sessions,
       _meta: { "pix.tabs": { sessionIds: ["tui"], activeSessionId: "tui" } },
     };
-    expect(startupSessionId(response, "desktop")).toBe("desktop");
+    expect(startupSessionId(response, "desktop", ["desktop"])).toBe("desktop");
   });
 
-  it("falls back to the TUI active tab when desktop state is unavailable", () => {
+  it("does not fall back to the TUI active tab when the Desktop snapshot is missing", () => {
     const response: ListSessionsResponse = {
       sessions,
       _meta: { "pix.tabs": { sessionIds: ["tui"], activeSessionId: "tui" } },
     };
-    expect(startupSessionId(response, "missing")).toBe("tui");
+    expect(startupSessionId(response, "missing", null)).toBeNull();
   });
 
   it("requests a new session when no saved active session exists", () => {
     expect(startupSessionId({
       sessions,
       _meta: { "pix.tabs": { sessionIds: ["tui"], activeSessionId: "missing" } },
-    }, null)).toBeNull();
+    }, null, null)).toBeNull();
+  });
+
+  it("uses the Desktop tab snapshot to reject a stale active session and stale TUI tabs", () => {
+    const response: ListSessionsResponse = {
+      sessions: [session("closed"), session("open")],
+      _meta: { "pix.tabs": { sessionIds: ["closed"], activeSessionId: "closed" } },
+    };
+    expect(startupSessionId(response, "closed", ["open"])).toBe("open");
+  });
+
+  it("keeps an explicit empty Desktop tab snapshot empty", () => {
+    const response: ListSessionsResponse = {
+      sessions: [session("closed")],
+      _meta: { "pix.tabs": { sessionIds: ["closed"], activeSessionId: "closed" } },
+    };
+    expect(startupSessionId(response, "closed", [])).toBeNull();
   });
 });
 
@@ -125,6 +144,54 @@ describe("active desktop session storage", () => {
     expect(parseActiveSessionIds("not json")).toEqual(new Map());
     expect(parseActiveSessionIds(JSON.stringify({ "/projects/a": 42, "/projects/b": "b" })))
       .toEqual(new Map([["/projects/b", "b"]]));
+  });
+});
+
+describe("Desktop session-tab storage", () => {
+  it("round-trips ordered project-scoped tab lists including an explicit empty list", () => {
+    const tabs = new Map<string, readonly string[]>([
+      ["/projects/a", ["a", "b"]],
+      ["/projects/b", []],
+    ]);
+    expect(parseSessionTabIds(serializeSessionTabIds(tabs))).toEqual(new Map([
+      ["/projects/a", ["a", "b"]],
+      ["/projects/b", []],
+    ]));
+  });
+
+  it("deduplicates ids and ignores malformed project values", () => {
+    expect(parseSessionTabIds(JSON.stringify({
+      "/projects/a": ["a", "a", 42, "b"],
+      "/projects/b": "not-an-array",
+    }))).toEqual(new Map([["/projects/a", ["a", "b"]]]));
+  });
+});
+
+describe("restoreDesktopSessionTabs", () => {
+  it("keeps the Desktop snapshot authoritative over stale TUI membership", () => {
+    expect(restoreDesktopSessionTabs(["open", "desktop-only"], ["closed", "open"], [
+      "closed", "open", "desktop-only",
+    ])).toEqual({
+      restoredIds: ["open", "desktop-only"],
+      locallyOpenedIds: ["desktop-only"],
+      closedIds: ["closed"],
+    });
+  });
+
+  it("treats a missing Desktop snapshot as empty instead of restoring TUI tabs", () => {
+    expect(restoreDesktopSessionTabs(null, ["a", "b"], ["a", "b"])).toEqual({
+      restoredIds: [],
+      locallyOpenedIds: [],
+      closedIds: ["a", "b"],
+    });
+  });
+
+  it("filters deleted sessions but preserves an explicit empty Desktop snapshot", () => {
+    expect(restoreDesktopSessionTabs(["deleted"], ["stale"], ["stale"])).toEqual({
+      restoredIds: [],
+      locallyOpenedIds: [],
+      closedIds: ["stale"],
+    });
   });
 });
 

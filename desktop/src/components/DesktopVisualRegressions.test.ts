@@ -13,7 +13,7 @@ import gitCommitComposerSource from "./GitCommitComposer.svelte?raw";
 import idxSource from "./IdxPanel.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
-import dcpContextPanelSource from "./DcpContextPanel.svelte?raw";
+import sessionInspectorSource from "./SessionInspector.svelte?raw";
 import sessionSubagentsSource from "./SessionSubagentsPanel.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
@@ -136,7 +136,7 @@ describe("desktop visual regressions", () => {
   });
 
   it("keeps project and Git branch between context and usage status chrome", () => {
-    const context = runtimeStatusSource.indexOf("title={contextTitle()}");
+    const context = runtimeStatusSource.indexOf("data-runtime-context");
     const workspace = runtimeStatusSource.indexOf("data-runtime-workspace");
     const usage = runtimeStatusSource.indexOf('title="Session usage and cost"');
     expect(context).toBeGreaterThanOrEqual(0);
@@ -172,26 +172,20 @@ describe("desktop visual regressions", () => {
     expect(modelDraftConfigSource).toContain("}, true);");
   });
 
-  it("shows absolute context and live DCP token savings in the hover title without repeating percent", () => {
+  it("shows live DCP savings and a categorized context legend in status chrome", () => {
     expect(runtimeStatusSource).toContain("status?.dcpTokensSaved");
-    expect(runtimeStatusSource).toContain("DCP saved ~");
+    expect(runtimeStatusSource).toContain("saved ~{formatCompactTokens(status.dcpTokensSaved)}");
     expect(runtimeStatusSource).toContain("Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens");
     expect(runtimeStatusSource).not.toContain("Context ${Math.round(context.percent)}%");
+    expect(runtimeStatusSource).toContain('aria-label="Context color legend"');
+    expect(runtimeStatusSource).toContain("dcpContextMap(status?.context");
+    expect(runtimeStatusSource).toContain("w-16");
+    expect(runtimeStatusSource).toContain('kind === "retained" || kind === "occupied"');
+    expect(sessionInspectorSource).not.toContain("DcpContextPanel");
   });
 
-  it("keeps DCP context visualization semantically separated in the Session inspector", () => {
-    expect(dcpContextPanelSource).toContain("Context token-volume capacity map");
-    expect(dcpContextPanelSource).not.toContain("DcpPreparedMap");
-    expect(dcpContextPanelSource).toContain("grouped capacity shares, not message positions");
-    expect(dcpContextPanelSource).toContain("Advisory compression candidates, not permission to delete");
-    expect(dcpContextPanelSource).toContain("DCP category estimates are unavailable.");
-    expect(dcpContextPanelSource).toContain("It is not measured commit gain or a billing counter.");
-    expect(dcpContextPanelSource).toContain("Old unmeasured commits remain unknown");
-    expect(dcpContextPanelSource).not.toContain("Open DCP statistics from Context in the status bar");
-  });
-
-  it("keeps Session inspector sections as independently persistent native accordions", () => {
-    for (const source of [dcpContextPanelSource, sessionSubagentsSource, sessionTodosSource]) {
+  it("keeps Session inspector activity sections as independently persistent native accordions", () => {
+    for (const source of [sessionSubagentsSource, sessionTodosSource]) {
       expect(source).toContain('<details');
       expect(source).toContain("<summary");
       expect(source).toContain("[&::-webkit-details-marker]:hidden");
@@ -199,8 +193,6 @@ describe("desktop visual regressions", () => {
       expect(source).not.toContain("open={$derived");
     }
 
-    expect(dcpContextPanelSource).toContain('<details class="group border-b border-border">');
-    expect(dcpContextPanelSource).not.toContain('<details class="group border-b border-border" open>');
     for (const source of [sessionSubagentsSource, sessionTodosSource]) {
       expect(source).toContain('ontoggle={noteToggle}');
       expect(source).toContain('receivedInitialSnapshot || snapshot === undefined');
@@ -214,14 +206,19 @@ describe("desktop visual regressions", () => {
     expect(sessionTodosSource.indexOf('aria-label="Clear session plan"')).toBeGreaterThan(sessionTodosSource.indexOf("</details>"));
     expect(sessionTodosSource).toContain("disabled={!canClearTodos || clearingTodos || rows.length === 0}");
     expect(sessionSubagentsSource).toContain("{activeCount} active");
-    const dcpSummary = dcpContextPanelSource.slice(
-      dcpContextPanelSource.indexOf("<summary"),
-      dcpContextPanelSource.indexOf("</summary>"),
-    );
-    expect(dcpSummary).toContain("~{formatCompactTokens(view.liveTokensSaved)}");
-    expect(dcpSummary).not.toContain("occupied");
-    expect(dcpSummary).not.toContain("saved");
-    expect(dcpSummary).not.toContain("unknown");
+  });
+
+  it("keeps danger color on percentages while progress tracks stay neutral", () => {
+    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 rounded-sm bg-muted-foreground/50"');
+    expect(runtimeStatusSource).not.toContain("toneFillClass");
+    expect(runtimeStatusSource).toContain("class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%");
+    expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-muted-foreground"');
+  });
+
+  it("segments weekly quota into seven day slices without inventing per-day usage", () => {
+    expect(runtimeStatusSource).toContain("const WEEKLY_DAY_SEGMENTS = 7");
+    expect(runtimeStatusSource).toContain("grid grid-cols-7");
+    expect(runtimeStatusSource).toContain("aggregate quota, not per-day usage");
   });
 
   it("keeps the model and thinking selector available while a prompt is running", () => {

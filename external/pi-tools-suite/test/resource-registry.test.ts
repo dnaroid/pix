@@ -475,7 +475,7 @@ describe("resource registry", () => {
 		expect(h.reloads).toBe(5);
 	}, GIT_INTEGRATION_TIMEOUT_MS);
 
-	test("pushes, reports, and pulls project-scoped tasks, plans, and TODO without mixing them with reusable resources", async () => {
+	test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspace state without mixing them with reusable resources", async () => {
 		const root = tempRoot();
 		const home = path.join(root, "home");
 		const project = path.join(root, "project");
@@ -492,17 +492,20 @@ describe("resource registry", () => {
 		fs.writeFileSync(path.join(project, ".pi", "tasks.jsonc"), '// keep this comment\n{"tasks":["local-v1"],}\n');
 		fs.writeFileSync(path.join(project, ".pi", "plans", "roadmap.md"), "local plan v1\n");
 		fs.writeFileSync(path.join(project, ".pi", "TODO.md"), "# TODO\n\n- local todo v1\n");
+		fs.writeFileSync(path.join(project, ".pi", "workspace.jsonc"), '{"workspace":"local-v1"}\n');
 
 		await command.handler("push project", h.ctx);
 		git(seed, ["pull", "--ff-only", "origin", "main"]);
 		expect(fs.readFileSync(path.join(seed, "projects", "project-alpha", "tasks.jsonc"), "utf8")).toContain("// keep this comment");
 		expect(fs.readFileSync(path.join(seed, "projects", "project-alpha", "plans", "roadmap.md"), "utf8")).toContain("local plan v1");
 		expect(fs.readFileSync(path.join(seed, "projects", "project-alpha", "TODO.md"), "utf8")).toContain("local todo v1");
+		expect(fs.readFileSync(path.join(seed, "projects", "project-alpha", "workspace.jsonc"), "utf8")).toContain("local-v1");
 		expect(fs.existsSync(path.join(seed, "skills", "demo", "SKILL.md"))).toBe(true);
 
 		fs.writeFileSync(path.join(seed, "projects", "project-alpha", "tasks.jsonc"), '{"tasks":["remote-v2"]}\n');
 		fs.writeFileSync(path.join(seed, "projects", "project-alpha", "plans", "roadmap.md"), "remote plan v2\n");
 		fs.writeFileSync(path.join(seed, "projects", "project-alpha", "TODO.md"), "# TODO\n\n- remote todo v2\n");
+		fs.writeFileSync(path.join(seed, "projects", "project-alpha", "workspace.jsonc"), '{"workspace":"remote-v2"}\n');
 		git(seed, ["add", "projects/project-alpha"]);
 		git(seed, ["commit", "-m", "Update project state"]);
 		git(seed, ["push", "origin", "main"]);
@@ -513,6 +516,7 @@ describe("resource registry", () => {
 		expect(updateStatus).toContain("↓ tasks.jsonc  [PROJECT]  **OUTDATED**");
 		expect(updateStatus).toContain("↓ plans/  [PROJECT]  **OUTDATED**");
 		expect(updateStatus).toContain("↓ TODO.md  [PROJECT]  **OUTDATED**");
+		expect(updateStatus).toContain("↓ workspace.jsonc  [PROJECT]  **OUTDATED**");
 		const updateLines = updateStatus.split("\n").filter((line) => line.startsWith("↓ "));
 		expect(updateLines).toEqual([...updateLines].sort((left, right) => {
 			const leftName = left.split(" ")[1] ?? "";
@@ -525,7 +529,29 @@ describe("resource registry", () => {
 		expect(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8")).toContain("remote-v2");
 		expect(fs.readFileSync(path.join(project, ".pi", "plans", "roadmap.md"), "utf8")).toContain("remote plan v2");
 		expect(fs.readFileSync(path.join(project, ".pi", "TODO.md"), "utf8")).toContain("remote todo v2");
+		expect(fs.readFileSync(path.join(project, ".pi", "workspace.jsonc"), "utf8")).toContain("remote-v2");
 		expect(h.reloads).toBe(reloadsBeforePull + 1);
+
+		const localWorkspace = path.join(project, ".pi", "workspace.jsonc");
+		const remoteWorkspace = path.join(seed, "projects", "project-alpha", "workspace.jsonc");
+		fs.writeFileSync(localWorkspace, '{"workspace":"local-diverged"}\n');
+		fs.writeFileSync(remoteWorkspace, '{"workspace":"remote-diverged"}\n');
+		git(seed, ["add", "projects/project-alpha/workspace.jsonc"]);
+		git(seed, ["commit", "-m", "Diverge workspace state"]);
+		git(seed, ["push", "origin", "main"]);
+
+		await command.handler("status", h.ctx);
+		expect(h.messages.at(-1)?.content).toContain("↕ workspace.jsonc  [PROJECT]  **CONFLICT**");
+		const localBeforeConflictActions = fs.readFileSync(localWorkspace, "utf8");
+		const remoteBeforeConflictActions = fs.readFileSync(remoteWorkspace, "utf8");
+		await command.handler("push workspace", h.ctx);
+		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
+		expect(h.notices.at(-1)?.message).toContain("changed in the registry");
+		expect(fs.readFileSync(remoteWorkspace, "utf8")).toBe(remoteBeforeConflictActions);
+		await command.handler("pull workspace", h.ctx);
+		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
+		expect(h.notices.at(-1)?.message).toContain("has local changes");
+		expect(fs.readFileSync(localWorkspace, "utf8")).toBe(localBeforeConflictActions);
 
 		fs.appendFileSync(path.join(project, ".pi", "tasks.jsonc"), "local change\n");
 		fs.writeFileSync(path.join(seed, "projects", "project-alpha", "tasks.jsonc"), '{"tasks":["remote-v3"]}\n');

@@ -37,11 +37,12 @@ export function createWorkspaceSessionStartup(options: WorkspaceSessionStartupOp
     options.setOperationRunning(true);
     options.setErrorMessage(null);
     try {
+      const desktopTabSessionIds = options.tabs.sessionTabsForProject(requestWorkspace);
       const response = await options.catalog.listNow();
       if (!response || options.client() !== requestClient || options.workspace() !== requestWorkspace) return;
 
       const desktopSessionId = options.tabs.activeForProject(requestWorkspace);
-      const sessionId = startupSessionId(response, desktopSessionId);
+      const sessionId = startupSessionId(response, desktopSessionId, desktopTabSessionIds);
       if (desktopSessionId && desktopSessionId !== sessionId) options.tabs.forgetActive(requestWorkspace);
 
       options.state.resetConversation();

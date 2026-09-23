@@ -22,7 +22,7 @@ without blocking desktop interactions.
   after the platform/native-control inset it shows a compact non-interactive
   colored square with a two-letter abbreviation for the active project before
   the workbench tabs. The square fill follows the same project identity color as
-  the status-bar project name and recent-project folders, including
+  the status-bar project name and recent-project badges, including
   `.pi/workspace.jsonc` overrides and
   the deterministic full-path fallback hue. On macOS the webview still extends
   into the native title bar and reserves the existing traffic-light inset;
@@ -37,7 +37,7 @@ without blocking desktop interactions.
   the right edge of the row, and opens an inline menu of at most 20 recent projects.
   The switcher measures the rendered fixed controls/padding/gaps and reports a
   dynamic minimum width to the sidebar. The sidebar uses that value both for drag
-  clamping and as its CSS minimum, so resizing cannot clip the folder or chevron.
+  clamping and as its CSS minimum, so resizing cannot clip the project name or chevron.
   Only a bounded project-name slot (96–160 px) contributes text width; the project
   path never contributes to the minimum and therefore cannot make the sidebar
   arbitrarily wide.
@@ -73,11 +73,11 @@ without blocking desktop interactions.
   identity color instead, while its Git branch suffix remains muted. The Project
   switcher's active row is text-only before its chevron (no leading folder icon)
   and stays neutral;
-  recent-project folders remain identity-colored so different projects stay easy
-  to distinguish.
+  recent-project badges show two-letter project abbreviations and remain
+  identity-colored so different projects stay easy to distinguish.
 - Hovering the compact project/branch identity in the bottom status bar shows
   the full active workspace path.
-- The titlebar badge, status-bar project name, and recent-project folders use a stable fallback hue
+- The titlebar badge, status-bar project name, and recent-project badges use a stable fallback hue
   derived from the normalized full project path rather than only its basename.
   Windows drive and UNC identities are compared case-insensitively.
 - A project may override the fallback identity color in `.pi/workspace.jsonc`:

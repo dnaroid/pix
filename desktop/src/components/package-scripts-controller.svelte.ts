@@ -3,6 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { tick } from "svelte";
 import { createTerminalInputWriter } from "../lib/terminal-input";
+import type { ProjectFilePreview } from "../lib/project-files";
+import { WORKSPACE_CONFIG_PATH } from "../lib/project-colors";
+import { launchCommandsFromWorkspaceConfig, workspaceConfigWithLaunchCommands, type LaunchCommand } from "../lib/project-launch-commands";
 import {
   appendTerminalOutput,
   decodeBase64Bytes,
@@ -26,11 +29,13 @@ interface PackageTerminalSurface {
 interface PackageScriptsControllerOptions {
   readonly workspace: () => string;
   readonly terminalView: () => PackageTerminalSurface | null;
+  readonly afterWorkspaceSave?: (workspace: string) => void;
 }
 
 export function createPackageScriptsController(options: PackageScriptsControllerOptions) {
   const windowLabel = getCurrentWindow().label;
   const terminalDecoders = new Map<string, TextDecoder>();
+  const launchCommandByTerminal = new Map<string, string>();
   let snapshot = $state<PackageScriptsSnapshot | undefined>();
   let terminals = $state<PackageTerminalView[]>([]);
   let activeTerminalId = $state<string | null>(null);
@@ -38,10 +43,14 @@ export function createPackageScriptsController(options: PackageScriptsController
   let error = $state<string | null>(null);
   let startingScript = $state<string | null>(null);
   let terminalActionId = $state<string | null>(null);
+  let launchCommands = $state<LaunchCommand[]>([]);
+  let launchGeneration = 0;
   let loadGeneration = 0;
   let workspaceGeneration = 0;
   let disposed = false;
   let workspaceLoad: Promise<void> | undefined;
+  let launchSaveTail: Promise<unknown> = Promise.resolve();
+  let launchWorkspace = "";
   const inputWriter = createTerminalInputWriter(async (terminalId, data) => {
     const terminal = terminals.find((candidate) => candidate.id === terminalId);
     if (disposed || !terminal || terminal.status !== "running") throw new Error("Terminal is no longer running");
@@ -50,6 +59,12 @@ export function createPackageScriptsController(options: PackageScriptsController
 
   $effect(() => {
     const requestWorkspace = options.workspace();
+    if (requestWorkspace !== launchWorkspace) {
+      launchWorkspace = requestWorkspace;
+      launchCommands = [];
+      terminalDecoders.clear();
+      launchCommandByTerminal.clear();
+    }
     workspaceGeneration += 1;
     startingScript = null;
     terminalActionId = null;
@@ -98,6 +113,7 @@ export function createPackageScriptsController(options: PackageScriptsController
       terminalDecoders.clear();
       return;
     }
+    const savedGeneration = launchGeneration;
     loading = true;
     error = null;
     try {
@@ -115,6 +131,15 @@ export function createPackageScriptsController(options: PackageScriptsController
       if (!terminals.some((terminal) => terminal.id === activeTerminalId)) {
         activeTerminalId = lastRunningTerminalId(terminals) ?? terminals.at(-1)?.id ?? null;
       }
+      try {
+        const exists = await invoke<boolean>("project_file_exists", { workspace: requestWorkspace, path: WORKSPACE_CONFIG_PATH });
+        const settings = exists ? await invoke<ProjectFilePreview>("read_project_file", { workspace: requestWorkspace, path: WORKSPACE_CONFIG_PATH }) : undefined;
+        if (disposed || generation !== loadGeneration || options.workspace() !== requestWorkspace) return;
+        if (savedGeneration === launchGeneration) launchCommands = launchCommandsFromWorkspaceConfig(settings?.content);
+      } catch (caught) {
+        if (disposed || generation !== loadGeneration || options.workspace() !== requestWorkspace) return;
+        error = errorMessage(caught);
+      }
     } catch (caught) {
       if (disposed || generation !== loadGeneration || options.workspace() !== requestWorkspace) return;
       error = errorMessage(caught);
@@ -124,6 +149,46 @@ export function createPackageScriptsController(options: PackageScriptsController
     } finally {
       if (generation === loadGeneration) loading = false;
     }
+  }
+
+  async function saveLaunchOperation(operation: (current: LaunchCommand[]) => LaunchCommand[]): Promise<boolean> {
+    const workspace = options.workspace();
+    if (!workspace) { error = "Open a project before saving launch commands."; return false; }
+    const generation = workspaceGeneration;
+    const previous = launchSaveTail;
+    let release!: () => void;
+    launchSaveTail = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      await previous;
+      if (disposed || generation !== workspaceGeneration || options.workspace() !== workspace) return false;
+      const exists = await invoke<boolean>("project_file_exists", { workspace, path: WORKSPACE_CONFIG_PATH });
+      let current = exists ? await invoke<ProjectFilePreview>("read_project_file", { workspace, path: WORKSPACE_CONFIG_PATH }) : undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (disposed || generation !== workspaceGeneration || options.workspace() !== workspace) return false;
+        const commands = launchCommandsFromWorkspaceConfig(current?.content);
+        const content = workspaceConfigWithLaunchCommands(current?.content, operation(commands));
+        const result = await invoke<{ written: boolean; document: ProjectFilePreview | null }>("write_project_workspace_config_if_unchanged", { workspace, expectedContent: current?.content ?? null, content });
+        if (disposed || generation !== workspaceGeneration || options.workspace() !== workspace) return false;
+        if (result.written && result.document) { launchCommands = launchCommandsFromWorkspaceConfig(result.document.content); launchGeneration += 1; error = null; options.afterWorkspaceSave?.(workspace); return true; }
+        current = result.document ?? undefined;
+      }
+      throw new Error(".pi/workspace.jsonc changed repeatedly. Try again.");
+    } catch (caught) { if (!disposed && generation === workspaceGeneration && options.workspace() === workspace) error = errorMessage(caught); return false; }
+    finally { release(); }
+  }
+
+  async function saveLaunchCommand(command: LaunchCommand): Promise<boolean> {
+    if (!command.name.trim() || !command.command.trim()) { error = "Name and command are required."; return false; }
+    return saveLaunchOperation((current) => [...current.filter((item) => item.id !== command.id), { ...command, name: command.name.trim(), command: command.command.trim() }]);
+  }
+
+  async function deleteLaunchCommand(id: string): Promise<boolean> { return saveLaunchOperation((current) => current.filter((item) => item.id !== id)); }
+
+  async function runLaunchCommand(id: string): Promise<void> {
+    if (launchWorkspace && launchWorkspace !== options.workspace()) return;
+    const command = launchCommands.find((item) => item.id === id);
+    if (!command) { error = "Launch command no longer exists."; return; }
+    await openShellTerminal(command.command, id);
   }
 
   function refresh(): void {
@@ -166,7 +231,7 @@ export function createPackageScriptsController(options: PackageScriptsController
     }
   }
 
-  async function openShellTerminal(initialCommand?: string): Promise<void> {
+  async function openShellTerminal(initialCommand?: string, launchCommandId?: string): Promise<void> {
     const { workspace, isCurrent } = captureWorkspace();
     if (!workspace || !isCurrent() || startingScript || terminalActionId) return;
     startingScript = "__shell__";
@@ -187,6 +252,7 @@ export function createPackageScriptsController(options: PackageScriptsController
         return;
       }
       terminals = [...terminals, terminalSnapshotView(started)];
+      if (launchCommandId) launchCommandByTerminal.set(started.id, launchCommandId);
       terminalDecoders.set(started.id, new TextDecoder());
       activeTerminalId = started.id;
       await tick();
@@ -239,6 +305,8 @@ export function createPackageScriptsController(options: PackageScriptsController
   async function restartTerminal(terminal: PackageTerminalView): Promise<void> {
     const { isCurrent } = captureWorkspace();
     if (!isCurrent() || terminalActionId || startingScript) return;
+    const launchCommandId = launchCommandByTerminal.get(terminal.id);
+    const launchCommand = launchCommands.find((item) => item.id === launchCommandId);
     const script = terminal.kind === "script"
       ? snapshot?.scripts.find((candidate) => candidate.name === terminal.script)
       : undefined;
@@ -256,9 +324,10 @@ export function createPackageScriptsController(options: PackageScriptsController
       if (!isCurrent()) return;
       terminals = terminals.filter((candidate) => candidate.id !== terminal.id);
       terminalDecoders.delete(terminal.id);
+      launchCommandByTerminal.delete(terminal.id);
       activeTerminalId = terminals.at(-1)?.id ?? null;
       terminalActionId = null;
-      if (terminal.kind === "shell") await openShellTerminal();
+      if (terminal.kind === "shell") await openShellTerminal(launchCommand?.command, launchCommand?.id);
       else await runScript(script!);
     } catch (caught) {
       if (isCurrent()) error = errorMessage(caught);
@@ -281,6 +350,7 @@ export function createPackageScriptsController(options: PackageScriptsController
       const index = terminals.findIndex((candidate) => candidate.id === terminal.id);
       terminals = terminals.filter((candidate) => candidate.id !== terminal.id);
       terminalDecoders.delete(terminal.id);
+      launchCommandByTerminal.delete(terminal.id);
       if (activeTerminalId === terminal.id) {
         activeTerminalId = terminals[Math.min(index, terminals.length - 1)]?.id ?? terminals.at(-1)?.id ?? null;
       }
@@ -358,6 +428,10 @@ export function createPackageScriptsController(options: PackageScriptsController
     get terminalActionId() { return terminalActionId; },
     refresh,
     runScript,
+    get launchCommands() { return launchCommands; },
+    saveLaunchCommand,
+    deleteLaunchCommand,
+    runLaunchCommand,
     openShellTerminal,
     writeTerminal,
     resizeTerminal,

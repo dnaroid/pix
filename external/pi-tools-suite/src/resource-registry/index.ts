@@ -23,6 +23,7 @@ const PROJECT_TASKS_FILE = "tasks.jsonc";
 const PROJECT_TASK_ATTACHMENTS_DIR = "task-attachments";
 const PROJECT_PLANS_DIR = "plans";
 const PROJECT_TODO_FILE = "TODO.md";
+const PROJECT_WORKSPACE_FILE = "workspace.jsonc";
 const REGISTRY_TASK_ATTACHMENT_SCHEME = "pix-task-attachment:";
 const PROVENANCE_FILE = "registry.json";
 const PROVENANCE_VERSION = 1;
@@ -36,7 +37,7 @@ const SKIP_NAMES = new Set([".DS_Store"]);
 
 export type ResourceType = "skill" | "agent";
 type ResourceScope = ResourceType | "all";
-export type ProjectArtifact = "tasks" | "plans" | "todo";
+export type ProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
 type ProjectScope = ProjectArtifact | "project";
 type RegistryAction = "install" | "push" | "pull" | "remove" | "uninstall" | "status" | "update" | "configure" | "remote" | "project-key";
 
@@ -190,6 +191,7 @@ function projectScope(value: string | undefined): ProjectScope | undefined {
 	if (value === "tasks") return "tasks";
 	if (value === "plans") return "plans";
 	if (value === "todo") return "todo";
+	if (value === "workspace") return "workspace";
 	if (value === "project") return "project";
 	return undefined;
 }
@@ -240,6 +242,7 @@ function projectArtifactLocalPath(cwd: string, artifact: ProjectArtifact): strin
 		case "tasks": return join(cwd, PROJECT_DIR, PROJECT_TASKS_FILE);
 		case "plans": return join(cwd, PROJECT_DIR, PROJECT_PLANS_DIR);
 		case "todo": return join(cwd, PROJECT_DIR, PROJECT_TODO_FILE);
+		case "workspace": return join(cwd, PROJECT_DIR, PROJECT_WORKSPACE_FILE);
 	}
 }
 
@@ -253,6 +256,7 @@ function projectArtifactRelativePath(projectKey: string, artifact: ProjectArtifa
 		case "tasks": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_TASKS_FILE}`;
 		case "plans": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_PLANS_DIR}`;
 		case "todo": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_TODO_FILE}`;
+		case "workspace": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_WORKSPACE_FILE}`;
 	}
 }
 
@@ -273,6 +277,7 @@ function projectArtifactDisplayName(artifact: ProjectArtifact): string {
 		case "tasks": return PROJECT_TASKS_FILE;
 		case "plans": return `${PROJECT_PLANS_DIR}/`;
 		case "todo": return PROJECT_TODO_FILE;
+		case "workspace": return PROJECT_WORKSPACE_FILE;
 	}
 }
 
@@ -1081,7 +1086,7 @@ async function collectStatuses(pi: ExtensionAPI, project: ProjectContext, runtim
 }
 
 function projectArtifacts(scope: ProjectScope): ProjectArtifact[] {
-	return scope === "project" ? ["tasks", "plans", "todo"] : [scope];
+	return scope === "project" ? ["tasks", "plans", "todo", "workspace"] : [scope];
 }
 
 async function collectProjectStatuses(
@@ -1098,7 +1103,7 @@ async function collectProjectStatuses(
 	}
 	const provenance = await readProvenance(cwd);
 	const statuses: ProjectArtifactStatus[] = [];
-	for (const artifact of ["tasks", "plans", "todo"] as const) {
+	for (const artifact of ["tasks", "plans", "todo", "workspace"] as const) {
 		const localPath = projectArtifactLocalPath(cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
 		const [localPathExists, remoteExists] = await Promise.all([pathExists(localPath), pathExists(remotePath)]);
@@ -2099,15 +2104,16 @@ async function chooseProjectScope(ctx: ExtensionCommandContext, title: string): 
 	if (!ctx.hasUI) return undefined;
 	let selected: string | undefined;
 	try {
-		selected = await ctx.ui.select(title, ["Tasks + plans + TODO", "Tasks", "Plans", "TODO.md"]);
+		selected = await ctx.ui.select(title, ["Tasks + plans + TODO + workspace", "Tasks", "Plans", "TODO.md", "workspace.jsonc"]);
 	} catch (error) {
 		ignoreStaleExtensionContextError(error);
 		return undefined;
 	}
-	if (selected === "Tasks + plans + TODO") return "project";
+	if (selected === "Tasks + plans + TODO + workspace") return "project";
 	if (selected === "Tasks") return "tasks";
 	if (selected === "Plans") return "plans";
 	if (selected === "TODO.md") return "todo";
+	if (selected === "workspace.jsonc") return "workspace";
 	return undefined;
 }
 
@@ -2301,11 +2307,13 @@ function registryUsage(): string {
 		`/${COMMAND} push tasks              push .pi/${PROJECT_TASKS_FILE} under this project's registry key`,
 		`/${COMMAND} push plans              push .pi/plans/ under this project's registry key`,
 		`/${COMMAND} push todo               push .pi/${PROJECT_TODO_FILE} under this project's registry key`,
-		`/${COMMAND} push project            push available ${PROJECT_TASKS_FILE} + plans + ${PROJECT_TODO_FILE} state`,
+		`/${COMMAND} push project            push available ${PROJECT_TASKS_FILE} + plans + ${PROJECT_TODO_FILE} + ${PROJECT_WORKSPACE_FILE} state`,
 		`/${COMMAND} pull tasks              pull this project's ${PROJECT_TASKS_FILE} from the registry`,
 		`/${COMMAND} pull plans              pull this project's plans/ from the registry`,
 		`/${COMMAND} pull todo               pull this project's ${PROJECT_TODO_FILE} from the registry`,
-		`/${COMMAND} pull project            pull available ${PROJECT_TASKS_FILE} + plans + ${PROJECT_TODO_FILE} state`,
+		`/${COMMAND} push workspace          push .pi/${PROJECT_WORKSPACE_FILE} under this project's registry key`,
+		`/${COMMAND} pull workspace          pull .pi/${PROJECT_WORKSPACE_FILE} from the registry`,
+		`/${COMMAND} pull project            pull available ${PROJECT_TASKS_FILE} + plans + ${PROJECT_TODO_FILE} + ${PROJECT_WORKSPACE_FILE} state`,
 		`/${COMMAND} remove skill <name>     remove a skill from the registry only`,
 		`/${COMMAND} remove agent <name>     remove an agent from the registry only`,
 		`/${COMMAND} remove all              remove all registry skills and agents (confirmation required)`,

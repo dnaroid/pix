@@ -85,10 +85,6 @@ export function createDesktopWorkbenchViewModelServices(options: DesktopViewMode
       activeSessionActivity: () => options.presentation.activeSessionActivity,
       activeTodoSnapshot: () => options.presentation.activeTodoSnapshot,
       activeSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
-      activeRuntimeStatus: () => {
-        const sessionId = options.state.sessionId;
-        return sessionId ? options.sessions.runtime.statuses.get(sessionId) : undefined;
-      },
       canClearTodos: () => Boolean(
         options.state.sessionId && todoActions.canClear(options.state.sessionId),
       ),

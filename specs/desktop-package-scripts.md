@@ -12,11 +12,14 @@ Active implemented contract.
 
 ## Goal
 
-Expose project-root package scripts and window-scoped interactive terminals from the Desktop workspace without turning the panel into an arbitrary command launcher.
+Expose project-root package scripts, project-defined launch commands, and window-scoped interactive terminals from the Desktop workspace.
 
 ## Behavior
 
 - The Package Scripts workspace view reads the active project root `package.json`, shows its detected package manager, and renders scripts as a compact name-only list. The filter matches script names only; command bodies stay out of the list UI.
+- The same panel offers full create, view, edit, and delete controls for named launch commands, independently of whether `package.json` exists. A command has a stable id, a non-empty display name, and a non-empty shell command. Deletion requires confirmation; save failures remain visible and do not pretend the change succeeded.
+- Launch commands belong to the active project and are stored in the separate `launchCommands` array of its `.pi/workspace.jsonc`. Reading supports JSONC; saving preserves unrelated settings and comments. A missing file starts with an empty list. Malformed configuration is not overwritten; an invalid command field reports an error without hiding existing terminals. Conditional writes retry concurrent changes without discarding unrelated settings or other command edits. Loading and saving are guarded against a project switch or panel teardown.
+- Running a launch command opens a project-root interactive terminal and sends the saved shell command. The terminal stays available for output and further input. While the panel is mounted, restarting a saved-command terminal reruns its latest definition if it still exists; after deletion it restarts as a neutral shell. A launch never materializes a conversation session.
 - Script launches and new-shell launches create backend-managed PTY terminals for the active Desktop window and workspace. Initial terminal dimensions come from the mounted terminal surface when available and otherwise default to 80×24.
 - Existing window/workspace terminals are restored when the panel loads. The most recent running terminal is preferred as the active tab, otherwise the most recent terminal is selected.
 - Workspace loads are generation/workspace guarded so stale package/terminal snapshots cannot overwrite a newer workspace.
@@ -34,9 +37,13 @@ Expose project-root package scripts and window-scoped interactive terminals from
 ## Related files
 
 - `desktop/src/components/PackageScriptsPanel.svelte`
+- `desktop/src/components/SavedLaunchCommands.svelte`
 - `desktop/src/components/package-scripts-controller.svelte.ts`
 - `desktop/src/components/TerminalView.svelte`
 - `desktop/src/lib/package-scripts.ts`
+- `desktop/src/lib/project-launch-commands.ts`
+- `desktop/src/lib/project-launch-commands.test.ts`
+- `desktop/src/components/PackageScriptsPanel.test.ts`
 - `desktop/src/lib/package-scripts.test.ts`
 - `desktop/src/lib/terminal-input.ts`
 - `desktop/src/lib/terminal-input.test.ts`
@@ -48,6 +55,7 @@ Expose project-root package scripts and window-scoped interactive terminals from
 - `desktop/src/lib/package-scripts.test.ts` covers compact name-only package-script filtering, terminal snapshot decoding, bounded output, and status helpers.
 - Desktop visual/source regressions cover the visible terminal caret, coalesced/cancelled caret frames, explicit 5,000-line xterm scrollback, visible scrollbar styling, and name-only script rows.
 - Input tests use controlled acknowledgements to check ordering, independent terminals, Unicode boundaries, and recovery after failed writes. Controller tests cover workspace changes during launch/restart, initial shell-command ownership, launch reservation, and teardown.
+- Launch-command tests cover JSONC round-tripping alongside other project settings, create/update/delete conflict handling, stale workspace completion, and the UI lifecycle for edit/delete/launch.
 - `npm --prefix desktop run check`
 - `npm --prefix desktop test`
 - `npm --prefix desktop run build:web`

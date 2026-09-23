@@ -4,6 +4,7 @@ const PIX_TABS_META_KEY = "pix.tabs";
 const PIX_IS_FORK_META_KEY = "pix.isFork";
 const PIX_PARENT_SESSION_ID_META_KEY = "pix.parentSessionId";
 export const ACTIVE_SESSIONS_STORAGE_KEY = "pix.desktop.activeSessions";
+export const SESSION_TABS_STORAGE_KEY = "pix.desktop.sessionTabs";
 
 /** Pix session-list metadata mirrors Pi's parent-session fork marker without exposing the parent path. */
 export function sessionIsFork(session: SessionInfo): boolean {
@@ -94,13 +95,13 @@ export function restoredTabSessionIds(response: ListSessionsResponse): string[] 
 export function startupSessionId(
   response: ListSessionsResponse,
   desktopSessionId: string | null,
+  desktopTabSessionIds: readonly string[] | null,
 ): string | null {
   const availableIds = new Set(response.sessions.map((session) => session.sessionId));
-  if (desktopSessionId && availableIds.has(desktopSessionId)) return desktopSessionId;
-
-  const metadata = response._meta?.[PIX_TABS_META_KEY];
-  if (!isRecord(metadata) || typeof metadata.activeSessionId !== "string") return null;
-  return availableIds.has(metadata.activeSessionId) ? metadata.activeSessionId : null;
+  const openIds = (desktopTabSessionIds ?? []).filter((sessionId) => availableIds.has(sessionId));
+  const openSet = new Set(openIds);
+  if (desktopSessionId && openSet.has(desktopSessionId)) return desktopSessionId;
+  return openIds[0] ?? null;
 }
 
 /** Parse the last active desktop session for each workspace from local storage. */
@@ -119,6 +120,65 @@ export function parseActiveSessionIds(serialized: string | null): Map<string, st
 
 export function serializeActiveSessionIds(sessionIds: ReadonlyMap<string, string>): string {
   return JSON.stringify(Object.fromEntries(sessionIds));
+}
+
+/** Parse the Desktop-owned ordered session-tab snapshot for each workspace. */
+export function parseSessionTabIds(serialized: string | null): Map<string, string[]> {
+  if (!serialized) return new Map();
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    if (!isRecord(parsed)) return new Map();
+    const result = new Map<string, string[]>();
+    for (const [workspace, value] of Object.entries(parsed)) {
+      if (!Array.isArray(value)) continue;
+      const ids: string[] = [];
+      const seen = new Set<string>();
+      for (const sessionId of value) {
+        if (typeof sessionId !== "string" || seen.has(sessionId)) continue;
+        seen.add(sessionId);
+        ids.push(sessionId);
+      }
+      result.set(workspace, ids);
+    }
+    return result;
+  } catch {
+    return new Map();
+  }
+}
+
+export function serializeSessionTabIds(sessionIds: ReadonlyMap<string, readonly string[]>): string {
+  return JSON.stringify(Object.fromEntries(
+    [...sessionIds].map(([workspace, ids]) => [workspace, [...ids]]),
+  ));
+}
+
+export interface RestoredDesktopSessionTabs {
+  readonly restoredIds: string[] | null;
+  readonly locallyOpenedIds: string[];
+  readonly closedIds: string[];
+}
+
+/**
+ * Seed one Desktop run from its own last visible tab snapshot. TUI metadata is
+ * still used for cross-surface reconciliation, but it is never a restart
+ * fallback. A missing Desktop snapshot is treated as an explicit empty list.
+ */
+export function restoreDesktopSessionTabs(
+  desktopIds: readonly string[] | null,
+  incomingIds: readonly string[] | null,
+  availableIds: readonly string[],
+): RestoredDesktopSessionTabs {
+  const available = new Set(availableIds);
+  const restoredIds = [...new Set(desktopIds ?? [])].filter((sessionId) => available.has(sessionId));
+  const restored = new Set(restoredIds);
+  const incoming = incomingIds === null ? new Set<string>() : new Set(incomingIds);
+  return {
+    restoredIds,
+    locallyOpenedIds: restoredIds.filter((sessionId) => !incoming.has(sessionId)),
+    closedIds: incomingIds === null
+      ? []
+      : [...new Set(incomingIds)].filter((sessionId) => available.has(sessionId) && !restored.has(sessionId)),
+  };
 }
 
 /** Select and order sessions shown in the top strip independently of the full selector list. */

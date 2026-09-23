@@ -14,9 +14,10 @@
     type PackageTerminalView,
   } from "../lib/package-scripts";
   import { createPackageScriptsController } from "./package-scripts-controller.svelte";
+  import SavedLaunchCommands from "./SavedLaunchCommands.svelte";
   import TerminalView from "./TerminalView.svelte";
 
-  let { workspace }: { workspace: string } = $props();
+  let { workspace, afterWorkspaceSave }: { workspace: string; afterWorkspaceSave: (workspace: string) => void } = $props();
 
   let query = $state("");
   let terminalView = $state<{
@@ -27,6 +28,7 @@
   const controller = createPackageScriptsController({
     workspace: () => workspace,
     terminalView: () => terminalView,
+    afterWorkspaceSave: (savedWorkspace) => afterWorkspaceSave(savedWorkspace),
   });
   const snapshot = $derived(controller.snapshot);
   const terminals = $derived(controller.terminals);
@@ -37,6 +39,7 @@
   const error = $derived(controller.error);
   const startingScript = $derived(controller.startingScript);
   const terminalActionId = $derived(controller.terminalActionId);
+  const launchCommands = $derived(controller.launchCommands);
 
   const visibleScripts = $derived(filterPackageScripts(snapshot?.scripts ?? [], query));
   const refresh = controller.refresh;
@@ -124,6 +127,16 @@
     {:else if snapshot && snapshot.scripts.length === 0}
       <div class="border-t border-sidebar-border/70 px-3 py-4 text-center text-xs text-muted-foreground">No scripts in package.json.</div>
     {/if}
+    {#key workspace}
+      <SavedLaunchCommands
+        commands={launchCommands}
+        {workspace}
+        disabled={startingScript !== null || terminalActionId !== null || loading}
+        onSave={controller.saveLaunchCommand}
+        onDelete={controller.deleteLaunchCommand}
+        onRun={controller.runLaunchCommand}
+      />
+    {/key}
   </div>
 
   <div class="grid min-h-0 min-w-0 w-full max-w-full grid-rows-[32px_minmax(0,1fr)] overflow-hidden bg-code">

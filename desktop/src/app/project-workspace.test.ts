@@ -3,6 +3,7 @@ import {
   RECENT_PROJECTS_STORAGE_KEY,
   WORKSPACE_STORAGE_KEY,
 } from "../lib/recent-projects";
+import { SESSION_TABS_STORAGE_KEY } from "../lib/session-tabs";
 import { restoreProjectWorkspace } from "./project-workspace.svelte";
 
 describe("project workspace startup restore", () => {
@@ -32,5 +33,21 @@ describe("project workspace startup restore", () => {
     expect(restored.workspace).toBe("/qa/project");
     expect(restored.recentProjects).toEqual(["/qa/project"]);
     expect(restored.activeSessionIds).toEqual(new Map());
+    expect(restored.sessionTabIds).toEqual(new Map());
+  });
+
+  it("restores the Desktop-owned session-tab snapshot independently of the workspace URL", () => {
+    const restored = restoreProjectWorkspace("http://127.0.0.1:1420/?workspace=%2Fqa%2Fproject", {
+      getItem(key) {
+        if (key === SESSION_TABS_STORAGE_KEY) {
+          return JSON.stringify({ "/qa/project": ["session-b", "session-a"] });
+        }
+        return null;
+      },
+    });
+
+    expect(restored.sessionTabIds).toEqual(new Map([
+      ["/qa/project", ["session-b", "session-a"]],
+    ]));
   });
 });

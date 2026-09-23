@@ -135,6 +135,7 @@
     onRegistryInitializeProject,
     onRegistryAction,
     onRegistryProjectChange,
+    onWorkspaceSettingsSave,
     onGitRefresh,
     onGitInitialize,
     onGitOpenDiff,
@@ -206,6 +207,7 @@
     onRegistryInitializeProject: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
     onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
+    onWorkspaceSettingsSave: (workspace: string) => void;
     onGitRefresh: () => void;
     onGitInitialize: () => void;
     onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
@@ -304,6 +306,10 @@
       planSelectorQuery = "";
       planSelectorOpen = true;
       void tick().then(() => planSearchInput?.focus());
+      return;
+    }
+    if (artifact === "workspace") {
+      projectSettingsController.show();
       return;
     }
     setActiveTab("tasks");
@@ -694,7 +700,7 @@
         </div>
       {:else if activeTab === "scripts"}
         <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Package Scripts">
-          <PackageScriptsPanel bind:this={packageScriptsPanel} {workspace} />
+          <PackageScriptsPanel bind:this={packageScriptsPanel} {workspace} afterWorkspaceSave={onWorkspaceSettingsSave} />
         </div>
       {:else if activeTab === "idx"}
         <div id="workspace-idx-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="IDX">
