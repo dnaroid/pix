@@ -101,6 +101,10 @@
     localStorage.setItem(COMPLETED_KEY, "1");
     visible = false;
   }
+
+  function retainUntilContinue(event: Event): void {
+    event.preventDefault();
+  }
 </script>
 
 {#if visible}
@@ -108,7 +112,7 @@
     bind:this={dialogElement}
     class="fixed inset-0 z-50 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-5 text-foreground backdrop:bg-overlay open:grid"
     aria-labelledby="desktop-bootstrap-title"
-    oncancel={(event) => { event.preventDefault(); finish(); }}
+    oncancel={retainUntilContinue}
   >
     <div class="w-[560px] max-w-[calc(100vw-40px)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
       <header class="border-b border-border bg-chrome px-4 py-3">

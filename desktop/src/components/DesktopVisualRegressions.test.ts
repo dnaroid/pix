@@ -50,6 +50,7 @@ describe("desktop visual regressions", () => {
     expect(styles).toMatch(/textarea\s*\{\s*resize:\s*none;\s*\}/);
     expect(gitCommitComposerSource).toContain("autosizeTextarea(messageTextarea, { minHeight: 64, maxHeight: 160 })");
     expect(gitCommitComposerSource).not.toContain("resize-y");
+    expect(elicitationSource).not.toContain("resize-y");
   });
 
   it("normalizes modal elicitation select and action buttons", () => {

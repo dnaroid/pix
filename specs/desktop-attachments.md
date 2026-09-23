@@ -17,10 +17,10 @@ Show image and video attachments in the desktop composer and transcript, while k
 ## Scope
 
 - Add attachments through the file picker, native drag-and-drop, and clipboard paste.
-- Send pathless pasted images as ACP image content when supported.
-- Send path-backed images as resource links plus Pix file-image metadata so ACP
-  can materialize them for Pi without embedding their bytes in the Desktop
-  request body.
+- Pasted files, including images, are copied to the Pix cache and sent as
+  path-backed resource links. Pasted images additionally carry Pix file-image
+  metadata so ACP can materialize them for Pi without embedding their bytes in
+  the Desktop request body.
 - Send video and other files as local resource links so the agent receives their paths.
 - Render image/video previews in the composer, user messages, and supported ACP content.
 - Preserve the current composer attachments when the draft is captured as a
@@ -41,9 +41,8 @@ Show image and video attachments in the desktop composer and transcript, while k
 - Selected and dropped images keep their local path. On submission they become
   ACP resource links and are also listed in private Pix file-image metadata for
   the ACP adapter.
-- Pathless pasted images use their clipboard bytes and become ACP image blocks
-  when image prompting is supported.
-- Pasted images use their clipboard bytes. Other pasted files are copied to the Pix cache first so the agent receives a usable local path.
+- Pasted files, including images, are copied to the Pix cache before
+  submission, so the agent receives a usable local path.
 - A prompt may contain text, attachments, or both.
 - Creating a project task persists attachments into the project's
   `.pi/task-attachments` storage before writing task description markers. This
@@ -59,10 +58,11 @@ Show image and video attachments in the desktop composer and transcript, while k
 ## Contracts
 
 - `session/prompt` receives `ContentBlock[]`: path-backed files (including
-  images) use resource-link blocks; pathless supported images use image blocks.
-- Path-backed images additionally travel in Pix `_meta["pix.fileImages"]` so the
-  ACP adapter can materialize image content for Pi while retaining the resource
-  link in the persisted prompt surface.
+  cached pasted images) use resource-link blocks.
+- Path-backed images, including cached pasted images, additionally travel in
+  Pix `_meta["pix.fileImages"]` so the ACP adapter can materialize image
+  content for Pi while retaining the resource link in the persisted prompt
+  surface.
 - Resource links are persisted in Pi text as Pix attachment markers containing a file URI.
 - Project-task capture uses the same marker encoding. The Tauri
   `cache_task_attachment` command persists pathless image bytes and
@@ -86,7 +86,8 @@ Show image and video attachments in the desktop composer and transcript, while k
 
 - Missing/deleted paths remain visible as file tiles; opening errors are reported.
 - A pasted non-image exceeding the IPC size limit is rejected.
-- If image prompting is not advertised, images fall back to resource links when a path exists; pathless pasted images are rejected.
+- If image prompting is not advertised, pasted images remain usable as cached
+  resource links.
 
 ## Related files
 

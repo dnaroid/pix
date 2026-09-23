@@ -96,6 +96,41 @@ test("stable leaf identity cannot accept a snapshot read from a transient fork",
   await assert.rejects(readDcpJournalBranch({ sessionManager: manager } as any), /branch changed/);
 });
 
+test("stable leaf rejects malformed complete full-branch parent chains", async (t) => {
+  const cases: Array<{ name: string; entries: Link[] }> = [
+    {
+      name: "malformed interior parent",
+      entries: [root, old, { id: "interior", parentId: "missing" }, { id: "stable", parentId: "interior" }],
+    },
+    {
+      name: "duplicate interior identity",
+      entries: [root, old, { id: "interior", parentId: old.id }, { id: "interior", parentId: old.id }, { id: "stable", parentId: "interior" }],
+    },
+    {
+      name: "conflicting duplicate interior parent",
+      entries: [root, old, { id: "interior", parentId: old.id }, { id: "interior", parentId: root.id }, { id: "stable", parentId: "interior" }],
+    },
+  ];
+
+  for (const { name, entries } of cases) {
+    await t.test(name, async () => {
+      let reads = 0;
+      const manager = {
+        getSessionId: () => "stable-malformed",
+        getLeafId: () => entries.at(-1)!.id,
+        getBranch: () => entries,
+        readFullBranchEntries: async () => {
+          reads += 1;
+          return entries;
+        },
+      };
+
+      await assert.rejects(readDcpJournalBranch({ sessionManager: manager } as any), /invalid parent links/);
+      assert.equal(reads, 1);
+    });
+  }
+});
+
 test("owner replacement and session identity change never authorize a retry", async (t) => {
   for (const change of ["manager", "session-id"] as const) {
     await t.test(change, async () => {

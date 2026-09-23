@@ -45,8 +45,11 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
 ## Unchanged behavior
 
 Markdown definitions, config precedence, presets, model/thinking overrides,
-mandatory private browser QA skills, spawn concurrency, and child model
-fallbacks remain unchanged. This is role selection, not model routing.
+spawn concurrency, and child model fallbacks remain unchanged. Every child is
+started with `--no-skills`; any `--skill <path>`, `--skill=<path>`, or
+caller-supplied `--no-skills` arguments are stripped before invocation, so no
+child role (including `ui-qa`) discovers or receives skills. This is role
+selection, not model routing.
 
 ## Verification
 

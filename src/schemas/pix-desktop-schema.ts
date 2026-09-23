@@ -40,7 +40,7 @@ const ModelRoutingTier = Type.Object(
 
 const ModelRoutingConfig = Type.Object(
 	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable Auto for new Desktop drafts and route the first real prompt before session creation." })),
+		enabled: Type.Optional(Type.Boolean({ description: "Enable Auto in new-draft and live-session Desktop pickers. A live selection opens a new Auto-routed draft; only its first real prompt is routed before session creation." })),
 		default: Type.Optional(Type.Boolean({ description: "Start new Desktop conversation drafts in Auto routing mode by default." })),
 		modelRef: Type.Optional(Type.String({ description: "Primary router model. OpenRouter Jev Latest is available as openrouter/~typesafe/jev-latest." })),
 		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered router-model fallbacks." })),

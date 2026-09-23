@@ -104,15 +104,18 @@ The permanent key must stay outside UI/browser runtime code.
 `dictation.apiKey` is the preferred Deepgram credential and is intended only for
 the relevant frontend's user config (`pix.jsonc` for TUI, `pix-desktop.jsonc`
 for Desktop); the Desktop Settings form exposes its own value as a sensitive
-field. Desktop config uses only `dictation.language` as the Deepgram language
-code and `dictation.model` as the speech model (default `nova-3`). A legacy
-Desktop `dictation.languages` map is still tolerated by the native reader for
-existing files, including a legacy `deepgramLanguage` remap, but it is no longer
-part of the Desktop schema, defaults, or Settings UI.
+field. Desktop config accepts only `dictation.apiKey`, `dictation.language`,
+and `dictation.model` (default `nova-3`).
 
-Legacy Vosk `dirName`, `url`, and per-language `model` fields remain parseable
-for existing config files but are deprecated and ignored by the Deepgram
-runtime. Pix does not download Vosk models or load/install Vosk bindings.
+The TUI additionally has the active language-picker configuration:
+`dictation.languages`, keyed by the selectable local language code, with each
+entry's `label` and optional `deepgramLanguage` transport code. This is the
+only language remap because the terminal picker consumes that map and its
+defaults define English and Russian. Desktop sends `dictation.language`
+directly and has no language map. Legacy Vosk fields and undocumented
+`voice`/`voiceInput`, `models`, `selectedLanguage`/`currentLanguage`,
+`deepgramApiKey`/`deepgramModel`, and per-language alias forms are not accepted. Pix does not
+download Vosk models or load/install Vosk bindings.
 
 ## Verification
 
@@ -120,7 +123,7 @@ runtime. Pix does not download Vosk models or load/install Vosk bindings.
   forwarding, interim/final parsing, finalize/last-interim behavior, errors,
   and stale-scope rejection.
 - `tests/config.test.ts` covers the user-config API key, project-secret rejection,
-  Deepgram defaults, and legacy dictation config compatibility.
+  and Deepgram defaults.
 - `desktop/src/lib/deepgram.test.ts` covers desktop recorder format choice,
   configured Nova-3 language/model transport, finalization, and Results parsing.
 - `npm run check:desktop`/desktop tests cover Svelte integration and the composer

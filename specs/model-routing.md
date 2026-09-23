@@ -17,7 +17,10 @@ Pix can optionally expose an `Auto` model choice for a new, still-sessionless dr
 ## Configuration contract
 
 - TUI reads `modelRouting` from `pix.jsonc`; Desktop reads the same shape from `pix-desktop.jsonc`. The profiles remain independent.
-- Routing is disabled by default. `enabled: true` only makes `Auto` available in the new-draft model picker; it does not replace the configured default model automatically.
+- Routing is disabled by default. `enabled: true` makes `Auto` available in both
+  new-draft and live/existing-session model pickers; it does not replace the
+  configured default model automatically. Choosing it from a live picker stages
+  a new UI-only draft rather than changing that session.
 - `default: true` makes new UI-only conversation drafts start in `Auto`. It defaults to false and is dormant while routing is disabled. An explicit CLI/runtime model override still wins.
 - `modelRef` is the primary router model. The default is `openrouter/~typesafe/jev-latest`.
 - `fallbackModels` is the ordered router-model fallback chain and defaults to `[]`.

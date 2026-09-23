@@ -217,7 +217,7 @@
 
     <SettingsFieldRow
       label="Automatic model routing"
-      description="Expose Auto for new drafts and route the first real prompt to a semantic task tier before the session is created."
+      description="Expose Auto in draft and live-session pickers; a live selection opens a new draft, whose first real prompt routes to a semantic task tier before session creation."
       explicit={has(["modelRouting", "enabled"])}
       defaultLabel={defaultLabel(["modelRouting", "enabled"])}
       onReset={() => reset(["modelRouting", "enabled"])}

@@ -75,7 +75,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Concurrency (`core/concurrency.ts`)
 - `createSemaphore(limit)`: `limit ≤ 0` = unlimited. `acquire(signal?)` queues when full, rejects on abort. `[confirmed by code]`
 - Project-scoped semaphores cached in a `PROJECT_SEMAPHORES` Map keyed by resolved cwd; reused if same limit or if active/waiting > 0. `[confirmed by code, tools/spawn.ts ~50-58]`
-- Default max concurrent = 5 (`DEFAULT_MAX_CONCURRENT`); configurable via the top-level `maxConcurrent` field of the subagent config (project `<project>/.pi/agents/presets.jsonc` or the builtin presets file) or env `PI_SUBAGENTS_MAX_CONCURRENT` / `ASYNC_SUBAGENTS_MAX_CONCURRENT`. `[confirmed by code, core/config.ts:127,211,673-674]`
+- Default max concurrent = 5 (`DEFAULT_MAX_CONCURRENT`); configurable only through `PI_SUBAGENTS_MAX_CONCURRENT` or `ASYNC_SUBAGENTS_MAX_CONCURRENT`. Preset files configure model pools only and do not accept `maxConcurrent`. `[confirmed by code, core/config.ts:673-699]`
 
 ### Retry (`core/retry.ts`)
 - `spawnAgentWithRetry()` wraps `spawnAgent` with retry + model-fallback loops. `[confirmed by code]`
@@ -143,7 +143,8 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     <agentId>/
       prompt.md, pid, started_at, pi_args, project_cwd, subagent_type, model,
       image_paths, session_dir?, session_file?, parent_session?, return_session?,
-      events.jsonl, stderr.log, result.md, result.json, exit_code, finished_at,
+      events.jsonl, progress.jsonl, stderr.log, result.md, result.json, exit_code, finished_at,
+      process_group?  (non-Windows process-group leader PID),
       stop_requested?, stop_signal?, timeout_ms?, timed_out_at?,
       retry_count?, retry_pending?, next_retry_at?, retry.log?,
       model_fallback_from?, model_fallback_to?, model_fallback.log?,

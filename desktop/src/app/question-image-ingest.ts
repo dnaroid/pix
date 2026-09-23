@@ -68,7 +68,7 @@ export function createQuestionImageIngest(
     for (const candidate of candidates) {
       let pending = options.pendingQuestion(requestId);
       if (!pending || !state.questionCanAcceptImages(questionId, requestId)) return null;
-      if (totalQuestionImageCount(pending.state) + images.length >= MAX_QUESTION_IMAGES) {
+      if (totalQuestionImageCount(pending.state) + images.length + 1 > MAX_QUESTION_IMAGES) {
         issue = `Attach at most ${MAX_QUESTION_IMAGES} images to a questionnaire.`;
         break;
       }

@@ -26,7 +26,7 @@ export function createContextInventoryState(
 	reason?: ContextInventoryState["reason"],
 ): ContextInventoryState {
 	const tools = unique(pi.getActiveTools());
-	const skillsReadable = tools.includes("read") || tools.includes("bash");
+	const skillsReadable = tools.some(isSkillFileAccessTool);
 	const skills = skillsReadable
 		? unique(pi.getCommands()
 			.filter((command) => command.source === "skill")
@@ -61,6 +61,19 @@ export function publishContextInventoryState(
 	const state = createContextInventoryState(pi, ctx, reason);
 	pi.events?.emit?.(CONTEXT_INVENTORY_EVENT, state);
 	publishRpcSessionState(ctx, CONTEXT_INVENTORY_EVENT, state);
+}
+
+/** Active tools that can load a discovered SKILL.md file. */
+export function isSkillFileAccessTool(toolName: string): boolean {
+	switch (toolName.trim().toLowerCase()) {
+		case "read":
+		case "bash":
+		case "shell":
+		case "shell_command":
+			return true;
+		default:
+			return false;
+	}
 }
 
 function effectiveAgentTypes(cwd: string, model: string | undefined): string[] | undefined {

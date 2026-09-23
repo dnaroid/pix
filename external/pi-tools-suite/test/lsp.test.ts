@@ -335,6 +335,61 @@ describe.serial("LSP shared helpers", () => {
 		expect(loaded.layers.map((layer) => layer.path)).toEqual([path.join(home, ".config", "pi", "pi-tools-suite.jsonc")]);
 		expect(loaded.warnings).toEqual([]);
 	});
+
+	test.serial("rejects malformed global LSP JSONC with a warning", async () => {
+		const home = tempDir();
+		const configPath = path.join(home, ".config", "pi", "pi-tools-suite.jsonc");
+		const previousConfigDir = process.env.PI_CONFIG_DIR;
+		try {
+			delete process.env.PI_CONFIG_DIR;
+			process.env.HOME = home;
+			fs.mkdirSync(path.dirname(configPath), { recursive: true });
+			fs.writeFileSync(configPath, '{"lsp":', "utf8");
+
+			const { loadLspConfig } = await import("../src/lsp/_shared/config.js");
+			const loaded = await loadLspConfig({ cwd: home } as any);
+
+			expect(loaded.items).toEqual([]);
+			expect(loaded.layers).toEqual([]);
+			expect(loaded.warnings).toEqual([
+				`Failed to load global lsp config ${configPath}: Invalid JSONC (ValueExpected, CloseBraceExpected)`,
+			]);
+		} finally {
+			if (previousConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
+			else process.env.PI_CONFIG_DIR = previousConfigDir;
+		}
+	});
+
+	test.serial("rejects malformed project LSP JSONC before the trust prompt", async () => {
+		const home = tempDir();
+		const project = tempDir();
+		const configPath = path.join(project, ".pi", "pi-tools-suite.jsonc");
+		const previousConfigDir = process.env.PI_CONFIG_DIR;
+		try {
+			delete process.env.PI_CONFIG_DIR;
+			process.env.HOME = home;
+			fs.mkdirSync(path.dirname(configPath), { recursive: true });
+			fs.writeFileSync(configPath, '{"lsp":', "utf8");
+			let prompts = 0;
+
+			const { loadLspConfig } = await import("../src/lsp/_shared/config.js");
+			const loaded = await loadLspConfig({
+				cwd: project,
+				hasUI: true,
+				ui: { select: async () => { prompts += 1; return "Trust once"; } },
+			} as any);
+
+			expect(loaded.items).toEqual([]);
+			expect(loaded.layers).toEqual([]);
+			expect(loaded.warnings).toEqual([
+				"Failed to load project lsp config: Invalid JSONC (ValueExpected, CloseBraceExpected)",
+			]);
+			expect(prompts).toBe(0);
+		} finally {
+			if (previousConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
+			else process.env.PI_CONFIG_DIR = previousConfigDir;
+		}
+	});
 });
 
 describe.serial("LSP library post-edit diagnostics", () => {

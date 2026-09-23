@@ -19,7 +19,10 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 - Advertise ACP-supported Pix built-ins and Pi runtime extension, prompt-template, and skill commands through standard ACP `available_commands_update` notifications.
 - Fuzzy-match commands by name, alias, description, and source in the Desktop composer.
 - Implement `/session` and `/clone` through public Pi RPC methods.
-- Implement Desktop-owned `/new`, `/resume`, `/reload`, and `/fork` session actions.
+- Implement Desktop-owned composer actions: `/new`, `/new_tab`, `/resume`,
+  `/reload`, `/enhance`, `/import`, `/queue`, `/fork`, `/search`, `/delete`,
+  `/jump`, `/history`, `/hotkeys`, `/quit` (and `/exit`), `/model`, and
+  `/thinking` (with `/thought` as its alias).
 - Implement `/copy` with the same last-assistant-message clipboard semantics as the Pix TUI.
 - Open Desktop pickers for argument-free `/model` and `/thinking`, and expose one combined model + thinking picker from the persistent status bar, matching the TUI's model/thinking semantics while adapting the flow for Desktop.
 - Reuse the Desktop fuzzy-search utility in the session selector.
@@ -27,12 +30,17 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 ## Non-goals
 
 - Pretending renderer-only Pix commands work by forwarding them as model prompts.
-- Porting unrelated terminal pickers, settings, authentication, tree navigation, import/share, or process-lifecycle commands without matching Desktop UI or Pi RPC support.
+- Porting unrelated terminal pickers, settings, authentication, tree navigation,
+  share, or process-lifecycle commands without matching Desktop UI or Pi RPC support.
 - Importing the root renderer's terminal command controller into Desktop or ACP.
 
 ## Behavior
 
-- The merged Desktop catalog contains `/new`, `/resume`, `/reload`, `/fork`, the interactive Desktop overrides for `/model` and `/thinking`, ACP built-ins including `/copy`, and then Pi runtime commands.
+- The merged Desktop catalog contains the Desktop-owned `/new`, `/new_tab`,
+  `/resume`, `/reload`, `/enhance`, `/import`, `/queue`, `/fork`, `/search`,
+  `/delete`, `/jump`, `/history`, `/hotkeys`, `/quit`, `/exit`, `/model`, and
+  `/thinking` commands (with `/thought`), ACP built-ins including `/copy`, and
+  then Pi runtime commands.
 - Built-in names and aliases take precedence over runtime command collisions. Renderer-owned Pix names are also withheld from the runtime catalog.
 - Command discovery failures are non-fatal: supported ACP built-ins remain available.
 - `/name` with no argument reports the current name; with an argument it renames the session.
@@ -40,7 +48,13 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 - `/clone` clones the current Pi branch and refreshes the persisted ACP-to-Pi session mapping.
 - `/copy` copies the complete plain text of the last assistant message. No assistant message and OS clipboard failures are distinct user-visible errors.
 - Intercepted built-ins are serialized with prompts so session mutations such as `/clone` cannot overlap another run.
-- Exact `/new` starts a fresh Desktop conversation. Exact `/resume` opens the Desktop session selector. Argument forms of Desktop-owned commands (`/resume <path>`, `/fork <entry-id>`, `/model <ref>`, `/thinking <level>`) are also intercepted locally; commands with attachments are not intercepted (only `/queue` may carry attachments).
+- Exact `/new` starts a fresh Desktop conversation and `/new_tab` opens one in a
+  new tab. `/resume [path]`, `/import [path]`, `/search [query]`,
+  `/delete [query]`, `/jump [query]`, `/history [query]`, `/enhance [draft]`,
+  `/fork [entry-id]`, `/model [ref]`, and `/thinking [level]` (or `/thought`)
+  are intercepted locally. `/hotkeys`, `/quit`, and `/exit` accept no argument.
+  Commands with attachments are not intercepted, except `/queue <message>`,
+  which may carry them.
 - Exact `/reload` is idle-only and reloads the active Pi session in-process through the ACP extension RPC `pix/session/reload`, then reports completion without sending the command to the model. (Earlier Pi RPC versions had no in-process reload and forced a Desktop subprocess restart; the current pinned RPC supports it.)
 - `/fork [entry-id]` is idle-only. With no argument Desktop resolves the newest forkable user-message entry, matching Pix TUI behavior. It creates a new ACP/Pi session before that entry, replaces the active Desktop conversation, reloads the fork history, and restores Pi's selected user text into the composer. Cancellation or failure leaves the source conversation active.
 - Exact `/model` and `/thinking` keep their compact searchable command pickers. The status bar instead exposes one `Model · thinking` control. Its combined dialog stages both values locally, keeps the composer draft untouched, and changes the session only after `Apply`; `Cancel`/Escape discard the staged selection. Selecting a model row remains staged until Apply and must not be reset by reactive search/visibility updates.
@@ -92,6 +106,6 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 
 ## Risks / unknowns
 
-- `/tree`, `/settings`, `/import`, `/share`, `/trust`, `/login`, `/logout`, and `/bug` still require additional APIs or Desktop UI.
+- `/tree`, `/settings`, `/share`, `/trust`, `/login`, `/logout`, and `/bug` still require additional APIs or Desktop UI.
 - Desktop `/reload` relies on the private `pix/session/reload` extension RPC rather than a public Pi RPC reload command.
 - Desktop `/new` replaces the active ACP runtime; true `/new_tab` behavior needs a separate multi-runtime tab lifecycle.

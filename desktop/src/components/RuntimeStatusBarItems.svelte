@@ -255,9 +255,6 @@
           onclick={toggleUsage}
         >
           <span class="font-sans text-xs text-muted-foreground max-[900px]:hidden">Usage</span>
-          {#if sessionUsage && sessionUsage.totals.cost > 0}
-            <span class="text-foreground">{formatSessionUsageCost(sessionUsage.totals.cost)}</span>
-          {/if}
           {#if status?.modelUsage?.accountEmail}
             <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{status.modelUsage.accountEmail}</span>
           {/if}

@@ -16,7 +16,7 @@ const pixConfig: PixConfig = {
 	autocomplete: { modelRef: "test/model", debounceMs: 350, timeoutMs: 3000, maxTokens: 48, maxPromptTokens: 1200, includeRecentMessages: 0 },
 	modelColors: { rules: {} },
 	iconTheme: { name: "nerdFont" },
-	dictation: { languages: { en: { dirName: "vosk-model-small-en-us-0.15", url: "https://example.test/en.zip", label: "English" } } },
+	dictation: { languages: { en: { deepgramLanguage: "en", label: "English" } } },
 	ignoreContextFiles: false,
 	maxProjectSessions: 0,
 };

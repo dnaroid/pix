@@ -331,7 +331,7 @@ describe("AppMouseController", () => {
 		assert.equal(newTabCount, 1);
 	});
 
-	it("shows compact model-level session usage, including subagent calls, when clicking Usage", async () => {
+	it("shows token-only model-level session usage, including subagent calls, when clicking Usage", async () => {
 		let toast: { message: string; kind: string; variant?: string } | undefined;
 		const session = {
 			sessionManager: {
@@ -371,9 +371,10 @@ describe("AppMouseController", () => {
 		assert.equal(toast?.kind, "info");
 		assert.equal(toast?.variant, "dialog");
 		const plain = (toast?.message ?? "").replace(/\x1b\[[\d;:]*m/gu, "");
-		assert.match(plain, /Session usage\n\$0\.200 · 400 tokens/);
-		assert.match(plain, /anthropic\n\s+claude-sonnet\s+250 · \$0\.150/);
-		assert.match(plain, /openai-codex\n\s+gpt-5\.6-sol\s+150 · \$0\.050/);
+		assert.match(plain, /Session usage\n400 tokens/);
+		assert.match(plain, /anthropic\n\s+claude-sonnet\s+250/);
+		assert.match(plain, /openai-codex\n\s+gpt-5\.6-sol\s+150/);
+		assert.doesNotMatch(plain, /\$/);
 		assert.doesNotMatch(plain, /agents|of session|quota|remaining|used/i);
 		assert.match(toast?.message ?? "", /\x1b\[[\d;]*38;2;/u);
 	});

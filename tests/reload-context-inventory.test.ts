@@ -5,6 +5,7 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import {
 	createReloadContextInventory,
 	formatReloadContextInventory,
+	isSkillFileAccessTool,
 } from "../src/app/commands/reload-context-inventory.js";
 import { parseSubagentCatalogState } from "../src/app/extensions/subagent-catalog-state.js";
 
@@ -50,6 +51,13 @@ describe("reload context inventory", () => {
 
 		assert.equal(inventory.skillsReadable, true);
 		assert.deepEqual(inventory.skills, ["frontier-model-rollover"]);
+	});
+
+	it("recognizes the supported skill-file tools case-insensitively without extra aliases", () => {
+		for (const tool of ["read", "Read", "BASH", "shell", "SHELL_COMMAND"]) {
+			assert.equal(isSkillFileAccessTool(tool), true, tool);
+		}
+		assert.equal(isSkillFileAccessTool("powershell"), false);
 	});
 
 	it("does not claim skills or agents are in context when their access tools are inactive", () => {

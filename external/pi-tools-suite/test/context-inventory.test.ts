@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createContextInventoryState } from "../src/context-inventory.js";
+import { createContextInventoryState, isSkillFileAccessTool } from "../src/context-inventory.js";
 
 const dirs: string[] = [];
 
@@ -38,6 +38,21 @@ describe("context inventory", () => {
 
 		expect(state.agents).not.toContain("frontier-review");
 		expect(state.agents).toContain("research");
+	});
+
+	test("recognizes model-specific and shell skill-file tools case-insensitively", () => {
+		for (const tool of ["read", "Read", "BASH", "shell", "SHELL_COMMAND"]) {
+			expect(isSkillFileAccessTool(tool)).toBe(true);
+		}
+		expect(isSkillFileAccessTool("powershell")).toBe(false);
+
+		const cwd = tempDir();
+		const state = createContextInventoryState({
+			getActiveTools: () => ["SHELL_COMMAND"],
+			getCommands: () => [{ name: "skill:visible", source: "skill" }] as any,
+		} as any, context(cwd, "openai-codex", "gpt-5.6-luna"));
+
+		expect(state.skills).toEqual(["visible"]);
 	});
 
 	test("does not claim loaded skills or agents when their access tools are inactive", () => {

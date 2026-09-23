@@ -50,9 +50,11 @@ percentages with spend attributable to one conversation.
 
 - In both Pix TUI and Desktop, clicking `Usage` opens session usage instead of
   forcing a provider quota refresh.
-- The popup is intentionally compact: total session cost/tokens, then
-  `provider → model → tokens · cost`. It does not split parent-agent and
-  sub-agent consumption into separate presentation rows; both are one session.
+- The session detail remains intentionally compact and does not split parent-agent
+  and sub-agent consumption into separate presentation rows; both are one session.
+  Desktop keeps recorded cost in its on-demand detail popover, but does not show a
+  dollar amount inline in the status bar. TUI shows token totals only and does not
+  render monetary prices.
 - Model labels use the same model-color conventions as the rest of Pix. TUI
   honors configured `modelColors` rules with the normal provider-palette
   fallback; Desktop uses its matching model-ref tone mapping.
@@ -114,8 +116,9 @@ percentages with spend attributable to one conversation.
 
 - Shared unit tests cover provider/model grouping, merging parent and async-agent
   calls into one model total, unattributed usage, and the compact formatter.
-- TUI mouse tests assert that Usage opens the compact colored model breakdown and
-  contains no agent/subagent split, session-share percentage, or quota block.
+- TUI mouse tests assert that Usage opens the compact colored token breakdown and
+  contains no monetary price, agent/subagent split, session-share percentage, or
+  quota block.
 - Async-subagents tests validate child `message_end` extraction and durable usage
   append on the captured parent manager.
 - Desktop ACP-client and runtime lifecycle tests cover the independent usage
@@ -129,5 +132,5 @@ percentages with spend attributable to one conversation.
   exact historical child-agent cost unless that usage was already persisted by
   another mechanism. Pix reports what is recorded; it does not invent missing
   historical spend.
-- Providers may report zero monetary cost while still reporting tokens; the model
-  row still reports its recorded token total and `$0` cost.
+- Providers may report zero monetary cost while still reporting tokens; accounting
+  keeps that recorded cost even though TUI presentation is token-only.

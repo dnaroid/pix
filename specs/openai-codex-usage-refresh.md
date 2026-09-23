@@ -20,7 +20,9 @@ expires, without consuming a rotated refresh token behind pi core's back.
 
 - A valid access token is used directly for the ChatGPT usage request.
 - An expired pi `openai-codex` OAuth credential is refreshed through
-  `AuthStorage.getApiKey()` from `@earendil-works/pi-coding-agent`.
+  `ModelRuntime.create({ authPath }).getAuth("openai-codex")` from
+  `@earendil-works/pi-coding-agent`. That API delegates to pi-owned
+  `AuthStorage`; Pix does not instantiate or refresh a separate store.
 - The refreshed credential is then used for the usage request.
 - If refresh fails, the model-usage query rejects instead of returning
   `undefined`; `ModelUsageController` therefore retains its previous status.

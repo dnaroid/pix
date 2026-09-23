@@ -75,7 +75,7 @@ const ModelRoutingTier = Type.Object(
 
 const ModelRoutingConfig = Type.Object(
 	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable Auto in the new-session model picker and route the first real prompt before session creation." })),
+		enabled: Type.Optional(Type.Boolean({ description: "Enable Auto in new-draft and live-session model pickers. A live selection opens a new Auto-routed draft; only its first real prompt is routed before session creation." })),
 		default: Type.Optional(Type.Boolean({ description: "Start new UI-only conversation drafts in Auto routing mode by default." })),
 		modelRef: Type.Optional(Type.String({ description: "Primary router model. OpenRouter Jev Latest is available as openrouter/~typesafe/jev-latest." })),
 		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered router-model fallbacks tried if the primary routing request fails." })),
@@ -144,8 +144,6 @@ const DictationLanguageModelConfig = Type.Object(
 	{
 		label: Type.String({ description: "Human-readable language label." }),
 		deepgramLanguage: Type.Optional(Type.String({ description: "Deepgram language code. Defaults to the language map key." })),
-		dirName: Type.Optional(Type.String({ description: "Deprecated legacy Vosk model directory name; ignored by Deepgram dictation." })),
-		url: Type.Optional(Type.String({ description: "Deprecated legacy Vosk model URL; ignored by Deepgram dictation." })),
 	},
 	{ description: "Deepgram voice dictation language definition." },
 );

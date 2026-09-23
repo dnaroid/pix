@@ -45,16 +45,17 @@ describe("session usage accounting", () => {
 		assert.equal(report.unattributed.totalTokens, 10);
 	});
 
-	it("formats a compact provider/model breakdown without quota or agent labels", () => {
+	it("formats a compact token-only provider/model breakdown without quota, prices, or agent labels", () => {
 		const report = aggregateSessionUsage([
 			{ type: "message", message: { role: "assistant", provider: "openai-codex", model: "gpt-5.6-sol", usage: { totalTokens: 1000, cost: { total: 0.2 } } } },
 			{ type: "usage", kind: "async-subagent", provider: "openai-codex", model: "gpt-5.6-sol", usage: { totalTokens: 500, cost: { total: 0.1 } } },
 			{ type: "usage", kind: "async-subagent", provider: "anthropic", model: "claude-sonnet", usage: { totalTokens: 300, cost: { total: 0.15 } } },
 		]);
 		const text = formatSessionUsageText(report, { formatModel: (provider, model) => `<${provider}:${model}>` });
-		assert.match(text, /^Session usage\n\$0\.450 · 1\.8K tokens/m);
-		assert.match(text, /openai-codex\n\s+<openai-codex:gpt-5\.6-sol>\s+1\.5K · \$0\.300/);
-		assert.match(text, /anthropic\n\s+<anthropic:claude-sonnet>\s+300 · \$0\.150/);
+		assert.match(text, /^Session usage\n1\.8K tokens/m);
+		assert.match(text, /openai-codex\n\s+<openai-codex:gpt-5\.6-sol>\s+1\.5K/);
+		assert.match(text, /anthropic\n\s+<anthropic:claude-sonnet>\s+300/);
+		assert.doesNotMatch(text, /\$/);
 		assert.doesNotMatch(text, /agents|of session|quota|remaining|used/i);
 	});
 

@@ -2960,9 +2960,11 @@ describe("DCP pruning effectiveness", () => {
       waitForIdle: async () => {},
       sessionManager: {
         getBranch: () => [
-          { type: "custom", customType: "dcp-journal", data: { schemaVersion: 1, kind: "init", operationId: "stats-init", previousOperationId: null } },
-          { type: "custom", customType: "dcp-journal", data: { schemaVersion: 1, kind: "delta", operationId: "stats-delta", previousOperationId: "stats-init", nudgeAnchors: state.nudgeAnchors } },
+          { id: "stats-1", parentId: null, type: "custom", customType: "dcp-journal", data: { schemaVersion: 1, kind: "init", operationId: "stats-init", previousOperationId: null } },
+          { id: "stats-2", parentId: "stats-1", type: "custom", customType: "dcp-journal", data: { schemaVersion: 1, kind: "delta", operationId: "stats-delta", previousOperationId: "stats-init", nudgeAnchors: state.nudgeAnchors } },
           {
+            id: "stats-3",
+            parentId: "stats-2",
             type: "custom",
             customType: "dcp-nudge",
             data: {
@@ -2973,6 +2975,8 @@ describe("DCP pruning effectiveness", () => {
             },
           },
           {
+            id: "stats-4",
+            parentId: "stats-3",
             type: "custom",
             customType: "dcp-nudge",
             data: {
@@ -2983,6 +2987,8 @@ describe("DCP pruning effectiveness", () => {
             },
           },
           {
+            id: "stats-5",
+            parentId: "stats-4",
             type: "custom",
             customType: "dcp-nudge",
             data: {
@@ -2993,6 +2999,8 @@ describe("DCP pruning effectiveness", () => {
             },
           },
           {
+            id: "stats-6",
+            parentId: "stats-5",
             type: "custom",
             customType: "dcp-nudge",
             data: {

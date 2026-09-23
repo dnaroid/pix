@@ -70,7 +70,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Enable Auto in the new-session model picker and route the first real prompt before session creation."
+          "description": "Enable Auto in new-draft and live-session model pickers. A live selection opens a new Auto-routed draft; only its first real prompt is routed before session creation."
         },
         "default": {
           "type": "boolean",
@@ -465,14 +465,6 @@
                 "deepgramLanguage": {
                   "type": "string",
                   "description": "Deepgram language code. Defaults to the language map key."
-                },
-                "dirName": {
-                  "type": "string",
-                  "description": "Deprecated legacy Vosk model directory name; ignored by Deepgram dictation."
-                },
-                "url": {
-                  "type": "string",
-                  "description": "Deprecated legacy Vosk model URL; ignored by Deepgram dictation."
                 }
               },
               "description": "Deepgram voice dictation language definition."

@@ -81,6 +81,7 @@ const MAX_DESKTOP_WATCH_STATE_BYTES: u64 = 4 * 1024;
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PROJECT_MARKDOWN_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static WORKSPACE_CONFIG_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static GIT_CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
@@ -629,7 +630,7 @@ fn resolve_deepgram_runtime_config(
         .and_then(|config| config.get("dictation"))
         .and_then(serde_json::Value::as_object);
     let api_key = dictation
-        .and_then(|value| value.get("apiKey").or_else(|| value.get("deepgramApiKey")))
+        .and_then(|value| value.get("apiKey"))
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -640,39 +641,19 @@ fn resolve_deepgram_runtime_config(
                 .to_owned()
         })?;
     let model = dictation
-        .and_then(|value| value.get("model").or_else(|| value.get("deepgramModel")))
+        .and_then(|value| value.get("model"))
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("nova-3")
         .to_owned();
-    let selected_language = dictation
-        .and_then(|value| {
-            value
-                .get("language")
-                .or_else(|| value.get("selectedLanguage"))
-                .or_else(|| value.get("currentLanguage"))
-        })
+    let language = dictation
+        .and_then(|value| value.get("language"))
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("en")
         .to_lowercase();
-    let language = dictation
-        .and_then(|value| value.get("languages"))
-        .and_then(serde_json::Value::as_object)
-        .and_then(|languages| languages.get(&selected_language))
-        .and_then(serde_json::Value::as_object)
-        .and_then(|language| {
-            language
-                .get("deepgramLanguage")
-                .or_else(|| language.get("language"))
-        })
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(&selected_language)
-        .to_owned();
 
     Ok(DeepgramRuntimeConfig {
         api_key,
@@ -1367,17 +1348,8 @@ async fn cache_task_attachment(
     let bytes = bytes.clone();
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&workspace))?;
-        let project_dir = root.join(".pi");
-        if !project_dir.exists() {
-            fs::create_dir(&project_dir)
-                .map_err(|error| format!("failed to create {}: {error}", project_dir.display()))?;
-        }
-        let project_dir = canonical_project_directory(&root, &project_dir)?;
+        let project_dir = require_initialized_project_pi(&root)?;
         let directory = project_dir.join("task-attachments");
-        if !directory.exists() {
-            fs::create_dir(&directory)
-                .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
-        }
         let directory = canonical_project_directory(&root, &directory)?;
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1412,17 +1384,8 @@ async fn persist_task_attachment(
         }
 
         let root = canonical_workspace(Path::new(&workspace))?;
-        let project_dir = root.join(".pi");
-        if !project_dir.exists() {
-            fs::create_dir(&project_dir)
-                .map_err(|error| format!("failed to create {}: {error}", project_dir.display()))?;
-        }
-        let project_dir = canonical_project_directory(&root, &project_dir)?;
+        let project_dir = require_initialized_project_pi(&root)?;
         let directory = project_dir.join("task-attachments");
-        if !directory.exists() {
-            fs::create_dir(&directory)
-                .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
-        }
         let directory = canonical_project_directory(&root, &directory)?;
 
         if source.starts_with(&directory) {
@@ -2196,72 +2159,17 @@ fn write_project_markdown_from(
     }
 
     let root = canonical_workspace(workspace)?;
-    let project_dir_path = root.join(".pi");
-    if !project_dir_path.exists() {
-        fs::create_dir(&project_dir_path)
-            .map_err(|error| format!("failed to create {}: {error}", project_dir_path.display()))?;
-    }
-    let project_dir = canonical_project_directory(&root, &project_dir_path)?;
-
-    let target = if normalized == ".pi/TODO.md" {
-        project_dir.join("TODO.md")
-    } else {
-        let plans_dir_path = project_dir.join("plans");
-        if !plans_dir_path.exists() {
-            fs::create_dir(&plans_dir_path).map_err(|error| {
-                format!("failed to create {}: {error}", plans_dir_path.display())
-            })?;
-        }
-        let plans_dir = fs::canonicalize(&plans_dir_path)
-            .map_err(|error| format!("failed to resolve {}: {error}", plans_dir_path.display()))?;
-        if !plans_dir.starts_with(&project_dir) || !plans_dir.is_dir() {
-            return Err(".pi/plans must stay inside the workspace".to_owned());
-        }
-        let plan_relative = Path::new(&normalized)
-            .strip_prefix(Path::new(".pi/plans"))
-            .map_err(|_| "invalid plan path".to_owned())?;
-        let target = plans_dir.join(plan_relative);
-        let parent = target
-            .parent()
-            .ok_or_else(|| "plan path has no parent directory".to_owned())?;
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-        let canonical_parent = fs::canonicalize(parent)
-            .map_err(|error| format!("failed to resolve {}: {error}", parent.display()))?;
-        if !canonical_parent.starts_with(&plans_dir) {
-            return Err("plan path resolves outside .pi/plans".to_owned());
-        }
-        canonical_parent.join(
-            target
-                .file_name()
-                .ok_or_else(|| "plan path has no file name".to_owned())?,
-        )
-    };
-
-    if target.exists() {
-        if fs::symlink_metadata(&target)
-            .map_err(|error| format!("failed to inspect {}: {error}", target.display()))?
-            .file_type()
-            .is_symlink()
-        {
-            return Err(format!("{} cannot be a symbolic link", normalized));
-        }
-        let canonical = fs::canonicalize(&target)
-            .map_err(|error| format!("failed to resolve {}: {error}", target.display()))?;
-        if !canonical.starts_with(&project_dir) {
-            return Err("project Markdown resolves outside the workspace".to_owned());
-        }
-        if !fs::metadata(&canonical)
-            .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?
-            .is_file()
-        {
-            return Err(format!("{} is not a file", normalized));
-        }
-    }
-
-    fs::write(&target, content.as_bytes())
+    let project_dir = require_initialized_project_pi(&root)?;
+    let plan_relative = (normalized != ".pi/TODO.md")
+        .then(|| Path::new(&normalized).strip_prefix(Path::new(".pi/plans")))
+        .transpose()
+        .map_err(|_| "invalid plan path".to_owned())?;
+    write_project_markdown_atomically(&project_dir, plan_relative, content.as_bytes())
         .map_err(|error| format!("failed to save {normalized}: {error}"))?;
-    read_project_file_from(&root, relative_path, MAX_PROJECT_MARKDOWN_BYTES)
+    Ok(ProjectFilePreview {
+        path: normalized,
+        content: content.to_owned(),
+    })
 }
 
 fn write_project_workspace_config_from(
@@ -7164,12 +7072,7 @@ fn normalize_jsonc(source: &str) -> Result<String, String> {
 fn write_project_tasks_to(workspace: &Path, document: &ProjectTaskDocument) -> Result<(), String> {
     validate_task_document(document)?;
     let root = canonical_workspace(workspace)?;
-    let directory_path = root.join(".pi");
-    if !directory_path.exists() {
-        fs::create_dir(&directory_path)
-            .map_err(|error| format!("failed to create {}: {error}", directory_path.display()))?;
-    }
-    let directory = canonical_project_directory(&root, &directory_path)?;
+    let directory = require_initialized_project_pi(&root)?;
     let target = directory.join("tasks.jsonc");
     if target.exists() {
         let canonical = fs::canonicalize(&target)
@@ -7358,24 +7261,63 @@ fn canonical_project_directory(root: &Path, directory: &Path) -> Result<PathBuf,
 
 fn project_pi_initialized_from(workspace: &Path) -> Result<bool, String> {
     let root = canonical_workspace(workspace)?;
+    Ok(initialized_project_pi(&root)?.is_some())
+}
+
+/// The scaffold itself is the initialization marker.  A pre-existing `.pi`
+/// directory (including one containing unrelated Pi configuration) is not an
+/// initialized Desktop project-state directory.
+fn initialized_project_pi(root: &Path) -> Result<Option<PathBuf>, String> {
     let project_directory = root.join(".pi");
-    if !project_directory.exists() {
-        return Ok(false);
-    }
-    let metadata = fs::symlink_metadata(&project_directory)
-        .map_err(|error| format!("failed to inspect {}: {error}", project_directory.display()))?;
+    let metadata = match fs::symlink_metadata(&project_directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect {}: {error}",
+                project_directory.display()
+            ))
+        }
+    };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(".pi must be a project-owned directory".to_owned());
     }
-    canonical_project_directory(&root, &project_directory)?;
-    Ok(true)
+    let project_directory = canonical_project_directory(root, &project_directory)?;
+    for name in ["plans", "task-attachments"] {
+        let directory = project_directory.join(name);
+        let metadata = match fs::symlink_metadata(&directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect {}: {error}",
+                    directory.display()
+                ))
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(format!(".pi/{name} must be a project-owned directory"));
+        }
+        let canonical = fs::canonicalize(&directory)
+            .map_err(|error| format!("failed to resolve {}: {error}", directory.display()))?;
+        if !canonical.starts_with(&project_directory) {
+            return Err(format!(".pi/{name} resolves outside .pi"));
+        }
+    }
+    if !inspect_project_tasks_file(&project_directory)? {
+        return Ok(None);
+    }
+    Ok(Some(project_directory))
 }
 
-fn ensure_project_pi_subdirectory(
-    root: &Path,
-    project_directory: &Path,
-    name: &str,
-) -> Result<(), String> {
+fn require_initialized_project_pi(root: &Path) -> Result<PathBuf, String> {
+    initialized_project_pi(root)?.ok_or_else(|| {
+        "project state is not initialized; initialize project Registry before saving project state"
+            .to_owned()
+    })
+}
+
+fn ensure_project_pi_subdirectory(project_directory: &Path, name: &str) -> Result<(), String> {
     let directory = project_directory.join(name);
     match fs::create_dir(&directory) {
         Ok(()) => {}
@@ -7389,13 +7331,34 @@ fn ensure_project_pi_subdirectory(
     }
     let canonical = fs::canonicalize(&directory)
         .map_err(|error| format!("failed to resolve {}: {error}", directory.display()))?;
-    if !canonical.starts_with(root) {
-        return Err(format!(".pi/{name} resolves outside the workspace"));
+    if !canonical.starts_with(project_directory) {
+        return Err(format!(".pi/{name} resolves outside .pi"));
     }
     Ok(())
 }
 
+fn inspect_project_tasks_file(project_directory: &Path) -> Result<bool, String> {
+    let target = project_directory.join("tasks.jsonc");
+    let metadata = match fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("failed to inspect {}: {error}", target.display())),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(".pi/tasks.jsonc must be a project-owned regular file".to_owned());
+    }
+    let canonical = fs::canonicalize(&target)
+        .map_err(|error| format!("failed to resolve {}: {error}", target.display()))?;
+    if !canonical.starts_with(project_directory) {
+        return Err(".pi/tasks.jsonc resolves outside .pi".to_owned());
+    }
+    Ok(true)
+}
+
 fn initialize_project_tasks_file(project_directory: &Path) -> Result<(), String> {
+    if inspect_project_tasks_file(project_directory)? {
+        return Ok(());
+    }
     let target = project_directory.join("tasks.jsonc");
     let mut serialized = serde_json::to_vec_pretty(&empty_task_document())
         .map_err(|error| format!("failed to encode .pi/tasks.jsonc: {error}"))?;
@@ -7429,7 +7392,13 @@ fn initialize_project_tasks_file(project_directory: &Path) -> Result<(), String>
         drop(file);
         match fs::hard_link(&temporary, &target) {
             Ok(()) => sync_directory(project_directory)?,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Another initializer may have won the publication race. It is
+                // only success after inspecting that final path; a symlink,
+                // directory, or escaped target must never be accepted merely
+                // because it already exists.
+                inspect_project_tasks_file(project_directory)?;
+            }
             Err(error) => {
                 return Err(format!(
                     "failed to publish project task skeleton {}: {error}",
@@ -7463,10 +7432,231 @@ fn initialize_project_pi_from(workspace: &Path) -> Result<(), String> {
     }
     let project_directory = canonical_project_directory(&root, &project_directory)?;
 
-    ensure_project_pi_subdirectory(&root, &project_directory, "plans")?;
-    ensure_project_pi_subdirectory(&root, &project_directory, "task-attachments")?;
+    ensure_project_pi_subdirectory(&project_directory, "plans")?;
+    ensure_project_pi_subdirectory(&project_directory, "task-attachments")?;
     initialize_project_tasks_file(&project_directory)?;
+    // Do not report success based only on the publication attempt. A competing
+    // initializer or filesystem mutation may have removed a scaffold member
+    // after it was inspected, so success requires one final complete scaffold
+    // inspection.
+    if initialized_project_pi(&root)?.is_none() {
+        return Err("project initialization did not publish a complete scaffold".to_owned());
+    }
     Ok(())
+}
+
+#[cfg(unix)]
+fn open_project_markdown_directory(project_directory: &Path) -> Result<fs::File, String> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt, os::unix::io::FromRawFd};
+
+    let path = CString::new(project_directory.as_os_str().as_bytes())
+        .map_err(|_| ".pi path contains an unsupported NUL byte".to_owned())?;
+    // SAFETY: `path` is NUL-terminated and remains alive for the call.
+    let fd = unsafe {
+        libc::open(
+            path.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        return Err(format!(
+            "failed to open .pi without following links: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: `fd` is a newly-owned descriptor returned by `open`.
+    Ok(unsafe { fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_project_markdown_subdirectory(
+    parent: &fs::File,
+    name: &std::ffi::OsStr,
+    create: bool,
+) -> Result<fs::File, String> {
+    use std::{
+        ffi::CString,
+        os::unix::ffi::OsStrExt,
+        os::unix::io::{AsRawFd, FromRawFd},
+    };
+
+    let name = CString::new(name.as_bytes())
+        .map_err(|_| "project Markdown path contains an unsupported NUL byte".to_owned())?;
+    if create {
+        // A concurrent creator is fine; the no-follow open below verifies its
+        // actual object type without traversing a link.
+        // SAFETY: descriptors and string are valid for this syscall.
+        let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
+        if result != 0
+            && std::io::Error::last_os_error().kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(format!(
+                "failed to create plan directory: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    // SAFETY: descriptors and string are valid for this syscall.
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        return Err(format!(
+            "project Markdown directory is not a project-owned directory: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: `fd` is a newly-owned descriptor returned by `openat`.
+    Ok(unsafe { fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn write_project_markdown_atomically(
+    project_directory: &Path,
+    plan_relative: Option<&Path>,
+    content: &[u8],
+) -> Result<(), String> {
+    use std::{
+        ffi::CString,
+        os::unix::{
+            ffi::OsStrExt,
+            io::{AsRawFd, FromRawFd},
+        },
+    };
+
+    let mut directory = open_project_markdown_directory(project_directory)?;
+    let target = if let Some(plan_relative) = plan_relative {
+        directory =
+            open_project_markdown_subdirectory(&directory, std::ffi::OsStr::new("plans"), false)?;
+        let components = plan_relative.components().collect::<Vec<_>>();
+        let (file_name, parents) = components
+            .split_last()
+            .ok_or_else(|| "plan path has no file name".to_owned())?;
+        for component in parents {
+            let Component::Normal(name) = component else {
+                return Err("plan path must contain only normal path components".to_owned());
+            };
+            directory = open_project_markdown_subdirectory(&directory, name, true)?;
+        }
+        let Component::Normal(name) = file_name else {
+            return Err("plan path has no file name".to_owned());
+        };
+        name.to_os_string()
+    } else {
+        std::ffi::OsString::from("TODO.md")
+    };
+    let target = CString::new(target.as_bytes())
+        .map_err(|_| "project Markdown path contains an unsupported NUL byte".to_owned())?;
+    let sequence = PROJECT_MARKDOWN_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = CString::new(format!(".markdown.{}.{}.tmp", std::process::id(), sequence))
+        .expect("generated temporary Markdown name has no NUL byte");
+    // SAFETY: descriptors and strings are valid for this syscall.
+    let temporary_fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            temporary.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            0o600,
+        )
+    };
+    if temporary_fd < 0 {
+        return Err(format!(
+            "failed to create Markdown temporary file: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: `temporary_fd` is a newly-owned descriptor returned by `openat`.
+    let mut temporary_file = unsafe { fs::File::from_raw_fd(temporary_fd) };
+    let result = (|| {
+        temporary_file
+            .write_all(content)
+            .map_err(|error| format!("failed to write Markdown: {error}"))?;
+        temporary_file
+            .sync_all()
+            .map_err(|error| format!("failed to flush Markdown: {error}"))?;
+        drop(temporary_file);
+        // `renameat` replaces the directory entry itself. It never follows a
+        // target symlink, including one installed after the temporary write.
+        // SAFETY: descriptors and strings are valid for this syscall.
+        if unsafe {
+            libc::renameat(
+                directory.as_raw_fd(),
+                temporary.as_ptr(),
+                directory.as_raw_fd(),
+                target.as_ptr(),
+            )
+        } != 0
+        {
+            return Err(format!(
+                "failed to atomically replace Markdown: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        directory
+            .sync_all()
+            .map_err(|error| format!("failed to flush Markdown directory: {error}"))
+    })();
+    if result.is_err() {
+        // SAFETY: descriptors and string are valid; cleanup failure is secondary.
+        unsafe { libc::unlinkat(directory.as_raw_fd(), temporary.as_ptr(), 0) };
+    }
+    result
+}
+
+#[cfg(not(unix))]
+fn write_project_markdown_atomically(
+    project_directory: &Path,
+    plan_relative: Option<&Path>,
+    content: &[u8],
+) -> Result<(), String> {
+    let directory = match plan_relative {
+        Some(relative) => {
+            let target = project_directory.join("plans").join(relative);
+            let parent = target
+                .parent()
+                .ok_or_else(|| "plan path has no parent directory".to_owned())?;
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("failed to create plan directory: {error}"))?;
+            parent.to_path_buf()
+        }
+        None => project_directory.to_path_buf(),
+    };
+    let target = match plan_relative {
+        Some(relative) => directory.join(
+            relative
+                .file_name()
+                .ok_or_else(|| "plan path has no file name".to_owned())?,
+        ),
+        None => directory.join("TODO.md"),
+    };
+    let temporary = directory.join(format!(
+        ".markdown.{}.{}.tmp",
+        std::process::id(),
+        PROJECT_MARKDOWN_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|error| format!("failed to create Markdown temporary file: {error}"))?;
+    let result = (|| {
+        file.write_all(content)
+            .map_err(|error| format!("failed to write Markdown: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("failed to flush Markdown: {error}"))?;
+        drop(file);
+        fs::rename(&temporary, &target)
+            .map_err(|error| format!("failed to atomically replace Markdown: {error}"))?;
+        sync_directory(&directory)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
 }
 
 fn empty_task_document() -> ProjectTaskDocument {
@@ -8716,6 +8906,7 @@ mod tests {
     #[test]
     fn lists_and_edits_project_markdown_documents() {
         let workspace = temporary_workspace("project-documents");
+        initialize_project_pi_from(&workspace).expect("initialize project state");
         fs::create_dir_all(workspace.join(".pi/plans/releases")).expect("create plans directory");
         fs::write(workspace.join(".pi/plans/alpha.md"), "# Alpha\n").expect("write plan");
         fs::write(workspace.join(".pi/plans/releases/v2.md"), "# V2\n").expect("write nested plan");
@@ -9410,9 +9601,6 @@ mod tests {
                 "apiKey": " dg-config-key ",
                 "model": "nova-3",
                 "language": "ru",
-                "languages": {
-                  "ru": { "deepgramLanguage": "legacy-ru" },
-                },
               },
             }"#,
         )
@@ -9422,7 +9610,7 @@ mod tests {
             .expect("resolve config");
         assert_eq!(config.api_key, "dg-config-key");
         assert_eq!(config.model, "nova-3");
-        assert_eq!(config.language, "legacy-ru");
+        assert_eq!(config.language, "ru");
 
         fs::write(
             &path,
@@ -9646,6 +9834,7 @@ mod tests {
     fn writes_and_reads_a_valid_task_document() {
         let workspace = temporary_workspace("task-roundtrip");
         let expected = sample_task_document();
+        initialize_project_pi_from(&workspace).expect("initialize project state");
         write_project_tasks_to(&workspace, &expected).expect("write tasks");
         assert!(workspace.join(".pi/tasks.jsonc").is_file());
         assert!(!workspace.join(".pi/tasks.json").exists());
@@ -9680,6 +9869,110 @@ mod tests {
             existing
         );
 
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initialization_rejects_existing_symlinks_and_non_regular_scaffold_entries() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("project-pi-initialize-unsafe");
+        let outside = temporary_workspace("project-pi-initialize-unsafe-outside");
+
+        symlink(&outside, workspace.join(".pi")).expect("create .pi symlink");
+        assert!(initialize_project_pi_from(&workspace)
+            .expect_err(".pi symlink must be rejected")
+            .contains("project-owned directory"));
+        fs::remove_file(workspace.join(".pi")).expect("remove .pi symlink");
+
+        fs::create_dir(workspace.join(".pi")).expect("create project directory");
+        symlink(&outside, workspace.join(".pi/plans")).expect("create plans symlink");
+        assert!(initialize_project_pi_from(&workspace)
+            .expect_err("plans symlink must be rejected")
+            .contains(".pi/plans must be a project-owned directory"));
+        fs::remove_file(workspace.join(".pi/plans")).expect("remove plans symlink");
+
+        fs::create_dir(workspace.join(".pi/plans")).expect("create plans directory");
+        symlink(&outside, workspace.join(".pi/task-attachments"))
+            .expect("create attachments symlink");
+        assert!(initialize_project_pi_from(&workspace)
+            .expect_err("attachments symlink must be rejected")
+            .contains(".pi/task-attachments must be a project-owned directory"));
+        fs::remove_file(workspace.join(".pi/task-attachments"))
+            .expect("remove attachments symlink");
+
+        fs::create_dir(workspace.join(".pi/task-attachments"))
+            .expect("create attachments directory");
+        fs::write(outside.join("tasks.jsonc"), "outside").expect("write outside tasks");
+        symlink(
+            outside.join("tasks.jsonc"),
+            workspace.join(".pi/tasks.jsonc"),
+        )
+        .expect("create task file symlink");
+        assert!(initialize_project_pi_from(&workspace)
+            .expect_err("task file symlink must be rejected")
+            .contains("project-owned regular file"));
+        assert_eq!(
+            fs::read_to_string(outside.join("tasks.jsonc")).expect("read outside tasks"),
+            "outside"
+        );
+        fs::remove_file(workspace.join(".pi/tasks.jsonc")).expect("remove task symlink");
+
+        fs::create_dir(workspace.join(".pi/tasks.jsonc")).expect("create task directory");
+        assert!(initialize_project_pi_from(&workspace)
+            .expect_err("task directory must be rejected")
+            .contains("project-owned regular file"));
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside temporary workspace");
+    }
+
+    #[test]
+    fn project_markdown_save_requires_explicit_project_initialization() {
+        let workspace = temporary_workspace("project-documents-initialize");
+
+        for path in [Path::new(".pi/TODO.md"), Path::new(".pi/plans/release.md")] {
+            let error = write_project_markdown_from(&workspace, path, "# Draft\n")
+                .err()
+                .expect("saving before initialization must fail");
+            assert!(error.contains("initialize project Registry"));
+            assert!(
+                !workspace.join(".pi").exists(),
+                "a direct project-document save must not create .pi"
+            );
+        }
+
+        initialize_project_pi_from(&workspace).expect("initialize project state");
+        write_project_markdown_from(&workspace, Path::new(".pi/TODO.md"), "# Draft\n")
+            .expect("save TODO after initialization");
+        write_project_markdown_from(&workspace, Path::new(".pi/plans/release.md"), "# Plan\n")
+            .expect("save plan after initialization");
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn bare_pi_or_pix_configuration_is_not_project_state_initialization() {
+        let workspace = temporary_workspace("project-pi-explicit-scaffold");
+        fs::create_dir(workspace.join(".pi")).expect("create bare .pi directory");
+        fs::write(workspace.join(".pi/pix.jsonc"), "{}\n").expect("write unrelated Pix config");
+
+        assert!(!project_pi_initialized_from(&workspace).expect("inspect bare project state"));
+        for path in [Path::new(".pi/TODO.md"), Path::new(".pi/plans/release.md")] {
+            assert!(write_project_markdown_from(&workspace, path, "# Draft\n")
+                .err()
+                .expect("document save must require the explicit scaffold")
+                .contains("initialize project Registry"));
+        }
+        assert!(write_project_tasks_to(&workspace, &sample_task_document())
+            .expect_err("task save must require the explicit scaffold")
+            .contains("initialize project Registry"));
+        assert!(!workspace.join(".pi/TODO.md").exists());
+        assert!(!workspace.join(".pi/plans").exists());
+
+        initialize_project_pi_from(&workspace).expect("initialize explicit scaffold");
+        assert!(project_pi_initialized_from(&workspace).expect("inspect initialized project state"));
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
@@ -9737,10 +10030,59 @@ mod tests {
     }
 
     #[test]
+    fn initialization_does_not_accept_a_missing_or_nonregular_task_marker() {
+        let workspace = temporary_workspace("project-pi-initialize-marker-race");
+        fs::create_dir(workspace.join(".pi")).expect("create project directory");
+        fs::create_dir(workspace.join(".pi/plans")).expect("create plans directory");
+        fs::create_dir(workspace.join(".pi/task-attachments"))
+            .expect("create attachment directory");
+        fs::create_dir(workspace.join(".pi/tasks.jsonc"))
+            .expect("race installs a directory at task marker");
+
+        assert!(initialize_project_pi_from(&workspace)
+            .expect_err("a raced non-regular task marker must fail initialization")
+            .contains("project-owned regular file"));
+        assert!(project_pi_initialized_from(&workspace).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markdown_save_atomically_replaces_a_raced_target_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("project-markdown-symlink-replace");
+        let outside = temporary_workspace("project-markdown-symlink-replace-outside");
+        initialize_project_pi_from(&workspace).expect("initialize project state");
+        let outside_target = outside.join("outside.md");
+        fs::write(&outside_target, "outside\n").expect("write outside target");
+        let todo = workspace.join(".pi/TODO.md");
+        symlink(&outside_target, &todo).expect("install raced TODO symlink");
+
+        write_project_markdown_from(&workspace, Path::new(".pi/TODO.md"), "# Safe\n")
+            .expect("atomically replace symlink rather than following it");
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("read outside target"),
+            "outside\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&todo).expect("read replacement"),
+            "# Safe\n"
+        );
+        assert!(!fs::symlink_metadata(&todo)
+            .expect("inspect replacement")
+            .file_type()
+            .is_symlink());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside workspace");
+    }
+
+    #[test]
     fn task_writes_prune_only_unreferenced_project_owned_attachments() {
         let workspace = temporary_workspace("task-attachment-prune");
+        initialize_project_pi_from(&workspace).expect("initialize project state");
         let attachments = workspace.join(".pi/task-attachments");
-        fs::create_dir_all(&attachments).expect("create task attachments directory");
         let kept = attachments.join("100-1-kept.png");
         let orphan = attachments.join("100-2-orphan.png");
         fs::write(&kept, b"kept").expect("write kept task attachment");

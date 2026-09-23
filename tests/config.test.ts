@@ -198,8 +198,8 @@ describe("config helpers", () => {
 				"apiKey": "dg-user-config-key",
 				"language": "ru",
 				"languages": {
-					"en": { "dirName": "vosk-model-small-en-us-0.15", "url": "https://example.test/en.zip", "label": "English" },
-					"ru": { "model": "vosk-model-small-ru-0.22", "url": "https://example.test/ru.zip", "label": "Russian" },
+					"en": { "deepgramLanguage": "en", "label": "English" },
+					"ru": { "deepgramLanguage": "ru", "label": "Russian" },
 					"bad": null
 				}
 			}
@@ -231,7 +231,6 @@ describe("config helpers", () => {
 		assert.equal(loaded.ignoreContextFiles, false);
 		assert.equal(loaded.maxProjectSessions, 50);
 		assert.deepEqual(Object.keys(loaded.dictation.languages), ["en", "ru"]);
-		assert.equal(loaded.dictation.languages.ru?.dirName, "vosk-model-small-ru-0.22");
 		assert.equal(loaded.dictation.languages.ru?.deepgramLanguage, "ru");
 
 		writeFileSync(testConfigPath, `{
@@ -301,6 +300,28 @@ describe("config helpers", () => {
 		assert.equal(loaded.ignoreContextFiles, true);
 		assert.equal(loaded.maxProjectSessions, 50);
 		assert.equal(loaded.dictation.apiKey, "dg-user-key");
+	});
+
+	it("accepts only the documented dictation shape", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{
+			"voice": { "apiKey": "dg-unsupported-root" },
+			"dictation": {
+				"deepgramApiKey": "dg-unsupported-key",
+				"deepgramModel": "unsupported-model",
+				"selectedLanguage": "ru",
+				"models": { "ru": { "language": "ru" } },
+				"languages": { "ru": { "language": "unsupported-remap", "modelDir": "ignored" } }
+			}
+		}`);
+
+		const loaded = loadPixConfig();
+		assert.equal(loaded.dictation.apiKey, undefined);
+		assert.equal(loaded.dictation.model, undefined);
+		assert.equal(loaded.dictation.language, undefined);
+		assert.deepEqual(loaded.dictation.languages, {
+			ru: { label: "RU", deepgramLanguage: "ru" },
+		});
 	});
 
 	it("persists project ignoreContextFiles in JSONC config", () => {
@@ -459,8 +480,8 @@ describe("config helpers", () => {
 			// keep comments
 			"dictation": {
 				"languages": {
-					"en": { "dirName": "en-model", "url": "https://example.test/en.zip", "label": "English" },
-					"ru": { "dirName": "ru-model", "url": "https://example.test/ru.zip", "label": "Russian" }
+					"en": { "deepgramLanguage": "en", "label": "English" },
+					"ru": { "deepgramLanguage": "ru", "label": "Russian" }
 				}
 			}
 		}`);
@@ -479,8 +500,8 @@ describe("config helpers", () => {
 		const source = `{
 			"dictation": {
 				"languages": {
-					"en": { "dirName": "en-model", "url": "https://example.test/en.zip" }
-					// ,"ru": { "dirName": "ru-model", "url": "https://example.test/ru.zip" }
+					"en": { "deepgramLanguage": "en", "label": "English" }
+					// ,"ru": { "deepgramLanguage": "ru", "label": "Russian" }
 				}
 			}
 		}`;

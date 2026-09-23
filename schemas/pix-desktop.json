@@ -65,7 +65,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Enable Auto for new Desktop drafts and route the first real prompt before session creation."
+          "description": "Enable Auto in new-draft and live-session Desktop pickers. A live selection opens a new Auto-routed draft; only its first real prompt is routed before session creation."
         },
         "default": {
           "type": "boolean",

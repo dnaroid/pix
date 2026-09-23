@@ -78,7 +78,7 @@ export function withFinalSkillCommands(
 	commands: readonly { name: string; source: string }[],
 ): ContextInventoryState | undefined {
 	if (!state) return undefined;
-	const skillsReadable = state.tools.includes("read") || state.tools.includes("bash");
+	const skillsReadable = state.tools.some(isSkillFileAccessTool);
 	const skills = skillsReadable
 		? [...new Set(commands
 			.filter((command) => command.source === "skill")
@@ -86,6 +86,19 @@ export function withFinalSkillCommands(
 			.filter(Boolean))].sort((left, right) => left.localeCompare(right))
 		: [];
 	return { ...state, skills };
+}
+
+/** Active tools that can load a discovered SKILL.md file. */
+export function isSkillFileAccessTool(toolName: string): boolean {
+	switch (toolName.trim().toLowerCase()) {
+		case "read":
+		case "bash":
+		case "shell":
+		case "shell_command":
+			return true;
+		default:
+			return false;
+	}
 }
 
 function stringList(value: unknown): string[] | undefined {

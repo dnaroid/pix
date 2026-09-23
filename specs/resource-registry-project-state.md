@@ -95,6 +95,9 @@ Those portable markers are not written to the local project task file.
     creates `.pi/tasks.jsonc` as an empty version-one task document plus
     `.pi/plans/` and `.pi/task-attachments/`, then reloads project tasks and
     documents. Remote Registry setup remains a separate action.
+15. Saving a TODO or plan never creates a missing `.pi` directory. Those
+    project-document writes require the explicit local initialization action,
+    so a document edit cannot silently create incomplete Registry state.
 
 ## Compatibility
 
@@ -121,10 +124,23 @@ Those portable markers are not written to the local project task file.
 - The sidebar's cheap Registry task check hashes the same normalized task bundle
   as Registry provenance, including referenced attachment bytes, so a completed
   background push can converge back to a clean local indicator.
-- Desktop project-state initialization is explicit and idempotent. Existing
-  `.pi/tasks.jsonc` content is never overwritten, and `.pi` plus scaffold
-  subdirectories must be regular project-owned directories rather than symbolic
-  links escaping the workspace.
+- Desktop project-state initialization is explicit and idempotent. Its marker is
+  the complete scaffold: a regular `.pi/tasks.jsonc` plus project-owned regular
+  `.pi/plans/` and `.pi/task-attachments/` directories. A bare `.pi` directory
+  or unrelated `.pi/pix.jsonc` is not initialized state. Existing task content
+  is never overwritten, and `.pi` plus scaffold subdirectories must be regular
+  project-owned directories rather than symbolic links escaping the workspace.
+- Initialization inspects an already-existing `tasks.jsonc` before accepting a
+  concurrent publish race: it must be a regular file canonically inside `.pi`.
+  An existing symbolic link, directory, or escaping target is an error, never
+  an idempotent-success result.
+- Desktop TODO and plan saves never bootstrap a missing `.pi`; explicit
+  initialization is the only Desktop project-document path that creates it.
+  Task-document and task-attachment saves likewise require the complete
+  explicit-initialization scaffold.
+- Markdown saves write and flush a temporary file through no-follow directory
+  handles, then atomically replace the destination entry. A destination symlink
+  installed before or during the save is replaced rather than followed.
 - Concurrent Desktop initializers use create-or-inspect directory operations and
   publish the task skeleton only after it is fully written and flushed. A
   competing initializer preserves the already-published task document; it never
@@ -147,8 +163,11 @@ Those portable markers are not written to the local project task file.
   attachment removal, conflicts, and existing project-state/TUI behavior.
 - Desktop Rust task persistence tests cover reference-based local attachment
   pruning after successful task-document writes, idempotent `.pi` skeleton
-  initialization without overwriting an existing task document, and concurrent
-  initialization with atomic task-skeleton publication.
+  initialization without overwriting an existing task document, concurrent
+  initialization with atomic task-skeleton publication, rejection of bare
+  `.pi`/`.pi/pix.jsonc` initialization bypasses and nonregular scaffold races,
+  Unix symlink/nonregular scaffold rejection, symlink-safe Markdown replacement,
+  and document saves that require explicit initialization.
 - Desktop coordinator tests cover debounce, scope coalescing, busy deferral,
   changes during an in-flight push, retained error state, and foreground-lock
   independence.

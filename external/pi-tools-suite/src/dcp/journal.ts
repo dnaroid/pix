@@ -535,6 +535,12 @@ export async function readDcpJournalBranch(ctx: ExtensionContext): Promise<unkno
       throw new DcpJournalError("DCP branch changed during history read; rebuild context");
     }
     if (!Array.isArray(entries)) throw new DcpJournalError("DCP full branch is unavailable");
+    // A stable leaf alone is not enough: malformed interior links or duplicate
+    // IDs can leave the tip unchanged while making the returned history unsafe
+    // to replay. Validate the complete root-to-tip read before returning it.
+    if (!indexBranchParents(entries, true)) {
+      throw new DcpJournalError("DCP full branch has invalid parent links");
+    }
     // A presentation cursor is not a complete SDK branch, even if it contains
     // recent users or journal deltas. Never silently initialize from that tail.
     if (entries[0]?.parentId != null) throw new DcpJournalError("DCP received an incomplete branch (presentation tail)");

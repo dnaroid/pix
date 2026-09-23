@@ -99,9 +99,6 @@ export type DictationLanguageModelConfig = {
 	label: string;
 	/** Deepgram language code. Defaults to the language map key. */
 	deepgramLanguage?: string;
-	/** Deprecated Vosk model fields kept only for config compatibility. */
-	dirName?: string;
-	url?: string;
 };
 
 export type DictationConfig = {
@@ -462,10 +459,10 @@ function extractDictationConfig(
 	options: { allowApiKey?: boolean } = {},
 ): DictationConfig | undefined {
 	if (!isPlainObject(raw)) return undefined;
-	const dictation = raw.dictation ?? raw.voiceInput ?? raw.voice;
+	const dictation = raw.dictation;
 	if (!isPlainObject(dictation)) return undefined;
 
-	const configuredLanguages = dictation.languages ?? dictation.models;
+	const configuredLanguages = dictation.languages;
 	const replacesLanguages = isPlainObject(configuredLanguages);
 	let languages = fallback.languages;
 	if (replacesLanguages) {
@@ -475,35 +472,27 @@ function extractDictationConfig(
 			if (!key || !isPlainObject(value)) continue;
 
 			const label = nonEmptyString(value.label) ?? key.toUpperCase();
-			const deepgramLanguage = nonEmptyString(value.deepgramLanguage)
-				?? nonEmptyString(value.language)
-				?? key;
-			const dirName = nonEmptyString(value.dirName) ?? nonEmptyString(value.model) ?? nonEmptyString(value.modelDir);
-			const url = nonEmptyString(value.url);
+			const deepgramLanguage = nonEmptyString(value.deepgramLanguage) ?? key;
 
 			parsedLanguages[key] = {
 				label,
 				deepgramLanguage,
-				...(dirName ? { dirName } : {}),
-				...(url ? { url } : {}),
 			};
 		}
 		if (Object.keys(parsedLanguages).length > 0) languages = parsedLanguages;
 	}
 
-	const configuredLanguage = normalizeDictationLanguage(dictation.language)
-		?? normalizeDictationLanguage(dictation.selectedLanguage)
-		?? normalizeDictationLanguage(dictation.currentLanguage);
+	const configuredLanguage = normalizeDictationLanguage(dictation.language);
 	const selectedLanguage = configuredLanguage && languages[configuredLanguage]
 		? configuredLanguage
 		: !replacesLanguages && fallback.language && languages[fallback.language]
 			? fallback.language
 			: undefined;
-	const configuredModel = nonEmptyString(dictation.model) ?? nonEmptyString(dictation.deepgramModel);
+	const configuredModel = nonEmptyString(dictation.model);
 	const model = configuredModel ?? (replacesLanguages ? undefined : fallback.model);
 	const apiKey = options.allowApiKey === false
 		? fallback.apiKey
-		: nonEmptyString(dictation.apiKey) ?? nonEmptyString(dictation.deepgramApiKey) ?? fallback.apiKey;
+		: nonEmptyString(dictation.apiKey) ?? fallback.apiKey;
 
 	return Object.keys(languages).length > 0 ? {
 		...(selectedLanguage === undefined ? {} : { language: selectedLanguage }),

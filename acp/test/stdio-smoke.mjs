@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -143,7 +143,15 @@ async function withTimeout(promise, timeoutMs, label) {
 }
 
 async function verifyDefaultPiEntry() {
-	const pi = new PiRpcClient({ piEntry: resolveAdapterConfig().piEntry, cwd: scratch });
+	const isolatedHome = join(scratch, "default-pi-home");
+	mkdirSync(isolatedHome, { recursive: true });
+	const pi = new PiRpcClient({
+		piEntry: resolveAdapterConfig().piEntry,
+		cwd: scratch,
+		// The default-entry smoke must exercise the bundled RPC bootstrap, not
+		// arbitrary user-level Pi settings, extensions, or package resolution.
+		env: { HOME: isolatedHome, USERPROFILE: isolatedHome },
+	});
 	try {
 		await withTimeout(pi.start(), 5_000, "default pi RPC entry startup");
 		const state = await withTimeout(pi.getState(), 5_000, "default pi RPC get_state");

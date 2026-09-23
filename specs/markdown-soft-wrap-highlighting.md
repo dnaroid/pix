@@ -51,5 +51,5 @@ Keep syntax highlighting continuous when one logical Markdown or fenced-code lin
 ## Evidence
 
 - Confirmed by code: `renderMarkdownTextLines` wraps before `ScreenStyler` invokes line-local syntax highlighting.
-- Confirmed by tests: existing tests cover Markdown styles and wrapping independently, but not style continuity across wraps.
+- Confirmed by tests: `tests/markdown-format.test.ts` directly covers inline-code/emphasis, headings, and fenced TypeScript string/comment highlighting across soft wraps.
 - Confirmed by user report: inline-code color is lost after a terminal-width wrap.

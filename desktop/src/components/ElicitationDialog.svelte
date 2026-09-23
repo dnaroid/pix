@@ -68,7 +68,7 @@
       {:else}
         <textarea
           bind:this={fieldControl}
-          class="min-h-24 w-full resize-y rounded-md border border-input bg-panel-strong px-2.5 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          class="min-h-24 w-full rounded-md border border-input bg-panel-strong px-2.5 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           rows="4"
           value={String(field.value)}
           oninput={(event) => onValueChange(event.currentTarget.value)}

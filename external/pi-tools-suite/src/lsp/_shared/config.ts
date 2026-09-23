@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { parse as parseJsonc } from "jsonc-parser";
+import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { getPiToolsSuiteUserConfigPath } from "../../config";
 import { findUp } from "./paths";
 import { askProjectConfigTrust, sha256 } from "./trust";
@@ -107,7 +107,11 @@ async function readJsoncLayer<TItem extends MatchableConfig>(options: {
     throw error;
   }
 
-  const parsed = parseJsonc(raw) as unknown;
+  const errors: ParseError[] = [];
+  const parsed = parseJsonc(raw, errors) as unknown;
+  if (errors.length > 0) {
+    throw new Error(`Invalid JSONC (${errors.map(({ error }) => printParseErrorCode(error)).join(", ")})`);
+  }
   const selected = options.selectConfig ? options.selectConfig(parsed) : parsed;
   if (selected === undefined) return undefined;
   const items = options.parseItems(selected);

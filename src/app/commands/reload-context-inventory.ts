@@ -35,7 +35,11 @@ export function createReloadContextInventory(
 	};
 }
 
-function isSkillFileAccessTool(toolName: string): boolean {
+/**
+ * Active tools that can load a discovered SKILL.md file. Tool names come from
+ * model-specific adapters, so compare their supported names case-insensitively.
+ */
+export function isSkillFileAccessTool(toolName: string): boolean {
 	switch (toolName.trim().toLowerCase()) {
 		case "read":
 		case "bash":

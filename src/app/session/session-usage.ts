@@ -114,7 +114,7 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 export function formatSessionUsageText(report: SessionUsageReport, options: FormatSessionUsageOptions = {}): string {
 	const lines = [
 		"Session usage",
-		`${formatCost(report.totals.cost)} · ${formatCompactTokens(report.totals.totalTokens)} tokens`,
+		`${formatCompactTokens(report.totals.totalTokens)} tokens`,
 	];
 
 	if (report.providers.length === 0 && !hasUsage(report.unattributed)) {
@@ -125,17 +125,16 @@ export function formatSessionUsageText(report: SessionUsageReport, options: Form
 			lines.push("", provider.provider);
 			for (const model of provider.models) {
 				const modelLabel = options.formatModel?.(provider.provider, model.model) ?? model.model;
-				lines.push(`  ${modelLabel}  ${formatCompactTokens(model.totals.totalTokens)} · ${formatCost(model.totals.cost)}`);
+				lines.push(`  ${modelLabel}  ${formatCompactTokens(model.totals.totalTokens)}`);
 			}
 		}
 		if (hasUsage(report.unattributed)) {
-			lines.push("", `Unattributed  ${formatCompactTokens(report.unattributed.totalTokens)} · ${formatCost(report.unattributed.cost)}`);
+			lines.push("", `Unattributed  ${formatCompactTokens(report.unattributed.totalTokens)}`);
 		}
 	}
 	return lines.join("\n");
 }
 
-export function formatSessionUsageCost(cost: number): string { return formatCost(cost); }
 export function formatSessionUsageTokens(tokens: number): string { return formatCompactTokens(tokens); }
 
 function addAttributedUsage(
@@ -201,9 +200,4 @@ function formatCompactTokens(value: number): string {
 	if (value >= 1_000_000) return `${trimDecimal(value / 1_000_000)}M`;
 	if (value >= 1_000) return `${trimDecimal(value / 1_000)}K`;
 	return Math.round(value).toLocaleString("en-US");
-}
-function formatCost(value: number): string {
-	if (value <= 0) return "$0";
-	if (value < 0.0001) return "<$0.0001";
-	return `$${value.toFixed(value < 0.01 ? 4 : value < 1 ? 3 : 2)}`;
 }

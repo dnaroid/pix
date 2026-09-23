@@ -52,12 +52,12 @@ current product non-goals.
    `specs/desktop-*.md` family, not by this historical baseline.
 2. The client initializes ACP with form-elicitation support before creating or
    loading a session.
-3. Selecting a workspace lists its persisted sessions. The user can create a
-   session or load one; loading replays its transcript. Clicking the active
-   session tab opens a searchable session selector below the tabs, matching the
-   terminal UI's active-tab behavior. Each visible tab also has a close button;
-   closing a tab does not delete its persisted session, so it remains available
-   from the selector.
+3. **Later implemented behavior:** selecting a workspace lists its persisted
+   sessions. The user can create a session or load one; loading replays its
+   transcript. Clicking the active session tab opens a searchable session
+   selector below the tabs, matching the terminal UI's active-tab behavior.
+   Each visible tab also has a close button; closing a tab does not delete its
+   persisted session, so it remains available from the selector.
 4. A submitted prompt appears immediately as a user message. ACP
    `session/update` notifications incrementally update assistant text,
    thoughts, and tool activity.
@@ -131,8 +131,9 @@ current product non-goals.
 
 ## Risks / unknowns
 
-- Production bundles still need a platform-specific strategy for shipping
-  Node/pi/pix-acp or a compiled standalone sidecar.
+- Current release distribution, bundling, and platform verification are defined
+  by [`release-distribution.md`](../specs/release-distribution.md); this
+  historical MVP baseline is not the source of release-packaging risk.
 - Tauri/Rust verification requires a local Rust toolchain; frontend tests
   remain runnable independently.
 - ACP 1.4 live message chunks from `pix-acp` may omit `messageId`; the desktop
