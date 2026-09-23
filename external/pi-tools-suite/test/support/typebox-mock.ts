@@ -6,6 +6,7 @@ export function createTypeboxMock(overrides: Record<string, unknown> = {}) {
 			String: (options?: any) => ({ kind: "string", options }),
 			Array: (items: any, options?: any) => ({ kind: "array", items, options }),
 			Number: (options?: any) => ({ kind: "number", options }),
+			Integer: (options?: any) => ({ kind: "integer", options }),
 			Boolean: (options?: any) => ({ kind: "boolean", options }),
 			Record: (key: any, value: any, options?: any) => ({ kind: "record", key, value, options }),
 			Unknown: (options?: any) => ({ kind: "unknown", options }),

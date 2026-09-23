@@ -14,6 +14,7 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"repo-discovery": { deterministic: ["test/repo-discovery.test.ts", "test/repo-native-compact.test.ts", "test/tool-descriptions.test.ts"], live: ["tool.semantic-repo-search", "tool.architecture-first", "tool.knowledge-context", "tool.knowledge-impact"] },
 	"antigravity-auth": { deterministic: ["test/antigravity-auth.test.ts"] },
 	"opencode-import": { deterministic: ["test/opencode-import.test.ts"] },
+	"question": { deterministic: ["test/native-pi-tui.test.ts"] },
 	"todo": { deterministic: ["test/todo.test.ts", "test/todo-persistence-e2e.test.ts"], live: ["tool.todo-plan", "negative.trivial-chat-no-tools"] },
 	"model-tools": { deterministic: ["test/model-tools.test.ts"], live: ["tool.exact-literal-direct", "negative.small-known-edit-no-plan"] },
 	"usage": { deterministic: ["test/evals/extension-contracts.test.ts"] },
