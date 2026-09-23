@@ -27,6 +27,8 @@ export interface ToolItem {
   readonly kind: string;
   readonly status: ToolCallStatus;
   readonly rawInput?: unknown;
+  /** Cached name for SKILL.md reads; collapsed headers never inspect rawInput. */
+  readonly skillName?: string;
   readonly rawOutput?: unknown;
   readonly content: string;
   readonly diffs: readonly ToolDiff[];

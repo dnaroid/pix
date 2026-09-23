@@ -6,7 +6,7 @@ integration, decisions and the final answer. Actual savings depend on worker
 quality, retries and how much work the parent repeats; the configuration is
 not a price oracle.
 
-## Six execution modes
+## Seven execution modes
 
 - `research`: read-only evidence gathering, searches and focused review questions.
 - `implement`: bounded code, documentation, test and frontend changes.
@@ -16,12 +16,36 @@ not a price oracle.
 - `frontier-review`: independent post-implementation code review on a strong
   model; hidden when the current parent model matches the role's availability
   gate.
+- `delivery-review`: explicitly requested, read-only delivery readiness and
+  evidence review, available to any parent; does not perform real UI QA or
+  assume release authority. Available in each bundled pool where a declared
+  candidate intersects: GLM-5.3 in `cheap`/`deep`, GPT-6-Sol in `gpt`/`deep`.
 - `oracle`: a deliberate strong second opinion, not automatic worker escalation.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
 agent is warranted when it adds a durable contract, capabilities or resources,
 not merely a professional title. `verify` has a behavioral no-edit contract;
 shell access is not a read-only filesystem sandbox.
+
+### Delivery review contract
+
+`delivery-review` reviews the actual diff, surrounding code, and completed
+verification to assess residual delivery risk. Its bundled profile is
+self-contained: it does not require project skills or their discovery in the
+child. It uses GPT-6-Sol followed by GLM-5.3, `high` thinking, and the inspection
+tools `read`, `grep`, and `bash`, subject to normal pool/runtime availability.
+It remains available even when the parent is a frontier model.
+
+The role must not edit files, execute tests, perform UI QA, or spawn children.
+Missing test/UI evidence is requested through the parent. This is a behavioral
+restriction, not a shell sandbox. Concurrency/lifecycle and production-impact
+checks apply only when relevant to the changed paths. Reports distinguish
+inspection from execution, classify material risks as `covered`, `acceptable`,
+or `needs attention`, and end with `High`, `Medium`, or `Low` confidence plus
+what would raise lower confidence. The role must not recommend readiness with
+unresolved material blockers (which require `Low` readiness confidence),
+unresolved high-impact risks or missing essential verification, assume release
+authority, or waive a required independent `frontier-review` gate.
 
 ## Agent priority, preset availability
 
@@ -33,8 +57,8 @@ chain for initial selection and subsequent quota fallbacks:
 description: Make bounded implementation changes.
 models:
   - zai/glm-5.3-flash
-  - openai-codex/gpt-6-luna
-thinking: medium
+  - openai-codex/gpt-6-sol
+thinking: high
 ---
 ```
 
@@ -54,9 +78,9 @@ pools live in `<project>/.pi/agents/presets.jsonc`:
 }
 ```
 
-The example agent selects Luna: the agent's order wins. Sol and Astra are
-available in the pool but absent from this worker's chain, so neither can become
-an automatic implementation fallback. The frontier-review can declare Sol in
+Workers select candidates in their own declared order. For example,
+`implement` has GLM-5.3-Flash followed by GPT-6-Sol, while `research` and
+`ui-qa` retain GPT-6-Luna as fallback. The frontier-review can declare Sol in
 its chain while oracle can declare Astra. Model references in `models` must be
 exact `provider/model` values, not wildcards.
 

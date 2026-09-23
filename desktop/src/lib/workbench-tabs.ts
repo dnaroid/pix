@@ -9,6 +9,7 @@ interface WorkbenchTabBase {
   readonly panelId: string;
   readonly closable: boolean;
   readonly disabled?: boolean;
+  readonly selectionDisabled?: boolean;
 }
 
 export interface WorkbenchSessionTab extends WorkbenchTabBase {

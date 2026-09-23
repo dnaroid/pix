@@ -101,10 +101,16 @@ describe.serial("model-pool selection contract", () => {
 		expect(nextFallbackModel("b/medium", selected.fallbackModels)).toBeUndefined();
 	});
 
-	test("new-install pools do not redefine agents or change worker instructions", () => {
+	test("bundled worker profiles keep their configured model and thinking contracts", () => {
 		const { cwd } = fixture();
 		const config = loadSubagentConfig(cwd, {});
-		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(config.types.implement.models).toEqual(["zai/glm-5.3-flash", "openai-codex/gpt-6-sol"]);
+		expect(config.types.implement.thinking).toBe("high");
+		expect(config.types.research.models).toEqual(["zai/glm-5-turbo", "openai-codex/gpt-6-luna"]);
+		expect(config.types.research.thinking).toBe("medium");
+		expect(config.types["ui-qa"].models).toEqual(["zai/glm-5.3-flash", "openai-codex/gpt-6-luna"]);
+		expect(config.types["ui-qa"].thinking).toBe("medium");
 		for (const preset of Object.values(config.presets ?? {})) {
 			expect(preset.models?.length).toBeGreaterThan(0);
 			expect(preset.types).toBeUndefined();
@@ -113,10 +119,10 @@ describe.serial("model-pool selection contract", () => {
 				const selected = resolve(config, preset, type);
 				expect(preset.models).toContain(selected.task.model);
 				expect(selected.task.promptAppend).toBe(config.types[type].promptAppend);
-				expect(selected.task.model).not.toMatch(/sol|glm-5\.3$/);
+				if (type !== "implement") expect(selected.task.model).not.toMatch(/sol|glm-5\.3$/);
 				for (const fallback of selected.fallbackModels) {
 					expect(preset.models).toContain(fallback);
-					expect(fallback).not.toMatch(/sol|glm-5\.3$/);
+					if (type !== "implement") expect(fallback).not.toMatch(/sol|glm-5\.3$/);
 				}
 			}
 		}
@@ -156,7 +162,7 @@ describe.serial("model-pool selection contract", () => {
 		writePresets(cwd, { cheap: { description: "project cheap", models: ["zai/glm-5-turbo"] } });
 		const config = loadSubagentConfig(cwd, {});
 		expect(config.presets?.cheap).toEqual({ description: "project cheap", models: ["zai/glm-5-turbo"] });
-		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(resolve(config, config.presets!.cheap).task.model).toBe("zai/glm-5-turbo");
 	});
 

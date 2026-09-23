@@ -17,6 +17,22 @@ const EDIT_LABELS: Record<EditCommand, string> = {
   Undo: "Undo", Redo: "Redo", Cut: "Cut", Copy: "Copy", Paste: "Paste", SelectAll: "Select All",
 };
 
+function editorSelectionText(context: DesktopContextTarget): string | null {
+  const editor = context.editor;
+  if (
+    !editor
+    || context.kind === "password"
+    || !("value" in editor)
+    || !("selectionStart" in editor)
+    || !("selectionEnd" in editor)
+  ) return null;
+  const textEditor = editor as HTMLInputElement | HTMLTextAreaElement;
+  const start = textEditor.selectionStart;
+  const end = textEditor.selectionEnd;
+  if (start === null || end === null || end <= start) return null;
+  return textEditor.value.slice(start, end);
+}
+
 export function nativeContextMenuItems(
   context: DesktopContextTarget,
   linux: boolean,
@@ -37,6 +53,18 @@ export function nativeContextMenuItems(
         enabled: (command !== "Cut" && command !== "Copy") || context.hasSelection,
         action: run(() => invoke("desktop_edit", { command })),
       });
+    } else if (command === "Copy") {
+      const selectedText = editorSelectionText(context);
+      if (selectedText !== null) {
+        items.push({
+          id: "desktop.text.Copy",
+          text: EDIT_LABELS.Copy,
+          enabled: selectedText.length > 0,
+          action: run(() => writeText(selectedText)),
+        });
+      } else {
+        items.push({ item: command, text: EDIT_LABELS[command] });
+      }
     } else {
       items.push({ item: command, text: EDIT_LABELS[command] });
     }

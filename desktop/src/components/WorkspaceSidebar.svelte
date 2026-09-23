@@ -95,6 +95,11 @@
     gitAssistantReady,
     registrySnapshot,
     registryProjectInitialized,
+    registryProjectPiSizeBytes,
+    registryProjectPiCleanupBytes,
+    registryProjectPiCleanupAvailable,
+    registryProjectPiStorageLoading,
+    registryProjectPiStorageError,
     registryBackgroundSync,
     registryLoading,
     registryActionId,
@@ -134,6 +139,7 @@
     onReload,
     onRegistryRefresh,
     onRegistryInitializeProject,
+    onRegistryCleanProject,
     onRegistryAction,
     onRegistryProjectChange,
     onWorkspaceSettingsSave,
@@ -163,6 +169,11 @@
     gitAssistantReady: boolean;
     registrySnapshot: RegistrySnapshot | undefined;
     registryProjectInitialized: boolean | undefined;
+    registryProjectPiSizeBytes: number | null | undefined;
+    registryProjectPiCleanupBytes: number | undefined;
+    registryProjectPiCleanupAvailable: boolean;
+    registryProjectPiStorageLoading: boolean;
+    registryProjectPiStorageError: string | null;
     registryBackgroundSync: RegistryBackgroundSyncState;
     registryLoading: boolean;
     registryActionId: string | null;
@@ -207,6 +218,7 @@
     onReload: () => void;
     onRegistryRefresh: () => void;
     onRegistryInitializeProject: () => void;
+    onRegistryCleanProject: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
     onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
     onWorkspaceSettingsSave: (workspace: string) => void;
@@ -691,11 +703,17 @@
           <RegistryPanel
             snapshot={registrySnapshot}
             projectInitialized={registryProjectInitialized}
+            projectPiSizeBytes={registryProjectPiSizeBytes}
+            projectPiCleanupBytes={registryProjectPiCleanupBytes}
+            projectPiCleanupAvailable={registryProjectPiCleanupAvailable}
+            projectPiStorageLoading={registryProjectPiStorageLoading}
+            projectPiStorageError={registryProjectPiStorageError}
             loading={registryLoading}
             remoteDisabled={!registryReady}
             actionId={registryActionId}
             onRefresh={onRegistryRefresh}
             onInitializeProject={onRegistryInitializeProject}
+            onCleanProject={onRegistryCleanProject}
             onAction={onRegistryAction}
             onOpenProjectArtifact={openRegistryProjectArtifact}
           />

@@ -93,6 +93,7 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     pendingElicitationSessionIds: options.interactions.pendingElicitationSessionIds,
     unseenCompletedSessionIds: options.tabAttention.unseenCompletedSessionIds,
     disabled: sessionMutationRunning,
+    selectionDisabled: options.operationRunning(),
     realSessionCount: tabSessions.length,
   }));
   const workbenchTabs = $derived.by(() => buildDesktopWorkbenchTabs({

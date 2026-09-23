@@ -24,8 +24,12 @@ type DraftSessionOptions = {
   refreshDraftConfig: () => void | Promise<void>;
   draftModelOverride: () => DraftModelOverride;
   routeDraftModel: (prompt: string, attachmentCount: number, signal?: AbortSignal) => Promise<DraftModelOverride>;
-  clearPrompt: () => void;
-  invalidateAttachmentDraft: () => void;
+  switchComposerDraft: (
+    sourceOwnerId: string | null | undefined,
+    targetOwnerId: string,
+    options?: { resetTarget?: boolean; preserveSource?: boolean },
+  ) => void;
+  forgetComposerDraft: (ownerId: string) => void;
   focusComposer: () => void | Promise<void>;
   forgetRuntime: (sessionId: string) => void;
   ensureProvisionalSession: (sessionId: string, workspace: string) => void;
@@ -61,17 +65,17 @@ export function createDraftSession(options: DraftSessionOptions) {
     options.closeSessionSelector();
     if (config.resetComposer) invalidateMaterialization();
     const currentSessionId = options.activeSessionId();
+    const sourceOwnerId = active ? DRAFT_SESSION_TAB_ID : currentSessionId;
     if (currentSessionId) options.saveActiveTranscript(currentSessionId);
     options.cancelHistoryLoad();
     options.setActiveSessionId(null);
     options.resetActiveConversation();
     open = true;
     active = true;
+    options.switchComposerDraft(sourceOwnerId, DRAFT_SESSION_TAB_ID, { resetTarget: config.resetComposer });
     if (config.resetComposer) {
       touched = false;
       options.resetModelDraft();
-      options.clearPrompt();
-      options.invalidateAttachmentDraft();
     }
     if (!options.draftConfigAvailable()) void options.refreshDraftConfig();
   }
@@ -143,6 +147,7 @@ export function createDraftSession(options: DraftSessionOptions) {
       open = false;
       active = false;
       touched = false;
+      options.forgetComposerDraft(DRAFT_SESSION_TAB_ID);
       options.resetModelDraft();
       options.setMaterializedTranscript(created.sessionId);
       const configOptions = loaded.configOptions ?? created.configOptions ?? [];
@@ -168,11 +173,13 @@ export function createDraftSession(options: DraftSessionOptions) {
   }
 
   function deactivate(): void {
+    invalidateMaterialization();
     active = false;
   }
 
   function close(): void {
     invalidateMaterialization();
+    options.forgetComposerDraft(DRAFT_SESSION_TAB_ID);
     open = false;
     active = false;
     touched = false;

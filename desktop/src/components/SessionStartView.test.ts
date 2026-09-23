@@ -8,6 +8,7 @@ import workbenchBuilderSource from "../app/desktop-workbench-prop-builders.ts?ra
 import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
 import composerSource from "./PromptComposer.svelte?raw";
 import source from "./SessionStartView.svelte?raw";
+import transcriptPaneSource from "./TranscriptPane.svelte?raw";
 
 describe("SessionStartView", () => {
   it("lists saved conversations without a redundant New conversation action", () => {
@@ -43,6 +44,13 @@ describe("SessionStartView", () => {
   it("disappears as soon as the composer draft is changed", () => {
     expect(workbenchBuilderSource).toContain("onDraftChange: options.draft.promote");
     expect(composerSource).toContain("onDraftChange();");
+  });
+
+  it("shows the empty conversation prompt instead of a loading status after editing a draft", () => {
+    expect(transcriptPaneSource).toContain("{#if !activeSessionId && !workspace}");
+    expect(transcriptPaneSource).toContain("{:else if activeSessionId && transcript.items.length === 0 && historyLoading}");
+    expect(transcriptPaneSource).toContain("What should we work on?");
+    expect(transcriptPaneSource).not.toContain("Opening conversation…");
   });
 
   it("does not create an ACP session until the draft is actually submitted", () => {

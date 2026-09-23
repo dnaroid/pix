@@ -112,7 +112,9 @@ export function activityGroupPresentationLabels(
 ): ActivityGroupPresentationLabel[] {
   const labels = new Map<string, ActivityGroupPresentationLabel>();
   for (const entry of entries) {
-    const name = entry.type === "tool" ? toolPresentationName(entry) : "thinking";
+    const name = entry.type === "tool"
+      ? entry.skillName ? `skill ${entry.skillName}` : toolPresentationName(entry)
+      : "thinking";
     const active = activityEntryActive(entry);
     const existing = labels.get(name);
     if (!existing) {

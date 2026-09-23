@@ -34,6 +34,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 ## Behavior
 
 - File tools show the path instead of repeating a human title such as `read Read path`.
+- Reads of `SKILL.md` (direct `read` and the TUI-recognized non-mutating shell reader commands) display as `skill <directory name>` in both child rows and the collapsed group header. Lightweight replay omits `rawInput` until a result is expanded, so direct reads also classify from the tool location or read title at ingestion. Arbitrary shell programs are not classified by inspecting their effects. The skill name is cached during tool ingestion/update so collapsed headers never inspect `rawInput`; active skill calls receive the usual header emphasis, while ordinary reads and shell mutations retain their normal tool name.
 - Read ranges use the TUI `path:offset+limit` form.
 - Shell commands collapse whitespace to one line.
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.

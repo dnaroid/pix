@@ -6,7 +6,7 @@
     "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]
   },
   "gpt": {
-    "description": "GPT pool: Luna workers; Sol is available to frontier-review and Astra to oracle.",
+    "description": "GPT pool: Luna research/QA workers, Sol implementer/frontier-review, and Astra oracle.",
     "models": ["openai-codex/gpt-6-luna", "openai-codex/gpt-6-sol", "openai-codex/gpt-6-astra"]
   },
   "deep": {

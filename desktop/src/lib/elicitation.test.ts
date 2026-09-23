@@ -26,7 +26,7 @@ describe("parseElicitation", () => {
       key: "answer",
       label: "Answer",
       description: "A short response",
-      type: "string",
+      type: "input",
       options: [],
       value: "yes",
     });
@@ -40,6 +40,11 @@ describe("parseElicitation", () => {
       options: ["one", "two"],
       value: "one",
     });
+  });
+
+  it("uses the explicit Pix metadata to distinguish input and editor", () => {
+    expect(parseElicitation(request({ type: "string", _meta: { "_pix/ui-kind": "editor" } }))?.type).toBe("editor");
+    expect(parseElicitation(request({ type: "string", _meta: { "_pix/ui-kind": "other" } }))?.type).toBe("input");
   });
 
   it("parses boolean defaults", () => {

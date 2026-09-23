@@ -16,9 +16,31 @@ describe("RegistryPanel refresh lifecycle", () => {
     expect(panelSource).toContain('actionId === "initialize-project"');
   });
 
+  it("shows local .pi storage and cleans only reclaimable junk", () => {
+    expect(panelSource).toContain(".pi storage");
+    expect(panelSource).toContain("formatPiSize(projectPiSizeBytes)");
+    expect(panelSource).toContain("projectPiCleanupBytes");
+    expect(panelSource).toContain("projectPiCleanupAvailable");
+    expect(panelSource).toContain("reclaimable");
+    expect(panelSource).toContain('actionId === "cleanup-project"');
+    expect(panelSource).toContain("window.confirm");
+    expect(panelSource).toContain("clears all contents of artifacts/ and subagents/");
+    expect(panelSource).toContain("removes non-canonical top-level directories");
+    expect(panelSource).toContain("agents/, plans/, skills/, task-attachments/ and project files are preserved");
+    expect(panelSource).toContain("onCleanProject()");
+    expect(panelSource).toContain("projectPiStorageLoading");
+    expect(panelSource).toContain("projectPiStorageError");
+    expect(panelSource).toContain("Checking… total");
+  });
+
   it("does not gate Registry controls on conversation session readiness", () => {
     expect(sidebarSource).toContain("remoteDisabled={!registryReady}");
     expect(sidebarSource).not.toContain("disabled={!sessionReady || registryActionId !== null}");
     expect(panelSource).not.toContain("Open a ready project session to manage its registry.");
+  });
+
+  it("treats a missing project key as a non-Git project-sync setup state", () => {
+    expect(panelSource).toContain("Project sync needs a key");
+    expect(panelSource).toContain("Set a project key; Git is optional");
   });
 });

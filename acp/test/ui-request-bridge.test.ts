@@ -7,6 +7,7 @@ import {
 	fromElicitationResponse,
 	PIX_QUESTION_EDITOR_TITLE,
 	PIX_QUESTION_ELICITATION_MODE,
+	PIX_INPUT_KIND_META,
 	toElicitationRequest,
 } from "../src/acp/ui-request-bridge.js";
 
@@ -66,6 +67,7 @@ test("input maps to a string property with the placeholder as description", () =
 	assert.deepEqual(formSchema(elicitation).properties?.value, {
 		type: "string",
 		title: "Enter a value",
+		_meta: { [PIX_INPUT_KIND_META]: "input" },
 		description: "type something...",
 	});
 });
@@ -78,6 +80,7 @@ test("editor maps to a string property with the prefill as default", () => {
 	assert.deepEqual(formSchema(withPrefill).properties?.value, {
 		type: "string",
 		title: "Edit text",
+		_meta: { [PIX_INPUT_KIND_META]: "editor" },
 		default: "Line 1",
 	});
 

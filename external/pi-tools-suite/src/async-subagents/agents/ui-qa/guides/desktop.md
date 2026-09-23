@@ -24,9 +24,15 @@ Before `run`, the loaded topic must equal the authoritative `selection.guide`.
 
 ## Common desktop flow
 
-Set `target.application` to exactly one supported identity/launch contract. The
-detail guide documents any platform-specific identity restrictions. Common
-steps are:
+Set `target.application` to an object containing exactly one supported
+identity/launch contract. Never use a bare string such as
+`"target":{"application":"dev.example.app"}`: that is not a desktop target
+contract. Portable/common forms are `{"name":"App Name"}`,
+`{"pid":1234}`, or a runner-owned launch such as
+`{"launch":{"argv":["npm","run","dev"],"cwd":"desktop"}}`.
+`{"bundleId":"dev.example.app"}` is macOS-only; use it only when the selected
+detail guide allows it. The detail guide documents platform-specific identity
+restrictions. Common steps are:
 
 - window/control: `waitForWindow`, `activateWindow`, `activate`;
 - inspection: `snapshotAccessibility`;

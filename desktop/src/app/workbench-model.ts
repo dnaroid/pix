@@ -37,6 +37,7 @@ export function buildSessionWorkbenchTabs(options: {
   pendingElicitationSessionIds: ReadonlySet<string>;
   unseenCompletedSessionIds: ReadonlySet<string>;
   disabled: boolean;
+  selectionDisabled?: boolean;
   realSessionCount: number;
 }): WorkbenchSessionTab[] {
   return options.sessions.map((session) => {
@@ -61,6 +62,7 @@ export function buildSessionWorkbenchTabs(options: {
       panelId: "conversation-workspace",
       closable: !draft || options.realSessionCount > 0,
       disabled: options.disabled,
+      selectionDisabled: options.selectionDisabled,
       running,
       draft,
       fork: sessionIsFork(session),

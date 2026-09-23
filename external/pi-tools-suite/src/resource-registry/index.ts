@@ -2140,13 +2140,20 @@ async function configureProjectKeyInteractive(pi: ExtensionAPI, ctx: ExtensionCo
 	}
 	let value: string | undefined;
 	try {
-		value = await ctx.ui.input("Project registry key (blank = auto from Git origin)", configured ?? derived);
+		value = await ctx.ui.input(
+			derived ? "Project registry key (blank = auto from Git origin)" : "Project registry key",
+			configured ?? derived,
+		);
 	} catch (error) {
 		ignoreStaleExtensionContextError(error);
 		return;
 	}
 	if (value === undefined) return;
 	const trimmed = value.trim();
+	if (!trimmed && !derived) {
+		notify(ctx, "Project registry key is required because this workspace has no Git origin.");
+		return;
+	}
 	await saveProjectKeyConfig(ctx.cwd, trimmed || undefined);
 	if (trimmed) notify(ctx, `Project registry key set to ${trimmed}.`);
 	else notify(ctx, `Project registry key override cleared; using ${await resolveProjectKey(pi, ctx.cwd)}.`);
@@ -2210,7 +2217,7 @@ async function configureInteractive(ctx: ExtensionCommandContext): Promise<void>
 	let remote: string | undefined;
 	let branch: string | undefined;
 	try {
-		remote = await ctx.ui.input("Resource registry Git remote", current.remote ?? "git@github.com:you/pix-resources.git");
+		remote = await ctx.ui.input("Resource registry Git remote", current.remote ?? "Enter your Git remote URL (SSH or HTTPS)");
 		if (!remote?.trim()) return;
 		branch = await ctx.ui.input("Registry branch", current.branch || "main");
 	} catch (error) {

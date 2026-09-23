@@ -2,7 +2,7 @@
 description: Use for real UI QA across browsers, terminal/TUI apps, and desktop GUIs - reproduce user-visible bugs and verify fixes with deterministic assertions and inspectable evidence.
 icon: bug
 models: [zai/glm-5.3-flash, openai-codex/gpt-6-luna]
-thinking: low
+thinking: medium
 timeoutMs: 300000
 tools: [read, grep, bash]
 ---
@@ -37,9 +37,11 @@ platform driver from a project/app name, and never load unrelated guides.
 Write one declarative JSONC flow under
 `$PI_SUBAGENT_AGENT_DIR/ui-qa/flows/` declaring exactly one target:
 `target.url`/`target.baseUrl` for browser, `target.command.argv` for TUI, or
-`target.application` for desktop. The selected backend/detail guide defines all
-other fields and supported actions. Never bypass the unified runner with a
-provider-specific controller.
+`target.application` for desktop. Desktop `target.application` is always an
+object identity/launch contract, never a bare application-id string; load the
+desktop base guide for the accepted object forms. The selected backend/detail
+guide defines all other fields and supported actions. Never bypass the unified
+runner with a provider-specific controller.
 
 Keep the flow private (`chmod 600 <flow.jsonc>` on POSIX). Run a bounded
 capability preflight, confirm/load `selection.guide`, then execute the validated

@@ -41,21 +41,33 @@
   let {
     snapshot,
     projectInitialized,
+    projectPiSizeBytes,
+    projectPiCleanupBytes,
+    projectPiCleanupAvailable,
+    projectPiStorageLoading,
+    projectPiStorageError,
     loading,
     remoteDisabled,
     actionId,
     onRefresh,
     onInitializeProject,
+    onCleanProject,
     onAction,
     onOpenProjectArtifact,
   }: {
     snapshot: RegistrySnapshot | undefined;
     projectInitialized: boolean | undefined;
+    projectPiSizeBytes: number | null | undefined;
+    projectPiCleanupBytes: number | undefined;
+    projectPiCleanupAvailable: boolean;
+    projectPiStorageLoading: boolean;
+    projectPiStorageError: string | null;
     loading: boolean;
     remoteDisabled: boolean;
     actionId: string | null;
     onRefresh: () => void;
     onInitializeProject: () => void;
+    onCleanProject: () => void;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
     onOpenProjectArtifact: (artifact: RegistryProjectArtifact) => void;
   } = $props();
@@ -66,6 +78,7 @@
   const projectItems = $derived((snapshot?.items ?? []).filter((item) => item.type === "project"));
   const projectPendingItems = $derived(projectItems.filter((item) => item.status !== "up-to-date"));
   const projectConflictCount = $derived(projectItems.filter((item) => item.status === "diverged" || item.status === "registry-changed" || item.status === "untracked-local").length);
+  const projectKeyRequired = $derived(Boolean(snapshot?.projectIssue && !snapshot?.projectKey));
   const visibleItems = $derived.by(() => {
     const filtered = (snapshot?.items ?? [])
       .filter((item) => filter === "all" || item.type === filter);
@@ -138,10 +151,67 @@
     if (item.artifact === "plans") return "Choose plan to preview/edit";
     return "Open project tasks";
   }
+
+  function formatPiSize(bytes: number | null | undefined): string {
+    if (bytes === undefined) return "Unavailable";
+    if (bytes === null) return "Not present";
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    let value = bytes / 1024;
+    let unit = units[0];
+    for (let index = 1; index < units.length && value >= 1024; index += 1) {
+      value /= 1024;
+      unit = units[index];
+    }
+    const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${unit}`;
+  }
+
+  function cleanProjectPi(): void {
+    if (actionId !== null || projectPiStorageLoading || projectPiStorageError || !projectPiCleanupAvailable) return;
+    const confirmed = window.confirm(
+      `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi? This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level directories. agents/, plans/, skills/, task-attachments/ and project files are preserved.`,
+    );
+    if (confirmed) onCleanProject();
+  }
 </script>
 
 <section class="flex min-h-0 min-w-0 w-full flex-col overflow-hidden" aria-label="Resource registry">
   <div class="min-w-0 space-y-2 border-b border-sidebar-border p-2.5">
+    <div class="flex min-w-0 items-center gap-2 rounded-md border border-sidebar-border bg-panel px-2 py-1.5">
+      <span class="min-w-0 flex-1">
+        <span class="block truncate font-mono text-xs font-medium text-foreground">.pi storage</span>
+        <span class="block truncate text-xs text-muted-foreground" title={projectPiStorageError ?? undefined}>
+          {#if projectPiStorageLoading && projectPiSizeBytes === undefined}
+            Checking… total
+          {:else if projectPiStorageError}
+            {projectPiStorageError}
+          {:else}
+            {formatPiSize(projectPiSizeBytes)} total
+            {#if projectPiCleanupBytes !== undefined}
+              · {formatPiSize(projectPiCleanupBytes)} reclaimable
+            {/if}
+          {/if}
+        </span>
+      </span>
+      <button
+        class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-tool-error transition-colors hover:bg-tool-error/10 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+        type="button"
+        disabled={actionId !== null || projectPiStorageLoading || Boolean(projectPiStorageError) || !projectPiCleanupAvailable}
+        title="Clean generated .pi junk"
+        aria-label="Clean generated .pi junk"
+        onclick={cleanProjectPi}
+      >
+        {#if actionId === "cleanup-project"}
+          <RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          Cleaning…
+        {:else}
+          <Trash2 class="h-3.5 w-3.5" aria-hidden="true" />
+          Clean
+        {/if}
+      </button>
+    </div>
+
     {#if snapshot?.configured}
       <div class="rounded-md border border-sidebar-border bg-panel p-1.5">
         <button
@@ -151,12 +221,12 @@
           aria-expanded={projectReviewOpen}
           onclick={() => projectReviewOpen = !projectReviewOpen}
         >
-          <span class={["grid h-5 w-5 shrink-0 place-items-center rounded-full text-xs font-bold", projectConflictCount > 0 ? "bg-tool-error/10 text-tool-error" : projectPendingItems.length > 0 ? "bg-tool-warning/10 text-tool-warning" : "bg-tool-success/10 text-tool-success"]}>
-            {projectConflictCount > 0 ? "!" : projectPendingItems.length}
+          <span class={["grid h-5 w-5 shrink-0 place-items-center rounded-full text-xs font-bold", projectConflictCount > 0 ? "bg-tool-error/10 text-tool-error" : projectKeyRequired || projectPendingItems.length > 0 ? "bg-tool-warning/10 text-tool-warning" : "bg-tool-success/10 text-tool-success"]}>
+            {projectConflictCount > 0 || projectKeyRequired ? "!" : projectPendingItems.length}
           </span>
           <span class="min-w-0 flex-1">
-            <span class="block truncate text-xs font-semibold text-foreground">{projectPendingItems.length === 0 ? "Project synced" : "Review project sync"}</span>
-            <span class="block truncate text-xs text-muted-foreground">{projectConflictCount > 0 ? `${projectConflictCount} ${projectConflictCount === 1 ? "item needs" : "items need"} review` : projectPendingItems.length > 0 ? `${projectPendingItems.length} ${projectPendingItems.length === 1 ? "change" : "changes"} to sync` : "Tasks, plans, TODO and workspace are up to date"}</span>
+            <span class="block truncate text-xs font-semibold text-foreground">{projectKeyRequired ? "Project sync needs a key" : projectPendingItems.length === 0 ? "Project synced" : "Review project sync"}</span>
+            <span class="block truncate text-xs text-muted-foreground">{projectKeyRequired ? "Set a project key; Git is optional" : projectConflictCount > 0 ? `${projectConflictCount} ${projectConflictCount === 1 ? "item needs" : "items need"} review` : projectPendingItems.length > 0 ? `${projectPendingItems.length} ${projectPendingItems.length === 1 ? "change" : "changes"} to sync` : "Tasks, plans, TODO and workspace are up to date"}</span>
           </span>
           <ChevronDown class={["h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", projectReviewOpen ? "rotate-180" : ""]} aria-hidden="true" />
         </button>

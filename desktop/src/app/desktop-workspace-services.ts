@@ -60,6 +60,7 @@ export function createDesktopWorkspaceServices(options: DesktopWorkspaceServices
       options.sessions.runtime.reset();
     },
     loadWorkspace: async (selected) => {
+      void options.project.registry.autoCleanProject(selected);
       await Promise.all([
         options.startup().open(),
         options.project.tasks.load(selected),

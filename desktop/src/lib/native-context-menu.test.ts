@@ -28,6 +28,27 @@ describe("native desktop context menu commands", () => {
   it("uses native editing roles instead of replacing values or synthesizing paste", () => {
     expect(labels({})).toEqual(["Undo", "Redo", "Separator", "Cut", "Copy", "Paste", "Separator", "SelectAll"]);
   });
+  it("copies textarea selections through the native clipboard instead of relying on a WebView menu role", async () => {
+    const editor = {
+      value: "copy this text",
+      selectionStart: 0,
+      selectionEnd: 4,
+    } as HTMLTextAreaElement;
+    const commands = items({ editor, hasSelection: true });
+    const copy = commands.find((item) => "id" in item && item.id === "desktop.text.Copy");
+    expect(copy).toBeDefined();
+    if (copy && "action" in copy) copy.action?.("ignored");
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledWith("copy");
+  });
+  it("keeps contenteditable copy on the native role without assuming input selection APIs", () => {
+    const commands = items({
+      kind: "editable",
+      editor: {} as HTMLElement,
+      hasSelection: true,
+    });
+    expect(commands.some((item) => "item" in item && item.item === "Copy")).toBe(true);
+  });
   it("limits read-only and selected document text to applicable commands", () => {
     expect(labels({ kind: "readonly", readOnly: true })).toEqual(["Copy", "Separator", "SelectAll"]);
     expect(labels({ kind: "selection", readOnly: true })).toEqual(["Copy"]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isUserBashTool, toolGroupPresentationNames, toolPresentation, toolTone } from "./tool-presentation";
+import { isUserBashTool, skillReadName, toolGroupPresentationNames, toolPresentation, toolTone } from "./tool-presentation";
 
 describe("toolPresentation", () => {
   it("formats read paths and ranges like the TUI", () => {
@@ -9,6 +9,20 @@ describe("toolPresentation", () => {
       title: "Read src/main.ts",
       rawInput: { path: "src/main.ts", offset: 12, limit: 20 },
     })).toEqual({ name: "read", args: "src/main.ts:12+20", tone: "inspect" });
+  });
+
+  it("presents cached skill reads by skill name and keeps ordinary reads unchanged", () => {
+    expect(skillReadName("read", undefined, undefined, "Read .pi/skills/pi-sdk/SKILL.md")).toBe("pi-sdk");
+    expect(skillReadName("read", undefined, "/repo/skills/demo/SKILL.md", "Read")).toBe("demo");
+    expect(skillReadName("shell", undefined, undefined, "Shell cat /repo/skills/demo/SKILL.md")).toBeUndefined();
+    expect(skillReadName("read", undefined, undefined, "Read /repo/README.md")).toBeUndefined();
+    expect(toolPresentation({
+      name: "read", kind: "read", title: "Read SKILL.md",
+      rawInput: { path: "/repo/skills/simplify/SKILL.md", offset: 1, limit: 100 }, skillName: "simplify",
+    })).toEqual({ name: "skill", args: "simplify", tone: "context" });
+    expect(toolPresentation({
+      name: "read", kind: "read", title: "Read README.md", rawInput: { path: "README.md" },
+    })).toEqual({ name: "read", args: "README.md", tone: "inspect" });
   });
 
   it("formats commands and collapses whitespace", () => {

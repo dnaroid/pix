@@ -377,7 +377,7 @@
       <SettingsSelect value={text(["repoDiscovery", "profile"])} options={REPO_DISCOVERY_PROFILE} onChange={(value) => set(["repoDiscovery", "profile"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow label="Registry remote" description="Private Git remote for reusable skills, agents, and project-scoped state." explicit={has(["resourceRegistry", "remote"])} defaultLabel={defaultLabel(["resourceRegistry", "remote"])} onReset={() => reset(["resourceRegistry", "remote"])}>
-      <SettingsTextInput value={text(["resourceRegistry", "remote"])} placeholder="git@github.com:you/pix-resources.git" onChange={(value) => set(["resourceRegistry", "remote"], value)} />
+      <SettingsTextInput value={text(["resourceRegistry", "remote"])} placeholder="SSH or HTTPS Git remote URL" onChange={(value) => set(["resourceRegistry", "remote"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow label="Registry branch" explicit={has(["resourceRegistry", "branch"])} defaultLabel={defaultLabel(["resourceRegistry", "branch"])} onReset={() => reset(["resourceRegistry", "branch"])}>
       <SettingsTextInput value={text(["resourceRegistry", "branch"])} placeholder="main" onChange={(value) => set(["resourceRegistry", "branch"], value)} />

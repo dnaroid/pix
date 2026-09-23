@@ -8,6 +8,7 @@ import {
   emptyTranscript,
   finalizeTranscriptActivity,
   groupTranscriptItems,
+  transcriptFromSessionUpdates,
   type ActivityGroupItem,
   type ToolItem,
   type TranscriptState,
@@ -69,6 +70,82 @@ describe("mixed transcript activity regressions", () => {
     };
     expect(activityGroupPresentationLabels([item])).toEqual([{ name: "read", active: false }]);
     expect(isUserBashTool(item)).toBe(false);
+  });
+
+  it("presents SKILL.md reads as active skill rows in live and replayed transcripts", () => {
+    const active = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call", toolCallId: "skill-live", name: "read", title: "Read", status: "in_progress",
+      rawInput: { path: "/repo/tools/demo/SKILL.md" },
+    });
+    expect(activityGroupPresentationLabels(group(active).entries)).toEqual([{ name: "skill demo", active: true }]);
+    expect(group(active).tools[0]?.skillName).toBe("demo");
+    const replay = group(transcriptFromSessionUpdates([{
+      sessionUpdate: "tool_call", toolCallId: "skill-replay", name: "read", title: "Read", status: "completed",
+      rawInput: { path: "/repo/tools/demo/SKILL.md" },
+    }]));
+    expect(activityGroupPresentationLabels(replay.entries)).toEqual([{ name: "skill demo", active: false }]);
+    // ACP replay's initial page carries titles/locations, not rawInput. Result
+    // hydration must not be required for the collapsed header or child label.
+    const lightReplay = group(transcriptFromSessionUpdates([{
+      sessionUpdate: "tool_call", toolCallId: "light-read", name: "read",
+      title: "Read .pi/skills/pix-desktop-frontend/SKILL.md", status: "completed",
+    }]));
+    expect(lightReplay.tools[0]?.skillName).toBe("pix-desktop-frontend");
+    expect(activityGroupPresentationLabels(lightReplay.entries)).toEqual([
+      { name: "skill pix-desktop-frontend", active: false },
+    ]);
+    const located = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call", toolCallId: "located-read", name: "read", title: "Read", status: "in_progress",
+      locations: [{ path: "/repo/.pi/skills/pi-sdk/SKILL.md" }],
+    });
+    expect(activityGroupPresentationLabels(group(located).entries)).toEqual([{ name: "skill pi-sdk", active: true }]);
+    const laterTitle = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call", toolCallId: "later-title", name: "read", title: "Read", status: "in_progress",
+    });
+    const titled = applySessionUpdate(laterTitle, {
+      sessionUpdate: "tool_call_update", toolCallId: "later-title", title: "Read .pi/skills/pi-tools-suite/SKILL.md",
+    });
+    expect(activityGroupPresentationLabels(group(titled).entries)).toEqual([
+      { name: "skill pi-tools-suite", active: true },
+    ]);
+    const ordinary = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call", toolCallId: "ordinary", name: "read", title: "Read", status: "completed",
+      rawInput: { path: "/repo/README.md" },
+    });
+    expect(activityGroupPresentationLabels(group(ordinary).entries)).toEqual([{ name: "read", active: false }]);
+    const shell = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call", toolCallId: "shell-skill", name: "shell", title: "Shell", status: "in_progress",
+      rawInput: { command: "cat /repo/skills/simplify/SKILL.md" },
+    });
+    expect(group(shell).tools[0]?.skillName).toBe("simplify");
+    expect(activityGroupPresentationLabels(group(shell).entries)).toEqual([{ name: "skill simplify", active: true }]);
+    const mutation = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call", toolCallId: "shell-write", name: "shell", title: "Shell", status: "completed",
+      rawInput: { command: "cat /repo/skills/simplify/SKILL.md > /tmp/SKILL.md" },
+    });
+    expect(activityGroupPresentationLabels(group(mutation).entries)).toEqual([{ name: "shell", active: false }]);
+    const updated = applySessionUpdate(ordinary, {
+      sessionUpdate: "tool_call_update", toolCallId: "ordinary", status: "in_progress",
+      rawInput: { path: "/repo/skills/demo/SKILL.md" },
+    });
+    expect(activityGroupPresentationLabels(group(updated).entries)).toEqual([{ name: "skill demo", active: true }]);
+    const settled = applySessionUpdate(updated, {
+      sessionUpdate: "tool_call_update", toolCallId: "ordinary", status: "completed",
+    });
+    expect(activityGroupPresentationLabels(group(settled).entries)).toEqual([{ name: "skill demo", active: false }]);
+    const inputFirst = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call_update", toolCallId: "late-name", status: "in_progress",
+      rawInput: { path: "/repo/skills/demo/SKILL.md" },
+    });
+    const named = applySessionUpdate(inputFirst, {
+      sessionUpdate: "tool_call_update", toolCallId: "late-name", name: "read", status: "completed",
+    });
+    expect(activityGroupPresentationLabels(group(named).entries)).toEqual([{ name: "skill demo", active: false }]);
+    const bareShell = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call", toolCallId: "bare-shell", name: "shell", title: "Shell", status: "completed",
+      rawInput: { command: "cat SKILL.md", cwd: "/repo/skills/demo" },
+    });
+    expect(group(bareShell).tools[0]?.skillName).toBe("demo");
   });
 
   it("moves highlights across thought/tool boundaries, parallel completions and prompt settlement", () => {

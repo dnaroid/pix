@@ -4,7 +4,7 @@ export interface ElicitationField {
   key: string;
   label: string;
   description?: string;
-  type: "string" | "select" | "boolean";
+  type: "string" | "input" | "editor" | "select" | "boolean";
   options: string[];
   value: string | boolean;
 }
@@ -42,6 +42,7 @@ export function parseElicitation(request: CreateElicitationRequest): Elicitation
   if (!isRecord(property)) return null;
   const label = typeof property.title === "string" ? property.title : key;
   const description = typeof property.description === "string" ? property.description : undefined;
+  const metadata = isRecord(property._meta) ? property._meta : {};
   if (property.type === "boolean") {
     return {
       key,
@@ -60,7 +61,7 @@ export function parseElicitation(request: CreateElicitationRequest): Elicitation
     key,
     label,
     ...(description ? { description } : {}),
-    type: options.length ? "select" : "string",
+    type: options.length ? "select" : metadata["_pix/ui-kind"] === "editor" ? "editor" : "input",
     options,
     value: typeof property.default === "string" ? property.default : (options[0] ?? ""),
   };

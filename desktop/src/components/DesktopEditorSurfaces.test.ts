@@ -34,6 +34,13 @@ describe("desktop editor work surfaces", () => {
     expect(previewSource).not.toContain("Resize preview");
   });
 
+  it("keeps editable Markdown in edit mode even when the preview has a line range", () => {
+    expect(previewSource).toContain('const markdown = $derived(language === "markdown")');
+    expect(previewSource).toContain("markdown: () => markdown");
+    expect(previewSource).toContain("{#if editing}");
+    expect(previewSource).not.toContain("{#if renderAsMarkdown && editing}");
+  });
+
   it("gives the editor host an explicit full-height grid so the conversation composer stays bottom-anchored", () => {
     expect(workbenchSurfaceSource).toContain("relative grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden bg-background");
     expect(workbenchSurfaceSource).toContain("col-start-1 row-start-1 min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto]");

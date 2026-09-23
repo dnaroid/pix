@@ -72,6 +72,7 @@
     attachment?.dataUrl ?? (attachment?.path ? convertFileSrc(attachment.path) : ""),
   );
   const language = $derived(file ? languageForFilePath(file.path) : undefined);
+  const markdown = $derived(language === "markdown");
   const renderAsMarkdown = $derived(language === "markdown" && !lineRange);
   const highlighted = $derived(
     file && !renderAsMarkdown ? highlightCode(file.content, language) : undefined,
@@ -81,7 +82,7 @@
     previewId: () => previewId,
     file: () => file,
     editable: () => editable,
-    renderAsMarkdown: () => renderAsMarkdown,
+    markdown: () => markdown,
     onSaveProjectFile: () => onSaveProjectFile,
     onDirtyChange: () => onDirtyChange,
   });
@@ -224,7 +225,7 @@
       {/if}
     </header>
     {#if file}
-      {#if renderAsMarkdown && editing}
+      {#if editing}
         <textarea
           class="min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           bind:value={editorState.draft}

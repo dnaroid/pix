@@ -19,6 +19,13 @@ describe("desktop modal dialog lifecycle", () => {
     expect(settingsSource).toContain('type="submit"');
   });
 
+  it("renders single-line prompts separately from multiline editors", () => {
+    expect(elicitationSource).toContain('field.type === "editor"');
+    expect(elicitationSource).toContain("<textarea");
+    expect(elicitationSource).toContain('type="text"');
+    expect(elicitationSource).toContain("class:sr-only={field.label === message}");
+  });
+
   it("keeps picker result rows outside the normal Tab sequence", () => {
     expect(commandSource).toContain('role="combobox"');
     expect(commandSource).toContain('tabindex="-1"');

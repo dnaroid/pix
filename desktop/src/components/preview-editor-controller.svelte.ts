@@ -5,7 +5,7 @@ interface PreviewEditorControllerOptions {
   readonly previewId: () => number;
   readonly file: () => ProjectFilePreview | undefined;
   readonly editable: () => boolean;
-  readonly renderAsMarkdown: () => boolean;
+  readonly markdown: () => boolean;
   readonly onSaveProjectFile: () => ((path: string, content: string) => Promise<boolean>) | undefined;
   readonly onDirtyChange: () => ((dirty: boolean) => void) | undefined;
 }
@@ -23,7 +23,7 @@ export function createPreviewEditorController(options: PreviewEditorControllerOp
   function canEdit(): boolean {
     return Boolean(
       options.file()
-      && options.renderAsMarkdown()
+      && options.markdown()
       && options.editable()
       && options.onSaveProjectFile(),
     );

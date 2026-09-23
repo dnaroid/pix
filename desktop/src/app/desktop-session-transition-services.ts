@@ -1,8 +1,10 @@
 import type { AcpClient } from "../lib/acp-client";
 import type { ActiveSessionState } from "./active-session-state.svelte";
 import type { DesktopSessionServices } from "./desktop-session-services";
+import { createComposerDraftStore } from "./composer-drafts";
 import { createDraftSession } from "./draft-session.svelte";
 import { createSessionTabController } from "./session-tab-controller";
+import type { Attachment } from "../lib/attachments";
 
 type DraftModelOverride = { modelRef: string; thinkingLevel: string } | null;
 
@@ -33,6 +35,10 @@ type DesktopSessionTransitionServicesOptions = {
   routeDraftModel: (prompt: string, attachmentCount: number, signal?: AbortSignal) => Promise<DraftModelOverride>;
   clearPrompt: () => void;
   invalidateAttachmentDraft: () => void;
+  promptText: () => string;
+  promptAttachments: () => readonly Attachment[];
+  setPromptText: (text: string) => void;
+  replacePromptAttachments: (attachments: readonly Attachment[]) => void;
   focusComposer: () => void | Promise<void>;
   sessionCoordinator: () => SessionCoordinatorRef;
   workbenchController: () => WorkbenchControllerRef;
@@ -48,6 +54,13 @@ export function createDesktopSessionTransitionServices(
   options: DesktopSessionTransitionServicesOptions,
 ) {
   let sessionTabs!: ReturnType<typeof createSessionTabController>;
+  const composerDrafts = createComposerDraftStore({
+    workspace: options.workspace,
+    promptText: options.promptText,
+    promptAttachments: options.promptAttachments,
+    setPromptText: options.setPromptText,
+    replacePromptAttachments: options.replacePromptAttachments,
+  });
 
   const draft = createDraftSession({
     client: options.client,
@@ -67,8 +80,8 @@ export function createDesktopSessionTransitionServices(
     refreshDraftConfig: options.refreshDraftConfig,
     draftModelOverride: options.draftModelOverride,
     routeDraftModel: options.routeDraftModel,
-    clearPrompt: options.clearPrompt,
-    invalidateAttachmentDraft: options.invalidateAttachmentDraft,
+    switchComposerDraft: composerDrafts.switchTo,
+    forgetComposerDraft: composerDrafts.forget,
     focusComposer: options.focusComposer,
     forgetRuntime: (sessionId) => options.sessionCoordinator().forgetRuntime(sessionId),
     ensureProvisionalSession: options.sessions.catalog.ensureProvisional,
@@ -106,6 +119,9 @@ export function createDesktopSessionTransitionServices(
       options.workbenchController().retargetSessionAnchors(sourceSessionId, targetSessionId),
     clearPrompt: options.clearPrompt,
     invalidateAttachmentDraft: options.invalidateAttachmentDraft,
+    switchComposerDraft: composerDrafts.switchTo,
+    forgetComposerDraft: composerDrafts.forget,
+    resetComposerDrafts: composerDrafts.reset,
     tabSessionIds: options.tabSessionIds,
     focusComposer: options.focusComposer,
     refreshQueueState: options.refreshQueueState,
@@ -116,6 +132,7 @@ export function createDesktopSessionTransitionServices(
   return {
     draft,
     sessionTabs,
+    composerDrafts,
   };
 }
 

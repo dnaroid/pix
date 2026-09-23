@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { loadPiToolsSuiteConfig } from "../src/config.js";
 import resourceRegistry, { __test } from "../src/resource-registry/index.js";
 
 const originalHome = process.env.HOME;
@@ -182,6 +183,28 @@ describe("resource registry", () => {
 		const project = tempRoot();
 		const { commands } = harness(project);
 		expect([...commands.keys()]).toEqual(["registry"]);
+	});
+
+	test("interactive remote setup does not suggest a repository as the user's value", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project);
+		process.env.HOME = home;
+		const h = harness(project);
+		const prompts: Array<{ title: string; placeholder: string | undefined }> = [];
+		h.ctx.ui.input = async (title: string, placeholder?: string) => {
+			prompts.push({ title, placeholder });
+			return undefined;
+		};
+
+		await h.commands.get("registry").handler("configure", h.ctx);
+		expect(prompts).toEqual([{
+			title: "Resource registry Git remote",
+			placeholder: "Enter your Git remote URL (SSH or HTTPS)",
+		}]);
+		expect(loadPiToolsSuiteConfig([], { cwd: project }).resourceRegistry.remote).toBeUndefined();
 	});
 
 	test("bounds spawned commands and identifies a timed-out command", async () => {

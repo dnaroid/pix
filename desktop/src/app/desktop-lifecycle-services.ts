@@ -57,6 +57,8 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
       void options.projectServices.tasks.load(workspace);
       void options.projectServices.documents.load(workspace);
       void options.projectServices.workspace.loadPreferences(workspace);
+      void options.projectServices.registry.refreshProjectInitialization();
+      void options.projectServices.registry.autoCleanProject(workspace);
     },
     canAcceptDroppedAttachments: options.questionImages.canAcceptDroppedAttachments,
     setDragActive: options.setDragActive,

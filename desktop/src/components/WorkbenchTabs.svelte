@@ -122,7 +122,7 @@
             title={tab.title}
             onclick={() => onSelect(tab.id)}
             onkeydown={(event) => handleTabKeydown(event, index, tab)}
-            disabled={tab.disabled}
+            disabled={tab.selectionDisabled ?? tab.disabled}
           >
             {#if tab.kind === "session"}
               <SessionTabStatusIcon kind={tab.statusKind} {active} />

@@ -114,7 +114,11 @@ Those portable markers are not written to the local project task file.
     project-scoped artifacts. If there is no Git origin, reusable skills and
     agents remain fully usable and the Registry snapshot reports one non-fatal
     project-key issue. The user can set a project key explicitly; lack of Git
-    must not surface as a duplicate global Registry error.
+    must not surface as a duplicate global Registry error. Without a Git origin,
+    the interactive key prompt requires a nonempty explicit key and must not
+    suggest that leaving it blank will derive one automatically. Interactive
+    remote setup gives generic Git URL guidance when no remote is configured,
+    rather than presenting an example repository as a usable value.
 
 ## Compatibility
 
@@ -151,6 +155,42 @@ Those portable markers are not written to the local project task file.
   concurrent publish race: it must be a regular file canonically inside `.pi`.
   An existing symbolic link, directory, or escaping target is an error, never
   an idempotent-success result.
+- The Registry panel reports the logical byte size of the current project-owned
+  `.pi` tree plus the currently reclaimable generated-junk byte count. Size
+  traversal never follows symbolic-link targets; a missing `.pi` is represented
+  as absent rather than as an alternate storage layout.
+- Total and reclaimable bytes are returned by one native storage inspection so
+  the panel does not duplicate full-tree traversal. Desktop bounds local project
+  inspection waits to five seconds; a stalled or failed storage inspection ends
+  the loading state with a local unavailable/timeout status, and a later Refresh
+  starts a new inspection instead of leaving `Checking…` indefinitely.
+- Registry cleanup is allowlist-based and never resets project state. The
+  canonical top-level project directories are `agents/`, `artifacts/`,
+  `plans/`, `skills/`, `subagents/`, and `task-attachments/`.
+- Cleanup preserves the canonical `agents/`, `plans/`, `skills/`, and
+  `task-attachments/` trees, but removes every entry recursively inside
+  `.pi/artifacts/` and `.pi/subagents/` while leaving those two container
+  directories in place.
+- Any other regular top-level directory directly under `.pi/` is non-canonical
+  and is removed recursively. Arbitrary top-level files are not removed by this
+  directory rule; the existing cleanup of `.DS_Store` and stale Pix temporary
+  files still applies.
+- Recursive removal uses no-follow traversal: symbolic-link targets are never
+  traversed or deleted. A root `.pi` symbolic link or non-directory is rejected
+  rather than followed.
+- When Desktop opens an already-initialized project, it starts the same cleanup
+  policy in the background with a 72-hour TTL. The project open path does not
+  wait for cleanup and the foreground operation lock is not taken.
+- TTL cleanup treats each direct child of `.pi/artifacts/` and `.pi/subagents/`,
+  each non-canonical top-level directory, and the other ordinary cleanup targets
+  as one candidate. A candidate is removed only when its own modification time
+  and every entry in its subtree are at least 72 hours old. The candidate is
+  re-checked immediately before deletion so activity that begins during size
+  accounting preserves it.
+- Background cleanup is not run against a bare/uninitialized `.pi` directory.
+  After it completes, Registry storage state is refreshed only if that project
+  is still the active workspace. Manual Clean remains immediate and ignores the
+  TTL.
 - Desktop TODO and plan saves never bootstrap a missing `.pi`; explicit
   initialization is the only Desktop project-document path that creates it.
   Task-document and task-attachment saves likewise require the complete
@@ -194,10 +234,16 @@ Those portable markers are not written to the local project task file.
   changes during an in-flight push, retained error state, and foreground-lock
   independence.
 - Registry store/panel tests cover local initialization without a ready ACP
-  session and workspace-lifecycle guards. Sidebar tests cover
-  pending/syncing/error presentation, initialization wiring and the shared
-  animated indicator. Rust coverage verifies that the fast Registry check uses
-  task attachment bytes when comparing the `tasks` project artifact.
+  session, local `.pi` size/reclaimable-byte reporting and allowlist-based
+  garbage cleanup, background TTL cleanup and stale-workspace lifecycle guards.
+  Sidebar tests cover
+  pending/syncing/error presentation, initialization/storage wiring and the
+  shared animated indicator. Rust coverage verifies that storage
+  sizing/cleanup preserves the canonical data trees, empties artifacts/subagents,
+  removes non-canonical top-level directories, applies the 72-hour TTL only to
+  initialized projects, and does not follow symlink targets. The fast Registry
+  check also uses task attachment bytes when comparing the `tasks` project
+  artifact.
 - ACP Desktop command tests cover `workspace` push/pull request validation and
   rejection of unknown scopes before the Registry RPC is dispatched.
 

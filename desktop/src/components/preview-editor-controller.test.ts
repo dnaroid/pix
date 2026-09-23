@@ -15,7 +15,7 @@ function fixture() {
     previewId: () => id,
     file: () => file,
     editable: () => true,
-    renderAsMarkdown: () => true,
+    markdown: () => true,
     onSaveProjectFile: () => saveFile,
     onDirtyChange: () => undefined,
   });

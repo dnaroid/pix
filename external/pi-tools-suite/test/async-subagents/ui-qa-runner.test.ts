@@ -198,6 +198,10 @@ describe("ui-qa guide routing", () => {
 		expect(desktop).not.toContain("ScreenCaptureKit");
 		expect(desktop).not.toContain("PrintWindow");
 		expect(desktop).not.toContain("pyatspi");
+		expect(desktop).toContain("target.application");
+		expect(desktop).toContain('{"name":"App Name"}');
+		expect(desktop).toContain('{"launch":{"argv":["npm","run","dev"],"cwd":"desktop"}}');
+		expect(desktop).toContain("Never use a bare string");
 	});
 
 	test("rejects unknown backends, topics, options, and extra arguments", () => {

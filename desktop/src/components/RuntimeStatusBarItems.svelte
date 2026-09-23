@@ -342,7 +342,7 @@
                   aria-hidden="true"
                 >
                   <span
-                    class="absolute inset-y-0 left-0 rounded-sm bg-muted-foreground/50"
+                    class="absolute inset-y-0 left-0 bg-muted-foreground/50"
                     style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
                   ></span>
                   {#if label === "W"}

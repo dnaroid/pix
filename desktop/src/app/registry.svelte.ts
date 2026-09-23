@@ -25,9 +25,22 @@ type RegistryStoreOptions = {
   reportError: (error: unknown) => void;
 };
 
+type ProjectPiStorageSnapshot = {
+  totalBytes: number | null;
+  cleanupBytes: number;
+  cleanupAvailable: boolean;
+};
+
+const PROJECT_LOCAL_INSPECTION_TIMEOUT_MS = 5_000;
+
 export function createRegistryStore(options: RegistryStoreOptions) {
   let snapshot = $state<RegistrySnapshot | undefined>(undefined);
   let projectInitialized = $state<boolean | undefined>(undefined);
+  let projectPiSizeBytes = $state<number | null | undefined>(undefined);
+  let projectPiCleanupBytes = $state<number | undefined>(undefined);
+  let projectPiCleanupAvailable = $state(false);
+  let projectPiStorageLoading = $state(false);
+  let projectPiStorageError = $state<string | null>(null);
   let actionId = $state<string | null>(null);
   let projectStateLoadGeneration = 0;
   let lifecycleGeneration = 0;
@@ -76,15 +89,38 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     const requestGeneration = ++projectStateLoadGeneration;
     if (!workspace) {
       projectInitialized = undefined;
+      projectPiSizeBytes = undefined;
+      projectPiCleanupBytes = undefined;
+      projectPiCleanupAvailable = false;
+      projectPiStorageLoading = false;
+      projectPiStorageError = null;
       return;
     }
-    try {
-      const initialized = await invoke<boolean>("project_pi_initialized", { workspace });
-      if (requestGeneration !== projectStateLoadGeneration || options.workspace() !== workspace) return;
-      projectInitialized = initialized;
-    } catch (error) {
-      if (requestGeneration === projectStateLoadGeneration && options.workspace() === workspace) options.reportError(error);
+    projectPiStorageLoading = true;
+    projectPiStorageError = null;
+    const [initializedResult, storageResult] = await Promise.allSettled([
+      withTimeout(
+        invoke<boolean>("project_pi_initialized", { workspace }),
+        "Project state inspection",
+      ),
+      withTimeout(
+        invoke<ProjectPiStorageSnapshot>("project_pi_storage", { workspace }),
+        ".pi storage inspection",
+      ),
+    ]);
+    if (requestGeneration !== projectStateLoadGeneration || options.workspace() !== workspace) return;
+    if (initializedResult.status === "fulfilled") projectInitialized = initializedResult.value;
+    else options.reportError(initializedResult.reason);
+    if (storageResult.status === "fulfilled") {
+      projectPiSizeBytes = storageResult.value.totalBytes;
+      projectPiCleanupBytes = storageResult.value.cleanupBytes;
+      projectPiCleanupAvailable = storageResult.value.cleanupAvailable;
+      projectPiStorageError = null;
+    } else {
+      projectPiCleanupAvailable = false;
+      projectPiStorageError = registryStorageErrorLabel(storageResult.reason);
     }
+    projectPiStorageLoading = false;
   }
 
   async function initializeProject(): Promise<boolean> {
@@ -118,6 +154,44 @@ export function createRegistryStore(options: RegistryStoreOptions) {
         if (initialized) refresh();
       }
     }
+  }
+
+  async function cleanProject(): Promise<boolean> {
+    const workspace = options.workspace();
+    const requestGeneration = lifecycleGeneration;
+    const current = () => requestGeneration === lifecycleGeneration && options.workspace() === workspace;
+    if (!workspace || actionId !== null || backgroundSyncState.phase === "syncing") return false;
+
+    actionId = "cleanup-project";
+    options.setOperationRunning(true);
+    options.setErrorMessage(null);
+    try {
+      await invoke<number>("clean_project_pi", { workspace });
+      if (!current()) return false;
+      await refreshProjectInitialization();
+      return current();
+    } catch (error) {
+      if (current()) options.reportError(error);
+      return false;
+    } finally {
+      if (current()) {
+        actionId = null;
+        options.setOperationRunning(false);
+        backgroundSync.retry();
+      }
+    }
+  }
+
+  async function autoCleanProject(workspace: string): Promise<void> {
+    if (!workspace) return;
+    const requestGeneration = lifecycleGeneration;
+    try {
+      await invoke<number>("auto_clean_project_pi", { workspace });
+    } catch {
+      return;
+    }
+    if (requestGeneration !== lifecycleGeneration || options.workspace() !== workspace) return;
+    await refreshProjectInitialization();
   }
 
   async function runAction(request: RegistryActionRequest, nextActionId: string): Promise<void> {
@@ -170,6 +244,11 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     projectStateLoadGeneration += 1;
     snapshot = undefined;
     projectInitialized = undefined;
+    projectPiSizeBytes = undefined;
+    projectPiCleanupBytes = undefined;
+    projectPiCleanupAvailable = false;
+    projectPiStorageLoading = false;
+    projectPiStorageError = null;
     actionId = null;
     backgroundSync.reset();
   }
@@ -181,11 +260,18 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   return {
     get snapshot() { return snapshot; },
     get projectInitialized() { return projectInitialized; },
+    get projectPiSizeBytes() { return projectPiSizeBytes; },
+    get projectPiCleanupBytes() { return projectPiCleanupBytes; },
+    get projectPiCleanupAvailable() { return projectPiCleanupAvailable; },
+    get projectPiStorageLoading() { return projectPiStorageLoading; },
+    get projectPiStorageError() { return projectPiStorageError; },
     get actionId() { return actionId; },
     get backgroundSyncState() { return backgroundSyncState; },
     handleSessionState,
     refreshProjectInitialization,
     initializeProject,
+    cleanProject,
+    autoCleanProject,
     runAction,
     refresh,
     scheduleProjectSync,
@@ -197,4 +283,28 @@ function registryActionBusyError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("registry actions are unavailable while the agent is running")
     || message.includes("registry actions are unavailable while the session is busy");
+}
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out`)),
+          PROJECT_LOCAL_INSPECTION_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function registryStorageErrorLabel(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("timed out")
+    ? "Storage meter timed out"
+    : "Storage meter unavailable";
 }

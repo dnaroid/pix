@@ -33,6 +33,13 @@ export type SessionTabControllerOptions = {
   retargetWorkbenchAnchors: (sourceSessionId: string, targetSessionId?: string) => void;
   clearPrompt: () => void;
   invalidateAttachmentDraft: () => void;
+  switchComposerDraft: (
+    sourceOwnerId: string | null | undefined,
+    targetOwnerId: string,
+    options?: { resetTarget?: boolean; preserveSource?: boolean },
+  ) => void;
+  forgetComposerDraft: (ownerId: string) => void;
+  resetComposerDrafts: () => void;
   tabSessionIds: () => readonly string[];
   focusComposer: () => void | Promise<void>;
   refreshQueueState: (sessionId: string) => void | Promise<void>;

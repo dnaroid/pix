@@ -73,4 +73,19 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarViewModelSource).toContain("onGitInitialize: () => void options.git.initialize()");
     expect(sidebarViewModelSource).toContain("onRegistryInitializeProject: () => void options.registry.initializeProject()");
   });
+
+  it("wires Registry .pi storage and garbage cleanup through the sidebar", () => {
+    expect(sidebarSource).toContain("projectPiSizeBytes={registryProjectPiSizeBytes}");
+    expect(sidebarSource).toContain("projectPiCleanupBytes={registryProjectPiCleanupBytes}");
+    expect(sidebarSource).toContain("projectPiCleanupAvailable={registryProjectPiCleanupAvailable}");
+    expect(sidebarSource).toContain("projectPiStorageLoading={registryProjectPiStorageLoading}");
+    expect(sidebarSource).toContain("projectPiStorageError={registryProjectPiStorageError}");
+    expect(sidebarSource).toContain("onCleanProject={onRegistryCleanProject}");
+    expect(sidebarViewModelSource).toContain("registryProjectPiSizeBytes: options.registry.projectPiSizeBytes");
+    expect(sidebarViewModelSource).toContain("registryProjectPiCleanupBytes: options.registry.projectPiCleanupBytes");
+    expect(sidebarViewModelSource).toContain("registryProjectPiCleanupAvailable: options.registry.projectPiCleanupAvailable");
+    expect(sidebarViewModelSource).toContain("registryProjectPiStorageLoading: options.registry.projectPiStorageLoading");
+    expect(sidebarViewModelSource).toContain("registryProjectPiStorageError: options.registry.projectPiStorageError");
+    expect(sidebarViewModelSource).toContain("onRegistryCleanProject: () => void options.registry.cleanProject()");
+  });
 });

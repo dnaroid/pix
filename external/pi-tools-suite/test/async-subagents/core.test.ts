@@ -545,7 +545,7 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
 		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
@@ -586,7 +586,7 @@ describe.serial("subagent type config", () => {
 		});
 		for (const [subagentType, model, fallbackModels] of [
 			["research", "zai/glm-5-turbo", ["openai-codex/gpt-6-luna"]],
-			["implement", "zai/glm-5.3-flash", ["openai-codex/gpt-6-luna"]],
+			["implement", "zai/glm-5.3-flash", ["openai-codex/gpt-6-sol"]],
 			["verify", "zai/glm-5-turbo", ["openai-codex/gpt-6-luna"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
@@ -597,7 +597,7 @@ describe.serial("subagent type config", () => {
 		expect(oracle.task.thinking).toBe("max");
 		expect(resolved.task.model).toBe("zai/glm-5.3-flash");
 		expect(resolved.task.subagentType).toBe("ui-qa");
-		expect(resolved.task.thinking).toBe("low");
+		expect(resolved.task.thinking).toBe("medium");
 		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-6-luna"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(300_000);
@@ -617,6 +617,8 @@ describe.serial("subagent type config", () => {
 		expect(instructions).toContain('guide --backend browser');
 		expect(instructions).toContain('guide --backend tui');
 		expect(instructions).toContain('guide --backend desktop');
+		expect(instructions).toContain("target.application");
+		expect(instructions).toContain("never a bare application-id string");
 		expect(instructions).toContain("selection.guide");
 		expect(instructions).toContain("probe --flow");
 		expect(instructions).toContain("run --flow");
@@ -649,6 +651,7 @@ describe.serial("subagent type config", () => {
 		const definitions = readAgentDefinitionsFromDir(definitionsDir);
 
 		expect(Object.keys(definitions).sort()).toEqual([
+			"delivery-review",
 			"frontier-review",
 			"implement",
 			"oracle",
@@ -658,6 +661,8 @@ describe.serial("subagent type config", () => {
 		]);
 		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
 		expect(definitions["frontier-review"]?.raw.notForParentModels).toEqual(["openai-codex/gpt-6-sol*", "zai/glm-5.3"]);
+		expect(definitions["delivery-review"]?.raw.tools).toEqual(["read", "grep", "bash"]);
+		expect(definitions["delivery-review"]?.raw.promptAppend).toContain("End with confidence");
 		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
 		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);

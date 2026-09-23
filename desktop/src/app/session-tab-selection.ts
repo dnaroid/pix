@@ -5,13 +5,23 @@ import type { SessionTabControllerOptions } from "./session-tab-controller-optio
 export function createSessionTabSelection(options: SessionTabControllerOptions) {
   async function loadSession(sessionId: string): Promise<void> {
     const requestClient = options.client();
-    if (!requestClient || !options.canUseSession() || sessionId === options.state.sessionId) return;
+    const canSelectDuringDraftStartup = options.draft.materializing
+      && options.statusReady()
+      && !!options.workspace()
+      && !options.operationRunning();
+    if (
+      !requestClient
+      || (!options.canUseSession() && !canSelectDuringDraftStartup)
+      || sessionId === options.state.sessionId
+    ) return;
     const requestWorkspace = options.workspace();
     options.closeProjectSelector();
     options.tabs.closeSelector();
     options.setErrorMessage(null);
     const currentSessionId = options.state.sessionId;
+    const sourceOwnerId = options.draft.active ? DRAFT_SESSION_TAB_ID : currentSessionId;
     if (currentSessionId) options.state.setSessionTranscript(currentSessionId, options.state.transcript);
+    options.switchComposerDraft(sourceOwnerId, sessionId);
     options.draft.deactivate();
     options.state.setSessionId(sessionId);
     const cachedTranscript = options.state.sessionTranscript(sessionId);
@@ -88,6 +98,7 @@ export function createSessionTabSelection(options: SessionTabControllerOptions) 
       if (sourceSessionId) options.retargetWorkbenchAnchors(sourceSessionId, sessionId);
 
       options.history.cancel();
+      options.switchComposerDraft(sourceSessionId, sessionId, { preserveSource: false });
       options.state.setSessionId(sessionId);
       const cachedTranscript = options.state.sessionTranscript(sessionId);
       options.state.setTranscript(cachedTranscript ?? emptyTranscript);

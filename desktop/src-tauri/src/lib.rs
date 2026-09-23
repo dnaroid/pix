@@ -79,6 +79,17 @@ const PI_TOOLS_SUITE_SCHEMA_URL: &str =
 const PIX_DESKTOP_WATCH_STATE_ENV: &str = "PIX_DESKTOP_WATCH_STATE";
 const MAX_DESKTOP_WATCH_STATE_BYTES: u64 = 4 * 1024;
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const PROJECT_PI_STALE_TEMP_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const PROJECT_PI_AUTO_CLEAN_TTL: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
+    "agents",
+    "artifacts",
+    "plans",
+    "skills",
+    "subagents",
+    "task-attachments",
+];
+const PROJECT_PI_EPHEMERAL_DIRECTORIES: &[&str] = &["artifacts", "subagents"];
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static PROJECT_MARKDOWN_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -701,6 +712,14 @@ struct ConditionalWorkspaceConfigWrite {
 struct ProjectDocumentsSnapshot {
     plans: Vec<String>,
     todo_exists: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectPiStorageSnapshot {
+    total_bytes: Option<u64>,
+    cleanup_bytes: u64,
+    cleanup_available: bool,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -1568,6 +1587,21 @@ async fn project_pi_initialized(workspace: String) -> Result<bool, String> {
 #[tauri::command]
 async fn initialize_project_pi(workspace: String) -> Result<(), String> {
     run_blocking(move || initialize_project_pi_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn project_pi_storage(workspace: String) -> Result<ProjectPiStorageSnapshot, String> {
+    run_blocking(move || project_pi_storage_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn clean_project_pi(workspace: String) -> Result<u64, String> {
+    run_blocking(move || clean_project_pi_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn auto_clean_project_pi(workspace: String) -> Result<u64, String> {
+    run_blocking(move || auto_clean_project_pi_from(Path::new(&workspace))).await
 }
 
 #[tauri::command]
@@ -7264,6 +7298,382 @@ fn project_pi_initialized_from(workspace: &Path) -> Result<bool, String> {
     Ok(initialized_project_pi(&root)?.is_some())
 }
 
+fn project_pi_storage_from(workspace: &Path) -> Result<ProjectPiStorageSnapshot, String> {
+    let root = canonical_workspace(workspace)?;
+    let project_directory = root.join(".pi");
+    let metadata = match fs::symlink_metadata(&project_directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ProjectPiStorageSnapshot {
+                total_bytes: None,
+                cleanup_bytes: 0,
+                cleanup_available: false,
+            })
+        }
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect {}: {error}",
+                project_directory.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(".pi must be a project-owned directory".to_owned());
+    }
+    let project_directory = canonical_project_directory(&root, &project_directory)?;
+    inspect_project_pi_storage(&project_directory)
+}
+
+fn inspect_project_pi_storage(
+    project_directory: &Path,
+) -> Result<ProjectPiStorageSnapshot, String> {
+    let artifacts_directory = project_directory.join("artifacts");
+    let now = SystemTime::now();
+    let mut pending = vec![(project_directory.to_path_buf(), false)];
+    let mut total = 0u64;
+    let mut cleanup_bytes = 0u64;
+    let mut cleanup_available = false;
+    while let Some((current, cleanup_subtree)) = pending.pop() {
+        let entries = fs::read_dir(&current)
+            .map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                let child_cleanup_subtree = if current == project_directory {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if project_pi_directory_is_ephemeral(&name) {
+                        true
+                    } else if !project_pi_directory_is_canonical(&name) {
+                        cleanup_available = true;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    if cleanup_subtree {
+                        cleanup_available = true;
+                    }
+                    cleanup_subtree
+                };
+                pending.push((path, child_cleanup_subtree));
+                continue;
+            }
+            total = total.checked_add(metadata.len()).ok_or_else(|| {
+                format!(
+                    "logical size of {} exceeds u64",
+                    project_directory.display()
+                )
+            })?;
+            if cleanup_subtree
+                || (!metadata.file_type().is_symlink()
+                    && project_pi_is_cleanup_candidate(
+                        &current,
+                        &entry.file_name().to_string_lossy(),
+                        &path,
+                        &metadata,
+                        &artifacts_directory,
+                        now,
+                    ))
+            {
+                cleanup_available = true;
+                cleanup_bytes = cleanup_bytes.checked_add(metadata.len()).ok_or_else(|| {
+                    format!(
+                        "cleanup size of {} exceeds u64",
+                        project_directory.display()
+                    )
+                })?;
+            }
+        }
+    }
+    Ok(ProjectPiStorageSnapshot {
+        total_bytes: Some(total),
+        cleanup_bytes,
+        cleanup_available,
+    })
+}
+
+fn clean_project_pi_from(workspace: &Path) -> Result<u64, String> {
+    let root = canonical_workspace(workspace)?;
+    let project_directory = root.join(".pi");
+    let metadata = match fs::symlink_metadata(&project_directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect {}: {error}",
+                project_directory.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(".pi must be a project-owned directory".to_owned());
+    }
+    let project_directory = canonical_project_directory(&root, &project_directory)?;
+    let candidates = project_pi_cleanup_targets(&project_directory)?;
+    let mut removed_bytes = 0u64;
+    for candidate in candidates {
+        let candidate_bytes = project_pi_path_logical_size(&candidate)?;
+        remove_project_pi_path_nofollow(&candidate)?;
+        removed_bytes = removed_bytes
+            .checked_add(candidate_bytes)
+            .ok_or_else(|| "removed .pi garbage size exceeds u64".to_owned())?;
+    }
+    Ok(removed_bytes)
+}
+
+fn auto_clean_project_pi_from(workspace: &Path) -> Result<u64, String> {
+    let root = canonical_workspace(workspace)?;
+    if initialized_project_pi(&root)?.is_none() {
+        return Ok(0);
+    }
+    let project_directory = root.join(".pi");
+    let metadata = match fs::symlink_metadata(&project_directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect {}: {error}",
+                project_directory.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(".pi must be a project-owned directory".to_owned());
+    }
+    let project_directory = canonical_project_directory(&root, &project_directory)?;
+    let candidates = project_pi_cleanup_targets(&project_directory)?;
+    let now = SystemTime::now();
+    let mut removed_bytes = 0u64;
+    for candidate in candidates {
+        if !project_pi_path_is_older_than(&candidate, now, PROJECT_PI_AUTO_CLEAN_TTL)? {
+            continue;
+        }
+        let candidate_bytes = project_pi_path_logical_size(&candidate)?;
+        // Re-scan immediately before deletion so activity that started while size
+        // accounting was running keeps the candidate alive.
+        if !project_pi_path_is_older_than(&candidate, SystemTime::now(), PROJECT_PI_AUTO_CLEAN_TTL)?
+        {
+            continue;
+        }
+        remove_project_pi_path_nofollow(&candidate)?;
+        removed_bytes = removed_bytes
+            .checked_add(candidate_bytes)
+            .ok_or_else(|| "removed .pi garbage size exceeds u64".to_owned())?;
+    }
+    Ok(removed_bytes)
+}
+
+fn project_pi_cleanup_targets(project_directory: &Path) -> Result<Vec<PathBuf>, String> {
+    let artifacts_directory = project_directory.join("artifacts");
+    let now = SystemTime::now();
+    let mut pending = vec![project_directory.to_path_buf()];
+    let mut candidates = Vec::new();
+    while let Some(current) = pending.pop() {
+        let entries = fs::read_dir(&current)
+            .map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+            if current == project_directory {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                    if project_pi_directory_is_ephemeral(&name) {
+                        let children = fs::read_dir(&path).map_err(|error| {
+                            format!("failed to read {}: {error}", path.display())
+                        })?;
+                        for child in children {
+                            let child = child.map_err(|error| {
+                                format!("failed to read {}: {error}", path.display())
+                            })?;
+                            candidates.push(child.path());
+                        }
+                        continue;
+                    }
+                    if !project_pi_directory_is_canonical(&name) {
+                        candidates.push(path);
+                        continue;
+                    }
+                }
+            }
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if !metadata.is_file() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if project_pi_is_cleanup_candidate(
+                &current,
+                &name,
+                &path,
+                &metadata,
+                &artifacts_directory,
+                now,
+            ) {
+                candidates.push(path);
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+fn project_pi_directory_is_canonical(name: &str) -> bool {
+    PROJECT_PI_CANONICAL_DIRECTORIES.contains(&name)
+}
+
+fn project_pi_directory_is_ephemeral(name: &str) -> bool {
+    PROJECT_PI_EPHEMERAL_DIRECTORIES.contains(&name)
+}
+
+fn project_pi_path_logical_size(path: &Path) -> Result<u64, String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(format!("failed to inspect {}: {error}", path.display())),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(metadata.len());
+    }
+    let mut total = 0u64;
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let entries = fs::read_dir(&current)
+            .map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+            let child = entry.path();
+            let metadata = fs::symlink_metadata(&child)
+                .map_err(|error| format!("failed to inspect {}: {error}", child.display()))?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                pending.push(child);
+            } else {
+                total = total
+                    .checked_add(metadata.len())
+                    .ok_or_else(|| format!("logical size of {} exceeds u64", path.display()))?;
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn project_pi_path_is_older_than(
+    path: &Path,
+    now: SystemTime,
+    ttl: Duration,
+) -> Result<bool, String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("failed to inspect {}: {error}", path.display())),
+    };
+    let mut latest_modified = metadata.modified().map_err(|error| {
+        format!(
+            "failed to read modification time for {}: {error}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(now
+            .duration_since(latest_modified)
+            .is_ok_and(|age| age >= ttl));
+    }
+
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let entries = fs::read_dir(&current)
+            .map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("failed to read {}: {error}", current.display()))?;
+            let child = entry.path();
+            let metadata = fs::symlink_metadata(&child)
+                .map_err(|error| format!("failed to inspect {}: {error}", child.display()))?;
+            let modified = metadata.modified().map_err(|error| {
+                format!(
+                    "failed to read modification time for {}: {error}",
+                    child.display()
+                )
+            })?;
+            if modified > latest_modified {
+                latest_modified = modified;
+            }
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                pending.push(child);
+            }
+        }
+    }
+    Ok(now
+        .duration_since(latest_modified)
+        .is_ok_and(|age| age >= ttl))
+}
+
+fn remove_project_pi_path_nofollow(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("failed to inspect {}: {error}", path.display())),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return fs::remove_file(path)
+            .map_err(|error| format!("failed to remove {}: {error}", path.display()));
+    }
+    let children = fs::read_dir(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    for child in children {
+        let child = child.map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        remove_project_pi_path_nofollow(&child.path())?;
+    }
+    fs::remove_dir(path)
+        .map_err(|error| format!("failed to remove directory {}: {error}", path.display()))
+}
+
+fn project_pi_is_cleanup_candidate(
+    current_directory: &Path,
+    name: &str,
+    path: &Path,
+    metadata: &fs::Metadata,
+    artifacts_directory: &Path,
+    now: SystemTime,
+) -> bool {
+    let generated_log = current_directory == artifacts_directory
+        && path.extension().is_some_and(|extension| extension == "log")
+        && project_pi_file_is_stale(metadata, now);
+    let system_junk = name == ".DS_Store";
+    let stale_pix_temp = is_pix_project_temp_name(name) && project_pi_file_is_stale(metadata, now);
+    generated_log || system_junk || stale_pix_temp
+}
+
+fn project_pi_file_is_stale(metadata: &fs::Metadata, now: SystemTime) -> bool {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| now.duration_since(modified).ok())
+        .is_some_and(|age| age >= PROJECT_PI_STALE_TEMP_AGE)
+}
+
+fn is_pix_project_temp_name(name: &str) -> bool {
+    name.ends_with(".tmp")
+        && (name.starts_with(".tasks.jsonc.")
+            || name.starts_with(".tasks.jsonc.initialize.")
+            || name.starts_with(".workspace.jsonc.")
+            || name.starts_with(".markdown."))
+}
+
 /// The scaffold itself is the initialization marker.  A pre-existing `.pi`
 /// directory (including one containing unrelated Pi configuration) is not an
 /// initialized Desktop project-state directory.
@@ -8384,6 +8794,9 @@ pub fn run() {
             list_project_documents,
             project_pi_initialized,
             initialize_project_pi,
+            project_pi_storage,
+            clean_project_pi,
+            auto_clean_project_pi,
             write_project_markdown,
             read_home_file,
             home_file_exists,
@@ -9870,6 +10283,267 @@ mod tests {
         );
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn reports_project_pi_storage_and_cleans_ephemeral_and_noncanonical_data() {
+        let workspace = temporary_workspace("project-pi-storage");
+        assert_eq!(
+            project_pi_storage_from(&workspace).expect("inspect missing .pi storage"),
+            ProjectPiStorageSnapshot {
+                total_bytes: None,
+                cleanup_bytes: 0,
+                cleanup_available: false,
+            }
+        );
+
+        initialize_project_pi_from(&workspace).expect("initialize project .pi");
+        fs::write(workspace.join(".pi/plans/notes.md"), b"hello").expect("write project plan");
+        fs::create_dir(workspace.join(".pi/artifacts")).expect("create artifacts directory");
+        fs::write(workspace.join(".pi/artifacts/check.log"), [7u8; 17])
+            .expect("write generated log");
+        fs::write(workspace.join(".pi/artifacts/result.png"), [8u8; 19])
+            .expect("write generated artifact");
+        fs::write(workspace.join(".pi/.DS_Store"), [9u8; 11]).expect("write system metadata");
+        fs::create_dir_all(workspace.join(".pi/subagents/run-1/agent-1"))
+            .expect("create sub-agent run data");
+        fs::write(
+            workspace.join(".pi/subagents/run-1/agent-1/result.md"),
+            b"subagent-data",
+        )
+        .expect("write sub-agent run data");
+        fs::create_dir_all(workspace.join(".pi/qa-runs/browser/latest"))
+            .expect("create non-canonical directory");
+        fs::write(
+            workspace.join(".pi/qa-runs/browser/latest/result.txt"),
+            b"foreign-data",
+        )
+        .expect("write non-canonical directory data");
+        fs::create_dir_all(workspace.join(".pi/skills/demo"))
+            .expect("create canonical skill directory");
+        fs::write(workspace.join(".pi/skills/demo/SKILL.md"), b"keep-skill")
+            .expect("write canonical skill");
+        fs::create_dir_all(workspace.join(".pi/agents"))
+            .expect("create canonical agents directory");
+        fs::write(workspace.join(".pi/agents/demo.md"), b"keep-agent")
+            .expect("write canonical agent");
+        fs::write(
+            workspace.join(".pi/task-attachments/keep.bin"),
+            b"keep-attachment",
+        )
+        .expect("write canonical attachment");
+        fs::write(workspace.join(".pi/qa_auth.jsonc"), b"{\"profiles\":{}}")
+            .expect("write QA auth config");
+        let young_temp = workspace.join(".pi/.tasks.jsonc.1.1.tmp");
+        fs::write(&young_temp, b"young").expect("write young temp file");
+        let stale_temp = workspace.join(".pi/.workspace.jsonc.1.1.tmp");
+        fs::write(&stale_temp, b"stale-temp").expect("write stale temp file");
+        let old = SystemTime::now()
+            .checked_sub(PROJECT_PI_STALE_TEMP_AGE + Duration::from_secs(1))
+            .expect("old temp timestamp");
+        fs::File::open(workspace.join(".pi/artifacts/check.log"))
+            .expect("open generated log")
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .expect("age generated log");
+        fs::File::open(&stale_temp)
+            .expect("open stale temp")
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .expect("age stale temp");
+
+        let storage = project_pi_storage_from(&workspace).expect("inspect .pi storage");
+        assert!(storage.total_bytes.expect("existing .pi size") > 0);
+        let expected_cleanup_bytes = 17
+            + 19
+            + b"subagent-data".len() as u64
+            + b"foreign-data".len() as u64
+            + 11
+            + b"stale-temp".len() as u64;
+        assert_eq!(storage.cleanup_bytes, expected_cleanup_bytes);
+        assert!(storage.cleanup_available);
+
+        assert_eq!(
+            clean_project_pi_from(&workspace).expect("clean project .pi"),
+            expected_cleanup_bytes
+        );
+        assert!(workspace.join(".pi").is_dir());
+        assert!(workspace.join(".pi/tasks.jsonc").is_file());
+        assert!(workspace.join(".pi/plans/notes.md").is_file());
+        assert!(workspace.join(".pi/artifacts").is_dir());
+        assert_eq!(
+            fs::read_dir(workspace.join(".pi/artifacts"))
+                .expect("read cleaned artifacts")
+                .count(),
+            0
+        );
+        assert!(workspace.join(".pi/subagents").is_dir());
+        assert_eq!(
+            fs::read_dir(workspace.join(".pi/subagents"))
+                .expect("read cleaned subagents")
+                .count(),
+            0
+        );
+        assert!(!workspace.join(".pi/qa-runs").exists());
+        assert!(workspace.join(".pi/skills/demo/SKILL.md").is_file());
+        assert!(workspace.join(".pi/agents/demo.md").is_file());
+        assert!(workspace.join(".pi/task-attachments/keep.bin").is_file());
+        assert!(workspace.join(".pi/qa_auth.jsonc").is_file());
+        assert!(young_temp.is_file());
+        assert!(!workspace.join(".pi/.DS_Store").exists());
+        assert!(!stale_temp.exists());
+        let cleaned = project_pi_storage_from(&workspace).expect("inspect cleaned .pi storage");
+        assert_eq!(cleaned.cleanup_bytes, 0);
+        assert!(!cleaned.cleanup_available);
+        assert!(project_pi_initialized_from(&workspace).expect("inspect cleaned project state"));
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn project_pi_cleanup_removes_empty_noncanonical_top_level_directories() {
+        let workspace = temporary_workspace("project-pi-empty-junk");
+        initialize_project_pi_from(&workspace).expect("initialize project .pi");
+        fs::create_dir_all(workspace.join(".pi/qa-runs/empty"))
+            .expect("create empty non-canonical directory");
+
+        let storage = project_pi_storage_from(&workspace).expect("inspect .pi storage");
+        assert_eq!(storage.cleanup_bytes, 0);
+        assert!(storage.cleanup_available);
+
+        assert_eq!(
+            clean_project_pi_from(&workspace).expect("clean empty non-canonical directory"),
+            0
+        );
+        assert!(!workspace.join(".pi/qa-runs").exists());
+        assert!(
+            !project_pi_storage_from(&workspace)
+                .expect("inspect cleaned .pi storage")
+                .cleanup_available
+        );
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_pi_auto_cleanup_removes_only_targets_idle_for_three_days() {
+        fn set_tree_modified(path: &Path, modified: SystemTime) {
+            let metadata = fs::symlink_metadata(path).expect("inspect path to age");
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                for child in fs::read_dir(path).expect("read path to age") {
+                    set_tree_modified(&child.expect("read child to age").path(), modified);
+                }
+            }
+            fs::File::open(path)
+                .expect("open path to age")
+                .set_times(fs::FileTimes::new().set_modified(modified))
+                .expect("set path modification time");
+        }
+
+        let workspace = temporary_workspace("project-pi-auto-clean-ttl");
+        initialize_project_pi_from(&workspace).expect("initialize project .pi");
+
+        let old_artifact = workspace.join(".pi/artifacts/old-run");
+        let fresh_artifact = workspace.join(".pi/artifacts/fresh-run");
+        let old_subagent = workspace.join(".pi/subagents/old-run");
+        let fresh_subagent = workspace.join(".pi/subagents/fresh-run");
+        let old_noncanonical = workspace.join(".pi/qa-runs-old");
+        let fresh_noncanonical = workspace.join(".pi/qa-runs-fresh");
+        for directory in [
+            &old_artifact,
+            &fresh_artifact,
+            &old_subagent,
+            &fresh_subagent,
+            &old_noncanonical,
+            &fresh_noncanonical,
+        ] {
+            fs::create_dir_all(directory).expect("create cleanup candidate");
+            fs::write(directory.join("payload.bin"), b"payload")
+                .expect("write cleanup candidate payload");
+        }
+        fs::write(workspace.join(".pi/plans/keep.md"), b"keep")
+            .expect("write canonical project data");
+
+        let old = SystemTime::now()
+            .checked_sub(PROJECT_PI_AUTO_CLEAN_TTL + Duration::from_secs(60))
+            .expect("old cleanup timestamp");
+        for directory in [&old_artifact, &old_subagent, &old_noncanonical] {
+            set_tree_modified(directory, old);
+        }
+
+        let removed = auto_clean_project_pi_from(&workspace).expect("auto clean project .pi");
+        assert!(removed >= (b"payload".len() * 3) as u64);
+        assert!(!old_artifact.exists());
+        assert!(!old_subagent.exists());
+        assert!(!old_noncanonical.exists());
+        assert!(fresh_artifact.join("payload.bin").is_file());
+        assert!(fresh_subagent.join("payload.bin").is_file());
+        assert!(fresh_noncanonical.join("payload.bin").is_file());
+        assert!(workspace.join(".pi/plans/keep.md").is_file());
+        assert!(workspace.join(".pi/artifacts").is_dir());
+        assert!(workspace.join(".pi/subagents").is_dir());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn project_pi_auto_cleanup_skips_uninitialized_pi_directories() {
+        let workspace = temporary_workspace("project-pi-auto-clean-uninitialized");
+        fs::create_dir_all(workspace.join(".pi/qa-runs/junk"))
+            .expect("create uninitialized .pi data");
+        fs::write(workspace.join(".pi/qa-runs/junk/result.txt"), b"keep")
+            .expect("write uninitialized .pi data");
+
+        assert_eq!(
+            auto_clean_project_pi_from(&workspace).expect("auto clean uninitialized project"),
+            0
+        );
+        assert!(workspace.join(".pi/qa-runs/junk/result.txt").is_file());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_pi_storage_does_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("project-pi-storage-symlink");
+        let outside = temporary_workspace("project-pi-storage-symlink-outside");
+        initialize_project_pi_from(&workspace).expect("initialize project .pi");
+        fs::write(outside.join("keep.bin"), vec![9u8; 1024 * 1024]).expect("write outside data");
+
+        let before = project_pi_storage_from(&workspace)
+            .expect("inspect .pi before symlink")
+            .total_bytes
+            .expect("existing .pi size");
+        symlink(&outside, workspace.join(".pi/outside-link")).expect("create nested symlink");
+        let after = project_pi_storage_from(&workspace)
+            .expect("inspect .pi with symlink")
+            .total_bytes
+            .expect("existing .pi size");
+        assert!(after < before + 1024);
+
+        fs::create_dir(workspace.join(".pi/artifacts")).expect("create artifacts directory");
+        symlink(
+            outside.join("keep.bin"),
+            workspace.join(".pi/artifacts/outside.log"),
+        )
+        .expect("create cleanup-candidate symlink");
+        clean_project_pi_from(&workspace).expect("clean project .pi with nested symlinks");
+        assert!(outside.join("keep.bin").is_file());
+        assert!(!workspace.join(".pi/artifacts/outside.log").exists());
+
+        fs::remove_file(workspace.join(".pi/outside-link")).expect("remove nested symlink");
+        fs::remove_dir_all(workspace.join(".pi")).expect("remove project .pi");
+        symlink(&outside, workspace.join(".pi")).expect("create root .pi symlink");
+        assert!(clean_project_pi_from(&workspace)
+            .expect_err("root .pi symlink must be rejected")
+            .contains("project-owned directory"));
+        assert!(outside.join("keep.bin").is_file());
+
+        fs::remove_file(workspace.join(".pi")).expect("remove root .pi symlink");
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside temporary workspace");
     }
 
     #[cfg(unix)]

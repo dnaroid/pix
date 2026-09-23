@@ -21,6 +21,7 @@ import type { RpcExtensionUIRequest, RpcExtensionUIResponse } from "@earendil-wo
 
 /** Property name used for the single form field in every mapping. */
 const FIELD = "value";
+export const PIX_INPUT_KIND_META = "_pix/ui-kind";
 export const PIX_QUESTION_EDITOR_TITLE = "__pix_question_v1__";
 export const PIX_QUESTION_ELICITATION_MODE = "_pix.question";
 
@@ -78,12 +79,14 @@ export function toElicitationRequest(
 			return formElicitation(request, options, {
 				type: "string",
 				title: request.title,
+				_meta: { [PIX_INPUT_KIND_META]: "input" },
 				...(request.placeholder ? { description: request.placeholder } : {}),
 			});
 		case "editor":
 			return formElicitation(request, options, {
 				type: "string",
 				title: request.title,
+				_meta: { [PIX_INPUT_KIND_META]: "editor" },
 				...(request.prefill !== undefined && request.prefill !== "" ? { default: request.prefill } : {}),
 			});
 		default:

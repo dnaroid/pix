@@ -52,15 +52,15 @@ afterEach(() => {
 });
 
 describe("ordered agent models and preset pools", () => {
-	test("ships six Markdown modes and pool-only presets from a single defaults source", () => {
+	test("ships seven Markdown modes and pool-only presets from a single defaults source", () => {
 		const cfg = loadSubagentConfig(temp(), {});
-		expect(Object.keys(cfg.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(cfg.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		for (const [name, profile] of Object.entries(cfg.types)) {
 			expect(profile.models?.length).toBeGreaterThan(0);
 			expect(profile.model).toBeUndefined();
 			expect(profile.fallbackModels).toBeUndefined();
 			expect(profile.modelByParent).toBeUndefined();
-			if (name !== "oracle" && name !== "frontier-review") expect(profile.models?.join(",")).not.toContain("gpt-6-sol");
+			if (name !== "oracle" && name !== "frontier-review" && name !== "delivery-review" && name !== "implement") expect(profile.models?.join(",")).not.toContain("gpt-6-sol");
 		}
 		for (const preset of Object.values(cfg.presets ?? {})) {
 			expect(preset.models?.length).toBeGreaterThan(0);
@@ -164,7 +164,7 @@ describe("ordered agent models and preset pools", () => {
 		fs.writeFileSync(path.join(dir, "research.md"), "---\nmodels:\n  - new/first\n  - new/second\n---\nRead only.\n");
 		const cfg = loadSubagentConfig(cwd, {});
 		expect(cfg.types.research.models).toEqual(["new/first", "new/second"]);
-		expect(cfg.types.research.thinking).toBe("low");
+		expect(cfg.types.research.thinking).toBe("medium");
 		expect(cfg.types.research.model).toBeUndefined();
 		expect(cfg.types.research.modelByParent).toBeUndefined();
 		expect(resolveAgentTaskConfig(task(), cfg, { parentModel: "parent/model" }).task.model).toBe("new/first");

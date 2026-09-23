@@ -8,7 +8,7 @@ export interface ToolPresentation {
   readonly tone: ToolTone;
 }
 
-type ToolHeaderSource = Pick<ToolItem, "kind" | "name" | "rawInput" | "title">;
+type ToolHeaderSource = Pick<ToolItem, "kind" | "name" | "rawInput" | "title" | "skillName">;
 type PlainRecord = Record<string, unknown>;
 
 const SEARCH_KEYS = [
@@ -33,7 +33,7 @@ export function toolPresentation(tool: ToolHeaderSource): ToolPresentation {
   const name = toolPresentationName(tool);
   return {
     name,
-    args: headerArgs(name, tool.rawInput) || argsFromTitle(tool.title, name),
+    args: tool.skillName ?? (headerArgs(name, tool.rawInput) || argsFromTitle(tool.title, name)),
     tone: toolTone(name, tool.kind, tool.rawInput),
   };
 }
@@ -44,7 +44,7 @@ export function toolGroupPresentationNames(tools: readonly ToolHeaderSource[]): 
 
 /** True only for Desktop one-shot user bash rows (`!`), not ordinary model bash tools. */
 export function isUserBashTool(tool: ToolHeaderSource): boolean {
-  if (toolPresentationName(tool) !== "bash") return false;
+  if (normalizedName(tool.name ?? tool.title.split(/[\s:]/u)[0] ?? "") !== "bash") return false;
   const args = asRecord(tool.rawInput);
   return typeof args?.excludeFromContext === "boolean";
 }
@@ -52,6 +52,7 @@ export function isUserBashTool(tool: ToolHeaderSource): boolean {
 export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown): ToolTone {
   const name = normalizedName(toolName);
   const kind = normalizedName(toolKind ?? "");
+  if (name === "skill") return "context";
   if (name === "repo_knowledge") {
     const input = asRecord(rawInput);
     const action = input ? stringValue(input, ["action"]) : undefined;
@@ -80,7 +81,8 @@ export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown
   return "neutral";
 }
 
-export function toolPresentationName(tool: Pick<ToolItem, "kind" | "name" | "title">): string {
+export function toolPresentationName(tool: Pick<ToolItem, "kind" | "name" | "title" | "skillName">): string {
+  if (tool.skillName) return "skill";
   const explicit = typeof tool.name === "string" ? tool.name.trim() : "";
   if (explicit) return normalizedName(explicit);
 
@@ -88,6 +90,46 @@ export function toolPresentationName(tool: Pick<ToolItem, "kind" | "name" | "tit
   if (titleName) return normalizedName(titleName);
   if (tool.kind && tool.kind !== "other") return normalizedName(tool.kind);
   return "tool";
+}
+
+/** Classify TUI-equivalent reads of SKILL.md once, at ingestion time. */
+export function skillReadName(toolName: string | undefined, rawInput: unknown, location?: string, title?: string): string | undefined {
+  const leaf = normalizedName(toolName ?? "");
+  const record = asRecord(rawInput);
+  let path: string | undefined;
+  if (leaf === "read") {
+    for (const [key, value] of Object.entries(record ?? {})) {
+      if (/(?:path|file|target|url|uri|glob|cwd|workdir|directory|dir)s?$/i.test(key)) {
+        path = findSkillPath(value);
+        if (path) break;
+      }
+    }
+    // Deferred history deliberately omits rawInput until expansion. Its lightweight
+    // tool call still carries the ACP location and human-readable read title.
+    path ??= findSkillPath(location) ?? findSkillPath(title?.match(/^Read\s+(.+)$/iu)?.[1]);
+  } else if (["bash", "shell", "shell_command"].includes(leaf)) {
+    if (!record) return undefined;
+    const command = stringValue(record, ["command", "cmd", "script"])?.replace(/\s+/g, " ").trim() ?? "";
+    if (/(?:^|[\s'"`=:[\/])SKILL\.md(?:$|[\s'"`;|&)>),:])/i.test(command)) {
+      if (/(?:^|[;&|()\s])(?:cat|bat|batcat|less|more|head|tail|sed|awk|grep|rg|ripgrep|nl|wc|file)\b/i.test(command)
+        && !/(?:>\s*|>>\s*|tee\b[^\n;&|]*|sed\b[^\n;&|]*\s-i(?:\b|[A-Za-z]))[^\n;&|]*SKILL\.md/i.test(command)) {
+        path = /(?:^|[\s'"`=:[(])([^\s'"`;|&)>),]+SKILL\.md)(?=$|[\s'"`;|&)>),:])/i.exec(command)?.[1] ?? "SKILL.md";
+      }
+    }
+  }
+  if (!path) return undefined;
+  const parts = path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean);
+  const cwd = leaf === "read" || !record ? undefined : stringValue(record, ["cwd", "workdir"]);
+  return (parts.at(-1)?.toLowerCase() === "skill.md" ? parts.at(-2) : undefined)
+    ?? cwd?.replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean).at(-1)
+    ?? "skill";
+}
+
+function findSkillPath(value: unknown): string | undefined {
+  if (typeof value === "string") return /(?:^|[\\/])SKILL\.md$/i.test(value.trim()) ? value.trim() : undefined;
+  if (Array.isArray(value)) return value.map(findSkillPath).find(Boolean);
+  if (value && typeof value === "object") return Object.values(value).map(findSkillPath).find(Boolean);
+  return undefined;
 }
 
 function normalizedName(name: string): string {

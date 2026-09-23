@@ -167,9 +167,15 @@ try {
   await page.evaluate(() => window.activitySmoke.advanceClock(1_300));
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "1.3s");
   await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "running-read",
-    name: "read", title: "Read", status: "in_progress" }));
+    name: "read", title: "Read /repo/skills/demo/SKILL.md", status: "in_progress" }));
   assert.equal(await page.locator('[data-activity-name="thinking"]').getAttribute("data-activity-active"), "false");
-  assert.equal(await page.locator('[data-activity-name="read"]').getAttribute("data-activity-active"), "true");
+  const activeSkillHeader = page.locator('[data-activity-name="skill demo"]');
+  assert.equal(await activeSkillHeader.getAttribute("data-activity-active"), "true");
+  await outerSummary.click();
+  const skillRow = page.locator('[data-activity-entry-id="tool:running-read"]');
+  assert.equal(await skillRow.locator('.tool-name').textContent(), "skill");
+  assert.match(await skillRow.textContent(), /skill\s+demo/);
+  await outerSummary.click();
   assert.equal(await outer.count(), 1);
   await page.evaluate(() => window.activitySmoke.advanceClock(700));
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s");
@@ -178,6 +184,7 @@ try {
     await window.activitySmoke.settle();
   });
   assert.equal(await page.locator('[data-activity-active="true"]').count(), 0);
+  assert.equal(await activeSkillHeader.getAttribute("data-activity-active"), "false");
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s");
   assert.equal(await page.evaluate(() => window.activitySmoke.timerCount), inactiveTimerCount, "settled activity clears the pane clock");
   await page.evaluate(() => window.activitySmoke.advanceClock(10_000));
@@ -201,7 +208,7 @@ try {
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 2);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: "passed", scenarios: ["lazy DOM", "per-tool hydration", "duplicate toggles",
-    "late result after collapse", "session replacement", "header-only live highlights and duration", "duration freeze and timer teardown",
+    "late result after collapse", "session replacement", "skill label and header-only live highlights and duration", "duration freeze and timer teardown",
     "keyboard disclosure", "large collapsed history"], stress }, null, 2));
 } finally {
   await browser?.close();

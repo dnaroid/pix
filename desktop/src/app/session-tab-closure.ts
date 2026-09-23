@@ -8,6 +8,7 @@ export function createSessionTabClosure(
   async function closeWorkspaceSessions(): Promise<void> {
     options.runtime.invalidatePrewarm();
     options.draft.reset();
+    options.resetComposerDrafts();
     const sessionIds = [...new Set([
       ...options.tabSessionIds(),
       ...(options.state.sessionId ? [options.state.sessionId] : []),
@@ -72,6 +73,7 @@ export function createSessionTabClosure(
         options.forgetRuntime(sessionId);
         options.clearSessionActivity(sessionId);
         options.state.deleteSessionTranscript(sessionId);
+        options.forgetComposerDraft(sessionId);
         options.retargetWorkbenchAnchors(sessionId, options.state.sessionId ?? undefined);
         options.tabs.markClosed(sessionId);
       } catch (error) {
@@ -94,6 +96,7 @@ export function createSessionTabClosure(
       options.forgetRuntime(sessionId);
       options.clearSessionActivity(sessionId);
       options.state.deleteSessionTranscript(sessionId);
+      options.forgetComposerDraft(sessionId);
       options.history.cancel();
       options.state.clearActiveSession();
       options.retargetWorkbenchAnchors(sessionId, nextSessionId);
@@ -132,6 +135,7 @@ export function createSessionTabClosure(
       options.forgetRuntime(sessionId);
       options.clearSessionActivity(sessionId);
       options.state.deleteSessionTranscript(sessionId);
+      options.forgetComposerDraft(sessionId);
       options.catalog.remove(sessionId);
       options.tabs.remove(sessionId);
       if (deletingActive) {

@@ -8,6 +8,7 @@ import {
   isTerminalToolStatus,
 } from "./transcript-timing";
 import type { MessageRole, ToolItem, TranscriptItem, TranscriptState } from "./transcript-types";
+import { skillReadName } from "./tool-presentation";
 
 interface ReducerIndexes {
   readonly messages: Map<string, number>;
@@ -21,6 +22,7 @@ type ToolPatch = Partial<Pick<
   | "kind"
   | "status"
   | "rawInput"
+  | "skillName"
   | "rawOutput"
   | "content"
   | "diffs"
@@ -221,9 +223,15 @@ function upsertTool(
     ?? (toolIndexes ? -1 : items.findIndex((item) => item.type === "tool" && item.toolCallId === toolCallId));
   if (index >= 0) {
     const existing = items[index] as ToolItem;
+    const skillName = patch.rawInput !== undefined || patch.name !== undefined || patch.kind !== undefined
+      || patch.title !== undefined || patch.path !== undefined
+      ? skillReadName(skillToolName(patch.name ?? existing.name, patch.kind ?? existing.kind, patch.title ?? existing.title),
+        patch.rawInput ?? existing.rawInput, patch.path ?? existing.path, patch.title ?? existing.title)
+      : existing.skillName;
     items[index] = {
       ...existing,
       ...patch,
+      skillName,
       ...(existing.startedAtMs !== undefined && patch.startedAtMs !== undefined
         ? { startedAtMs: existing.startedAtMs }
         : {}),
@@ -232,6 +240,7 @@ function upsertTool(
   }
 
   if (toolIndexes) toolIndexes.set(toolCallId, items.length);
+  const skillName = skillReadName(skillToolName(patch.name, patch.kind, patch.title), patch.rawInput, patch.path, patch.title);
   items.push({
     type: "tool",
     id: `tool:${toolCallId}`,
@@ -241,6 +250,7 @@ function upsertTool(
     kind: patch.kind ?? "other",
     status: patch.status ?? "pending",
     ...(patch.rawInput !== undefined ? { rawInput: patch.rawInput } : {}),
+    ...(skillName ? { skillName } : {}),
     ...(patch.rawOutput !== undefined ? { rawOutput: patch.rawOutput } : {}),
     content: patch.content ?? "",
     diffs: patch.diffs ?? [],
@@ -249,6 +259,10 @@ function upsertTool(
     ...(patch.startedAtMs !== undefined ? { startedAtMs: patch.startedAtMs } : {}),
     ...(patch.endedAtMs !== undefined ? { endedAtMs: patch.endedAtMs } : {}),
   });
+}
+
+function skillToolName(name?: string, kind?: string, title?: string): string | undefined {
+  return name ?? (kind && kind !== "other" ? kind : title?.match(/^([^\s:]+)/u)?.[1]);
 }
 
 function messageKey(role: MessageRole, messageId: string): string {

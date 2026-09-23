@@ -29,7 +29,7 @@ export function createWorkbenchController(options: WorkbenchControllerOptions) {
 
   function select(id: WorkbenchTabId): void {
     const tab = options.tabs().find((candidate) => candidate.id === id);
-    if (!tab || tab.disabled) return;
+    if (!tab || (tab.selectionDisabled ?? tab.disabled)) return;
     options.setActiveTabId(id);
     if (tab.kind === "session") options.handleSessionTabClick(tab.sessionId);
   }

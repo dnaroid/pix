@@ -208,24 +208,20 @@
 
 <div class="relative row-start-2 min-h-0 min-w-0">
   <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={handleTranscriptPaneScroll}>
-  {#if !activeSessionId}
+  {#if !activeSessionId && !workspace}
     <section class="grid h-full place-items-center content-center p-10 text-center">
-      {#if workspace}
-        <p class="text-sm text-muted-foreground" role="status">Opening conversation…</p>
-      {:else}
-        <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-md border border-border bg-panel-strong font-semibold text-primary">P</div>
-        <h2 class="mb-2 text-lg font-medium text-foreground">Open a workspace</h2>
-        <p class="mb-5 max-w-[470px] text-sm leading-relaxed text-muted-foreground">
-          Choose a folder to begin a Pix session.
-        </p>
-        <button
-          class="rounded-md border border-border bg-panel-strong px-3.5 py-2 text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-          onclick={onChooseWorkspace}
-          disabled={promptRunning || operationRunning}
-        >Choose workspace</button>
-      {/if}
+      <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-md border border-border bg-panel-strong font-semibold text-primary">P</div>
+      <h2 class="mb-2 text-lg font-medium text-foreground">Open a workspace</h2>
+      <p class="mb-5 max-w-[470px] text-sm leading-relaxed text-muted-foreground">
+        Choose a folder to begin a Pix session.
+      </p>
+      <button
+        class="rounded-md border border-border bg-panel-strong px-3.5 py-2 text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        onclick={onChooseWorkspace}
+        disabled={promptRunning || operationRunning}
+      >Choose workspace</button>
     </section>
-  {:else if transcript.items.length === 0 && historyLoading}
+  {:else if activeSessionId && transcript.items.length === 0 && historyLoading}
     <section class="grid min-h-[220px] place-items-center content-center p-10 text-center">
       <p class="text-sm text-muted-foreground" role="status">Loading conversation…</p>
     </section>

@@ -41,7 +41,7 @@
     <span class="text-xs font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
     <h2 id="elicitation-title" class="mt-2 mb-4 text-sm leading-snug font-medium whitespace-pre-wrap text-foreground">{message}</h2>
     <label class="grid gap-1.5">
-      <span class="text-xs font-semibold">{field.label}</span>
+      <span class="text-xs font-semibold" class:sr-only={field.label === message}>{field.label}</span>
       {#if field.description}<small class="text-muted-foreground">{field.description}</small>{/if}
       {#if field.type === "select"}
         <div class="relative">
@@ -65,7 +65,7 @@
             onchange={(event) => onValueChange(event.currentTarget.checked)}
           />
         </div>
-      {:else}
+      {:else if field.type === "editor"}
         <textarea
           bind:this={fieldControl}
           class="min-h-24 w-full rounded-md border border-input bg-panel-strong px-2.5 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
@@ -73,6 +73,14 @@
           value={String(field.value)}
           oninput={(event) => onValueChange(event.currentTarget.value)}
         ></textarea>
+      {:else}
+        <input
+          bind:this={fieldControl}
+          class="h-9 w-full rounded-md border border-input bg-panel-strong px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          type="text"
+          value={String(field.value)}
+          oninput={(event) => onValueChange(event.currentTarget.value)}
+        />
       {/if}
     </label>
     <div class="mt-5 flex justify-end gap-2">
