@@ -499,6 +499,12 @@
   });
   const workbenchController = workbenchGitServices.workbench;
 
+  nativeNotifications.setActivationHandler(async (sessionId) => {
+    sessionTabAttention.clear(sessionId);
+    await sessionTabController.loadSession(sessionId);
+    activeWorkbenchTabId = workbenchSessionTabId(sessionId);
+  });
+
   const elicitationStore = interactionServices.elicitation;
   const cancelAllPendingElicitations = elicitationStore.cancelAll;
   const requestElicitation = elicitationStore.request;

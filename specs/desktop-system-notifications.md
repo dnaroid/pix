@@ -33,12 +33,13 @@ Notify the user through the operating system when a Pix Desktop agent needs atte
 7. Agent-originated ACP form/question elicitations notify as soon as Desktop accepts the pending request, including when the owning session tab is inactive. Desktop-local text-input elicitations used by its own commands/actions do not trigger system notifications.
 8. Question notifications retain the owning session identity and the elicitation message. Completion notifications use the session title. Error notifications use the session title plus a bounded single-line error/stop message.
 9. Notification bodies are whitespace-normalized and bounded. The feature does not mirror the transcript, thinking, tool calls/results, or full conversation history into OS notifications.
+10. Clicking a Desktop notification reactivates the exact Pix window that created it, including showing/unminimizing/focusing that window, then selects the owning conversation session and its unified workbench tab. Notification activation is best effort and must not affect agent execution if native focus or navigation fails.
 
 ## Native integration
 
-- Desktop uses the official Tauri v2 notification plugin in both Rust and JavaScript.
+- Desktop uses the official Tauri v2 notification plugin for notification permission integration and native application setup. Desktop delivery uses the Web Notification API directly (the same Desktop delivery path wrapped by the plugin helper) so Pix can retain the notification handle and attach an exact-window click handler.
 - `notification:default` is granted to the Desktop capability covering `main` and `project-*` windows.
-- The Tauri builder initializes `tauri_plugin_notification`; the frontend uses `@tauri-apps/plugin-notification` for permission checks and delivery.
+- The Tauri builder initializes `tauri_plugin_notification`; the frontend uses `@tauri-apps/plugin-notification` for permission checks and the Web Notification API for clickable Desktop delivery.
 - Windows native notification behavior still inherits the Tauri plugin limitation that normal app identity/icon behavior requires an installed application rather than development mode.
 
 ## Related files

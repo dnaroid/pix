@@ -2,14 +2,15 @@ import type { StopReason } from "@agentclientprotocol/sdk";
 import {
   isPermissionGranted,
   requestPermission,
-  sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { AgentControlState } from "./agent-control";
 
 type NativeNotificationApi = {
   isPermissionGranted: () => Promise<boolean>;
   requestPermission: () => Promise<NotificationPermission>;
-  sendNotification: (options: { title: string; body?: string }) => void;
+  sendNotification: (options: { title: string; body?: string }, onClick: () => void) => void;
+  focusWindow: () => Promise<void>;
 };
 
 type DesktopNotificationServiceOptions = {
@@ -22,7 +23,29 @@ export type DesktopNotificationService = ReturnType<typeof createDesktopNotifica
 const NATIVE_NOTIFICATION_API: NativeNotificationApi = {
   isPermissionGranted,
   requestPermission,
-  sendNotification,
+  sendNotification(options, onClick) {
+    // Tauri's Desktop helper uses the Web Notification API too, but returns no
+    // handle. Keep the handle here so a click can target this exact webview.
+    const notification = new Notification(options.title, { body: options.body });
+    notification.addEventListener("click", () => {
+      notification.close();
+      onClick();
+    }, { once: true });
+  },
+  async focusWindow() {
+    const appWindow = getCurrentWindow();
+    for (const activate of [
+      () => appWindow.unminimize(),
+      () => appWindow.show(),
+      () => appWindow.setFocus(),
+    ]) {
+      try {
+        await activate();
+      } catch {
+        // Window activation is best effort; session navigation should still run.
+      }
+    }
+  },
 };
 
 export function desktopWindowForeground(): boolean {
@@ -40,6 +63,7 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
   const isForeground = options.isForeground ?? desktopWindowForeground;
   let permissionGranted: boolean | undefined;
   let permissionRequest: Promise<boolean> | null = null;
+  let activationHandler: ((sessionId: string) => void | Promise<void>) | null = null;
 
   async function ensurePermission(): Promise<boolean> {
     if (permissionGranted !== undefined) return permissionGranted;
@@ -59,25 +83,45 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
     return permissionRequest;
   }
 
-  async function notify(title: string, body: string): Promise<void> {
+  async function activate(sessionId: string | null): Promise<void> {
+    try {
+      await api.focusWindow();
+    } catch {
+      // Native window activation is best effort.
+    }
+    if (!sessionId || !activationHandler) return;
+    try {
+      await activationHandler(sessionId);
+    } catch {
+      // Notification activation must not surface as an unhandled UI failure.
+    }
+  }
+
+  async function notify(title: string, body: string, sessionId: string | null): Promise<void> {
     if (isForeground()) return;
     if (!(await ensurePermission()) || isForeground()) return;
     try {
-      api.sendNotification({ title, body: compactBody(body) });
+      api.sendNotification(
+        { title, body: compactBody(body) },
+        () => void activate(sessionId),
+      );
     } catch {
       // Native notifications are best effort and must never fail the agent flow.
     }
   }
 
   return {
-    completed(sessionTitle: string): Promise<void> {
-      return notify("Pix — Completed", sessionTitle);
+    setActivationHandler(handler: (sessionId: string) => void | Promise<void>): void {
+      activationHandler = handler;
     },
-    question(sessionTitle: string, message: string): Promise<void> {
-      return notify("Pix — Question", `${sessionTitle}: ${message}`);
+    completed(sessionId: string, sessionTitle: string): Promise<void> {
+      return notify("Pix — Completed", sessionTitle, sessionId);
     },
-    error(sessionTitle: string, message: string): Promise<void> {
-      return notify("Pix — Error", `${sessionTitle}: ${message}`);
+    question(sessionId: string | null, sessionTitle: string, message: string): Promise<void> {
+      return notify("Pix — Question", `${sessionTitle}: ${message}`, sessionId);
+    },
+    error(sessionId: string, sessionTitle: string, message: string): Promise<void> {
+      return notify("Pix — Error", `${sessionTitle}: ${message}`, sessionId);
     },
   };
 }
@@ -125,7 +169,7 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
     } catch {
       // In-app attention chrome is best effort and must not block native notification delivery.
     }
-    void options.notifications.completed(title(sessionId));
+    void options.notifications.completed(sessionId, title(sessionId));
   }
 
   function promptStarted(sessionId: string): void {
@@ -136,7 +180,7 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
     pendingCompletions.delete(sessionId);
     if (stopReason === "cancelled") return;
     if (stopReason !== "end_turn") {
-      void options.notifications.error(title(sessionId), stopReasonMessage(stopReason));
+      void options.notifications.error(sessionId, title(sessionId), stopReasonMessage(stopReason));
       return;
     }
     pendingCompletions.add(sessionId);
@@ -145,11 +189,11 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
 
   function promptError(sessionId: string, error: unknown): void {
     pendingCompletions.delete(sessionId);
-    void options.notifications.error(title(sessionId), errorMessage(error));
+    void options.notifications.error(sessionId, title(sessionId), errorMessage(error));
   }
 
   function needsInput(sessionId: string | null, message: string): void {
-    void options.notifications.question(title(sessionId), message || "Agent is waiting for your input.");
+    void options.notifications.question(sessionId, title(sessionId), message || "Agent is waiting for your input.");
   }
 
   function sessionActivityChanged(sessionId: string): void {

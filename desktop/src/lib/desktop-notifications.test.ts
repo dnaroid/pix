@@ -9,6 +9,7 @@ function notificationHarness(foreground = false) {
     isPermissionGranted: vi.fn(async () => true),
     requestPermission: vi.fn(async () => "granted" as NotificationPermission),
     sendNotification: vi.fn(),
+    focusWindow: vi.fn(async () => undefined),
   };
   const service = createDesktopNotificationService({ isForeground: () => foreground, api });
   return { api, service };
@@ -18,7 +19,7 @@ describe("desktop native notifications", () => {
   it("suppresses native notifications while the window is foreground", async () => {
     const { api, service } = notificationHarness(true);
 
-    await service.completed("Build session");
+    await service.completed("session-1", "Build session");
 
     expect(api.isPermissionGranted).not.toHaveBeenCalled();
     expect(api.sendNotification).not.toHaveBeenCalled();
@@ -29,22 +30,38 @@ describe("desktop native notifications", () => {
       isPermissionGranted: vi.fn(async () => false),
       requestPermission: vi.fn(async () => "granted" as NotificationPermission),
       sendNotification: vi.fn(),
+      focusWindow: vi.fn(async () => undefined),
     };
     const service = createDesktopNotificationService({ isForeground: () => false, api });
 
-    await service.question("Research", "Which branch should I use?");
-    await service.completed("Research");
+    await service.question("session-1", "Research", "Which branch should I use?");
+    await service.completed("session-1", "Research");
 
     expect(api.isPermissionGranted).toHaveBeenCalledTimes(1);
     expect(api.requestPermission).toHaveBeenCalledTimes(1);
     expect(api.sendNotification).toHaveBeenNthCalledWith(1, {
       title: "Pix — Question",
       body: "Research: Which branch should I use?",
-    });
+    }, expect.any(Function));
     expect(api.sendNotification).toHaveBeenNthCalledWith(2, {
       title: "Pix — Completed",
       body: "Research",
-    });
+    }, expect.any(Function));
+  });
+
+  it("focuses the owning window and activates the exact session when clicked", async () => {
+    const { api, service } = notificationHarness(false);
+    const activateSession = vi.fn(async () => undefined);
+    service.setActivationHandler(activateSession);
+
+    await service.question("session-2", "Research", "Need input");
+    const onClick = api.sendNotification.mock.calls[0]?.[1];
+    expect(onClick).toEqual(expect.any(Function));
+
+    onClick?.();
+
+    await vi.waitFor(() => expect(api.focusWindow).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(activateSession).toHaveBeenCalledWith("session-2"));
   });
 });
 
@@ -74,7 +91,7 @@ describe("desktop agent notification coordinator", () => {
     expect(api.sendNotification).toHaveBeenCalledWith({
       title: "Pix — Completed",
       body: "Background task",
-    });
+    }, expect.any(Function));
   });
 
   it("suppresses cancellation and turns abnormal stop reasons into errors", async () => {
@@ -94,7 +111,7 @@ describe("desktop agent notification coordinator", () => {
     expect(api.sendNotification).toHaveBeenCalledWith({
       title: "Pix — Error",
       body: "Limits: Agent stopped after reaching the turn/request limit.",
-    });
+    }, expect.any(Function));
   });
 
   it("drops a deferred completion when new work starts", async () => {
