@@ -15,4 +15,10 @@ describe("RegistryPanel refresh lifecycle", () => {
     expect(panelSource).toContain("onclick={onInitializeProject}");
     expect(panelSource).toContain('actionId === "initialize-project"');
   });
+
+  it("does not gate Registry controls on conversation session readiness", () => {
+    expect(sidebarSource).toContain("remoteDisabled={!registryReady}");
+    expect(sidebarSource).not.toContain("disabled={!sessionReady || registryActionId !== null}");
+    expect(panelSource).not.toContain("Open a ready project session to manage its registry.");
+  });
 });

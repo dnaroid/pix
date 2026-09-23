@@ -328,7 +328,7 @@ export interface DesktopQueueConsumedNotification {
 export type DesktopRegistryResourceType = "skill" | "agent";
 export type DesktopRegistryProjectScope = "tasks" | "plans" | "todo" | "workspace" | "project";
 
-export type DesktopRegistryActionRequest = DesktopSessionRequest & (
+export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 	| { readonly action: "refresh" | "configure" | "project-key" }
 	| {
 		readonly action: "install" | "update" | "push" | "uninstall" | "remove";
@@ -340,6 +340,10 @@ export type DesktopRegistryActionRequest = DesktopSessionRequest & (
 		readonly scope: DesktopRegistryProjectScope;
 	}
 );
+
+export interface DesktopRegistryActionResponse {
+	readonly snapshot: unknown;
+}
 
 export function parseDesktopSessionRequest(value: unknown): DesktopSessionRequest {
 	if (!isRecord(value) || typeof value.sessionId !== "string" || value.sessionId.length === 0) {
@@ -558,12 +562,12 @@ export function parseDesktopQueueActionRequest(value: unknown): DesktopQueueActi
 }
 
 export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegistryActionRequest {
-	const session = parseDesktopSessionRequest(value);
-	if (!isRecord(value) || typeof value.action !== "string") {
+	if (!isRecord(value) || typeof value.cwd !== "string" || value.cwd.trim().length === 0 || typeof value.action !== "string") {
 		throw new RequestError(ERROR_INVALID_PARAMS, "registry action request requires an action");
 	}
+	const workspace = { cwd: value.cwd };
 	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key") {
-		return { ...session, action: value.action };
+		return { ...workspace, action: value.action };
 	}
 	if (["install", "update", "push", "uninstall", "remove"].includes(value.action)) {
 		if (
@@ -575,7 +579,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry resource action request");
 		}
 		return {
-			...session,
+			...workspace,
 			action: value.action as "install" | "update" | "push" | "uninstall" | "remove",
 			type: value.type,
 			name: value.name,
@@ -586,7 +590,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry project scope");
 		}
 		return {
-			...session,
+			...workspace,
 			action: value.action,
 			scope: value.scope as DesktopRegistryProjectScope,
 		};

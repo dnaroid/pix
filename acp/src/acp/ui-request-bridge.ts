@@ -41,7 +41,7 @@ export interface PixQuestion {
 }
 
 export interface ElicitationRequestOptions {
-	readonly sessionId: string;
+	readonly sessionId?: string;
 	readonly elicitationId: string;
 }
 
@@ -59,7 +59,7 @@ export function toElicitationRequest(
 		return {
 			mode: PIX_QUESTION_ELICITATION_MODE,
 			elicitationId: options.elicitationId,
-			sessionId: options.sessionId,
+			...(options.sessionId ? { sessionId: options.sessionId } : { requestId: options.elicitationId }),
 			message: questions.length === 1 ? "Answer the agent's question" : "Answer the agent's questions",
 			version: 1,
 			questions,
@@ -226,7 +226,7 @@ function formElicitation(
 	return {
 		mode: "form",
 		elicitationId: options.elicitationId,
-		sessionId: options.sessionId,
+		...(options.sessionId ? { sessionId: options.sessionId } : { requestId: options.elicitationId }),
 		message,
 		requestedSchema: schema,
 	};

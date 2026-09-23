@@ -2219,76 +2219,115 @@ test("session/load switches the pi session and replays history as chunk updates"
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
 });
 
-test("Pix Desktop registry actions forward only to the extension-owned private registry RPC command", async () => {
-	const harness = createTestAdapter();
-	const notifications: SessionNotification[] = [];
-	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
-		const created = await cx.request("session/new", { cwd: "/tmp/registry-gui", mcpServers: [] }) as { sessionId: string };
-		const pi = harness.clients[0]!;
-
-		await assert.rejects(
-			cx.request(PIX_REGISTRY_ACTION_METHOD, { sessionId: created.sessionId, action: "refresh" }),
-			/resource registry extension is unavailable/,
-		);
-
-		pi.commands.push({
-			name: "registry",
-			description: "Manage registry",
-			source: "extension",
-			sourceInfo: {},
-		});
-		pi.commands.push({ name: "skill:frontier-model-rollover", source: "skill", sourceInfo: {} });
-		pi.promptHandledWithoutRun = true;
-		const originalPrompt = pi.prompt.bind(pi);
-		pi.prompt = async (message: string, images?: PiImageContent[]) => {
-			await originalPrompt(message, images);
-			if (message !== "/registry rpc update skill pdf") return;
-			pi.emit({
-				type: "extension_ui_request",
-				id: "registry-reload-context-inventory",
-				method: "setWidget",
-				widgetKey: "pix.session-state",
-				widgetLines: [
-					"pi-tools-suite:context-inventory",
-					JSON.stringify({
-						version: 1,
-						reason: "reload",
-						model: "anthropic/claude-4",
-						thinking: "medium",
-						tools: ["read", "subagents"],
-						skills: [],
-						agents: ["research"],
-					}),
-				],
-			});
-		};
-
-		await cx.request(PIX_REGISTRY_ACTION_METHOD, { sessionId: created.sessionId, action: "refresh" });
-		await cx.request(PIX_REGISTRY_ACTION_METHOD, {
-			sessionId: created.sessionId,
-			action: "update",
-			type: "skill",
-			name: "pdf",
-		});
-		await cx.request(PIX_REGISTRY_ACTION_METHOD, {
-			sessionId: created.sessionId,
-			action: "pull-project",
-			scope: "todo",
-		});
-
-		assert.deepEqual(pi.promptCalls.slice(-3), [
-			{ message: "/registry rpc refresh", images: undefined },
-			{ message: "/registry rpc update skill pdf", images: undefined },
-			{ message: "/registry rpc pull todo", images: undefined },
-		]);
-	}, (app) => {
-		app.onNotification("session/update", (ctx) => {
-			notifications.push(ctx.params);
-		});
+test("Pix Desktop registry actions run in a disposable workspace runtime without a conversation session", async () => {
+	const registryClients: FakePiClient[] = [];
+	const registryOptions: PiRpcClientOptions[] = [];
+	const elicitationParams: CreateElicitationRequest[] = [];
+	const extensionDir = mkdtempSync(join(tmpdir(), "registry-extension-"));
+	const extensionPath = join(extensionDir, "index.ts");
+	await writeFile(extensionPath, "// test registry extension\n");
+	const snapshot: {
+		version: number;
+		configured: boolean;
+		remote: string;
+		branch: string;
+		items: never[];
+		checkedAt: string;
+		projectKey?: string;
+	} = {
+		version: 1,
+		configured: true,
+		remote: "git@example.test:registry.git",
+		branch: "main",
+		items: [],
+		checkedAt: "2026-09-23T12:00:00Z",
+	};
+	const harness = createTestAdapter({
+		agentDir: join(extensionDir, "agent"),
+		toolsSuiteExtensionPath: extensionPath,
+		createPiClient: (options) => {
+			registryOptions.push(options);
+			const pi = new FakePiClient();
+			pi.commands.push({ name: "registry", description: "Manage registry", source: "extension", sourceInfo: {} });
+			pi.promptHandledWithoutRun = true;
+			pi.promptHook = async (message) => {
+				let finalSnapshot = snapshot;
+				if (message === "/registry rpc project-key") {
+					pi.emit({
+						type: "extension_ui_request",
+						id: "registry-project-key",
+						method: "input",
+						title: "Project registry key",
+						placeholder: "my-project",
+					});
+					await waitFor(() => pi.uiResponses.length === 1);
+					assert.deepEqual(pi.uiResponses[0], {
+						type: "extension_ui_response",
+						id: "registry-project-key",
+						value: "manual-key",
+					});
+					finalSnapshot = { ...snapshot, projectKey: "manual-key" };
+				}
+				pi.emit({
+					type: "extension_ui_request",
+					id: `registry-state-${registryClients.length}`,
+					method: "setWidget",
+					widgetKey: "pix.session-state",
+					widgetLines: ["pi-tools-suite:resource-registry:state", JSON.stringify(finalSnapshot)],
+				});
+			};
+			registryClients.push(pi);
+			return pi;
+		},
 	});
-	const text = notifications.map((item) => (item.update as { content?: { text?: string } }).content?.text ?? "").join("\n");
-	assert.match(text, /Reloaded resources\n\nModel: anthropic\/claude-4:medium/);
-	assert.match(text, /Skills \(in context\): frontier-model-rollover/);
+
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+			const refreshed = await cx.request(PIX_REGISTRY_ACTION_METHOD, { cwd: "/tmp/registry-gui", action: "refresh" });
+			const updated = await cx.request(PIX_REGISTRY_ACTION_METHOD, {
+				cwd: "/tmp/registry-gui",
+				action: "update",
+				type: "skill",
+				name: "pdf",
+			});
+			const pulled = await cx.request(PIX_REGISTRY_ACTION_METHOD, {
+				cwd: "/tmp/registry-gui",
+				action: "pull-project",
+				scope: "todo",
+			});
+			const keyed = await cx.request(PIX_REGISTRY_ACTION_METHOD, {
+				cwd: "/tmp/registry-gui",
+				action: "project-key",
+			});
+			for (const result of [refreshed, updated, pulled]) assert.deepEqual(result, { snapshot });
+			assert.deepEqual(keyed, { snapshot: { ...snapshot, projectKey: "manual-key" } });
+		}, (app) => {
+			app.onRequest("elicitation/create", (ctx) => {
+				elicitationParams.push(ctx.params);
+				return { action: "accept", content: { value: "manual-key" } } satisfies CreateElicitationResponse;
+			});
+		});
+
+		assert.equal(harness.adapter.sessionCount, 0);
+		assert.deepEqual(registryClients.map((pi) => pi.promptCalls[0]?.message), [
+			"/registry rpc refresh",
+			"/registry rpc update skill pdf",
+			"/registry rpc pull todo",
+			"/registry rpc project-key",
+		]);
+		assert.equal(elicitationParams.length, 1);
+		assert.equal((elicitationParams[0] as { sessionId?: string }).sessionId, undefined);
+		assert.equal(typeof (elicitationParams[0] as { requestId?: string }).requestId, "string");
+		for (const options of registryOptions) {
+			assert.equal(options.cwd, "/tmp/registry-gui");
+			assert.ok(options.args?.includes("--no-session"));
+			assert.ok(options.args?.includes("--extension"));
+		}
+		assert.equal(registryClients.every((pi) => pi.started === false), true, "disposable Registry runtimes are stopped");
+	} finally {
+		await rm(extensionDir, { recursive: true, force: true });
+	}
 });
 
 test("desktop lazy session/load omits tool bodies and retrieves them on demand", async () => {

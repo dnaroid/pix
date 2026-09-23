@@ -14,11 +14,7 @@ import {
 
 type RegistryStoreOptions = {
   client: () => AcpClient | null;
-  activeSessionId: () => string | null;
-  sessionRuntimeReady: () => boolean;
   operationRunning: () => boolean;
-  promptRunning: () => boolean;
-  sessionHistoryLoading: () => boolean;
   workspace: () => string;
   sessionWorkspace: (sessionId: string) => string | undefined;
   setOperationRunning: (running: boolean) => void;
@@ -44,18 +40,21 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     canSync: () => Boolean(
       snapshot?.configured
       && options.client()
-      && options.activeSessionId()
-      && options.sessionRuntimeReady()
+      && options.workspace()
       && !options.operationRunning()
-      && !options.promptRunning()
-      && !options.sessionHistoryLoading()
       && actionId === null
     ),
     sync: async (scope) => {
       const requestClient = options.client();
-      const sessionId = options.activeSessionId();
-      if (!requestClient || !sessionId) throw new Error("Registry background sync has no active session.");
-      await requestClient.registryAction(sessionId, { action: "push-project", scope });
+      const workspace = options.workspace();
+      const requestGeneration = lifecycleGeneration;
+      if (!requestClient || !workspace) throw new Error("Registry background sync has no active workspace.");
+      const next = await requestClient.registryAction(workspace, { action: "push-project", scope });
+      if (
+        requestGeneration === lifecycleGeneration
+        && options.workspace() === workspace
+        && options.client() === requestClient
+      ) snapshot = next;
     },
     onChange: (state) => { backgroundSyncState = state; },
     shouldRetryError: registryActionBusyError,
@@ -123,20 +122,15 @@ export function createRegistryStore(options: RegistryStoreOptions) {
 
   async function runAction(request: RegistryActionRequest, nextActionId: string): Promise<void> {
     const requestClient = options.client();
-    const sessionId = options.activeSessionId();
     const workspace = options.workspace();
     const requestGeneration = lifecycleGeneration;
     const current = () => requestGeneration === lifecycleGeneration
       && workspace === options.workspace()
-      && requestClient === options.client()
-      && sessionId === options.activeSessionId();
+      && requestClient === options.client();
     if (
       !requestClient
-      || !sessionId
-      || !options.sessionRuntimeReady()
+      || !workspace
       || options.operationRunning()
-      || options.promptRunning()
-      || options.sessionHistoryLoading()
       || actionId !== null
       || backgroundSyncState.phase === "syncing"
     ) return;
@@ -145,8 +139,9 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     options.setOperationRunning(true);
     options.setErrorMessage(null);
     try {
-      await requestClient.registryAction(sessionId, request);
+      const next = await requestClient.registryAction(workspace, request);
       if (!current()) return;
+      snapshot = next;
       if (request.action === "pull-project") {
         if (request.scope === "workspace" || request.scope === "project") void options.loadWorkspaceSettings?.(workspace);
         if (request.scope === "tasks" || request.scope === "project") void options.loadProjectTasks(workspace);

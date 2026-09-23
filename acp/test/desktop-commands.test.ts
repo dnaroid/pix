@@ -85,45 +85,46 @@ test("desktop todo clear is a private session-scoped command", () => {
 	assert.equal(PIX_CLEAR_TODOS_METHOD, "pix/session/clear_todos");
 });
 
-test("desktop registry actions are session-scoped and validate resource/project targets", () => {
+test("desktop registry actions are workspace-scoped and validate resource/project targets", () => {
 	assert.equal(PIX_REGISTRY_ACTION_METHOD, "pix/registry/action");
-	assert.deepEqual(parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "refresh" }), {
-		sessionId: "session-1",
+	assert.deepEqual(parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "refresh", sessionId: "ignored" }), {
+		cwd: "/workspace",
 		action: "refresh",
 	});
-	assert.deepEqual(parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "configure" }), {
-		sessionId: "session-1",
+	assert.deepEqual(parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "configure" }), {
+		cwd: "/workspace",
 		action: "configure",
 	});
 	assert.deepEqual(parseDesktopRegistryActionRequest({
-		sessionId: "session-1",
+		cwd: "/workspace",
 		action: "update",
 		type: "skill",
 		name: "pdf",
 	}), {
-		sessionId: "session-1",
+		cwd: "/workspace",
 		action: "update",
 		type: "skill",
 		name: "pdf",
 	});
 	assert.deepEqual(parseDesktopRegistryActionRequest({
-		sessionId: "session-1",
+		cwd: "/workspace",
 		action: "pull-project",
 		scope: "todo",
 	}), {
-		sessionId: "session-1",
+		cwd: "/workspace",
 		action: "pull-project",
 		scope: "todo",
 	});
 	for (const action of ["push-project", "pull-project"] as const) {
-		assert.deepEqual(parseDesktopRegistryActionRequest({ sessionId: "session-1", action, scope: "workspace" }), {
-			sessionId: "session-1",
+		assert.deepEqual(parseDesktopRegistryActionRequest({ cwd: "/workspace", action, scope: "workspace" }), {
+			cwd: "/workspace",
 			action,
 			scope: "workspace",
 		});
 	}
-	assert.throws(() => parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "remove", type: "skill", name: "../bad" }));
-	assert.throws(() => parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "pull-project", scope: "skills" }));
+	assert.throws(() => parseDesktopRegistryActionRequest({ action: "refresh" }));
+	assert.throws(() => parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "remove", type: "skill", name: "../bad" }));
+	assert.throws(() => parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "pull-project", scope: "skills" }));
 });
 
 test("desktop Git assistant accepts bounded review and commit-message diffs", () => {

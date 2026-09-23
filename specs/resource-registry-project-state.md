@@ -72,15 +72,14 @@ Those portable markers are not written to the local project task file.
 9. Dirty project-state writes are debounced for approximately 900 ms. Repeated
    writes to one artifact collapse into one push, while more than one dirty
    artifact collapses into one `push project` operation.
-10. Background sync never takes the Desktop foreground-operation lock. Because
-    the current ACP Registry bridge executes the private action through the
-    owning session, the coordinator waits until that session is runtime-ready,
-    not prompting, not loading history, and not executing another Registry or
-    foreground operation. A blocked sync remains pending and retries on a short
-    idle cadence instead of dropping dirty state. While the actual background
-    Registry RPC is in flight, Registry-panel actions are locally disabled so a
-    manual Registry command cannot overlap it; unrelated Desktop UI remains
-    available.
+10. Background sync never takes the Desktop foreground-operation lock. Registry
+    actions are workspace-scoped: Desktop sends the workspace cwd to ACP, and
+    ACP executes the private Registry command in a disposable `--no-session` Pi
+    RPC runtime. No conversation session is created, loaded, or required. A
+    blocked sync remains pending and retries on a short idle cadence instead of
+    dropping dirty state. While the actual background Registry RPC is in flight,
+    Registry-panel actions are locally disabled so a manual Registry command
+    cannot overlap it; unrelated Desktop UI remains available.
 11. Dirty state is removed from the current batch before an RPC starts. If the
     same or another artifact changes while that RPC is in flight, the new dirty
     state survives and starts another debounced pass after the current pass
@@ -109,6 +108,13 @@ Those portable markers are not written to the local project task file.
     Registry remote is trusted to hold them. The Desktop ACP Registry request
     validator accepts `workspace` for both `push-project` and `pull-project`,
     while still rejecting unknown project scopes.
+17. A workspace Git repository is optional. When `resourceRegistry.projectKey`
+    is not configured, Registry may derive a stable project key from Git
+    `remote.origin.url`, but that is only an automatic convenience for
+    project-scoped artifacts. If there is no Git origin, reusable skills and
+    agents remain fully usable and the Registry snapshot reports one non-fatal
+    project-key issue. The user can set a project key explicitly; lack of Git
+    must not surface as a duplicate global Registry error.
 
 ## Compatibility
 

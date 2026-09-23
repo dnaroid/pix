@@ -8,7 +8,9 @@ afterEach(() => vi.useRealTimers());
 describe("registry background project sync", () => {
   it("does not reload the next workspace or unlock its action after a stale pull finishes", async () => {
     let finishPull!: () => void;
-    const registryAction = vi.fn(() => new Promise<void>((resolve) => { finishPull = resolve; }));
+    const registryAction = vi.fn(() => new Promise<any>((resolve) => {
+      finishPull = () => resolve({ version: 1, configured: true, branch: "main", items: [], checkedAt: "now" });
+    }));
     const client = { registryAction } as unknown as AcpClient;
     let workspace = "/one";
     const loadWorkspaceSettings = vi.fn();
@@ -17,11 +19,7 @@ describe("registry background project sync", () => {
     const setOperationRunning = vi.fn();
     const store = createRegistryStore({
       client: () => client,
-      activeSessionId: () => "session-1",
-      sessionRuntimeReady: () => true,
       operationRunning: () => false,
-      promptRunning: () => false,
-      sessionHistoryLoading: () => false,
       workspace: () => workspace,
       sessionWorkspace: () => workspace,
       setOperationRunning,
@@ -46,16 +44,18 @@ describe("registry background project sync", () => {
 
   it("pushes a debounced project artifact without taking the foreground operation lock", async () => {
     vi.useFakeTimers();
-    const registryAction = vi.fn(async () => {});
+    const registryAction = vi.fn(async () => ({
+      version: 1 as const,
+      configured: true,
+      branch: "main",
+      items: [],
+      checkedAt: "now",
+    }));
     const setOperationRunning = vi.fn();
     const client = { registryAction } as unknown as AcpClient;
     const store = createRegistryStore({
       client: () => client,
-      activeSessionId: () => "session-1",
-      sessionRuntimeReady: () => true,
       operationRunning: () => false,
-      promptRunning: () => false,
-      sessionHistoryLoading: () => false,
       workspace: () => "/project",
       sessionWorkspace: () => "/project",
       setOperationRunning,
@@ -80,7 +80,7 @@ describe("registry background project sync", () => {
     expect(store.backgroundSyncState.phase).toBe("pending");
     await vi.advanceTimersByTimeAsync(900);
 
-    expect(registryAction).toHaveBeenCalledWith("session-1", {
+    expect(registryAction).toHaveBeenCalledWith("/project", {
       action: "push-project",
       scope: "tasks",
     });

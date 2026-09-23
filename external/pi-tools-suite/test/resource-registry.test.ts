@@ -154,6 +154,30 @@ describe("resource registry", () => {
 		expect(__test.projectKeyFromGitRemote("https://github.com/dnaroid/pi-ui-extend.git")).toBe("github.com__dnaroid__pi-ui-extend");
 	});
 
+	test("a project without Git origin keeps reusable Registry resources usable and asks only for a project key", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "plain-project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		const { remote } = createRegistry(root);
+		await __test.saveRegistryConfig(remote, "main");
+		const h = harness(project);
+
+		const snapshot = await __test.collectRegistryUiSnapshot(h.pi, project);
+		expect(snapshot.configured).toBe(true);
+		expect(snapshot.projectKey).toBeUndefined();
+		expect(snapshot.projectIssue).toContain("Project state needs a registry key");
+		expect(snapshot.error).toBeUndefined();
+		expect(snapshot.items.some((item) => item.type === "skill" && item.name === "demo")).toBe(true);
+
+		const afterProjectActionFailure = await __test.collectRegistryUiSnapshot(h.pi, project, snapshot.projectIssue);
+		expect(afterProjectActionFailure.projectIssue).toBe(snapshot.projectIssue);
+		expect(afterProjectActionFailure.error).toBeUndefined();
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
 	test("registers one /registry command", () => {
 		const project = tempRoot();
 		const { commands } = harness(project);

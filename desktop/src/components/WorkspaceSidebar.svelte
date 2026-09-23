@@ -91,6 +91,7 @@
     taskStorageIndicatorError,
     activeTaskId,
     sessionReady,
+    registryReady,
     gitAssistantReady,
     registrySnapshot,
     registryProjectInitialized,
@@ -158,6 +159,7 @@
     taskStorageIndicatorError: string | null;
     activeTaskId: string | null;
     sessionReady: boolean;
+    registryReady: boolean;
     gitAssistantReady: boolean;
     registrySnapshot: RegistrySnapshot | undefined;
     registryProjectInitialized: boolean | undefined;
@@ -585,7 +587,7 @@
               title="Configure registry"
               aria-label="Configure registry"
               onclick={() => onRegistryAction({ action: "configure" }, "configure")}
-              disabled={!sessionReady || registryActionId !== null}
+              disabled={!registryReady || registryActionId !== null}
             ><Settings class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
               class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
@@ -593,7 +595,7 @@
               title="Refresh registry"
               aria-label="Refresh registry"
               onclick={onRegistryRefresh}
-              disabled={!sessionReady || registryActionId !== null}
+              disabled={!registryReady || registryActionId !== null}
             ><RefreshCw class={["h-3.5 w-3.5", registryLoading || registryActionId === "refresh" ? "animate-spin" : ""]} aria-hidden="true" /></button>
           </div>
         {/if}
@@ -690,7 +692,7 @@
             snapshot={registrySnapshot}
             projectInitialized={registryProjectInitialized}
             loading={registryLoading}
-            disabled={!sessionReady}
+            remoteDisabled={!registryReady}
             actionId={registryActionId}
             onRefresh={onRegistryRefresh}
             onInitializeProject={onRegistryInitializeProject}

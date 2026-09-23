@@ -205,11 +205,7 @@
   const projectServices = createDesktopProjectServices({
     client: () => client,
     workspace: () => workspace,
-    activeSessionId: () => activeSessionId,
-    activeSessionRuntimeReady: () => activeSessionRuntimeReady,
     operationRunning: () => operationRunning,
-    promptRunning: () => promptRunning,
-    sessionHistoryLoading: () => sessionHistoryLoading,
     sessionWorkspace: (sessionId) => sessions.find((session) => session.sessionId === sessionId)?.cwd,
     transcript: () => transcript,
     prepareAttachment: (attachment) => transcriptAttachments.prepare(attachment),

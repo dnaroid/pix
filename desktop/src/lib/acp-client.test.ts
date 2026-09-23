@@ -414,24 +414,31 @@ describe("ACP JSON-RPC client", () => {
   it("routes registry GUI actions through the private ACP registry method", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);
+    const snapshot = {
+      version: 1,
+      configured: true,
+      branch: "main",
+      items: [],
+      checkedAt: "2026-09-23T12:00:00Z",
+    };
 
-    const refreshing = client.registryAction("session-1", { action: "refresh" });
+    const refreshing = client.registryAction("/project", { action: "refresh" });
     await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
     expect(requestAt(transport, 1)).toMatchObject({
       method: "pix/registry/action",
-      params: { sessionId: "session-1", action: "refresh" },
+      params: { cwd: "/project", action: "refresh" },
     });
-    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: {} });
-    await expect(refreshing).resolves.toBeUndefined();
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { snapshot } });
+    await expect(refreshing).resolves.toEqual(snapshot);
 
-    const updating = client.registryAction("session-1", { action: "update", type: "skill", name: "pdf" });
+    const updating = client.registryAction("/project", { action: "update", type: "skill", name: "pdf" });
     await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
     expect(requestAt(transport, 2)).toMatchObject({
       method: "pix/registry/action",
-      params: { sessionId: "session-1", action: "update", type: "skill", name: "pdf" },
+      params: { cwd: "/project", action: "update", type: "skill", name: "pdf" },
     });
-    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: {} });
-    await expect(updating).resolves.toBeUndefined();
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: { snapshot } });
+    await expect(updating).resolves.toEqual(snapshot);
 
     await client.dispose();
   });

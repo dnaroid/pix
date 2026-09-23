@@ -1,6 +1,6 @@
 import type { ContentBlock, SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk";
 import { isAgentControlState, type AgentControlAction } from "./agent-control";
-import type { RegistryActionRequest } from "./registry";
+import { parseRegistrySnapshot, type RegistryActionRequest, type RegistrySnapshot } from "./registry";
 import { isRecord, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
 import type {
   AgentControlStatus,
@@ -268,9 +268,12 @@ export class AcpPixExtensions {
     return parseQueueState(await this.request<unknown>("pix/session/queue_state", { sessionId }, null));
   }
 
-  async registryAction(sessionId: string, action: RegistryActionRequest): Promise<void> {
-    const response = await this.request<unknown>("pix/registry/action", { sessionId, ...action }, null);
+  async registryAction(cwd: string, action: RegistryActionRequest): Promise<RegistrySnapshot> {
+    const response = await this.request<unknown>("pix/registry/action", { cwd, ...action }, null);
     if (!isRecord(response)) throw new Error("pix/registry/action returned an invalid response");
+    const snapshot = parseRegistrySnapshot(response.snapshot);
+    if (!snapshot) throw new Error("pix/registry/action returned an invalid registry snapshot");
+    return snapshot;
   }
 
   async queueMessage(

@@ -42,7 +42,7 @@
     snapshot,
     projectInitialized,
     loading,
-    disabled,
+    remoteDisabled,
     actionId,
     onRefresh,
     onInitializeProject,
@@ -52,7 +52,7 @@
     snapshot: RegistrySnapshot | undefined;
     projectInitialized: boolean | undefined;
     loading: boolean;
-    disabled: boolean;
+    remoteDisabled: boolean;
     actionId: string | null;
     onRefresh: () => void;
     onInitializeProject: () => void;
@@ -71,7 +71,7 @@
       .filter((item) => filter === "all" || item.type === filter);
     return searchRegistryItems(filtered, query);
   });
-  const busy = $derived(disabled || actionId !== null);
+  const remoteBusy = $derived(remoteDisabled || actionId !== null);
 
   function iconTone(status: RegistryStatus): string {
     if (status === "up-to-date") return "text-tool-success";
@@ -147,7 +147,7 @@
         <button
           class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
           type="button"
-          disabled={busy || !snapshot.projectKey || projectItems.length === 0}
+          disabled={remoteBusy || !snapshot.projectKey || projectItems.length === 0}
           aria-expanded={projectReviewOpen}
           onclick={() => projectReviewOpen = !projectReviewOpen}
         >
@@ -187,7 +187,7 @@
                       actionTone(item, projectPrimary),
                     ]}
                     type="button"
-                    disabled={busy}
+                    disabled={remoteBusy}
                     title={registryFriendlyActionLabel(item, projectPrimary)}
                     aria-label={registryFriendlyActionLabel(item, projectPrimary)}
                     onclick={() => runItemAction(item, projectPrimary)}
@@ -257,10 +257,10 @@
         <Database class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Registry is not configured</p>
         <p class="mt-1 text-xs leading-4 text-muted-foreground">Connect the private Git repository used for skills, agents, and project state.</p>
-        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Configure registry</button>
+        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={remoteBusy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Configure registry</button>
       </div>
     {:else if !snapshot}
-      <div class="px-3 py-8 text-center text-xs text-muted-foreground">Open a ready project session to manage its registry.</div>
+      <div class="px-3 py-8 text-center text-xs text-muted-foreground">Registry data is not loaded yet. Refresh to check this workspace.</div>
     {:else}
       {#if snapshot.error}
         <div class="mb-2 flex items-start gap-2 rounded-md border border-tool-error/30 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
@@ -268,7 +268,7 @@
       {#if snapshot.projectIssue}
         <div class="mb-2 rounded-md border border-tool-warning/30 bg-tool-warning/5 px-2.5 py-2 text-xs leading-4 text-tool-warning">
           <p>{snapshot.projectIssue}</p>
-          <button class="mt-2 inline-flex h-6 items-center gap-1.5 rounded-md border border-tool-warning/30 bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "project-key" }, "project-key")}><KeyRound class="h-3 w-3" aria-hidden="true" />Set project key</button>
+          <button class="mt-2 inline-flex h-6 items-center gap-1.5 rounded-md border border-tool-warning/30 bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover disabled:opacity-40" type="button" disabled={remoteBusy} onclick={() => onAction({ action: "project-key" }, "project-key")}><KeyRound class="h-3 w-3" aria-hidden="true" />Set project key</button>
         </div>
       {/if}
       {#if visibleItems.length === 0}
@@ -310,7 +310,7 @@
                       <button
                         class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
                         type="button"
-                        disabled={busy}
+                        disabled={remoteBusy}
                         title={projectEditTitle(item)}
                         aria-label={`${projectEditTitle(item)}: ${item.name}`}
                         onclick={() => item.artifact && onOpenProjectArtifact(item.artifact)}
@@ -327,7 +327,7 @@
                           actionTone(item, action),
                         ]}
                         type="button"
-                        disabled={busy}
+                        disabled={remoteBusy}
                         title={actionLabel}
                         aria-label={`${actionLabel}: ${item.name}`}
                         onclick={() => runItemAction(item, action)}

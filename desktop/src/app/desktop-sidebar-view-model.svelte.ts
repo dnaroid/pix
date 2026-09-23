@@ -21,6 +21,7 @@ export function createDesktopSidebarViewModel(options: {
   workspace: () => string;
   configOptions: () => SessionConfigOption[];
   canUseSession: () => boolean;
+  registryReady: () => boolean;
   gitAssistantReady: () => boolean;
   anyPromptRunning: () => boolean;
   sessionMutationRunning: () => boolean;
@@ -73,6 +74,7 @@ export function createDesktopSidebarViewModel(options: {
     taskStorageIndicatorError: options.projectTasks.saveError,
     activeTaskId: options.projectActions.actionId,
     sessionReady: options.canUseSession(),
+    registryReady: options.registryReady(),
     gitAssistantReady: options.gitAssistantReady(),
     registrySnapshot: options.registry.snapshot,
     registryProjectInitialized: options.registry.projectInitialized,

@@ -12,11 +12,7 @@ function fixture() {
   const reportError = vi.fn();
   const store = createRegistryStore({
     client: () => null,
-    activeSessionId: () => null,
-    sessionRuntimeReady: () => false,
     operationRunning: () => false,
-    promptRunning: () => false,
-    sessionHistoryLoading: () => false,
     workspace: () => workspace,
     sessionWorkspace: () => undefined,
     setOperationRunning,
@@ -92,5 +88,29 @@ describe("Registry project initialization", () => {
     await expect(pending).resolves.toBe(false);
     expect(store.projectInitialized).toBeUndefined();
     expect(loadProjectTasks).not.toHaveBeenCalled();
+  });
+});
+
+describe("Registry workspace actions", () => {
+  it("refreshes through the workspace without requiring a conversation session", async () => {
+    const snapshot = { version: 1 as const, configured: true, branch: "main", items: [], checkedAt: "now" };
+    const registryAction = vi.fn(async () => snapshot);
+    const client = { registryAction } as any;
+    const store = createRegistryStore({
+      client: () => client,
+      operationRunning: () => false,
+      workspace: () => "/project",
+      sessionWorkspace: () => undefined,
+      setOperationRunning: vi.fn(),
+      setErrorMessage: vi.fn(),
+      loadProjectTasks: vi.fn(),
+      loadProjectDocuments: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    await store.runAction({ action: "refresh" }, "refresh");
+
+    expect(registryAction).toHaveBeenCalledWith("/project", { action: "refresh" });
+    expect(store.snapshot).toEqual(snapshot);
   });
 });

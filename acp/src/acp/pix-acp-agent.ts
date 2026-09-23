@@ -175,6 +175,7 @@ import {
 	type DesktopQueueSubmitResponse,
 	type DesktopQueuedUserMessage,
 	type DesktopRegistryActionRequest,
+	type DesktopRegistryActionResponse,
 	type DesktopRequestHistoryResponse,
 	type DesktopRuntimeStatusRequest,
 	type DesktopRuntimeStatusResponse,
@@ -554,7 +555,7 @@ export class PixAcpAgent {
 				this.desktopQueueAction(ctx.params),
 			)
 			.onRequest(PIX_REGISTRY_ACTION_METHOD, parseDesktopRegistryActionRequest, (ctx) =>
-				this.desktopRegistryAction(ctx.params),
+				this.desktopRegistryAction(ctx.params, ctx.client),
 			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopTakeAutoMessage(ctx.params),
@@ -665,28 +666,80 @@ export class PixAcpAgent {
 		}
 	}
 
-	private async desktopRegistryAction(params: DesktopRegistryActionRequest): Promise<Record<string, never>> {
-		const session = this.requireDesktopSession(params.sessionId);
-		if (session.activeRun || session.builtinRunning) {
-			throw new RequestError(ERROR_SERVER, "registry actions are unavailable while the agent is running");
-		}
-		const state = await session.pi.getState();
-		if (state.isStreaming || state.isCompacting) {
-			throw new RequestError(ERROR_SERVER, "registry actions are unavailable while the session is busy");
-		}
-		const commands = await session.pi.getCommands();
-		if (!commands.some((command) => command.name.replace(/^\/+/, "") === "registry")) {
-			throw new RequestError(ERROR_SERVER, "resource registry extension is unavailable in this session");
-		}
+	private async desktopRegistryAction(
+		params: DesktopRegistryActionRequest,
+		client: ClientCaller,
+	): Promise<DesktopRegistryActionResponse> {
+		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
+			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
+			...(this.options.toolsSuiteExtensionPath
+				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
+				: {}),
+		});
 
-		session.builtinRunning = true;
+		// Registry is workspace-scoped. Run its private command in a disposable,
+		// non-persisted pi RPC runtime instead of borrowing a conversation session.
+		// This keeps Registry usable before the first chat tab exists and avoids
+		// coupling project synchronization to an agent's streaming state.
+		const pi = this.options.createPiClient(registryPiClientOptions(
+			this.options.piEntry,
+			params.cwd,
+			toolsSuiteExtensionPath,
+		));
+		let snapshot: unknown;
+		const unsubscribe = pi.onEvent((event) => {
+			if (!isExtensionUiRequest(event)) return;
+			const state = sessionStateEnvelopeFromUiRequest(event);
+			if (state?.channel === "pi-tools-suite:resource-registry:state") {
+				snapshot = state.data;
+				return;
+			}
+			void this.handleWorkspaceRegistryUiRequest(pi, event, client);
+		});
+
 		try {
-			await session.pi.prompt(registryRpcCommand(params));
+			await pi.start();
+			const commands = await pi.getCommands();
+			if (!commands.some((command) => command.name.replace(/^\/+/, "") === "registry")) {
+				throw new RequestError(ERROR_SERVER, "resource registry extension is unavailable");
+			}
+			// Ignore any advisory startup snapshot; the command below publishes the
+			// authoritative post-action snapshot after its filesystem/Git work.
+			snapshot = undefined;
+			await pi.prompt(registryRpcCommand(params));
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
-			await this.consumeContextInventoryNotice(session, { reason: "reload" });
-			return {};
+			if (snapshot === undefined) {
+				throw new RequestError(ERROR_SERVER, "resource registry did not publish a workspace snapshot");
+			}
+			return { snapshot };
 		} finally {
-			session.builtinRunning = false;
+			unsubscribe();
+			await pi.stop().catch(() => undefined);
+		}
+	}
+
+	private async handleWorkspaceRegistryUiRequest(
+		pi: PiClient,
+		request: RpcExtensionUIRequest,
+		client: ClientCaller,
+	): Promise<void> {
+		const elicitation = toElicitationRequest(request, { elicitationId: randomUUID() });
+		if (!elicitation) {
+			if (request.method === "select" || request.method === "confirm" || request.method === "input" || request.method === "editor") {
+				this.safeRespond(pi, cancelledResponse(request.id));
+			}
+			return;
+		}
+		if (this.clientCapabilities?.elicitation?.form == null) {
+			this.safeRespond(pi, cancelledResponse(request.id));
+			return;
+		}
+		try {
+			const answer = await client.request("elicitation/create", elicitation);
+			this.safeRespond(pi, fromElicitationResponse(answer, request));
+		} catch (error) {
+			this.options.logger.warn(`workspace registry elicitation/create failed: ${stringifyUnknown(error)}`);
+			this.safeRespond(pi, cancelledResponse(request.id));
 		}
 	}
 
@@ -2999,6 +3052,27 @@ function piClientOptions(
 	};
 	if (defaultModel.thinkingLevel === undefined) return selected;
 	return { ...selected, args: [...(base.args ?? []), "--thinking", defaultModel.thinkingLevel] };
+}
+
+function registryPiClientOptions(
+	piEntry: string,
+	cwd: string,
+	toolsSuiteExtensionPath?: string,
+): PiRpcClientOptions {
+	return {
+		piEntry,
+		cwd,
+		env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
+		args: [
+			...(toolsSuiteExtensionPath ? ["--extension", toolsSuiteExtensionPath] : []),
+			"--no-session",
+			"--no-context-files",
+			"--no-skills",
+			"--no-prompt-templates",
+			"--no-themes",
+			"--no-tools",
+		],
+	};
 }
 
 function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): SessionMapRecord | undefined {

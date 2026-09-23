@@ -194,7 +194,7 @@ function registryStatusRank(status: RegistryStatus): number {
   }
 }
 
-function parseRegistrySnapshot(value: unknown): RegistrySnapshot | undefined {
+export function parseRegistrySnapshot(value: unknown): RegistrySnapshot | undefined {
   if (!isRecord(value) || value.version !== 1 || typeof value.configured !== "boolean") return undefined;
   if (typeof value.branch !== "string" || !Array.isArray(value.items) || typeof value.checkedAt !== "string") return undefined;
   if (value.remote !== undefined && typeof value.remote !== "string") return undefined;

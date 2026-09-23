@@ -13,11 +13,7 @@ import { createRegistryStore } from "./registry.svelte";
 type DesktopProjectServicesOptions = {
   client: () => AcpClient | null;
   workspace: () => string;
-  activeSessionId: () => string | null;
-  activeSessionRuntimeReady: () => boolean;
   operationRunning: () => boolean;
-  promptRunning: () => boolean;
-  sessionHistoryLoading: () => boolean;
   sessionWorkspace: (sessionId: string) => string | undefined;
   transcript: () => TranscriptState;
   prepareAttachment: (attachment: Attachment) => Promise<void>;
@@ -71,11 +67,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
   });
   registry = createRegistryStore({
     client: options.client,
-    activeSessionId: options.activeSessionId,
-    sessionRuntimeReady: options.activeSessionRuntimeReady,
     operationRunning: options.operationRunning,
-    promptRunning: options.promptRunning,
-    sessionHistoryLoading: options.sessionHistoryLoading,
     workspace: options.workspace,
     sessionWorkspace: options.sessionWorkspace,
     setOperationRunning: options.setOperationRunning,

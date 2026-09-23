@@ -491,7 +491,9 @@ async function resolveProjectKey(pi: ExtensionAPI, cwd: string): Promise<string>
 	const origin = (await runGit(pi, cwd, ["remote", "get-url", "origin"], { allowFailure: true })).stdout.trim();
 	const derived = projectKeyFromGitRemote(origin);
 	if (derived) return derived;
-	throw new Error(`Cannot determine this project's registry key from Git origin. Run /${COMMAND} project-key <key> in this project.`);
+	throw new Error(
+		`Project state needs a registry key. Git origin can provide one automatically; otherwise run /${COMMAND} project-key <key> in this project.`,
+	);
 }
 
 async function gitRefExists(pi: ExtensionAPI, cwd: string, ref: string): Promise<boolean> {
@@ -1318,6 +1320,10 @@ async function collectRegistryUiSnapshot(
 			collectStatuses(pi, cwd, runtime),
 			collectProjectStatuses(pi, cwd, runtime),
 		]);
+		// A missing project key only disables project-scoped artifacts. Skills and
+		// agents still have a valid Registry state, so don't duplicate the same
+		// project-key problem as a fatal snapshot error.
+		const snapshotError = error && error !== projectStatus.issue ? error : undefined;
 		return {
 			version: 1,
 			configured: true,
@@ -1327,7 +1333,7 @@ async function collectRegistryUiSnapshot(
 			...(projectStatus.issue ? { projectIssue: projectStatus.issue } : {}),
 			items: registryUiItems(statuses, projectStatus),
 			checkedAt,
-			...(error ? { error } : {}),
+			...(snapshotError ? { error: snapshotError } : {}),
 		};
 	});
 }
