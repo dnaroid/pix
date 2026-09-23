@@ -31,7 +31,7 @@ Example:
 {
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   "defaultModel": {
-    "modelRef": "openai-codex/gpt-5.6-sol",
+    "modelRef": "openai-codex/gpt-6-sol",
     "fallbackModels": [],
     "thinking": "medium"
   },
@@ -69,7 +69,7 @@ Example:
     ]
   },
   "promptEnhancer": {
-    "modelRef": "openai-codex/gpt-5.6-luna",
+    "modelRef": "openai-codex/gpt-6-luna",
     "fallbackModels": []
   },
   "autocomplete": {
@@ -79,7 +79,7 @@ Example:
     "timeoutMs": 3000
   },
   "sessionTitle": {
-    "modelRef": "openai-codex/gpt-5.6-luna",
+    "modelRef": "openai-codex/gpt-6-luna",
     "fallbackModels": ["zai/glm-5-turbo"]
   },
   "dictation": { "language": "en" },

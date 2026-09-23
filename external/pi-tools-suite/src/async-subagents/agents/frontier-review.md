@@ -1,8 +1,8 @@
 ---
 description: Independent frontier-model code review gate for substantive code changes made by a non-frontier parent. Use after implementation and targeted checks, before finalizing. Read-only review of the actual diff and surrounding code; use research for ordinary evidence gathering and oracle for architecture or high-stakes second opinions.
 icon: eye
-models: [openai-codex/gpt-5.6-sol, zai/glm-5.3]
-notForParentModels: [openai-codex/gpt-5.6-sol*, zai/glm-5.3]
+models: [openai-codex/gpt-6-sol, zai/glm-5.3]
+notForParentModels: [openai-codex/gpt-6-sol*, zai/glm-5.3]
 thinking: high
 tools: [read, grep, bash]
 ---

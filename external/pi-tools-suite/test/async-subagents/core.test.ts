@@ -437,7 +437,7 @@ describe.serial("core utils and prompt generation", () => {
 	});
 
 	test.serial("uses economical context-aware orchestration regardless of parent tier", () => {
-		for (const modelRef of ["zai/glm-5-turbo", "openai/gpt-5.4", "openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]) {
+		for (const modelRef of ["zai/glm-5-turbo", "openai/gpt-5.4", "openai-codex/gpt-6-luna", "openai-codex/gpt-6-sol"]) {
 			const prompt = agentStrategyPrompt({ modelRef, env: {} })!;
 			expect(prompt).toContain('name="cost-aware-orchestrator"');
 			expect(prompt).toContain("one sequential task can qualify");
@@ -547,11 +547,11 @@ describe.serial("subagent type config", () => {
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
 		expect(Object.keys(config.types).sort()).toEqual(["frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
-		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-5.6-sol", "zai/glm-5.3"]);
+		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
 		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
-		expect(config.types["frontier-review"].notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*", "zai/glm-5.3"]);
-		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-5.6-luna")).toContain("- frontier-review:");
-		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-5.6-sol")).not.toContain("- frontier-review:");
+		expect(config.types["frontier-review"].notForParentModels).toEqual(["openai-codex/gpt-6-sol*", "zai/glm-5.3"]);
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- frontier-review:");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-sol")).not.toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- frontier-review:");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
 	});
@@ -559,17 +559,17 @@ describe.serial("subagent type config", () => {
 	test.serial("filters roles by parent model with deny taking precedence over allow", () => {
 		const profile = {
 			forParentModels: ["openai-codex/*", "zai/*"],
-			notForParentModels: ["openai-codex/gpt-5.6-sol*"],
+			notForParentModels: ["openai-codex/gpt-6-sol*"],
 		};
-		expect(isSubagentTypeAvailableForParent(profile, "openai-codex/gpt-5.6-luna")).toBe(true);
-		expect(isSubagentTypeAvailableForParent(profile, "openai-codex/gpt-5.6-sol")).toBe(false);
+		expect(isSubagentTypeAvailableForParent(profile, "openai-codex/gpt-6-luna")).toBe(true);
+		expect(isSubagentTypeAvailableForParent(profile, "openai-codex/gpt-6-sol")).toBe(false);
 		expect(isSubagentTypeAvailableForParent(profile, "anthropic/claude-opus")).toBe(false);
 		expect(isSubagentTypeAvailableForParent(profile, undefined)).toBe(false);
 		expect(isSubagentTypeAvailableForParent({ notForParentModels: ["zai/glm-5.3"] }, undefined)).toBe(true);
 
 		const config = loadSubagentConfig(tempDir(), {});
-		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-5.6-luna").types["frontier-review"]).toBeDefined();
-		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-5.6-sol").types["frontier-review"]).toBeUndefined();
+		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6-luna").types["frontier-review"]).toBeDefined();
+		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6-sol").types["frontier-review"]).toBeUndefined();
 		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3").types["frontier-review"]).toBeUndefined();
 	});
 
@@ -582,12 +582,12 @@ describe.serial("subagent type config", () => {
 
 		expect(config.routing).toMatchObject({
 			model: "zai/glm-5-turbo",
-			fallbackModels: ["openai-codex/gpt-5.6-luna"],
+			fallbackModels: ["openai-codex/gpt-6-luna"],
 		});
 		for (const [subagentType, model, fallbackModels] of [
-			["research", "zai/glm-5-turbo", ["openai-codex/gpt-5.6-luna"]],
-			["implement", "zai/glm-5.3-flash", ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-luna"]],
-			["verify", "zai/glm-5-turbo", ["openai-codex/gpt-5.6-luna"]],
+			["research", "zai/glm-5-turbo", ["openai-codex/gpt-6-luna"]],
+			["implement", "zai/glm-5.3-flash", ["openai-codex/gpt-6-luna"]],
+			["verify", "zai/glm-5-turbo", ["openai-codex/gpt-6-luna"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
 			expect(role.task.model).toBe(model);
@@ -598,7 +598,7 @@ describe.serial("subagent type config", () => {
 		expect(resolved.task.model).toBe("zai/glm-5.3-flash");
 		expect(resolved.task.subagentType).toBe("ui-qa");
 		expect(resolved.task.thinking).toBe("low");
-		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
+		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-6-luna"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(300_000);
 		expect(fs.existsSync(runner)).toBe(true);
@@ -657,7 +657,7 @@ describe.serial("subagent type config", () => {
 			"verify",
 		]);
 		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
-		expect(definitions["frontier-review"]?.raw.notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*", "zai/glm-5.3"]);
+		expect(definitions["frontier-review"]?.raw.notForParentModels).toEqual(["openai-codex/gpt-6-sol*", "zai/glm-5.3"]);
 		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
 		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
@@ -1152,12 +1152,12 @@ Give a second opinion.
 		expect(fromLuna.task.model).toBe("openai-codex/gpt-5.6-sol");
 		expect(fromLuna.fallbackModels).toEqual(["zai/glm-5.3"]);
 
-		const fromTerra = resolveAgentTaskConfig(
-			{ id: "impl-terra", task: "implement the change", subagentType: "implement" },
+		const fromGenericOpenAi = resolveAgentTaskConfig(
+			{ id: "impl-openai", task: "implement the change", subagentType: "implement" },
 			config,
-			{ parentModel: "openai-codex/gpt-5.6-terra", preset: solPreset },
+			{ parentModel: "openai/gpt-5.5", preset: solPreset },
 		);
-		expect(fromTerra.task.model).toBe("openai-codex/gpt-5.6-sol");
+		expect(fromGenericOpenAi.task.model).toBe("openai-codex/gpt-5.6-sol");
 	});
 
 	test.serial("does not map removed builtin role names onto canonical roles", async () => {

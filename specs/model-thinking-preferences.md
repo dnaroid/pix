@@ -23,7 +23,7 @@ Remember the user's last applied thinking level independently for each model in 
   ```jsonc
   {
     "thinkingByModel": {
-      "openai-codex/gpt-5.6-sol": "high",
+      "openai-codex/gpt-6-sol": "high",
       "zai/glm-5-turbo": "max"
     }
   }

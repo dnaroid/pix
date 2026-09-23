@@ -126,7 +126,7 @@ describe.serial("model-pool selection contract", () => {
 		const { config } = fixture();
 		const task = { id: "o", task: "Second opinion", subagentType: "oracle" };
 		const models = ["openai-codex/gpt-6-astra", "zai/glm-5.3"];
-		const selected = resolveAgentTaskConfig(task, config, { parentModel: "openai-codex/gpt-5.6-luna", preset: { models } });
+		const selected = resolveAgentTaskConfig(task, config, { parentModel: "openai-codex/gpt-6-luna", preset: { models } });
 		expect(selected.task.model).toBe("zai/glm-5.3");
 		const astra = resolveAgentTaskConfig(task, config, { parentModel: "zai/glm-5-turbo", preset: { models: ["openai-codex/gpt-6-astra"] } });
 		expect(astra.task.model).toBe("openai-codex/gpt-6-astra");

@@ -30,7 +30,7 @@ const THINKING_LEVELS = new Set<PixThinkingLevel>([
 
 // Mirrors the defaultModel written by src/default-pix-config.ts for a fresh Pix profile.
 const FIRST_LAUNCH_DEFAULT: DefaultModelConfig = {
-	modelRef: "openai-codex/gpt-5.6-sol",
+	modelRef: "openai-codex/gpt-6-sol",
 	fallbackModels: [],
 	thinking: "medium",
 };

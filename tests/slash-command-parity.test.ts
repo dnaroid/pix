@@ -58,7 +58,7 @@ function desktopCommandNames(): string[] {
 }
 
 describe("slash command parity", () => {
-	it("pins the Pi 0.87.0 built-in catalog so upgrades cannot silently drift", () => {
+	it("pins the Pi 0.87.1 built-in catalog so upgrades cannot silently drift", () => {
 		assert.deepEqual(PI_SLASH_COMMANDS.map((command) => command.name), [...EXPECTED_PI_COMMANDS]);
 	});
 

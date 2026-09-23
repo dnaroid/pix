@@ -188,7 +188,7 @@ export const DEFAULT_MAX_CONCURRENT = 5;
 export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 	enabled: true,
 	model: "zai/glm-5-turbo",
-	fallbackModels: ["openai-codex/gpt-5.6-luna"],
+	fallbackModels: ["openai-codex/gpt-6-luna"],
 	maxTaskChars: 1200,
 	maxTokens: 512,
 	maxRetries: 1,

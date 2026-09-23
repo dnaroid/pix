@@ -220,7 +220,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         "enabled": false,
         "patience": 2,
         "summarizerModel": ["zai/glm-5-turbo"],
-        "summarizerFallbackModels": ["openai-codex/gpt-5.6-luna"],
+        "summarizerFallbackModels": ["openai-codex/gpt-6-luna"],
         "timeoutMs": 20000
       }
     }

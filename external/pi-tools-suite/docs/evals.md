@@ -39,7 +39,7 @@ Live cases are used for questions such as:
 - should the model choose `repo_search` or a direct read?
 - should a non-trivial task create a todo plan?
 - should an expensive Sol parent delegate substantial implementation work?
-- should Terra escalate a high-risk architecture decision?
+- should Luna escalate a high-risk architecture decision?
 - should a narrow local failure stay local instead of calling an oracle?
 - did a coding agent reproduce the bug before editing and verify behavior after
   editing?
@@ -123,7 +123,7 @@ The current extension registry covers all 19 modules:
 | --- | --- | --- |
 | `coding-discipline` | coding-discipline tests | coding-quality workflows |
 | `ast-grep` | ast-grep tests | structural tool selection |
-| `async-subagents` | core/tools/UI tests | Sol/Luna/Terra orchestration |
+| `async-subagents` | core/tools/UI tests | Sol/Luna orchestration |
 | `lsp` | LSP tests | deterministic only |
 | `comment-checker` | comment-checker tests | deterministic only |
 | `session-name` | session-name tests | deterministic only |
@@ -185,7 +185,7 @@ The prompt should describe user intent rather than naming the expected tool
 unless naming the tool is itself part of the contract. This prevents a case from
 passing merely because the answer was embedded in the prompt.
 
-## Initial 20-case corpus
+## Initial 19-case corpus
 
 ### Tool selection
 
@@ -225,8 +225,6 @@ passing merely because the answer was embedded in the prompt.
   or research should use the configured worker tier.
 - `orchestration.luna-escalates-high-risk` (Luna): high-risk cross-module or
   security work should trigger stronger review/deep escalation.
-- `orchestration.terra-escalates-high-risk` (Terra): high-risk architecture or
-  security uncertainty should escalate to stronger roles.
 
 ### Negative controls
 
@@ -443,9 +441,8 @@ Multiple models are comma-, semicolon-, or newline-separated:
 
 ```bash
 MODELS='zai/glm-5.3,'\
-'openai-codex/gpt-5.6-luna,'\
-'openai-codex/gpt-5.6-terra,'\
-'openai-codex/gpt-5.6-sol'
+'openai-codex/gpt-6-luna,'\
+'openai-codex/gpt-6-sol'
 PI_TOOLS_SUITE_EVAL_MODELS="$MODELS" \
   npm run test:evals:live
 ```
@@ -462,8 +459,8 @@ For model comparison, prefer the report runner:
 
 ```bash
 MODELS='zai/glm-5.3,'\
-'openai-codex/gpt-5.6-terra,'\
-'openai-codex/gpt-5.6-sol'
+'openai-codex/gpt-6-luna,'\
+'openai-codex/gpt-6-sol'
 PI_TOOLS_SUITE_EVAL_MODELS="$MODELS" \
   npm run evals:report
 ```
@@ -490,7 +487,7 @@ negative
 ### Run named cases
 
 ```bash
-PI_TOOLS_SUITE_EVAL_MODELS='openai-codex/gpt-5.6-sol' \
+PI_TOOLS_SUITE_EVAL_MODELS='openai-codex/gpt-6-sol' \
 CASES='orchestration.sol-delegates-substantial,'\
 'orchestration.sol-keeps-tiny-edit'
 PI_TOOLS_SUITE_EVAL_CASES="$CASES" \
@@ -536,16 +533,15 @@ For changes to model discipline or orchestration, the useful comparison set is:
 
 ```text
 zai/glm-5.3
-openai-codex/gpt-5.6-luna
-openai-codex/gpt-5.6-terra
-openai-codex/gpt-5.6-sol
+openai-codex/gpt-6-luna
+openai-codex/gpt-6-sol
 ```
 
 This matrix exposes several important regressions:
 
-- a prompt improves GLM but makes Terra overthink simple tasks;
+- a prompt improves GLM but makes Luna overthink simple tasks;
 - Luna stops delegating substantial work;
-- Terra escalates routine failures unnecessarily;
+- Luna escalates routine failures unnecessarily;
 - Sol stops delegating expensive implementation work;
 - Sol delegates tiny tasks and increases total cost;
 - a cheaper route saves parent tokens but increases total worker tokens or
@@ -642,7 +638,7 @@ Run the relevant live category/model subset in addition to deterministic tests.
 
 ### Nightly or manual comparison
 
-Run the full available GLM/Luna/Terra/Sol matrix and persist the JSON/Markdown
+Run the full available GLM/Luna/Sol matrix and persist the JSON/Markdown
 report as a CI artifact. This is the right place to watch token/cost/latency
 drift because live-model variance and expense make it a poor default PR gate.
 
@@ -676,7 +672,7 @@ Useful next additions include:
 - comment-checker precision/recall corpora;
 - larger AST transformation fixtures with semantic hidden tests;
 - end-to-end orchestration cases that allow real workers to complete and compare
-  `Sol direct` vs `Sol + Terra` vs `Terra + Sol escalation`;
+  `Sol direct` vs `Sol + Luna` vs `Luna + Sol escalation`;
 - machine-readable CI summary output for trend dashboards.
 
 The important constraint is to keep correctness evidence objective whenever it

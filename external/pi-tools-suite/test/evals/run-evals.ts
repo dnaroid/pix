@@ -8,7 +8,7 @@ import type { EvalReport, EvalRunResult } from "./harness/types.js";
 
 const models = parseEvalModels();
 if (models.length === 0) {
-	console.error("Set PI_TOOLS_SUITE_EVAL_MODELS to a comma-separated model matrix, e.g. zai/glm-5.3,openai-codex/gpt-5.6-terra.");
+	console.error("Set PI_TOOLS_SUITE_EVAL_MODELS to a comma-separated model matrix, e.g. zai/glm-5.3,openai-codex/gpt-6-luna.");
 	process.exit(2);
 }
 

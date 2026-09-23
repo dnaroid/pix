@@ -33,8 +33,7 @@ chain for initial selection and subsequent quota fallbacks:
 description: Make bounded implementation changes.
 models:
   - zai/glm-5.3-flash
-  - openai-codex/gpt-5.6-terra
-  - openai-codex/gpt-5.6-luna
+  - openai-codex/gpt-6-luna
 thinking: medium
 ---
 ```
@@ -47,20 +46,19 @@ pools live in `<project>/.pi/agents/presets.jsonc`:
   "gpt": {
     "description": "Models available for this project",
     "models": [
-      "openai-codex/gpt-5.6-luna",
-      "openai-codex/gpt-5.6-terra",
-      "openai-codex/gpt-5.6-sol",
+      "openai-codex/gpt-6-luna",
+      "openai-codex/gpt-6-sol",
       "openai-codex/gpt-6-astra"
     ]
   }
 }
 ```
 
-The example agent selects Terra, not Luna: the agent's order wins. Sol and Astra
-are available in the pool but absent from this worker's chain, so neither can
-become an automatic implementation fallback. The frontier-review can declare
-Sol in its chain while oracle can declare Astra. Model references in `models`
-must be exact `provider/model` values, not wildcards.
+The example agent selects Luna: the agent's order wins. Sol and Astra are
+available in the pool but absent from this worker's chain, so neither can become
+an automatic implementation fallback. The frontier-review can declare Sol in
+its chain while oracle can declare Astra. Model references in `models` must be
+exact `provider/model` values, not wildcards.
 
 The resolver intersects the agent chain with the selected pool. Runtime
 selection then skips unregistered, unauthenticated or session-exhausted models.

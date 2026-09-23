@@ -186,7 +186,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
-	modelRef: "openai-codex/gpt-5.6-luna",
+	modelRef: "openai-codex/gpt-6-luna",
 	fallbackModels: [],
 };
 

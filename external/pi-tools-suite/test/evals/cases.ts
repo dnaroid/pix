@@ -191,16 +191,6 @@ export const EVAL_CASES: EvalCase[] = [
 		assert: { requiredTools: ["subagents"] },
 	},
 	{
-		id: "orchestration.terra-escalates-high-risk",
-		category: "orchestration",
-		description: "Terra should escalate high-risk architecture/security uncertainty to Sol roles.",
-		fixture: "demo",
-		models: [/gpt-5\.6-terra/i],
-		blockTools: ["subagents"],
-		prompt: "Review a proposed change that would alter payment retry semantics, audit persistence, and the public checkout contract. This is high-risk architecture/security work with subtle cross-module invariants; use the configured deep/review escalation when appropriate.",
-		assert: { requiredTools: ["subagents"] },
-	},
-	{
 		id: "negative.trivial-chat-no-tools",
 		category: "negative",
 		description: "Trivial chat should not trigger planning, compression, or orchestration.",

@@ -6,7 +6,7 @@ export type EvalCoverageEntry = {
 export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"coding-discipline": { deterministic: ["test/coding-discipline.test.ts"], live: ["quality.two-hypotheses-before-fix", "quality.behavior-over-structural-check", "quality.async-stale-state"] },
 	"ast-grep": { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },
-	"async-subagents": { deterministic: ["test/async-subagents/core.test.ts", "test/async-subagents/tools.test.ts", "test/async-subagents/ui.test.ts"], live: ["orchestration.sol-delegates-substantial", "orchestration.luna-escalates-high-risk", "orchestration.terra-escalates-high-risk"] },
+	"async-subagents": { deterministic: ["test/async-subagents/core.test.ts", "test/async-subagents/tools.test.ts", "test/async-subagents/ui.test.ts"], live: ["orchestration.sol-delegates-substantial", "orchestration.luna-escalates-high-risk"] },
 	"lsp": { deterministic: ["test/lsp.test.ts"] },
 	"comment-checker": { deterministic: ["test/comment-checker.test.ts"] },
 	"session-name": { deterministic: ["test/session-name.test.ts"] },

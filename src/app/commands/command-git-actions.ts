@@ -21,8 +21,8 @@ const GIT_REVIEW_MAX_TOKENS = 4_096;
 const GIT_COMMIT_MESSAGE_MAX_TOKENS = 768;
 const GIT_DIFF_MAX_CHARS = 200_000;
 const UNTRACKED_FILE_MAX_BYTES = 128 * 1024;
-const DEFAULT_GIT_REVIEW_MODEL = "openai-codex/gpt-5.6-luna:medium";
-const DEFAULT_GIT_COMMIT_MESSAGE_MODEL = "openai-codex/gpt-5.6-luna:minimal";
+const DEFAULT_GIT_REVIEW_MODEL = "openai-codex/gpt-6-luna:medium";
+const DEFAULT_GIT_COMMIT_MESSAGE_MODEL = "openai-codex/gpt-6-luna:minimal";
 
 const REVIEW_SYSTEM_PROMPT = `You review Git diffs as a senior software engineer.
 

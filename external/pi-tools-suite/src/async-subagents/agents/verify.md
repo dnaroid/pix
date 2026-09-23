@@ -1,7 +1,7 @@
 ---
 description: Run targeted tests, builds, or checks and diagnose their output in an isolated context. Return pass/fail, relevant failure evidence and log paths. Do not fix source code; creating or changing tests belongs to implement.
 icon: flask
-models: [zai/glm-5-turbo, openai-codex/gpt-5.6-luna]
+models: [zai/glm-5-turbo, openai-codex/gpt-6-luna]
 thinking: low
 tools: [read, grep, bash]
 ---

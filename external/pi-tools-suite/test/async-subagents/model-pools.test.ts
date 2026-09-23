@@ -60,13 +60,13 @@ describe("ordered agent models and preset pools", () => {
 			expect(profile.model).toBeUndefined();
 			expect(profile.fallbackModels).toBeUndefined();
 			expect(profile.modelByParent).toBeUndefined();
-			if (name !== "oracle" && name !== "frontier-review") expect(profile.models?.join(",")).not.toContain("gpt-5.6-sol");
+			if (name !== "oracle" && name !== "frontier-review") expect(profile.models?.join(",")).not.toContain("gpt-6-sol");
 		}
 		for (const preset of Object.values(cfg.presets ?? {})) {
 			expect(preset.models?.length).toBeGreaterThan(0);
 			expect(preset.types).toBeUndefined();
 			for (const role of Object.keys(cfg.types)) {
-				const resolved = resolveAgentTaskConfig(task(role), cfg, { preset, parentModel: "openai-codex/gpt-5.6-luna" });
+				const resolved = resolveAgentTaskConfig(task(role), cfg, { preset, parentModel: "openai-codex/gpt-6-luna" });
 				expect(preset.models).toContain(resolved.task.model);
 				expect(resolved.fallbackModels.every((model) => preset.models!.includes(model))).toBe(true);
 			}

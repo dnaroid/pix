@@ -20,13 +20,13 @@ describe("context inventory", () => {
 				{ name: "reload", source: "extension" },
 				{ name: "skill:project-agent-creator", source: "skill" },
 			] as any,
-		} as any, context(cwd, "openai-codex", "gpt-5.6-luna"), "reload");
+		} as any, context(cwd, "openai-codex", "gpt-6-luna"), "reload");
 
 		expect(state.reason).toBe("reload");
 		expect(state.tools).toEqual(["repo_search", "read", "subagents"]);
 		expect(state.skills).toEqual(["frontier-model-rollover", "project-agent-creator"]);
 		expect(state.agents).toContain("frontier-review");
-		expect(state.model).toBe("openai-codex/gpt-5.6-luna");
+		expect(state.model).toBe("openai-codex/gpt-6-luna");
 	});
 
 	test("hides frontier-review for a frontier parent", () => {
@@ -34,7 +34,7 @@ describe("context inventory", () => {
 		const state = createContextInventoryState({
 			getActiveTools: () => ["read", "subagents"],
 			getCommands: () => [] as any,
-		} as any, context(cwd, "openai-codex", "gpt-5.6-sol"));
+		} as any, context(cwd, "openai-codex", "gpt-6-sol"));
 
 		expect(state.agents).not.toContain("frontier-review");
 		expect(state.agents).toContain("research");
@@ -50,7 +50,7 @@ describe("context inventory", () => {
 		const state = createContextInventoryState({
 			getActiveTools: () => ["SHELL_COMMAND"],
 			getCommands: () => [{ name: "skill:visible", source: "skill" }] as any,
-		} as any, context(cwd, "openai-codex", "gpt-5.6-luna"));
+		} as any, context(cwd, "openai-codex", "gpt-6-luna"));
 
 		expect(state.skills).toEqual(["visible"]);
 	});
@@ -60,7 +60,7 @@ describe("context inventory", () => {
 		const state = createContextInventoryState({
 			getActiveTools: () => ["repo_search", "apply_patch"],
 			getCommands: () => [{ name: "skill:hidden", source: "skill" }] as any,
-		} as any, context(cwd, "openai-codex", "gpt-5.6-luna"));
+		} as any, context(cwd, "openai-codex", "gpt-6-luna"));
 
 		expect(state.skills).toEqual([]);
 		expect(state.agents).toEqual([]);

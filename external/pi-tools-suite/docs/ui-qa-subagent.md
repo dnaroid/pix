@@ -19,7 +19,7 @@ Lighthouse, and memory diagnostics. Native/TUI QA uses a real PTY or
 deterministic app/platform UI driver and retains inspectable captures plus
 automatic bounded video evidence when the backend supports it.
 Its ranked `models` list prefers `zai/glm-5.3-flash`, then
-`openai-codex/gpt-5.6-luna`, filtered by the active preset's model pool and
+`openai-codex/gpt-6-luna`, filtered by the active preset's model pool and
 confirmed runtime image support.
 
 ## Inline agent workflow and skill isolation

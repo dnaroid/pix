@@ -589,7 +589,7 @@ description: Use for reviewing this repo's diff — knows the house rules.
 icon: eye
 models:
   - zai/glm-5-turbo
-  - openai-codex/gpt-5.6-luna
+  - openai-codex/gpt-6-luna
 thinking: low
 tools: read, grep
 retry:
@@ -612,7 +612,7 @@ AGENTS.md before approving anything; cite file paths first.
 ### Real UI QA (browser, TUI, and desktop GUI)
 
 The built-in `ui-qa` role runs on `zai/glm-5.3-flash`, with
-`openai-codex/gpt-5.6-luna` as its fallback. Its Markdown body
+`openai-codex/gpt-6-luna` as its fallback. Its Markdown body
 (`src/async-subagents/agents/ui-qa.md`) is a deliberately thin common contract:
 test the real user-facing target, classify only the top-level backend, route
 through on-demand guides, run through the unified runner, and keep deterministic
@@ -807,7 +807,7 @@ Example project `.pi/agents/presets.jsonc`:
   },
   "project-gpt": {
     "description": "GPT models approved for this project.",
-    "models": ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra"]
+    "models": ["openai-codex/gpt-6-luna"]
   }
 }
 ```
@@ -969,7 +969,7 @@ The default live model is `zai/glm-5-turbo`. Override it for the whole suite wit
 
 `test/evals/` adds a shared deterministic + live-model eval layer. The coverage
 gate requires every registered extension and model-facing tool to have a
-deterministic contract. The initial live corpus contains 20 cases across tool
+deterministic contract. The initial live corpus contains 19 cases across tool
 selection, coding quality, orchestration/escalation, and negative overuse
 controls. Coding-quality fixtures use executable behavioral checks rather than
 an LLM judge, while reports compare parent/worker tokens, provider-reported cost,
@@ -980,11 +980,11 @@ tool calls, changed files, and elapsed time.
 npm run test:evals:contracts
 
 # Live matrix as Bun tests. Models are comma/semicolon separated.
-PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-5.6-luna,openai-codex/gpt-5.6-terra,openai-codex/gpt-5.6-sol' \
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-6-luna,openai-codex/gpt-6-sol' \
   npm run test:evals:live
 
 # Produce JSON + Markdown comparison artifacts.
-PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-5.6-terra,openai-codex/gpt-5.6-sol' \
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-6-luna,openai-codex/gpt-6-sol' \
   npm run evals:report
 
 # Focus the report runner when iterating
@@ -995,7 +995,7 @@ PI_TOOLS_SUITE_EVAL_CATEGORIES='coding-quality,negative' \
 
 Live evals are opt-in. The deterministic coverage registry is part of normal
 tests, so adding an extension or tool without eval coverage fails the gate. See
-[`docs/evals.md`](docs/evals.md) for the architecture, complete 20-case catalog,
+[`docs/evals.md`](docs/evals.md) for the architecture, complete 19-case catalog,
 fixtures, assertions, metrics, model matrix, report format, environment
 variables, CI recommendations, and the procedure for adding new evals.
 

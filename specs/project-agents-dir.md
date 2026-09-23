@@ -49,14 +49,14 @@ model: zai/glm-5.3
 thinking: medium
 tools: read, grep, bash        # comma-separated or block list
 fallbackModels:
-  - openai-codex/gpt-5.6-luna
+  - openai-codex/gpt-6-luna
 modelByParent:
   zai/*: zai/glm-5.3
   openai-codex/*:
-    model: openai-codex/gpt-5.6-sol
+    model: openai-codex/gpt-6-sol
     fallbackModels: [zai/glm-5.3]
 forParentModels: [zai/*, openai-codex/*]
-notForParentModels: [openai-codex/gpt-5.6-sol*]
+notForParentModels: [openai-codex/gpt-6-sol*]
 ---
 
 You are a ... role prompt (markdown body).

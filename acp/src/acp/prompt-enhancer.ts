@@ -6,7 +6,7 @@ import { pixProjectConfigPath, pixUserConfigPath } from "./pix-config-paths.js";
 import { parseModelRef } from "./pix-settings.js";
 
 const DEFAULT_PROMPT_ENHANCER_CONFIG = {
-	modelRef: "openai-codex/gpt-5.6-luna",
+	modelRef: "openai-codex/gpt-6-luna",
 	fallbackModels: [] as string[],
 };
 const PROMPT_ENHANCER_TIMEOUT_MS = 30_000;

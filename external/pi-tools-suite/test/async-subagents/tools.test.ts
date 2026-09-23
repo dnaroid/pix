@@ -270,11 +270,7 @@ describe.serial("extension entrypoint", () => {
 
 		const lunaResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-luna" } });
 		expect(lunaResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(lunaResult.systemPrompt).not.toContain("prefer Terra workers");
-
-		const terraResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-terra" } });
-		expect(terraResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(terraResult.systemPrompt).not.toContain("escalate deep root-cause analysis");
+		expect(lunaResult.systemPrompt).not.toContain("escalate deep root-cause analysis");
 
 		const solResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-sol" } });
 		expect(solResult.systemPrompt).toContain('name="cost-aware-orchestrator"');

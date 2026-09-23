@@ -170,7 +170,6 @@ describe("codex-reasoning-fix", () => {
 			"gpt-5.5",
 			"gpt-5.6-luna",
 			"gpt-5.6-sol",
-			"gpt-5.6-terra",
 		]) {
 			const payload = { model: modelId, prompt_cache_retention: "24h" };
 			expect(stripUnsupportedPromptCacheRetention(
@@ -211,7 +210,7 @@ describe("codex-reasoning-fix", () => {
 			prompt_cache_retention: "24h",
 		};
 		const directOpenAi = {
-			model: "openai/gpt-5.6-terra",
+			model: "openai/gpt-5.6",
 			prompt_cache_retention: "24h",
 		};
 		const bare = { model: "gpt-5.6-sol", prompt_cache_retention: "24h" };
@@ -220,7 +219,7 @@ describe("codex-reasoning-fix", () => {
 			model: "openai-codex/gpt-5.4",
 		});
 		expect(stripUnsupportedPromptCacheRetention(directOpenAi, undefined)).toEqual({
-			model: "openai/gpt-5.6-terra",
+			model: "openai/gpt-5.6",
 		});
 		expect(stripUnsupportedPromptCacheRetention(bare, undefined)).toBe(bare);
 	});

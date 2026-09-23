@@ -175,7 +175,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"lookupModel": "zai/glm-5.3-flash"');
 		expect(content).toContain('"lookupFallbackModels": []');
 		expect(content).toContain('"summarizerModel": ["zai/glm-5-turbo"]');
-		expect(content).toContain('"summarizerFallbackModels": ["openai-codex/gpt-5.6-luna"]');
+		expect(content).toContain('"summarizerFallbackModels": ["openai-codex/gpt-6-luna"]');
 		expect(content).toContain('"credential-firewall": false');
 		expect(content).toContain('"truncation-metadata-normalizer": false');
 		expect(content).toContain('"secretFirewall"');

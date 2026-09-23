@@ -9,8 +9,8 @@ const GIT_REVIEW_TIMEOUT_MS = 120_000;
 const GIT_COMMIT_MESSAGE_TIMEOUT_MS = 45_000;
 const GIT_REVIEW_MAX_TOKENS = 4_096;
 const GIT_COMMIT_MESSAGE_MAX_TOKENS = 768;
-const DEFAULT_GIT_REVIEW_MODEL = "openai-codex/gpt-5.6-luna:medium";
-const DEFAULT_GIT_COMMIT_MESSAGE_MODEL = "openai-codex/gpt-5.6-luna:minimal";
+const DEFAULT_GIT_REVIEW_MODEL = "openai-codex/gpt-6-luna:medium";
+const DEFAULT_GIT_COMMIT_MESSAGE_MODEL = "openai-codex/gpt-6-luna:minimal";
 
 type GitAssistantModelConfig = {
 	modelRef: string;

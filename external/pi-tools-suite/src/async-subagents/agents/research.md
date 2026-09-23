@@ -1,7 +1,7 @@
 ---
 description: Read-only evidence gathering - search files, trace behavior, investigate hypotheses, or analyze a focused review question. Return findings with paths, not raw source. Use frontier-review for the post-implementation code-review gate when available, verify for running checks, and implement for changes.
 icon: search
-models: [zai/glm-5-turbo, openai-codex/gpt-5.6-luna]
+models: [zai/glm-5-turbo, openai-codex/gpt-6-luna]
 thinking: low
 tools: [read, grep]
 ---
