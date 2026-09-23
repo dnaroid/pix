@@ -5,6 +5,7 @@ import sessionTabClosureSource from "../app/session-tab-closure.ts?raw";
 import workbenchControllerSource from "../app/workbench-controller.ts?raw";
 import workbenchModelSource from "../app/workbench-model.ts?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
+import projectSwitcherSource from "./ProjectSwitcher.svelte?raw";
 import statusIconSource from "./SessionTabStatusIcon.svelte?raw";
 import source from "./WorkbenchTabs.svelte?raw";
 
@@ -28,18 +29,18 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(titlebarSource).not.toContain("<WorkspaceEditorTabs");
   });
 
-  it("shows the active project's colored two-letter identity before the workbench tabs", () => {
-    expect(titlebarSource).toContain("data-project-badge");
-    expect(titlebarSource).toContain("{project.abbreviation}");
-    expect(titlebarSource).toContain("cursor-default select-none");
-    expect(titlebarSource.indexOf("data-project-badge")).toBeLessThan(titlebarSource.indexOf("<WorkbenchTabs {...workbench} />"));
-    expect(titlebarSource).toContain("style:--project-titlebar-color={project.color}");
-    expect(titlebarSource).toContain("style:--project-titlebar-hue={project.hue}");
-    expect(titlebarSource).toContain("background-color: var(--project-titlebar-color");
-    expect(titlebarSource).toContain("title={project.name}");
-    expect(titlebarSource).not.toContain("title={project.path}");
-    expect(titlebarViewModelSource).toContain("projectAbbreviation(workspace)");
-    expect(navigationViewModelSource).toContain("projectColors.get(options.workspace())");
+  it("uses the shared project selector as a clickable titlebar project badge", () => {
+    expect(titlebarSource).toContain('<ProjectSwitcher {...projectSwitcher} variant="titlebar" />');
+    expect(titlebarSource.indexOf("<ProjectSwitcher")).toBeLessThan(titlebarSource.indexOf("<WorkbenchTabs {...workbench} />"));
+    expect(projectSwitcherSource).toContain("data-project-badge");
+    expect(projectSwitcherSource).toContain("{projectAbbreviation(workspace)}");
+    expect(projectSwitcherSource).toContain('aria-haspopup="menu"');
+    expect(projectSwitcherSource).toContain("aria-expanded={open}");
+    expect(projectSwitcherSource).toContain('variant === "titlebar"');
+    expect(projectSwitcherSource).toContain("style:--project-titlebar-color={projectColors.get(workspace)}");
+    expect(projectSwitcherSource).toContain("style:--project-titlebar-hue={projectFolderHue(workspace)}");
+    expect(projectSwitcherSource).toContain("background-color: var(--project-titlebar-color");
+    expect(navigationViewModelSource).not.toContain("projectColors.get(options.workspace())");
   });
 
   it("keeps pointer close outside the normal Tab sequence and supports Delete plus middle-click close", () => {

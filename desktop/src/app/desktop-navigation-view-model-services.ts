@@ -6,8 +6,6 @@ import type { DesktopViewModelServicesOptions } from "./desktop-view-model-servi
 
 export function createDesktopNavigationViewModelServices(options: DesktopViewModelServicesOptions) {
   const titlebar = createDesktopTitlebarViewModel({
-    workspace: options.workspace,
-    workspaceColor: () => options.project.workspace.projectColors.get(options.workspace()),
     newSessionShortcut: () => desktopCommandShortcutLabel("session.new", options.platform),
     tabs: () => options.presentation.workbenchTabs,
     activeId: options.activeWorkbenchTabId,

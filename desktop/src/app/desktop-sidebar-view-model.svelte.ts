@@ -1,6 +1,7 @@
 import type { ComponentProps } from "svelte";
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import DesktopSidebar from "../components/DesktopSidebar.svelte";
+import ProjectSwitcher from "../components/ProjectSwitcher.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createGitAssist } from "./git-assist";
 import type { createGitWorkspaceStore } from "./git-workspace.svelte";
@@ -14,6 +15,7 @@ import type { createSessionTabController } from "./session-tab-controller";
 import type { createWorkspaceController } from "./workspace-controller";
 
 type SidebarProps = ComponentProps<typeof DesktopSidebar>["props"];
+type ProjectSwitcherProps = Omit<ComponentProps<typeof ProjectSwitcher>, "variant">;
 
 export function createDesktopSidebarViewModel(options: {
   workspace: () => string;
@@ -35,6 +37,32 @@ export function createDesktopSidebarViewModel(options: {
   sessionTabs: ReturnType<typeof createSessionTabController>;
   workspaceController: ReturnType<typeof createWorkspaceController>;
 }) {
+  const projectSwitchDisabled = $derived(
+    options.anyPromptRunning()
+      || options.sessionMutationRunning()
+      || options.projectTasks.saving
+      || options.projectActions.actionId !== null,
+  );
+  const onProjectSwitcherOpen = () => {
+    options.sessionTabs.closeSessionSelector();
+    options.projectWorkspace.refreshColors(options.projectWorkspace.recentProjects);
+  };
+  const onSelectProject = (path: string) => void options.workspaceController.select(path);
+  const onChooseWorkspace = () => void options.workspaceController.choose();
+  const onChooseWorkspaceInNewWindow = () => void options.workspaceController.chooseInNewWindow();
+
+  const projectSwitcher = $derived.by<ProjectSwitcherProps>(() => ({
+    workspace: options.workspace(),
+    recentProjects: options.projectWorkspace.recentProjects,
+    projectColors: options.projectWorkspace.projectColors,
+    currentWindowDisabled: projectSwitchDisabled,
+    onOpen: onProjectSwitcherOpen,
+    onSelectProject,
+    onOpenProjectInNewWindow: options.workspaceController.openInNewWindow,
+    onChooseWorkspace,
+    onChooseWorkspaceInNewWindow,
+  }));
+
   const props = $derived.by<SidebarProps>(() => ({
     workspace: options.workspace(),
     settingsConfigOptions: options.configOptions(),
@@ -73,10 +101,7 @@ export function createDesktopSidebarViewModel(options: {
     projectDocuments: options.projectDocuments.snapshot,
     recentProjects: options.projectWorkspace.recentProjects,
     projectColors: options.projectWorkspace.projectColors,
-    projectSwitchDisabled: options.anyPromptRunning()
-      || options.sessionMutationRunning()
-      || options.projectTasks.saving
-      || options.projectActions.actionId !== null,
+    projectSwitchDisabled,
     externalEditorLabel: options.externalEditorLabel(),
     onCreate: options.projectTasks.create,
     onUpdate: options.projectTasks.update,
@@ -93,14 +118,11 @@ export function createDesktopSidebarViewModel(options: {
     onValidateProjectFile: options.preview.validateProjectFile,
     onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),
     onOpenExternalEditor: (path) => void options.projectWorkspace.openInEditor(path),
-    onProjectSwitcherOpen: () => {
-      options.sessionTabs.closeSessionSelector();
-      options.projectWorkspace.refreshColors(options.projectWorkspace.recentProjects);
-    },
-    onSelectProject: (path) => void options.workspaceController.select(path),
+    onProjectSwitcherOpen,
+    onSelectProject,
     onOpenProjectInNewWindow: options.workspaceController.openInNewWindow,
-    onChooseWorkspace: () => void options.workspaceController.choose(),
-    onChooseWorkspaceInNewWindow: () => void options.workspaceController.chooseInNewWindow(),
+    onChooseWorkspace,
+    onChooseWorkspaceInNewWindow,
     onSaveProjectColor: options.projectWorkspace.saveColor,
     onReload: () => void options.projectTasks.load(options.workspace()),
     onRegistryRefresh: options.registry.refresh,
@@ -123,5 +145,6 @@ export function createDesktopSidebarViewModel(options: {
 
   return {
     get props() { return props; },
+    get projectSwitcher() { return projectSwitcher; },
   };
 }

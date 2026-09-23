@@ -24,9 +24,18 @@ describe("ProjectSwitcher project opening actions", () => {
 
   it("renders per-project override colors without owning filesystem IO", () => {
     expect(switcherSource).toContain("projectColors.get(project)");
-    expect(switcherSource).not.toContain("projectColors.get(workspace)");
+    expect(switcherSource).toContain("projectColors.get(workspace)");
     expect(switcherSource).not.toContain("project-identity-name");
     expect(switcherSource).not.toContain("invoke(");
+  });
+
+  it("reuses the same menu behind the compact titlebar badge", () => {
+    expect(switcherSource).toContain('variant?: "sidebar" | "titlebar"');
+    expect(switcherSource).toContain('variant === "titlebar"');
+    expect(switcherSource).toContain("data-project-badge");
+    expect(switcherSource).toContain("{projectAbbreviation(workspace)}");
+    expect(switcherSource).toContain('aria-expanded={open}');
+    expect(switcherSource).toContain('"absolute left-0 top-full z-50');
   });
 
   it("keeps the active project header text-only before the chevron", () => {

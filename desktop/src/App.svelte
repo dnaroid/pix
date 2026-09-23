@@ -644,7 +644,7 @@
     restartAvailable={desktopWatchRestart.available}
     restartPending={desktopWatchRestart.restarting}
     onRestart={desktopWatchRestart.restart}
-    project={titlebarViewModel.project}
+    projectSwitcher={sidebarViewModel.projectSwitcher}
     workbench={titlebarViewModel.workbench}
     selector={titlebarViewModel.selector}
   />
