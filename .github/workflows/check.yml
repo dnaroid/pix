@@ -39,6 +39,7 @@ jobs:
       - name: Install and check ACP adapter
         run: npm ci --prefix acp --ignore-scripts && npm run check:acp
       - name: Install and check desktop frontend
+        if: runner.os == 'macOS'
         run: npm ci --prefix desktop --ignore-scripts && npm run check:desktop && npm --prefix desktop test
       - name: Check desktop Rust host
         if: runner.os == 'macOS'

@@ -11,7 +11,7 @@ const { parse } = require("yaml");
 const workflow = parse(readFileSync(join(root, ".github/workflows/publish.yml"), "utf8"));
 const checkWorkflow = parse(readFileSync(join(root, ".github/workflows/check.yml"), "utf8"));
 
-test("release matrix covers every supported native OS/CPU and follows correctness gates", () => {
+test("release matrix ships TUI everywhere and Desktop only on macOS", () => {
   const build = workflow.jobs["build-release"];
   assert.equal(build.needs, "release-contract");
   assert.deepEqual(build.strategy.matrix.include.map((row) => row.target).sort(), Object.keys(targets).sort());
@@ -23,8 +23,14 @@ test("release matrix covers every supported native OS/CPU and follows correctnes
   assert.equal(upload.with["if-no-files-found"], "error");
   assert.equal(upload.with.path, ".artifacts/releases/${{ matrix.target }}/assets/*");
   assert.ok(build.steps.some((step) => step.with?.name === "size-${{ matrix.target }}"));
-  const releaseBuild = build.steps.find((step) => step.name === "Build and test portable TUI and GUI installers");
-  assert.match(releaseBuild.env.TAURI_SIGNING_PRIVATE_KEY, /secrets\.TAURI_SIGNING_PRIVATE_KEY/u);
+  const desktopBuild = build.steps.find((step) => step.name === "Build and test portable TUI and macOS Desktop installer");
+  assert.equal(desktopBuild.if, "runner.os == 'macOS'");
+  assert.match(desktopBuild.env.TAURI_SIGNING_PRIVATE_KEY, /secrets\.TAURI_SIGNING_PRIVATE_KEY/u);
+  const tuiBuild = build.steps.find((step) => step.name === "Build and test portable TUI");
+  assert.equal(tuiBuild.if, "runner.os != 'macOS'");
+  assert.match(tuiBuild.run, /--tui-only/u);
+  assert.equal(JSON.stringify(build).includes("WINDOWS_CERTIFICATE"), false);
+  assert.equal(JSON.stringify(build).includes("libwebkit2gtk"), false);
 });
 
 test("CI and release workflows do not duplicate npm/publication work", () => {
@@ -37,6 +43,8 @@ test("CI and release workflows do not duplicate npm/publication work", () => {
   assert.deepEqual(checkWorkflow.on.push.branches, ["master"]);
   assert.deepEqual(checkWorkflow.on.pull_request.branches, ["master"]);
   assert.ok(checkWorkflow.jobs["build-and-test"]);
+  const desktopCheck = checkWorkflow.jobs["build-and-test"].steps.find((step) => step.name === "Install and check desktop frontend");
+  assert.equal(desktopCheck.if, "runner.os == 'macOS'");
   const browserInstall = checkWorkflow.jobs["build-and-test"].steps.find((step) => step.name === "Install Chromium for browser QA E2E");
   assert.equal(browserInstall.if, "matrix.os == 'ubuntu-latest'");
   for (const candidate of [workflow, checkWorkflow]) {

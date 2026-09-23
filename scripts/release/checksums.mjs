@@ -6,11 +6,10 @@ import { targets, version } from "./common.mjs";
 
 export function expectedBuildAssets(releaseVersion) {
   return Object.keys(targets).flatMap((target) => {
-    const extensions = target.startsWith("windows") ? ["-setup.exe", "-setup.exe.sig"]
-      : target.startsWith("macos") ? [".dmg", "-updater.tar.gz", "-updater.tar.gz.sig"]
-        : [".AppImage", ".AppImage.sig", ".deb"];
-    return [`pix-tui-${releaseVersion}-${target}.${target.startsWith("windows") ? "zip" : "tar.gz"}`,
-      ...extensions.map((extension) => `pix-desktop-${releaseVersion}-${target}${extension}`)];
+    const tui = `pix-tui-${releaseVersion}-${target}.${target.startsWith("windows") ? "zip" : "tar.gz"}`;
+    if (target !== "macos-arm64") return [tui];
+    const desktopExtensions = [".dmg", "-updater.tar.gz", "-updater.tar.gz.sig"];
+    return [tui, ...desktopExtensions.map((extension) => `pix-desktop-${releaseVersion}-${target}${extension}`)];
   }).sort();
 }
 
@@ -29,18 +28,12 @@ async function signature(directory, name) {
 }
 
 export async function latestJson(directory, releaseVersion) {
-  const asset = {
-    linux: `pix-desktop-${releaseVersion}-linux-x64.AppImage`,
-    windows: `pix-desktop-${releaseVersion}-windows-x64-setup.exe`,
-    macArm: `pix-desktop-${releaseVersion}-macos-arm64-updater.tar.gz`,
-  };
+  const macArm = `pix-desktop-${releaseVersion}-macos-arm64-updater.tar.gz`;
   const data = {
     version: releaseVersion,
     notes: `Pix ${releaseVersion}. See the GitHub Release for full notes.`,
     platforms: {
-      "linux-x86_64": { url: releaseUrl(releaseVersion, asset.linux), signature: await signature(directory, `${asset.linux}.sig`) },
-      "windows-x86_64": { url: releaseUrl(releaseVersion, asset.windows), signature: await signature(directory, `${asset.windows}.sig`) },
-      "darwin-aarch64": { url: releaseUrl(releaseVersion, asset.macArm), signature: await signature(directory, `${asset.macArm}.sig`) },
+      "darwin-aarch64": { url: releaseUrl(releaseVersion, macArm), signature: await signature(directory, `${macArm}.sig`) },
     },
   };
   await writeFile(join(directory, "latest.json"), `${JSON.stringify(data, null, 2)}\n`);

@@ -3,6 +3,13 @@
 Lightweight Tauri 2 + Svelte 5 client for Pix. It runs `pix-acp` as an
 isolated child process and communicates with it over ACP JSON-RPC.
 
+## Platform support
+
+Pix Desktop is currently supported and released only on **macOS Apple Silicon**.
+Windows and Linux Desktop packages are intentionally not produced or
+platform-validated in CI for now. This does not affect Pix TUI support on
+Windows or Linux.
+
 ## Visual direction
 
 The desktop client follows the terminal renderer's information hierarchy:

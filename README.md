@@ -15,8 +15,9 @@ sessions.
 
 ## Start
 
-Download the latest **TUI** archive or **Pix Desktop** installer for your OS/CPU
-from [GitHub Releases](https://github.com/dnaroid/pix/releases).
+Download the latest **TUI** archive for your OS/CPU, or the **Pix Desktop**
+installer for macOS Apple Silicon, from
+[GitHub Releases](https://github.com/dnaroid/pix/releases).
 
 Stable release packages contain their own Node.js runtime and Pix dependencies;
 Node/npm is not an end-user prerequisite.
@@ -31,8 +32,8 @@ for this machine. Follow
 https://github.com/dnaroid/pix/blob/master/docs/llm-install.md exactly.
 Detect OS/CPU, preserve Pi/Pix config and sessions, remove only confirmed legacy
 Pix installs/wrappers, install the matching GitHub Release assets, verify them
-against SHA256SUMS, configure without overwriting credentials, and verify both
-TUI and Desktop when this platform has official assets.
+against SHA256SUMS, configure without overwriting credentials, and verify the
+TUI plus Pix Desktop on macOS Apple Silicon when the Desktop asset is present.
 ```
 
 Full agent contract: **[LLM installation](docs/llm-install.md)**.
@@ -79,6 +80,11 @@ ecosystem.
 
 Pix Desktop turns the same Pi/Pix runtime into an IDE-like native workbench.
 
+**Platform support:** Pix Desktop currently supports **macOS on Apple Silicon
+only**. Windows and Linux Desktop packages are not currently published or
+platform-validated in CI. The Pix TUI remains supported on the release targets
+listed below.
+
 The Activity Bar provides:
 
 - **Tasks** — project-local tasks in `.pi/tasks.jsonc`, attachments and linked
@@ -104,10 +110,6 @@ Configuration is intentionally separate from the TUI:
 
 See **[Pix Desktop](docs/desktop.md)** for installation, first-run behavior,
 workspace details and troubleshooting.
-
-**Linux AppImage opens a blank window?** If stderr contains
-`Could not create default EGL display: EGL_BAD_PARAMETER`, use the documented
-[Wayland/Mesa workaround](docs/desktop.md#linux-appimage-blank-window-egl_bad_parameter).
 
 ## Pix TUI
 
@@ -168,9 +170,9 @@ More configuration details:
 
 Official release targets currently include:
 
-- Windows x64 — TUI ZIP + Desktop NSIS installer;
+- Windows x64 — TUI ZIP;
 - macOS Apple Silicon — TUI tarball + Desktop DMG;
-- Linux x64 — TUI tarball + Desktop AppImage/DEB.
+- Linux x64 — TUI tarball.
 
 Release assets include `SHA256SUMS`.
 
@@ -216,7 +218,7 @@ behavior.
 | --- | --- |
 | [Installing Pix](docs/installation.md) | manual GitHub Release install, checksums, legacy cleanup, updates |
 | [LLM installation](docs/llm-install.md) | copy/paste agent command and safe OS-aware execution contract |
-| [Pix Desktop](docs/desktop.md) | Desktop features, configuration, updater and Linux AppImage workaround |
+| [Pix Desktop](docs/desktop.md) | macOS Desktop features, configuration, updater and troubleshooting |
 | [Using Pix TUI](docs/usage.md) | prompts, shell, sessions, commands, bundled tools |
 | [Configuration and accounts](docs/configuration.md) | models, credentials, voice, tools-suite and project config |
 | [Troubleshooting](docs/troubleshooting.md) | fonts, clipboard, voice, providers, IDX and Desktop launch issues |

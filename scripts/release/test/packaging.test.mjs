@@ -48,8 +48,8 @@ test("checksums reject incomplete or unexpected releases and hash the complete s
   t.after(() => rm(directory, { recursive: true, force: true }));
   const buildFiles = expectedBuildAssets("1.2.3");
   const files = expectedPublishedAssets("1.2.3");
-  assert.equal(buildFiles.length, 11);
-  assert.equal(files.length, 9);
+  assert.equal(buildFiles.length, 6);
+  assert.equal(files.length, 6);
   assert.equal(new Set(files).size, files.length);
   assert.equal(files.some((file) => file.endsWith(".sig")), false);
   await assert.rejects(checksums(directory, "1.2.3"), /Incomplete/u);
@@ -57,9 +57,9 @@ test("checksums reject incomplete or unexpected releases and hash the complete s
   await checksums(directory, "1.2.3");
   const latest = JSON.parse(await readFile(join(directory, "latest.json"), "utf8"));
   assert.equal(latest.version, "1.2.3");
-  assert.deepEqual(Object.keys(latest.platforms).sort(), ["darwin-aarch64", "linux-x86_64", "windows-x86_64"]);
-  assert.match(latest.platforms["windows-x86_64"].url, /pix-desktop-1\.2\.3-windows-x64-setup\.exe$/u);
-  assert.equal(latest.platforms["linux-x86_64"].signature, "signature:pix-desktop-1.2.3-linux-x64.AppImage.sig");
+  assert.deepEqual(Object.keys(latest.platforms), ["darwin-aarch64"]);
+  assert.match(latest.platforms["darwin-aarch64"].url, /pix-desktop-1\.2\.3-macos-arm64-updater\.tar\.gz$/u);
+  assert.equal(latest.platforms["darwin-aarch64"].signature, "signature:pix-desktop-1.2.3-macos-arm64-updater.tar.gz.sig");
   const expected = (await Promise.all(files.map(async (file) => `${createHash("sha256").update(await readFile(join(directory, file))).digest("hex")}  ${file}`))).join("\n") + "\n";
   assert.equal(await readFile(join(directory, "SHA256SUMS"), "utf8"), expected);
   assert.doesNotMatch(expected, /\.sig(?:\n|$)/u);
