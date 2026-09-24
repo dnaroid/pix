@@ -13,6 +13,10 @@ type ConnectionStoreOptions = {
   workspace: () => string;
   onSessionUpdate: (notification: SessionNotification) => void;
   onSessionState: (notification: SessionStateNotification) => void;
+  onOpenActivity?: (sessionId: string) => string;
+  onBeginActivityRequest?: (owner: string) => void;
+  onCompleteActivityRequest?: (owner: string, sessionId: string) => void;
+  onCancelActivityRequest?: (owner: string) => void;
   onQueueState: (state: QueueState) => void;
   onQueueConsumed: (sessionId: string, message: QueuedUserMessage) => void;
   onElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
@@ -51,13 +55,17 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
     imagePromptSupported = false;
     options.setErrorMessage(null);
     const transport = new TauriAcpTransport();
-    const next = new AcpClient(transport, {
+    const next: AcpClient = new AcpClient(transport, {
       onSessionUpdate: (notification) => {
         if (client === next) options.onSessionUpdate(notification);
       },
       onSessionState: (notification) => {
         if (client === next) options.onSessionState(notification);
       },
+      onOpenActivity: (sessionId): string => client === next ? options.onOpenActivity?.(sessionId) ?? "" : "",
+      onBeginActivityRequest: (owner) => { if (client === next) options.onBeginActivityRequest?.(owner); },
+      onCompleteActivityRequest: (owner, sessionId) => { if (client === next) options.onCompleteActivityRequest?.(owner, sessionId); },
+      onCancelActivityRequest: (owner) => { if (client === next) options.onCancelActivityRequest?.(owner); },
       onQueueState: (state) => {
         if (client === next) options.onQueueState(state);
       },

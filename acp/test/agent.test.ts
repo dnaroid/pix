@@ -739,6 +739,39 @@ test("session/new forwards structured extension state emitted during pi startup"
 	}]);
 });
 
+test("desktop activity attachment rebinds a reused lazy runtime and replays its cached snapshot", async () => {
+	const notifications: Array<{ sessionId: string; channel: string; data: unknown; activityOwner?: string }> = [];
+	const harness = createTestAdapter({
+		createPiClient: () => {
+			const fake = new FakePiClient();
+			fake.eventsOnStart.push({
+				type: "extension_ui_request", id: "startup-activity", method: "setWidget",
+				widgetKey: "pix.session-state",
+				widgetLines: ["pi-tools-suite:todo:state", JSON.stringify({ version: 1, checkedAt: 10 })],
+			});
+			return fake;
+		},
+	});
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", {
+			cwd: "/tmp/activity-owner", mcpServers: [], _meta: { "pix.lazyRuntime": true, "pix.activityOwner": "first" },
+		}) as { sessionId: string };
+		await cx.request("session/load", { sessionId: created.sessionId, cwd: "/tmp/activity-owner",
+			mcpServers: [], _meta: { "pix.lazyHistory": true, "pix.activityOwner": "first" } });
+		await waitFor(() => notifications.length === 1);
+		assert.equal(notifications[0]?.activityOwner, "first");
+		await cx.request("session/load", { sessionId: created.sessionId, cwd: "/tmp/activity-owner",
+			mcpServers: [], _meta: { "pix.lazyHistory": true, "pix.activityOwner": "second" } });
+		await waitFor(() => notifications.length === 2);
+		assert.deepEqual(notifications[1], { ...notifications[0], activityOwner: "second" });
+	}, (app) => {
+		const custom = app as unknown as { onNotification(method: string, parser: (params: unknown) => typeof notifications[number],
+			handler: (ctx: { params: typeof notifications[number] }) => void): void };
+		custom.onNotification(PIX_SESSION_STATE_METHOD, (params) => params as typeof notifications[number],
+			(ctx) => { notifications.push(ctx.params); });
+	});
+});
+
 test("session/new starts pi with the cwd Pix default model and thinking level", async () => {
 	const resolvedCwds: string[] = [];
 	const { adapter, options } = createTestAdapter({
@@ -2449,6 +2482,34 @@ test("desktop lazy session/load reuses an already-live tab runtime", async () =>
 	});
 });
 
+test("activity attachments rebind a reused runtime and replay cached snapshots with their original timestamp", async () => {
+	const harness = createTestAdapter();
+	const notifications: Array<{ sessionId: string; channel: string; data: { checkedAt: number }; activityOwner?: string }> = [];
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", {
+			cwd: "/tmp/proj", mcpServers: [], _meta: { "pix.activityOwner": "attachment-old" },
+		}) as { sessionId: string };
+		const sessionId = created.sessionId;
+		const pi = harness.clients[0]!;
+		pi.emit({ type: "extension_ui_request", id: "activity", method: "setWidget",
+			widgetKey: "pix.session-state", widgetLines: ["pi-tools-suite:todo:state", JSON.stringify({ version: 1, checkedAt: 17 })] });
+		await waitFor(() => notifications.length === 1);
+		assert.equal(notifications[0]?.activityOwner, "attachment-old");
+		await cx.request("session/load", { sessionId, cwd: "/tmp/proj", mcpServers: [],
+			_meta: { "pix.lazyHistory": true, "pix.activityOwner": "attachment-new" } });
+		await waitFor(() => notifications.length === 2);
+		assert.equal(harness.clients.length, 1);
+		assert.deepEqual(notifications[1], { sessionId, channel: "pi-tools-suite:todo:state",
+			data: { version: 1, checkedAt: 17 }, activityOwner: "attachment-new" });
+	}, (app) => {
+		const custom = app as unknown as { onNotification(method: string,
+			parser: (params: unknown) => typeof notifications[number],
+			handler: (ctx: { params: typeof notifications[number] }) => void): void };
+		custom.onNotification(PIX_SESSION_STATE_METHOD, (value) => value as typeof notifications[number],
+			(ctx) => notifications.push(ctx.params));
+	});
+});
+
 test("desktop history is readable directly from JSONL while the pi runtime is closed", async () => {
 	const harness = createTestAdapter();
 	await connect(harness.adapter, async (cx) => {
@@ -2645,6 +2706,32 @@ test("session/fork switches, clones, and registers a fresh mapped session", asyn
 
 	const listed = await connect(harness.adapter, (cx) => cx.request("session/list", {}));
 	assert.equal(listed.sessions.length, 2);
+});
+
+test("session/fork tags startup activity before its response with the requested attachment", async () => {
+	let spawned = 0;
+	const harness = createTestAdapter({ createPiClient: () => {
+		const fake = new FakePiClient();
+		if (++spawned === 2) fake.eventsOnStart.push({ type: "extension_ui_request", id: "fork-startup",
+			method: "setWidget", widgetKey: "pix.session-state",
+			widgetLines: ["pi-tools-suite:todo:state", JSON.stringify({ version: 1, checkedAt: 9 })] });
+		return fake;
+	} });
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] })) as { sessionId: string };
+	const notifications: Array<{ sessionId: string; activityOwner: string; data: unknown }> = [];
+	await connect(harness.adapter, async (cx) => {
+		const forked = await cx.request("session/fork", { sessionId: created.sessionId, cwd: "/tmp/proj",
+			mcpServers: [], _meta: { "pix.activityOwner": "fork-attachment" } }) as { sessionId: string };
+		await waitFor(() => notifications.length === 1);
+		assert.deepEqual(notifications[0], { sessionId: forked.sessionId, activityOwner: "fork-attachment",
+			channel: "pi-tools-suite:todo:state", data: { version: 1, checkedAt: 9 } });
+	}, (app) => {
+		const custom = app as unknown as { onNotification(method: string,
+			parser: (params: unknown) => typeof notifications[number],
+			handler: (ctx: { params: typeof notifications[number] }) => void): void };
+		custom.onNotification(PIX_SESSION_STATE_METHOD, (value) => value as typeof notifications[number],
+			(ctx) => notifications.push(ctx.params));
+	});
 });
 
 test("session/fork clone cancelled tears down and reports an error", async () => {

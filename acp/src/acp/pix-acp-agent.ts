@@ -310,6 +310,8 @@ interface ActiveRun {
 
 interface AgentSessionState {
 	readonly acpSessionId: string;
+	activityOwner: string | undefined;
+	readonly activitySnapshots: Map<string, PixSessionStateNotification>;
 	readonly cwd: string;
 	readonly pi: PiClient;
 	readonly client: ClientCaller;
@@ -1233,7 +1235,7 @@ export class PixAcpAgent {
 		const response = await this.loadOrResumeSession(
 			{ sessionId: params.sessionId, cwd: current.cwd },
 			client,
-			{ replay: false },
+			{ replay: false, ...(current.activityOwner ? { activityOwner: current.activityOwner } : {}) },
 		);
 		const replacement = this.sessions.get(params.sessionId);
 		if (replacement) {
@@ -1332,9 +1334,10 @@ export class PixAcpAgent {
 		const acpSessionId = randomUUID();
 		const lazyRuntime = params._meta?.["pix.lazyRuntime"] === true;
 		const draftDefaultModel = draftDefaultModelFromMeta(params._meta);
+		const activityOwner = activityOwnerFromMeta(params._meta);
 		const pending = lazyRuntime
-			? Promise.resolve().then(() => this.startNewSession(acpSessionId, params.cwd, client, draftDefaultModel))
-			: this.startNewSession(acpSessionId, params.cwd, client, draftDefaultModel);
+			? Promise.resolve().then(() => this.startNewSession(acpSessionId, params.cwd, client, draftDefaultModel, activityOwner))
+			: this.startNewSession(acpSessionId, params.cwd, client, draftDefaultModel, activityOwner);
 		if (lazyRuntime) {
 			this.pendingDesktopNewSessions.set(acpSessionId, { promise: pending });
 			void pending.catch((error: unknown) => {
@@ -1354,6 +1357,7 @@ export class PixAcpAgent {
 		cwd: string,
 		client: ClientCaller,
 		defaultModelOverride?: PixDefaultModel,
+		activityOwner?: string,
 	): Promise<{ session: AgentSessionState; configOptions?: SessionConfigOption[] }> {
 		let defaultModel = defaultModelOverride;
 		if (!defaultModel) {
@@ -1367,7 +1371,7 @@ export class PixAcpAgent {
 		let lastError: unknown;
 		for (const candidate of defaultModelCandidates(defaultModel)) {
 			try {
-				session = await this.spawnSession(acpSessionId, cwd, client, candidate);
+				session = await this.spawnSession(acpSessionId, cwd, client, candidate, activityOwner);
 				break;
 			} catch (error) {
 				lastError = error;
@@ -1383,11 +1387,13 @@ export class PixAcpAgent {
 
 	private async loadSession(params: LoadSessionRequest, client: ClientCaller): Promise<LoadSessionResponse> {
 		const lazyHistory = (params as { _meta?: Record<string, unknown> })._meta?.["pix.lazyHistory"] === true;
+		const owner = activityOwnerFromMeta(params._meta);
 		if (lazyHistory) {
 			const pendingNew = this.pendingDesktopNewSessions.get(params.sessionId);
 			if (pendingNew) {
 				try {
 					const ready = await pendingNew.promise;
+					await this.attachActivity(ready.session, owner);
 					return ready.configOptions ? { configOptions: ready.configOptions } : {};
 				} finally {
 					this.pendingDesktopNewSessions.delete(params.sessionId);
@@ -1395,11 +1401,22 @@ export class PixAcpAgent {
 			}
 			const existing = this.sessions.get(params.sessionId);
 			if (existing) {
+				await this.attachActivity(existing, owner);
 				const configOptions = await this.safeConfigOptions(existing.pi);
 				return configOptions ? { configOptions } : {};
 			}
 		}
-		return this.loadOrResumeSession(params, client, { replay: !lazyHistory });
+		return this.loadOrResumeSession(params, client, { replay: !lazyHistory, ...(owner ? { activityOwner: owner } : {}) });
+	}
+
+	/** A reused Pi process still needs a fresh Desktop attachment. Replay only
+	 * its two latest activity snapshots, with their original checkedAt values. */
+	private async attachActivity(session: AgentSessionState, owner: string | undefined): Promise<void> {
+		if (!owner || this.sessions.get(session.acpSessionId) !== session || session.activityOwner === owner) return;
+		session.activityOwner = owner;
+		for (const snapshot of session.activitySnapshots.values()) {
+			await session.client.notify(PIX_SESSION_STATE_METHOD, { ...snapshot, activityOwner: owner });
+		}
 	}
 
 	private async resumeSession(params: ResumeSessionRequest, client: ClientCaller): Promise<ResumeSessionResponse> {
@@ -1410,7 +1427,7 @@ export class PixAcpAgent {
 	private async loadOrResumeSession(
 		params: { sessionId: string; cwd: string },
 		client: ClientCaller,
-		options: { replay: boolean },
+		options: { replay: boolean; activityOwner?: string },
 	): Promise<{ configOptions?: SessionConfigOption[] }> {
 		const record = await this.sessionMap.get(params.sessionId);
 		if (!record?.piSessionPath) {
@@ -1419,7 +1436,7 @@ export class PixAcpAgent {
 		// Reloading a live session reloads it fresh (the client forgot history).
 		if (this.sessions.has(params.sessionId)) await this.closeSession(params.sessionId);
 
-		const session = await this.spawnSession(params.sessionId, params.cwd, client);
+		const session = await this.spawnSession(params.sessionId, params.cwd, client, undefined, options.activityOwner);
 		this.options.logger.info(
 			`${options.replay ? "session/load" : "session/resume"}: ${params.sessionId} → ${record.piSessionPath}`,
 		);
@@ -1532,7 +1549,7 @@ export class PixAcpAgent {
 		}
 		const acpSessionId = randomUUID();
 		const cwd = params.cwd || record.cwd;
-		const session = await this.spawnSession(acpSessionId, cwd, client);
+		const session = await this.spawnSession(acpSessionId, cwd, client, undefined, activityOwnerFromMeta(params._meta));
 		let selectedText: string | undefined;
 		this.options.logger.info(`session/fork: ${params.sessionId} → ${acpSessionId}`);
 		try {
@@ -1609,8 +1626,9 @@ export class PixAcpAgent {
 		cwd: string,
 		client: ClientCaller,
 		defaultModel?: PixDefaultModel,
+		activityOwner?: string,
 	): Promise<AgentSessionState> {
-		const pending = this.startSession(acpSessionId, cwd, client, defaultModel);
+		const pending = this.startSession(acpSessionId, cwd, client, defaultModel, activityOwner);
 		this.pendingSpawns.add(pending);
 		void pending.finally(() => this.pendingSpawns.delete(pending)).catch(() => {});
 		return pending;
@@ -1621,6 +1639,7 @@ export class PixAcpAgent {
 		cwd: string,
 		client: ClientCaller,
 		defaultModel?: PixDefaultModel,
+		activityOwner?: string,
 	): Promise<AgentSessionState> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
@@ -1642,6 +1661,8 @@ export class PixAcpAgent {
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const session: AgentSessionState = {
 			acpSessionId,
+			activityOwner,
+			activitySnapshots: new Map(),
 			cwd,
 			pi,
 			client,
@@ -1932,10 +1953,22 @@ export class PixAcpAgent {
 					}
 				}
 			}
-			await session.client.notify(PIX_SESSION_STATE_METHOD, {
+			const activity = state.channel === "pi-tools-suite:todo:state"
+				|| state.channel === "pi-tools-suite:async-subagents:live-state";
+			const envelope: PixSessionStateNotification = {
 				sessionId: session.acpSessionId,
 				...state,
-			}).catch((error: unknown) => {
+				...(activity && session.activityOwner ? { activityOwner: session.activityOwner } : {}),
+			};
+			if (activity) {
+				const previous = session.activitySnapshots.get(state.channel);
+				const timestamp = activityCheckedAt(state.data);
+				const priorTimestamp = previous && activityCheckedAt(previous.data);
+				if (!previous || timestamp === undefined || priorTimestamp === undefined || timestamp >= priorTimestamp) {
+					session.activitySnapshots.set(state.channel, envelope);
+				}
+			}
+			await session.client.notify(PIX_SESSION_STATE_METHOD, envelope).catch((error: unknown) => {
 				this.options.logger.warn(`${PIX_SESSION_STATE_METHOD} failed: ${stringifyUnknown(error)}`);
 			});
 			return;
@@ -2972,6 +3005,17 @@ export class PixAcpAgent {
 		}
 	}
 
+}
+
+function activityOwnerFromMeta(meta: Record<string, unknown> | null | undefined): string | undefined {
+	const value = meta?.["pix.activityOwner"];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function activityCheckedAt(data: unknown): number | undefined {
+	if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
+	const value = (data as { checkedAt?: unknown }).checkedAt;
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function draftDefaultModelFromMeta(meta: Record<string, unknown> | null | undefined): PixDefaultModel | undefined {

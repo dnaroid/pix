@@ -13,6 +13,7 @@ export interface SessionStateEnvelope {
 
 export interface PixSessionStateNotification extends SessionStateEnvelope {
 	readonly sessionId: string;
+	readonly activityOwner?: string;
 }
 
 /** Decode the private structured-state convention carried by RPC setWidget. */

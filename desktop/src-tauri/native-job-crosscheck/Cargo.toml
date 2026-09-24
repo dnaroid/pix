@@ -1,0 +1,7 @@
+[package]
+name = "native-job-crosscheck"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }

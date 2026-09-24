@@ -6,6 +6,7 @@ import { chmod, copyFile, cp, mkdtemp, readFile, readdir, realpath, rename, rm, 
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canReclaimWatchDirectory, reclaimStaleWatchDirectories, WATCH_OWNER_FILE, WATCH_TEMP_PREFIX } from "./watch-all-temp.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = dirname(SCRIPT_PATH);
@@ -20,7 +21,7 @@ const MACOS_OPEN_PATH = "/usr/bin/open";
 const MACOS_CODESIGN_PATH = "/usr/bin/codesign";
 const MACOS_DEV_BUNDLE_IDENTIFIER = "dev.pix.desktop";
 const PS_COMMAND = "/bin/ps";
-const PS_ARGUMENTS = ["-axo", "pid=,command="];
+const PS_ARGUMENTS = ["-ww", "-axo", "pid=,command="];
 const APP_PID_POLL_MS = 100;
 const APP_PID_TIMEOUT_MS = 10_000;
 const APP_PID_CLEANUP_TIMEOUT_MS = 1_000;
@@ -304,6 +305,7 @@ export function hasProcessPid(entries, pid) {
 	return entries.some((entry) => entry.pid === pid);
 }
 
+
 /** Update a cached filesystem stamp and report whether the path actually changed. */
 export function updateWatchedPathStamp(stamps, path, stamp) {
 	const previous = stamps.get(path);
@@ -377,7 +379,8 @@ function processListSnapshot() {
 			output += chunk;
 		});
 		ps.once("error", rejectSnapshot);
-		ps.once("exit", (code) => {
+		// A successful exit can precede the last stdout chunk; cleanup needs the full list.
+		ps.once("close", (code) => {
 			if (code === 0) resolveSnapshot(output);
 			else rejectSnapshot(new Error(`${PS_COMMAND} ${PS_ARGUMENTS.join(" ")} exited with code ${code}`));
 		});
@@ -448,6 +451,9 @@ export class WatchAllSupervisor {
 		this.candidateProcess = undefined;
 		this.candidateAppPid = undefined;
 		this.desktopExecutable = undefined;
+		this.desktopRunningExecutable = undefined;
+		this.candidateExecutable = undefined;
+		this.copiedArtifacts = new Set();
 		this.tempDirectory = undefined;
 		this.executableSequence = 0;
 		this.watchedPathStamps = new Map();
@@ -461,13 +467,42 @@ export class WatchAllSupervisor {
 	async start() {
 		// `ps` reports macOS temporary paths through their canonical `/private/var/...` spelling.
 		// Canonicalize our copy root too so exact executable-path PID discovery remains reliable.
-		this.tempDirectory = await realpath(await mkdtemp(join(tmpdir(), "pix-watch-all-")));
+		this.tempDirectory = await realpath(await mkdtemp(join(tmpdir(), WATCH_TEMP_PREFIX)));
+		await writeFile(join(this.tempDirectory, WATCH_OWNER_FILE), `${JSON.stringify({ pid: process.pid })}\n`, { flag: "wx", mode: 0o600 });
+		// Failures to inspect old directories must never prevent a fresh watcher from starting.
+		if (process.platform === "darwin") {
+			await this.reclaimStaleDirectories().catch((error) => {
+				console.error(`[watch:all] could not reclaim old temporary bundles: ${error.message}`);
+			});
+		}
 		this.desktopWatchStatePath = join(this.tempDirectory, DESKTOP_WATCH_STATE_FILE);
 		this.desktopRestartRequestPath = join(this.tempDirectory, DESKTOP_RESTART_REQUEST_FILE);
 		this.restartRequestTimer = setInterval(() => void this.consumeDesktopRestartRequest(), DESKTOP_RESTART_POLL_MS);
 		await this.seedWatchedPathStamps(NATIVE_ICON_PATH);
 		this.startWatchers();
 		this.queueParts(PART_ORDER, "initial build", { immediate: true });
+	}
+
+	async reclaimStaleDirectories(rootOverride, processEntries, currentProcesses = async () => parseProcessList(await processListSnapshot())) {
+		const root = rootOverride ?? await realpath(tmpdir());
+		const entries = processEntries ?? parseProcessList(await processListSnapshot());
+		await reclaimStaleWatchDirectories(root, this.tempDirectory, entries, currentProcesses);
+	}
+
+	/** Copies have unique names; only the running, launching and newest published ones need to survive. */
+	async pruneDesktopArtifacts(processEntries) {
+		if (!this.tempDirectory || this.stopping) return;
+		const entries = processEntries ?? (usesDesktopAppBundle() ? parseProcessList(await processListSnapshot()) : []);
+		const protectedPaths = new Set([
+			this.desktopExecutable,
+			this.desktopRunningExecutable,
+			this.candidateExecutable,
+		].filter(Boolean).map((path) => usesDesktopAppBundle() ? dirname(desktopAppBundlePath(path)) : path));
+		for (const artifact of this.copiedArtifacts) {
+			if (protectedPaths.has(artifact) || entries.some(({ command }) => command.includes(`${artifact}/`))) continue;
+			await rm(artifact, { recursive: true, force: true });
+			this.copiedArtifacts.delete(artifact);
+		}
 	}
 
 	async seedWatchedPathStamps(relativePath) {
@@ -594,10 +629,12 @@ export class WatchAllSupervisor {
 		this.desktopRevision += 1;
 		if (this.desktopProcess) {
 			await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, true);
+			await this.pruneDesktopArtifacts();
 			console.error("[watch:all] desktop build is ready; use Restart in its titlebar when ready");
 			return;
 		}
 		await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, false);
+		await this.pruneDesktopArtifacts();
 		this.restartPending = true;
 		this.scheduleDesktopRestart();
 	}
@@ -767,21 +804,27 @@ export class WatchAllSupervisor {
 	async copyDesktopArtifact(source, isBundle) {
 		this.executableSequence += 1;
 		const destination = desktopArtifactDestination(this.tempDirectory, this.executableSequence, source, process.platform);
-		if (isBundle) {
-			await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
-			if (usesDesktopAppBundle()) {
-				await this.runCommand(
-					"sign desktop bundle for stable macOS permissions",
-					MACOS_CODESIGN_PATH,
-					macOSCodeSignArguments(destination),
-					REPO_ROOT,
-				);
+		try {
+			if (isBundle) {
+				await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+				if (usesDesktopAppBundle()) {
+					await this.runCommand(
+						"sign desktop bundle for stable macOS permissions",
+						MACOS_CODESIGN_PATH,
+						macOSCodeSignArguments(destination),
+						REPO_ROOT,
+					);
+				}
+			} else {
+				await copyFile(source, destination, fsConstants.COPYFILE_FICLONE);
 			}
-		} else {
-			await copyFile(source, destination, fsConstants.COPYFILE_FICLONE);
+			if (process.platform !== "win32") await chmod(desktopLaunchExecutable(destination), 0o755);
+		} catch (error) {
+			await rm(isBundle && usesDesktopAppBundle() ? dirname(destination) : destination, { recursive: true, force: true });
+			throw error;
 		}
-		if (process.platform !== "win32") await chmod(desktopLaunchExecutable(destination), 0o755);
 		this.desktopExecutable = desktopLaunchExecutable(destination);
+		this.copiedArtifacts.add(isBundle && usesDesktopAppBundle() ? dirname(destination) : destination);
 	}
 
 	/**
@@ -826,7 +869,7 @@ export class WatchAllSupervisor {
 	async restartDesktop(expectedRevision = this.desktopRevision) {
 		if (!this.desktopExecutable) throw new Error("no successfully built desktop executable is available");
 		const previous = this.desktopProcess
-			? { process: this.desktopProcess, appPid: this.desktopAppPid }
+			? { process: this.desktopProcess, appPid: this.desktopAppPid, executable: this.desktopRunningExecutable }
 			: undefined;
 		if (previous) {
 			console.error("[watch:all] stopping the previous desktop before starting the newly built desktop");
@@ -835,6 +878,8 @@ export class WatchAllSupervisor {
 			this.desktopProcess = undefined;
 			this.desktopAppPid = undefined;
 			await this.stopDesktopInstance(previous);
+			this.desktopRunningExecutable = undefined;
+			await this.pruneDesktopArtifacts();
 			if (this.stopping || this.building || this.pendingParts.size > 0 || expectedRevision !== this.desktopRevision) {
 				if (!this.stopping) {
 					console.error("[watch:all] desktop restart deferred because newer changes were queued while stopping the previous process");
@@ -850,6 +895,7 @@ export class WatchAllSupervisor {
 		const candidate = this.spawnDesktopCandidate();
 		this.candidateProcess = candidate.process;
 		this.candidateAppPid = candidate.appPid;
+		this.candidateExecutable = candidate.executable;
 		let accepted = false;
 		try {
 			await new Promise((resolveSpawn, rejectSpawn) => {
@@ -861,7 +907,7 @@ export class WatchAllSupervisor {
 				throw new Error(`new desktop exited during startup (${candidate.process.signalCode ?? `exit ${candidate.process.exitCode}`})`);
 			}
 			if (usesDesktopAppBundle()) {
-				const executablePath = this.desktopExecutable;
+				const executablePath = candidate.executable;
 				candidate.appPid = await findDesktopAppPid(
 					executablePath,
 					() => candidate.process.exitCode !== null || candidate.process.signalCode !== null,
@@ -895,15 +941,20 @@ export class WatchAllSupervisor {
 			if (!accepted) await this.stopDesktopInstance(candidate);
 			this.candidateAppPid = undefined;
 			if (this.candidateProcess === candidate.process) this.candidateProcess = undefined;
+			this.candidateExecutable = undefined;
+			if (!accepted) await this.pruneDesktopArtifacts();
 		}
 
 		this.desktopProcess = candidate.process;
 		this.desktopAppPid = candidate.appPid;
+		this.desktopRunningExecutable = candidate.executable;
 		candidate.process.once("exit", (code, signal) => {
 			if (!this.stopping && this.desktopProcess === candidate.process) {
 				console.error(`[watch:all] desktop stopped (${signal ?? `exit ${code}`}); waiting for the next successful build`);
 				this.desktopProcess = undefined;
 				this.desktopAppPid = undefined;
+				this.desktopRunningExecutable = undefined;
+				void this.pruneDesktopArtifacts().catch((error) => console.error(`[watch:all] could not prune desktop bundles: ${error.message}`));
 			}
 		});
 		console.error("[watch:all] desktop is running the latest successful build");
@@ -922,14 +973,26 @@ export class WatchAllSupervisor {
 			await this.stopDesktopInstance({
 				process: this.candidateProcess,
 				appPid: this.candidateAppPid,
-				executable: this.desktopExecutable,
+				executable: this.candidateExecutable,
 			});
 		}
 		if (this.desktopProcess) {
 			await this.stopDesktopInstance({ process: this.desktopProcess, appPid: this.desktopAppPid });
 		}
 		if (this.tempDirectory) {
-			await rm(this.tempDirectory, { recursive: true, force: true });
+			// An app that survived shutdown must retain its on-disk executable.
+			let safeToRemove = false;
+			try {
+				const entries = process.platform === "darwin" ? parseProcessList(await processListSnapshot()) : [];
+				safeToRemove = canReclaimWatchDirectory(this.tempDirectory, undefined, entries, -1);
+			} catch (error) {
+				console.error(`[watch:all] could not verify desktop exit; retaining bundles: ${error.message}`);
+			}
+			if (safeToRemove) {
+				await rm(this.tempDirectory, { recursive: true, force: true });
+			} else {
+				console.error(`[watch:all] leaving temporary bundles in use: ${this.tempDirectory}`);
+			}
 		}
 		process.exitCode = exitCode;
 	}

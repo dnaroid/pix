@@ -44,6 +44,11 @@ export function createDesktopSessionServices(options: DesktopSessionServicesOpti
     setActiveConfigOptions: options.state.setConfigOptions,
     refreshQueueState: options.refreshQueueState,
     reportError: options.reportError,
+    onOpen: activity.open,
+    onLoadFailed: (sessionId) => {
+      activity.markForgotten(sessionId);
+      activity.clear(sessionId);
+    },
   });
   const metadata = createSessionMetadataStore({
     updateSessionInfo: catalog.updateInfo,

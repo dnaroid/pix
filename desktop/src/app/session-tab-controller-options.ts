@@ -29,6 +29,7 @@ export type SessionTabControllerOptions = {
   history: SessionHistory;
   closeProjectSelector: () => void;
   clearSessionActivity: (sessionId: string) => void;
+  resetSessionActivity: () => void;
   forgetRuntime: (sessionId: string) => void;
   retargetWorkbenchAnchors: (sourceSessionId: string, targetSessionId?: string) => void;
   clearPrompt: () => void;

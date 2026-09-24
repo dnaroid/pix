@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -29,6 +29,7 @@ import {
 	updateWatchedPathStamp,
 	usesDesktopAppBundle,
 } from "../scripts/watch-all.mjs";
+import { canReclaimWatchDirectory, hasOtherWatchSupervisor } from "../scripts/watch-all-temp.mjs";
 
 function sortedParts(path: string): string[] {
 	return [...classifyChange(path)].sort();
@@ -327,6 +328,93 @@ describe("watch:all macOS launch identity", () => {
 		const entries = parseProcessList("  4711 /usr/bin/open -n -W /tmp/run\n  8112 /tmp/run/Pix Desktop.app/Contents/MacOS/pix-desktop\n");
 		assert.equal(hasProcessPid(entries, 8112), true);
 		assert.equal(hasProcessPid(entries, 9999), false);
+	});
+});
+
+describe("watch:all temporary artifact lifecycle", () => {
+	it("prunes superseded copies but retains the running, launching, and newest builds", async () => {
+		const root = await mkdtemp(join(tmpdir(), "watch-all-test-"));
+		const supervisor = new WatchAllSupervisor();
+		supervisor.tempDirectory = root;
+		const artifacts = [1, 2, 3, 4].map((number) => {
+			const destination = desktopArtifactDestination(root, number, "Pix Desktop.app", process.platform);
+			const artifact = process.platform === "darwin" ? resolve(destination, "..") : destination;
+			return { artifact, executable: desktopLaunchExecutable(destination) };
+		});
+		try {
+			for (const { artifact } of artifacts) {
+				if (process.platform === "darwin") await mkdir(artifact, { recursive: true });
+				else await writeFile(artifact, "test");
+				supervisor.copiedArtifacts.add(artifact);
+			}
+			supervisor.desktopRunningExecutable = artifacts[0]!.executable;
+			supervisor.candidateExecutable = artifacts[1]!.executable;
+			supervisor.desktopExecutable = artifacts[3]!.executable;
+			await supervisor.pruneDesktopArtifacts([]);
+			assert.deepEqual(artifacts.map(({ artifact }) => existsSync(artifact)), [true, true, false, true]);
+
+			// An app with no tracked child (e.g. after a failed shutdown) still owns its bundle.
+			supervisor.desktopRunningExecutable = undefined;
+			supervisor.candidateExecutable = undefined;
+			await supervisor.pruneDesktopArtifacts([{ pid: 91, command: `${artifacts[0]!.executable} --running` }]);
+			assert.deepEqual(artifacts.map(({ artifact }) => existsSync(artifact)), [true, false, false, true]);
+			await supervisor.pruneDesktopArtifacts([]);
+			assert.deepEqual(artifacts.map(({ artifact }) => existsSync(artifact)), [false, false, false, true]);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("reclaims abandoned owned and old legacy roots, never live watcher or app roots", async () => {
+		const root = await mkdtemp(join(tmpdir(), "watch-all-test-"));
+		const supervisor = new WatchAllSupervisor();
+		const names = ["current", "dead", "live", "app", "legacy", "recent"].map((name) => `pix-watch-all-${name}`);
+		try {
+			for (const name of names) await mkdir(join(root, name));
+			supervisor.tempDirectory = join(root, names[0]!);
+			for (const name of names.slice(1, 4)) {
+				await writeFile(join(root, name, "watch-all-owner.json"), JSON.stringify({ pid: name === names[2] ? 87654 : 98765 }));
+			}
+			const old = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+			await utimes(join(root, names[4]!), old, old);
+			const entries = [
+				{ pid: 87654, command: "node scripts/watch-all.mjs" },
+				{ pid: 42, command: `${join(root, names[3]!)}/pix-desktop-1/Pix Desktop.app/Contents/MacOS/pix-desktop` },
+			];
+			await supervisor.reclaimStaleDirectories(root, entries, async () => entries);
+			assert.deepEqual(names.map((name) => existsSync(join(root, name))), [true, false, true, true, true, true]);
+			await supervisor.reclaimStaleDirectories(root, entries.slice(1), async () => entries.slice(1));
+			assert.deepEqual(names.map((name) => existsSync(join(root, name))), [true, false, false, true, false, true]);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects an owner PID and a running app's exact root without confusing prefix siblings", () => {
+		const entries = [
+			{ pid: 456, command: "node scripts/watch-all.mjs" },
+			{ pid: 789, command: "/tmp/pix-watch-all-active/Pix Desktop.app/Contents/MacOS/pix-desktop" },
+		];
+		assert.equal(canReclaimWatchDirectory("/tmp/pix-watch-all-dead", 456, entries), false);
+		assert.equal(canReclaimWatchDirectory("/tmp/pix-watch-all-active", 123, entries), false);
+		assert.equal(canReclaimWatchDirectory("/tmp/pix-watch-all-act", 123, entries), true);
+		assert.equal(hasOtherWatchSupervisor(entries), true);
+	});
+
+	it("rechecks process ownership when another watcher starts after the first snapshot", async () => {
+		const root = await mkdtemp(join(tmpdir(), "watch-all-test-"));
+		const active = join(root, "pix-watch-all-racing");
+		try {
+			await mkdir(active);
+			await writeFile(join(active, "watch-all-owner.json"), JSON.stringify({ pid: 87654 }));
+			const supervisor = new WatchAllSupervisor();
+			await supervisor.reclaimStaleDirectories(root, [], async () => [
+				{ pid: 87654, command: "node scripts/watch-all.mjs" },
+			]);
+			assert.equal(existsSync(active), true);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
 	});
 });
 

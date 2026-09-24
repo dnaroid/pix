@@ -4,6 +4,7 @@
   import type { FitAddon } from "@xterm/addon-fit";
   import type { ILink, Terminal } from "@xterm/xterm";
   import { createAnimationFrameCoalescer } from "../lib/animation-frame-coalescer";
+  import { createTerminalViewLifetime, type TerminalViewLifetime } from "./terminal-view-lifetime";
 
   type TerminalTextLink = {
     startIndex: number;
@@ -50,6 +51,7 @@
   let inputTimer: number | null = null;
   let resizeTimer: number | null = null;
   let scrollbarFrame = 0;
+  let stopThumbDrag: (() => void) | undefined;
   let renderedControlledContent = "";
   let scrollbarVisible = $state(false);
   let scrollThumbTop = $state(0);
@@ -102,27 +104,28 @@
   });
 
   onMount(() => {
-    let disposed = false;
+    const lifetime = createTerminalViewLifetime();
     let cleanup: (() => void) | undefined;
 
-    void mountTerminal().then((nextCleanup) => {
-      if (disposed) nextCleanup?.();
+    void mountTerminal(lifetime).then((nextCleanup) => {
+      if (!lifetime.isActive()) nextCleanup?.();
       else cleanup = nextCleanup;
     });
 
     return () => {
-      disposed = true;
+      lifetime.dispose();
+      stopThumbDrag?.();
       cleanup?.();
     };
   });
 
-  async function mountTerminal(): Promise<(() => void) | undefined> {
+  async function mountTerminal(lifetime: TerminalViewLifetime): Promise<(() => void) | undefined> {
     if (!container) return undefined;
     const [{ Terminal: TerminalConstructor }, { FitAddon: FitAddonConstructor }] = await Promise.all([
       import("@xterm/xterm"),
       import("@xterm/addon-fit"),
     ]);
-    if (!container?.isConnected) return undefined;
+    if (!lifetime.isActive() || !container?.isConnected) return undefined;
     const next = new TerminalConstructor({
       allowTransparency: false,
       convertEol,
@@ -153,48 +156,48 @@
       ? next.registerLinkProvider({
           provideLinks(bufferLineNumber, callback): void {
             const line = next.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) ?? "";
-            void Promise.resolve(resolveLinks(line))
-              .then((links) => {
-                const resolved = links
-                  .filter((link) => link.startIndex >= 0 && link.endIndex > link.startIndex)
-                  .map<ILink>((link) => ({
-                    range: {
-                      start: { x: link.startIndex + 1, y: bufferLineNumber },
-                      end: { x: link.endIndex, y: bufferLineNumber },
-                    },
-                    text: link.text,
-                    activate: () => void link.activate(),
-                  }));
-                callback(resolved.length > 0 ? resolved : undefined);
-              })
-              .catch(() => callback(undefined));
+            lifetime.resolveLinks(() => resolveLinks(line), (links) => {
+              const resolved = (links ?? [])
+                .filter((link) => link.startIndex >= 0 && link.endIndex > link.startIndex)
+                .map<ILink>((link) => ({
+                  range: {
+                    start: { x: link.startIndex + 1, y: bufferLineNumber },
+                    end: { x: link.endIndex, y: bufferLineNumber },
+                  },
+                  text: link.text,
+                  activate: () => void link.activate(),
+                }));
+              callback(resolved.length > 0 ? resolved : undefined);
+            });
           },
         })
       : undefined;
 
     const dataDisposable = next.onData((data) => {
-      if (!running) return;
+      if (!lifetime.isActive() || !running) return;
       inputBuffer += data;
       if (inputTimer !== null) return;
-      inputTimer = window.setTimeout(() => {
+      inputTimer = lifetime.setTimeout(() => {
         inputTimer = null;
         flushInput();
       }, 8);
     });
     const resizeDisposable = next.onResize(({ cols, rows }) => {
+      if (!lifetime.isActive()) return;
       scheduleTerminalChromeSync();
-      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => {
+      if (resizeTimer !== null) lifetime.clearTimeout(resizeTimer);
+      resizeTimer = lifetime.setTimeout(() => {
         resizeTimer = null;
         void onResize(cols, rows);
       }, 50);
     });
-    const scrollDisposable = next.onScroll(() => scheduleTerminalChromeSync());
-    const writeDisposable = next.onWriteParsed(() => scheduleTerminalChromeSync());
-    const cursorDisposable = next.onCursorMove(() => scheduleTerminalChromeSync());
+    const syncIfActive = () => { if (lifetime.isActive()) scheduleTerminalChromeSync(); };
+    const scrollDisposable = next.onScroll(syncIfActive);
+    const writeDisposable = next.onWriteParsed(syncIfActive);
+    const cursorDisposable = next.onCursorMove(syncIfActive);
 
     const fitTerminal = () => {
-      if (!container?.isConnected || !fitAddon || !terminal) return;
+      if (!lifetime.isActive() || !container?.isConnected || !fitAddon || !terminal) return;
       try {
         terminal.options.theme = terminalTheme(container);
         fitAddon.fit();
@@ -203,12 +206,12 @@
         // The container can transiently have zero geometry while the sidebar resizes.
       }
     };
-    const resizeObserver = new ResizeObserver(() => requestAnimationFrame(fitTerminal));
+    const resizeObserver = new ResizeObserver(() => lifetime.scheduleFit(fitTerminal));
     resizeObserver.observe(container);
     const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
-    colorScheme.addEventListener("change", fitTerminal);
+    lifetime.listen(colorScheme, "change", fitTerminal);
 
-    requestAnimationFrame(() => {
+    lifetime.scheduleInitial(() => {
       fitTerminal();
       if (content === undefined && initialContent) {
         next.write(initialContent);
@@ -219,14 +222,12 @@
     });
 
     return () => {
-      if (inputTimer !== null) window.clearTimeout(inputTimer);
-      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      lifetime.dispose();
       cancelAnimationFrame(scrollbarFrame);
       scrollbarFrame = 0;
       caretSync.cancel();
       flushInput();
       resizeObserver.disconnect();
-      colorScheme.removeEventListener("change", fitTerminal);
       dataDisposable.dispose();
       resizeDisposable.dispose();
       scrollDisposable.dispose();
@@ -327,6 +328,7 @@
     event.preventDefault();
     event.stopPropagation();
     const thumb = event.currentTarget as HTMLDivElement;
+    stopThumbDrag?.();
     const grabOffset = event.clientY - thumb.getBoundingClientRect().top;
     thumb.setPointerCapture(event.pointerId);
     const move = (moveEvent: PointerEvent) => {
@@ -334,11 +336,15 @@
     };
     const finish = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== event.pointerId) return;
+      stopThumbDrag?.();
+      if (running) terminal?.focus();
+    };
+    stopThumbDrag = () => {
       thumb.removeEventListener("pointermove", move);
       thumb.removeEventListener("pointerup", finish);
       thumb.removeEventListener("pointercancel", finish);
       if (thumb.hasPointerCapture(event.pointerId)) thumb.releasePointerCapture(event.pointerId);
-      if (running) terminal?.focus();
+      stopThumbDrag = undefined;
     };
     thumb.addEventListener("pointermove", move);
     thumb.addEventListener("pointerup", finish);

@@ -9,4 +9,6 @@ export type SessionRuntimeStoreOptions = {
   setActiveConfigOptions: (options: SessionConfigOption[]) => void;
   refreshQueueState: (sessionId: string) => void | Promise<void>;
   reportError: (error: unknown) => void;
+  onOpen?: (sessionId: string) => void;
+  onLoadFailed?: (sessionId: string) => void;
 };

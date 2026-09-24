@@ -5,7 +5,6 @@ import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
 export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions) {
   const readySessionIds = new Set<string>();
   const loadsBySessionId = new Map<string, Promise<void>>();
-  const loadGenerations = new Map<string, number>();
   const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
   let prewarmGeneration = 0;
 
@@ -39,15 +38,14 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
     const existing = loadsBySessionId.get(sessionId);
     if (existing) return existing;
 
-    const generation = (loadGenerations.get(sessionId) ?? 0) + 1;
-    loadGenerations.set(sessionId, generation);
+    options.onOpen?.(sessionId);
 
     const pending = requestClient.loadSession(sessionId, requestWorkspace)
       .then((response) => {
         if (
           requestClient !== options.client()
           || requestWorkspace !== options.workspace()
-          || loadGenerations.get(sessionId) !== generation
+          || loadsBySessionId.get(sessionId) !== pending
         ) return;
         const configOptions = response.configOptions ?? [];
         readySessionIds.add(sessionId);
@@ -62,11 +60,13 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
         if (
           requestClient === options.client()
           && requestWorkspace === options.workspace()
-          && loadGenerations.get(sessionId) === generation
-          && sessionId === options.activeSessionId()
+          && loadsBySessionId.get(sessionId) === pending
         ) {
-          options.setActiveReady(false);
-          options.reportError(error);
+          options.onLoadFailed?.(sessionId);
+          if (sessionId === options.activeSessionId()) {
+            options.setActiveReady(false);
+            options.reportError(error);
+          }
         }
       })
       .finally(() => {
@@ -77,6 +77,9 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
   }
 
   function markReady(sessionId: string, configOptions: SessionConfigOption[]): void {
+    // An externally ready runtime supersedes any outstanding load for this ID.
+    loadsBySessionId.delete(sessionId);
+    options.onOpen?.(sessionId);
     readySessionIds.add(sessionId);
     configOptionsBySessionId.set(sessionId, configOptions);
     void options.refreshQueueState(sessionId);
@@ -84,7 +87,6 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
   }
 
   function forget(sessionId: string): void {
-    loadGenerations.set(sessionId, (loadGenerations.get(sessionId) ?? 0) + 1);
     readySessionIds.delete(sessionId);
     loadsBySessionId.delete(sessionId);
     configOptionsBySessionId.delete(sessionId);
@@ -123,11 +125,11 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
     invalidatePrewarm();
     readySessionIds.clear();
     loadsBySessionId.clear();
-    loadGenerations.clear();
     configOptionsBySessionId.clear();
   }
 
   return {
+    get pendingLoadCount() { return loadsBySessionId.size; },
     isReady,
     isLoading,
     getConfigOptions,

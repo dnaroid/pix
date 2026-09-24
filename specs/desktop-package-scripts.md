@@ -28,6 +28,7 @@ Expose project-root package scripts, project-defined launch commands, and window
 - Output for the active terminal is written incrementally into the mounted terminal surface while the same text is retained in terminal state for tab switches/remounts.
 - Terminal input and resize operations are accepted only while the terminal is running. Running terminals use a Pix-owned non-blinking bar caret positioned from xterm's public buffer cursor coordinates, so caret visibility does not depend on xterm focus/inactive-cursor rendering. They also expose a Pix-owned visible vertical scrollbar for xterm history instead of relying on macOS overlay-scrollbar policy. Resize is best-effort because the process may exit concurrently.
 - Scroll, cursor, and parsed-output notifications coalesce caret geometry reads into at most one pending animation-frame callback. Terminal teardown cancels that callback so high-volume PTY output cannot accumulate layout work or leave a stale caret update behind.
+- Terminal teardown cancels pending initial-render and ResizeObserver fit frames, ignores link resolution success/failure after unmount, and removes active resize/input timers and pointer-drag listeners. A late dynamic import cannot mount an orphaned terminal.
 - The `+` shell terminal intentionally uses a neutral `pix:<cwd> $` prompt for zsh/bash rather than inheriting decorative shell-theme prompt glyphs such as arrows or dirty-state crosses. This prompt isolation is local to the embedded terminal and does not modify the user's shell configuration files.
 - Input is serialized per terminal with one IPC write in flight for that terminal. Large pastes are split into native-limit-safe chunks without splitting UTF-16 surrogate pairs, and later keystrokes cannot overtake them. Other terminals are independent. A mounted terminal's callbacks retain that terminal's id through tab switching and final buffer flushes.
 - Package terminals have no wall-clock execution timeout: a script or shell runs until the process exits, the user stops it, or workspace/window teardown stops it. Stop uses a short Ctrl+C grace and a bounded forced-kill wait; that stop timeout is cleanup safety, not a command runtime limit. Restart first stops a running process, forgets the old backend terminal record, then starts the same script or a fresh shell. A script restart is rejected if that script is no longer present in the current `package.json` snapshot.
@@ -40,6 +41,8 @@ Expose project-root package scripts, project-defined launch commands, and window
 - `desktop/src/components/SavedLaunchCommands.svelte`
 - `desktop/src/components/package-scripts-controller.svelte.ts`
 - `desktop/src/components/TerminalView.svelte`
+- `desktop/src/components/terminal-view-lifetime.ts`
+- `desktop/src/components/terminal-view-lifetime.test.ts`
 - `desktop/src/lib/package-scripts.ts`
 - `desktop/src/lib/project-launch-commands.ts`
 - `desktop/src/lib/project-launch-commands.test.ts`
@@ -54,6 +57,7 @@ Expose project-root package scripts, project-defined launch commands, and window
 
 - `desktop/src/lib/package-scripts.test.ts` covers compact name-only package-script filtering, terminal snapshot decoding, bounded output, and status helpers.
 - Desktop visual/source regressions cover the visible terminal caret, coalesced/cancelled caret frames, explicit 5,000-line xterm scrollback, visible scrollbar styling, and name-only script rows.
+- Terminal lifetime tests use controlled animation frames and link promises to check unmount cancellation, late success/failure suppression, and normal initial/resize/link behavior.
 - Input tests use controlled acknowledgements to check ordering, independent terminals, Unicode boundaries, and recovery after failed writes. Controller tests cover workspace changes during launch/restart, initial shell-command ownership, launch reservation, and teardown.
 - Launch-command tests cover JSONC round-tripping alongside other project settings, create/update/delete conflict handling, stale workspace completion, and the UI lifecycle for edit/delete/launch.
 - `npm --prefix desktop run check`

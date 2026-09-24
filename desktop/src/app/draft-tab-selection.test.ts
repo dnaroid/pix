@@ -55,7 +55,7 @@ describe("selecting an existing tab during draft materialization", () => {
       catalog: { refresh: vi.fn() }, tabs, draft,
       runtime: { getConfigOptions: () => [], isReady: () => false, ensure: vi.fn(async () => {}), schedulePrewarm: vi.fn(), invalidatePrewarm: vi.fn() },
       history: { cancel: vi.fn(), begin: vi.fn(() => 1), hydrate: vi.fn() },
-      closeProjectSelector: vi.fn(), clearSessionActivity: vi.fn(), forgetRuntime: vi.fn(),
+      closeProjectSelector: vi.fn(), clearSessionActivity: vi.fn(), resetSessionActivity: vi.fn(), forgetRuntime: vi.fn(),
       retargetWorkbenchAnchors: vi.fn(), clearPrompt, invalidateAttachmentDraft,
       switchComposerDraft, forgetComposerDraft, resetComposerDrafts: vi.fn(),
       tabSessionIds: () => [], focusComposer: vi.fn(), refreshQueueState: vi.fn(),

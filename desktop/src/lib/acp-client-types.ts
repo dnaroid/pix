@@ -32,6 +32,10 @@ export interface AcpTransport {
 export interface AcpClientHandlers {
   readonly onSessionUpdate: (notification: SessionNotification) => void;
   readonly onSessionState?: (notification: SessionStateNotification) => void;
+  readonly onOpenActivity?: (sessionId: string) => string;
+  readonly onBeginActivityRequest?: (owner: string) => void;
+  readonly onCompleteActivityRequest?: (owner: string, sessionId: string) => void;
+  readonly onCancelActivityRequest?: (owner: string) => void;
   readonly onQueueState?: (state: QueueState) => void;
   readonly onQueueConsumed?: (sessionId: string, message: QueuedUserMessage) => void;
   readonly onElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;

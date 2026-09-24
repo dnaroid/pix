@@ -40,6 +40,17 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 - A failed cycle remains explicit in watcher state until a later successful
   cycle. The next relevant edit logs that it is retrying the failed build, and a
   successful recovery is called out before the normal success message.
+- Each successful native build gets a distinct copied debug bundle so its
+  executable path identifies the launched macOS process. The watcher removes
+  superseded copies after publication and restart, but retains the running app,
+  an in-flight launch, the latest build, and any app still visible in the
+  process list. A failed copy/signing removes its incomplete destination.
+- On macOS startup, the watcher reclaims abandoned `pix-watch-all-*` temporary
+  roots only after checking their owner PID and process commands for a running
+  app/helper using that exact root. A missing or invalid process snapshot
+  prevents cleanup. Pre-owner-marker roots are eligible only after an hour and
+  when no other watcher is running; recent/ambiguous roots are left intact.
+  Shutdown likewise retains a root if its Desktop process survives termination.
 
 ## Non-goals
 
@@ -50,6 +61,7 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 ## Related files
 
 - `scripts/watch-all.mjs`
+- `scripts/watch-all-temp.mjs`
 - `tests/watch-all.test.ts`
 - `desktop/src/app/desktop-watch-restart.svelte.ts`
 - `desktop/src/App.svelte`
@@ -64,6 +76,7 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 - `tests/watch-all.test.ts` covers the ordered `web -> native` build plan, the bounded watcher-state handoff, and the Tauri CLI override that suppresses the duplicate `beforeBuildCommand`.
 - `tests/watch-all.test.ts` also covers bounded failed-command output retention
   and the repeated bottom-of-terminal failure report, plus exact app-PID
-  liveness checks used by the macOS startup gate.
+  liveness checks used by the macOS startup gate, artifact retention and stale
+  root reclamation with concurrent watcher and surviving app scenarios.
 - After changing/rebuilding Desktop web output, the subsequent native build must rerun the `pix-desktop` build script and produce a launchable bundle with `index.html` embedded.
-- Run `npm run test:inner -- --test-name-pattern='watch:all'`, `npm --prefix desktop run check`, and a production Desktop web/native smoke build.
+- Run `node --import tsx --test tests/watch-all.test.ts`, `npm --prefix desktop run check`, and a production Desktop web/native smoke build.

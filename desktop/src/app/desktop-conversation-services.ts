@@ -87,6 +87,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
     beginHistoryLoad: options.sessions.history.begin,
     hydrateHistory: options.sessions.history.hydrate,
     cancelHistoryLoad: options.sessions.history.cancel,
+    isHistoryLoadCurrent: options.sessions.history.isCurrent,
     markHistoryFullyLoaded: options.sessions.history.markFullyLoaded,
     markSourceClosed: options.sessions.tabs.markClosedUnique,
     ensureProvisionalSession: options.sessions.catalog.ensureProvisional,

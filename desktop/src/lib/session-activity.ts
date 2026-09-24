@@ -61,9 +61,7 @@ export function updateSessionActivitySummary(
 export function shouldAcceptSessionActivitySnapshot(
   checkedAt: number,
   currentCheckedAt: number | undefined,
-  forgottenAt: number | undefined,
 ): boolean {
-  if (forgottenAt !== undefined && checkedAt <= forgottenAt) return false;
   return currentCheckedAt === undefined || checkedAt >= currentCheckedAt;
 }
 
@@ -94,4 +92,3 @@ export function sessionActivityLabel(
   if (state.blockedTodos > 0) parts.push(`${state.blockedTodos} blocked`);
   return parts.length > 0 ? parts.join(" · ") : "Session idle";
 }
-

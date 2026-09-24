@@ -114,4 +114,45 @@ describe("lazy history request ownership", () => {
     current.resolve({ updates: [], deferredToolCallIds: [] });
     await second;
   });
+
+  it("prunes background cursors on close/delete without affecting a live tab, including a reopened ID", async () => {
+    const h = harness();
+    const old = deferred<LazySessionHistory>();
+    h.sessionHistory.mockResolvedValue({ updates: [], deferredToolCallIds: [], cursor: "old-page" });
+    await h.history.hydrate(h.client, "session-1", "/project", h.history.begin());
+    h.state.setSessionId("background");
+    await h.history.hydrate(h.client, "background", "/project", h.history.begin());
+    expect(h.history.olderCursorCount).toBe(2);
+    h.history.forget("session-1");
+    expect(h.history.olderCursorCount).toBe(1);
+    h.state.setSessionId("session-1");
+    h.history.cancel();
+    await expect(h.history.loadOlder()).resolves.toBe(false);
+    h.sessionHistory.mockReturnValueOnce(old.promise);
+    const pending = h.history.hydrate(h.client, "session-1", "/project", h.history.begin());
+    h.history.forget("session-1");
+    h.sessionHistory.mockResolvedValueOnce({ updates: [], deferredToolCallIds: [], cursor: "new-page" });
+    await h.history.hydrate(h.client, "session-1", "/project", h.history.begin());
+    old.resolve({ updates: [], deferredToolCallIds: [], cursor: "stale-page" });
+    await pending;
+    expect(h.history.olderCursorCount).toBe(2);
+    const page = deferred<LazySessionHistory>();
+    h.sessionHistory.mockReturnValueOnce(page.promise);
+    const loading = h.history.loadOlder();
+    expect(h.sessionHistory).toHaveBeenLastCalledWith("session-1", false, "new-page");
+    page.resolve({ updates: [], deferredToolCallIds: [] });
+    await loading;
+  });
+
+  it("retains no cursors after closing many different sessions", async () => {
+    const h = harness();
+    h.sessionHistory.mockResolvedValue({ updates: [], deferredToolCallIds: [], cursor: "page" });
+    for (let i = 0; i < 250; i++) {
+      const id = `closed-${i}`;
+      h.state.setSessionId(id);
+      await h.history.hydrate(h.client, id, "/project", h.history.begin());
+      h.history.forget(id);
+    }
+    expect(h.history.olderCursorCount).toBe(0);
+  });
 });

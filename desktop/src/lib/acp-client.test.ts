@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { AcpClient, type AcpExit, type AcpTransport, type AcpTransportHandlers } from "./acp-client";
 import { PIX_SESSION_STATE_METHOD } from "./session-state";
+import { createSessionActivityStore } from "../app/session-activity.svelte";
+import { TODO_STATE_CHANNEL } from "./session-todos";
 
 class FakeTransport implements AcpTransport {
   handlers?: AcpTransportHandlers;
@@ -43,6 +45,54 @@ async function startedClient(transport: FakeTransport, overrides: Record<string,
 }
 
 describe("ACP JSON-RPC client", () => {
+  it("binds startup activity for new/fork requests and releases failed request ownership", async () => {
+    const transport = new FakeTransport();
+    const activity = createSessionActivityStore();
+    const client = await startedClient(transport, {
+      onSessionState: activity.handle,
+      onOpenActivity: activity.open,
+      onBeginActivityRequest: activity.beginRequest,
+      onCompleteActivityRequest: activity.completeRequest,
+      onCancelActivityRequest: activity.cancelRequest,
+    });
+    const notification = (sessionId: string, owner: string) => transport.message({
+      jsonrpc: "2.0", method: PIX_SESSION_STATE_METHOD,
+      params: { sessionId, activityOwner: owner, channel: TODO_STATE_CHANNEL, data: {
+        version: 1, checkedAt: 10, details: { action: "list", params: {}, tasks: [
+          { id: 1, subject: "startup", status: "pending" },
+        ], nextId: 2 },
+      } },
+    });
+    const creating = client.newSession("/workspace");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    const newOwner = (requestAt(transport, 1).params as { _meta: Record<string, string> })._meta["pix.activityOwner"]!;
+    notification("new-id", newOwner);
+    expect(activity.summaries.size).toBe(0);
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { sessionId: "new-id" } });
+    await creating;
+    expect(activity.summaries.get("new-id")?.openTodos).toBe(1);
+    expect(activity.open("new-id")).toBe(newOwner);
+
+    const failing = client.newSession("/workspace");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    const failedOwner = (requestAt(transport, 2).params as { _meta: Record<string, string> })._meta["pix.activityOwner"]!;
+    notification("failed-id", failedOwner);
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, error: { code: -32000, message: "failed" } });
+    await expect(failing).rejects.toThrow("failed");
+    expect(activity.pendingRequestCount).toBe(0);
+    expect(activity.ownedSessionCount).toBe(1);
+
+    const forking = client.forkSession("new-id", "/workspace", "entry");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(4));
+    const forkOwner = (requestAt(transport, 3).params as { _meta: Record<string, string> })._meta["pix.activityOwner"]!;
+    expect(forkOwner).not.toBe(newOwner);
+    notification("fork-id", forkOwner);
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 3).id, result: { sessionId: "fork-id" } });
+    await forking;
+    expect(activity.summaries.get("fork-id")?.openTodos).toBe(1);
+    expect(activity.pendingRequestCount).toBe(0);
+    await client.dispose();
+  });
   it("initializes before issuing typed session requests", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

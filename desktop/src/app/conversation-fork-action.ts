@@ -38,7 +38,11 @@ export function createForkConversation(options: ConversationBranchActionsOptions
         requestClient !== options.client()
         || sourceSessionId !== options.state.sessionId
         || requestWorkspace !== options.workspace()
-      ) return;
+      ) {
+        options.forgetRuntime(forked.sessionId);
+        void requestClient.closeSession(forked.sessionId).catch(() => undefined);
+        return;
+      }
 
       options.state.setSessionTranscript(sourceSessionId, options.state.transcript);
       if (!config.keepSourceOpen) {
@@ -71,7 +75,7 @@ export function createForkConversation(options: ConversationBranchActionsOptions
       await options.scrollToLatest();
     } catch (error) {
       if (requestClient !== options.client() || requestWorkspace !== options.workspace()) return;
-      if (config.keepSourceOpen && forkedSessionId && options.state.sessionId !== forkedSessionId) {
+      if (forkedSessionId && options.state.sessionId !== forkedSessionId && !sourceClosed) {
         await requestClient.closeSession(forkedSessionId).catch(() => {});
         options.forgetRuntime(forkedSessionId);
       }
@@ -82,8 +86,8 @@ export function createForkConversation(options: ConversationBranchActionsOptions
         }
         options.state.setSessionId(sourceSessionId);
         options.state.resetConversation();
+        const historyGeneration = options.beginHistoryLoad();
         try {
-          const historyGeneration = options.beginHistoryLoad();
           void options.hydrateHistory(requestClient, sourceSessionId, requestWorkspace, historyGeneration);
           const restored = await requestClient.loadSession(sourceSessionId, requestWorkspace);
           const configOptions = restored.configOptions ?? [];
@@ -91,7 +95,11 @@ export function createForkConversation(options: ConversationBranchActionsOptions
           options.markRuntimeReady(sourceSessionId, configOptions);
           options.rememberActiveSession(requestWorkspace, sourceSessionId);
         } catch (restoreError) {
+          // Another attachment may have taken over this ID while loadSession was pending.
+          if (!options.isHistoryLoadCurrent(requestClient, sourceSessionId, requestWorkspace, historyGeneration)
+            || options.state.runtimeReady) return;
           options.cancelHistoryLoad();
+          options.forgetRuntime(sourceSessionId);
           options.state.setSessionId(null);
           options.reportError(new Error(
             `${error instanceof Error ? error.message : String(error)}; source conversation restore failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,

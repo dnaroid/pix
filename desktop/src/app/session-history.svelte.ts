@@ -187,12 +187,24 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     if (sessionId) olderCursorBySessionId.delete(sessionId);
   }
 
+  function forget(sessionId: string): void {
+    olderCursorBySessionId.delete(sessionId);
+    loadingOlderSessionIds.delete(sessionId);
+    for (const key of loadingToolResults.keys()) {
+      if (key.startsWith(`${sessionId}\0`)) loadingToolResults.delete(key);
+    }
+    // Invalidate an active history request even if this ID is reopened before
+    // its previous page or hydration completes.
+    if (options.state.sessionId === sessionId) cancel();
+  }
+
   function reset(): void {
     cancel();
     olderCursorBySessionId.clear();
   }
 
   return {
+    get olderCursorCount() { return olderCursorBySessionId.size; },
     get loading() { return loading; },
     get generation() { return generation; },
     begin,
@@ -202,6 +214,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     loadOlder,
     loadDeferredToolResult,
     markFullyLoaded,
+    forget,
     reset,
   };
 }

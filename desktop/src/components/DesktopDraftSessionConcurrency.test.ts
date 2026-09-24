@@ -24,11 +24,9 @@ describe("draft-session concurrency guards", () => {
   });
 
   it("invalidates stale runtime-load completions when a session is forgotten", () => {
-    expect(runtimeLoadingSource).toContain("const loadGenerations = new Map<string, number>()");
-    expect(runtimeLoadingSource).toContain("loadGenerations.get(sessionId) !== generation");
-    expect(runtimeLoadingSource).toContain(
-      "loadGenerations.set(sessionId, (loadGenerations.get(sessionId) ?? 0) + 1)",
-    );
+    expect(runtimeLoadingSource).toContain("const loadsBySessionId = new Map<string, Promise<void>>()");
+    expect(runtimeLoadingSource).toContain("loadsBySessionId.get(sessionId) !== pending");
+    expect(runtimeLoadingSource).toContain("loadsBySessionId.delete(sessionId)");
   });
 
   it("waits for pending attachment adds before snapshotting and sending the first prompt", () => {

@@ -113,18 +113,33 @@ export class AcpClient {
     return this.request("session/list", { cwd });
   }
 
-  newSession(cwd: string, draftConfig?: DraftSessionConfig): Promise<NewSessionResponse> {
-    return this.request("session/new", {
-      cwd,
-      mcpServers: [],
-      _meta: {
-        "pix.lazyRuntime": true,
-        ...(draftConfig ? {
-          "pix.draftModel": draftConfig.modelRef,
-          "pix.draftThinking": draftConfig.thinkingLevel,
-        } : {}),
-      },
-    });
+  async newSession(cwd: string, draftConfig?: DraftSessionConfig): Promise<NewSessionResponse> {
+    const owner = this.beginActivityRequest();
+    try {
+      const response = await this.request<NewSessionResponse>("session/new", {
+        cwd,
+        mcpServers: [],
+        _meta: {
+          "pix.lazyRuntime": true,
+          ...(owner ? { "pix.activityOwner": owner } : {}),
+          ...(draftConfig ? {
+            "pix.draftModel": draftConfig.modelRef,
+            "pix.draftThinking": draftConfig.thinkingLevel,
+          } : {}),
+        },
+      });
+      if (owner) this.handlers.onCompleteActivityRequest?.(owner, response.sessionId);
+      return response;
+    } finally {
+      if (owner) this.handlers.onCancelActivityRequest?.(owner);
+    }
+  }
+
+  private beginActivityRequest(): string | undefined {
+    if (!this.handlers.onBeginActivityRequest) return undefined;
+    const owner = crypto.randomUUID();
+    this.handlers.onBeginActivityRequest(owner);
+    return owner;
   }
 
   draftConfig(cwd: string, selection?: DraftSessionConfig, refreshModelUsage = false) {
@@ -144,7 +159,10 @@ export class AcpClient {
       sessionId,
       cwd,
       mcpServers: [],
-      _meta: { "pix.lazyHistory": true },
+      _meta: {
+        "pix.lazyHistory": true,
+        ...(this.handlers.onOpenActivity ? { "pix.activityOwner": this.handlers.onOpenActivity(sessionId) } : {}),
+      },
     });
   }
 
@@ -197,23 +215,29 @@ export class AcpClient {
   }
 
   async forkSession(sessionId: string, cwd: string, entryId: string): Promise<ForkSessionResult> {
-    const response = await this.request<unknown>("session/fork", {
-      sessionId,
-      cwd,
-      mcpServers: [],
-      _meta: { "pix.entryId": entryId },
-    });
-    if (!isRecord(response) || typeof response.sessionId !== "string") {
-      throw new Error("session/fork returned an invalid response");
+    const owner = this.beginActivityRequest();
+    try {
+      const response = await this.request<unknown>("session/fork", {
+        sessionId,
+        cwd,
+        mcpServers: [],
+        _meta: { "pix.entryId": entryId, ...(owner ? { "pix.activityOwner": owner } : {}) },
+      });
+      if (!isRecord(response) || typeof response.sessionId !== "string") {
+        throw new Error("session/fork returned an invalid response");
+      }
+      if (owner) this.handlers.onCompleteActivityRequest?.(owner, response.sessionId);
+      const configOptions = Array.isArray(response.configOptions)
+        ? response.configOptions as SessionConfigOption[]
+        : [];
+      const meta = isRecord(response._meta) ? response._meta : undefined;
+      const selectedText = typeof meta?.["pix.selectedText"] === "string"
+        ? meta["pix.selectedText"]
+        : undefined;
+      return { sessionId: response.sessionId, configOptions, ...(selectedText === undefined ? {} : { selectedText }) };
+    } finally {
+      if (owner) this.handlers.onCancelActivityRequest?.(owner);
     }
-    const configOptions = Array.isArray(response.configOptions)
-      ? response.configOptions as SessionConfigOption[]
-      : [];
-    const meta = isRecord(response._meta) ? response._meta : undefined;
-    const selectedText = typeof meta?.["pix.selectedText"] === "string"
-      ? meta["pix.selectedText"]
-      : undefined;
-    return { sessionId: response.sessionId, configOptions, ...(selectedText === undefined ? {} : { selectedText }) };
   }
 
   reloadSession(sessionId: string): Promise<{ configOptions: SessionConfigOption[] }> {

@@ -153,4 +153,24 @@ describe("runtime status lifecycle", () => {
     await old;
     expect(store.statuses.get("a")).toEqual(status(20, "current"));
   });
+
+  it("bounds generations to live owners across many closed sessions while keeping background status", async () => {
+    const { store, requests, usage } = setup();
+    const background = store.refreshStatus("background");
+    requests[0]!.resolve({ ...status(12), sessionId: "background" });
+    await background;
+    for (let i = 0; i < 500; i++) {
+      const id = `closed-${i}`;
+      const pending = store.refreshSessionUsage(id);
+      store.forget(id);
+      usage[i]!.resolve({ ...usageStatus(4), sessionId: id });
+      await pending;
+    }
+    expect(store.ownedSessionCount).toBe(1);
+    expect(store.statuses.get("background")?.context?.tokens).toBe(12);
+    expect(store.sessionUsageBySession.size).toBe(0);
+    expect(store.sessionUsageRefreshing.size).toBe(0);
+    store.reset();
+    expect(store.ownedSessionCount).toBe(0);
+  });
 });

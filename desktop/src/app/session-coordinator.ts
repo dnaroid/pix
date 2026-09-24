@@ -7,6 +7,7 @@ import type { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 import type { createRegistryStore } from "./registry.svelte";
 import type { createSessionActivityStore } from "./session-activity.svelte";
+import type { createSessionHistory } from "./session-history.svelte";
 import type { createSessionMetadataStore } from "./session-metadata.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createSessionUpdateBatcher } from "./session-update-batcher";
@@ -30,6 +31,7 @@ type SessionCoordinatorOptions = {
   setOperationRunning: (running: boolean) => void;
   runtime: SessionRuntime;
   activity: SessionActivity;
+  history: ReturnType<typeof createSessionHistory>;
   registry: RegistryStore;
   git: GitWorkspace;
   metadata: SessionMetadata;
@@ -41,6 +43,7 @@ type SessionCoordinatorOptions = {
 export function createSessionCoordinator(options: SessionCoordinatorOptions) {
   function resetAfterDisconnect(): void {
     options.updates.reset();
+    options.history.reset();
     options.closeProjectSelector();
     options.closeSessionSelector();
     options.clearCommandPicker();
@@ -97,6 +100,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
 
   function forgetRuntime(sessionId: string): void {
     options.updates.discardSession(sessionId);
+    options.history.forget(sessionId);
     options.activity.markForgotten(sessionId);
     options.cancelPendingElicitationForSession(sessionId);
     options.runtime.forget(sessionId);
@@ -111,6 +115,11 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     refreshActiveDcpStats,
     refreshActiveSessionUsage,
     clearActivity,
+    resetActivity: options.activity.reset,
+    openActivity: options.activity.open,
+    beginActivityRequest: options.activity.beginRequest,
+    completeActivityRequest: options.activity.completeRequest,
+    cancelActivityRequest: options.activity.cancelRequest,
     forgetRuntime,
   };
 }

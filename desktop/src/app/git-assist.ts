@@ -164,19 +164,20 @@ export function createGitAssist(options: GitAssistOptions) {
       const created = await requestClient.newSession(requestWorkspace);
       createdSessionId = created.sessionId;
       if (requestClient !== options.client() || requestWorkspace !== options.workspace() || requestGeneration !== options.git.generation) {
+        options.forgetRuntime(created.sessionId);
         await requestClient.closeSession(created.sessionId).catch(() => undefined);
         return;
       }
 
       await options.runtime.ensure(requestClient, created.sessionId, requestWorkspace);
       if (requestClient !== options.client() || requestWorkspace !== options.workspace() || requestGeneration !== options.git.generation) {
-        await requestClient.closeSession(created.sessionId).catch(() => undefined);
         options.forgetRuntime(created.sessionId);
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
         return;
       }
       if (!options.runtime.isReady(created.sessionId)) {
-        await requestClient.closeSession(created.sessionId).catch(() => undefined);
         options.forgetRuntime(created.sessionId);
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
         options.git.setError("Could not start a new session for resolving the code-review findings.");
         return;
       }
@@ -201,8 +202,8 @@ export function createGitAssist(options: GitAssistOptions) {
         });
     } catch (error) {
       if (createdSessionId) {
-        await requestClient.closeSession(createdSessionId).catch(() => undefined);
         options.forgetRuntime(createdSessionId);
+        await requestClient.closeSession(createdSessionId).catch(() => undefined);
       }
       if (requestClient === options.client() && requestWorkspace === options.workspace() && requestGeneration === options.git.generation) {
         options.git.setError(error instanceof Error ? error.message : String(error));

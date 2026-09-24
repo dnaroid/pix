@@ -18,6 +18,7 @@ export type ConversationBranchActionsOptions = {
   clearSessionActivity: (sessionId: string) => void;
   markRuntimeReady: (sessionId: string, options: SessionConfigOption[]) => void;
   beginHistoryLoad: () => number;
+  isHistoryLoadCurrent: (client: AcpClient, sessionId: string, workspace: string, generation: number) => boolean;
   hydrateHistory: (
     client: AcpClient,
     sessionId: string,

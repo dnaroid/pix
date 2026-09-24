@@ -12,7 +12,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
-    process::{Child, ChildStdin, Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc, Arc, Condvar, Mutex, RwLock,
@@ -24,10 +24,14 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
+mod acp_queue;
 mod backend_runtime;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod git_operations;
+#[cfg(test)]
+mod native_lifecycle_tests;
+mod native_process;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
 mod startup_theme;
@@ -213,7 +217,7 @@ struct DeepgramRuntimeConfig {
 
 #[derive(Default)]
 struct AcpProcessState {
-    slots: Mutex<HashMap<String, ProcessSlot>>,
+    slots: Mutex<HashMap<String, Arc<ProcessSlot>>>,
     next_generation: AtomicU64,
     exiting: AtomicBool,
 }
@@ -275,14 +279,26 @@ struct PackageTerminalRunning {
     process_group_leader: Option<i32>,
 }
 
-#[derive(Default)]
 struct ProcessSlot {
-    running: Option<RunningProcess>,
+    // Startup serialization is separate: send/stop only briefly lock running.
+    startup: Mutex<()>,
+    running: Mutex<Option<RunningProcess>>,
+    cancelled: AtomicBool,
+}
+
+impl Default for ProcessSlot {
+    fn default() -> Self {
+        Self {
+            startup: Mutex::new(()),
+            running: Mutex::new(None),
+            cancelled: AtomicBool::new(false),
+        }
+    }
 }
 
 struct RunningProcess {
     generation: u64,
-    stdin_tx: Option<mpsc::Sender<StdinCommand>>,
+    stdin_tx: Option<Arc<acp_queue::Queue<StdinCommand>>>,
     stop_tx: mpsc::Sender<()>,
     exited: ExitSignal,
 }
@@ -474,8 +490,8 @@ struct IdxAuditRequest {
 
 impl Drop for RunningProcess {
     fn drop(&mut self) {
-        if let Some(stdin_tx) = self.stdin_tx.take() {
-            let _ = stdin_tx.send(StdinCommand::Close);
+        if let Some(queue) = self.stdin_tx.take() {
+            queue.close();
         }
         let _ = self.stop_tx.send(());
     }
@@ -484,9 +500,8 @@ impl Drop for RunningProcess {
 enum StdinCommand {
     Write {
         line: String,
-        ack: mpsc::SyncSender<Result<(), String>>,
+        ack: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    Close,
 }
 
 #[derive(Clone, Serialize)]
@@ -5718,6 +5733,10 @@ fn start_idx_operation(
     app: AppHandle,
     request: IdxOperationRequest,
 ) -> Result<IdxOperationSnapshot, String> {
+    let lifecycle = app.state::<AcpProcessState>();
+    let lifetime = reserve_process_slot(&lifecycle, &request.window_label, || {
+        app.get_webview_window(&request.window_label).is_some()
+    })?;
     let root = canonical_workspace(Path::new(&request.workspace))?;
     if request.kind != IdxMaintenanceKind::Init && !root.join(".indexer-cli").is_dir() {
         return Err("this project is not indexed yet; initialize IDX first".to_owned());
@@ -5726,18 +5745,12 @@ fn start_idx_operation(
     let args = idx_operation_args(request.kind);
     let command_label = format!("idx {}", args.join(" "));
     let mut command = idx_process_command(&launcher, &root, &args)?;
-    let mut child = command
+    let child = command
         .spawn()
         .map_err(|error| format!("failed to start {command_label}: {error}"))?;
-    let process_id = child.id();
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "IDX operation stdout pipe is unavailable".to_owned())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "IDX operation stderr pipe is unavailable".to_owned())?;
+    let mut child = IdxStartupGuard(Some(child));
+    let process_id = child.0.as_ref().unwrap().id();
+    let (stdout, stderr) = take_idx_pipes(&mut child)?;
     let state = app.state::<IdxOperationState>();
     let id = format!(
         "idx-operation-{}",
@@ -5745,46 +5758,27 @@ fn start_idx_operation(
     );
     let (stop_tx, stop_rx) = mpsc::channel();
     let exited = Arc::new((Mutex::new(false), Condvar::new()));
-    let operation_conflict = {
-        let mut operations = state
-            .operations
-            .lock()
-            .map_err(|_| "IDX operation state is poisoned".to_owned())?;
-        if operations.values().any(|operation| {
-            operation.workspace == root && operation.status == IdxOperationStatus::Running
-        }) {
-            true
-        } else {
-            prune_idx_operation_history(&mut operations, &request.window_label);
-            operations.insert(
-                id.clone(),
-                IdxOperationRecord {
-                    window_label: request.window_label.clone(),
-                    workspace: root.clone(),
-                    kind: request.kind,
-                    command: command_label,
-                    status: IdxOperationStatus::Running,
-                    output: String::new(),
-                    started_at_ms: idx_now_ms(),
-                    finished_at_ms: None,
-                    exit_code: None,
-                    stop_tx: Some(stop_tx),
-                    exited: exited.clone(),
-                },
-            );
-            false
-        }
-    };
-    if operation_conflict {
-        // Never reap a process while holding the operation registry lock: the
-        // running operation's output/supervisor and Activity Bar polling also
-        // need that mutex to make progress.
-        force_kill_idx_process(process_id, &mut child);
-        let _ = child.wait();
-        return Err(
-            "another IDX maintenance operation is already running for this project".to_owned(),
-        );
-    }
+    let snapshot = publish_idx_operation(
+        &lifecycle,
+        &lifetime,
+        &request.window_label,
+        app.get_webview_window(&request.window_label).is_some(),
+        &state,
+        &id,
+        IdxOperationRecord {
+            window_label: request.window_label.clone(),
+            workspace: root,
+            kind: request.kind,
+            command: command_label,
+            status: IdxOperationStatus::Running,
+            output: String::new(),
+            started_at_ms: idx_now_ms(),
+            finished_at_ms: None,
+            exit_code: None,
+            stop_tx: Some(stop_tx),
+            exited: exited.clone(),
+        },
+    )?;
 
     let stdout_app = app.clone();
     let stdout_id = id.clone();
@@ -5801,6 +5795,10 @@ fn start_idx_operation(
     let supervisor_app = app.clone();
     let supervisor_id = id.clone();
     let supervisor_window = request.window_label.clone();
+    let child = child
+        .0
+        .take()
+        .expect("IDX child owned until supervisor starts");
     thread::spawn(move || {
         supervise_idx_operation(
             supervisor_app,
@@ -5813,14 +5811,76 @@ fn start_idx_operation(
         )
     });
 
-    let operations = state
+    Ok(snapshot)
+}
+
+/// Own the spawned process across pipe setup and publication failures. Dropping
+/// this guard occurs only after the registry locks have been released.
+struct IdxStartupGuard(Option<Child>);
+
+fn take_idx_pipes(
+    child: &mut IdxStartupGuard,
+) -> Result<(std::process::ChildStdout, std::process::ChildStderr), String> {
+    let child = child.0.as_mut().expect("IDX startup owns its child");
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "IDX operation stdout pipe is unavailable".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "IDX operation stderr pipe is unavailable".to_owned())?;
+    Ok((stdout, stderr))
+}
+
+impl Drop for IdxStartupGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            force_kill_idx_process(child.id(), &mut child);
+            let _ = child.wait();
+        }
+    }
+}
+
+fn publish_idx_operation(
+    lifecycle: &AcpProcessState,
+    lifetime: &Arc<ProcessSlot>,
+    window_label: &str,
+    window_available: bool,
+    state: &IdxOperationState,
+    id: &str,
+    operation: IdxOperationRecord,
+) -> Result<IdxOperationSnapshot, String> {
+    // Match Destroyed's slots -> operations lock order. Nothing that can
+    // block on a process or runtime runs under the global slots lock.
+    let slots = lifecycle
+        .slots
+        .lock()
+        .map_err(|_| "ACP process state is poisoned".to_owned())?;
+    if lifetime.cancelled.load(Ordering::Acquire)
+        || lifecycle.exiting.load(Ordering::Acquire)
+        || !window_available
+        || !slots
+            .get(window_label)
+            .is_some_and(|owner| Arc::ptr_eq(owner, lifetime))
+    {
+        return Err("IDX window closed during startup".to_owned());
+    }
+    let mut operations = state
         .operations
         .lock()
         .map_err(|_| "IDX operation state is poisoned".to_owned())?;
-    operations
-        .get(&id)
-        .map(|operation| idx_operation_snapshot(&id, operation))
-        .ok_or_else(|| "IDX operation disappeared during startup".to_owned())
+    if operations.values().any(|existing| {
+        existing.workspace == operation.workspace && existing.status == IdxOperationStatus::Running
+    }) {
+        return Err(
+            "another IDX maintenance operation is already running for this project".to_owned(),
+        );
+    }
+    prune_idx_operation_history(&mut operations, window_label);
+    let snapshot = idx_operation_snapshot(id, &operation);
+    operations.insert(id.to_owned(), operation);
+    Ok(snapshot)
 }
 
 fn stream_idx_operation_output<R: Read + Send + 'static>(
@@ -5996,25 +6056,24 @@ fn stop_idx_operations_for_workspace(
 }
 
 fn stop_idx_operations_for_window(app: &AppHandle, window_label: &str) {
-    let operations = {
+    let ids = {
         let state = app.state::<IdxOperationState>();
         let Ok(operations) = state.operations.lock() else {
             return;
         };
-        operations
-            .iter()
-            .filter(|(_, operation)| {
-                operation.window_label == window_label
-                    && operation.status == IdxOperationStatus::Running
-            })
-            .map(|(id, _)| id.clone())
-            .collect::<Vec<_>>()
+        captured_window_ids(&operations, window_label, |operation| {
+            &operation.window_label
+        })
     };
-    for id in operations {
+    stop_captured_idx_operations(app, window_label, &ids);
+}
+
+fn stop_captured_idx_operations(app: &AppHandle, window_label: &str, ids: &[String]) {
+    for id in ids {
         let _ = stop_idx_operation(app, window_label, &id);
     }
     if let Ok(mut operations) = app.state::<IdxOperationState>().operations.lock() {
-        operations.retain(|_, operation| operation.window_label != window_label);
+        remove_captured_ids(&mut operations, ids);
     }
 }
 
@@ -6240,6 +6299,15 @@ fn spawn_package_terminal(
     cols: u16,
     rows: u16,
 ) -> Result<PackageTerminalSnapshot, String> {
+    let lifetime = {
+        let state = app.state::<AcpProcessState>();
+        reserve_process_slot(&state, &window_label, || {
+            app.get_webview_window(&window_label).is_some()
+        })?
+    };
+    if lifetime.cancelled.load(Ordering::Acquire) {
+        return Err("terminal window is closed".to_owned());
+    }
     let size = validated_terminal_size(cols, rows)?;
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -6253,12 +6321,13 @@ fn spawn_package_terminal(
         .slave
         .spawn_command(command)
         .map_err(|error| format!("failed to start {command_label}: {error}"))?;
-    let process_id = child.process_id();
+    let mut child = PtyStartupGuard(Some(child));
+    let process_id = child.0.as_ref().and_then(|child| child.process_id());
     #[cfg(unix)]
     let process_group_leader = pair.master.process_group_leader();
     #[cfg(not(unix))]
     let process_group_leader: Option<i32> = None;
-    let killer = Arc::new(Mutex::new(child.clone_killer()));
+    let killer = Arc::new(Mutex::new(child.0.as_ref().unwrap().clone_killer()));
     let mut reader = pair
         .master
         .try_clone_reader()
@@ -6279,7 +6348,15 @@ fn spawn_package_terminal(
         "pkg-terminal-{}",
         state.next_id.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
     );
+    let window_exists = app.get_webview_window(&window_label).is_some();
     let terminal_limit_reached = {
+        // Serialize publication with Destroyed's synchronous cancellation.
+        // No runtime resolution, PTY setup or reaping occurs under this lock.
+        let lifecycle = app.state::<AcpProcessState>();
+        let _registry = lifecycle
+            .slots
+            .lock()
+            .map_err(|_| "ACP process state is poisoned".to_owned())?;
         let mut sessions = state
             .sessions
             .lock()
@@ -6289,7 +6366,11 @@ fn spawn_package_terminal(
             .values()
             .filter(|session| session.window_label == window_label && session.running.is_some())
             .count();
-        if running_count >= MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW {
+        if lifetime.cancelled.load(Ordering::Acquire)
+            || lifecycle.exiting.load(Ordering::Acquire)
+            || running_count >= MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW
+            || !window_exists
+        {
             true
         } else {
             sessions.insert(
@@ -6320,13 +6401,8 @@ fn spawn_package_terminal(
         }
     };
     if terminal_limit_reached {
-        // Reaping a rejected process can block; release the shared terminal
-        // registry first so output/exit bookkeeping and sidebar polling remain live.
-        let mut child = child;
-        let _ = child.kill();
-        let _ = child.wait();
         return Err(format!(
-            "at most {MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW} package terminals may run at once"
+            "terminal window closed or at most {MAX_RUNNING_PACKAGE_TERMINALS_PER_WINDOW} package terminals may run at once"
         ));
     }
 
@@ -6347,6 +6423,10 @@ fn spawn_package_terminal(
 
     let supervisor_app = app.clone();
     let supervisor_id = id.clone();
+    let child = child
+        .0
+        .take()
+        .expect("terminal child owned until supervisor starts");
     thread::spawn(move || supervise_package_terminal(supervisor_app, supervisor_id, child, exited));
 
     let sessions = state
@@ -6357,6 +6437,18 @@ fn spawn_package_terminal(
         .get(&id)
         .map(|session| package_terminal_snapshot(&id, session))
         .ok_or_else(|| "package terminal disappeared during startup".to_owned())
+}
+
+/// Every fallible operation between PTY spawn and supervisor transfer must reap the child.
+struct PtyStartupGuard(Option<Box<dyn portable_pty::Child + Send + Sync>>);
+
+impl Drop for PtyStartupGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -6957,19 +7049,17 @@ fn stop_package_terminals_for_window(app: &AppHandle, window_label: &str) {
         let Ok(sessions) = state.sessions.lock() else {
             return;
         };
-        sessions
-            .iter()
-            .filter(|(_, session)| {
-                session.window_label == window_label && session.running.is_some()
-            })
-            .map(|(id, _)| id.clone())
-            .collect::<Vec<_>>()
+        captured_window_ids(&sessions, window_label, |session| &session.window_label)
     };
+    stop_captured_package_terminals(app, window_label, &ids);
+}
+
+fn stop_captured_package_terminals(app: &AppHandle, window_label: &str, ids: &[String]) {
     for id in ids {
         let _ = stop_package_terminal(app, window_label, &id, true);
     }
     if let Ok(mut sessions) = app.state::<PackageTerminalState>().sessions.lock() {
-        sessions.retain(|_, session| session.window_label != window_label);
+        remove_captured_ids(&mut sessions, ids);
     }
 }
 
@@ -8436,14 +8526,27 @@ async fn acp_start(app: AppHandle, window_label: String) -> Result<u64, String> 
 
 fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
     let state = app.state::<AcpProcessState>();
-    let mut slots = state
-        .slots
+    let slot = reserve_process_slot(&state, &window_label, || {
+        app.get_webview_window(&window_label).is_some()
+    })?;
+    let _startup = slot
+        .startup
         .lock()
         .map_err(|_| "ACP process state is poisoned".to_owned())?;
-    let slot = slots.entry(window_label.clone()).or_default();
-    if let Some(running) = &slot.running {
+    let running_slot = slot
+        .running
+        .lock()
+        .map_err(|_| "ACP process state is poisoned".to_owned())?;
+    if slot.cancelled.load(Ordering::Acquire) || state.exiting.load(Ordering::Acquire) {
+        return Err("ACP window is closed".to_owned());
+    }
+    if app.get_webview_window(&window_label).is_none() {
+        return Err("ACP window is closed".to_owned());
+    }
+    if let Some(running) = &*running_slot {
         return Ok(running.generation);
     }
+    drop(running_slot);
 
     let resource_dir = app
         .path()
@@ -8452,21 +8555,32 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
     let runtime = backend_runtime::BackendRuntime::resolve(&resource_dir)?;
     let mut command = runtime.command()?;
     command.env("PIX_CONFIG_PROFILE", "desktop");
-    let mut child = command
+    native_process::isolate(&mut command);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    let mut child = native_process::spawn(&mut command)
         .map_err(|error| format!("failed to start Pix backend: {error}"))?;
 
     let pipes = (child.stdin.take(), child.stdout.take(), child.stderr.take());
     let (Some(stdin), Some(stdout), Some(stderr)) = pipes else {
-        let _ = child.kill();
+        let _ = native_process::force_stop(&mut child);
         let _ = child.wait();
         return Err("pix-acp did not expose all stdio pipes".to_owned());
     };
-    let (stdin_tx, stdin_rx) = mpsc::channel();
-    forward_stdin(stdin, stdin_rx);
+    // Destroyed is recorded synchronously, even if the blocking startup is
+    // currently resolving the runtime or spawning a child.
+    if slot.cancelled.load(Ordering::Acquire)
+        || state.exiting.load(Ordering::Acquire)
+        || app.get_webview_window(&window_label).is_none()
+    {
+        let _ = native_process::force_stop(&mut child);
+        let _ = child.wait();
+        return Err("ACP window closed during startup".to_owned());
+    }
+    let stdin_tx = Arc::new(acp_queue::Queue::new(8 * 1024 * 1024, 16));
+    forward_stdin(stdin, stdin_tx.clone());
 
     let generation = state
         .next_generation
@@ -8474,13 +8588,24 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         .wrapping_add(1);
     let (stop_tx, stop_rx) = mpsc::channel();
     let exited = Arc::new((Mutex::new(false), Condvar::new()));
-    slot.running = Some(RunningProcess {
-        generation,
-        stdin_tx: Some(stdin_tx),
-        stop_tx,
-        exited: exited.clone(),
-    });
-    drop(slots);
+    // The cancellation guard above checked before publication; a close can
+    // happen after that guard. Recheck while publishing under the short lock.
+    let publish = publish_process(
+        &slot,
+        &state,
+        app.get_webview_window(&window_label).is_some(),
+        RunningProcess {
+            generation,
+            stdin_tx: Some(stdin_tx),
+            stop_tx,
+            exited: exited.clone(),
+        },
+    );
+    if let Err(error) = publish {
+        let _ = native_process::force_stop(&mut child);
+        let _ = child.wait();
+        return Err(error);
+    }
 
     forward_lines(
         stdout,
@@ -8500,6 +8625,26 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
     Ok(generation)
 }
 
+fn publish_process(
+    slot: &ProcessSlot,
+    state: &AcpProcessState,
+    window_available: bool,
+    running: RunningProcess,
+) -> Result<(), String> {
+    let mut guard = slot
+        .running
+        .lock()
+        .map_err(|_| "ACP process state is poisoned".to_owned())?;
+    if slot.cancelled.load(Ordering::Acquire)
+        || state.exiting.load(Ordering::Acquire)
+        || !window_available
+    {
+        return Err("ACP window closed during startup".to_owned());
+    }
+    *guard = Some(running);
+    Ok(())
+}
+
 #[tauri::command]
 async fn acp_send(
     app: AppHandle,
@@ -8512,15 +8657,18 @@ async fn acp_send(
     }
     let stdin_tx = {
         let state = app.state::<AcpProcessState>();
-        let slots = state
+        let slot = state
             .slots
             .lock()
-            .map_err(|_| "ACP process state is poisoned".to_owned())?;
-        let slot = slots
+            .map_err(|_| "ACP process state is poisoned".to_owned())?
             .get(&window_label)
+            .cloned()
             .ok_or_else(|| format!("pix-acp is not running for window {window_label}"))?;
-        let running = slot
+        let running_slot = slot
             .running
+            .lock()
+            .map_err(|_| "ACP process state is poisoned".to_owned())?;
+        let running = running_slot
             .as_ref()
             .ok_or_else(|| "pix-acp is not running".to_owned())?;
         if running.generation != generation {
@@ -8535,16 +8683,22 @@ async fn acp_send(
             .cloned()
             .ok_or_else(|| "pix-acp stdin is closed".to_owned())?
     };
-    let (ack_tx, ack_rx) = mpsc::sync_channel(1);
+    let ack_rx = admit_stdin(&stdin_tx, line)?;
+    ack_rx
+        .await
+        .map_err(|_| "pix-acp stdin writer stopped before acknowledging the write".to_owned())?
+}
+
+fn admit_stdin(
+    stdin_tx: &acp_queue::Queue<StdinCommand>,
+    line: String,
+) -> Result<tokio::sync::oneshot::Receiver<Result<(), String>>, String> {
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+    let bytes = line.len();
     stdin_tx
-        .send(StdinCommand::Write { line, ack: ack_tx })
-        .map_err(|_| "pix-acp stdin writer is closed".to_owned())?;
-    run_blocking(move || {
-        ack_rx
-            .recv()
-            .map_err(|_| "pix-acp stdin writer stopped before acknowledging the write".to_owned())?
-    })
-    .await
+        .try_push(StdinCommand::Write { line, ack: ack_tx }, bytes)
+        .map_err(str::to_owned)?;
+    Ok(ack_rx)
 }
 
 fn validate_json_object(line: &str) -> Result<(), String> {
@@ -8586,15 +8740,26 @@ fn stop_process(
     window_label: &str,
     expected_generation: Option<u64>,
 ) -> Result<(), String> {
-    let process = {
-        let mut slots = state
+    let slot = {
+        let slots = state
             .slots
             .lock()
             .map_err(|_| "ACP process state is poisoned".to_owned())?;
-        let Some(slot) = slots.get_mut(window_label) else {
-            return Ok(());
-        };
-        slot.running.as_mut().and_then(|running| {
+        slots.get(window_label).cloned()
+    };
+    let Some(slot) = slot else {
+        return Ok(());
+    };
+    stop_process_slot(&slot, expected_generation)
+}
+
+fn stop_process_slot(slot: &ProcessSlot, expected_generation: Option<u64>) -> Result<(), String> {
+    let process = {
+        let mut running_slot = slot
+            .running
+            .lock()
+            .map_err(|_| "ACP process state is poisoned".to_owned())?;
+        running_slot.as_mut().and_then(|running| {
             if expected_generation.is_some_and(|expected| expected != running.generation) {
                 return None;
             }
@@ -8611,8 +8776,8 @@ fn stop_process(
         return Ok(());
     };
 
-    if let Some(stdin_tx) = stdin_tx {
-        let _ = stdin_tx.send(StdinCommand::Close);
+    if let Some(queue) = stdin_tx {
+        queue.close();
     }
     let _ = stop_tx.send(());
     let (lock, wake) = &*exited;
@@ -8628,25 +8793,38 @@ fn stop_process(
     Ok(())
 }
 
-fn forward_stdin(mut stdin: ChildStdin, receiver: mpsc::Receiver<StdinCommand>) {
+fn forward_stdin<W: Write + Send + 'static>(
+    mut stdin: W,
+    receiver: Arc<acp_queue::Queue<StdinCommand>>,
+) {
     thread::spawn(move || {
-        for command in receiver {
+        while let Some(command) = receiver.pop(None) {
             match command {
                 StdinCommand::Write { line, ack } => {
-                    let result = validate_json_object(&line).and_then(|()| {
+                    let validation = validate_json_object(&line);
+                    if let Err(error) = validation {
+                        let _ = ack.send(Err(error));
+                        continue;
+                    }
+                    let result = (|| {
                         stdin
                             .write_all(line.as_bytes())
                             .and_then(|_| stdin.write_all(b"\n"))
                             .and_then(|_| stdin.flush())
                             .map_err(|error| format!("failed to write to pix-acp: {error}"))
-                    });
+                    })();
                     let failed = result.is_err();
                     let _ = ack.send(result);
                     if failed {
+                        for pending in receiver.close_and_drain() {
+                            let StdinCommand::Write { ack, .. } = pending;
+                            let _ = ack.send(Err(
+                                "pix-acp stdin writer stopped after a write error".to_owned(),
+                            ));
+                        }
                         break;
                     }
                 }
-                StdinCommand::Close => break,
             }
         }
     });
@@ -8661,14 +8839,18 @@ fn forward_lines<R>(
 ) where
     R: Read + Send + 'static,
 {
-    let (line_tx, line_rx) = mpsc::channel();
+    // Reader backpressure is byte-bounded; oversized protocol lines occupy
+    // the queue exclusively rather than being truncated.
+    let lines = Arc::new(acp_queue::Queue::new(8 * 1024 * 1024, 32));
+    let line_tx = lines.clone();
     let error_app = app.clone();
     let error_window_label = window_label.clone();
     thread::spawn(move || {
         for line in BufReader::new(reader).lines() {
             match line {
                 Ok(line) => {
-                    if line_tx.send(line).is_err() {
+                    let bytes = line.len();
+                    if line_tx.push(line, bytes).is_err() {
                         break;
                     }
                 }
@@ -8686,32 +8868,36 @@ fn forward_lines<R>(
                 }
             }
         }
+        line_tx.close();
     });
-    thread::spawn(move || batch_forwarded_lines(line_rx, app, window_label, event, generation));
+    thread::spawn(move || batch_forwarded_lines(lines, app, window_label, event, generation));
 }
 
 fn batch_forwarded_lines(
-    receiver: mpsc::Receiver<String>,
+    receiver: Arc<acp_queue::Queue<String>>,
     app: AppHandle,
     window_label: String,
     event: &'static str,
     generation: u64,
 ) {
-    while let Ok(first) = receiver.recv() {
+    while let Some(first) = receiver.pop(None) {
         let mut lines = Vec::with_capacity(ACP_EVENT_BATCH_MAX_LINES);
+        let mut bytes = first.len();
         lines.push(first);
         let deadline = Instant::now() + ACP_EVENT_BATCH_LATENCY;
         let mut disconnected = false;
-        while lines.len() < ACP_EVENT_BATCH_MAX_LINES {
+        while lines.len() < ACP_EVENT_BATCH_MAX_LINES && bytes < 1024 * 1024 {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 break;
             }
-            match receiver.recv_timeout(remaining) {
-                Ok(line) => lines.push(line),
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    disconnected = true;
+            match receiver.pop(Some(remaining)) {
+                Some(line) => {
+                    bytes += line.len();
+                    lines.push(line);
+                }
+                None => {
+                    disconnected = receiver.is_closed();
                     break;
                 }
             }
@@ -8732,7 +8918,7 @@ fn batch_forwarded_lines(
 }
 
 fn supervise_child(
-    mut child: Child,
+    mut child: native_process::OwnedChild,
     stop_rx: mpsc::Receiver<()>,
     app: AppHandle,
     window_label: String,
@@ -8741,6 +8927,7 @@ fn supervise_child(
 ) {
     let mut requested = false;
     let mut force_stop_at = None;
+    let mut forced = false;
     let mut stop_error = None;
     let (status, error) = loop {
         if !requested && stop_rx.try_recv().is_ok() {
@@ -8749,13 +8936,36 @@ fn supervise_child(
         }
         if force_stop_at.is_some_and(|deadline| Instant::now() >= deadline) {
             force_stop_at = None;
-            if let Err(error) = child.kill() {
-                // The process may have exited between the stop request and
-                // kill. Keep polling so it is always reaped with try_wait.
-                stop_error = Some(format!("failed to stop pix-acp: {error}"));
+            match native_process::force_stop(&mut child) {
+                Ok(()) => forced = true,
+                Err(error) => {
+                    // Still reap the leader, retry group cleanup on observed
+                    // exit if the first signal failed.
+                    stop_error = Some(format!("failed to stop pix-acp: {error}"));
+                }
             }
         }
 
+        // Check without reaping on Unix; kill any descendants while the
+        // original leader still pins the isolated process-group ID.
+        #[cfg(unix)]
+        match native_process::exited_before_reap(&child) {
+            Ok(true) => {
+                if !forced {
+                    if let Err(error) = native_process::force_stop(&mut child) {
+                        stop_error =
+                            Some(format!("failed to clean up pix-acp descendants: {error}"));
+                    }
+                }
+                break match child.wait() {
+                    Ok(status) => (Some(status), stop_error),
+                    Err(error) => (None, Some(format!("failed to reap pix-acp: {error}"))),
+                };
+            }
+            Ok(false) => thread::sleep(POLL_INTERVAL),
+            Err(error) => break (None, Some(format!("failed to wait for pix-acp: {error}"))),
+        }
+        #[cfg(not(unix))]
         match child.try_wait() {
             Ok(Some(status)) => break (Some(status), stop_error),
             Ok(None) => thread::sleep(POLL_INTERVAL),
@@ -8763,6 +8973,22 @@ fn supervise_child(
         }
     };
 
+    // Job ownership survives leader exit. Terminate descendants even on
+    // natural exit, and close the job before notifying waiting callers.
+    #[cfg(windows)]
+    let error = if forced {
+        error
+    } else {
+        native_process::force_stop(&mut child)
+            .err()
+            .map(|e| format!("failed to clean up pix-acp descendants: {e}"))
+            .or(error)
+    };
+    #[cfg(not(any(unix, windows)))]
+    if requested && !forced {
+        let _ = native_process::force_stop(&mut child);
+    }
+    drop(child);
     clear_generation(&app, &window_label, generation);
     let payload = exit_payload(window_label.clone(), generation, status, requested, error);
     let _ = app.emit_to(&window_label, "acp://exit", payload);
@@ -8775,18 +9001,97 @@ fn supervise_child(
 
 fn clear_generation(app: &AppHandle, window_label: &str, generation: u64) {
     let state = app.state::<AcpProcessState>();
-    if let Ok(mut slots) = state.slots.lock() {
-        if let Some(slot) = slots.get_mut(window_label) {
-            if slot.running.as_ref().map(|process| process.generation) == Some(generation) {
-                slot.running = None;
+    let slot = state
+        .slots
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(window_label).cloned());
+    if let Some(slot) = slot {
+        if let Ok(mut running) = slot.running.lock() {
+            if running.as_ref().map(|process| process.generation) == Some(generation) {
+                *running = None;
             }
         }
-    };
+    }
 }
 
-fn remove_process_slot(state: &AcpProcessState, window_label: &str) {
+fn reserve_process_slot(
+    state: &AcpProcessState,
+    window_label: &str,
+    window_available: impl FnOnce() -> bool,
+) -> Result<Arc<ProcessSlot>, String> {
+    let mut slots = state
+        .slots
+        .lock()
+        .map_err(|_| "ACP process state is poisoned".to_owned())?;
+    // Check while holding the same registry lock as destruction: checking
+    // before locking could insert a closed-window slot after cleanup removed it.
+    if state.exiting.load(Ordering::Acquire) || !window_available() {
+        return Err("ACP window is closed".to_owned());
+    }
+    Ok(slots
+        .entry(window_label.to_owned())
+        .or_insert_with(|| Arc::new(ProcessSlot::default()))
+        .clone())
+}
+
+fn remove_process_slot(state: &AcpProcessState, window_label: &str) -> Option<Arc<ProcessSlot>> {
     if let Ok(mut slots) = state.slots.lock() {
-        slots.remove(window_label);
+        return remove_process_slot_locked(&mut slots, window_label);
+    }
+    None
+}
+
+fn remove_process_slot_locked(
+    slots: &mut HashMap<String, Arc<ProcessSlot>>,
+    window_label: &str,
+) -> Option<Arc<ProcessSlot>> {
+    let slot = slots.remove(window_label)?;
+    slot.cancelled.store(true, Ordering::Release);
+    Some(slot)
+}
+
+// Capture both running and completed records before delayed ACP stop. Holding
+// the slot registry lock also excludes in-flight terminal publication; no
+// blocking process work takes place under any registry lock.
+fn capture_destroyed_window(
+    lifecycle: &AcpProcessState,
+    terminals: &PackageTerminalState,
+    idx: &IdxOperationState,
+    window_label: &str,
+) -> (Option<Arc<ProcessSlot>>, Vec<String>, Vec<String>) {
+    let mut slots = lifecycle.slots.lock().ok();
+    let slot = slots
+        .as_mut()
+        .and_then(|slots| remove_process_slot_locked(slots, window_label));
+    let terminal_ids = terminals
+        .sessions
+        .lock()
+        .map(|sessions| captured_window_ids(&sessions, window_label, |s| &s.window_label))
+        .unwrap_or_default();
+    let idx_ids = idx
+        .operations
+        .lock()
+        .map(|operations| captured_window_ids(&operations, window_label, |o| &o.window_label))
+        .unwrap_or_default();
+    (slot, terminal_ids, idx_ids)
+}
+
+fn captured_window_ids<T>(
+    records: &HashMap<String, T>,
+    window_label: &str,
+    owner: impl Fn(&T) -> &str,
+) -> Vec<String> {
+    records
+        .iter()
+        .filter(|(_, record)| owner(record) == window_label)
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+fn remove_captured_ids<T>(records: &mut HashMap<String, T>, ids: &[String]) {
+    for id in ids {
+        records.remove(id);
     }
 }
 
@@ -9007,16 +9312,24 @@ pub fn run() {
             ..
         } = &event
         {
+            // Record destruction on the event thread, before any queued
+            // spawn_blocking task can resume and publish a child.
+            let (slot, terminal_ids, idx_ids) = capture_destroyed_window(
+                &handle.state::<AcpProcessState>(),
+                &handle.state::<PackageTerminalState>(),
+                &handle.state::<IdxOperationState>(),
+                label,
+            );
             let handle = handle.clone();
             let window_label = label.clone();
             thread::spawn(move || {
-                let state = handle.state::<AcpProcessState>();
-                if let Err(error) = stop_process(&state, &window_label, None) {
-                    eprintln!("failed to stop pix-acp for closed window {window_label}: {error}");
+                if let Some(slot) = slot {
+                    if let Err(error) = stop_process_slot(&slot, None) {
+                        eprintln!("failed to stop pix-acp for closed window {window_label}: {error}");
+                    }
                 }
-                remove_process_slot(&state, &window_label);
-                stop_package_terminals_for_window(&handle, &window_label);
-                stop_idx_operations_for_window(&handle, &window_label);
+                stop_captured_package_terminals(&handle, &window_label, &terminal_ids);
+                stop_captured_idx_operations(&handle, &window_label, &idx_ids);
             });
         }
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
@@ -9052,6 +9365,121 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn destroyed_reservation_cannot_publish_after_global_slot_is_removed() {
+        let state = AcpProcessState::default();
+        let slot = Arc::new(ProcessSlot::default());
+        state
+            .slots
+            .lock()
+            .unwrap()
+            .insert("window".to_owned(), slot.clone());
+        let held_start = slot.running.lock().unwrap();
+        let removed = remove_process_slot(&state, "window").unwrap();
+        assert!(removed.cancelled.load(Ordering::Acquire));
+        assert!(state.slots.lock().unwrap().is_empty());
+        drop(held_start);
+        assert!(slot.cancelled.load(Ordering::Acquire));
+        // A recreated window with the same label receives a fresh reservation.
+        let replacement = Arc::new(ProcessSlot::default());
+        state
+            .slots
+            .lock()
+            .unwrap()
+            .insert("window".to_owned(), replacement.clone());
+        assert!(!replacement.cancelled.load(Ordering::Acquire));
+        assert!(!Arc::ptr_eq(&removed, &replacement));
+    }
+
+    #[test]
+    fn stale_stop_does_not_close_replacement_stdin() {
+        let slot = ProcessSlot::default();
+        let queue = Arc::new(acp_queue::Queue::<StdinCommand>::new(16, 1));
+        let (stop_tx, stop_rx) = mpsc::channel();
+        *slot.running.lock().unwrap() = Some(RunningProcess {
+            generation: 2,
+            stdin_tx: Some(queue.clone()),
+            stop_tx,
+            exited: Arc::new((Mutex::new(false), Condvar::new())),
+        });
+        stop_process_slot(&slot, Some(1)).unwrap();
+        assert!(!queue.is_closed());
+        assert!(stop_rx.try_recv().is_err());
+        assert_eq!(slot.running.lock().unwrap().as_ref().unwrap().generation, 2);
+    }
+
+    #[test]
+    fn one_window_startup_reservation_does_not_lock_global_registry() {
+        let state = AcpProcessState::default();
+        let slot = Arc::new(ProcessSlot::default());
+        state
+            .slots
+            .lock()
+            .unwrap()
+            .insert("one".into(), slot.clone());
+        let _startup = slot.startup.lock().unwrap();
+        let mut slots = state
+            .slots
+            .try_lock()
+            .expect("global registry must remain unlocked during startup");
+        slots.insert("two".into(), Arc::new(ProcessSlot::default()));
+        assert_eq!(slots.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forced_stop_targets_isolated_group() {
+        use std::os::unix::process::ExitStatusExt;
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg("sleep 30");
+        native_process::isolate(&mut command);
+        let mut child = native_process::spawn(&mut command).unwrap();
+        assert_eq!(
+            unsafe { libc::getpgid(child.id() as i32) },
+            child.id() as i32
+        );
+        native_process::force_stop(&mut child).unwrap();
+        assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGKILL));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn forced_stop_terminates_backend_descendant() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("sleep 30 & echo $!; wait")
+            .stdout(Stdio::piped());
+        native_process::isolate(&mut command);
+        let mut child = native_process::spawn(&mut command).unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let descendant: u32 = line.trim().parse().unwrap();
+        native_process::force_stop(&mut child).unwrap();
+        child.wait().unwrap();
+        // An unreaped orphan may briefly remain in /proc as a zombie.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let status = fs::read_to_string(format!("/proc/{descendant}/stat"));
+            if status.is_err()
+                || status
+                    .unwrap()
+                    .split(") ")
+                    .nth(1)
+                    .is_some_and(|tail| tail.starts_with('Z') || tail.starts_with('X'))
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "backend descendant survived group kill"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn parses_only_versioned_absolute_desktop_watch_targets() {
@@ -9292,6 +9720,7 @@ mod tests {
     "dev": "vite"
   }
 }
+
 "#,
         )
         .expect("write package.json");

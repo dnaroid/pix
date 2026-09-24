@@ -133,6 +133,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
       createdSessionId = response.sessionId;
       if (requestClient !== options.client() || requestWorkspace !== options.workspace()) {
         await requestClient.closeSession(response.sessionId).catch(() => undefined);
+        options.forgetRuntime(response.sessionId);
         return;
       }
       await options.ensureRuntime(requestClient, response.sessionId, requestWorkspace);
@@ -197,7 +198,11 @@ export function createProjectActions(options: ProjectActionsOptions) {
       const payload = buildPromptPayload(taskPrompt.text, taskPrompt.attachments, options.imagePromptSupported());
       if (options.client() !== requestClient || options.workspace() !== requestWorkspace) return;
       const response = await requestClient.newSession(requestWorkspace);
-      if (options.client() !== requestClient || options.workspace() !== requestWorkspace) return;
+      if (options.client() !== requestClient || options.workspace() !== requestWorkspace) {
+        options.forgetRuntime(response.sessionId);
+        void requestClient.closeSession(response.sessionId).catch(() => undefined);
+        return;
+      }
       options.activateSession(response.sessionId, requestWorkspace, false);
       await options.ensureRuntime(requestClient, response.sessionId, requestWorkspace);
       if (!options.runtimeReady(response.sessionId)) return;

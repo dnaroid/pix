@@ -99,12 +99,10 @@ describe("session activity summary", () => {
     expect(summaryMap.get("b")?.activeSubagents).toBe(1);
   });
 
-  it("rejects stale or pre-forget snapshots while accepting a newer reopened-session snapshot", () => {
-    expect(shouldAcceptSessionActivitySnapshot(90, 100, undefined)).toBe(false);
-    expect(shouldAcceptSessionActivitySnapshot(100, 100, undefined)).toBe(true);
-    expect(shouldAcceptSessionActivitySnapshot(110, 100, undefined)).toBe(true);
-    expect(shouldAcceptSessionActivitySnapshot(110, undefined, 110)).toBe(false);
-    expect(shouldAcceptSessionActivitySnapshot(111, undefined, 110)).toBe(true);
+  it("orders snapshots only within an attachment", () => {
+    expect(shouldAcceptSessionActivitySnapshot(90, 100)).toBe(false);
+    expect(shouldAcceptSessionActivitySnapshot(100, 100)).toBe(true);
+    expect(shouldAcceptSessionActivitySnapshot(110, 100)).toBe(true);
+    expect(shouldAcceptSessionActivitySnapshot(90, undefined)).toBe(true);
   });
 });
-

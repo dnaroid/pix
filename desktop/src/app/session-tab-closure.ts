@@ -13,13 +13,14 @@ export function createSessionTabClosure(
       ...options.tabSessionIds(),
       ...(options.state.sessionId ? [options.state.sessionId] : []),
     ])];
-    options.history.cancel();
+    options.history.reset();
     options.state.setSessionId(null);
     options.state.setRuntimeReady(false);
     options.state.clearSessionTranscripts();
     const requestClient = options.client();
     if (!requestClient) {
       for (const sessionId of sessionIds) options.clearSessionActivity(sessionId);
+      options.resetSessionActivity();
       return;
     }
     await Promise.allSettled(sessionIds.map(async (sessionId) => {
@@ -31,6 +32,7 @@ export function createSessionTabClosure(
       }
     }));
     options.runtime.reset();
+    options.resetSessionActivity();
   }
 
   async function closeSessionTab(

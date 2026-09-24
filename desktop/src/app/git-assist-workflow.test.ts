@@ -29,7 +29,7 @@ function fixture() {
     newSession: vi.fn(async (_workspace: string) => ({ sessionId: "fix-session" })),
     closeSession: vi.fn(async (_session: string) => {}),
   };
-  const runtime = { ensure: vi.fn(async () => {}), isReady: vi.fn(() => true) };
+  const runtime = { ensure: vi.fn(async (_client: unknown, _sessionId: string) => {}), isReady: vi.fn(() => true) };
   const prompts = { runPromptRequest: vi.fn(async () => {}) };
   const activate = vi.fn(() => "message-1");
   const forget = vi.fn();
@@ -158,6 +158,37 @@ describe("Git review → fix-session handoff", () => {
     created.resolve({ sessionId: "orphan" });
     await pending;
     expect(f.client.closeSession).toHaveBeenCalledWith("orphan");
+    expect(f.forget).toHaveBeenCalledExactlyOnceWith("orphan");
+    expect(f.activate).not.toHaveBeenCalled();
+  });
+  it("does not forget a reopened session when the orphan's close finishes later", async () => {
+    const f = fixture();
+    f.setReview();
+    const ensuring = deferred<void>();
+    const closing = deferred<void>();
+    const owners = new Map<string, { runtime: string; activity: string }>();
+    f.runtime.ensure.mockImplementationOnce(async (_client: unknown, sessionId: string) => {
+      owners.set(sessionId, { runtime: "orphan", activity: "orphan" });
+      await ensuring.promise;
+    });
+    f.forget.mockImplementation((sessionId: string) => { owners.delete(sessionId); });
+    f.client.closeSession.mockReturnValueOnce(closing.promise);
+
+    const pending = f.assist.resolveReviewInNewSession();
+    await vi.waitFor(() => expect(f.runtime.ensure).toHaveBeenCalledOnce());
+    f.changeWorkspace("/two");
+    ensuring.resolve(undefined);
+    await vi.waitFor(() => expect(f.client.closeSession).toHaveBeenCalledExactlyOnceWith("fix-session"));
+    expect(f.forget).toHaveBeenCalledExactlyOnceWith("fix-session");
+    expect(owners.has("fix-session")).toBe(false);
+
+    // Reattach the same ID while the captured old client's close is still pending.
+    const reopened = { runtime: "replacement", activity: "replacement" };
+    owners.set("fix-session", reopened);
+    closing.resolve(undefined);
+    await pending;
+    expect(owners.get("fix-session")).toBe(reopened);
+    expect(f.forget).toHaveBeenCalledTimes(1);
     expect(f.activate).not.toHaveBeenCalled();
   });
 });

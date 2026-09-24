@@ -52,6 +52,7 @@ export function createDesktopSessionOrchestration(options: DesktopSessionOrchest
     setOperationRunning: options.setOperationRunning,
     runtime: options.sessionServices.runtime,
     activity: options.sessionServices.activity,
+    history: options.sessionServices.history,
     registry: options.projectServices.registry,
     git: options.projectServices.git,
     metadata: options.sessionServices.metadata,

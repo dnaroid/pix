@@ -10,6 +10,7 @@ type DraftModelOverride = { modelRef: string; thinkingLevel: string } | null;
 
 type SessionCoordinatorRef = {
   clearActivity: (sessionId: string) => void;
+  resetActivity: () => void;
   forgetRuntime: (sessionId: string) => void;
 };
 
@@ -114,6 +115,7 @@ export function createDesktopSessionTransitionServices(
     history: options.sessions.history,
     closeProjectSelector: options.closeProjectSelector,
     clearSessionActivity: (sessionId) => options.sessionCoordinator().clearActivity(sessionId),
+    resetSessionActivity: () => options.sessionCoordinator().resetActivity(),
     forgetRuntime: (sessionId) => options.sessionCoordinator().forgetRuntime(sessionId),
     retargetWorkbenchAnchors: (sourceSessionId, targetSessionId) =>
       options.workbenchController().retargetSessionAnchors(sourceSessionId, targetSessionId),

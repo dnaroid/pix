@@ -30,20 +30,29 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   let sessionUsageRefreshing = $state<Set<string>>(new Set());
   let sessionUsageFailed = $state<Set<string>>(new Set());
 
-  const statusGenerationsBySession = new Map<string, RuntimeStatusGenerations>();
-  const dcpStatsRequestGenerations = new Map<string, number>();
-  const sessionUsageRequestGenerations = new Map<string, number>();
+  type StatusOwner = { generations: RuntimeStatusGenerations; dcp: number; usage: number };
+  const owners = new Map<string, StatusOwner>();
   let lifecycleGeneration = 0;
+
+  function ownerFor(sessionId: string): StatusOwner {
+    let owner = owners.get(sessionId);
+    if (!owner) {
+      owner = { generations: EMPTY_RUNTIME_STATUS_GENERATIONS, dcp: 0, usage: 0 };
+      owners.set(sessionId, owner);
+    }
+    return owner;
+  }
 
   async function refreshStatus(sessionId: string, refreshModelUsage = false): Promise<void> {
     const requestClient = options.client();
     if (!requestClient || !options.isReady(sessionId)) return;
     const requestLifecycleGeneration = lifecycleGeneration;
+    const owner = ownerFor(sessionId);
     const request = beginRuntimeStatusRefresh(
-      statusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
+      owner.generations,
       refreshModelUsage,
     );
-    statusGenerationsBySession.set(sessionId, request.generations);
+    owner.generations = request.generations;
 
     if (refreshModelUsage) {
       const next = new Set(modelUsageRefreshing);
@@ -53,12 +62,12 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
 
     try {
       const next = await requestClient.runtimeStatus(sessionId, refreshModelUsage);
-      if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client() || !options.isReady(sessionId)) return;
+      if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client() || !options.isReady(sessionId) || owners.get(sessionId) !== owner) return;
       const merged = mergeRuntimeStatusResponse(
         statuses.get(sessionId),
         next,
         isLatestRuntimeStatusRefresh(
-          statusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
+          owner.generations,
           request.snapshotGeneration,
           request.quotaGeneration,
         ),
@@ -71,9 +80,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // Runtime chrome is best-effort. Keep the previous snapshot when the
       // private status request races a session reload or transient transport failure.
     } finally {
-      const live = statusGenerationsBySession.get(sessionId);
       if (requestLifecycleGeneration === lifecycleGeneration && requestClient === options.client()
-        && request.quotaGeneration !== undefined && live?.quota === request.quotaGeneration) {
+        && owners.get(sessionId) === owner && request.quotaGeneration !== undefined && owner.generations.quota === request.quotaGeneration) {
         const next = new Set(modelUsageRefreshing);
         next.delete(sessionId);
         modelUsageRefreshing = next;
@@ -88,11 +96,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       const previous = statuses.get(notification.sessionId);
       const dcpContextMap = newerDcpContextMap(previous?.dcpContextMap, incoming);
       if (incoming && dcpContextMap !== incoming) return true;
-      const generation = beginRuntimeStatusRefresh(
-        statusGenerationsBySession.get(notification.sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
-        false,
-      );
-      statusGenerationsBySession.set(notification.sessionId, generation.generations);
+      const owner = ownerFor(notification.sessionId);
+      owner.generations = beginRuntimeStatusRefresh(owner.generations, false).generations;
       const nextStatuses = new Map(statuses);
       nextStatuses.set(notification.sessionId, {
         ...previous,
@@ -117,11 +122,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // This scalar is sampled at the same model boundary as context usage.
       // Advance the snapshot generation as well so an older runtime_status
       // request cannot overwrite the newer saved-token estimate.
-      const generation = beginRuntimeStatusRefresh(
-        statusGenerationsBySession.get(notification.sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
-        false,
-      );
-      statusGenerationsBySession.set(notification.sessionId, generation.generations);
+      const owner = ownerFor(notification.sessionId);
+      owner.generations = beginRuntimeStatusRefresh(owner.generations, false).generations;
       const nextStatuses = new Map(statuses);
       nextStatuses.set(
         notification.sessionId,
@@ -145,11 +147,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     // A pushed context snapshot is newer than any runtime-status request that
     // started before this notification. Advance only the snapshot generation;
     // an in-flight quota refresh may still merge its quota fields later.
-    const generation = beginRuntimeStatusRefresh(
-      statusGenerationsBySession.get(notification.sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS,
-      false,
-    );
-    statusGenerationsBySession.set(notification.sessionId, generation.generations);
+    const owner = ownerFor(notification.sessionId);
+    owner.generations = beginRuntimeStatusRefresh(owner.generations, false).generations;
 
     const nextStatuses = new Map(statuses);
     nextStatuses.set(
@@ -165,8 +164,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     if (!requestClient || !options.isReady(sessionId) || dcpStatsRefreshing.has(sessionId)) return;
 
     const requestLifecycleGeneration = lifecycleGeneration;
-    const generation = (dcpStatsRequestGenerations.get(sessionId) ?? 0) + 1;
-    dcpStatsRequestGenerations.set(sessionId, generation);
+    const owner = ownerFor(sessionId);
+    const generation = ++owner.dcp;
     const refreshing = new Set(dcpStatsRefreshing);
     refreshing.add(sessionId);
     dcpStatsRefreshing = refreshing;
@@ -176,7 +175,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         requestLifecycleGeneration !== lifecycleGeneration
         || requestClient !== options.client()
         || !options.isReady(sessionId)
-        || dcpStatsRequestGenerations.get(sessionId) !== generation
+        || owners.get(sessionId) !== owner || owner.dcp !== generation
       ) return;
       const previous = statuses.get(sessionId);
       if (!previous) return;
@@ -191,7 +190,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // DCP telemetry is best-effort; keep the last successfully loaded snapshot.
     } finally {
       if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client()
-        || dcpStatsRequestGenerations.get(sessionId) !== generation) return;
+        || owners.get(sessionId) !== owner || owner.dcp !== generation) return;
       const next = new Set(dcpStatsRefreshing);
       next.delete(sessionId);
       dcpStatsRefreshing = next;
@@ -203,8 +202,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     if (!requestClient || !options.isReady(sessionId) || sessionUsageRefreshing.has(sessionId)) return;
 
     const requestLifecycleGeneration = lifecycleGeneration;
-    const generation = (sessionUsageRequestGenerations.get(sessionId) ?? 0) + 1;
-    sessionUsageRequestGenerations.set(sessionId, generation);
+    const owner = ownerFor(sessionId);
+    const generation = ++owner.usage;
     const refreshing = new Set(sessionUsageRefreshing);
     refreshing.add(sessionId);
     sessionUsageRefreshing = refreshing;
@@ -219,7 +218,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         requestLifecycleGeneration !== lifecycleGeneration
         || requestClient !== options.client()
         || !options.isReady(sessionId)
-        || sessionUsageRequestGenerations.get(sessionId) !== generation
+        || owners.get(sessionId) !== owner || owner.usage !== generation
         || next.sessionId !== sessionId
       ) return;
       const nextUsage = new Map(sessionUsageBySession);
@@ -230,7 +229,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         requestLifecycleGeneration === lifecycleGeneration
         && requestClient === options.client()
         && options.isReady(sessionId)
-        && sessionUsageRequestGenerations.get(sessionId) === generation
+        && owners.get(sessionId) === owner && owner.usage === generation
       ) {
         const nextFailed = new Set(sessionUsageFailed);
         nextFailed.add(sessionId);
@@ -240,7 +239,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // the UI can distinguish it from runtime warm-up and offer a retry.
     } finally {
       if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client()
-        || sessionUsageRequestGenerations.get(sessionId) !== generation) return;
+        || owners.get(sessionId) !== owner || owner.usage !== generation) return;
       const next = new Set(sessionUsageRefreshing);
       next.delete(sessionId);
       sessionUsageRefreshing = next;
@@ -248,15 +247,9 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   function forget(sessionId: string): void {
-    const generations = statusGenerationsBySession.get(sessionId) ?? EMPTY_RUNTIME_STATUS_GENERATIONS;
-    // Keep a monotonic tombstone. Deleting this entry would let an old request
-    // and a reopened runtime both look like generation one (ABA).
-    statusGenerationsBySession.set(sessionId, {
-      snapshot: generations.snapshot + 1,
-      quota: generations.quota + 1,
-    });
-    dcpStatsRequestGenerations.set(sessionId, (dcpStatsRequestGenerations.get(sessionId) ?? 0) + 1);
-    sessionUsageRequestGenerations.set(sessionId, (sessionUsageRequestGenerations.get(sessionId) ?? 0) + 1);
+    // Pending continuations retain their owner object; a reopened ID gets a
+    // different owner even when its local counters start from one again.
+    owners.delete(sessionId);
     if (statuses.has(sessionId)) {
       const next = new Map(statuses);
       next.delete(sessionId);
@@ -291,9 +284,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
 
   function reset(): void {
     lifecycleGeneration += 1;
-    statusGenerationsBySession.clear();
-    dcpStatsRequestGenerations.clear();
-    sessionUsageRequestGenerations.clear();
+    owners.clear();
     statuses = new Map();
     modelUsageRefreshing = new Set();
     dcpStatsRefreshing = new Set();
@@ -303,6 +294,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   return {
+    get ownedSessionCount() { return owners.size; },
     get statuses() { return statuses; },
     get modelUsageRefreshing() { return modelUsageRefreshing; },
     get dcpStatsRefreshing() { return dcpStatsRefreshing; },

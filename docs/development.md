@@ -70,7 +70,10 @@ npm --prefix desktop test
 
 `npm run watch:all` watches Pix, ACP, the bundled suite and Desktop. It keeps
 the last working Desktop process alive while a replacement compiles and only
-switches after the complete queued build succeeds.
+switches after the complete queued build succeeds. On macOS it prunes superseded
+temporary `.app` copies after builds/restarts and safely reclaims abandoned
+watcher temp roots at the next startup. Roots containing a running app or owned
+by another watcher are retained; do not delete them while Desktop is active.
 
 ## Release builds
 

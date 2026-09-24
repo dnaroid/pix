@@ -11,6 +11,10 @@ type SessionCoordinatorBridge = {
   handleUpdate: (notification: SessionNotification) => void;
   handleState: (notification: SessionStateNotification) => void;
   resetAfterDisconnect: () => void;
+  openActivity: (sessionId: string) => string;
+  beginActivityRequest: (owner: string) => void;
+  completeActivityRequest: (owner: string, sessionId: string) => void;
+  cancelActivityRequest: (owner: string) => void;
 };
 
 type PromptRuntimeBridge = {
@@ -37,6 +41,10 @@ export function createDesktopConnectionServices(options: DesktopConnectionServic
     workspace: options.workspace,
     onSessionUpdate: (notification) => options.sessionCoordinator().handleUpdate(notification),
     onSessionState: (notification) => options.sessionCoordinator().handleState(notification),
+    onOpenActivity: (sessionId) => options.sessionCoordinator().openActivity(sessionId),
+    onBeginActivityRequest: (owner) => options.sessionCoordinator().beginActivityRequest(owner),
+    onCompleteActivityRequest: (owner, sessionId) => options.sessionCoordinator().completeActivityRequest(owner, sessionId),
+    onCancelActivityRequest: (owner) => options.sessionCoordinator().cancelActivityRequest(owner),
     onQueueState: (state) => options.promptRuntime().handleQueueState(state),
     onQueueConsumed: (sessionId, message) => options.promptRuntime().handleQueueConsumed(sessionId, message),
     onElicitation: options.requestElicitation,
