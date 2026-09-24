@@ -131,9 +131,20 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     }
 
     try {
+      const preview = await invoke<ProjectFilePreview>("read_local_file", { path });
+      if (!state.fileLoadIsCurrent(generation)) return;
+      state.show({ kind: "file", file: preview }, navigation);
+      return;
+    } catch {
+      // Directories, binary/non-UTF-8 files and files beyond the bounded Preview
+      // limit retain the existing system-opener fallback.
+      if (!state.fileLoadIsCurrent(generation)) return;
+    }
+
+    try {
       await invoke("open_local_file", { path });
     } catch (error) {
-      options.reportError(error);
+      if (state.fileLoadIsCurrent(generation)) options.reportError(error);
     }
   }
 

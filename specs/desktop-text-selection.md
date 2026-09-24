@@ -32,10 +32,10 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 ## Behavior
 
 1. Desktop application chrome is non-selectable by default.
-2. Transcript message/content text opts back into normal document text selection. Pointer selection that starts in the transcript cannot continue selecting sidebar, tab, toolbar, status-bar, or other control labels outside that content surface.
-3. The composer textarea and other editable text controls opt into native text selection independently of the transcript.
+2. Transcript message/content text and text-file Preview surfaces opt back into normal document text selection. Pointer selection that starts in either surface cannot continue selecting sidebar, tab, toolbar, status-bar, or other control labels outside that content surface.
+3. The composer textarea and other editable text controls opt into native text selection independently of those document surfaces.
 4. With focus in the composer textarea, `Cmd+A` on macOS or `Ctrl+A` on other desktop platforms selects the composer draft only.
-5. With focus outside an editable text control, native Select All is constrained to the selectable transcript content because surrounding desktop chrome is non-selectable.
+5. With focus outside an editable text control, native Select All is constrained to selectable document content because surrounding desktop chrome is non-selectable.
 6. Text-entry inputs and contenteditable editors retain their native local Select All behavior when focused.
 7. Buttons, selects, disclosure summaries, tabs, options, checkbox/radio controls, and menu-item chrome remain non-selectable even when nested inside an otherwise selectable content surface.
 8. Existing per-component `select-none` behavior remains authoritative for interaction labels that intentionally live inside the transcript, such as disclosure summaries.
@@ -45,6 +45,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 
 - `desktop/src/styles.css`
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/components/PromptComposer.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/WorkbenchTabs.svelte`
@@ -61,4 +62,4 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 
 - Confirmed by code: `PromptComposer.svelte` uses a native textarea, so focused Select All remains local to the draft without a custom keyboard handler.
 - Confirmed by code: `TranscriptPane.svelte` exposes the `.transcript-pane` document-style conversation surface and already marks disclosure summaries as non-selectable controls.
-- Confirmed by implementation: global desktop CSS defaults the app root to `user-select: none`, opts `.transcript-pane` and editable controls back into text selection, and explicitly keeps common interaction roles non-selectable.
+- Confirmed by implementation: global desktop CSS defaults the app root to `user-select: none`, opts `.transcript-pane`, `.preview-text-surface`, and editable controls back into text selection, and explicitly keeps common interaction roles non-selectable.

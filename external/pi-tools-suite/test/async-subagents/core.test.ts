@@ -545,7 +545,7 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "oracle-openai", "oracle-zai", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
 		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
@@ -655,6 +655,8 @@ describe.serial("subagent type config", () => {
 			"frontier-review",
 			"implement",
 			"oracle",
+			"oracle-openai",
+			"oracle-zai",
 			"research",
 			"ui-qa",
 			"verify",

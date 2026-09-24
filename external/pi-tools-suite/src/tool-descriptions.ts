@@ -10,14 +10,12 @@ export type ToolDescription = {
 	promptGuidelines?: string[];
 };
 
-export type RepoDiscoveryCommand = "architecture" | "structure" | "ast" | "search" | "explain" | "deps";
+export type RepoDiscoveryCommand = "ask" | "context" | "audit" | "architecture" | "structure" | "ast" | "search" | "explain" | "deps";
 
 export type RepoDiscoveryToolDescription = ToolDescription & Required<Pick<ToolDescription, "promptSnippet" | "promptGuidelines">> & {
 	command: RepoDiscoveryCommand;
 	targetDescription?: string;
 };
-
-export type RepoKnowledgeToolDescription = ToolDescription & Required<Pick<ToolDescription, "promptSnippet" | "promptGuidelines">>;
 
 export type ToolDescriptionSetOptions = {
 	repoDiscovery?: boolean;
@@ -89,7 +87,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"For other work, use subagents action='spawn' for economical execution or context isolation, including one bounded sequential task or explicit delegate/parallelize/split work requests. " +
 				SUBAGENT_TYPE_SELECTION_GUIDANCE + " Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
-					? "For one semantic code-discovery question, use repo_search; for independent tracks/hypotheses/review axes, delegate even when repo_* tools exist. Read result only after completion when findings are needed."
+					? "For general repo discovery, start with repo_ask; use repo_search for focused code lookup. Delegate independent tracks/hypotheses/review axes even when repo_* tools exist. Read result only after completion when findings are needed."
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, delegate bounded research tracks for broad discovery rather than flooding parent context. Read result only after completion when findings are needed."),
 			promptGuidelines: [
 				"Treat every real UI QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"ui-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, UI automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-UI checks.",
@@ -98,7 +96,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"After ui-qa completes a test, preserve its clickable screenshot, terminal capture, video, trace, and other evidence links in the final user-facing response whenever those artifacts exist.",
 				SUBAGENT_DELEGATION_GUIDANCE,
 				repoDiscovery
-					? "For one discovery question, use repo_search; spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
+					? "For general discovery, start with repo_ask; use repo_search for focused code lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
 					: "For one small discovery question, use direct read/grep; when repo_* tools are unavailable, delegate scoped research to keep broad search output outside the parent context.",
 				repoDiscovery
 					? "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks, prefer focused agents over serial parent-context work."
@@ -156,6 +154,27 @@ export const ASYNC_SUBAGENT_TOOL_DESCRIPTIONS_WITH_REPO = asyncSubagentToolDescr
 
 export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 	{
+		name: "repo_ask", label: "Repo Ask", command: "ask",
+		description: "First choice for general indexed repo discovery. Produces an evidence-cited answer using read-only idx tools; requires a configured LLM.",
+		promptSnippet: "Start general discovery with repo_ask and budget 2000. Verify cited primary sources before editing; when the LLM is unavailable, use repo_search with lexical mode.",
+		promptGuidelines: ["Answer one question, then stop; mandatory retrieval warnings and truncation hints are evidence, not optional prose. No offline ask mode or cursor continuation."],
+	},
+	{
+		name: "repo_context", label: "Repo Context", command: "context",
+		description: "Compact indexed documents plus implementation and tests for a behavior/contract question.",
+		promptSnippet: "Before a material behavior change, find the primary contract with repo_context; scope narrowly and read returned sources directly.",
+		promptGuidelines: ["Documents remain searchable even without frontmatter. Retrieval rankings are navigation, not authoritative contracts; an empty result does not prove no contract exists."],
+	},
+	{
+		name: "repo_audit", label: "Repo Audit", command: "audit",
+		description: "Task-scoped documentation relationship signals for changed paths; read-only, not proof of semantic correctness.",
+		promptSnippet: "After a material behavior change, run repo_audit with only this task's changed paths; compare relevant source documents with code/tests and fix real semantic drift.",
+		promptGuidelines: [
+			"Keep or create the primary spec in the same task; reviewed no-impact is valid. Skip for mechanical edits. Audit may use a stale indexed snapshot; read primary sources and verify semantics.",
+			"For a new spec, use the non-overwriting template installed by idx init at .indexer-cli/spec-template.md. Declare kind: spec and the intended status in frontmatter; list project-root-relative paths under Implementation and Tests. If the template is absent, ask before running setup instead of inventing one.",
+		],
+	},
+	{
 		name: "repo_architecture",
 		label: "Repo Architecture",
 		command: "architecture",
@@ -190,7 +209,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		name: "repo_search",
 		label: "Repo Search",
 		command: "search",
-		description: "Indexed hybrid search for behavior when files or symbols are unknown. First pass: at most 3 results, no --include-content.",
+		description: "Indexed hybrid search across documents and code when the owner is unknown. First pass: at most 3 results, no --include-content.",
 		promptSnippet: "Search behavior, not synonyms; keep hybrid unless lexical matches mislead. Read best returned ranges with offset/limit, not whole files.",
 		promptGuidelines: [
 			"Use --path-prefix/--dedupe-file when appropriate. Expand only for a named gap; use Grep for exact identifiers.",
@@ -223,26 +242,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 	},
 ];
 
-export const REPO_KNOWLEDGE_TOOL_DESCRIPTION: RepoKnowledgeToolDescription = {
-	name: "repo_knowledge",
-	label: "Repo Knowledge",
-	description:
-		"Project behavioral knowledge/spec maintenance backed by idx. Query contracts, review task-scoped impact, discover documents, classify/relate metadata, and prepare or accept reviewed verification receipts. Durable review/check and manifest workflows use the explicit idx CLI fallback. This tool is exposed only when idx is available and the project is indexed.",
-	promptSnippet:
-		"Use repo_knowledge for project behavior/contracts and their maintenance. Prefer action=context when implementation/tests/freshness matter and action=search for spec-only retrieval. Before a material behavior change, find the primary contract; keep it aligned in the same task, then run task-scoped action=impact. For verification, action=prepare creates an unaccepted version 1 draft; review and complete that receipt before action=verify with receiptPath. Skip this lifecycle for mechanical/non-behavioral edits.",
-	promptGuidelines: [
-		"repo_knowledge treats primary source specs/contracts as authoritative; summaries, embeddings, rankings and relation candidates are routing evidence only. action=record classifies metadata but never verifies semantics.",
-		"repo_knowledge freshness is hash-bound review state, not proof of semantic correctness. Non-fresh sources require review; search/context are bounded and may report truncation or degraded retrieval, and an empty result does not prove no contract exists. idx uses no hidden generative LLM judge.",
-		"For a material behavior change, use repo_knowledge before/during implementation, keep the governing spec aligned in the same task, create a focused primary spec only when needed, then run task-scoped action=impact and reconcile uncovered/new/moved documents; changed code never rewrites spec semantics automatically.",
-		"repo_knowledge action=prepare never verifies. Review and complete its version 1 receipt against the final source, relations, code and tests before action=verify with receiptPath; checks run only when explicitly supplied in checks, and commands embedded in a receipt are never executed.",
-		"repo_knowledge never turns similarity into a durable relation; reviewed no-impact is valid. For durable impact obligations, CI gating, or optional manifests, use shell at the project root with idx wiki review collect/list/resolve, idx wiki check, or idx wiki manifest; manifests declare metadata/relations and never import verification.",
-	],
-};
-
-export const REPO_DISCOVERY_TOOL_NAMES = [
-	...REPO_DISCOVERY_TOOLS.map((tool) => tool.name),
-	REPO_KNOWLEDGE_TOOL_DESCRIPTION.name,
-];
+export const REPO_DISCOVERY_TOOL_NAMES = REPO_DISCOVERY_TOOLS.map((tool) => tool.name);
 
 export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	name: "todo",
@@ -354,14 +354,14 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 			name: "Edit",
 			label: "Edit",
 			description: repoDiscovery
-				? "Replace exact text in an existing file. Use for surgical edits; use Write only for whole-file replacement. After a material behavior change, do not finish until repo_knowledge impact reviews this task's changed paths and the authoritative spec is updated or created and verified; skip that lifecycle for mechanical/non-behavioral edits."
+				? "Replace exact text in an existing file. Use for surgical edits; use Write only for whole-file replacement. After a material behavior change, keep/create the primary spec and run task-scoped repo_audit plus semantic verification; skip for mechanical edits."
 				: "Replace exact text in an existing file. Use for surgical edits; use Write only for intentional whole-file replacement.",
 		},
 		Write: {
 			name: "Write",
 			label: "Write",
 			description: repoDiscovery
-				? "Create or overwrite a file with complete contents. Use only for intentional whole-file writes. When creating/changing material project behavior, keep or create the primary spec in the same task and finish with task-scoped repo_knowledge impact + semantic verification; mechanical/non-behavioral writes do not require it."
+				? "Create or overwrite a file with complete contents. Use only for intentional whole-file writes. For material behavior changes, keep/create the primary spec in the same task and finish with task-scoped repo_audit plus semantic verification; skip for mechanical edits."
 				: "Create or overwrite a file with complete contents. Use only when replacing the whole file is intended.",
 		},
 		Bash: {
@@ -400,7 +400,7 @@ export function codexAliasToolDescriptions(options: ToolDescriptionSetOptions | 
 	applyPatch: {
 		name: "apply_patch",
 		label: "apply_patch",
-		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.${repoDiscovery ? " After a material behavior change, keep/create the authoritative primary spec in the same task and finish with task-scoped repo_knowledge impact plus semantic verification; skip this for mechanical/non-behavioral edits." : ""}
+		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.${repoDiscovery ? " After a material behavior change, keep/create the primary spec in the same task and finish with task-scoped repo_audit plus semantic verification; skip for mechanical/non-behavioral edits." : ""}
 
 Begin-patch format:
 *** Begin Patch

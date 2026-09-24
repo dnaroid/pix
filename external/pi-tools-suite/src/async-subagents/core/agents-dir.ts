@@ -48,6 +48,7 @@ const KNOWN_FRONTMATTER_KEYS = new Set([
 	"modelByParent",
 	"forParentModels",
 	"notForParentModels",
+	"requireDifferentProvider",
 	"thinking",
 	"tools",
 	"extraArgs",

@@ -7,6 +7,7 @@ import {
   externalLink,
   homeFileLink,
   linkForDestination,
+  localFileLink,
   localMedia,
   mediaKindForPath,
   normalizeExternalHref,
@@ -51,9 +52,16 @@ export function renderInline(
         const code = text.slice(index + markerLength, end).replace(/\n/g, " ");
         const codeLabel = `<code>${escapeHtml(code)}</code>`;
         const homePath = allowLinks ? normalizeInlineHomeFilePath(code) : undefined;
-        const projectReference = allowLinks && !homePath ? normalizeInlineProjectFileReference(code) : undefined;
+        const localPath = allowLinks && !homePath
+          ? normalizeLocalFileDestination(code.replace(/:\d+(?::\d+)?$/u, ""))
+          : undefined;
+        const projectReference = allowLinks && !homePath && !localPath
+          ? normalizeInlineProjectFileReference(code)
+          : undefined;
         if (homePath) {
           output += homeFileLink(homePath, codeLabel);
+        } else if (localPath) {
+          output += localFileLink(localPath, codeLabel);
         } else if (projectReference) {
           output += projectFileLink(projectReference.path, codeLabel, projectReference.range);
         } else {

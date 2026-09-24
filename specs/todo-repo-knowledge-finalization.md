@@ -32,7 +32,7 @@ Keep repo-knowledge maintenance as a low-noise completion safeguard instead of a
 
 - Todo remains the finalization boundary: the reminder appears after an earlier todo is completed and before the remaining final active todo is closed.
 - Projects without repo-aware availability receive no repo-knowledge todo reminder.
-- The reminder does not replace the normal `repo_knowledge` prompt guidance; it is a last-stage safeguard when the agent reaches the final report step.
+- The reminder does not replace normal `repo_context`/`repo_audit` guidance; it is a last-stage safeguard when the agent reaches the final report step.
 - File mutations themselves carry no repo-knowledge checkpoint text.
 
 ## Related files

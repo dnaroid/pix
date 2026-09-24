@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import panelSource from "./IdxPanel.svelte?raw";
 import runtimeSource from "./idx-panel-runtime-controller.svelte.ts?raw";
+import querySource from "./idx-panel-query-controller.svelte.ts?raw";
+import auditSource from "./idx-panel-audit-controller.svelte.ts?raw";
 
 describe("IdxPanel managed installation", () => {
   it("offers managed IDX installation when IDX is unavailable", () => {
@@ -32,5 +34,20 @@ describe("IdxPanel managed installation", () => {
     expect(runtimeSource).toContain("let observedWorkspace: string | undefined;");
     expect(runtimeSource).toContain("if (requestWorkspace === observedWorkspace) return;");
     expect(runtimeSource).toContain("observedWorkspace = requestWorkspace;");
+  });
+});
+
+describe("IDX v2 panel contract", () => {
+  it("offers document search, context, ask and an explicit read-only task audit without wiki controls", () => {
+    expect(panelSource).toContain('["knowledge", "Documents"]');
+    expect(panelSource).toContain('["ask", "Ask"]');
+    expect(panelSource).toContain("value={auditState.pathsInput}");
+    expect(panelSource).toContain("auditController.setPathsInput(event.currentTarget.value)");
+    expect(panelSource).toContain("<IdxOutput text={auditOutput}");
+    expect(panelSource).not.toContain("wikiStatus");
+    expect(panelSource).not.toContain("runKnowledgeAction");
+    expect(querySource).toContain('kind: "ask" as const, question: text, budget: state.askBudget');
+    expect(querySource).not.toContain("includeSecondary");
+    expect(auditSource).toContain('invoke<IdxCommandResult>("idx_audit", { request: { workspace, paths } })');
   });
 });

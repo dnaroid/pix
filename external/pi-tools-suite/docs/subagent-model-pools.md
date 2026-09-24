@@ -6,7 +6,7 @@ integration, decisions and the final answer. Actual savings depend on worker
 quality, retries and how much work the parent repeats; the configuration is
 not a price oracle.
 
-## Seven execution modes
+## Execution modes
 
 - `research`: read-only evidence gathering, searches and focused review questions.
 - `implement`: bounded code, documentation, test and frontend changes.
@@ -21,6 +21,9 @@ not a price oracle.
   assume release authority. Available in each bundled pool where a declared
   candidate intersects: GLM-5.3 in `cheap`/`deep`, GPT-6-Sol in `gpt`/`deep`.
 - `oracle`: a deliberate strong second opinion, not automatic worker escalation.
+- `oracle-openai` / `oracle-zai`: explicitly cross-provider, read-only strong
+  second opinions, offered only to Z.ai / OpenAI Codex parents respectively.
+  These are not substitutes for routine review or the compatible `oracle` role.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
 agent is warranted when it adds a durable contract, capabilities or resources,
@@ -96,8 +99,19 @@ Oracle prefers another provider when possible, but still respects the pool.
 It never substitutes an ordinary cheap candidate merely to avoid a selection
 error. A single-provider pool cannot promise cross-provider independence.
 
+For a guaranteed different provider, use `oracle-openai` from a Z.ai parent or
+`oracle-zai` from an OpenAI Codex parent. They declare only Astra and GLM-5.3
+respectively. Their `requireDifferentProvider: true` profile contract rejects
+unknown/unsupported parent gates and same-provider explicit task/CLI/forced
+overrides; it removes same-provider candidates from the initial and fallback
+chain (including legacy candidates). If the pool intersection is empty or no
+candidate is available/authenticated, selection errors before launch. The
+read-only tool list and prompt are behavioral restrictions, not a filesystem
+sandbox. The original `oracle` remains best-effort for saved callers.
+
 Explicit task `model`, CLI `--model`, and `FORCE_CURRENT_MODEL` remain deliberate
-overrides: they bypass the pool and do not add automatic fallback candidates.
+overrides: they bypass the pool and do not add automatic fallback candidates,
+but cannot bypass `requireDifferentProvider` on strict profiles.
 The parent should not use these to evade the configured budget. The pool is
 a selection policy, not a security boundary against explicit overrides.
 
@@ -122,6 +136,9 @@ optional deny-list; deny wins when both match. These fields accept model
 patterns such as `zai/*` and affect the parent catalog, explicit role
 validation, and automatic routing. They do not change which model the child
 runs on; `models` / legacy model selectors still own child model selection.
+`requireDifferentProvider` is a separate opt-in runtime invariant: a known
+parent `provider/model` is mandatory, and every selectable child must have a
+different provider, even under explicit model overrides.
 
 Legacy `model` plus `fallbackModels` and `modelByParent` still load when they are
 declared in an agent Markdown file. New profile `models` replaces inherited

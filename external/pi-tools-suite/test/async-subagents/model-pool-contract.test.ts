@@ -104,7 +104,7 @@ describe.serial("model-pool selection contract", () => {
 	test("bundled worker profiles keep their configured model and thinking contracts", () => {
 		const { cwd } = fixture();
 		const config = loadSubagentConfig(cwd, {});
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "oracle-openai", "oracle-zai", "research", "ui-qa", "verify"]);
 		expect(config.types.implement.models).toEqual(["zai/glm-5.3-flash", "openai-codex/gpt-6-sol"]);
 		expect(config.types.implement.thinking).toBe("high");
 		expect(config.types.research.models).toEqual(["zai/glm-5-turbo", "openai-codex/gpt-6-luna"]);
@@ -162,7 +162,7 @@ describe.serial("model-pool selection contract", () => {
 		writePresets(cwd, { cheap: { description: "project cheap", models: ["zai/glm-5-turbo"] } });
 		const config = loadSubagentConfig(cwd, {});
 		expect(config.presets?.cheap).toEqual({ description: "project cheap", models: ["zai/glm-5-turbo"] });
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "oracle-openai", "oracle-zai", "research", "ui-qa", "verify"]);
 		expect(resolve(config, config.presets!.cheap).task.model).toBe("zai/glm-5-turbo");
 	});
 

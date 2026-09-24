@@ -774,7 +774,7 @@ describe.serial("todo extension lifecycle", () => {
 
 			const completed = await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
 			expect(completed.content[0].text).toContain("Before completing the final todo");
-			expect(completed.content[0].text).toContain("reconcile affected specs and repo knowledge");
+			expect(completed.content[0].text).toContain("run task-scoped repo_audit on changed paths");
 			expect(completed.content[0].text).toContain("skip for mechanical changes");
 		} finally {
 			process.env.PATH = previousPath;
@@ -805,7 +805,7 @@ describe.serial("todo extension lifecycle", () => {
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "implementing" }, undefined, undefined, ctx);
 
 			const completed = await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
-			expect(completed.content[0].text).not.toContain("reconcile affected specs and repo knowledge");
+			expect(completed.content[0].text).not.toContain("run task-scoped repo_audit on changed paths");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

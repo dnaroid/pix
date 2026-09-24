@@ -13,7 +13,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
 - `src/session-recovery` — branch- and compaction-aware `session_overview`, `session_read_section`, `session_search`, and `session_recovery_context` tools for bounded recovery from Pi's raw append-only session history
 - `src/context-gateway` — off/observe/enforce result shaping; enforce keeps safe test/build compacts and bounds over-budget structured `web_search` / `web_fetch` provider content while retaining the complete producer details in raw session history for `session-recovery`; active modes also keep a privacy-safe rotated JSONL efficiency log with gross avoided context, recovery/artifact-read tax, conservative net estimates, and finalized provider usage
-- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps` plus the unified `repo_knowledge` contract/wiki tool; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
+- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_ask` / `repo_context` / `repo_audit` / `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, model registration with live route mapping (current Antigravity catalog: Gemini 3.5/3.6/3.7/3.8 Flash, Gemini 3.1 Pro, Claude Sonnet 4.6 Thinking, Claude Opus 4.6 Thinking, GPT-OSS 120B Medium, plus legacy Antigravity aliases and Gemini CLI mirrors), and streaming through the Cloud Code Assist unified gateway
 - `src/opencode-import` — `/opencode-import` for bounded migration of supported OpenCode OpenAI/Codex, GitHub Copilot, Z.ai, and Antigravity credentials into Pi; existing entries are preserved unless `--force` is passed
 - `src/question` — clean-Pi-only native `question` tool with the suite questionnaire contract, multi-select/custom-answer support, and a transient questionnaire widget kept immediately above the real Pi composer; Pix deliberately skips this module because Pix owns its bundled question renderer/Desktop bridge
@@ -31,74 +31,46 @@ Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, 
 
 ## Repository knowledge and spec maintenance
 
-When repo-aware mode is available, `repo_knowledge` is the single model-facing
-surface for behavioral specs/contracts. It wraps the first-class `idx context`
-and `idx wiki` knowledge layer while ordinary file tools remain responsible for
-editing the primary spec documents themselves.
-
-Read/query actions:
-
-- `context` — primary contract + implementation ranges + tests + freshness in a
-  bounded response;
-- `search` / `show` — find or inspect authoritative project knowledge;
-- `status` / `audit` / `catalog` — freshness and project knowledge health;
-- `discover` — classify new/moved/changed document candidates, including
-  low-signal documents through the explicit all-unclassified mode;
-- `impact` — review known and uncovered contract impact for this task's changed
-  paths (preferred) or a Git base fallback.
-
-Verification uses an explicit receipt lifecycle. `prepare` returns or writes an
-unaccepted version 1 receipt draft. Review and complete that draft against the
-final source, relation map, code, tests, and limitations before passing its path
-to `verify`. Optional `checks` are the only commands locally executed by verify;
-commands imported in a receipt are attestations and are never executed.
-
-Metadata mutation actions are explicit: `record`, `relate`, `verify`, and
-`remove`. They do not edit primary documents. The wrapper requires a source
-review acknowledgement before `record`, concrete semantic evidence review before
-`relate`/`verify`, a reviewed receipt path before `verify`, and an explicit
-metadata-only acknowledgement before `remove`.
-
-The compact wrapper does not expose every `idx wiki` maintenance subcommand.
-Use the shell with the project root as `cwd` for durable review obligations
-(`idx wiki review collect/list/resolve`), the deterministic gate
-(`idx wiki check`), and optional portable declarations (`idx wiki manifest`).
-Manifests declare metadata and relations; they never carry verification receipts
-or baselines.
+When repo-aware mode is available, use `repo_ask` for general coding discovery:
+it orchestrates read-only indexed tools and cites evidence. Verify cited primary
+sources before changing code; generated prose is not a contract. If its LLM is
+unavailable, use `repo_search` in lexical mode rather than assuming `ask` has an
+offline mode. Use `repo_context` for a bounded view of project behavior,
+documents, implementation ranges, and tests; use `repo_search` (or `repo_ask`)
+to find project documents alongside code. All indexed Markdown documents are
+searchable subject to ignore/exclusion filters; they are not split into primary
+and secondary collections. Follow truncation/degradation diagnostics and read
+the primary source itself before relying on a summary.
 
 For a **material behavior-changing implementation** in repo-aware mode, the
 model-facing contract is:
 
 1. Find the existing primary behavioral contract before or while implementing.
-2. Keep that primary spec aligned with the intended behavior in the same task.
-   If no suitable primary contract exists, create a focused spec with the normal
-   Edit/Write/`apply_patch` tools before recording its metadata.
-3. After implementation, run task-scoped `repo_knowledge` `impact` on the files
-   changed by this task; review uncovered paths and new/moved documents. Persist
-   obligations with `idx wiki review collect <paths...> --scope <task>` when the
-   decision must survive the session, resolve each with reviewer/rationale/evidence,
-   and use `idx wiki check <paths...> --scope <task>` as the CI gate.
-4. Repair only evidence-backed relations. Similarity or graph proximity alone
-   never authorizes a durable relation, and a reviewed no-impact result is valid.
-5. `record` means classified/indexed, **not verified**. Run `prepare`, perform a
-   substantive review, complete the receipt, and only then run `verify` with
-   `receiptPath`. Preparation alone never verifies. Changed code never
-   automatically rewrites spec semantics.
+2. Keep the governing spec aligned with the intended behavior in the same task.
+   If none exists, create a focused spec with normal file editing tools. For a
+   new spec, use the template installed by `idx init` at
+   `.indexer-cli/spec-template.md` without overwriting existing documents. If
+   absent, ask before running setup rather than inventing a template. Declare
+   `kind: spec` and intended `status` in frontmatter and list
+   project-relative implementation/test paths in the appropriate sections.
+3. After implementation, run task-scoped `repo_audit` with the changed paths.
+   Compare candidate documents against the final code and tests; fix actual
+   semantic drift. An audit candidate is not proof of an error, and a reviewed
+   no-impact result is valid. Changed code never automatically rewrites specs.
 
-Freshness reports exact hash-bound review state, not semantic truth. Retrieval is
-bounded to indexed content: output may be truncated, hybrid mode may degrade with
-diagnostics, and an empty result does not prove that no contract exists. The
-knowledge workflow has no hidden generative LLM judge; semantic decisions remain
-the reviewer's responsibility.
+Retrieval is bounded: output may be truncated, hybrid mode may degrade with
+diagnostics, and an empty result does not prove that no contract exists.
+Document metadata and inferred purpose are navigation aids, not a semantic
+correctness verdict. The reviewer owns the final decision.
 
 Mechanical refactors, typo/formatting edits, exact renames, and other changes
 that do not alter project behavior do not require this knowledge-maintenance
 lifecycle. When `idx` is unavailable or the project is not indexed, none of
 these requirements are injected; use the normal repository workflow instead.
 For repo-aware projects, completing a todo when only the final active todo
-remains adds one compact reminder to reconcile affected specs and repo knowledge
-before closing that final todo. File mutations themselves do not emit knowledge
-reminders.
+remains adds one compact reminder to reconcile affected specs and run a
+task-scoped audit when needed before closing that final todo. File mutations
+themselves do not emit knowledge reminders.
 
 ## Session recovery
 

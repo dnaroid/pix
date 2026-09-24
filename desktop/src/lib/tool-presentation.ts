@@ -28,6 +28,7 @@ const SEARCH_KEYS = [
 ] as const;
 
 const REPO_KEYS = ["target", "path", "args", "maxLines", "maxBytes"] as const;
+const REPO_KNOWLEDGE_KEYS = ["query", "paths", "pathPrefix", "budget", "maxSpecs", "maxCode", "maxTests", "noSemantic", "maxLines", "maxBytes", "outputMode"] as const;
 
 export function toolPresentation(tool: ToolHeaderSource): ToolPresentation {
   const name = toolPresentationName(tool);
@@ -60,6 +61,8 @@ export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown
     if (action === "search") return "search";
     return "inspect";
   }
+  if (name === "repo_ask") return "search";
+  if (name === "repo_context" || name === "repo_audit") return "inspect";
   if (
     ["apply_patch", "edit", "multiedit", "write", "ast_apply", "create_file", "update_file", "delete_file", "remove_file", "move_file", "rename_file"].includes(name)
     || ["edit", "mutation", "write"].includes(kind)
@@ -207,6 +210,9 @@ function headerArgs(name: string, rawInput: unknown): string {
     }
   }
 
+  if (name === "repo_ask" || name === "repo_context" || name === "repo_audit") {
+    return formatArgsInline(args, REPO_KNOWLEDGE_KEYS, name === "repo_audit");
+  }
   if (name.startsWith("repo_")) return formatArgsInline(args, REPO_KEYS);
   if (["grep", "find", "glob", "rg"].includes(name)) return formatArgsInline(args, SEARCH_KEYS);
   if (name.startsWith("ast_")) {
@@ -224,13 +230,15 @@ function argsFromTitle(title: string, name: string): string {
   return trimmed.localeCompare(name, undefined, { sensitivity: "accent" }) === 0 ? "" : trimmed;
 }
 
-function formatArgsInline(args: PlainRecord, preferredKeys?: readonly string[]): string {
+function formatArgsInline(args: PlainRecord, preferredKeys?: readonly string[], showAllPaths = false): string {
   const entries = Object.entries(args).filter(([, value]) => value !== undefined);
   if (preferredKeys?.length) {
     const order = new Map(preferredKeys.map((key, index) => [key, index]));
     entries.sort(([left], [right]) => (order.get(left) ?? Number.MAX_SAFE_INTEGER) - (order.get(right) ?? Number.MAX_SAFE_INTEGER));
   }
-  return entries.map(([key, value]) => `${key}: ${formatInlineValue(value)}`).join(" · ");
+  return entries.map(([key, value]) => `${key}: ${showAllPaths && key === "paths" && Array.isArray(value) && value.every((path) => typeof path === "string")
+    ? `[${value.map((path) => oneLine(path)).join(", ")}]`
+    : formatInlineValue(value)}`).join(" · ");
 }
 
 function formatInlineValue(value: unknown): string {

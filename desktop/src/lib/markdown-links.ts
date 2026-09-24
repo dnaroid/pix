@@ -160,12 +160,23 @@ export function normalizeExternalHref(destination: string): string | undefined {
   }
 }
 
-/** Resolve a file URL to an absolute local path without treating other URL schemes as files. */
+/** Resolve a file URL or raw absolute Markdown destination to a local path. */
 export function normalizeLocalFileDestination(destination: string): string | undefined {
   if (!destination || /[\u0000-\u001f\u007f]/.test(destination)) return undefined;
   let value = destination.trim();
   if (value.startsWith("<") && value.endsWith(">")) value = value.slice(1, -1).trim();
-  if (!/^file:\/\//i.test(value)) return undefined;
+  if (!/^file:\/\//i.test(value)) {
+    const raw = value.split(/[?#]/, 1)[0] ?? "";
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch {
+      return undefined;
+    }
+    if (!decoded || /[\u0000-\u001f\u007f]/.test(decoded)) return undefined;
+    const absolute = decoded.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(decoded) || decoded.startsWith("\\\\");
+    return absolute ? decoded : undefined;
+  }
   let url: URL;
   try {
     url = new URL(value);

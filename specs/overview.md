@@ -43,7 +43,7 @@ Feature/contract specs stored in this directory, grouped by area. Filenames
 carry no numbers; ordering is by group. Additional behavioral documents may
 live beside the subsystem they describe (for example `docs/` or
 `external/pi-tools-suite/docs/`). This hand-maintained index intentionally does
-not duplicate those; Spec Wiki discovers and classifies them independently.
+not duplicate those; IDX document retrieval can find them independently.
 
 **Suite / auth / tools**
 
@@ -58,7 +58,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [ui-qa-agent](./ui-qa-agent.md) | Self-contained browser/TUI/desktop UI QA agent |
 | [model-selector-fallbacks](./model-selector-fallbacks.md) | Ordered fallback arrays for singular model selectors |
 | [context-gateway](./context-gateway.md) | Context Gateway (observe-only result chain) |
-| [repo-knowledge-agent-workflow](./repo-knowledge-agent-workflow.md) | Agent workflow for indexed retrieval, receipt verification, and durable knowledge review |
+| [repo-knowledge-agent-workflow](./repo-knowledge-agent-workflow.md) | Agent workflow for indexed retrieval and task-scoped documentation audits |
 | [todo-repo-knowledge-finalization](./todo-repo-knowledge-finalization.md) | Todo repo knowledge finalization reminder |
 
 **TUI renderer (`src/`)**
@@ -114,7 +114,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [desktop-question-tool](./desktop-question-tool.md) | Desktop Question tool |
 | [desktop-text-selection](./desktop-text-selection.md) | Desktop text-selection scopes |
 | [desktop-user-config-editing](./desktop-user-config-editing.md) | Desktop JSONC user-config editing |
-| [desktop-idx-panel](./desktop-idx-panel.md) | Desktop IDX repository intelligence and Spec Wiki maintenance |
+| [desktop-idx-panel](./desktop-idx-panel.md) | Desktop IDX repository intelligence and task-scoped documentation audit |
 | [desktop-sidebar-indicators](./desktop-sidebar-indicators.md) | Live semantic Activity Bar health and attention indicators |
 | [watch-all-desktop-assets](./watch-all-desktop-assets.md) | `watch:all` Desktop web-asset embedding and native rebuild invalidation |
 

@@ -36,7 +36,7 @@ const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
 const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
 const REPO_KNOWLEDGE_FINALIZATION_REMINDER =
-	"📚 Before completing the final todo: if behavior/contracts changed, reconcile affected specs and repo knowledge; skip for mechanical changes.";
+	"📚 Before completing the final todo: if behavior/contracts changed, run task-scoped repo_audit on changed paths and reconcile affected docs with code/tests; skip for mechanical changes.";
 
 function completesTodo(info: { action: string; params: TaskMutationParams }): boolean {
 	if (info.action === "update") return info.params.status === "completed";

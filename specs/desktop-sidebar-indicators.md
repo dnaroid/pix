@@ -61,7 +61,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - **Source Control** — info for a dirty working tree, commits ahead of upstream, or a branch behind upstream; warning for detached HEAD; error for unresolved conflicts or Git status failure. Changed-file counts are never rendered in the rail.
 - **Registry** — warning when the indicator service detects local reusable/project resources that differ from their recorded provenance or are local-only while Registry is configured. Remote-side attention (`update-available`, `missing-local`, `diverged`, `registry-changed`) and project-level review issues continue to come from the pushed ACP Registry snapshot. While Desktop background project-state sync is pending, the Registry dot is `info`; while a sync is actively running the same dot uses a motion-safe ping animation. A background sync failure uses error severity. Optional remote-only resources (`not-installed`) remain a normal catalog state and do not light the Activity Bar. Registry snapshot or local-indicator health failures use error severity.
 - **Package Scripts** — info while one or more package/shell terminals are running; error for a newly observed failed terminal or non-zero exit, or for package-script discovery errors. A failure event is acknowledged once the Scripts view is visible.
-- **IDX** — info while maintenance is running; warning when current/proposed knowledge needs semantic maintenance; error for failed/timed-out maintenance, IDX health/status errors, or IDX becoming unavailable for a project that is already initialized. Failed-operation attention is acknowledged once the IDX view is visible.
+- **IDX** — info while maintenance is running; error for failed/timed-out maintenance, IDX health/status errors, or IDX becoming unavailable for a project that is already initialized. Legacy knowledge counters do not establish semantic drift and never trigger an inferred warning. Failed-operation attention is acknowledged once the IDX view is visible.
 - **Settings** — error when either supported user config is unreadable, malformed JSONC, schema-invalid, or the mounted Settings editor reports a load/save/validation error. Missing optional user config files are healthy.
 
 ## Polling and invalidation
@@ -81,7 +81,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
   duplicate pushes, while a later poll can still detect a second external change
   to the same artifact without requiring an intermediate clean artifact set.
 - Remote Registry state, task execution state, Project Explorer read errors, and mounted Settings errors flow reactively from their existing owners. The fast indicator poll additionally performs a local-only Registry check over `.pi/registry.json`, reusable resources, and project artifacts; it never fetches/clones the Registry or runs Registry Git commands. Session todo/Subagent state is intentionally presented in session tabs/status chrome/the contextual inspector rather than in the workspace Activity Bar.
-- IDX overview/knowledge health has a separate approximately 60-second foreground / 180-second background cadence because it invokes IDX. Both the shared service and mounted IDX panel coalesce refreshes to at most one in-flight request plus one queued refresh. While the IDX view is mounted, its own idle overview refresh is reused instead of issuing duplicate health commands; workspace/generation guards prevent a late background response from overwriting newer panel state.
+- IDX overview health has a separate approximately 60-second foreground / 180-second background cadence because it invokes IDX. Both the shared service and mounted IDX panel coalesce refreshes to at most one in-flight request plus one queued refresh. While the IDX view is mounted, its own idle overview refresh is reused instead of issuing duplicate health commands; workspace/generation guards prevent a late background response from overwriting newer panel state.
 - Refocusing or making the window visible triggers an immediate refresh.
 - Local Registry verification is metadata-first and cached per workspace/resource. Unchanged fingerprints reuse the previous hash verdict; only cache misses or metadata changes read file contents, with a bounded content-hash budget per fast poll so initial verification is amortized instead of turning the 5-second service into a filesystem scan storm.
 - The `tasks` fast-poll hash follows the portable Registry task-bundle hash rather
@@ -93,7 +93,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 ## Persistent versus unseen state
 
-- Persistent conditions such as dirty Git, knowledge drift, invalid configs, and active processes remain visible until the underlying condition clears.
+- Persistent conditions such as dirty Git, invalid configs, and active processes remain visible until the underlying condition clears.
 - Registry background-sync presentation orders remote/error attention above
   active syncing, active syncing above ordinary pending dirtiness, and healthy
   state last. The ping animation is purely transient and honors reduced-motion

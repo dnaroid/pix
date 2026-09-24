@@ -254,6 +254,7 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain("data-local-media");
     expect(normalizeLocalFileDestination("file:///tmp/result.png")).toBe("/tmp/result.png");
     expect(normalizeLocalFileDestination("file:///tmp/result%20one.png#preview")).toBe("/tmp/result one.png");
+    expect(normalizeLocalFileDestination("/private/tmp/idx-compact-gate-qa/stdout.txt")).toBe("/private/tmp/idx-compact-gate-qa/stdout.txt");
     expect(normalizeLocalFileDestination("file:relative.png")).toBeUndefined();
     expect(normalizeLocalFileDestination("file:///tmp/%00result.png")).toBeUndefined();
     expect(normalizeLocalFileDestination("https://example.com/result.png")).toBeUndefined();
@@ -304,6 +305,12 @@ describe("renderMarkdown", () => {
     expect(html.match(/data-local-file-candidate="~\/.config\/pi\/pix.jsonc"/g)).toHaveLength(2);
     expect(html).not.toContain('href="#" data-local-file=');
     expect(html).not.toContain('data-project-file="~/.config/pi/pix.jsonc"');
+  });
+
+  it("turns inline-code absolute file paths into local validation candidates", () => {
+    const html = renderMarkdown("Inspect `/private/tmp/idx-compact-gate-qa/stdout.txt`.");
+    expect(html).toContain('data-local-file-candidate="/private/tmp/idx-compact-gate-qa/stdout.txt"');
+    expect(html).toContain("<code>/private/tmp/idx-compact-gate-qa/stdout.txt</code>");
   });
 
   it("keeps ordinary inline code as code", () => {

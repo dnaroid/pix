@@ -41,7 +41,7 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 8. After prepend, Desktop preserves the current DOM transcript entry as the viewport anchor. Browser-native scroll anchoring is respected; an explicit offset correction is applied only for the remaining anchor delta.
 9. Reaching the top repeatedly continues paging until the cursor is exhausted, at which point the first persisted transcript entry is reachable.
 10. History pagination must not eagerly hydrate deferred tool bodies or start a Pi runtime merely to read older persisted JSONL history.
-11. The floating jump-to-latest arrow uses a translucent panel background so it remains legible without visually blocking transcript content underneath it.
+11. The floating jump-to-latest arrow uses a near-transparent panel background with a stronger hover surface so it remains legible without visually blocking transcript content underneath it.
 
 ## Related files
 

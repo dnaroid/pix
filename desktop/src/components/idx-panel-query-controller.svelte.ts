@@ -29,7 +29,7 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
     contextMaxSpecs: 4,
     contextMaxCode: 6,
     contextMaxTests: 4,
-    includeSecondary: false,
+    askBudget: 2000,
     inspectCommand: "architecture" as IdxInspectCommand,
     inspectTarget: "",
     inspectDepth: 2,
@@ -40,12 +40,25 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
     inspectRunning: false,
     inspectResult: undefined as IdxCommandResult | undefined,
   });
+  let resultWorkspace = $state("");
+  let generation = 0;
+  $effect(() => {
+    options.workspace();
+    return () => {
+      generation++;
+      resultWorkspace = "";
+      state.queryRunning = false;
+      state.inspectRunning = false;
+    };
+  });
 
   async function runQuery(): Promise<void> {
     const text = state.queryText.trim();
     const workspace = options.workspace();
     if (!workspace || !options.indexReady() || !text || state.queryRunning || options.operationRunning()) return;
+    const requestGeneration = ++generation;
     state.queryRunning = true;
+    resultWorkspace = workspace;
     state.queryResult = undefined;
     state.inspectResult = undefined;
     options.setError(null);
@@ -64,25 +77,24 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
             kind: "knowledge" as const,
             query: text,
             limit: state.knowledgeLimit,
-            includeSecondary: state.includeSecondary,
             pathPrefix,
           }
-        : {
+        : state.queryKind === "context" ? {
             kind: "context" as const,
             query: text,
             budget: state.contextBudget,
             maxSpecs: state.contextMaxSpecs,
             maxCode: state.contextMaxCode,
             maxTests: state.contextMaxTests,
-            includeSecondary: state.includeSecondary,
             pathPrefix,
-          };
+          } : { kind: "ask" as const, question: text, budget: state.askBudget };
     try {
-      state.queryResult = await invoke<IdxCommandResult>("idx_query", { request: { workspace, query } });
+      const result = await invoke<IdxCommandResult>("idx_query", { request: { workspace, query } });
+      if (generation === requestGeneration && options.workspace() === workspace) state.queryResult = result;
     } catch (caught) {
-      options.setError(errorMessage(caught));
+      if (generation === requestGeneration && options.workspace() === workspace) options.setError(errorMessage(caught));
     } finally {
-      state.queryRunning = false;
+      if (generation === requestGeneration) state.queryRunning = false;
     }
   }
 
@@ -95,12 +107,14 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
       options.setError(state.inspectCommand === "explain" ? "Enter a symbol to explain." : "Enter a file or module target.");
       return;
     }
+    const requestGeneration = ++generation;
     state.inspectRunning = true;
+    resultWorkspace = workspace;
     state.inspectResult = undefined;
     state.queryResult = undefined;
     options.setError(null);
     try {
-      state.inspectResult = await invoke<IdxCommandResult>("idx_inspect", {
+      const result = await invoke<IdxCommandResult>("idx_inspect", {
         request: {
           workspace,
           command: state.inspectCommand,
@@ -113,17 +127,18 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
           tests: state.inspectTests,
         },
       });
+      if (generation === requestGeneration && options.workspace() === workspace) state.inspectResult = result;
     } catch (caught) {
-      options.setError(errorMessage(caught));
+      if (generation === requestGeneration && options.workspace() === workspace) options.setError(errorMessage(caught));
     } finally {
-      state.inspectRunning = false;
+      if (generation === requestGeneration) state.inspectRunning = false;
     }
   }
 
   return {
     state,
-    get output() { return idxCombinedOutput(state.inspectResult) || idxCombinedOutput(state.queryResult); },
-    get activeResult() { return state.inspectResult ?? state.queryResult; },
+    get output() { return resultWorkspace === options.workspace() ? idxCombinedOutput(state.inspectResult) || idxCombinedOutput(state.queryResult) : ""; },
+    get activeResult() { return resultWorkspace === options.workspace() ? state.inspectResult ?? state.queryResult : undefined; },
     runQuery,
     runInspect,
   };

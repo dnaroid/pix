@@ -36,6 +36,7 @@
     loadingDcpStats = false,
     sessionUsage,
     loadingSessionUsage = false,
+    sessionUsageFailed = false,
     sessionUsageAvailable = false,
     compressingContext = false,
     compressionAvailable = true,
@@ -53,6 +54,7 @@
     loadingDcpStats?: boolean;
     sessionUsage?: SessionUsageReport;
     loadingSessionUsage?: boolean;
+    sessionUsageFailed?: boolean;
     sessionUsageAvailable?: boolean;
     compressingContext?: boolean;
     compressionAvailable?: boolean;
@@ -108,6 +110,14 @@
       onOpenSessionUsage();
     }
   }
+
+  $effect(() => {
+    // Opening during session warm-up should not strand the popover in an
+    // unloaded state. Once the runtime becomes requestable, load on demand.
+    if (usageOpen && sessionUsageAvailable && !sessionUsage && !loadingSessionUsage && !sessionUsageFailed) {
+      onOpenSessionUsage();
+    }
+  });
 
   function contextTitle(): string {
     const context = status?.context;
@@ -376,10 +386,12 @@
                   {formatSessionUsageCost(sessionUsage.totals.cost)} · {formatSessionUsageTokens(sessionUsage.totals.totalTokens)} tokens
                 {:else if loadingSessionUsage}
                   Loading recorded usage…
+                {:else if sessionUsageFailed}
+                  Could not load recorded usage.
                 {:else if sessionUsageAvailable}
-                  Usage has not been loaded yet.
+                  Loading recorded usage…
                 {:else}
-                  No live session yet.
+                  Session runtime is still loading.
                 {/if}
               </div>
             </header>
@@ -388,6 +400,15 @@
                 <div class="flex items-center gap-1.5 text-muted-foreground" aria-live="polite">
                   <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
                   <span>Loading session usage…</span>
+                </div>
+              {:else if sessionUsageFailed && !sessionUsage}
+                <div class="flex items-center justify-between gap-3 text-muted-foreground" aria-live="polite">
+                  <span>The session usage request failed.</span>
+                  <button
+                    class="shrink-0 rounded-md px-2 py-1 text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                    type="button"
+                    onclick={onOpenSessionUsage}
+                  >Retry</button>
                 </div>
               {:else if sessionUsage}
                 <section class="space-y-2.5">

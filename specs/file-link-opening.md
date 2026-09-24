@@ -16,6 +16,10 @@ Open local links in the application appropriate to the current environment witho
 
 ## Behavior
 
+- This screen-level opener contract applies to Pix terminal/TUI file opening.
+  Pix Desktop intercepts validated bounded UTF-8 local text targets into its
+  read-only Preview first; only targets that cannot be text-previewed fall back
+  to the system opener, which may itself be configured to Zed.
 - HTTP(S) links use the current OS system opener.
 - When pix runs inside Zed, non-media local files open through the Zed CLI and preserve an available line and column.
 - File references with a line range are opened at the range's first line because the Zed CLI target format does not preserve an end line.

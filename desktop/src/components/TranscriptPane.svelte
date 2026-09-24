@@ -302,7 +302,7 @@
   {#if activeSessionId && showScrollToBottom}
     <button
       type="button"
-      class="absolute bottom-4 left-1/2 z-20 grid h-8 w-8 -translate-x-1/2 place-items-center rounded-md border border-border/70 bg-panel-strong/70 text-foreground shadow-xs backdrop-blur-sm transition-colors hover:bg-panel-hover/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      class="absolute bottom-4 left-1/2 z-20 grid h-8 w-8 -translate-x-1/2 place-items-center rounded-md border border-border/55 bg-panel-strong/15 text-foreground shadow-xs backdrop-blur-sm transition-colors hover:bg-panel-hover/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       aria-label="Jump to latest message"
       title="Jump to latest message"
       onclick={onScrollToBottom}

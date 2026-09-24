@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectFilePreview } from "../lib/project-files";
+import { isWorkspaceProjectFilePath, type ProjectFilePreview } from "../lib/project-files";
 import {
   EMPTY_PROJECT_DOCUMENTS,
   PROJECT_TODO_PATH,
@@ -53,15 +53,16 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
 
   async function save(path: string, content: string): Promise<boolean> {
     const workspace = options.workspace();
-    if (!workspace || !isEditableProjectMarkdown(path)) return false;
+    if (!workspace || !isWorkspaceProjectFilePath(path)) return false;
     const requestGeneration = workspaceGeneration;
     const previewId = options.previewId();
     const isCurrent = () => requestGeneration === workspaceGeneration && options.workspace() === workspace;
     const key = `${workspace}\0${path}`;
+    const command = isEditableProjectMarkdown(path) ? "write_project_markdown" : "write_project_file";
     options.clearError();
     try {
       const previous = writes.get(key) ?? Promise.resolve();
-      const pending = previous.catch(() => {}).then(() => invoke<ProjectFilePreview>("write_project_markdown", {
+      const pending = previous.catch(() => {}).then(() => invoke<ProjectFilePreview>(command, {
         workspace, path, content,
       })).finally(() => {
         if (writes.get(key) === pending) writes.delete(key);

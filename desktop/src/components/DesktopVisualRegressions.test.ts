@@ -53,13 +53,32 @@ describe("desktop visual regressions", () => {
     expect(elicitationSource).not.toContain("resize-y");
   });
 
-  it("normalizes modal elicitation select and action buttons", () => {
+  it("normalizes modal elicitation controls and action buttons", () => {
     expect(elicitationSource).toContain("appearance-none");
+    expect(elicitationSource).toContain('import Check from "@lucide/svelte/icons/check"');
     expect(elicitationSource).toContain("ChevronDown");
     expect(elicitationSource).toContain("focus:border-ring");
+    expect(elicitationSource).toContain("checked:border-primary checked:bg-primary");
+    expect(elicitationSource).toContain("peer-checked:opacity-100");
+    expect(elicitationSource).toContain("field.label.trim() === message.trim()");
+    expect(elicitationSource).not.toContain("accent-primary");
     expect(elicitationSource).not.toContain("border-primary bg-primary");
     expect(elicitationSource).toContain("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground");
     expect(elicitationSource).toContain("inline-flex h-8 min-w-20 items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground");
+  });
+
+  it("keeps text-file Preview selectable for native copy without making desktop chrome selectable", async () => {
+    // @ts-expect-error Node fs import in Vitest runner
+    const fs = (await import(/* @vite-ignore */ "node:fs")).default;
+    // @ts-expect-error Node path import in Vitest runner
+    const path = (await import(/* @vite-ignore */ "node:path")).default;
+    // @ts-expect-error Node __dirname in Vitest runner
+    const stylesPath = path.resolve(__dirname, "../styles.css");
+    const styles = fs.readFileSync(stylesPath, "utf-8");
+
+    expect(styles).toContain(".transcript-pane,\n.preview-text-surface,");
+    expect(styles).toContain("user-select: text;");
+    expect(styles).toContain("user-select: none;");
   });
 
   it("uses semantic error and success tokens in diff view instead of primary accent", () => {
@@ -129,10 +148,11 @@ describe("desktop visual regressions", () => {
     expect(transcriptSource).toContain("disabled={promptRunning || operationRunning}");
   });
 
-  it("keeps the jump-to-latest arrow translucent over transcript content", () => {
-    expect(transcriptSource).toContain("bg-panel-strong/70");
+  it("keeps the jump-to-latest arrow nearly transparent over transcript content", () => {
+    expect(transcriptSource).toContain("bg-panel-strong/15");
     expect(transcriptSource).toContain("backdrop-blur-sm");
-    expect(transcriptSource).toContain("hover:bg-panel-hover/90");
+    expect(transcriptSource).toContain("hover:bg-panel-hover/45");
+    expect(transcriptSource).not.toContain("bg-panel-strong/70");
   });
 
   it("keeps project and Git branch between context and usage status chrome", () => {
@@ -160,7 +180,11 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).not.toContain("Account quota now");
     expect(runtimeStatusSource).not.toContain('title="Refresh model usage limits"');
     expect(runtimeStatusSource).not.toContain("onclick={onRefreshModelUsage}");
+    expect(runtimeStatusSource).toContain("Could not load recorded usage.");
+    expect(runtimeStatusSource).toContain(">Retry</button>");
+    expect(runtimeStatusSource).not.toContain("Usage has not been loaded yet.");
     expect(statusBarViewModelSource).toContain("refreshActiveSessionUsage");
+    expect(statusBarViewModelSource).toContain("sessionUsageAvailable: !!sessionId && runtimeReady");
     expect(statusBarViewModelSource).not.toContain("refreshDraftModelUsage");
   });
 
@@ -209,7 +233,8 @@ describe("desktop visual regressions", () => {
   });
 
   it("keeps danger color on percentages while progress tracks stay neutral", () => {
-    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 rounded-sm bg-muted-foreground/50"');
+    expect(runtimeStatusSource).toContain('class={["relative h-1.5 overflow-hidden rounded-sm bg-border"');
+    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 bg-muted-foreground/50"');
     expect(runtimeStatusSource).not.toContain("toneFillClass");
     expect(runtimeStatusSource).toContain("class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%");
     expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-muted-foreground"');

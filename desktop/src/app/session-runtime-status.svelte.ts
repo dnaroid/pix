@@ -28,6 +28,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   let dcpStatsRefreshing = $state<Set<string>>(new Set());
   let sessionUsageBySession = $state<Map<string, SessionUsageReport>>(new Map());
   let sessionUsageRefreshing = $state<Set<string>>(new Set());
+  let sessionUsageFailed = $state<Set<string>>(new Set());
 
   const statusGenerationsBySession = new Map<string, RuntimeStatusGenerations>();
   const dcpStatsRequestGenerations = new Map<string, number>();
@@ -207,6 +208,11 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     const refreshing = new Set(sessionUsageRefreshing);
     refreshing.add(sessionId);
     sessionUsageRefreshing = refreshing;
+    if (sessionUsageFailed.has(sessionId)) {
+      const nextFailed = new Set(sessionUsageFailed);
+      nextFailed.delete(sessionId);
+      sessionUsageFailed = nextFailed;
+    }
     try {
       const next = await requestClient.sessionUsage(sessionId);
       if (
@@ -220,7 +226,18 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       nextUsage.set(sessionId, next.usage);
       sessionUsageBySession = nextUsage;
     } catch {
-      // Billing inspection is best-effort; keep the last successfully loaded snapshot.
+      if (
+        requestLifecycleGeneration === lifecycleGeneration
+        && requestClient === options.client()
+        && options.isReady(sessionId)
+        && sessionUsageRequestGenerations.get(sessionId) === generation
+      ) {
+        const nextFailed = new Set(sessionUsageFailed);
+        nextFailed.add(sessionId);
+        sessionUsageFailed = nextFailed;
+      }
+      // Keep the last successfully loaded snapshot; expose a failed refresh so
+      // the UI can distinguish it from runtime warm-up and offer a retry.
     } finally {
       if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client()
         || sessionUsageRequestGenerations.get(sessionId) !== generation) return;
@@ -265,6 +282,11 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       next.delete(sessionId);
       sessionUsageRefreshing = next;
     }
+    if (sessionUsageFailed.has(sessionId)) {
+      const next = new Set(sessionUsageFailed);
+      next.delete(sessionId);
+      sessionUsageFailed = next;
+    }
   }
 
   function reset(): void {
@@ -277,6 +299,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     dcpStatsRefreshing = new Set();
     sessionUsageBySession = new Map();
     sessionUsageRefreshing = new Set();
+    sessionUsageFailed = new Set();
   }
 
   return {
@@ -285,6 +308,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     get dcpStatsRefreshing() { return dcpStatsRefreshing; },
     get sessionUsageBySession() { return sessionUsageBySession; },
     get sessionUsageRefreshing() { return sessionUsageRefreshing; },
+    get sessionUsageFailed() { return sessionUsageFailed; },
     handleSessionState,
     refreshStatus,
     refreshDcpStats,

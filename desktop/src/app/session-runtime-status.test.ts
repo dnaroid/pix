@@ -4,8 +4,9 @@ import { createSessionRuntimeStatus } from "./session-runtime-status.svelte";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function status(tokens: number, dcpStats?: string): RuntimeStatus {
@@ -13,6 +14,7 @@ function status(tokens: number, dcpStats?: string): RuntimeStatus {
 }
 
 function setup() {
+  let ready = true;
   const requests: ReturnType<typeof deferred<RuntimeStatus>>[] = [];
   const stats: ReturnType<typeof deferred<{ dcpStats: string }>>[] = [];
   const usage: ReturnType<typeof deferred<SessionUsageStatus>>[] = [];
@@ -23,9 +25,9 @@ function setup() {
   };
   const store = createSessionRuntimeStatus({
     client: () => client as unknown as NonNullable<ReturnType<Parameters<typeof createSessionRuntimeStatus>[0]["client"]>>,
-    isReady: () => true,
+    isReady: () => ready,
   });
-  return { store, requests, stats, usage };
+  return { store, requests, stats, usage, setReady: (value: boolean) => { ready = value; } };
 }
 
 function usageStatus(cost: number): SessionUsageStatus {
@@ -104,6 +106,32 @@ describe("runtime status lifecycle", () => {
       expect(store.sessionUsageRefreshing.has("a")).toBe(false);
     });
   }
+
+  it("does not start a session-usage request before the runtime is ready", async () => {
+    const { store, usage, setReady } = setup();
+    setReady(false);
+    await store.refreshSessionUsage("a");
+    expect(usage).toHaveLength(0);
+    expect(store.sessionUsageRefreshing.has("a")).toBe(false);
+    expect(store.sessionUsageFailed.has("a")).toBe(false);
+  });
+
+  it("exposes a current session-usage failure and clears it on retry", async () => {
+    const { store, usage } = setup();
+    const failed = store.refreshSessionUsage("a");
+    usage[0]!.reject(new Error("temporary usage failure"));
+    await failed;
+    expect(store.sessionUsageFailed.has("a")).toBe(true);
+    expect(store.sessionUsageRefreshing.has("a")).toBe(false);
+
+    const retry = store.refreshSessionUsage("a");
+    expect(store.sessionUsageFailed.has("a")).toBe(false);
+    expect(store.sessionUsageRefreshing.has("a")).toBe(true);
+    usage[1]!.resolve(usageStatus(3));
+    await retry;
+    expect(store.sessionUsageBySession.get("a")?.totals.cost).toBe(3);
+    expect(store.sessionUsageFailed.has("a")).toBe(false);
+  });
 
   it("ignores a late response after forget even without a replacement snapshot", async () => {
     const { store, requests } = setup();

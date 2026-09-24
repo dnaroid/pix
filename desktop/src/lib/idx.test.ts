@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  idxArchivedPrimaryCount,
-  idxCurrentPrimaryCount,
-  idxKnowledgeCandidates,
-  idxKnowledgeIssues,
-  idxKnowledgeNeedsAttention,
+  idxAuditPaths,
+  idxValidAuditPaths,
   idxNumericField,
   idxOutputSegments,
   reconcileIdxOperationSnapshot,
@@ -15,74 +12,18 @@ import {
 describe("idx helpers", () => {
   it("parses numeric overview fields", () => {
     const status: IdxParsedStatus = {
-      fields: { files: "743", primarySpecs: "44 (43 current/proposed)" },
+      fields: { files: "743" },
       raw: "",
     };
     expect(idxNumericField(status, "files")).toBe(743);
-    expect(idxNumericField(status, "primarySpecs")).toBe(44);
-    expect(idxCurrentPrimaryCount(status)).toBe(43);
-    expect(idxArchivedPrimaryCount(status)).toBe(1);
   });
 
-  it("flags semantic knowledge drift without treating unresolved refs as stale", () => {
-    const healthy: IdxParsedStatus = {
-      fields: {
-        primarySpecs: "47 (46 current/proposed)",
-        fresh: "46",
-        needsReview: "0",
-        unresolvedRefs: "7",
-        unverified: "0",
-        newChangedCandidates: "0",
-        uncoveredActiveAsIs: "0",
-      },
-      raw: "",
-    };
-    expect(idxKnowledgeNeedsAttention(healthy)).toBe(false);
-    expect(idxKnowledgeNeedsAttention({
-      ...healthy,
-      fields: { ...healthy.fields, fresh: "45", needsReview: "1" },
-    })).toBe(true);
-    expect(idxKnowledgeNeedsAttention({
-      ...healthy,
-      fields: { ...healthy.fields, newChangedCandidates: "1" },
-    })).toBe(true);
-  });
-
-  it("extracts actionable knowledge issue rows", () => {
-    const status: IdxParsedStatus = {
-      fields: {},
-      raw: [
-        "primary specs: 44 | needs review: 1",
-        "Recommendation: inspect the changed source.",
-        "  inputs-changed           specs/desktop-tools.md — input:desktop/src/App.svelte",
-      ].join("\n"),
-    };
-    expect(idxKnowledgeIssues(status)).toEqual([
-      {
-        status: "inputs-changed",
-        path: "specs/desktop-tools.md",
-        detail: "input:desktop/src/App.svelte",
-      },
-    ]);
-  });
-
-  it("parses discover candidates with metadata", () => {
-    const output = [
-      "candidates: 1 | showing 1",
-      "score=  4 spec-candidate   DESIGN.md known=design-only",
-      "      title: Pix Desktop Design Contract",
-      "      signals: design-like-filename, path-references:2",
-    ].join("\n");
-    expect(idxKnowledgeCandidates(output)).toEqual([
-      {
-        score: 4,
-        kind: "spec-candidate",
-        path: "DESIGN.md",
-        known: "design-only",
-        title: "Pix Desktop Design Contract",
-        signals: "design-like-filename, path-references:2",
-      },
-    ]);
+  it("requires explicit project-relative task paths for audits", () => {
+    expect(idxAuditPaths(" src/main.ts, specs/design.md\n src/main.ts \n")).toEqual(["src/main.ts", "specs/design.md"]);
+    expect(idxValidAuditPaths(idxAuditPaths("  , \n"))).toBe(false);
+    for (const path of ["/tmp/secret", "../outside", "src/../../outside", "C:/outside", "src\\file.ts", "./src/file.ts", "src//file.ts"])
+      expect(idxValidAuditPaths([path])).toBe(false);
+    expect(idxValidAuditPaths(["src/main.ts", "specs/design.md"])).toBe(true);
   });
 
   it("extracts project file references and optional line ranges from IDX output", () => {

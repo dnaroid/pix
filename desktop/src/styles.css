@@ -262,11 +262,12 @@ html, body, #app {
 }
 
 /*
- * Desktop chrome is non-selectable by default. The transcript is the one
- * document-style selection surface; native text editors opt back into their
+ * Desktop chrome is non-selectable by default. Transcript and file Preview are
+ * document-style selection surfaces; native text editors opt back into their
  * own local selection so Cmd/Ctrl+A follows focus like a desktop app.
  */
 .transcript-pane,
+.preview-text-surface,
 :where(
   textarea,
   input:not([type]),

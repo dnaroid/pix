@@ -32,6 +32,7 @@
     runtimeStatus,
     sessionUsage,
     sessionUsageRefreshing,
+    sessionUsageFailed,
     sessionUsageAvailable,
     dcpStatsRefreshing,
     dcpCompressionRunning,
@@ -68,6 +69,7 @@
     runtimeStatus?: RuntimeStatus;
     sessionUsage?: SessionUsageReport;
     sessionUsageRefreshing: boolean;
+    sessionUsageFailed: boolean;
     sessionUsageAvailable: boolean;
     dcpStatsRefreshing: boolean;
     dcpCompressionRunning: boolean;
@@ -185,6 +187,7 @@
       {workspaceColor}
       {sessionUsage}
       loadingSessionUsage={sessionUsageRefreshing}
+      {sessionUsageFailed}
       {sessionUsageAvailable}
       loadingDcpStats={dcpStatsRefreshing}
       compressingContext={dcpCompressionRunning}

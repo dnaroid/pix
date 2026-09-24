@@ -34,11 +34,21 @@ describe("desktop editor work surfaces", () => {
     expect(previewSource).not.toContain("Resize preview");
   });
 
-  it("keeps editable Markdown in edit mode even when the preview has a line range", () => {
-    expect(previewSource).toContain('const markdown = $derived(language === "markdown")');
-    expect(previewSource).toContain("markdown: () => markdown");
+  it("keeps any editable project text file in edit mode, including line-range previews", () => {
+    expect(workbenchBuilderSource).toContain('editable: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)');
+    expect(previewEditorControllerSource).not.toContain("markdown: () => boolean");
     expect(previewSource).toContain("{#if editing}");
     expect(previewSource).not.toContain("{#if renderAsMarkdown && editing}");
+  });
+
+  it("makes read-only Preview file surfaces selectable for copy", () => {
+    expect(previewSource.match(/preview-text-surface/g)?.length).toBe(2);
+  });
+
+  it("keeps keyboard copy explicit inside the Preview textarea", () => {
+    expect(previewSource).toContain("function handleEditorCopy(event: ClipboardEvent)");
+    expect(previewSource).toContain('event.clipboardData.setData("text/plain"');
+    expect(previewSource).toContain("oncopy={handleEditorCopy}");
   });
 
   it("gives the editor host an explicit full-height grid so the conversation composer stays bottom-anchored", () => {

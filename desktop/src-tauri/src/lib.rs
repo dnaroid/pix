@@ -62,7 +62,6 @@ const IDX_QUERY_TIMEOUT: Duration = Duration::from_secs(180);
 const IDX_OPERATION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const IDX_STOP_GRACE: Duration = Duration::from_secs(2);
 const MAX_IDX_MAX_FILES: u32 = 1_000;
-const MAX_IDX_LIMIT: u32 = 1_000;
 const MAX_IDX_OPERATIONS_PER_WINDOW: usize = 12;
 const MAX_PACKAGE_JSON_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PACKAGE_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
@@ -92,6 +91,7 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
 const PROJECT_PI_EPHEMERAL_DIRECTORIES: &[&str] = &["artifacts", "subagents"];
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PROJECT_FILE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static PROJECT_MARKDOWN_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static WORKSPACE_CONFIG_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static GIT_CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -315,9 +315,6 @@ enum IdxMaintenanceKind {
     FullIndex,
     DryRun,
     Doctor,
-    WikiAudit,
-    WikiDiscover,
-    WikiCatalog,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -386,7 +383,6 @@ enum IdxQuery {
     Knowledge {
         query: String,
         limit: u32,
-        include_secondary: bool,
         path_prefix: Option<String>,
     },
     Context {
@@ -395,8 +391,11 @@ enum IdxQuery {
         max_specs: u32,
         max_code: u32,
         max_tests: u32,
-        include_secondary: bool,
         path_prefix: Option<String>,
+    },
+    Ask {
+        question: String,
+        budget: u32,
     },
 }
 
@@ -458,7 +457,6 @@ struct IdxOverview {
     version: Option<String>,
     initialized: bool,
     index_status: Option<IdxParsedStatus>,
-    wiki_status: Option<IdxParsedStatus>,
     raw_status: String,
     errors: Vec<String>,
 }
@@ -473,36 +471,9 @@ struct IdxOperationRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct IdxKnowledgeRequest {
+struct IdxAuditRequest {
     workspace: String,
-    action: IdxKnowledgeAction,
-    path: Option<String>,
-    classification: Option<String>,
-    behavior_type: Option<String>,
-    lifecycle: Option<String>,
-    confidence: Option<String>,
-    summary: Option<String>,
-    topics: Option<Vec<String>>,
-    target_paths: Option<Vec<String>>,
-    relation_kind: Option<String>,
-    relation_action: Option<String>,
-    source_reviewed: Option<bool>,
-    evidence_reviewed: Option<bool>,
-    metadata_only_confirmed: Option<bool>,
-    paths: Option<Vec<String>>,
-    base: Option<String>,
-    semantic: Option<bool>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-enum IdxKnowledgeAction {
-    Show,
-    Record,
-    Verify,
-    Relate,
-    Remove,
-    Impact,
+    paths: Vec<String>,
 }
 
 impl Drop for RunningProcess {
@@ -722,14 +693,14 @@ struct ProjectPiStorageSnapshot {
     cleanup_available: bool,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum ProjectTreeEntryKind {
     File,
     Directory,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectTreeEntry {
     name: String,
@@ -1458,6 +1429,16 @@ async fn read_project_file(workspace: String, path: String) -> Result<ProjectFil
 }
 
 #[tauri::command]
+async fn write_project_file(
+    workspace: String,
+    path: String,
+    content: String,
+) -> Result<ProjectFilePreview, String> {
+    run_blocking(move || write_project_file_from(Path::new(&workspace), Path::new(&path), &content))
+        .await
+}
+
+#[tauri::command]
 async fn write_project_workspace_config_if_unchanged(
     app: AppHandle,
     workspace: String,
@@ -1499,6 +1480,55 @@ async fn list_project_directory(
         list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))
     })
     .await
+}
+
+#[tauri::command]
+async fn create_project_entry(
+    workspace: String,
+    parent: Option<String>,
+    name: String,
+    kind: ProjectTreeEntryKind,
+) -> Result<ProjectTreeEntry, String> {
+    run_blocking(move || {
+        create_project_entry_from(
+            Path::new(&workspace),
+            parent.as_deref().map(Path::new),
+            &name,
+            kind,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rename_project_entry(
+    workspace: String,
+    path: String,
+    name: String,
+) -> Result<ProjectTreeEntry, String> {
+    run_blocking(move || rename_project_entry_from(Path::new(&workspace), Path::new(&path), &name))
+        .await
+}
+
+#[tauri::command]
+async fn copy_project_entry(
+    workspace: String,
+    path: String,
+    destination: Option<String>,
+) -> Result<ProjectTreeEntry, String> {
+    run_blocking(move || {
+        copy_project_entry_from(
+            Path::new(&workspace),
+            Path::new(&path),
+            destination.as_deref().map(Path::new),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_project_entry(workspace: String, path: String) -> Result<(), String> {
+    run_blocking(move || delete_project_entry_from(Path::new(&workspace), Path::new(&path))).await
 }
 
 #[tauri::command]
@@ -1744,6 +1774,9 @@ async fn idx_overview(app: AppHandle, workspace: String) -> Result<IdxOverview, 
 async fn idx_query(app: AppHandle, request: IdxQueryRequest) -> Result<IdxCommandResult, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&request.workspace))?;
+        if !root.join(".indexer-cli").is_dir() {
+            return Err("this project is not indexed yet; initialize IDX first".to_owned());
+        }
         let launcher = idx_launcher(&app)?;
         let args = idx_query_args(&request.query)?;
         run_idx_command(
@@ -1781,17 +1814,14 @@ async fn idx_inspect(
 }
 
 #[tauri::command]
-async fn idx_knowledge(
-    app: AppHandle,
-    request: IdxKnowledgeRequest,
-) -> Result<IdxCommandResult, String> {
+async fn idx_audit(app: AppHandle, request: IdxAuditRequest) -> Result<IdxCommandResult, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&request.workspace))?;
         if !root.join(".indexer-cli").is_dir() {
             return Err("this project is not indexed yet; initialize IDX first".to_owned());
         }
+        let args = idx_audit_args(&request)?;
         let launcher = idx_launcher(&app)?;
-        let args = idx_knowledge_args(&request)?;
         run_idx_command(
             &launcher,
             &root,
@@ -1966,6 +1996,12 @@ async fn local_file_exists(path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn read_local_file(path: String) -> Result<ProjectFilePreview, String> {
+    run_blocking(move || read_local_file_from(Path::new(&path), MAX_PROJECT_FILE_PREVIEW_BYTES))
+        .await
+}
+
+#[tauri::command]
 async fn resolve_project_media(
     app: AppHandle,
     workspace: String,
@@ -2054,6 +2090,12 @@ fn resolve_local_file_path(path: &Path) -> Result<PathBuf, String> {
         return Err(format!("{} is not a file", canonical.display()));
     }
     Ok(canonical)
+}
+
+fn read_local_file_from(path: &Path, max_bytes: u64) -> Result<ProjectFilePreview, String> {
+    let file_path = resolve_local_file_path(path)?;
+    let display_path = file_path.to_string_lossy().into_owned();
+    read_text_file_from(&file_path, display_path, max_bytes)
 }
 
 fn resolve_local_open_path(path: &Path) -> Result<PathBuf, String> {
@@ -2316,6 +2358,83 @@ fn read_project_file_from(
     read_text_file_from(&file_path, display_path, max_bytes)
 }
 
+fn write_project_file_from(
+    workspace: &Path,
+    relative_path: &Path,
+    content: &str,
+) -> Result<ProjectFilePreview, String> {
+    if content.len() as u64 > MAX_PROJECT_FILE_PREVIEW_BYTES {
+        return Err("project file is too large to save (maximum 2 MB)".to_owned());
+    }
+    validate_workspace_relative_path(relative_path, "project file path")?;
+
+    let root = canonical_workspace(workspace)?;
+    let unresolved = root.join(relative_path);
+    let unresolved_metadata = fs::symlink_metadata(&unresolved)
+        .map_err(|error| format!("failed to inspect {}: {error}", unresolved.display()))?;
+    if unresolved_metadata.file_type().is_symlink() {
+        return Err("project file editor does not follow symbolic links".to_owned());
+    }
+
+    let target = fs::canonicalize(&unresolved)
+        .map_err(|error| format!("failed to resolve {}: {error}", unresolved.display()))?;
+    if !target.starts_with(&root) {
+        return Err("project file resolves outside the workspace".to_owned());
+    }
+    let metadata = fs::metadata(&target)
+        .map_err(|error| format!("failed to inspect {}: {error}", target.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", relative_path.display()));
+    }
+    if metadata.permissions().readonly() {
+        return Err(format!("{} is read-only", relative_path.display()));
+    }
+
+    let display_path = target
+        .strip_prefix(&root)
+        .unwrap_or(relative_path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    // Keep the generic editor limited to the same existing UTF-8 text files
+    // that Preview can read. This intentionally refuses binary files even if a
+    // caller bypasses the frontend.
+    read_text_file_from(
+        &target,
+        display_path.clone(),
+        MAX_PROJECT_FILE_PREVIEW_BYTES,
+    )?;
+
+    let directory = target
+        .parent()
+        .ok_or_else(|| "project file has no parent directory".to_owned())?;
+    let sequence = PROJECT_FILE_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = directory.join(format!(".pix-edit.{}.{}.tmp", std::process::id(), sequence,));
+    let write_result: Result<(), String> = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("failed to create project file temporary file: {error}"))?;
+        file.write_all(content.as_bytes())
+            .map_err(|error| format!("failed to write {display_path}: {error}"))?;
+        fs::set_permissions(&temporary, metadata.permissions()).map_err(|error| {
+            format!("failed to preserve permissions for {display_path}: {error}")
+        })?;
+        file.sync_all()
+            .map_err(|error| format!("failed to flush {display_path}: {error}"))?;
+        drop(file);
+        replace_project_file(&temporary, &target, sequence, &display_path)?;
+        sync_directory(directory)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_result?;
+
+    read_text_file_from(&target, display_path, MAX_PROJECT_FILE_PREVIEW_BYTES)
+}
+
 fn list_project_directory_from(
     workspace: &Path,
     relative_path: Option<&Path>,
@@ -2369,6 +2488,261 @@ fn list_project_directory_from(
             .then_with(|| left.name.cmp(&right.name))
     });
     Ok(entries)
+}
+
+fn validate_project_entry_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+    {
+        return Err("project entry name must be a single non-empty file name".to_owned());
+    }
+    Ok(())
+}
+
+fn resolve_project_entry_path(
+    workspace: &Path,
+    relative_path: &Path,
+) -> Result<(PathBuf, PathBuf), String> {
+    validate_workspace_relative_path(relative_path, "project entry")?;
+    let root = canonical_workspace(workspace)?;
+    let unresolved = root.join(relative_path);
+    let metadata = fs::symlink_metadata(&unresolved)
+        .map_err(|error| format!("failed to inspect {}: {error}", unresolved.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err("project explorer does not follow symbolic links".to_owned());
+    }
+    let target = fs::canonicalize(&unresolved)
+        .map_err(|error| format!("failed to resolve {}: {error}", unresolved.display()))?;
+    if target == root || !target.starts_with(&root) {
+        return Err("project entry resolves outside the editable workspace".to_owned());
+    }
+    Ok((root, target))
+}
+
+fn project_tree_entry_from_path(root: &Path, path: &Path) -> Result<ProjectTreeEntry, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err("project explorer does not expose symbolic links".to_owned());
+    }
+    let kind = if metadata.is_dir() {
+        ProjectTreeEntryKind::Directory
+    } else if metadata.is_file() {
+        ProjectTreeEntryKind::File
+    } else {
+        return Err(format!("{} is not a file or directory", path.display()));
+    };
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "project entry name is not valid UTF-8".to_owned())?
+        .to_owned();
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| "project tree entry resolves outside the workspace".to_owned())?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(ProjectTreeEntry {
+        name,
+        path: relative,
+        kind,
+    })
+}
+
+fn create_project_entry_from(
+    workspace: &Path,
+    parent: Option<&Path>,
+    name: &str,
+    kind: ProjectTreeEntryKind,
+) -> Result<ProjectTreeEntry, String> {
+    validate_project_entry_name(name)?;
+    let (root, directory) = resolve_project_directory_path(workspace, parent)?;
+    let target = directory.join(name);
+    if fs::symlink_metadata(&target).is_ok() {
+        return Err(format!("{} already exists", target.display()));
+    }
+    match kind {
+        ProjectTreeEntryKind::File => {
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)
+                .map_err(|error| format!("failed to create {}: {error}", target.display()))?;
+        }
+        ProjectTreeEntryKind::Directory => {
+            fs::create_dir(&target)
+                .map_err(|error| format!("failed to create {}: {error}", target.display()))?;
+        }
+    }
+    sync_directory(&directory)?;
+    project_tree_entry_from_path(&root, &target)
+}
+
+fn rename_project_entry_from(
+    workspace: &Path,
+    relative_path: &Path,
+    name: &str,
+) -> Result<ProjectTreeEntry, String> {
+    validate_project_entry_name(name)?;
+    let (root, source) = resolve_project_entry_path(workspace, relative_path)?;
+    let parent = source
+        .parent()
+        .ok_or_else(|| "project entry has no parent directory".to_owned())?;
+    let target = parent.join(name);
+    if target == source {
+        return project_tree_entry_from_path(&root, &source);
+    }
+    if fs::symlink_metadata(&target).is_ok() {
+        return Err(format!("{} already exists", target.display()));
+    }
+    fs::rename(&source, &target).map_err(|error| {
+        format!(
+            "failed to rename {} to {}: {error}",
+            relative_path.display(),
+            target.display()
+        )
+    })?;
+    sync_directory(parent)?;
+    project_tree_entry_from_path(&root, &target)
+}
+
+fn project_copy_name(source_name: &str, directory: bool, sequence: usize) -> String {
+    let suffix = if sequence == 1 {
+        " copy".to_owned()
+    } else {
+        format!(" copy {sequence}")
+    };
+    if directory {
+        return format!("{source_name}{suffix}");
+    }
+    let path = Path::new(source_name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(source_name);
+    match path.extension().and_then(|value| value.to_str()) {
+        Some(extension) if !extension.is_empty() => format!("{stem}{suffix}.{extension}"),
+        _ => format!("{source_name}{suffix}"),
+    }
+}
+
+fn available_project_copy_target(
+    destination: &Path,
+    source_name: &str,
+    directory: bool,
+) -> Result<PathBuf, String> {
+    let direct = destination.join(source_name);
+    if fs::symlink_metadata(&direct).is_err() {
+        return Ok(direct);
+    }
+    for sequence in 1..=10_000usize {
+        let candidate = destination.join(project_copy_name(source_name, directory, sequence));
+        if fs::symlink_metadata(&candidate).is_err() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "could not find an available copy name for {source_name}"
+    ))
+}
+
+fn copy_project_path(source: &Path, target: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(source)
+        .map_err(|error| format!("failed to inspect {}: {error}", source.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("cannot copy symbolic link {}", source.display()));
+    }
+    if metadata.is_file() {
+        fs::copy(source, target).map_err(|error| {
+            format!(
+                "failed to copy {} to {}: {error}",
+                source.display(),
+                target.display()
+            )
+        })?;
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        return Err(format!("{} is not a file or directory", source.display()));
+    }
+    fs::create_dir(target)
+        .map_err(|error| format!("failed to create {}: {error}", target.display()))?;
+    fs::set_permissions(target, metadata.permissions()).map_err(|error| {
+        format!(
+            "failed to preserve permissions for {}: {error}",
+            target.display()
+        )
+    })?;
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("failed to read {}: {error}", source.display()))?
+    {
+        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+        copy_project_path(&entry.path(), &target.join(entry.file_name()))?;
+    }
+    Ok(())
+}
+
+fn remove_project_path_if_exists(path: &Path) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        let _ = fs::remove_dir_all(path);
+    } else {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn copy_project_entry_from(
+    workspace: &Path,
+    relative_path: &Path,
+    destination: Option<&Path>,
+) -> Result<ProjectTreeEntry, String> {
+    let (root, source) = resolve_project_entry_path(workspace, relative_path)?;
+    let (_, destination_directory) = resolve_project_directory_path(workspace, destination)?;
+    let metadata = fs::symlink_metadata(&source)
+        .map_err(|error| format!("failed to inspect {}: {error}", source.display()))?;
+    if metadata.is_dir() && destination_directory.starts_with(&source) {
+        return Err("cannot copy a directory into itself".to_owned());
+    }
+    let source_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "project entry name is not valid UTF-8".to_owned())?;
+    let target =
+        available_project_copy_target(&destination_directory, source_name, metadata.is_dir())?;
+    if let Err(error) = copy_project_path(&source, &target) {
+        remove_project_path_if_exists(&target);
+        return Err(error);
+    }
+    sync_directory(&destination_directory)?;
+    project_tree_entry_from_path(&root, &target)
+}
+
+fn delete_project_entry_from(workspace: &Path, relative_path: &Path) -> Result<(), String> {
+    let (_, target) = resolve_project_entry_path(workspace, relative_path)?;
+    let metadata = fs::symlink_metadata(&target)
+        .map_err(|error| format!("failed to inspect {}: {error}", target.display()))?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| "project entry has no parent directory".to_owned())?
+        .to_path_buf();
+    if metadata.is_dir() {
+        fs::remove_dir_all(&target)
+            .map_err(|error| format!("failed to delete {}: {error}", target.display()))?;
+    } else if metadata.is_file() {
+        fs::remove_file(&target)
+            .map_err(|error| format!("failed to delete {}: {error}", target.display()))?;
+    } else {
+        return Err(format!(
+            "{} is not a file or directory",
+            relative_path.display()
+        ));
+    }
+    sync_directory(&parent)
 }
 
 fn resolve_project_directory_path(
@@ -4910,35 +5284,23 @@ fn idx_overview_from(
                 version: None,
                 initialized,
                 index_status: None,
-                wiki_status: None,
                 raw_status: String::new(),
                 errors: vec![error],
             });
         }
     };
     let mut errors = Vec::new();
-    let version = match run_idx_command(
+    let version = run_idx_command(
         &launcher,
         &root,
         &["--version".to_owned()],
         IDX_COMMAND_TIMEOUT,
-        32 * 1024,
-    ) {
-        Ok(result) if result.exit_code == Some(0) => result
-            .stdout
-            .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .map(str::to_owned),
-        Ok(result) => {
-            errors.push(non_empty_idx_error("idx --version failed", &result));
-            None
-        }
-        Err(error) => {
-            errors.push(error);
-            None
-        }
-    };
+        1024,
+    )
+    .ok()
+    .filter(|result| result.exit_code == Some(0))
+    .map(|result| result.stdout.trim().to_owned())
+    .filter(|value| !value.is_empty());
 
     if !initialized {
         return Ok(IdxOverview {
@@ -4947,7 +5309,6 @@ fn idx_overview_from(
             version,
             initialized: false,
             index_status: None,
-            wiki_status: None,
             raw_status: String::new(),
             errors,
         });
@@ -4960,19 +5321,6 @@ fn idx_overview_from(
         IDX_COMMAND_TIMEOUT,
         128 * 1024,
     );
-    let wiki_result = run_idx_command(
-        &launcher,
-        &root,
-        &[
-            "wiki".to_owned(),
-            "status".to_owned(),
-            "--candidate-limit".to_owned(),
-            "50".to_owned(),
-        ],
-        IDX_COMMAND_TIMEOUT,
-        128 * 1024,
-    );
-    let mut raw_parts = Vec::new();
     let index_status = match index_result {
         Ok(result) => {
             let text = idx_result_text(&result);
@@ -4980,7 +5328,6 @@ fn idx_overview_from(
                 errors.push(non_empty_idx_error("idx index --status failed", &result));
             }
             if !text.trim().is_empty() {
-                raw_parts.push(text.clone());
                 Some(parse_idx_index_status(&text))
             } else {
                 None
@@ -4991,33 +5338,15 @@ fn idx_overview_from(
             None
         }
     };
-    let wiki_status = match wiki_result {
-        Ok(result) => {
-            let text = idx_result_text(&result);
-            if result.exit_code != Some(0) {
-                errors.push(non_empty_idx_error("idx wiki status failed", &result));
-            }
-            if !text.trim().is_empty() {
-                raw_parts.push(text.clone());
-                Some(parse_idx_wiki_status(&text))
-            } else {
-                None
-            }
-        }
-        Err(error) => {
-            errors.push(error);
-            None
-        }
-    };
-
     Ok(IdxOverview {
         available: true,
         executable: Some(launcher.display_path().to_string_lossy().into_owned()),
         version,
         initialized: true,
+        raw_status: index_status
+            .as_ref()
+            .map_or(String::new(), |status| status.raw.clone()),
         index_status,
-        wiki_status,
-        raw_status: raw_parts.join("\n\n"),
         errors,
     })
 }
@@ -5062,28 +5391,6 @@ fn parse_idx_index_status(raw: &str) -> IdxParsedStatus {
     }
     IdxParsedStatus {
         state,
-        fields,
-        raw: raw.trim().to_owned(),
-    }
-}
-
-fn parse_idx_wiki_status(raw: &str) -> IdxParsedStatus {
-    let mut fields = BTreeMap::new();
-    for line in raw
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .take(1)
-    {
-        for segment in line.split('|').map(str::trim) {
-            let Some((key, value)) = segment.split_once(':') else {
-                continue;
-            };
-            fields.insert(normalize_idx_field_key(key), value.trim().to_owned());
-        }
-    }
-    IdxParsedStatus {
-        state: None,
         fields,
         raw: raw.trim().to_owned(),
     }
@@ -5153,6 +5460,8 @@ fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
             let mut args = vec![
                 "search".to_owned(),
                 query,
+                "--domain".to_owned(),
+                "code".to_owned(),
                 "--max-files".to_owned(),
                 max_files.to_string(),
                 "--mode".to_owned(),
@@ -5169,20 +5478,17 @@ fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
         IdxQuery::Knowledge {
             query,
             limit,
-            include_secondary,
             path_prefix,
         } => {
             let query = non_empty_idx_argument(query, "query", 4_000)?;
             let mut args = vec![
-                "wiki".to_owned(),
                 "search".to_owned(),
                 query,
-                "--limit".to_owned(),
-                (*limit).clamp(1, MAX_IDX_LIMIT.min(20)).to_string(),
+                "--domain".to_owned(),
+                "document".to_owned(),
+                "--max-files".to_owned(),
+                (*limit).clamp(1, 20).to_string(),
             ];
-            if *include_secondary {
-                args.push("--include-secondary".to_owned());
-            }
             if let Some(prefix) = optional_idx_argument(path_prefix, "path prefix", 1_024)? {
                 args.extend(["--path-prefix".to_owned(), prefix]);
             }
@@ -5194,7 +5500,6 @@ fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
             max_specs,
             max_code,
             max_tests,
-            include_secondary,
             path_prefix,
         } => {
             let query = non_empty_idx_argument(query, "query", 4_000)?;
@@ -5210,15 +5515,48 @@ fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
                 "--max-tests".to_owned(),
                 (*max_tests).clamp(1, 20).to_string(),
             ];
-            if *include_secondary {
-                args.push("--include-secondary".to_owned());
-            }
             if let Some(prefix) = optional_idx_argument(path_prefix, "path prefix", 1_024)? {
                 args.extend(["--path-prefix".to_owned(), prefix]);
             }
             Ok(args)
         }
+        IdxQuery::Ask { question, budget } => Ok(vec![
+            "ask".to_owned(),
+            non_empty_idx_argument(question, "question", 4_000)?,
+            "--budget".to_owned(),
+            (*budget).clamp(200, 20_000).to_string(),
+        ]),
     }
+}
+
+fn idx_audit_args(request: &IdxAuditRequest) -> Result<Vec<String>, String> {
+    if request.paths.is_empty() || request.paths.len() > 100 {
+        return Err("audit requires 1..100 explicit changed paths".to_owned());
+    }
+    let mut args = vec!["audit".to_owned()];
+    for value in &request.paths {
+        let path = non_empty_idx_argument(value, "changed path", 2_048)?;
+        // Avoid platform-dependent path interpretation and option injection.
+        if !safe_idx_project_path(&path) {
+            return Err(
+                "changed path must be a project-relative path without traversal or options"
+                    .to_owned(),
+            );
+        }
+        args.push(path);
+    }
+    Ok(args)
+}
+
+fn safe_idx_project_path(path: &str) -> bool {
+    !path.starts_with('-')
+        && !path.contains('\\')
+        && !path.contains(':')
+        && !path.chars().any(char::is_control)
+        && !Path::new(path)
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        && validate_workspace_relative_path(Path::new(path), "IDX path").is_ok()
 }
 
 fn idx_inspect_args(request: &IdxInspectRequest) -> Result<Vec<String>, String> {
@@ -5244,18 +5582,27 @@ fn idx_inspect_args(request: &IdxInspectRequest) -> Result<Vec<String>, String> 
             }
             Ok(args)
         }
-        IdxInspectCommand::Ast => Ok(vec![
-            "ast".to_owned(),
-            non_empty_idx_argument(
+        IdxInspectCommand::Ast => {
+            let path = non_empty_idx_argument(
                 request.target.as_deref().unwrap_or_default(),
                 "AST file path",
                 2_048,
-            )?,
-            "--max-depth".to_owned(),
-            request.depth.unwrap_or(4).clamp(1, 8).to_string(),
-            "--max-nodes".to_owned(),
-            request.max_files.unwrap_or(100).clamp(1, 500).to_string(),
-        ]),
+            )?;
+            if !safe_idx_project_path(&path) {
+                return Err(
+                    "AST file path must be project-relative without traversal or options"
+                        .to_owned(),
+                );
+            }
+            Ok(vec![
+                "ast".to_owned(),
+                path,
+                "--max-depth".to_owned(),
+                request.depth.unwrap_or(4).clamp(1, 8).to_string(),
+                "--max-nodes".to_owned(),
+                request.max_files.unwrap_or(100).clamp(1, 500).to_string(),
+            ])
+        }
         IdxInspectCommand::Explain => {
             let mut args = vec![
                 "explain".to_owned(),
@@ -5303,204 +5650,6 @@ fn idx_inspect_args(request: &IdxInspectRequest) -> Result<Vec<String>, String> 
     }
 }
 
-fn idx_knowledge_args(request: &IdxKnowledgeRequest) -> Result<Vec<String>, String> {
-    let path = || optional_idx_argument(&request.path, "knowledge path", 2_048);
-    match request.action {
-        IdxKnowledgeAction::Show => Ok(vec![
-            "wiki".to_owned(),
-            "show".to_owned(),
-            "--path".to_owned(),
-            path()?.ok_or_else(|| "show requires a knowledge path".to_owned())?,
-        ]),
-        IdxKnowledgeAction::Record => {
-            if request.source_reviewed != Some(true) {
-                return Err(
-                    "record requires sourceReviewed=true after reading and classifying the source"
-                        .to_owned(),
-                );
-            }
-            let classification = validated_idx_choice(
-                request.classification.as_deref(),
-                "classification",
-                &[
-                    "spec",
-                    "spec-like",
-                    "meta-index",
-                    "design-only",
-                    "guide",
-                    "other",
-                ],
-            )?;
-            let source_path =
-                path()?.ok_or_else(|| "record requires a knowledge path".to_owned())?;
-            let mut args = vec![
-                "wiki".to_owned(),
-                "record".to_owned(),
-                "--path".to_owned(),
-                source_path,
-                "--classification".to_owned(),
-                classification.to_owned(),
-            ];
-            if classification == "spec" || classification == "spec-like" {
-                let behavior = validated_idx_choice(
-                    request.behavior_type.as_deref(),
-                    "behavior type",
-                    &["as-is", "change", "mixed", "unknown"],
-                )?;
-                let lifecycle = validated_idx_choice(
-                    request.lifecycle.as_deref(),
-                    "lifecycle",
-                    &["active", "proposed", "historical", "superseded", "unknown"],
-                )?;
-                args.extend([
-                    "--type".to_owned(),
-                    behavior.to_owned(),
-                    "--lifecycle".to_owned(),
-                    lifecycle.to_owned(),
-                ]);
-            }
-            if let Some(confidence) = request.confidence.as_deref() {
-                let confidence = validated_idx_choice(
-                    Some(confidence),
-                    "confidence",
-                    &["high", "medium", "low", "unknown"],
-                )?;
-                args.extend(["--confidence".to_owned(), confidence.to_owned()]);
-            }
-            if let Some(summary) = optional_idx_argument(&request.summary, "summary", 4_000)? {
-                args.extend(["--summary".to_owned(), summary]);
-            }
-            for topic in normalized_idx_strings(request.topics.as_deref(), "topic", 256, 20)? {
-                args.extend(["--topic".to_owned(), topic]);
-            }
-            Ok(args)
-        }
-        IdxKnowledgeAction::Verify => {
-            if request.evidence_reviewed != Some(true) {
-                return Err("verify requires evidenceReviewed=true after reviewing the source and relevant code/tests".to_owned());
-            }
-            Ok(vec![
-                "wiki".to_owned(),
-                "verify".to_owned(),
-                "--path".to_owned(),
-                path()?.ok_or_else(|| "verify requires a knowledge path".to_owned())?,
-            ])
-        }
-        IdxKnowledgeAction::Relate => {
-            if request.evidence_reviewed != Some(true) {
-                return Err(
-                    "relate requires evidenceReviewed=true after reviewing concrete evidence"
-                        .to_owned(),
-                );
-            }
-            let source_path =
-                path()?.ok_or_else(|| "relate requires a knowledge path".to_owned())?;
-            let relation_kind = validated_idx_choice(
-                request.relation_kind.as_deref(),
-                "relation kind",
-                &[
-                    "implements",
-                    "tests",
-                    "related",
-                    "supersedes",
-                    "superseded-by",
-                ],
-            )?;
-            let relation_action = validated_idx_choice(
-                request.relation_action.as_deref(),
-                "relation action",
-                &["add", "remove"],
-            )?;
-            let targets =
-                normalized_idx_strings(request.target_paths.as_deref(), "target path", 2_048, 30)?;
-            if targets.is_empty() {
-                return Err("relate requires at least one target path".to_owned());
-            }
-            let flag = match (relation_kind, relation_action) {
-                ("implements", "add") => "--add-code",
-                ("implements", "remove") => "--remove-code",
-                ("tests", "add") => "--add-test",
-                ("tests", "remove") => "--remove-test",
-                ("related", "add") => "--add-related-spec",
-                ("related", "remove") => "--remove-related-spec",
-                ("supersedes", "add") => "--add-supersedes",
-                ("supersedes", "remove") => "--remove-supersedes",
-                ("superseded-by", "add") => "--add-superseded-by",
-                ("superseded-by", "remove") => "--remove-superseded-by",
-                _ => return Err("unsupported relation".to_owned()),
-            };
-            let mut args = vec![
-                "wiki".to_owned(),
-                "relate".to_owned(),
-                "--path".to_owned(),
-                source_path,
-            ];
-            for target in targets {
-                args.extend([flag.to_owned(), target]);
-            }
-            Ok(args)
-        }
-        IdxKnowledgeAction::Remove => {
-            if request.metadata_only_confirmed != Some(true) {
-                return Err("remove requires metadataOnlyConfirmed=true; the source document itself is not deleted".to_owned());
-            }
-            Ok(vec![
-                "wiki".to_owned(),
-                "remove".to_owned(),
-                "--path".to_owned(),
-                path()?.ok_or_else(|| "remove requires a knowledge path".to_owned())?,
-            ])
-        }
-        IdxKnowledgeAction::Impact => {
-            let paths =
-                normalized_idx_strings(request.paths.as_deref(), "changed path", 2_048, 100)?;
-            let mut args = vec!["wiki".to_owned(), "impact".to_owned()];
-            args.extend(paths);
-            if let Some(base) = optional_idx_argument(&request.base, "git base", 256)? {
-                args.extend(["--base".to_owned(), base]);
-            }
-            args.extend(["--semantic-limit".to_owned(), "10".to_owned()]);
-            if request.semantic == Some(false) {
-                args.push("--no-semantic".to_owned());
-            }
-            Ok(args)
-        }
-    }
-}
-
-fn validated_idx_choice<'a>(
-    value: Option<&'a str>,
-    label: &str,
-    allowed: &[&str],
-) -> Result<&'a str, String> {
-    let value = value.ok_or_else(|| format!("{label} is required"))?;
-    if allowed.contains(&value) {
-        Ok(value)
-    } else {
-        Err(format!("invalid {label}"))
-    }
-}
-
-fn normalized_idx_strings(
-    values: Option<&[String]>,
-    label: &str,
-    max_chars: usize,
-    max_items: usize,
-) -> Result<Vec<String>, String> {
-    let mut result = Vec::new();
-    let mut seen = HashSet::new();
-    for value in values.unwrap_or_default().iter().take(max_items + 1) {
-        if result.len() >= max_items {
-            return Err(format!("too many {label} values"));
-        }
-        let value = non_empty_idx_argument(value, label, max_chars)?;
-        if seen.insert(value.clone()) {
-            result.push(value);
-        }
-    }
-    Ok(result)
-}
-
 fn idx_operation_args(kind: IdxMaintenanceKind) -> Vec<String> {
     match kind {
         IdxMaintenanceKind::Init => vec!["init".to_owned()],
@@ -5510,19 +5659,6 @@ fn idx_operation_args(kind: IdxMaintenanceKind) -> Vec<String> {
         IdxMaintenanceKind::Doctor => {
             vec!["doctor".to_owned(), "--force".to_owned(), ".".to_owned()]
         }
-        IdxMaintenanceKind::WikiAudit => vec![
-            "wiki".to_owned(),
-            "audit".to_owned(),
-            "--candidate-limit".to_owned(),
-            "100".to_owned(),
-        ],
-        IdxMaintenanceKind::WikiDiscover => vec![
-            "wiki".to_owned(),
-            "discover".to_owned(),
-            "--limit".to_owned(),
-            "200".to_owned(),
-        ],
-        IdxMaintenanceKind::WikiCatalog => vec!["wiki".to_owned(), "catalog".to_owned()],
     }
 }
 
@@ -8156,6 +8292,44 @@ fn replace_task_file(temporary: &Path, target: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
+fn replace_project_file(
+    temporary: &Path,
+    target: &Path,
+    _sequence: u64,
+    display_path: &str,
+) -> Result<(), String> {
+    fs::rename(temporary, target)
+        .map_err(|error| format!("failed to replace {display_path}: {error}"))
+}
+
+#[cfg(windows)]
+fn replace_project_file(
+    temporary: &Path,
+    target: &Path,
+    sequence: u64,
+    display_path: &str,
+) -> Result<(), String> {
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| format!("{display_path} has no file name"))?
+        .to_string_lossy();
+    let backup = target.with_file_name(format!(
+        ".{file_name}.pix-backup.{}.{}",
+        std::process::id(),
+        sequence,
+    ));
+    let _ = fs::remove_file(&backup);
+    fs::rename(target, &backup)
+        .map_err(|error| format!("failed to prepare {display_path} replacement: {error}"))?;
+    if let Err(error) = fs::rename(temporary, target) {
+        let _ = fs::rename(&backup, target);
+        return Err(format!("failed to replace {display_path}: {error}"));
+    }
+    let _ = fs::remove_file(backup);
+    Ok(())
+}
+
+#[cfg(not(windows))]
 fn replace_workspace_config_file(temporary: &Path, target: &Path) -> Result<(), String> {
     fs::rename(temporary, target)
         .map_err(|error| format!("failed to replace .pi/workspace.jsonc: {error}"))
@@ -8769,9 +8943,14 @@ pub fn run() {
             open_attachment,
             open_local_file,
             read_project_file,
+            write_project_file,
             write_project_workspace_config_if_unchanged,
             project_file_exists,
             list_project_directory,
+            create_project_entry,
+            rename_project_entry,
+            copy_project_entry,
+            delete_project_entry,
             open_in_external_editor,
             git_status,
             git_repository_state,
@@ -8807,7 +8986,7 @@ pub fn run() {
             idx_overview,
             idx_query,
             idx_inspect,
-            idx_knowledge,
+            idx_audit,
             idx_operation_list,
             idx_operation_start,
             idx_operation_stop,
@@ -8822,6 +9001,7 @@ pub fn run() {
             package_terminal_forget,
             package_terminal_stop_workspace,
             local_file_exists,
+            read_local_file,
             resolve_project_media,
             resolve_home_media,
             resolve_local_media,
@@ -9052,6 +9232,64 @@ mod tests {
     }
 
     #[test]
+    fn edits_existing_utf8_project_files_without_requiring_project_metadata() {
+        let workspace = temporary_workspace("project-edit");
+        fs::create_dir(workspace.join("src")).expect("create src directory");
+        fs::write(workspace.join("src/main.ts"), "const ready = false;\n").expect("write source");
+
+        let preview = write_project_file_from(
+            &workspace,
+            Path::new("src/main.ts"),
+            "const ready = true;\n",
+        )
+        .expect("edit project file");
+
+        assert_eq!(preview.path, "src/main.ts");
+        assert_eq!(preview.content, "const ready = true;\n");
+        assert_eq!(
+            fs::read_to_string(workspace.join("src/main.ts")).expect("read edited source"),
+            "const ready = true;\n"
+        );
+        assert!(!workspace.join(".pi").exists());
+        assert!(write_project_file_from(&workspace, Path::new("missing.txt"), "new\n").is_err());
+        assert!(
+            write_project_file_from(&workspace, Path::new("../outside.txt"), "nope\n").is_err()
+        );
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn generic_project_file_editor_refuses_binary_targets() {
+        let workspace = temporary_workspace("project-edit-binary");
+        fs::write(workspace.join("binary.bin"), [0xff, 0xfe]).expect("write binary file");
+
+        assert!(write_project_file_from(&workspace, Path::new("binary.bin"), "text\n").is_err());
+        assert_eq!(
+            fs::read(workspace.join("binary.bin")).expect("read binary file"),
+            [0xff, 0xfe]
+        );
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generic_project_file_editor_refuses_symbolic_link_targets() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("project-edit-symlink");
+        let target = workspace.join("target.txt");
+        fs::write(&target, "original\n").expect("write target");
+        symlink(&target, workspace.join("link.txt")).expect("create symlink");
+
+        assert!(write_project_file_from(&workspace, Path::new("link.txt"), "changed\n").is_err());
+        assert_eq!(
+            fs::read_to_string(&target).expect("read target"),
+            "original\n"
+        );
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
     fn discovers_root_package_scripts_and_package_manager() {
         let workspace = temporary_workspace("package-scripts");
         fs::write(
@@ -9130,22 +9368,35 @@ mod tests {
             Some("deadbeef")
         );
         assert_eq!(index.fields.get("files").map(String::as_str), Some("743"));
+    }
 
-        let wiki = parse_idx_wiki_status(
-            "primary specs: 44 (43 current/proposed) | fresh: 36 | needs review: 7 | unresolved refs: 8\nRecommendation: review changed inputs.\n",
+    #[cfg(unix)]
+    #[test]
+    fn idx_overview_reads_version_and_index_status() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let workspace = temporary_workspace("idx-overview");
+        fs::create_dir(workspace.join(".indexer-cli")).expect("initialized workspace");
+        let executable = workspace.join("fake-idx");
+        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> idx-args\nif [ \"$1\" = '--version' ]; then printf '2.0.7\\n'; else printf 'Snapshot: test (completed)\\n'; fi\n").expect("write fake idx");
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+            .expect("executable idx");
+
+        let overview =
+            idx_overview_from(&workspace, Ok(IdxLauncher::System(executable))).expect("overview");
+        assert_eq!(
+            fs::read_to_string(workspace.join("idx-args")).expect("CLI calls"),
+            "--version\nindex --status\n"
         );
         assert_eq!(
-            wiki.fields.get("primarySpecs").map(String::as_str),
-            Some("44 (43 current/proposed)")
+            overview
+                .index_status
+                .and_then(|status| status.state)
+                .as_deref(),
+            Some("completed")
         );
-        assert_eq!(
-            wiki.fields.get("needsReview").map(String::as_str),
-            Some("7")
-        );
-        assert_eq!(
-            wiki.fields.get("unresolvedRefs").map(String::as_str),
-            Some("8")
-        );
+        assert_eq!(overview.version.as_deref(), Some("2.0.7"));
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
     #[test]
@@ -9163,6 +9414,8 @@ mod tests {
             vec![
                 "search",
                 "workspace sidebar",
+                "--domain",
+                "code",
                 "--max-files",
                 "50",
                 "--mode",
@@ -9172,17 +9425,67 @@ mod tests {
             ]
         );
 
+        let documents = idx_query_args(&IdxQuery::Knowledge {
+            query: "workspace guide".to_owned(),
+            limit: 100,
+            path_prefix: Some("specs".to_owned()),
+        })
+        .expect("document query args");
+        assert_eq!(
+            documents,
+            [
+                "search",
+                "workspace guide",
+                "--domain",
+                "document",
+                "--max-files",
+                "20",
+                "--path-prefix",
+                "specs"
+            ]
+        );
+
         let context = idx_query_args(&IdxQuery::Context {
             query: "task lifecycle".to_owned(),
             budget: 1400,
             max_specs: 4,
             max_code: 6,
             max_tests: 4,
-            include_secondary: false,
             path_prefix: None,
         })
         .expect("context args");
-        assert_eq!(context[0..2], ["context", "task lifecycle"]);
+        assert_eq!(
+            context,
+            [
+                "context",
+                "task lifecycle",
+                "--budget",
+                "1400",
+                "--max-specs",
+                "4",
+                "--max-code",
+                "6",
+                "--max-tests",
+                "4"
+            ]
+        );
+
+        assert_eq!(
+            idx_query_args(&IdxQuery::Ask {
+                question: "why?".to_owned(),
+                budget: 100_000
+            })
+            .expect("ask args"),
+            ["ask", "why?", "--budget", "20000"]
+        );
+        assert_eq!(
+            idx_query_args(&IdxQuery::Ask {
+                question: "why?".to_owned(),
+                budget: 0
+            })
+            .expect("minimum budget"),
+            ["ask", "why?", "--budget", "200"]
+        );
 
         let decoded: IdxQueryRequest = serde_json::from_value(serde_json::json!({
             "workspace": "/workspace",
@@ -9196,6 +9499,11 @@ mod tests {
         }))
         .expect("camelCase query request");
         assert!(matches!(decoded.query, IdxQuery::Code { max_files: 5, .. }));
+        let ask: IdxQueryRequest = serde_json::from_value(serde_json::json!({
+            "workspace": "/workspace", "query": { "kind": "ask", "question": "Why?", "budget": 900 }
+        }))
+        .expect("typed ask request");
+        assert!(matches!(ask.query, IdxQuery::Ask { budget: 900, .. }));
     }
 
     #[test]
@@ -9241,36 +9549,88 @@ mod tests {
     }
 
     #[test]
-    fn idx_knowledge_mutations_require_review_confirmations() {
-        let base = IdxKnowledgeRequest {
+    fn idx_ast_requires_a_safe_project_relative_file() {
+        let mut request = IdxInspectRequest {
             workspace: "/workspace".to_owned(),
-            action: IdxKnowledgeAction::Verify,
-            path: Some("specs/behavior.md".to_owned()),
-            classification: None,
-            behavior_type: None,
-            lifecycle: None,
-            confidence: None,
-            summary: None,
-            topics: None,
-            target_paths: None,
-            relation_kind: None,
-            relation_action: None,
-            source_reviewed: None,
-            evidence_reviewed: None,
-            metadata_only_confirmed: None,
-            paths: None,
-            base: None,
-            semantic: None,
-        };
-        assert!(idx_knowledge_args(&base).is_err());
-        let verified = IdxKnowledgeRequest {
-            evidence_reviewed: Some(true),
-            ..base
+            command: IdxInspectCommand::Ast,
+            target: Some("src/lib.rs".to_owned()),
+            path_prefix: None,
+            depth: None,
+            max_files: None,
+            include_body: None,
+            show_edges: None,
+            tests: None,
         };
         assert_eq!(
-            idx_knowledge_args(&verified).expect("verified args"),
-            vec!["wiki", "verify", "--path", "specs/behavior.md"]
+            idx_inspect_args(&request).expect("AST args")[0..2],
+            ["ast", "src/lib.rs"]
         );
+        for path in [
+            "/etc/passwd",
+            "../secret",
+            "src/../secret",
+            "./src/lib.rs",
+            "-h",
+            "C:/secret",
+            "src\\lib.rs",
+        ] {
+            request.target = Some(path.to_owned());
+            assert!(idx_inspect_args(&request).is_err(), "accepted {path:?}");
+        }
+    }
+
+    #[test]
+    fn idx_audit_requires_explicit_safe_project_relative_paths() {
+        let decoded: IdxAuditRequest = serde_json::from_value(serde_json::json!({
+            "workspace": "/workspace", "paths": ["src/lib.rs"]
+        }))
+        .expect("camelCase audit request");
+        assert_eq!(
+            idx_audit_args(&decoded).expect("typed audit args"),
+            ["audit", "src/lib.rs"]
+        );
+        let request = IdxAuditRequest {
+            workspace: "/workspace".to_owned(),
+            paths: vec![
+                "desktop/src-tauri/src/lib.rs".to_owned(),
+                "specs/behavior.md".to_owned(),
+            ],
+        };
+        assert_eq!(
+            idx_audit_args(&request).expect("audit args"),
+            ["audit", "desktop/src-tauri/src/lib.rs", "specs/behavior.md"]
+        );
+        for path in [
+            "",
+            " ",
+            "/etc/passwd",
+            "../secret",
+            "foo/../secret",
+            "./specs/a",
+            "-json",
+            "foo\\..\\secret",
+            "C:/secret",
+            "foo\nbar",
+        ] {
+            assert!(
+                idx_audit_args(&IdxAuditRequest {
+                    paths: vec![path.to_owned()],
+                    ..request.clone()
+                })
+                .is_err(),
+                "accepted {path:?}"
+            );
+        }
+        assert!(idx_audit_args(&IdxAuditRequest {
+            paths: vec![],
+            ..request.clone()
+        })
+        .is_err());
+        assert!(idx_audit_args(&IdxAuditRequest {
+            paths: vec!["safe".to_owned(); 101],
+            ..request
+        })
+        .is_err());
     }
 
     #[test]
@@ -9393,6 +9753,91 @@ mod tests {
         );
         assert!(list_project_directory_from(&workspace, Some(Path::new("../outside"))).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn mutates_project_entries_without_overwriting_existing_targets() {
+        let workspace = temporary_workspace("project-tree-mutations");
+        fs::create_dir_all(workspace.join("src/nested")).expect("create source directories");
+        fs::write(workspace.join("src/main.ts"), "export {};\n").expect("write source file");
+
+        let created = create_project_entry_from(
+            &workspace,
+            Some(Path::new("src")),
+            "notes.txt",
+            ProjectTreeEntryKind::File,
+        )
+        .expect("create project file");
+        assert_eq!(created.path, "src/notes.txt");
+
+        let directory =
+            create_project_entry_from(&workspace, None, "docs", ProjectTreeEntryKind::Directory)
+                .expect("create project directory");
+        assert_eq!(directory.path, "docs");
+
+        let renamed =
+            rename_project_entry_from(&workspace, Path::new("src/notes.txt"), "README.txt")
+                .expect("rename project file");
+        assert_eq!(renamed.path, "src/README.txt");
+        assert!(!workspace.join("src/notes.txt").exists());
+
+        let duplicate = copy_project_entry_from(
+            &workspace,
+            Path::new("src/README.txt"),
+            Some(Path::new("src")),
+        )
+        .expect("duplicate project file");
+        assert_eq!(duplicate.path, "src/README copy.txt");
+        assert!(workspace.join("src/README.txt").exists());
+        assert!(workspace.join("src/README copy.txt").exists());
+
+        let copied_directory = copy_project_entry_from(&workspace, Path::new("src"), None)
+            .expect("duplicate project directory");
+        assert_eq!(copied_directory.path, "src copy");
+        assert!(workspace.join("src copy/main.ts").exists());
+
+        assert!(copy_project_entry_from(
+            &workspace,
+            Path::new("src"),
+            Some(Path::new("src/nested")),
+        )
+        .is_err());
+        assert!(
+            rename_project_entry_from(&workspace, Path::new("src/main.ts"), "../escape.ts",)
+                .is_err()
+        );
+
+        delete_project_entry_from(&workspace, Path::new("src/README copy.txt"))
+            .expect("delete copied file");
+        delete_project_entry_from(&workspace, Path::new("docs")).expect("delete directory");
+        assert!(!workspace.join("src/README copy.txt").exists());
+        assert!(!workspace.join("docs").exists());
+        assert!(delete_project_entry_from(&workspace, Path::new("../outside")).is_err());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_entry_copy_rejects_nested_symbolic_links_and_cleans_partial_copy() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("project-tree-copy-symlink");
+        let outside = temporary_workspace("project-tree-copy-symlink-outside");
+        fs::create_dir_all(workspace.join("src/nested")).expect("create source directory");
+        fs::write(workspace.join("src/ok.txt"), "ok\n").expect("write source file");
+        fs::write(outside.join("secret.txt"), "secret\n").expect("write outside file");
+        symlink(
+            outside.join("secret.txt"),
+            workspace.join("src/nested/secret.txt"),
+        )
+        .expect("create nested symlink");
+
+        assert!(copy_project_entry_from(&workspace, Path::new("src"), None).is_err());
+        assert!(!workspace.join("src copy").exists());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove temporary outside workspace");
     }
 
     #[test]
@@ -10150,6 +10595,29 @@ mod tests {
         assert!(resolve_local_open_path(Path::new("relative/artifact.log")).is_err());
         assert!(resolve_local_open_path(&directory.join("missing.log")).is_err());
         assert!(resolve_local_file_path(&directory).is_err());
+
+        fs::remove_dir_all(directory).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn reads_absolute_utf8_local_files_for_desktop_preview() {
+        let directory = temporary_workspace("local-preview-file");
+        let file_path = directory.join("stdout.txt");
+        let binary_path = directory.join("binary.bin");
+        fs::write(&file_path, "qa complete\n").expect("write local text artifact");
+        fs::write(&binary_path, [0xff, 0xfe]).expect("write local binary artifact");
+
+        let preview = read_local_file_from(&file_path, 1024).expect("read local preview");
+        assert_eq!(
+            preview.path,
+            fs::canonicalize(&file_path)
+                .expect("canonical path")
+                .to_string_lossy()
+        );
+        assert_eq!(preview.content, "qa complete\n");
+        assert!(read_local_file_from(&directory, 1024).is_err());
+        assert!(read_local_file_from(&binary_path, 1024).is_err());
+        assert!(read_local_file_from(&file_path, 4).is_err());
 
         fs::remove_dir_all(directory).expect("remove temporary workspace");
     }

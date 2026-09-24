@@ -1,5 +1,4 @@
 import { externalEditorLabel } from "../lib/desktop-config";
-import { isEditableProjectMarkdown } from "../lib/project-documents";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import { createDesktopWorkbenchViewModel } from "./desktop-workbench-view-model.svelte";
 import { createSessionTodoActions } from "./session-todo-actions";
@@ -72,7 +71,6 @@ export function createDesktopWorkbenchViewModelServices(options: DesktopViewMode
       operationRunning: options.operationRunning,
       activeWorkbenchTabId: options.activeWorkbenchTabId,
       externalEditorLabel: () => externalEditorLabel(options.project.workspace.externalEditor),
-      isEditableProjectMarkdown,
       preview: options.project.preview,
       projectDocuments: options.project.documents,
       projectWorkspace: options.project.workspace,

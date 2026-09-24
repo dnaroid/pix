@@ -1,6 +1,6 @@
 import type { AcpClient } from "../lib/acp-client";
 import type { Attachment } from "../lib/attachments";
-import { PROJECT_TODO_PATH } from "../lib/project-documents";
+import { isEditableProjectMarkdown, PROJECT_TODO_PATH } from "../lib/project-documents";
 import type { TranscriptState } from "../lib/transcript";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
@@ -60,7 +60,8 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     previewId: () => preview.active?.id,
     afterSave: (file, _workspace, previewId) => {
       if (preview.active?.id === previewId) preview.replaceCurrentFile(file);
-      registry.scheduleProjectSync(file.path === PROJECT_TODO_PATH ? "todo" : "plans");
+      if (file.path === PROJECT_TODO_PATH) registry.scheduleProjectSync("todo");
+      else if (isEditableProjectMarkdown(file.path)) registry.scheduleProjectSync("plans");
     },
     clearError: options.clearError,
     reportError: options.reportError,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import type { ElicitationField } from "../lib/elicitation";
   import { activateModalDialog } from "../lib/modal-dialog";
@@ -41,7 +42,9 @@
     <span class="text-xs font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
     <h2 id="elicitation-title" class="mt-2 mb-4 text-sm leading-snug font-medium whitespace-pre-wrap text-foreground">{message}</h2>
     <label class="grid gap-1.5">
-      <span class="text-xs font-semibold" class:sr-only={field.label === message}>{field.label}</span>
+      {#if field.type !== "boolean"}
+        <span class="text-xs font-semibold" class:sr-only={field.label.trim() === message.trim()}>{field.label}</span>
+      {/if}
       {#if field.description}<small class="text-muted-foreground">{field.description}</small>{/if}
       {#if field.type === "select"}
         <div class="relative">
@@ -56,15 +59,20 @@
           <ChevronDown class="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         </div>
       {:else if field.type === "boolean"}
-        <div class="flex items-center gap-2">
-          <input
-            bind:this={fieldControl}
-            class="h-4 w-4 accent-primary transition-shadow enabled:hover:ring-2 enabled:hover:ring-ring/30 focus-visible:outline-2 focus-visible:outline-ring"
-            type="checkbox"
-            checked={Boolean(field.value)}
-            onchange={(event) => onValueChange(event.currentTarget.checked)}
-          />
-        </div>
+        <span class="mt-0.5 inline-flex cursor-pointer items-center gap-2">
+          <span class="relative grid size-4 shrink-0 place-items-center">
+            <input
+              bind:this={fieldControl}
+              class="peer size-4 cursor-pointer appearance-none rounded-sm border border-input bg-panel-strong transition-colors hover:border-ring checked:border-primary checked:bg-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+              type="checkbox"
+              aria-label={field.label}
+              checked={Boolean(field.value)}
+              onchange={(event) => onValueChange(event.currentTarget.checked)}
+            />
+            <Check class="pointer-events-none absolute size-3 text-primary-foreground opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={2.5} aria-hidden="true" />
+          </span>
+          <span class="text-xs font-semibold" class:sr-only={field.label.trim() === message.trim()}>{field.label}</span>
+        </span>
       {:else if field.type === "editor"}
         <textarea
           bind:this={fieldControl}

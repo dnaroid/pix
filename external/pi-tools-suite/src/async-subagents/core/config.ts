@@ -46,6 +46,8 @@ export interface SubagentTypeConfig {
 	 * forParentModels also matches.
 	 */
 	notForParentModels?: string[];
+	/** Opt-in hard boundary: every child candidate (including overrides and fallbacks) must use a different provider from the known parent. */
+	requireDifferentProvider?: boolean;
 	thinking?: string;
 	tools?: string[];
 	extraArgs?: string[];
@@ -273,6 +275,10 @@ export function resolveAgentTaskConfig(
 ): ResolvedAgentTaskConfig {
 	const selectedType = selectSubagentType(task, config);
 	const profile = selectedType ? config.types[selectedType] : undefined;
+	const parentProvider = providerFromModelRef(globalOptions.parentModel);
+	if (profile?.requireDifferentProvider && (!parentProvider || !isSubagentTypeAvailableForParent(profile, globalOptions.parentModel))) {
+		throw new SubagentModelSelectionError(task.id, "A known, permitted parent provider is required for cross-provider selection.");
+	}
 	const preset = globalOptions.preset;
 	// A new pool preset has no per-role policy. Ignore any inherited legacy
 	// matrix/defaults so changing the pool cannot resurrect an expensive model.
@@ -328,6 +334,18 @@ export function resolveAgentTaskConfig(
 			if (candidates.length === 0) {
 				throw new SubagentModelSelectionError(task.id, "No ranked candidate is in the active preset's models pool.");
 			}
+		}
+	}
+	if (profile?.requireDifferentProvider) {
+		if (explicitModel && providerFromModelRef(explicitModel) === parentProvider) {
+			throw new SubagentModelSelectionError(task.id, "Explicit model override uses the parent provider; cross-provider selection is required.");
+		}
+		candidates = candidates.filter((ref) => {
+			const provider = providerFromModelRef(ref);
+			return provider !== undefined && provider !== parentProvider;
+		});
+		if (candidates.length === 0) {
+			throw new SubagentModelSelectionError(task.id, "No cross-provider model candidate is available in the selected pool/overrides.");
 		}
 	}
 	if (candidates.length === 0) {
@@ -394,6 +412,11 @@ export function currentModelRef(model: unknown): string | undefined {
 	if (!id) return undefined;
 	const provider = trimString(model.provider) || trimString(model.providerId);
 	return provider && !id.includes("/") ? `${provider}/${id}` : id;
+}
+
+function providerFromModelRef(ref: string | undefined): string | undefined {
+	if (!ref || !/^[^/*\s]+\/[^/*\s]+$/.test(ref)) return undefined;
+	return ref.slice(0, ref.indexOf("/"));
 }
 
 export function isBlindModelRef(modelRef: string | undefined, config: SubagentConfig): boolean {
@@ -480,6 +503,10 @@ export function normalizeSubagentTypeProfile(
 	const models = normalizeModels(rawProfile.models, `type "${name}"`, file);
 	const model = models === undefined ? trimString(rawProfile.model) : undefined;
 	const fallbackModels = models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined;
+	const requireDifferentProvider = rawProfile.requireDifferentProvider;
+	if (requireDifferentProvider !== undefined && typeof requireDifferentProvider !== "boolean") {
+		throw new Error(`Agent ${name}: requireDifferentProvider must be a boolean (${file})`);
+	}
 	return {
 		description: trimString(rawProfile.description),
 		icon: trimString(rawProfile.icon),
@@ -489,6 +516,7 @@ export function normalizeSubagentTypeProfile(
 		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file, fallbackModels ?? []) : undefined,
 		forParentModels: normalizeParentModelPatterns(rawProfile.forParentModels, "forParentModels", name, file),
 		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
+		requireDifferentProvider,
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
 		extraArgs: arrayOfStrings(rawProfile.extraArgs),
@@ -555,6 +583,7 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
 	if (profile.forParentModels !== undefined) compact.forParentModels = profile.forParentModels;
 	if (profile.notForParentModels !== undefined) compact.notForParentModels = profile.notForParentModels;
+	if (profile.requireDifferentProvider !== undefined) compact.requireDifferentProvider = profile.requireDifferentProvider;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
 	if (profile.extraArgs && profile.extraArgs.length > 0) compact.extraArgs = profile.extraArgs;

@@ -31,6 +31,7 @@ export function createSessionRuntimeStore(options: SessionRuntimeStoreOptions) {
     get dcpStatsRefreshing() { return status.dcpStatsRefreshing; },
     get sessionUsageBySession() { return status.sessionUsageBySession; },
     get sessionUsageRefreshing() { return status.sessionUsageRefreshing; },
+    get sessionUsageFailed() { return status.sessionUsageFailed; },
     get changingConfig() { return config.changingConfig; },
     isReady: loading.isReady,
     isLoading: loading.isLoading,

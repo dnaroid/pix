@@ -12,75 +12,45 @@ Active implemented contract.
 
 ## Goal
 
-Expose repository intelligence and Spec Wiki maintenance from Pix Desktop without turning the UI into an arbitrary command runner or weakening IDX's review requirements for knowledge mutations.
+Expose installed IDX v2 repository intelligence in Pix Desktop with typed queries and explicit task-scoped, read-only documentation audits. The panel is not a shell runner or a wiki metadata editor.
 
 ## Scope
 
-- Add an **IDX** activity view to the left Workspace sidebar.
-- Show IDX availability, version, index status, and Spec Wiki status for the active workspace.
-- Summarize current/proposed knowledge separately from archived primary entries and surface semantic maintenance state without treating unresolved path references as stale by themselves.
-- Run bounded index/knowledge maintenance operations with streamed output and cancellation.
-- Start a dedicated Desktop session that performs the full knowledge-base audit/update workflow.
-- Run typed code, knowledge, context, architecture, structure, AST, symbol, and dependency queries.
-- Expose reviewed Spec Wiki metadata actions (`show`, `record`, `verify`, `relate`, `remove`, `impact`).
-- Turn validated project-file references in IDX output into source-preview links, preserving optional line ranges.
-
-## Non-goals
-
-- Executing arbitrary shell commands supplied by the user.
-- Automatically initializing an unindexed project without an explicit action.
-- Editing a primary knowledge document through the metadata controls.
-- Bypassing IDX's source/evidence review gates for `record`, `verify`, or `relate`.
-- Treating an unvalidated path printed by IDX as a trusted project file.
+- IDX activity view in the workspace sidebar, with availability, version, initialization and code-index status for the active workspace.
+- Named index maintenance (initialize, incremental/full update, dry run, doctor), bounded streamed output, cancellation and managed installation.
+- Typed search of code (`idx search --domain code`) and documents (`idx search --domain document`), context packs, evidence-cited `idx ask`, and typed index inspections.
+- Knowledge tab: explicit changed project-relative paths entered one per line or comma-separated; read-only `idx audit <paths...>` scoped to those paths.
+- Optional **Update in new session** for agent-led review and updates; no metadata mutations from the panel.
+- IDX output file references become source-preview links only after project-file validation, preserving line ranges.
 
 ## Behavior
 
-- The Workspace activity rail contains an **IDX** view. Its wider content width is clamped so the main workspace keeps a usable minimum width.
-- The activity-rail IDX icon participates in the shared Desktop sidebar-indicator service. It shows info while maintenance is running, warning when current/proposed knowledge is not fully fresh or needs semantic maintenance, and error for unseen failed/timed-out maintenance or IDX health failures. `unresolved refs` alone do not trigger the warning dot. See `desktop-sidebar-indicators.md` for polling and acknowledgement semantics.
-- The overview resolves a system/login-shell idx first, then Pix's optional managed ~/.pi/pix-desktop-tools/node_modules/indexer-cli entry. Managed IDX is launched with Pix's bundled Node so native modules use the matching Node ABI. IDX is reported unavailable when neither source exists. In that state, the IDX panel offers an explicit **Install IDX** action that reuses Desktop's managed installer, installs only into Pix's private tools directory with bundled Node/npm, and refreshes the overview when installation completes. A project is initialized when its canonical workspace contains .indexer-cli; installing IDX never initializes project state implicitly.
-- Knowledge statistics show the parsed `current/proposed` primary count as **Current**, compare **Fresh** against that set, keep **Review** explicit, label path-like misses as **Unresolved refs** with neutral treatment, and report non-current primary entries separately as archived.
-- Maintenance actions are fixed to: initialize, update index, full reindex, dry run, doctor, knowledge audit, knowledge discovery, and knowledge catalog. Every command runs with the canonical workspace as its working directory.
-- Only one IDX maintenance operation may run for a workspace at a time. Stdout/stderr stream into the panel; the retained per-operation log is bounded, completed operation history is bounded per window, and operations time out rather than running forever.
-- After a maintenance start returns, the panel registers the returned snapshot and immediately reconciles it with backend operation state. Output or completion emitted before the start response is therefore recovered without regressing a newer event received during reconciliation.
-- Stop first interrupts the IDX process group and escalates to a forced kill after a short grace period. Switching away from a workspace stops that window's running IDX operation for the old workspace.
-- Overview refresh is best-effort and periodic while the panel is idle. The initial/full workspace load runs only when the workspace value actually changes; repeated reactive invalidations carrying the same workspace do not restart it or re-enter the loading state. The periodic timer is scheduled only after the previous polling attempt finishes, so a slow status command still gets a full idle delay before another automatic refresh begins. Background overview polling does not animate the explicit Refresh button; that spinner is reserved for initial/manual full loads. Refresh requests are coalesced and generation/workspace guarded so a slow status command cannot overwrite a newer workspace/panel snapshot. Query/inspect controls are disabled until IDX is available and the project is initialized.
-- Code search supports hybrid, semantic, lexical, and symbol modes plus an optional path prefix and optional inline content. Knowledge search supports a bounded result limit and optional secondary knowledge. Context queries expose bounded budget/spec/code/test limits.
-- Inspection is restricted to the typed IDX commands `architecture`, `structure`, `ast`, `explain`, and `deps`; the backend constructs their argument lists and clamps numeric limits instead of forwarding free-form command text.
-- Knowledge metadata actions use the typed IDX wiki commands. `record` requires `sourceReviewed=true`; `verify` and `relate` require `evidenceReviewed=true`; `remove` requires explicit metadata-only confirmation and does not delete the source file.
-- **Update in new session** creates and warms a fresh ACP/Pi session for the active workspace, makes it the active Desktop tab, inserts a visible user request, and immediately starts a turn instructing the agent to audit/discover/impact current knowledge, reconcile specs against code/tests, update metadata only after evidence review, and finish with a clean knowledge-status pass. The prompt explicitly does not assume legacy behavior is supported and does not hide unresolved project-local/runtime paths just to improve a counter.
-- IDX output is rendered as text until a project-file candidate passes workspace-confined validation. Valid candidates become preview controls. References with `:line` or `:start-end` carry that range into the source preview, which highlights and reveals the requested lines.
+- Overview resolves installed IDX from the login shell first, then Pix's managed tools directory. Unavailable IDX offers an explicit managed installation; installation does not initialize the project. Initialization requires its own button.
+- Overview reads `idx --version` when IDX is available and presents only `indexStatus` from `idx index --status` for initialized projects; no wiki status request or knowledge freshness counts exist in IDX v2. Polling is completion-spaced, generation/workspace guarded and visually quiet. Queries require an available initialized project.
+- Maintenance kinds are `init`, `index`, `full-index`, `dry-run`, `doctor`. The backend serializes operations per workspace, bounds output/history/time, streams events, and interrupts then forcibly stops cancelled operations. The runtime reconciles events emitted before operation-start response. Workspace changes cannot show old operation records.
+- Code search offers hybrid/semantic/lexical/symbol ranking modes, max files, optional path prefix/content. Document search uses the knowledge query kind on the Tauri wire with `limit` and optional path prefix; the backend maps it to `search --domain document --max-files`. Neither document nor context queries send legacy `includeSecondary`.
+- Context offers bounded budget and spec/code/test result counts. Ask takes a question and a separate 200–20000 token answer budget. Advanced inspections are restricted to architecture, structure, ast, explain, deps with typed targets and limits; AST file targets must be safe project-relative paths.
+- The Knowledge tab requires at least one explicit project-relative changed path before running `idx_audit`. Blank, absolute and traversing paths are rejected in the UI, with backend validation authoritative. The request contract is `{ workspace, paths: string[] }` returning `IdxCommandResult`; audit output is shown through `IdxOutput`, which validates candidate links before activation. In-flight results are invalidated on workspace change or path-list edits; stale errors/results cannot overwrite the current workspace.
+- **Update in new session** starts a fresh Desktop session for project knowledge review. It is not an IDX wiki command.
 
 ## Contracts and limits
 
-- Overview/status commands have a 30-second backend timeout. Query, inspect, and knowledge actions have a 180-second timeout and retain at most 512 KiB of command output.
-- Long-running maintenance operations have a 30-minute timeout, retain at most 256 KiB of streamed output, and keep at most 12 operation records per window.
-- Code search is clamped to at most 50 files; knowledge search to at most 20 results; context budget is clamped to 200–8000 tokens with bounded spec/code/test counts.
-- All backend entry points canonicalize the workspace before running IDX. Inspect, knowledge, and non-init maintenance paths reject an uninitialized project.
+- Overview/status commands have a 30-second backend timeout. Query/inspect/audit commands have a 180-second timeout and retain at most 512 KiB output. Long-running maintenance has a 30-minute timeout, 256 KiB streamed log and at most 12 records per window.
+- Code search accepts at most 50 files, document search at most 20; context uses 200–8000 tokens and ask uses 200–20000. Backend canonicalizes the workspace and rejects uninitialized projects for non-init commands.
+- No wiki status, discovery, catalog, impact, or metadata mutation actions are supported by this panel.
 
 ## Related files
 
-- `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/IdxPanel.svelte`
 - `desktop/src/components/idx-panel-runtime-controller.svelte.ts`
 - `desktop/src/components/idx-panel-query-controller.svelte.ts`
-- `desktop/src/components/idx-panel-knowledge-controller.svelte.ts`
+- `desktop/src/components/idx-panel-audit-controller.svelte.ts`
 - `desktop/src/components/IdxOutput.svelte`
-- `desktop/src/components/TerminalView.svelte`
-- `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/lib/idx.ts`
 - `desktop/src/lib/idx.test.ts`
-- `desktop/src/lib/project-files.ts`
-- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification
 
-- Desktop IDX helper/panel tests cover overview-field parsing, current/archive counts, semantic attention rules, knowledge issue/candidate parsing, file references with optional line ranges, and the managed-install unavailable state.
-- Rust unit tests cover event payload serialization, typed query/inspect argument construction, overview parsing, knowledge review gates, and project-file link validation. TypeScript helper tests cover post-start operation reconciliation.
-- Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and the Desktop Tauri Rust unit tests.
-
-## Evidence
-
-- Confirmed by code: `IdxPanel.svelte` owns the declarative typed UI while dedicated panel controllers own generation-guarded runtime/maintenance state, typed query/inspect state, and reviewed knowledge-action state; all invoke only named Tauri commands. `lib.rs` constructs fixed IDX argument vectors, canonicalizes workspaces, clamps limits, and enforces review confirmations.
-- Confirmed by code: maintenance operations stream through `idx://operation-output` / `idx://operation-exit`, are cancellable, and have bounded output/history/timeouts.
-- Confirmed by tests: TypeScript helper tests and Rust IDX tests cover parsing, typed argument construction, safety confirmations, and project-file candidate validation.
+- Desktop tests cover task path normalization/rejection, link candidates with line ranges, stale-completion guards, managed-install unavailable state and operation reconciliation.
+- Rust unit tests cover typed domain/ask/audit argument construction and path validation. Run focused Desktop tests, `npm --prefix desktop run check`, and the Rust IDX tests.

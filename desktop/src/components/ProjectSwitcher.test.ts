@@ -14,6 +14,12 @@ describe("ProjectSwitcher project opening actions", () => {
     expect(switcherSource).toContain("onclick={() => openProjectInNewWindow(project)}");
   });
 
+  it("signals unavailable current-window actions with the cursor instead of dimming project choices", () => {
+    expect(switcherSource).toContain("disabled:cursor-not-allowed");
+    expect(switcherSource).not.toContain("disabled:opacity-40");
+    expect(switcherSource).not.toContain("disabled:cursor-default");
+  });
+
   it("behaves as a keyboard navigable command menu", () => {
     expect(switcherSource).toContain('aria-haspopup="menu"');
     expect(switcherSource).toContain('role="menu"');

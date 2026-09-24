@@ -37,7 +37,6 @@ describe("workbench Git diff props", () => {
       operationRunning: () => false,
       activeWorkbenchTabId: () => "git-diff",
       externalEditorLabel: () => "Editor",
-      isEditableProjectMarkdown: () => false,
       preview: { active: null } as any,
       projectDocuments: {} as any,
       projectWorkspace: {} as any,
@@ -57,5 +56,43 @@ describe("workbench Git diff props", () => {
     });
 
     expect(props.gitDiff?.canReview).toBe(true);
+  });
+
+  it("allows editing project text previews but keeps home and absolute local previews read-only", () => {
+    const options = {
+      workspace: () => "/workspace",
+      statusReady: () => true,
+      clientAvailable: () => true,
+      operationRunning: () => false,
+      activeWorkbenchTabId: () => "preview",
+      externalEditorLabel: () => "Editor",
+      preview: {
+        active: { id: 1, kind: "file", file: { path: "src/main.ts", content: "x" }, scrollPosition: { left: 0, top: 0 } },
+        canGoBack: false,
+        canGoForward: false,
+        move: vi.fn(),
+        validateProjectFile: vi.fn(),
+        validateLocalFile: vi.fn(),
+        resolveProjectMedia: vi.fn(),
+        openProjectFile: vi.fn(),
+        openLocalFile: vi.fn(),
+        resolveLocalMedia: vi.fn(),
+        rememberScroll: vi.fn(),
+        setDirty: vi.fn(),
+        close: vi.fn(),
+      },
+      projectDocuments: { save: vi.fn() },
+      projectWorkspace: { openInEditor: vi.fn() },
+      git: { diffPreview: null },
+      gitAssist: {},
+    } as any;
+
+    expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(true);
+    options.preview.active = { ...options.preview.active, file: { path: "~/.config/pi/pix.jsonc", content: "{}" } };
+    expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(false);
+    options.preview.active = { ...options.preview.active, file: { path: "/private/tmp/stdout.txt", content: "output" } };
+    const local = buildWorkbenchEditorProps(options).preview;
+    expect(local?.editable).toBe(false);
+    expect(local?.externalEditorLabel).toBeUndefined();
   });
 });

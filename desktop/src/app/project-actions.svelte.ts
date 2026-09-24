@@ -10,13 +10,11 @@ import { buildPromptPayload } from "./prompt-payload";
 import { materializeComposerTaskAttachments } from "./attachment-io";
 
 const KNOWLEDGE_REFRESH_PROMPT = [
-  "Update the project knowledge base to match the current repository.",
-  "Audit IDX knowledge status, discover new or changed knowledge documents, and review current working-tree impact.",
-  "For every stale, unverified, uncovered, or newly discovered current/proposed contract, read the primary source and verify it against relevant implementation and tests before changing knowledge metadata.",
-  "Update existing primary specs when behavior changed, or create a focused primary spec when no current contract exists. Record, relate, and verify metadata only after semantic evidence review.",
-  "Finish by re-running knowledge status/audit and aim for needs review = 0, unverified = 0, uncovered active as-is = 0, and new/changed candidates = 0 when the evidence supports it.",
+  "Update the project knowledge documentation to match the current repository.",
+  "Use idx search, idx context, and idx ask to discover relevant primary specs and current implementation/tests. Read the primary sources and verify the actual behavior rather than treating search results or generated answers as proof.",
+  "Review each affected primary spec against code and tests; update an existing spec if behavior changed. Only when no current spec covers the behavior, create a focused new spec using .indexer-cli/spec-template.md (ask before setup if the template is missing).",
+  "After material changes, run idx audit <changed-paths...> with only the paths changed for this task. Review its document relationships against final code and tests, resolve real semantic drift, and report any remaining gaps; audit candidates alone are not proof of drift.",
   "Do not add or preserve legacy compatibility unless current product requirements explicitly demand it. Treat legacy behavior found in active code/specs as a mismatch to investigate, not as automatically supported behavior.",
-  "Do not silence unresolved path references by deleting useful runtime or project-local contract paths; fix only genuinely invalid references and explain the rest.",
 ].join("\n\n");
 
 type ProjectActionsOptions = {

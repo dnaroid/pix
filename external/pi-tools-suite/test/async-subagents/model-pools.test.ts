@@ -52,9 +52,65 @@ afterEach(() => {
 });
 
 describe("ordered agent models and preset pools", () => {
-	test("ships seven Markdown modes and pool-only presets from a single defaults source", () => {
+	test("cross-provider oracle roles are gated by known opposite parent providers", async () => {
 		const cfg = loadSubagentConfig(temp(), {});
-		expect(Object.keys(cfg.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		for (const [parent, offered, hidden] of [
+			["zai/glm-5-turbo", "oracle-openai", "oracle-zai"],
+			["openai-codex/gpt-6-luna", "oracle-zai", "oracle-openai"],
+		] as const) {
+			const catalog = buildSubagentCatalogPrompt(cfg, parent)!;
+			expect(catalog).toContain(`- ${offered}:`);
+			expect(catalog).not.toContain(`- ${hidden}:`);
+			await expect(routeSubagentTasks([task(hidden)], cfg, { model: { provider: parent.split("/")[0], id: parent.split("/")[1] } } as any))
+				.rejects.toThrow();
+		}
+		for (const parent of [undefined, "anthropic/opus"]) {
+			const catalog = buildSubagentCatalogPrompt(cfg, parent);
+			expect(catalog).not.toContain("- oracle-openai:");
+			expect(catalog).not.toContain("- oracle-zai:");
+		}
+	});
+
+	test("strict roles enforce provider independence across normal, pool, overrides and every fallback", async () => {
+		const cfg = loadSubagentConfig(temp(), {});
+		const work = task("oracle-openai");
+		const options = { parentModel: "zai/glm-5-turbo" };
+		const normal = resolveAgentTaskConfig(work, cfg, options);
+		expect(normal.task.model).toBe("openai-codex/gpt-6-astra");
+		expect(normal.fallbackModels).toEqual([]);
+		expect(normal.task.tools).toEqual(["read", "grep", "bash"]);
+		expect(resolveAgentTaskConfig(work, cfg, { ...options, preset: cfg.presets!.deep }).task.model).toBe(normal.task.model);
+		for (const preset of [cfg.presets!.cheap, { models: [] }]) {
+			expect(() => resolveAgentTaskConfig(work, cfg, { ...options, preset })).toThrow(/models pool/);
+		}
+		for (const parentModel of [undefined, "zai", "openai-codex/gpt-6-luna", "anthropic/opus"]) {
+			expect(() => resolveAgentTaskConfig(work, cfg, { parentModel })).toThrow(/parent provider/);
+		}
+		for (const override of [
+			{ work: { ...work, model: "zai/glm-5.3" }, options },
+			{ work, options: { ...options, extraArgs: ["--model=zai/glm-5.3"] } },
+			{ work, options: { ...options, forcedModel: "zai/glm-5-turbo" } },
+		]) {
+			expect(() => resolveAgentTaskConfig(override.work, cfg, override.options)).toThrow(/cross-provider/);
+		}
+		const explicit = resolveAgentTaskConfig({ ...work, model: "openai-codex/gpt-6-astra" }, cfg,
+			{ ...options, preset: { models: [] } });
+		expect(explicit.fallbackModels).toEqual([]);
+		const unavailable = registry();
+		await expect(selectAvailableAgentModels(normal, cfg, { ...unavailable, getAvailable: () => [] })).rejects.toThrow(/No configured candidate/);
+		const custom = agentConfig("independent", `models: [zai/same, openai-codex/first, zai/fallback, other/last]
+requireDifferentProvider: true`);
+		const filtered = resolveAgentTaskConfig(task("independent"), custom, options);
+		expect(filtered.task.model).toBe("openai-codex/first");
+		expect(filtered.fallbackModels).toEqual(["other/last"]);
+		expect(() => resolveAgentTaskConfig(task("independent"), custom,
+			{ ...options, preset: { models: ["zai/same", "zai/fallback"] } })).toThrow(/cross-provider/);
+		expect(() => agentConfig("bad", "models: [other/last]\nrequireDifferentProvider: yes")).toThrow(/boolean/);
+	});
+
+	test("ships Markdown modes and pool-only presets from a single defaults source", () => {
+		const cfg = loadSubagentConfig(temp(), {});
+		expect(Object.keys(cfg.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "oracle-openai", "oracle-zai", "research", "ui-qa", "verify"]);
 		for (const [name, profile] of Object.entries(cfg.types)) {
 			expect(profile.models?.length).toBeGreaterThan(0);
 			expect(profile.model).toBeUndefined();
@@ -66,7 +122,12 @@ describe("ordered agent models and preset pools", () => {
 			expect(preset.models?.length).toBeGreaterThan(0);
 			expect(preset.types).toBeUndefined();
 			for (const role of Object.keys(cfg.types)) {
-				const resolved = resolveAgentTaskConfig(task(role), cfg, { preset, parentModel: "openai-codex/gpt-6-luna" });
+				const parentModel = role === "oracle-openai" ? "zai/glm-5-turbo" : "openai-codex/gpt-6-luna";
+				if (!preset.models?.some((model) => cfg.types[role].models?.includes(model))) {
+					expect(() => resolveAgentTaskConfig(task(role), cfg, { preset, parentModel })).toThrow(/models pool/);
+					continue;
+				}
+				const resolved = resolveAgentTaskConfig(task(role), cfg, { preset, parentModel });
 				expect(preset.models).toContain(resolved.task.model);
 				expect(resolved.fallbackModels.every((model) => preset.models!.includes(model))).toBe(true);
 			}

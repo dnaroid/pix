@@ -23,6 +23,7 @@ interface IdxPanelRuntimeControllerOptions {
 export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControllerOptions) {
   const windowLabel = getCurrentWindow().label;
   let overview = $state<IdxOverview | undefined>();
+  let overviewWorkspace = $state("");
   let operations = $state<IdxOperationSnapshot[]>([]);
   let loading = $state(false);
   let overviewRefreshRunning = $state(false);
@@ -48,6 +49,7 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
     if (disposed) return;
     if (!requestWorkspace) {
       overview = undefined;
+      overviewWorkspace = "";
       options.onOverviewChange?.(requestWorkspace, undefined);
       operations = [];
       loading = false;
@@ -62,6 +64,7 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
       ]);
       if (disposed || generation !== loadGeneration || options.workspace() !== requestWorkspace) return;
       overview = nextOverview;
+      overviewWorkspace = requestWorkspace;
       options.onOverviewChange?.(requestWorkspace, nextOverview);
       operations = nextOperations;
     } catch (caught) {
@@ -91,6 +94,7 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
       const next = await invoke<IdxOverview>("idx_overview", { workspace: requestWorkspace });
       if (!disposed && generation === overviewRefreshGeneration && options.workspace() === requestWorkspace) {
         overview = next;
+        overviewWorkspace = requestWorkspace;
         options.onOverviewChange?.(requestWorkspace, next);
       }
     } catch (caught) {
@@ -165,11 +169,11 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
   }
 
   function runningOperation(): IdxOperationSnapshot | undefined {
-    return operations.find((operation) => operation.status === "running");
+    return operations.find((operation) => operation.workspace === options.workspace() && operation.status === "running");
   }
 
   function visibleOperation(): IdxOperationSnapshot | undefined {
-    return runningOperation() ?? operations.at(-1);
+    return runningOperation() ?? [...operations].reverse().find((operation) => operation.workspace === options.workspace());
   }
 
   function setError(message: string | null): void {
@@ -211,7 +215,7 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
   }
 
   return {
-    get overview() { return overview; },
+    get overview() { return overviewWorkspace === options.workspace() ? overview : undefined; },
     get operations() { return operations; },
     get loading() { return loading; },
     get overviewRefreshRunning() { return overviewRefreshRunning; },
@@ -219,7 +223,7 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
     get error() { return error; },
     get runningOperation() { return runningOperation(); },
     get visibleOperation() { return visibleOperation(); },
-    get indexReady() { return Boolean(overview?.available && overview.initialized); },
+    get indexReady() { return Boolean(overviewWorkspace === options.workspace() && overview?.available && overview.initialized); },
     refresh,
     refreshOverview,
     installIdx,

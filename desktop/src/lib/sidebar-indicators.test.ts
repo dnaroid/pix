@@ -61,14 +61,14 @@ describe("sidebar indicators", () => {
     expect(result.scripts).toEqual({ tone: "error", reason: "A terminal exited with an error" });
   });
 
-  it("covers task activity, registry review, and IDX knowledge maintenance", () => {
+  it("covers task activity and registry review without inferring IDX knowledge health", () => {
     const result = sidebarIndicators({
       ...inputs({
         poll: poll(),
         idxOverview: {
           available: true,
           initialized: true,
-          wikiStatus: {
+          indexStatus: {
             fields: {
               primarySpecs: "10 (10 current/proposed)",
               fresh: "9",
@@ -104,7 +104,48 @@ describe("sidebar indicators", () => {
 
     expect(result.tasks).toEqual({ tone: "info", reason: "A project task is running" });
     expect(result.registry?.tone).toBe("warning");
-    expect(result.idx).toEqual({ tone: "warning", reason: "Knowledge base needs maintenance" });
+    expect(result.idx).toBeUndefined();
+  });
+
+  it("preserves IDX running and failure signals even with legacy knowledge counters", () => {
+    const idxOverview = {
+      available: true,
+      initialized: true,
+      indexStatus: { fields: { needsReview: "5" }, raw: "" },
+      rawStatus: "",
+      errors: [],
+    };
+    const running = sidebarIndicators(inputs({
+      poll: poll({ idx: { runningIds: ["idx-1"], failedIds: [] } }),
+      idxOverview,
+      unseenScriptFailureIds: [],
+      unseenIdxFailureIds: [],
+    }));
+    expect(running.idx).toEqual({ tone: "info", reason: "IDX maintenance is running" });
+
+    const failed = sidebarIndicators(inputs({
+      poll: poll({ idx: { runningIds: ["idx-1"], failedIds: ["idx-2"] } }),
+      idxOverview,
+      unseenScriptFailureIds: [],
+      unseenIdxFailureIds: ["idx-2"],
+    }));
+    expect(failed.idx).toEqual({ tone: "error", reason: "An IDX maintenance operation failed" });
+
+    const unhealthy = sidebarIndicators(inputs({
+      poll: poll({ idx: { runningIds: ["idx-1"], failedIds: [], error: "IDX poll failed" } }),
+      idxOverview: { ...idxOverview, errors: ["Index check failed"] },
+      unseenScriptFailureIds: [],
+      unseenIdxFailureIds: [],
+    }));
+    expect(unhealthy.idx).toEqual({ tone: "error", reason: "IDX poll failed" });
+
+    const unavailable = sidebarIndicators(inputs({
+      poll: poll(),
+      idxOverview: { ...idxOverview, available: false },
+      unseenScriptFailureIds: [],
+      unseenIdxFailureIds: [],
+    }));
+    expect(unavailable.idx).toEqual({ tone: "error", reason: "IDX is unavailable for this indexed project" });
   });
 
   it("shows the registry indicator for locally changed resources", () => {

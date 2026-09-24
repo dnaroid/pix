@@ -1,7 +1,8 @@
 # Project-local sub-agents from `.pi/agents/*.md` (delta spec)
 
 > Risk classes: **config loading / sub-agent spawn surface**. Extends the
-> async-subagents config pipeline only; no spawn/runtime changes.
+> async-subagents config pipeline, with an opt-in cross-provider runtime
+> model-selection invariant for strict roles.
 >
 > Status: implemented and current. Re-verify against code before relying on
 > line numbers.
@@ -57,6 +58,7 @@ modelByParent:
     fallbackModels: [zai/glm-5.3]
 forParentModels: [zai/*, openai-codex/*]
 notForParentModels: [openai-codex/gpt-6-sol*]
+requireDifferentProvider: true # optional strict runtime model boundary
 ---
 
 You are a ... role prompt (markdown body).
@@ -65,13 +67,21 @@ You are a ... role prompt (markdown body).
 - Frontmatter keys: `name` (must match the filename if present; mismatch is an
   error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
   `models`, legacy `fallbackModels`/`modelByParent`, `forParentModels`,
-  `notForParentModels`, `thinking`, `tools`, `extraArgs`,
+  `notForParentModels`, `requireDifferentProvider`, `thinking`, `tools`, `extraArgs`,
   `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`).
   Unknown keys are rejected (typo safety; the JSONC config path stays lenient).
 - `forParentModels` is an optional parent-model allow-list;
   `notForParentModels` is an optional deny-list and wins on overlap. These gates
   filter the role from the parent catalog and router/explicit-role validation;
   they do not select the child model.
+- `requireDifferentProvider` is an optional boolean (default absent/false).
+  Unlike catalog gates it enforces a runtime boundary: a known permitted parent
+  provider must exist and every candidate, including explicit task/CLI/forced
+  model overrides and quota fallbacks, must differ from that provider. Pool
+  intersections without an eligible candidate and unavailable candidates fail
+  before spawn, not by falling back to the parent. The shipped
+  `oracle-openai` (Z.ai parents only, Astra) and `oracle-zai` (OpenAI Codex
+  parents only, GLM-5.3) opt in. The original `oracle` remains best-effort.
 - Supported YAML subset (bounded, dependency-free parser): plain/quoted scalars,
   numbers, booleans, `#` comments (full-line and trailing), inline arrays
   `[a, b]`, block lists `- item`, and exactly one level of nested maps for

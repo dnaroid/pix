@@ -41,6 +41,24 @@ while project selection/open state remains separate from transient focus.
 - `Shift+Enter` opens the focused file or directory in the configured external
   editor. The pointer hover icon remains available but is removed from the normal
   Tab sequence so every tree row does not add a second Tab stop.
+- Project entries expose IDE-style contextual file commands without adding a Tab
+  stop per row. Right-click, the Context Menu key, and `Shift+F10` open the same
+  command surface for the focused row. The command set includes Open/Open in
+  External Editor, New File/New Folder for directory targets, Copy/Paste,
+  Duplicate, Rename, Copy Relative Path, and Delete where applicable.
+- `F2` renames the focused entry, `Delete` requests deletion, and the platform
+  primary Copy/Paste shortcuts operate on the Project Explorer entry clipboard
+  while tree focus is active. These shortcuts do not replace normal text-editing
+  shortcuts outside the tree.
+- File mutations are workspace-relative backend operations. They reject paths
+  that escape the active project and do not follow symbolic links. Copying a
+  project entry creates a non-conflicting destination name rather than silently
+  overwriting an existing file or directory.
+- Rename, copy/paste, duplicate, create, and delete refresh only the affected
+  directory state. Rename preserves focus/selection and expanded descendants
+  under the new path when possible; deletion moves focus to a logical surviving
+  row and clears stale selected/expanded state beneath the removed path.
+- Delete is destructive and requires confirmation before the filesystem mutation.
 - Existing pointer drag/drop behavior and lazy directory loading remain unchanged.
 - Project Explorer keeps dotfiles and dotfolders in the normal tree. Entries whose basename starts with `.` use muted opacity by default so ordinary source files retain visual priority; hover, keyboard focus, and selected/open state restore normal readability.
 

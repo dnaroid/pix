@@ -1,5 +1,6 @@
 import type { ComponentProps } from "svelte";
 import DesktopWorkbenchSurface from "../components/DesktopWorkbenchSurface.svelte";
+import { isWorkspaceProjectFilePath } from "../lib/project-files";
 import type { PendingElicitation, createElicitationStore } from "./elicitation.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createAutocompleteStore } from "./autocomplete.svelte";
@@ -84,7 +85,6 @@ export type WorkbenchEditorBuilderOptions = {
   operationRunning: () => boolean;
   activeWorkbenchTabId: () => string | null;
   externalEditorLabel: () => string;
-  isEditableProjectMarkdown: (path: string) => boolean;
   preview: ReturnType<typeof createPreviewStore>;
   projectDocuments: ReturnType<typeof createProjectDocumentsStore>;
   projectWorkspace: ReturnType<typeof createProjectWorkspaceStore>;
@@ -226,8 +226,8 @@ export function buildWorkbenchEditorProps(
       attachment: activePreview.kind === "attachment" ? activePreview.attachment : undefined,
       canGoBack: options.preview.canGoBack,
       canGoForward: options.preview.canGoForward,
-      editable: activePreview.kind === "file" && options.isEditableProjectMarkdown(activePreview.file.path),
-      externalEditorLabel: activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
+      editable: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path),
+      externalEditorLabel: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)
         ? options.externalEditorLabel()
         : undefined,
       onBack: () => options.preview.move(-1),
@@ -239,7 +239,7 @@ export function buildWorkbenchEditorProps(
       onOpenLocalFile: (path) => options.preview.openLocalFile(path, "push"),
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onSaveProjectFile: options.projectDocuments.save,
-      onOpenExternalEditor: activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
+      onOpenExternalEditor: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)
         ? (path) => void options.projectWorkspace.openInEditor(path)
         : undefined,
       onScrollPositionChange: options.preview.rememberScroll,

@@ -15,7 +15,6 @@ function fixture() {
     previewId: () => id,
     file: () => file,
     editable: () => true,
-    markdown: () => true,
     onSaveProjectFile: () => saveFile,
     onDirtyChange: () => undefined,
   });
@@ -26,6 +25,12 @@ function fixture() {
 }
 
 describe("Preview save ownership", () => {
+  it("allows editing non-Markdown text files when Preview marks them editable", () => {
+    const { controller } = fixture();
+    controller.begin();
+    expect(controller.state.editing).toBe(true);
+  });
+
   it("retains changes typed while an earlier draft is being saved", async () => {
     const { controller, saveFile } = fixture();
     const pending = deferred();

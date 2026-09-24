@@ -3,7 +3,7 @@ import type { EvalCase, EvalRunResult } from "./harness/types.js";
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
 const NO_ORCHESTRATION = ["subagents", "async_subagents_spawn"];
-const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_knowledge"];
+const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_ask", "repo_context", "repo_audit"];
 
 export const EVAL_CASES: EvalCase[] = [
 	{
@@ -27,24 +27,35 @@ export const EVAL_CASES: EvalCase[] = [
 		assert: { requiredTools: ["repo_architecture"], forbiddenTools: [...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["repo_architecture", "todo"] },
 	},
 	{
-		id: "tool.knowledge-context",
+		id: "tool.repo-ask",
+		category: "tool-selection",
+		description: "General unfamiliar-repository discovery should start with repo_ask.",
+		fixture: "demo",
+		indexed: true,
+		fakeIdx: true,
+		prompt: "I am new to this checkout repository. Where does payment retry behavior live, and what should I read to understand it? Give me a concise starting point before I inspect files.",
+		assert: { requiredTools: ["repo_ask"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_ask", stdoutIncludes: ["src/payments.ts"] },
+	},
+	{
+		id: "tool.repo-context",
 		category: "tool-selection",
 		description: "Authoritative project behavior question should use indexed primary knowledge plus implementation/tests.",
 		fixture: "demo",
 		indexed: true,
 		fakeIdx: true,
-		prompt: "Before changing checkout payment retry behavior, find the current authoritative project contract and the implementation/tests that enforce it. I do not know which spec file contains the requirement. Use the indexed project knowledge path, then stop after the first useful knowledge result.",
-		assert: { requiredTools: ["repo_knowledge"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_knowledge", stdoutIncludes: ["specs/payment-retry.md"] },
+		prompt: "Before changing checkout payment retry behavior, find the current authoritative project contract and the implementation/tests that enforce it. I do not know which spec file contains the requirement. Stop after the first useful contract result.",
+		assert: { requiredTools: ["repo_context"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_context", stdoutIncludes: ["specs/payment-retry.md"] },
 	},
 	{
-		id: "tool.knowledge-impact",
+		id: "tool.repo-audit",
 		category: "tool-selection",
-		description: "Material behavior change should finish with task-scoped knowledge impact review.",
+		description: "Material behavior change should finish with task-scoped contract audit.",
 		fixture: "demo",
 		indexed: true,
 		fakeIdx: true,
-		prompt: "I just completed a material behavior change in src/payments.ts that changes payment retry/idempotency behavior. Before finishing, perform the project-contract maintenance checkpoint for this task-scoped changed path. Do not broaden to the whole dirty worktree; stop after the impact result.",
-		assert: { requiredTools: ["repo_knowledge"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_knowledge", maxToolCalls: 2 },
+		prompt: "I just completed a material behavior change in src/payments.ts that changes payment retry/idempotency behavior. Before finishing, audit the project contract for this task-scoped changed path. Do not broaden to the whole dirty worktree; stop after the audit result.",
+		assert: { requiredTools: ["repo_audit"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_audit", maxToolCalls: 2 },
+		validate: (result) => result.events.some((event) => event.type === "tool_call" && event.toolName === "repo_audit" && isRecord(event.input) && Array.isArray(event.input.paths) && event.input.paths.length === 1 && event.input.paths[0] === "src/payments.ts") ? [] : ["repo_audit must receive only the task-changed src/payments.ts path"],
 	},
 	{
 		id: "tool.exact-literal-direct",

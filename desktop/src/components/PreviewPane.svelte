@@ -82,7 +82,6 @@
     previewId: () => previewId,
     file: () => file,
     editable: () => editable,
-    markdown: () => markdown,
     onSaveProjectFile: () => onSaveProjectFile,
     onDirtyChange: () => onDirtyChange,
   });
@@ -124,6 +123,15 @@
   const openLocalFromMarkdown = markdownController.openLocal;
   const saveEdit = editorController.save;
   const handleEditorKeydown = editorController.handleKeydown;
+  function handleEditorCopy(event: ClipboardEvent): void {
+    const editor = event.currentTarget;
+    if (!(editor instanceof HTMLTextAreaElement) || !event.clipboardData) return;
+    const start = editor.selectionStart ?? 0;
+    const end = editor.selectionEnd ?? start;
+    if (end <= start) return;
+    event.clipboardData.setData("text/plain", editor.value.slice(start, end));
+    event.preventDefault();
+  }
 
   export function requestClose(): boolean {
     if (!editorController.canClose()) return false;
@@ -232,6 +240,7 @@
           aria-label={`Edit ${file.path}`}
           spellcheck="false"
           onkeydown={handleEditorKeydown}
+          oncopy={handleEditorCopy}
         ></textarea>
       {:else if renderAsMarkdown}
         {#key previewId}
@@ -239,7 +248,7 @@
           <div
             bind:this={contentScrollElement}
             use:restoreScroll={{ key: previewId, position: scrollPosition }}
-            class="min-h-0 min-w-0 flex-1 overflow-auto bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            class="preview-text-surface min-h-0 min-w-0 flex-1 overflow-auto bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             role="region"
             aria-label={`Rendered Markdown for ${file.path}`}
             tabindex="0"
@@ -266,7 +275,7 @@
         <div
           bind:this={contentScrollElement}
           use:restoreScroll={{ key: previewId, position: scrollPosition }}
-          class="min-h-0 min-w-0 flex-1 overflow-auto bg-code outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          class="preview-text-surface min-h-0 min-w-0 flex-1 overflow-auto bg-code outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           role="region"
           aria-label={`Source for ${file.path}`}
           tabindex="0"

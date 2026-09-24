@@ -94,4 +94,47 @@ describe("Preview async ownership", () => {
     await pending;
     expect(options.reportError).not.toHaveBeenCalled();
   });
+
+  it("previews absolute UTF-8 local files instead of sending them to the system opener", async () => {
+    const { preview } = fixture();
+    const file = { path: "/private/tmp/idx-compact-gate-qa/stdout.txt", content: "qa output\n" };
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === "read_local_file") return Promise.resolve(file);
+      return Promise.resolve(undefined);
+    });
+
+    await preview.openLocalFile(file.path);
+
+    expect(tauri.invoke).toHaveBeenCalledWith("read_local_file", { path: file.path });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_local_file", expect.anything());
+    expect(preview.active).toMatchObject({ kind: "file", file });
+  });
+
+  it("keeps the system-opener fallback for local files that cannot be text-previewed", async () => {
+    const { preview } = fixture();
+    const path = "/private/tmp/idx-compact-gate-qa/archive.bin";
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === "read_local_file") return Promise.reject(new Error("not UTF-8"));
+      if (command === "open_local_file") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+
+    await preview.openLocalFile(path);
+
+    expect(tauri.invoke).toHaveBeenCalledWith("read_local_file", { path });
+    expect(tauri.invoke).toHaveBeenCalledWith("open_local_file", { path });
+    expect(preview.active).toBeUndefined();
+  });
+
+  it("does not open an obsolete absolute local file externally after Preview navigation changes", async () => {
+    const { preview } = fixture();
+    const read = deferred<never>();
+    tauri.invoke.mockImplementation((command: string) => command === "read_local_file" ? read.promise : Promise.resolve(undefined));
+    const pending = preview.openLocalFile("/private/tmp/old.txt");
+    preview.show({ kind: "attachment", attachment: image }, "replace");
+    read.reject(new Error("not previewable"));
+    await pending;
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_local_file", expect.anything());
+    expect(preview.active).toMatchObject({ kind: "attachment", attachment: image });
+  });
 });

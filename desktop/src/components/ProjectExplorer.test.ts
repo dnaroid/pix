@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import explorerSource from "./ProjectExplorer.svelte?raw";
+import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?raw";
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
@@ -14,8 +15,34 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(treeControllerSource).toContain('event.key === "ArrowRight"');
     expect(treeControllerSource).toContain('event.key === "ArrowLeft"');
     expect(treeControllerSource).toContain("projectTreeParentIndex(visibleRows, index)");
-    expect(explorerSource).toContain('aria-keyshortcuts="Shift+Enter"');
+    expect(explorerSource).toContain('aria-keyshortcuts="Shift+Enter F2 Delete"');
     expect(treeControllerSource).toContain("typeaheadFocusIndex");
+  });
+
+  it("exposes IDE-style file commands through pointer and keyboard-reachable context actions", () => {
+    expect(explorerSource).toContain("oncontextmenu={(event) => openEntryContextMenu(event, entry)}");
+    expect(explorerSource).toContain("data-project-explorer-menu");
+    expect(explorerSource).toContain('event.key === "F2"');
+    expect(explorerSource).toContain('event.key === "Delete"');
+    expect(explorerSource).toContain('primaryShortcut(event, "c")');
+    expect(explorerSource).toContain('primaryShortcut(event, "v")');
+    expect(explorerSource).toContain("New File…");
+    expect(explorerSource).toContain("New Folder…");
+    expect(explorerSource).toContain("Duplicate");
+    expect(explorerSource).toContain("Copy Relative Path");
+    expect(menuControllerSource).toContain("menuFocusIndex");
+    expect(menuControllerSource).toContain('event.key === "Escape"');
+    expect(menuControllerSource).toContain('event.key === "Tab"');
+  });
+
+  it("routes filesystem mutations through workspace-scoped Tauri commands", () => {
+    expect(explorerSource).toContain('invoke<ProjectTreeEntry>("create_project_entry"');
+    expect(explorerSource).toContain('invoke<ProjectTreeEntry>("rename_project_entry"');
+    expect(explorerSource).toContain('invoke<ProjectTreeEntry>("copy_project_entry"');
+    expect(explorerSource).toContain('invoke("delete_project_entry"');
+    expect(explorerSource).toContain("window.confirm");
+    expect(explorerSource).toContain("operationGeneration");
+    expect(explorerSource).toContain("finishOperation(operation)");
   });
 
   it("keeps dotfiles and dotfolders visible but visually muted", () => {
@@ -30,5 +57,14 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(treeControllerSource).toContain('return workspaceChanged ? [""] : ["", ...new Set(state.expandedDirectories)]');
     expect(treeControllerSource).toContain("if (workspaceChanged) {");
     expect(treeControllerSource).toContain("state.expandedDirectories = []");
+  });
+
+  it("invalidates stale directory requests and preserves tree state across rename/delete", () => {
+    expect(treeControllerSource).toContain("directoryRequestVersions");
+    expect(treeControllerSource).toContain("directoryRequestVersions.get(path) !== requestVersion");
+    expect(treeControllerSource).toContain("async function refreshDirectory(path: string)");
+    expect(treeControllerSource).toContain("function remapPath(oldPath: string, newPath: string)");
+    expect(treeControllerSource).toContain("function focusFallbackAfterRemoval(path: string)");
+    expect(treeControllerSource).toContain("function removePath(path: string)");
   });
 });

@@ -63,6 +63,11 @@ percentages with spend attributable to one conversation.
   does not start a model request and does not refresh provider quota.
 - Active TUI/Desktop sessions expose `Usage` even when their provider has no
   quota API, because recorded session spend does not depend on quota support.
+- Desktop marks session spend requestable only after that session's Pi runtime is
+  ready. If the popover was opened during runtime warm-up, it starts the request
+  when readiness arrives instead of leaving an ambiguous unloaded state. A failed
+  first load is shown as an explicit retryable error; if an older successful
+  snapshot already exists, that snapshot remains visible after a refresh failure.
 - A Desktop UI-only draft has no session spend and the session-spend popup does
   not manufacture quota-only content for it.
 
@@ -88,6 +93,10 @@ percentages with spend attributable to one conversation.
   and tab lifecycle before showing a dialog. Stale completion is discarded.
 - Loaded Desktop spend snapshots are scoped to their session and cleared when
   that runtime is forgotten or the ACP connection resets.
+- Running async sub-agents do not intentionally disable session-usage reads.
+  Usage already durably mirrored into the parent session remains readable; a
+  child call that has not finalized yet is not counted until its usage entry is
+  appended.
 
 ## Protocol
 

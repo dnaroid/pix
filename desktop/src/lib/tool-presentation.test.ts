@@ -47,6 +47,39 @@ describe("toolPresentation", () => {
     });
   });
 
+  it("prioritizes new repository knowledge queries and every audited path", () => {
+    expect(toolPresentation({
+      name: "repo_ask", kind: "other", title: "Repo Ask",
+      rawInput: { budget: 2000, query: "How are tool rows rendered?", maxLines: 80 },
+    })).toEqual({
+      name: "repo_ask", args: "query: How are tool rows rendered? · budget: 2000 · maxLines: 80", tone: "search",
+    });
+    expect(toolPresentation({
+      name: "repo_context", kind: "other", title: "Repo Context",
+      rawInput: { maxTests: 4, pathPrefix: "desktop/src", query: "tool row contract", budget: 1400 },
+    })).toEqual({
+      name: "repo_context", args: "query: tool row contract · pathPrefix: desktop/src · budget: 1400 · maxTests: 4", tone: "inspect",
+    });
+    expect(toolPresentation({
+      name: "repo_audit", kind: "other", title: "Repo Audit",
+      rawInput: { noSemantic: true, paths: ["desktop/src/lib/tool-presentation.ts", "desktop/src/lib/tool-presentation.test.ts", "specs/desktop-tool-rows.md", "desktop/src/lib/transcript.ts"] },
+    })).toEqual({
+      name: "repo_audit",
+      args: "paths: [desktop/src/lib/tool-presentation.ts, desktop/src/lib/tool-presentation.test.ts, specs/desktop-tool-rows.md, desktop/src/lib/transcript.ts] · noSemantic: true",
+      tone: "inspect",
+    });
+  });
+
+  it("preserves historical repository knowledge headers and fallback titles", () => {
+    expect(toolPresentation({
+      name: "repo_knowledge", kind: "other", title: "Repo knowledge",
+      rawInput: { action: "search", query: "old question" },
+    })).toEqual({ name: "repo_knowledge", args: "action: search · query: old question", tone: "search" });
+    expect(toolPresentation({ kind: "other", title: "repo_ask: old query" })).toEqual({
+      name: "repo_ask", args: "old query", tone: "search",
+    });
+  });
+
   it("falls back to splitting legacy ACP titles", () => {
     expect(toolPresentation({ kind: "read", title: "Read src/legacy.ts" })).toEqual({
       name: "read",
@@ -111,5 +144,6 @@ describe("toolTone", () => {
     expect(toolTone("repo_knowledge", "other", { action: "context" })).toBe("inspect");
     expect(toolTone("repo_knowledge", "other", { action: "search" })).toBe("search");
     expect(toolTone("repo_knowledge", "other", { action: "record" })).toBe("mutation");
+    expect(toolTone("repo_knowledge", "other", { action: "remove" })).toBe("mutation");
   });
 });

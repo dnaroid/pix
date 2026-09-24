@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import repoDiscoveryExtension, { truncateOutput } from "../src/repo-discovery/index.js";
-import { REPO_DISCOVERY_TOOLS, REPO_KNOWLEDGE_TOOL_DESCRIPTION } from "../src/tool-descriptions.js";
+import { REPO_DISCOVERY_TOOLS } from "../src/tool-descriptions.js";
 import { installFakeIdxOnPath } from "./support/fake-idx.js";
 
 type RegisteredTool = {
@@ -46,7 +46,7 @@ describe("repo discovery output truncation", () => {
 					return { stdout: "fixture result", stderr: "", code: 0 };
 				},
 			} as never, { profile: "baseline", cwd: projectRoot });
-			expect(tools).toHaveLength(REPO_DISCOVERY_TOOLS.length + 1);
+			expect(tools).toHaveLength(REPO_DISCOVERY_TOOLS.length);
 			for (const description of REPO_DISCOVERY_TOOLS) {
 				const tool = tools.find((entry) => entry.name === description.name)!;
 				expect(tool).toMatchObject({
@@ -54,13 +54,13 @@ describe("repo discovery output truncation", () => {
 					promptSnippet: description.promptSnippet,
 					promptGuidelines: description.promptGuidelines,
 				});
-				expect(tool.parameters.properties.maxLines.default).toBe(2000);
-				expect(tool.parameters.properties.maxBytes.default).toBe(50000);
+				expect(tool.parameters.properties.maxLines.default).toBe(["repo_ask", "repo_context", "repo_audit"].includes(tool.name) ? 600 : 2000);
+				expect(tool.parameters.properties.maxBytes.default).toBe(["repo_ask", "repo_context", "repo_audit"].includes(tool.name) ? 20000 : 50000);
 				expect(tool.parameters.properties.outputMode).toBeUndefined();
-				expect(tool.parameters.properties.maxLines.description).toContain("Prefer native limits/cursors");
+				if (!["repo_ask", "repo_context", "repo_audit"].includes(tool.name)) expect(tool.parameters.properties.maxLines.description).toContain("Prefer native limits/cursors");
 			}
 			const search = tools.find((tool) => tool.name === "repo_search")!;
-			expect(tools.some((tool) => tool.name === REPO_KNOWLEDGE_TOOL_DESCRIPTION.name)).toBe(true);
+			expect(tools.map((tool) => tool.name)).toContain("repo_ask");
 			expect(search.parameters.properties.args.description).toContain("default 3 results without code");
 			expect(search.parameters.properties.args.description).toContain("--include-content only for narrow follow-up");
 			await search.execute("first-pass", { target: "session persistence" }, undefined, undefined, { cwd: projectRoot });
@@ -77,146 +77,72 @@ describe("repo discovery output truncation", () => {
 		}
 	});
 
-	test("registers repo_knowledge only when idx is available and project is indexed", () => {
-		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-knowledge-availability-"));
+	test("ask/context/audit use supported idx commands and refuse unsafe or obsolete inputs", async () => {
+		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-idx-commands-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
-		const previousPath = process.env.PATH;
-		try {
-			process.env.PATH = "";
-			const unavailable: RegisteredTool[] = [];
-			repoDiscoveryExtension({
-				registerCommand: () => undefined,
-				registerTool: (tool: RegisteredTool) => unavailable.push(tool),
-				exec: async () => ({ stdout: "", stderr: "", code: 0 }),
-			} as never, { profile: "baseline", cwd: projectRoot });
-			expect(unavailable).toEqual([]);
-
-			const restorePath = installFakeIdxOnPath(projectRoot);
-			try {
-				const available: RegisteredTool[] = [];
-				repoDiscoveryExtension({
-					registerCommand: () => undefined,
-					registerTool: (tool: RegisteredTool) => available.push(tool),
-					exec: async () => ({ stdout: "", stderr: "", code: 0 }),
-				} as never, { profile: "baseline", cwd: projectRoot });
-				expect(available.map((tool) => tool.name)).toContain("repo_knowledge");
-			} finally {
-				restorePath();
-			}
-		} finally {
-			process.env.PATH = previousPath;
-			rmSync(projectRoot, { recursive: true, force: true });
-		}
-	});
-
-	test("repo_knowledge maps compact read actions and guards semantic mutations", async () => {
-		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-knowledge-actions-"));
-		const outsideRoot = mkdtempSync(path.join(tmpdir(), "repo-knowledge-outside-"));
-		mkdirSync(path.join(projectRoot, ".indexer-cli"));
-		mkdirSync(path.join(projectRoot, "artifacts"));
-		symlinkSync(outsideRoot, path.join(projectRoot, "outside-link"));
-		symlinkSync(path.join(outsideRoot, "missing"), path.join(projectRoot, "dangling-outside-link"));
-		const binDir = path.join(projectRoot, "bin");
-		mkdirSync(binDir);
-		const idxPath = path.join(binDir, "idx");
-		writeFileSync(idxPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-		const previousPath = process.env.PATH;
-		process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+		const restorePath = installFakeIdxOnPath(projectRoot);
 		const tools: RegisteredTool[] = [];
 		const calls: string[][] = [];
 		try {
 			repoDiscoveryExtension({
 				registerCommand: () => undefined,
 				registerTool: (tool: RegisteredTool) => tools.push(tool),
-				exec: async (_command: string, args: string[]) => {
-					calls.push(args);
-					return { stdout: "ok", stderr: "", code: 0 };
-				},
+				exec: async (_command: string, args: string[]) => { calls.push(args); return { stdout: "ok", stderr: "", code: 0 }; },
 			} as never, { profile: "baseline", cwd: projectRoot });
-
-			const knowledge = tools.find((tool) => tool.name === "repo_knowledge")!;
-			const context = await knowledge.execute("ctx", {
-				action: "context",
-				query: "session refresh retry",
-			}, undefined, undefined, { cwd: projectRoot });
-			expect(context.isError).toBe(false);
-			expect(calls[0]).toEqual([
-				"context", "session refresh retry", "--budget", "1400", "--max-specs", "4", "--max-code", "6", "--max-tests", "4",
+			const run = (name: string, params: Record<string, unknown>) => tools.find((tool) => tool.name === name)!.execute("call", params, undefined, undefined, { cwd: projectRoot });
+			expect(tools.some((tool) => tool.name === "repo_knowledge")).toBe(false);
+			expect((await run("repo_ask", { query: "where is session persistence?" })).isError).toBe(false);
+			expect((await run("repo_context", { query: "session refresh retry", maxCode: 2, pathPrefix: "src/session" })).isError).toBe(false);
+			expect((await run("repo_audit", { paths: ["src/session.ts", "specs/session.md"], noSemantic: true })).isError).toBe(false);
+			expect(calls).toEqual([
+				["ask", "where is session persistence?", "--budget", "2000"],
+				["context", "session refresh retry", "--budget", "1400", "--max-specs", "4", "--max-code", "2", "--max-tests", "4", "--path-prefix", "src/session"],
+				["audit", "src/session.ts", "specs/session.md", "--no-semantic"],
 			]);
-
-			const impact = await knowledge.execute("impact", {
-				action: "impact",
-				paths: ["src/session.ts", "src/refresh-worker.ts"],
-			}, undefined, undefined, { cwd: projectRoot });
-			expect(impact.isError).toBe(false);
-			expect(calls[1]).toEqual([
-				"wiki", "impact", "src/session.ts", "src/refresh-worker.ts", "--semantic-limit", "5",
-			]);
-
-			const prepare = await knowledge.execute("prepare", {
-				action: "prepare",
-				path: "docs/session.md",
-				selectorsPath: "artifacts/session-selectors.json",
-				receiptPath: "artifacts/session-receipt.json",
-			}, undefined, undefined, { cwd: projectRoot });
-			expect(prepare.isError).toBe(false);
-			expect(prepare.details?.mutating).toBe(true);
-			expect(calls[2]).toEqual([
-				"wiki", "prepare", "--path", "docs/session.md", "--selectors", "artifacts/session-selectors.json", "--output", "artifacts/session-receipt.json",
-			]);
-
-			for (const guarded of [
-				{ action: "record", path: "docs/session.md", classification: "spec", behaviorType: "as-is", lifecycle: "active" },
-				{ action: "verify", path: "docs/session.md" },
-				{ action: "verify", path: "docs/session.md", receiptPath: "artifacts/session-receipt.json" },
-				{ action: "verify", path: "docs/session.md", receiptPath: "/tmp/session-receipt.json", evidenceReviewed: true },
-				{ action: "verify", path: "docs/session.md", receiptPath: "C:session-receipt.json", evidenceReviewed: true },
-				{ action: "verify", path: "docs/session.md", receiptPath: "C:\\temp\\session-receipt.json", evidenceReviewed: true },
-				{ action: "verify", path: "docs/session.md", receiptPath: "\\\\server\\share\\session-receipt.json", evidenceReviewed: true },
-				{ action: "prepare", path: "docs/session.md", receiptPath: "../session-receipt.json" },
-				{ action: "prepare", path: "docs/session.md", selectorsPath: "..\\session-selectors.json" },
-				{ action: "prepare", path: "docs/session.md", receiptPath: "outside-link/session-receipt.json" },
-				{ action: "prepare", path: "docs/session.md", receiptPath: "dangling-outside-link/session-receipt.json" },
-				{ action: "relate", path: "docs/session.md", relationAction: "add", relationKind: "implements", targetPaths: ["src/session.ts"] },
-				{ action: "remove", path: "docs/session.md" },
-			]) {
-				const result = await knowledge.execute("guard", guarded, undefined, undefined, { cwd: projectRoot });
-				expect(result.isError).toBe(true);
-			}
+			for (const [name, params] of [
+				["repo_ask", { query: "--help" }],
+				["repo_ask", { query: "valid", budget: 201.5 }],
+				["repo_context", { query: "valid", maxSpecs: 100 }],
+				["repo_context", { query: "valid", pathPrefix: "../outside" }],
+				["repo_audit", { paths: [] }],
+				["repo_audit", { paths: ["../outside"] }],
+				["repo_audit", { paths: ["--json"] }],
+				["repo_audit", { paths: ["C:\\outside"] }],
+			] as const) expect((await run(name, params)).isError).toBe(true);
 			expect(calls).toHaveLength(3);
+			for (const name of ["repo_ask", "repo_context", "repo_audit"]) {
+				const properties = tools.find((tool) => tool.name === name)!.parameters.properties as Record<string, unknown>;
+				expect(properties).not.toHaveProperty("includeSecondary");
+				expect(properties).not.toHaveProperty("action");
+			}
+		} finally { restorePath(); rmSync(projectRoot, { recursive: true, force: true }); }
+	});
 
-			const verify = await knowledge.execute("verify", {
-				action: "verify",
-				path: "docs/session.md",
-				receiptPath: "artifacts/session-receipt.json",
-				checks: ["bun test test/session.test.ts", "npm run typecheck"],
-				evidenceReviewed: true,
-			}, undefined, undefined, { cwd: projectRoot });
-			expect(verify.isError).toBe(false);
-			expect(verify.details?.mutating).toBe(true);
-			expect(calls[3]).toEqual([
-				"wiki", "verify", "--path", "docs/session.md", "--receipt", "artifacts/session-receipt.json",
-				"--check", "bun test test/session.test.ts", "--check", "npm run typecheck",
-			]);
-
-			const relate = await knowledge.execute("relate", {
-				action: "relate",
-				path: "docs/session.md",
-				relationAction: "add",
-				relationKind: "implements",
-				targetPaths: ["src/session.ts"],
-				evidenceReviewed: true,
-			}, undefined, undefined, { cwd: projectRoot });
-			expect(relate.isError).toBe(false);
-			expect(relate.details?.mutating).toBe(true);
-			expect(calls[4]).toEqual([
-				"wiki", "relate", "--path", "docs/session.md", "--add-code", "src/session.ts",
-			]);
-		} finally {
-			process.env.PATH = previousPath;
-			rmSync(projectRoot, { recursive: true, force: true });
-			rmSync(outsideRoot, { recursive: true, force: true });
-		}
+	test("new idx tools require available idx and indexed project, including native-compact delivery", async () => {
+		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-idx-gate-"));
+		const previousPath = process.env.PATH;
+		process.env.PATH = "";
+		try {
+			mkdirSync(path.join(projectRoot, ".indexer-cli"));
+			const unavailable: RegisteredTool[] = [];
+			repoDiscoveryExtension({ registerCommand: () => undefined, registerTool: (tool: RegisteredTool) => unavailable.push(tool), exec: async () => ({ stdout: "ok", stderr: "", code: 0 }) } as never,
+				{ profile: "baseline", cwd: projectRoot });
+			expect(unavailable).toHaveLength(0);
+		} finally { process.env.PATH = previousPath; rmSync(path.join(projectRoot, ".indexer-cli"), { recursive: true }); }
+		const restorePath = installFakeIdxOnPath(projectRoot);
+		const tools: RegisteredTool[] = [];
+		try {
+			repoDiscoveryExtension({ registerCommand: () => undefined, registerTool: (tool: RegisteredTool) => tools.push(tool), exec: async () => ({ stdout: "ok", stderr: "", code: 0 }) } as never,
+				{ profile: "native-compact", cwd: projectRoot });
+			expect(tools).toHaveLength(0);
+			mkdirSync(path.join(projectRoot, ".indexer-cli"));
+			repoDiscoveryExtension({ registerCommand: () => undefined, registerTool: (tool: RegisteredTool) => tools.push(tool), exec: async () => ({ stdout: "ok", stderr: "", code: 0 }) } as never,
+				{ profile: "native-compact", cwd: projectRoot });
+			const ask = tools.find((tool) => tool.name === "repo_ask")!;
+			expect(ask.parameters.properties.outputMode?.default).toBe("compact");
+			expect((await ask.execute("call", { query: "task", maxLines: 401 }, undefined, undefined, { cwd: projectRoot })).isError).toBe(true);
+			expect((await ask.execute("call", { query: "task", outputMode: "full", maxLines: 401 }, undefined, undefined, { cwd: projectRoot })).isError).toBe(false);
+		} finally { restorePath(); rmSync(projectRoot, { recursive: true, force: true }); }
 	});
 
 	test("keeps top lines when the line limit is exceeded", () => {

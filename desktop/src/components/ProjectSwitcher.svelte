@@ -290,7 +290,7 @@
           {@const selected = project === workspace}
           <div class={["group grid grid-cols-[minmax(0,1fr)_28px] rounded-md", selected && "bg-panel-selected"]}>
             <button
-              class="grid min-w-0 grid-cols-[22px_minmax(0,1fr)_14px] items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+              class="grid min-w-0 grid-cols-[22px_minmax(0,1fr)_14px] items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"
               data-project-option
               type="button"
               role="menuitem"
@@ -329,7 +329,7 @@
 
       <div class="border-t border-sidebar-border p-1.5">
         <button
-          class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"
           data-project-option
           type="button"
           role="menuitem"

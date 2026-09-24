@@ -1,4 +1,3 @@
-import { idxKnowledgeNeedsAttention } from "./idx";
 import { registryHasAttention } from "./registry";
 import type {
   SidebarIndicator,
@@ -91,9 +90,6 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
       : undefined,
     (idxOverview?.errors.length ?? 0) > 0
       ? { tone: "error", reason: idxOverview?.errors[0] ?? "IDX status check failed" }
-      : undefined,
-    idxKnowledgeNeedsAttention(idxOverview?.wikiStatus)
-      ? { tone: "warning", reason: "Knowledge base needs maintenance" }
       : undefined,
     (poll?.idx.runningIds.length ?? 0) > 0
       ? { tone: "info", reason: "IDX maintenance is running" }

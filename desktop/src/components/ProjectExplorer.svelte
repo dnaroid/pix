@@ -1,15 +1,26 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
+  import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
+  import CopyIcon from "@lucide/svelte/icons/copy";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import File from "@lucide/svelte/icons/file";
   import FileCode from "@lucide/svelte/icons/file-code";
+  import FilePlus from "@lucide/svelte/icons/file-plus";
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
+  import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import ImageIcon from "@lucide/svelte/icons/image";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
-  import { onDestroy } from "svelte";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import { onDestroy, tick } from "svelte";
+  import type { MenuNavigationItem } from "../lib/keyboard-navigation";
   import type { ProjectTreeEntry } from "../lib/project-tree";
   import { createProjectExplorerDragController } from "./project-explorer-drag-controller.svelte";
+  import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
 
   let {
@@ -31,6 +42,19 @@
   } = $props();
 
   let treeRoot = $state<HTMLDivElement | null>(null);
+  let nameDialogElement = $state<HTMLDialogElement | null>(null);
+  let nameInputElement = $state<HTMLInputElement | null>(null);
+  let operationBusy = $state(false);
+  let operationError = $state<string | null>(null);
+  let entryClipboard = $state<{ workspace: string; entry: ProjectTreeEntry } | null>(null);
+  let operationGeneration = 0;
+  let observedOperationWorkspace: string | undefined;
+  let nameDialog = $state<{
+    mode: "rename" | "new-file" | "new-directory";
+    entry: ProjectTreeEntry;
+    value: string;
+    error: string | null;
+  } | null>(null);
   const dragController = createProjectExplorerDragController();
   const treeController = createProjectExplorerTreeController({
     workspace: () => workspace,
@@ -48,10 +72,32 @@
   const rootLoading = $derived(treeController.rootLoading);
   const rootError = $derived(treeController.rootError);
   const tabbablePath = $derived(treeController.tabbablePath);
+  const rootContextEntry: ProjectTreeEntry = { name: "Project", path: "", kind: "directory" };
+  const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
+  const menuController = createProjectExplorerMenuController({ items: menuNavigationItems });
+  const menuState = menuController.state;
 
   onDestroy(() => {
     treeController.dispose();
     dragController.clear();
+    menuController.dispose();
+  });
+
+  $effect(() => {
+    const currentWorkspace = workspace;
+    if (observedOperationWorkspace === undefined) {
+      observedOperationWorkspace = currentWorkspace;
+      return;
+    }
+    if (currentWorkspace === observedOperationWorkspace) return;
+    observedOperationWorkspace = currentWorkspace;
+    operationGeneration += 1;
+    operationBusy = false;
+    operationError = null;
+    entryClipboard = null;
+    nameDialogElement?.close();
+    nameDialog = null;
+    menuController.close();
   });
 
   function fileIconKind(path: string): "text" | "code" | "image" | "file" {
@@ -79,7 +125,278 @@
     if (entry.kind === "directory") treeController.toggleDirectory(entry.path);
     else treeController.openFile(entry.path);
   }
+
+  function parentDirectory(path: string): string {
+    const separator = path.lastIndexOf("/");
+    return separator < 0 ? "" : path.slice(0, separator);
+  }
+
+  function destinationDirectory(entry: ProjectTreeEntry): string {
+    return entry.kind === "directory" ? entry.path : parentDirectory(entry.path);
+  }
+
+  function sameOrDescendantPath(path: string, prefix: string): boolean {
+    return path === prefix || path.startsWith(`${prefix}/`);
+  }
+
+  function canPasteInto(entry: ProjectTreeEntry): boolean {
+    const copied = entryClipboard;
+    if (!copied || copied.workspace !== workspace) return false;
+    const destination = destinationDirectory(entry);
+    return copied.entry.kind !== "directory" || !sameOrDescendantPath(destination, copied.entry.path);
+  }
+
+  function menuNavigationItems(entry: ProjectTreeEntry): MenuNavigationItem[] {
+    const items: MenuNavigationItem[] = [];
+    if (entry.path) items.push({ label: entry.kind === "directory" ? "Toggle Folder" : "Open" });
+    items.push({ label: entry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}` });
+    if (entry.kind === "directory") {
+      items.push({ label: "New File…" }, { label: "New Folder…" });
+    }
+    if (entry.path) items.push({ label: "Copy" });
+    items.push({ label: "Paste", disabled: !canPasteInto(entry) });
+    if (entry.path) {
+      items.push(
+        { label: "Duplicate" },
+        { label: "Rename…" },
+        { label: "Copy Relative Path" },
+        { label: "Delete" },
+      );
+    }
+    return items;
+  }
+
+  function openEntryContextMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
+    treeState.focusedPath = entry.path;
+    menuController.openContextMenu(event, entry);
+  }
+
+  function openRootContextMenu(event: MouseEvent): void {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("[data-project-tree-path]")) return;
+    menuController.openContextMenu(event, rootContextEntry);
+  }
+
+  function primaryShortcut(event: KeyboardEvent, key: string): boolean {
+    const primary = isMacOS ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    return primary && !event.shiftKey && !event.altKey && event.key.toLocaleLowerCase() === key;
+  }
+
+  function handleEntryKeydown(event: KeyboardEvent, index: number, entry: ProjectTreeEntry): void {
+    if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === "F2") {
+      event.preventDefault();
+      openNameDialog("rename", entry);
+      return;
+    }
+    if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === "Delete") {
+      event.preventDefault();
+      void deleteEntry(entry);
+      return;
+    }
+    if (primaryShortcut(event, "c")) {
+      event.preventDefault();
+      copyEntry(entry);
+      return;
+    }
+    if (primaryShortcut(event, "v")) {
+      event.preventDefault();
+      void pasteEntry(entry);
+      return;
+    }
+    treeController.handleKeydown(event, index, entry);
+  }
+
+  function clearOperationError(): void {
+    operationError = null;
+  }
+
+  function beginOperation(): number {
+    const operation = ++operationGeneration;
+    operationBusy = true;
+    return operation;
+  }
+
+  function finishOperation(operation: number): void {
+    if (operation === operationGeneration) operationBusy = false;
+  }
+
+  function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  function copyEntry(entry: ProjectTreeEntry): void {
+    if (!entry.path || operationBusy) return;
+    entryClipboard = { workspace, entry };
+    clearOperationError();
+    menuController.close(true);
+  }
+
+  async function copyRelativePath(entry: ProjectTreeEntry): Promise<void> {
+    if (!entry.path || operationBusy) return;
+    menuController.close(true);
+    try {
+      await writeText(entry.path);
+      clearOperationError();
+    } catch (error) {
+      operationError = errorMessage(error);
+    }
+  }
+
+  async function pasteEntry(entry: ProjectTreeEntry): Promise<void> {
+    const copied = entryClipboard;
+    if (!copied || copied.workspace !== workspace || operationBusy || !canPasteInto(entry)) return;
+    menuController.close();
+    const requestWorkspace = workspace;
+    const destination = destinationDirectory(entry);
+    const operation = beginOperation();
+    try {
+      const created = await invoke<ProjectTreeEntry>("copy_project_entry", {
+        workspace: requestWorkspace,
+        path: copied.entry.path,
+        destination: destination || null,
+      });
+      if (workspace !== requestWorkspace) return;
+      if (destination) treeController.ensureDirectoryExpanded(destination);
+      await treeController.refreshDirectory(destination);
+      await treeController.focusPath(created.path);
+      clearOperationError();
+    } catch (error) {
+      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+    } finally {
+      finishOperation(operation);
+    }
+  }
+
+  async function duplicateEntry(entry: ProjectTreeEntry): Promise<void> {
+    if (!entry.path || operationBusy) return;
+    menuController.close();
+    const requestWorkspace = workspace;
+    const destination = parentDirectory(entry.path);
+    const operation = beginOperation();
+    try {
+      const created = await invoke<ProjectTreeEntry>("copy_project_entry", {
+        workspace: requestWorkspace,
+        path: entry.path,
+        destination: destination || null,
+      });
+      if (workspace !== requestWorkspace) return;
+      await treeController.refreshDirectory(destination);
+      await treeController.focusPath(created.path);
+      clearOperationError();
+    } catch (error) {
+      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+    } finally {
+      finishOperation(operation);
+    }
+  }
+
+  async function deleteEntry(entry: ProjectTreeEntry): Promise<void> {
+    if (!entry.path || operationBusy) return;
+    menuController.close();
+    const kind = entry.kind === "directory" ? "folder" : "file";
+    if (!window.confirm(`Delete ${kind} “${entry.name}”?\n\nThis cannot be undone.`)) return;
+    const requestWorkspace = workspace;
+    const parent = parentDirectory(entry.path);
+    const fallback = treeController.focusFallbackAfterRemoval(entry.path);
+    const operation = beginOperation();
+    try {
+      await invoke("delete_project_entry", { workspace: requestWorkspace, path: entry.path });
+      if (workspace !== requestWorkspace) return;
+      treeController.removePath(entry.path);
+      await treeController.refreshDirectory(parent);
+      const focusTarget = fallback ?? treeController.rows[0]?.entry.path;
+      if (focusTarget) await treeController.focusPath(focusTarget);
+      clearOperationError();
+    } catch (error) {
+      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+    } finally {
+      finishOperation(operation);
+    }
+  }
+
+  function openNameDialog(mode: "rename" | "new-file" | "new-directory", entry: ProjectTreeEntry): void {
+    if (operationBusy) return;
+    menuController.close();
+    nameDialog = { mode, entry, value: mode === "rename" ? entry.name : "", error: null };
+    void tick().then(() => {
+      nameDialogElement?.showModal();
+      nameInputElement?.focus();
+      if (mode === "rename") nameInputElement?.select();
+    });
+  }
+
+  function closeNameDialog(): void {
+    if (operationBusy) return;
+    nameDialogElement?.close();
+    nameDialog = null;
+  }
+
+  async function submitNameDialog(): Promise<void> {
+    const dialog = nameDialog;
+    if (!dialog || operationBusy) return;
+    const name = dialog.value.trim();
+    if (!name) {
+      dialog.error = "Enter a file or folder name.";
+      return;
+    }
+    const requestWorkspace = workspace;
+    const operation = beginOperation();
+    dialog.error = null;
+    try {
+      if (dialog.mode === "rename") {
+        const oldPath = dialog.entry.path;
+        const selectedBefore = treeState.selectedPath;
+        const renamed = await invoke<ProjectTreeEntry>("rename_project_entry", {
+          workspace: requestWorkspace,
+          path: oldPath,
+          name,
+        });
+        if (workspace !== requestWorkspace) return;
+        treeController.remapPath(oldPath, renamed.path);
+        await treeController.refreshDirectory(parentDirectory(renamed.path));
+        await treeController.focusPath(renamed.path);
+        if (selectedBefore && sameOrDescendantPath(selectedBefore, oldPath) && treeState.selectedPath) {
+          onOpenFile(treeState.selectedPath);
+        }
+      } else {
+        const parent = destinationDirectory(dialog.entry);
+        const created = await invoke<ProjectTreeEntry>("create_project_entry", {
+          workspace: requestWorkspace,
+          parent: parent || null,
+          name,
+          kind: dialog.mode === "new-file" ? "file" : "directory",
+        });
+        if (workspace !== requestWorkspace) return;
+        if (parent) treeController.ensureDirectoryExpanded(parent);
+        await treeController.refreshDirectory(parent);
+        await treeController.focusPath(created.path);
+        if (created.kind === "file") treeController.openFile(created.path);
+      }
+      clearOperationError();
+      nameDialogElement?.close();
+      nameDialog = null;
+    } catch (error) {
+      if (operation === operationGeneration && workspace === requestWorkspace && nameDialog) {
+        nameDialog.error = errorMessage(error);
+      }
+    } finally {
+      finishOperation(operation);
+    }
+  }
+
+  function runMenuOpen(entry: ProjectTreeEntry): void {
+    menuController.close();
+    if (!entry.path) return;
+    if (entry.kind === "directory") treeController.toggleDirectory(entry.path);
+    else treeController.openFile(entry.path);
+  }
 </script>
+
+<svelte:window
+  onpointerdown={menuController.handleWindowPointerDown}
+  onkeydown={menuController.handleWindowKeydown}
+  onresize={menuController.handleWindowResize}
+/>
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files">
   <div
@@ -87,6 +404,8 @@
     class="min-h-0 flex-1 overflow-auto py-1"
     role="tree"
     aria-label="Project files"
+    tabindex="-1"
+    oncontextmenu={openRootContextMenu}
   >
     {#if rootLoading && rootEntries.length === 0}
       <div class="flex items-center justify-center gap-1.5 py-8 text-xs text-muted-foreground">
@@ -125,11 +444,12 @@
             aria-level={row.depth + 1}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
             aria-selected={treeState.selectedPath === entry.path}
-            aria-keyshortcuts="Shift+Enter"
+            aria-keyshortcuts="Shift+Enter F2 Delete"
             tabindex={tabbablePath === entry.path ? 0 : -1}
             data-project-tree-path={entry.path}
             onfocus={() => treeState.focusedPath = entry.path}
-            onkeydown={(event) => treeController.handleKeydown(event, index, entry)}
+            onkeydown={(event) => handleEntryKeydown(event, index, entry)}
+            oncontextmenu={(event) => openEntryContextMenu(event, entry)}
             onclick={(event) => activateProjectEntry(event, entry)}
             onpointerdown={(event) => dragController.start(event, entry)}
             onpointermove={dragController.move}
@@ -177,6 +497,78 @@
     {/if}
   </div>
 
+  {#if operationError}
+    <div class="mx-2 mb-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">
+      {operationError}
+    </div>
+  {/if}
+
+  {#if menuState.entry && menuState.position}
+    {@const menuEntry = menuState.entry}
+    {@const pasteEnabled = canPasteInto(menuEntry)}
+    <div
+      bind:this={menuState.menuElement}
+      class="fixed z-[100] max-h-[calc(100vh-1rem)] w-56 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+      style={`left: ${menuState.position.left}px; top: ${menuState.position.top}px;`}
+      role="menu"
+      tabindex="-1"
+      aria-label="Project file actions"
+      data-project-explorer-menu
+      onkeydown={menuController.handleMenuKeydown}
+    >
+      {#if menuEntry.path}
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => runMenuOpen(menuEntry)}>
+          <File class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>{menuEntry.kind === "directory" ? "Toggle Folder" : "Open"}</span>
+        </button>
+      {/if}
+      <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => { menuController.close(); onOpenExternal(menuEntry.path); }}>
+        <ExternalLink class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{menuEntry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}`}</span>
+        {#if menuEntry.path}<span class="ml-auto font-mono text-xs text-muted-foreground">⇧Enter</span>{/if}
+      </button>
+
+      {#if menuEntry.kind === "directory"}
+        <div class="my-1 h-px bg-border" role="separator"></div>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => openNameDialog("new-file", menuEntry)}>
+          <FilePlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>New File…</span>
+        </button>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => openNameDialog("new-directory", menuEntry)}>
+          <FolderPlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>New Folder…</span>
+        </button>
+      {/if}
+
+      <div class="my-1 h-px bg-border" role="separator"></div>
+      {#if menuEntry.path}
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => copyEntry(menuEntry)}>
+          <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy</span>
+          <span class="ml-auto font-mono text-xs text-muted-foreground">{isMacOS ? "⌘C" : "Ctrl+C"}</span>
+        </button>
+      {/if}
+      <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!pasteEnabled} onclick={() => void pasteEntry(menuEntry)}>
+        <ClipboardPaste class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Paste</span>
+        <span class="ml-auto font-mono text-xs text-muted-foreground">{isMacOS ? "⌘V" : "Ctrl+V"}</span>
+      </button>
+      {#if menuEntry.path}
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void duplicateEntry(menuEntry)}>
+          <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Duplicate</span>
+        </button>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => openNameDialog("rename", menuEntry)}>
+          <Pencil class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Rename…</span>
+          <span class="ml-auto font-mono text-xs text-muted-foreground">F2</span>
+        </button>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyRelativePath(menuEntry)}>
+          <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Relative Path</span>
+        </button>
+        <div class="my-1 h-px bg-border" role="separator"></div>
+        <button class="project-file-menu-item text-destructive hover:bg-destructive/10" type="button" role="menuitem" tabindex="-1" onclick={() => void deleteEntry(menuEntry)}>
+          <Trash2 class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Delete</span>
+          <span class="ml-auto font-mono text-xs opacity-65">Delete</span>
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   {#if dragController.entry && dragController.dragging}
     <div
       class="pointer-events-none fixed z-50 flex max-w-80 items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 font-mono text-xs text-popover-foreground shadow-md"
@@ -192,3 +584,66 @@
     </div>
   {/if}
 </section>
+
+{#if nameDialog}
+  <dialog
+    bind:this={nameDialogElement}
+    class="w-full max-w-md rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-md backdrop:bg-background/70"
+    oncancel={(event) => {
+      if (operationBusy) event.preventDefault();
+      else nameDialog = null;
+    }}
+    onclose={() => { if (!operationBusy) nameDialog = null; }}
+  >
+    <form class="p-4" onsubmit={(event) => { event.preventDefault(); void submitNameDialog(); }}>
+      <h2 class="text-sm font-semibold">
+        {nameDialog.mode === "rename" ? "Rename" : nameDialog.mode === "new-file" ? "New File" : "New Folder"}
+      </h2>
+      <p class="mt-1 text-xs text-muted-foreground">
+        {nameDialog.mode === "rename"
+          ? nameDialog.entry.path
+          : `Create in ${destinationDirectory(nameDialog.entry) || "project root"}`}
+      </p>
+      <label class="mt-3 block text-xs font-medium" for="project-entry-name">Name</label>
+      <input
+        bind:this={nameInputElement}
+        bind:value={nameDialog.value}
+        id="project-entry-name"
+        class="mt-1 h-8 w-full rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none"
+        autocomplete="off"
+        spellcheck="false"
+        disabled={operationBusy}
+      />
+      {#if nameDialog.error}
+        <p class="mt-2 text-xs leading-4 text-tool-error">{nameDialog.error}</p>
+      {/if}
+      <div class="mt-4 flex justify-end gap-2">
+        <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" type="button" disabled={operationBusy} onclick={closeNameDialog}>Cancel</button>
+        <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50" type="submit" disabled={operationBusy || !nameDialog.value.trim()}>
+          {operationBusy ? "Working…" : nameDialog.mode === "rename" ? "Rename" : "Create"}
+        </button>
+      </div>
+    </form>
+  </dialog>
+{/if}
+
+<style>
+  .project-file-menu-item {
+    display: flex;
+    min-height: 1.75rem;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-sm);
+    padding: 0.25rem 0.5rem;
+    text-align: left;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+  .project-file-menu-item:hover { background: var(--accent); }
+  .project-file-menu-item:focus-visible {
+    outline: 1px solid var(--ring);
+    outline-offset: -1px;
+  }
+  .project-file-menu-item:disabled { cursor: default; opacity: 0.4; }
+</style>

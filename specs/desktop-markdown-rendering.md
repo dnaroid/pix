@@ -63,9 +63,11 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   inline playback controls and their caption opens the viewer.
 - `file://` media is accepted only after decoding to an absolute existing regular
   file. The backend canonicalizes it and grants scoped asset access only for a
-  supported image/video extension. Existing non-media `file://` files and
-  directories remain explicit clickable links and use the OS opener only after a
-  user action. Missing paths remain ordinary text.
+  supported image/video extension. Existing bounded UTF-8 non-media files from
+  `file://`, raw absolute Markdown destinations, or inline-code absolute paths
+  open read-only in the Desktop Preview. Directories, binary/non-UTF-8 files, and
+  files beyond the Preview limit retain the OS-opener fallback after user action.
+  Missing paths remain ordinary text.
 - Missing, disallowed, or unrenderable local media keeps a readable fallback and
   actionable caption; a media load failure does not replace the whole transcript
   with a global error.
@@ -75,7 +77,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Each preview history entry retains its horizontal and vertical scroll position, which is restored when Back or Forward returns to that entry.
 - Preview consumes the central workbench region rather than a resizable modal. Switching to a conversation or Git Diff tab in the unified top strip leaves the still-open Preview component mounted so its current edit draft and scroll/history state are not reset merely by tab switching.
 - Same-document hash links in a Markdown preview scroll to stable, deduplicated heading anchors.
-- Raw absolute paths, URL-like destinations other than the separately supported `file://` flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
+- Unvalidated raw absolute prose, URL-like destinations other than the supported local-file flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
 - An unclosed fenced code block remains visible while the message streams.
 - Fenced code keeps its intrinsic width for short content and is capped at the
   available content width. Long logical lines visually wrap without horizontal

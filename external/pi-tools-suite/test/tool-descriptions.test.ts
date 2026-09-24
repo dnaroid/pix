@@ -5,7 +5,6 @@ import {
 	CODEX_ALIAS_TOOL_DESCRIPTIONS,
 	COMPRESS_TOOL_DESCRIPTION,
 	REPO_DISCOVERY_TOOLS,
-	REPO_KNOWLEDGE_TOOL_DESCRIPTION,
 	SESSION_RECOVERY_TOOL_DESCRIPTIONS,
 	TODO_TOOL_DESCRIPTION,
 	asyncSubagentToolDescriptions,
@@ -93,54 +92,33 @@ describe("tool descriptions", () => {
 	});
 
 	test("repo guidance fits within the pre-economy description budget", () => {
-		// The six tools used 3326 characters including target descriptions before
-		// this change. Strengthen guidance by replacing text, not appending policy.
-		expect(REPO_DISCOVERY_TOOLS).toHaveLength(6);
-		const size = REPO_DISCOVERY_TOOLS.reduce((total, tool) => total + [
+		const existing = REPO_DISCOVERY_TOOLS.filter((tool) => !["ask", "context", "audit"].includes(tool.command));
+		expect(REPO_DISCOVERY_TOOLS).toHaveLength(9);
+		const size = existing.reduce((total, tool) => total + [
 			tool.description, tool.promptSnippet, ...tool.promptGuidelines, tool.targetDescription ?? "",
 		].join("\n").length, 0);
 		expect(size).toBeLessThanOrEqual(3326);
 		for (const tool of REPO_DISCOVERY_TOOLS) expect(tool.promptGuidelines.length).toBeLessThanOrEqual(3);
 	});
 
-	test("repo knowledge guidance requires contract maintenance only in indexed repo-aware mode", () => {
-		const promptText = [
-			REPO_KNOWLEDGE_TOOL_DESCRIPTION.description,
-			REPO_KNOWLEDGE_TOOL_DESCRIPTION.promptSnippet,
-			...REPO_KNOWLEDGE_TOOL_DESCRIPTION.promptGuidelines,
-		].join("\n");
-		expect(promptText).toContain("only when idx is available and the project is indexed");
-		expect(promptText).toContain("Before a material behavior change");
-		expect(promptText).toContain("create a focused primary spec");
-		expect(promptText).toContain("task-scoped action=impact");
-		expect(promptText).toContain("action=record classifies metadata but never verifies semantics");
-		expect(promptText).toContain("action=prepare never verifies");
-		expect(promptText).toContain("action=verify with receiptPath");
-		expect(promptText).toContain("commands embedded in a receipt are never executed");
-		expect(promptText).toContain("reviewed no-impact is valid");
-		expect(promptText).toContain("idx wiki review collect/list/resolve");
-		expect(promptText).toContain("idx wiki check");
-		expect(promptText).toContain("manifests declare metadata/relations and never import verification");
-		expect(promptText).toContain("empty result does not prove no contract exists");
-		expect(promptText).toContain("no hidden generative LLM judge");
-		expect(promptText).toContain("changed code never rewrites spec semantics automatically");
-		for (const guideline of REPO_KNOWLEDGE_TOOL_DESCRIPTION.promptGuidelines) {
-			expect(guideline).toContain("repo_knowledge");
+	test("repo guidance starts with ask, routes contracts and changed paths, and omits removed wiki lifecycle", () => {
+		const names = REPO_DISCOVERY_TOOLS.map((tool) => tool.name);
+		expect(names.slice(0, 3)).toEqual(["repo_ask", "repo_context", "repo_audit"]);
+		const text = REPO_DISCOVERY_TOOLS.flatMap((tool) => [tool.description, tool.promptSnippet, ...tool.promptGuidelines]).join("\n");
+		expect(text).toContain("general indexed repo discovery");
+		expect(text).toContain("configured LLM");
+		expect(text).toContain("lexical mode");
+		expect(text).toContain("material behavior change");
+		expect(text).toContain("primary spec");
+		expect(text).toContain("semantic drift");
+		expect(text).toContain(".indexer-cli/spec-template.md");
+		expect(text).toContain("kind: spec");
+		expect(text).toContain("ask before running setup");
+		expect(text).not.toMatch(/wiki|include-secondary|action=impact|receiptPath/);
+		for (const tool of [CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Edit, CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Write, codexAliasToolDescriptions(true).applyPatch]) {
+			expect(tool.description).toContain("repo_audit");
+			expect(tool.description).not.toContain("repo_knowledge");
 		}
-
-		const claudeRepo = CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO;
-		const claudePlain = CLAUDE_ALIAS_TOOL_DESCRIPTIONS;
-		for (const name of ["Edit", "Write"] as const) {
-			expect(claudeRepo[name].description).toContain("repo_knowledge impact");
-			expect(claudeRepo[name].description).toContain("material");
-			expect(claudePlain[name].description).not.toContain("repo_knowledge");
-		}
-
-		const codexRepo = codexAliasToolDescriptions(true);
-		const codexPlain = codexAliasToolDescriptions(false);
-		expect(codexRepo.applyPatch.description).toContain("repo_knowledge impact");
-		expect(codexRepo.applyPatch.description).toContain("authoritative primary spec");
-		expect(codexPlain.applyPatch.description).not.toContain("repo_knowledge");
 	});
 
 	test("subagents descriptions and parent catalog agree on parent-first role selection", () => {
@@ -233,7 +211,7 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("delegate/parallelize/split work");
 		expect(promptText).toContain("one sequential task can qualify");
 		expect(promptText).toContain("do not let repo_* availability suppress delegation");
-		expect(promptText).toContain("one discovery question");
+		expect(promptText).toContain("general discovery");
 		expect(promptText).toContain("subagentType: \"ui-qa\"");
 		expect(promptText).toContain("generated `.pi/qa_auth.jsonc` template path");
 		expect(promptText).toContain("clickable screenshot, terminal capture, video, trace");

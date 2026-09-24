@@ -22,7 +22,7 @@ function fixture() {
   return { store, afterSave, navigate: () => { previewId += 1; } };
 }
 
-describe("project Markdown writes", () => {
+describe("project file writes", () => {
   beforeEach(() => { tauri.invoke.mockReset(); });
 
   it("serializes writes to the same file and captures the originating preview", async () => {
@@ -58,5 +58,33 @@ describe("project Markdown writes", () => {
     release.resolve({ path: PROJECT_TODO_PATH, content: "old" });
     expect(await saving).toBe(false);
     expect(afterSave).not.toHaveBeenCalled();
+  });
+
+  it("uses the confined generic writer for ordinary project text files", async () => {
+    tauri.invoke.mockImplementation(async (_command: string, args: { path: string; content: string }) => ({
+      path: args.path,
+      content: args.content,
+    }));
+    const { store } = fixture();
+
+    expect(await store.save("src/main.ts", "export const ready = true;\n")).toBe(true);
+    expect(tauri.invoke).toHaveBeenCalledWith("write_project_file", {
+      workspace: "/project",
+      path: "src/main.ts",
+      content: "export const ready = true;\n",
+    });
+  });
+
+  it("keeps TODO and plan writes on their specialized project-document command", async () => {
+    tauri.invoke.mockImplementation(async (_command: string, args: { path: string; content: string }) => ({
+      path: args.path,
+      content: args.content,
+    }));
+    const { store } = fixture();
+
+    expect(await store.save(PROJECT_TODO_PATH, "todo\n")).toBe(true);
+    expect(tauri.invoke).toHaveBeenCalledWith("write_project_markdown", expect.objectContaining({
+      path: PROJECT_TODO_PATH,
+    }));
   });
 });
