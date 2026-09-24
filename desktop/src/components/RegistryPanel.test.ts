@@ -25,8 +25,8 @@ describe("RegistryPanel refresh lifecycle", () => {
     expect(panelSource).toContain('actionId === "cleanup-project"');
     expect(panelSource).toContain("window.confirm");
     expect(panelSource).toContain("clears all contents of artifacts/ and subagents/");
-    expect(panelSource).toContain("removes non-canonical top-level directories");
-    expect(panelSource).toContain("agents/, plans/, skills/, task-attachments/ and project files are preserved");
+    expect(panelSource).toContain("removes non-canonical top-level files and directories");
+    expect(panelSource).toContain("Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved");
     expect(panelSource).toContain("onCleanProject()");
     expect(panelSource).toContain("projectPiStorageLoading");
     expect(panelSource).toContain("projectPiStorageError");

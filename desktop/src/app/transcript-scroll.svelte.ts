@@ -56,9 +56,11 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   }
 
   async function scrollToLatest(): Promise<void> {
-    if (!followsLatest) return;
+    // Calls to this method come from explicit user/application actions such as
+    // sending a prompt. Those actions should bring the conversation back to the
+    // live edge even when the user had previously scrolled up.
+    followsLatest = true;
     await tick();
-    if (!followsLatest) return;
     const pane = options.pane();
     if (pane) pane.scrollTop = pane.scrollHeight;
   }

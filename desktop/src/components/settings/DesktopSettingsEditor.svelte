@@ -175,6 +175,18 @@
     >
       <SettingsSwitch value={bool(["ignoreContextFiles"])} onChange={(value) => set(["ignoreContextFiles"], value)} />
     </SettingsFieldRow>
+    <SettingsFieldRow
+      label="System notifications"
+      description="Send native notifications for completed work, questions, and errors while this Pix window is in the background. Project Desktop config can override this value."
+      explicit={has(["desktop", "notifications", "enabled"])}
+      defaultLabel={defaultLabel(["desktop", "notifications", "enabled"])}
+      onReset={() => reset(["desktop", "notifications", "enabled"])}
+    >
+      <SettingsSwitch
+        value={bool(["desktop", "notifications", "enabled"])}
+        onChange={(value) => set(["desktop", "notifications", "enabled"], value)}
+      />
+    </SettingsFieldRow>
   </div>
 {:else if section === "models"}
   <div class="px-2.5 py-2.5">

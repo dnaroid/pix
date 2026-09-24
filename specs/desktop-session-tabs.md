@@ -51,6 +51,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 
 - Focus and selected workbench state are distinct. Arrow navigation can focus a background session, Preview, or Git Diff tab without activating it.
 - Conversation activity/runtime-active indication is separate from `aria-selected`; an underlying active session may retain its status dot while Preview/Diff is the selected workbench tab.
+- A session whose agent-control state is `paused` replaces the running spinner in its conversation-tab status slot with a static Pause icon. The paused state wins over the generic prompt-running indicator while the prompt request is settling, so a successfully paused tab never continues to look actively spinning.
 - The workbench tablist does not require every tab to be reachable by repeated Tab presses; arrow navigation owns movement inside the composite.
 - New Conversation remains a separate control outside the roving-focus sequence.
 

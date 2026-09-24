@@ -11,6 +11,7 @@ type PromptAgentControlOptions = Pick<
   | "setErrorMessage"
   | "reportError"
   | "onPromptError"
+  | "onAgentPaused"
 > & {
   runs: PromptRunLifecycle;
 };
@@ -23,9 +24,17 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
   }
 
   function setAgentState(sessionId: string, state: AgentControlState): void {
+    const previous = agentControlStates.get(sessionId);
     const next = new Map(agentControlStates);
     next.set(sessionId, state);
     agentControlStates = next;
+    if (previous !== undefined && previous !== "paused" && state === "paused") {
+      try {
+        options.onAgentPaused?.(sessionId);
+      } catch {
+        // Native attention is best effort and must not affect agent-control state.
+      }
+    }
   }
 
   async function pauseActiveAgent(): Promise<void> {

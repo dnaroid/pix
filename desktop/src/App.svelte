@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
@@ -39,6 +40,7 @@
     createDesktopAgentNotificationCoordinator,
     createDesktopNotificationService,
   } from "./lib/desktop-notifications";
+  import { resolveDesktopPreferences } from "./lib/desktop-config";
   import { createDesktopUpdater } from "./app/desktop-updater.svelte";
   import { createDesktopWatchRestart } from "./app/desktop-watch-restart.svelte";
 
@@ -139,7 +141,21 @@
   const sessions = $derived(sessionCatalog.sessions);
   const sessionTabAttention = createSessionTabAttentionStore();
 
-  const nativeNotifications = createDesktopNotificationService();
+  const nativeNotifications = createDesktopNotificationService({
+    enabled: async () => {
+      const notificationWorkspace = workspace;
+      const [globalConfig, projectConfig] = await Promise.all([
+        invoke<{ content: string }>("read_user_config", { kind: "desktop" }).catch(() => undefined),
+        notificationWorkspace
+          ? invoke<{ content: string }>("read_project_file", {
+              workspace: notificationWorkspace,
+              path: ".pi/pix-desktop.jsonc",
+            }).catch(() => undefined)
+          : Promise.resolve(undefined),
+      ]);
+      return resolveDesktopPreferences(globalConfig?.content, projectConfig?.content).notificationsEnabled;
+    },
+  });
   const agentNotifications = createDesktopAgentNotificationCoordinator({
     notifications: nativeNotifications,
     sessionTitle: (sessionId) => sessionCatalog.sessions.find((session) => session.sessionId === sessionId)?.title ?? undefined,
@@ -188,6 +204,7 @@
     },
     onPromptSettled: agentNotifications.promptSettled,
     onPromptError: agentNotifications.promptError,
+    onAgentPaused: agentNotifications.paused,
     onSessionCleared: (sessionId) => {
       sessionTabAttention.clear(sessionId);
       agentNotifications.clearSession(sessionId);

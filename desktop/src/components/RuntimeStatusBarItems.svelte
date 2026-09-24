@@ -389,7 +389,7 @@
                 </span>
                 <span class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%</span>
                 {#if exhaustsEarly}
-                  <TriangleAlert class="h-2.5 w-2.5 text-muted-foreground" aria-label="Projected to exhaust before reset" />
+                  <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
                 {/if}
                 <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
               </span>

@@ -561,7 +561,7 @@
     />
   {/if}
 
-  <div class={questionMode ? "px-3 pt-2 pb-2" : "px-3 pt-2.5 pb-2"}>
+  <div class={questionMode ? "px-3 pt-2 pb-2" : editorMode ? "px-3 pt-2.5 pb-2" : "px-2 py-1.5"}>
     {#if !questionMode || questionnaireController.currentDraft?.customSelected}
       <AttachmentGrid
         attachments={questionnaireController.displayedAttachments}
@@ -569,42 +569,9 @@
         onOpen={questionnaireController.openDisplayedAttachment}
         onRemove={questionnaireController.removeDisplayedAttachment}
       />
-      <div class="relative min-w-0 text-sm">
-        {#if textareaController.suggestion && !editorMode && !questionMode}
-          <div
-            class="pointer-events-none absolute inset-0 overflow-hidden px-0.5 leading-relaxed whitespace-pre-wrap break-words"
-            bind:this={ghostLayer}
-            aria-hidden="true"
-          ><span class="text-transparent">{promptText}</span><span class="text-muted-foreground/45">{textareaController.suggestion}</span></div>
-        {/if}
-        <textarea
-          class="relative z-10 block min-h-7 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 leading-relaxed text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-40 [&::placeholder]:whitespace-nowrap disabled:cursor-default disabled:opacity-40"
-          bind:this={textarea}
-          value={textareaValue}
-          oninput={handleInput}
-          onkeydown={handleKeydown}
-          onkeyup={textareaController.handleKeyup}
-          onselect={textareaController.handleSelection}
-          onclick={textareaController.handleSelection}
-          onscroll={textareaController.handleScroll}
-          oncompositionstart={textareaController.handleCompositionStart}
-          oncompositionend={textareaController.handleCompositionEnd}
-          onpaste={handlePaste}
-          aria-label={ariaLabel ?? (questionMode ? `Custom answer for ${questionnaireController.currentQuestion?.label ?? "question"}` : editorMode ? "Editor" : "Message Pix")}
-          aria-describedby="prompt-autocomplete-status"
-          role={!editorMode && !questionMode ? "combobox" : undefined}
-          aria-autocomplete={!editorMode && !questionMode ? "list" : undefined}
-          aria-expanded={!editorMode && !questionMode ? slashController.open : undefined}
-          aria-controls={!editorMode && !questionMode && slashController.open ? slashListboxId : undefined}
-          aria-activedescendant={!editorMode && !questionMode && slashController.open ? `prompt-slash-command-${slashController.selectedIndex}` : undefined}
-          placeholder={composerPlaceholder()}
-          disabled={questionMode ? !questionnaireController.currentQuestion : editorMode ? !ready : !hasConversationTarget || !ready}
-          rows="1"
-        ></textarea>
-      </div>
-      <div class="mt-1.5 flex items-center justify-between gap-2">
+      <div class="flex min-w-0 items-end gap-1.5" data-prompt-composer-row>
         <button
-          class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           aria-label={questionMode ? "Attach images" : "Attach files"}
           title={questionMode ? "Attach images" : "Attach files"}
@@ -616,8 +583,41 @@
         >
           <Paperclip class="h-4 w-4" aria-hidden="true" />
         </button>
+        <div class="relative min-w-0 flex-1 text-sm">
+          {#if textareaController.suggestion && !editorMode && !questionMode}
+            <div
+              class="pointer-events-none absolute inset-0 overflow-hidden px-0.5 py-1 leading-5 whitespace-pre-wrap break-words"
+              bind:this={ghostLayer}
+              aria-hidden="true"
+            ><span class="text-transparent">{promptText}</span><span class="text-muted-foreground/45">{textareaController.suggestion}</span></div>
+          {/if}
+          <textarea
+            class="relative z-10 block min-h-7 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 py-1 leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-40 [&::placeholder]:whitespace-nowrap disabled:cursor-default disabled:opacity-40"
+            bind:this={textarea}
+            value={textareaValue}
+            oninput={handleInput}
+            onkeydown={handleKeydown}
+            onkeyup={textareaController.handleKeyup}
+            onselect={textareaController.handleSelection}
+            onclick={textareaController.handleSelection}
+            onscroll={textareaController.handleScroll}
+            oncompositionstart={textareaController.handleCompositionStart}
+            oncompositionend={textareaController.handleCompositionEnd}
+            onpaste={handlePaste}
+            aria-label={ariaLabel ?? (questionMode ? `Custom answer for ${questionnaireController.currentQuestion?.label ?? "question"}` : editorMode ? "Editor" : "Message Pix")}
+            aria-describedby="prompt-autocomplete-status"
+            role={!editorMode && !questionMode ? "combobox" : undefined}
+            aria-autocomplete={!editorMode && !questionMode ? "list" : undefined}
+            aria-expanded={!editorMode && !questionMode ? slashController.open : undefined}
+            aria-controls={!editorMode && !questionMode && slashController.open ? slashListboxId : undefined}
+            aria-activedescendant={!editorMode && !questionMode && slashController.open ? `prompt-slash-command-${slashController.selectedIndex}` : undefined}
+            placeholder={composerPlaceholder()}
+            disabled={questionMode ? !questionnaireController.currentQuestion : editorMode ? !ready : !hasConversationTarget || !ready}
+            rows="1"
+          ></textarea>
+        </div>
         {#if !editorMode && !questionMode}
-          <div class="flex items-center gap-1">
+          <div class="flex shrink-0 items-center gap-1">
             <PromptComposerControls
               bind:menuTrigger={composerMenuTrigger}
               menuOpen={composerMenuOpen}

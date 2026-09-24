@@ -2,6 +2,7 @@
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import CircleHelp from "@lucide/svelte/icons/circle-help";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Pause from "@lucide/svelte/icons/pause";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { SessionTabStatusKind } from "../lib/session-tab-status";
 
@@ -21,6 +22,8 @@
 >
   {#if kind === "running"}
     <LoaderCircle class="h-3.5 w-3.5 animate-spin text-tool-info motion-reduce:animate-none" />
+  {:else if kind === "paused"}
+    <Pause class="h-3.5 w-3.5 text-tool-info" />
   {:else if kind === "needs-input"}
     <CircleHelp class={[
       "h-3.5 w-3.5 text-tool-warning",

@@ -32,6 +32,7 @@ export function sessionWorkbenchTitle(session: SessionInfo): string {
 export function buildSessionWorkbenchTabs(options: {
   sessions: readonly SessionInfo[];
   draftSessionTabId: string;
+  pausedSessionIds: ReadonlySet<string>;
   runningSessionIds: ReadonlySet<string>;
   sessionActivityBySessionId: ReadonlyMap<string, SessionActivitySummary>;
   pendingElicitationSessionIds: ReadonlySet<string>;
@@ -41,6 +42,7 @@ export function buildSessionWorkbenchTabs(options: {
   realSessionCount: number;
 }): WorkbenchSessionTab[] {
   return options.sessions.map((session) => {
+    const paused = options.pausedSessionIds.has(session.sessionId);
     const running = options.runningSessionIds.has(session.sessionId);
     const activity = options.sessionActivityBySessionId.get(session.sessionId);
     const needsInput = options.pendingElicitationSessionIds.has(session.sessionId);
@@ -48,6 +50,7 @@ export function buildSessionWorkbenchTabs(options: {
     const activityLabel = sessionActivityLabel(activity, running, needsInput);
     const statusKind = sessionTabStatusKind({
       activity,
+      paused,
       running,
       needsInput,
       unseenComplete: options.unseenCompletedSessionIds.has(session.sessionId),

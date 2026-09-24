@@ -25,6 +25,26 @@ describe("desktop native notifications", () => {
     expect(api.sendNotification).not.toHaveBeenCalled();
   });
 
+  it("suppresses permission requests and delivery when notifications are disabled", async () => {
+    const api = {
+      isPermissionGranted: vi.fn(async () => true),
+      requestPermission: vi.fn(async () => "granted" as NotificationPermission),
+      sendNotification: vi.fn(),
+      focusWindow: vi.fn(async () => undefined),
+    };
+    const service = createDesktopNotificationService({
+      isForeground: () => false,
+      enabled: () => false,
+      api,
+    });
+
+    await service.completed("session-1", "Build session");
+
+    expect(api.isPermissionGranted).not.toHaveBeenCalled();
+    expect(api.requestPermission).not.toHaveBeenCalled();
+    expect(api.sendNotification).not.toHaveBeenCalled();
+  });
+
   it("requests permission once and sends background notifications", async () => {
     const api = {
       isPermissionGranted: vi.fn(async () => false),
@@ -62,6 +82,17 @@ describe("desktop native notifications", () => {
 
     await vi.waitFor(() => expect(api.focusWindow).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(activateSession).toHaveBeenCalledWith("session-2"));
+  });
+
+  it("sends a paused notification for a background session", async () => {
+    const { api, service } = notificationHarness(false);
+
+    await service.paused("session-3", "Long refactor");
+
+    expect(api.sendNotification).toHaveBeenCalledWith({
+      title: "Pix — Paused",
+      body: "Long refactor",
+    }, expect.any(Function));
   });
 });
 

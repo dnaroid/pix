@@ -97,6 +97,17 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     "subagents",
     "task-attachments",
 ];
+const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
+    "TODO.md",
+    "pi-tools-suite.jsonc",
+    "pix-desktop.jsonc",
+    "pix.jsonc",
+    "qa_auth.jsonc",
+    "registry.json",
+    "tasks.jsonc",
+    "todo-plan.json",
+    "workspace.jsonc",
+];
 const PROJECT_PI_EPHEMERAL_DIRECTORIES: &[&str] = &["artifacts", "subagents"];
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -3815,6 +3826,26 @@ fn launch_external_editor(editor: &str, target: &Path) -> Result<(), String> {
     }
 
     #[cfg(target_os = "macos")]
+    if let Some(cli) = macos_editor_cli(editor) {
+        let status = Command::new(&cli)
+            .arg(target)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|error| {
+                format!(
+                    "failed to open {} with {}: {error}",
+                    target.display(),
+                    cli.display()
+                )
+            })?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
     if let Some(app_name) = macos_editor_app_name(editor) {
         let status = Command::new("open")
             .arg("-a")
@@ -3842,6 +3873,36 @@ fn launch_external_editor(editor: &str, target: &Path) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("failed to open {} with {editor}: {error}", target.display()))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_editor_cli(editor: &str) -> Option<PathBuf> {
+    let (app_name, relative_cli) = macos_editor_cli_spec(editor)?;
+    let output = Command::new("open")
+        .arg("-Ra")
+        .arg(app_name)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let app_path = String::from_utf8(output.stdout).ok()?;
+    let app_path = app_path.trim();
+    if app_path.is_empty() {
+        return None;
+    }
+    let cli = PathBuf::from(app_path).join(relative_cli);
+    cli.is_file().then_some(cli)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_editor_cli_spec(editor: &str) -> Option<(&'static str, &'static str)> {
+    match editor.to_ascii_lowercase().as_str() {
+        "gram" => Some(("Gram", "Contents/MacOS/cli")),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -7794,6 +7855,7 @@ fn inspect_project_pi_storage(
                         &entry.file_name().to_string_lossy(),
                         &path,
                         &metadata,
+                        project_directory,
                         &artifacts_directory,
                         now,
                     ))
@@ -7939,6 +8001,7 @@ fn project_pi_cleanup_targets(project_directory: &Path) -> Result<Vec<PathBuf>, 
                 &name,
                 &path,
                 &metadata,
+                project_directory,
                 &artifacts_directory,
                 now,
             ) {
@@ -7951,6 +8014,10 @@ fn project_pi_cleanup_targets(project_directory: &Path) -> Result<Vec<PathBuf>, 
 
 fn project_pi_directory_is_canonical(name: &str) -> bool {
     PROJECT_PI_CANONICAL_DIRECTORIES.contains(&name)
+}
+
+fn project_pi_file_is_canonical(name: &str) -> bool {
+    PROJECT_PI_CANONICAL_FILES.contains(&name)
 }
 
 fn project_pi_directory_is_ephemeral(name: &str) -> bool {
@@ -8065,6 +8132,7 @@ fn project_pi_is_cleanup_candidate(
     name: &str,
     path: &Path,
     metadata: &fs::Metadata,
+    project_directory: &Path,
     artifacts_directory: &Path,
     now: SystemTime,
 ) -> bool {
@@ -8073,7 +8141,12 @@ fn project_pi_is_cleanup_candidate(
         && project_pi_file_is_stale(metadata, now);
     let system_junk = name == ".DS_Store";
     let stale_pix_temp = is_pix_project_temp_name(name) && project_pi_file_is_stale(metadata, now);
-    generated_log || system_junk || stale_pix_temp
+    let noncanonical_top_level_file = current_directory == project_directory
+        && metadata.is_file()
+        && !project_pi_file_is_canonical(name)
+        && !is_pix_project_temp_name(name)
+        && !system_junk;
+    generated_log || system_junk || stale_pix_temp || noncanonical_top_level_file
 }
 
 fn project_pi_file_is_stale(metadata: &fs::Metadata, now: SystemTime) -> bool {
@@ -9572,6 +9645,10 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_external_editor_mapping_includes_gram() {
+        assert_eq!(
+            macos_editor_cli_spec("gram"),
+            Some(("Gram", "Contents/MacOS/cli"))
+        );
         assert_eq!(macos_editor_app_name("gram"), Some("Gram"));
         assert_eq!(macos_editor_app_name("ZED"), Some("Zed"));
     }
@@ -11491,6 +11568,21 @@ mod tests {
         .expect("write canonical attachment");
         fs::write(workspace.join(".pi/qa_auth.jsonc"), b"{\"profiles\":{}}")
             .expect("write QA auth config");
+        for canonical_file in [
+            "TODO.md",
+            "pi-tools-suite.jsonc",
+            "pix-desktop.jsonc",
+            "pix.jsonc",
+            "registry.json",
+            "todo-plan.json",
+            "workspace.jsonc",
+        ] {
+            fs::write(workspace.join(".pi").join(canonical_file), b"{}\n")
+                .expect("write canonical project file");
+        }
+        let stray_receipt_bytes = b"{\"temporary\":true}\n";
+        let stray_receipt = workspace.join(".pi/desktop-skill-reads-receipt.json");
+        fs::write(&stray_receipt, stray_receipt_bytes).expect("write non-canonical receipt");
         let young_temp = workspace.join(".pi/.tasks.jsonc.1.1.tmp");
         fs::write(&young_temp, b"young").expect("write young temp file");
         let stale_temp = workspace.join(".pi/.workspace.jsonc.1.1.tmp");
@@ -11514,6 +11606,7 @@ mod tests {
             + b"subagent-data".len() as u64
             + b"foreign-data".len() as u64
             + 11
+            + stray_receipt_bytes.len() as u64
             + b"stale-temp".len() as u64;
         assert_eq!(storage.cleanup_bytes, expected_cleanup_bytes);
         assert!(storage.cleanup_available);
@@ -11544,6 +11637,18 @@ mod tests {
         assert!(workspace.join(".pi/agents/demo.md").is_file());
         assert!(workspace.join(".pi/task-attachments/keep.bin").is_file());
         assert!(workspace.join(".pi/qa_auth.jsonc").is_file());
+        for canonical_file in [
+            "TODO.md",
+            "pi-tools-suite.jsonc",
+            "pix-desktop.jsonc",
+            "pix.jsonc",
+            "registry.json",
+            "todo-plan.json",
+            "workspace.jsonc",
+        ] {
+            assert!(workspace.join(".pi").join(canonical_file).is_file());
+        }
+        assert!(!stray_receipt.exists());
         assert!(young_temp.is_file());
         assert!(!workspace.join(".pi/.DS_Store").exists());
         assert!(!stale_temp.exists());
@@ -11605,6 +11710,8 @@ mod tests {
         let fresh_subagent = workspace.join(".pi/subagents/fresh-run");
         let old_noncanonical = workspace.join(".pi/qa-runs-old");
         let fresh_noncanonical = workspace.join(".pi/qa-runs-fresh");
+        let old_receipt = workspace.join(".pi/old-receipt.json");
+        let fresh_receipt = workspace.join(".pi/fresh-receipt.json");
         for directory in [
             &old_artifact,
             &fresh_artifact,
@@ -11619,6 +11726,8 @@ mod tests {
         }
         fs::write(workspace.join(".pi/plans/keep.md"), b"keep")
             .expect("write canonical project data");
+        fs::write(&old_receipt, b"old-receipt").expect("write old non-canonical file");
+        fs::write(&fresh_receipt, b"fresh-receipt").expect("write fresh non-canonical file");
 
         let old = SystemTime::now()
             .checked_sub(PROJECT_PI_AUTO_CLEAN_TTL + Duration::from_secs(60))
@@ -11626,15 +11735,18 @@ mod tests {
         for directory in [&old_artifact, &old_subagent, &old_noncanonical] {
             set_tree_modified(directory, old);
         }
+        set_tree_modified(&old_receipt, old);
 
         let removed = auto_clean_project_pi_from(&workspace).expect("auto clean project .pi");
-        assert!(removed >= (b"payload".len() * 3) as u64);
+        assert!(removed >= (b"payload".len() * 3 + b"old-receipt".len()) as u64);
         assert!(!old_artifact.exists());
         assert!(!old_subagent.exists());
         assert!(!old_noncanonical.exists());
+        assert!(!old_receipt.exists());
         assert!(fresh_artifact.join("payload.bin").is_file());
         assert!(fresh_subagent.join("payload.bin").is_file());
         assert!(fresh_noncanonical.join("payload.bin").is_file());
+        assert!(fresh_receipt.is_file());
         assert!(workspace.join(".pi/plans/keep.md").is_file());
         assert!(workspace.join(".pi/artifacts").is_dir());
         assert!(workspace.join(".pi/subagents").is_dir());

@@ -4,6 +4,39 @@ import { createPromptAgentControl } from "./prompt-agent-control.svelte";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 
 describe("prompt agent control notifications", () => {
+  it("emits pause attention only for a live transition into paused", () => {
+    const client = {} as AcpClient;
+    const onAgentPaused = vi.fn();
+    const runs = createPromptRunLifecycle({
+      client: () => client,
+      activeSessionId: () => "session-1",
+      reportError: vi.fn(),
+      bindPromptSessionEntry: vi.fn(),
+      finalizeTranscriptActivity: vi.fn(),
+      flushAutoQueue: vi.fn(async () => {}),
+    });
+    const control = createPromptAgentControl({
+      client: () => client,
+      activeSessionId: () => "session-1",
+      runtimeReady: () => true,
+      operationRunning: () => false,
+      setErrorMessage: vi.fn(),
+      reportError: vi.fn(),
+      onAgentPaused,
+      runs,
+    });
+
+    control.setAgentState("session-1", "paused");
+    expect(onAgentPaused).not.toHaveBeenCalled();
+
+    control.setAgentState("session-1", "resuming");
+    control.setAgentState("session-1", "paused");
+    control.setAgentState("session-1", "paused");
+
+    expect(onAgentPaused).toHaveBeenCalledTimes(1);
+    expect(onAgentPaused).toHaveBeenCalledWith("session-1");
+  });
+
   it("propagates the settled stop reason after Continue and queue draining", async () => {
     const client = {
       agentControl: vi.fn(async (_sessionId: string, action: string) => action === "continue"

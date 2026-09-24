@@ -19,6 +19,7 @@ export type PromptRuntimeOptions = {
   onPromptStarted?: (sessionId: string) => void;
   onPromptSettled?: (sessionId: string, stopReason: StopReason) => void;
   onPromptError?: (sessionId: string, error: unknown) => void;
+  onAgentPaused?: (sessionId: string) => void;
   onSessionCleared?: (sessionId: string) => void;
   onReset?: () => void;
 };

@@ -3,48 +3,66 @@ import { EMPTY_SESSION_ACTIVITY } from "./session-activity";
 import { sessionTabStatusKind, sessionTabStatusLabel } from "./session-tab-status";
 
 describe("session tab status", () => {
-  it("prioritizes input, warning, running, unseen completion, then idle", () => {
+  it("prioritizes input, warning, paused, running, unseen completion, then idle", () => {
     expect(sessionTabStatusKind({
       activity: { ...EMPTY_SESSION_ACTIVITY, retryingSubagents: 1 },
+      paused: true,
       running: true,
       needsInput: true,
       unseenComplete: true,
     })).toBe("needs-input");
     expect(sessionTabStatusKind({
       activity: { ...EMPTY_SESSION_ACTIVITY, retryingSubagents: 1 },
+      paused: true,
       running: true,
       needsInput: false,
       unseenComplete: true,
     })).toBe("warning");
     expect(sessionTabStatusKind({
       activity: EMPTY_SESSION_ACTIVITY,
+      paused: false,
       running: true,
       needsInput: false,
       unseenComplete: true,
     })).toBe("running");
     expect(sessionTabStatusKind({
       activity: EMPTY_SESSION_ACTIVITY,
+      paused: false,
       running: false,
       needsInput: false,
       unseenComplete: true,
     })).toBe("unseen-complete");
     expect(sessionTabStatusKind({
       activity: EMPTY_SESSION_ACTIVITY,
+      paused: false,
       running: false,
       needsInput: false,
       unseenComplete: false,
     })).toBe("idle");
   });
 
+  it("shows paused before the generic running spinner state", () => {
+    expect(sessionTabStatusKind({
+      activity: EMPTY_SESSION_ACTIVITY,
+      paused: true,
+      running: true,
+      needsInput: false,
+      unseenComplete: false,
+    })).toBe("paused");
+    expect(sessionTabStatusLabel("paused", "Session running")).toBe("Paused");
+  });
+
   it("treats live subagents and in-progress plan items as running", () => {
     expect(sessionTabStatusKind({
       activity: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: 1 },
+      paused: false,
       running: false,
       needsInput: false,
       unseenComplete: false,
     })).toBe("running");
     expect(sessionTabStatusKind({
       activity: { ...EMPTY_SESSION_ACTIVITY, inProgressTodos: 1 },
+      paused: false,
       running: false,
       needsInput: false,
       unseenComplete: false,

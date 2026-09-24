@@ -172,9 +172,13 @@ Those portable markers are not written to the local project task file.
   `.pi/artifacts/` and `.pi/subagents/` while leaving those two container
   directories in place.
 - Any other regular top-level directory directly under `.pi/` is non-canonical
-  and is removed recursively. Arbitrary top-level files are not removed by this
-  directory rule; the existing cleanup of `.DS_Store` and stale Pix temporary
-  files still applies.
+  and is removed recursively. Top-level regular files are allowlist-based too:
+  `TODO.md`, `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
+  `qa_auth.jsonc`, `registry.json`, `tasks.jsonc`, `todo-plan.json`, and
+  `workspace.jsonc` are preserved; other ordinary top-level files (for example
+  temporary receipt JSONs) are reclaimable. The existing cleanup of `.DS_Store`
+  and stale Pix temporary files still applies, while fresh Pix temp files keep
+  their stale-age protection.
 - Recursive removal uses no-follow traversal: symbolic-link targets are never
   traversed or deleted. A root `.pi` symbolic link or non-directory is rejected
   rather than followed.
@@ -182,10 +186,10 @@ Those portable markers are not written to the local project task file.
   policy in the background with a 72-hour TTL. The project open path does not
   wait for cleanup and the foreground operation lock is not taken.
 - TTL cleanup treats each direct child of `.pi/artifacts/` and `.pi/subagents/`,
-  each non-canonical top-level directory, and the other ordinary cleanup targets
-  as one candidate. A candidate is removed only when its own modification time
-  and every entry in its subtree are at least 72 hours old. The candidate is
-  re-checked immediately before deletion so activity that begins during size
+  each non-canonical top-level file/directory, and the other ordinary cleanup
+  targets as one candidate. A candidate is removed only when its own modification
+  time and every entry in its subtree are at least 72 hours old. The candidate
+  is re-checked immediately before deletion so activity that begins during size
   accounting preserves it.
 - Background cleanup is not run against a bare/uninitialized `.pi` directory.
   After it completes, Registry storage state is refreshed only if that project

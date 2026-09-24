@@ -26,7 +26,8 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 
 - While a normal Desktop prompt or continuation is running, the composer shows Pause and Stop controls together.
 - Pause changes the session to `pause-requested` immediately and becomes disabled until Pi reaches the next turn boundary or the run finishes naturally.
-- A successful turn-boundary pause changes the session to `paused`; the active conversation shows a short non-interactive `Agent paused` toast centered over the chat viewport, and once the prompt request settles the composer shows Continue instead of Pause/Stop. The toast is transition-driven: opening or switching to a session that is already paused does not replay an old pause notification.
+- A successful turn-boundary pause changes the session to `paused`; the active conversation shows a short non-interactive `Agent paused` toast centered over the chat viewport, and once the prompt request settles the composer shows Continue instead of Pause/Stop. A native `Pix — Paused` notification is also eligible through the normal Desktop notification policy when the owning window is in the background. Both are transition-driven: opening or switching to a session that is already paused does not replay an old pause notification.
+- While a session is in `paused`, its conversation-tab status icon is a static Pause glyph rather than the normal running spinner, including the short settlement interval where the prompt runtime may still be marked running.
 - When a run becomes idle with a non-assistant transcript tail or queued Pi message, Desktop reports `continuable`. This covers turn/request-limit stops that leave Pi at a resumable boundary.
 - A normal completed assistant response is `idle` and does not show Continue.
 - Explicit Stop/cancel clears the continuation affordance; cancellation is not treated as pause.

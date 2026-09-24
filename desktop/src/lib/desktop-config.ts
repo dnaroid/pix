@@ -2,6 +2,7 @@ import { parse } from "jsonc-parser";
 
 export interface DesktopPreferences {
   readonly externalEditor: string | undefined;
+  readonly notificationsEnabled: boolean;
 }
 
 export const EXTERNAL_EDITOR_OPTIONS = [
@@ -20,7 +21,12 @@ export function resolveDesktopPreferences(
 ): DesktopPreferences {
   const globalEditor = externalEditorFromSource(globalSource);
   const projectEditor = externalEditorFromSource(projectSource);
-  return { externalEditor: projectEditor ?? globalEditor };
+  const globalNotificationsEnabled = notificationsEnabledFromSource(globalSource);
+  const projectNotificationsEnabled = notificationsEnabledFromSource(projectSource);
+  return {
+    externalEditor: projectEditor ?? globalEditor,
+    notificationsEnabled: projectNotificationsEnabled ?? globalNotificationsEnabled ?? true,
+  };
 }
 
 export function externalEditorLabel(editor: string | undefined): string {
@@ -50,6 +56,18 @@ function externalEditorFromSource(source: string | undefined): string | undefine
     if (!isRecord(parsed) || !isRecord(parsed.desktop)) return undefined;
     const editor = parsed.desktop.externalEditor;
     return typeof editor === "string" && editor.trim() ? editor.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function notificationsEnabledFromSource(source: string | undefined): boolean | undefined {
+  if (!source?.trim()) return undefined;
+  try {
+    const parsed = parse(source, undefined, { allowTrailingComma: true }) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.notifications)) return undefined;
+    const enabled = parsed.desktop.notifications.enabled;
+    return typeof enabled === "boolean" ? enabled : undefined;
   } catch {
     return undefined;
   }

@@ -6,6 +6,7 @@ function build(sessions: SessionInfo[]) {
   return buildSessionWorkbenchTabs({
     sessions,
     draftSessionTabId: "draft",
+    pausedSessionIds: new Set(),
     runningSessionIds: new Set(),
     sessionActivityBySessionId: new Map(),
     pendingElicitationSessionIds: new Set(),
@@ -20,6 +21,7 @@ describe("session workbench model", () => {
     const tabs = buildSessionWorkbenchTabs({
       sessions: [{ sessionId: "a", cwd: "/tmp" }, { sessionId: "draft", cwd: "/tmp" }],
       draftSessionTabId: "draft",
+      pausedSessionIds: new Set(),
       runningSessionIds: new Set(),
       sessionActivityBySessionId: new Map(),
       pendingElicitationSessionIds: new Set(),
@@ -39,5 +41,22 @@ describe("session workbench model", () => {
 
     expect(forked?.fork).toBe(true);
     expect(regular?.fork).toBe(false);
+  });
+
+  it("marks a paused session as paused even while its prompt runtime is still settling", () => {
+    const [tab] = buildSessionWorkbenchTabs({
+      sessions: [{ sessionId: "paused", cwd: "/tmp/project", title: "Paused tab" }],
+      draftSessionTabId: "draft",
+      pausedSessionIds: new Set(["paused"]),
+      runningSessionIds: new Set(["paused"]),
+      sessionActivityBySessionId: new Map(),
+      pendingElicitationSessionIds: new Set(),
+      unseenCompletedSessionIds: new Set(),
+      disabled: false,
+      realSessionCount: 1,
+    });
+
+    expect(tab?.statusKind).toBe("paused");
+    expect(tab?.title).toContain("Paused");
   });
 });

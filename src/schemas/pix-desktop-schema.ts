@@ -97,6 +97,15 @@ const DesktopAppConfig = Type.Object(
 		externalEditor: Type.Optional(Type.String({
 			description: "External file editor used by Project and Preview open-in-editor actions. Common values include gram, zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted. When omitted, Desktop asks the user to choose an editor instead of assuming one.",
 		})),
+		notifications: Type.Optional(Type.Object(
+			{
+				enabled: Type.Optional(Type.Boolean({
+					default: true,
+					description: "Allow Pix Desktop to send native system notifications when the owning window is not focused.",
+				})),
+			},
+			{ description: "Desktop native system notification preferences." },
+		)),
 		git: Type.Optional(Type.Object(
 			{
 				reviewModelRef: Type.Optional(Type.String({ description: "Model used for Source Control LLM diff review, optionally with a :thinking suffix." })),

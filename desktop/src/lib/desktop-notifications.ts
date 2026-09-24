@@ -15,6 +15,7 @@ type NativeNotificationApi = {
 
 type DesktopNotificationServiceOptions = {
   isForeground?: () => boolean;
+  enabled?: () => boolean | Promise<boolean>;
   api?: NativeNotificationApi;
 };
 
@@ -61,6 +62,7 @@ function compactBody(value: string, maxLength = 240): string {
 export function createDesktopNotificationService(options: DesktopNotificationServiceOptions = {}) {
   const api = options.api ?? NATIVE_NOTIFICATION_API;
   const isForeground = options.isForeground ?? desktopWindowForeground;
+  const enabled = options.enabled ?? (() => true);
   let permissionGranted: boolean | undefined;
   let permissionRequest: Promise<boolean> | null = null;
   let activationHandler: ((sessionId: string) => void | Promise<void>) | null = null;
@@ -99,6 +101,12 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
 
   async function notify(title: string, body: string, sessionId: string | null): Promise<void> {
     if (isForeground()) return;
+    try {
+      if (!(await enabled())) return;
+    } catch {
+      return;
+    }
+    if (isForeground()) return;
     if (!(await ensurePermission()) || isForeground()) return;
     try {
       api.sendNotification(
@@ -119,6 +127,9 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
     },
     question(sessionId: string | null, sessionTitle: string, message: string): Promise<void> {
       return notify("Pix — Question", `${sessionTitle}: ${message}`, sessionId);
+    },
+    paused(sessionId: string, sessionTitle: string): Promise<void> {
+      return notify("Pix — Paused", sessionTitle, sessionId);
     },
     error(sessionId: string, sessionTitle: string, message: string): Promise<void> {
       return notify("Pix — Error", `${sessionTitle}: ${message}`, sessionId);
@@ -196,6 +207,10 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
     void options.notifications.question(sessionId, title(sessionId), message || "Agent is waiting for your input.");
   }
 
+  function paused(sessionId: string): void {
+    void options.notifications.paused(sessionId, title(sessionId));
+  }
+
   function sessionActivityChanged(sessionId: string): void {
     flushCompletion(sessionId);
   }
@@ -213,6 +228,7 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
     promptSettled,
     promptError,
     needsInput,
+    paused,
     sessionActivityChanged,
     clearSession,
     reset,

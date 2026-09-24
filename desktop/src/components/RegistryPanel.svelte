@@ -178,7 +178,7 @@
   function cleanProjectPi(): void {
     if (actionId !== null || projectPiStorageLoading || projectPiStorageError || !projectPiCleanupAvailable) return;
     const confirmed = window.confirm(
-      `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi? This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level directories. agents/, plans/, skills/, task-attachments/ and project files are preserved.`,
+      `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi? This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level files and directories. Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved.`,
     );
     if (confirmed) onCleanProject();
   }

@@ -33,7 +33,7 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 
 1. The transcript pane owns its vertical scrolling independently from the desktop shell and anchored composer.
 2. When the transcript is following the latest content, appended content and transcript-size changes keep the viewport at the bottom.
-3. Once the user scrolls away from the bottom, automatic follow-latest scrolling stops until the user returns near the bottom or explicitly jumps to the latest message.
+3. Once the user scrolls away from the bottom, passive follow-latest scrolling stops until the user returns near the bottom. Explicit latest-content actions re-enable follow mode: using the jump-to-latest control or sending/appending a new user message scrolls the transcript all the way to the bottom after the new content is rendered.
 4. A normal `pix/session/history` request returns a bounded recent persisted-history window plus an opaque cursor when older persisted entries exist.
 5. When the Desktop viewport reaches the top threshold, it requests the preceding history page using that cursor and prepends the resulting transcript items.
 6. Because collapsed/grouped tool rows can make many persisted entries occupy little vertical space, a loaded tail that still leaves the pane at the top triggers another cursor page after rendering; paging continues until the pane gains scrollable history or the cursor is exhausted.

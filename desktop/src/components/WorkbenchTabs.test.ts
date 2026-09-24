@@ -101,9 +101,12 @@ describe("WorkbenchTabs desktop interaction", () => {
   it("uses semantic IDE icons for session state instead of a color-only activity dot", () => {
     expect(statusIconSource).toContain("CircleCheck");
     expect(statusIconSource).toContain("LoaderCircle");
+    expect(statusIconSource).toContain("Pause");
     expect(statusIconSource).toContain("CircleHelp");
     expect(statusIconSource).toContain("TriangleAlert");
     expect(statusIconSource).toContain("animate-spin text-tool-info");
+    expect(statusIconSource).toContain('kind === "paused"');
+    expect(statusIconSource).toContain('<Pause class="h-3.5 w-3.5 text-tool-info"');
     expect(statusIconSource).toContain('kind === "unseen-complete"');
     expect(statusIconSource).toContain("bg-primary ring-1 ring-background");
     expect(source).not.toContain('h-[7px] w-[7px] shrink-0 rounded-full border');

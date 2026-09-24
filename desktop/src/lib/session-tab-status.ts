@@ -2,6 +2,7 @@ import type { SessionActivitySummary } from "./session-activity";
 
 export type SessionTabStatusKind =
   | "idle"
+  | "paused"
   | "running"
   | "needs-input"
   | "warning"
@@ -9,6 +10,7 @@ export type SessionTabStatusKind =
 
 export function sessionTabStatusKind(options: {
   activity: SessionActivitySummary | undefined;
+  paused: boolean;
   running: boolean;
   needsInput: boolean;
   unseenComplete: boolean;
@@ -17,6 +19,7 @@ export function sessionTabStatusKind(options: {
   if ((options.activity?.retryingSubagents ?? 0) > 0 || (options.activity?.blockedTodos ?? 0) > 0) {
     return "warning";
   }
+  if (options.paused) return "paused";
   if (
     options.running
     || (options.activity?.activeSubagents ?? 0) > 0
@@ -30,5 +33,6 @@ export function sessionTabStatusLabel(
   kind: SessionTabStatusKind,
   activityLabel: string,
 ): string {
+  if (kind === "paused") return "Paused";
   return kind === "unseen-complete" ? "Completed · not viewed" : activityLabel;
 }

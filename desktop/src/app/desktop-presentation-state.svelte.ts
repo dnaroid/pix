@@ -51,6 +51,11 @@ export function createDesktopPresentationState(options: DesktopPresentationState
       : "idle",
   );
   const anyPromptRunning = $derived(options.prompt.runtime.runningSessionIds.size > 0);
+  const pausedSessionIds = $derived.by(() => new Set(
+    [...options.prompt.runtime.agentControlStates]
+      .filter(([, state]) => state === "paused")
+      .map(([sessionId]) => sessionId),
+  ));
   const activeTitle = $derived(
     options.sessions.catalog.sessions.find((session) => session.sessionId === options.state.sessionId)?.title
       ?? "New conversation",
@@ -88,6 +93,7 @@ export function createDesktopPresentationState(options: DesktopPresentationState
   const workbenchSessionTabs = $derived.by(() => buildSessionWorkbenchTabs({
     sessions: titlebarSessions,
     draftSessionTabId: DRAFT_SESSION_TAB_ID,
+    pausedSessionIds,
     runningSessionIds: options.prompt.runtime.runningSessionIds,
     sessionActivityBySessionId: options.sessions.activity.summaries,
     pendingElicitationSessionIds: options.interactions.pendingElicitationSessionIds,

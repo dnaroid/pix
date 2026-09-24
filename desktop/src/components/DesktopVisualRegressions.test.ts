@@ -37,6 +37,18 @@ describe("desktop visual regressions", () => {
   it("keeps the composer placeholder on one visual line", () => {
     expect(composerSource).toContain('"Ask Pix anything…"');
     expect(composerSource).toContain("[&::placeholder]:whitespace-nowrap");
+    expect(composerSource).toContain("px-0.5 py-1 leading-5");
+  });
+
+  it("keeps normal composer input and actions in one horizontal row", () => {
+    const rowStart = composerSource.indexOf("data-prompt-composer-row");
+    const rowEnd = composerSource.indexOf("{#if !editorMode && !questionMode && (voiceController.interim", rowStart);
+    const row = composerSource.slice(rowStart, rowEnd);
+    expect(rowStart).toBeGreaterThanOrEqual(0);
+    expect(row).toContain("<Paperclip");
+    expect(row).toContain("<textarea");
+    expect(row).toContain("<PromptComposerControls");
+    expect(composerSource).not.toContain('class="mt-1.5 flex items-center justify-between gap-2"');
   });
 
   it("hides native textarea resize handles and auto-sizes the commit message", async () => {
@@ -266,7 +278,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("contextCellClass(segment.kind)");
     expect(runtimeStatusSource).toContain("contextCellClass(item.kind)");
     expect(runtimeStatusSource).toContain("class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%");
-    expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-muted-foreground"');
+    expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-tool-warning"');
   });
 
   it("segments weekly quota into seven day slices without inventing per-day usage", () => {
@@ -382,6 +394,12 @@ describe("desktop visual regressions", () => {
     expect(desktopSettingsEditorSource).toContain('label: "Choose an editor…"');
     expect(desktopSettingsEditorSource).toContain("EXTERNAL_EDITOR_OPTIONS");
     expect(desktopSettingsEditorSource).toContain('["desktop", "externalEditor"]');
+  });
+
+  it("exposes a Desktop switch for native system notifications", () => {
+    expect(desktopSettingsEditorSource).toContain('label="System notifications"');
+    expect(desktopSettingsEditorSource).toContain('["desktop", "notifications", "enabled"]');
+    expect(desktopSettingsEditorSource).toContain("Send native notifications for completed work, questions, and errors");
   });
 
   it("keeps package terminals interactive, scrollable, bounded, and script rows compact", () => {

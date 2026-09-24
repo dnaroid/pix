@@ -44,6 +44,10 @@ while project selection/open state remains separate from transient focus.
   rather than silently assuming Zed. The pointer hover icon remains available but
   is removed from the normal Tab sequence so every tree row does not add a second
   Tab stop.
+- On macOS, Gram targets are opened through Gram's bundled CLI when it is present
+  inside the installed app bundle; LaunchServices app opening remains the fallback.
+  This keeps file/project opening aligned with Gram's own command-line entry point
+  even when the `gram` executable is not installed on `PATH`.
 - Project entries expose IDE-style contextual file commands without adding a Tab
   stop per row. Right-click, the Context Menu key, and `Shift+F10` open the same
   command surface for the focused row. The command set includes Open/Open in
