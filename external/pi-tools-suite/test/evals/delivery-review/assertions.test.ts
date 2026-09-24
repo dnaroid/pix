@@ -39,7 +39,7 @@ describe("delivery review eval audit", () => {
 			fs.writeFileSync(path.join(dir, "src/a"), "old");
 			fs.symlinkSync("src/a", path.join(dir, "link"));
 			const before = snapshot(dir);
-			expect(before.link).toBe("link:src/a");
+			expect(before.link).toBe(`link:${path.join("src", "a")}`);
 			fs.writeFileSync(path.join(dir, "src/a"), "new");
 			expect(snapshot(dir)).not.toEqual(before);
 		} finally { fs.rmSync(dir, { recursive: true, force: true }); }
