@@ -1,10 +1,18 @@
 import { parse } from "jsonc-parser";
 
 export interface DesktopPreferences {
-  readonly externalEditor: string;
+  readonly externalEditor: string | undefined;
 }
 
-export const DEFAULT_EXTERNAL_EDITOR = "zed";
+export const EXTERNAL_EDITOR_OPTIONS = [
+  { value: "gram", label: "Gram" },
+  { value: "zed", label: "Zed" },
+  { value: "code", label: "Visual Studio Code" },
+  { value: "cursor", label: "Cursor" },
+  { value: "subl", label: "Sublime Text" },
+  { value: "idea", label: "IntelliJ IDEA" },
+  { value: "webstorm", label: "WebStorm" },
+] as const;
 
 export function resolveDesktopPreferences(
   globalSource: string | undefined,
@@ -12,11 +20,13 @@ export function resolveDesktopPreferences(
 ): DesktopPreferences {
   const globalEditor = externalEditorFromSource(globalSource);
   const projectEditor = externalEditorFromSource(projectSource);
-  return { externalEditor: projectEditor ?? globalEditor ?? DEFAULT_EXTERNAL_EDITOR };
+  return { externalEditor: projectEditor ?? globalEditor };
 }
 
-export function externalEditorLabel(editor: string): string {
-  switch (editor.trim().toLowerCase()) {
+export function externalEditorLabel(editor: string | undefined): string {
+  const configured = editor?.trim() ?? "";
+  switch (configured.toLowerCase()) {
+    case "gram": return "Gram";
     case "zed": return "Zed";
     case "code":
     case "vscode":
@@ -29,7 +39,7 @@ export function externalEditorLabel(editor: string): string {
     case "intellij":
     case "intellij idea": return "IntelliJ IDEA";
     case "webstorm": return "WebStorm";
-    default: return editor.trim() || "editor";
+    default: return configured || "External Editor";
   }
 }
 

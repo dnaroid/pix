@@ -18,10 +18,7 @@ import {
   workspaceConfigWithProjectColor,
   WORKSPACE_CONFIG_PATH,
 } from "../lib/project-colors";
-import {
-  DEFAULT_EXTERNAL_EDITOR,
-  resolveDesktopPreferences,
-} from "../lib/desktop-config";
+import { resolveDesktopPreferences } from "../lib/desktop-config";
 import type { ProjectFilePreview } from "../lib/project-files";
 import type { ProjectTreeEntry } from "../lib/project-tree";
 
@@ -70,7 +67,7 @@ export function restoreProjectWorkspace(
 export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOptions) {
   let recentProjects = $state<string[]>([]);
   let projectColors = $state<Map<string, string>>(new Map());
-  let externalEditor = $state(DEFAULT_EXTERNAL_EDITOR);
+  let externalEditor = $state<string | undefined>(undefined);
   let colorLoadGeneration = 0;
   let colorSaveGeneration = 0;
 
@@ -194,6 +191,10 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     try {
       await loadPreferences(workspace);
       if (options.workspace() !== workspace) return;
+      if (!externalEditor) {
+        options.reportError(new Error("Choose an external file editor in Settings → Desktop → Editor."));
+        return;
+      }
       await invoke("open_in_external_editor", {
         workspace,
         path: path || null,

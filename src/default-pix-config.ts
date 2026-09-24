@@ -24,8 +24,6 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.
   "maxProjectSessions": 0,
 	"desktop": {
-    // Legacy compatibility field. Pix Desktop reads externalEditor from pix-desktop.jsonc instead.
-    "externalEditor": "zed",
 		"git": {
 			// TUI LLM used by /code-review. Desktop keeps an independent Source Control preference.
       "reviewModelRef": "openai-codex/gpt-6-luna:medium",

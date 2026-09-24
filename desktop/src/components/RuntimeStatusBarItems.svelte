@@ -131,16 +131,10 @@
   function toneTextClass(tone: UsageTone): string {
     if (tone === "error") return "text-tool-error";
     if (tone === "warning") return "text-tool-warning";
-    return "text-tool-success";
+    return "text-muted-foreground";
   }
 
-  function contextTrackCellClass(kind: DcpContextMapCellKind): string {
-    if (kind === "free") return "bg-border";
-    if (kind === "unknown") return "bg-muted";
-    return "bg-muted-foreground/65";
-  }
-
-  function contextLegendCellClass(kind: DcpContextMapCellKind): string {
+  function contextCellClass(kind: DcpContextMapCellKind): string {
     if (kind === "free") return "bg-border";
     if (kind === "retained" || kind === "occupied") return "bg-muted-foreground/45";
     if (kind === "candidate") return "bg-primary";
@@ -232,7 +226,7 @@
               <span class="flex h-full min-w-0 flex-1">
                 {#each cell.segments as segment}
                   <span
-                    class={["h-full min-w-0", contextTrackCellClass(segment.kind)]}
+                    class={["h-full min-w-0", contextCellClass(segment.kind)]}
                     style:flex-grow={segment.share}
                   ></span>
                 {/each}
@@ -253,7 +247,7 @@
             <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Context color legend">
               {#each contextLegend as item}
                 <span class="inline-flex items-center gap-1">
-                  <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextLegendCellClass(item.kind)]} aria-hidden="true"></i>
+                  <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
                   <span>{item.label}{item.value ? ` ${item.value}` : ""}</span>
                 </span>
               {/each}
@@ -382,7 +376,7 @@
                   aria-hidden="true"
                 >
                   <span
-                    class="absolute inset-y-0 left-0 bg-muted-foreground/65"
+                    class="absolute inset-y-0 left-0 bg-muted-foreground/50"
                     style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
                   ></span>
                   {#if label === "W"}

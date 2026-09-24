@@ -39,8 +39,11 @@ while project selection/open state remains separate from transient focus.
   and existing rows while refresh requests are in flight. A full tree-state
   reset happens only when the workspace itself changes.
 - `Shift+Enter` opens the focused file or directory in the configured external
-  editor. The pointer hover icon remains available but is removed from the normal
-  Tab sequence so every tree row does not add a second Tab stop.
+  editor. Gram is a supported built-in choice. When no external editor is
+  configured, Desktop reports that the user must choose one in Desktop Settings
+  rather than silently assuming Zed. The pointer hover icon remains available but
+  is removed from the normal Tab sequence so every tree row does not add a second
+  Tab stop.
 - Project entries expose IDE-style contextual file commands without adding a Tab
   stop per row. Right-click, the Context Menu key, and `Shift+F10` open the same
   command surface for the focused row. The command set includes Open/Open in

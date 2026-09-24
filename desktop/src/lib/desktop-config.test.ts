@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_EXTERNAL_EDITOR,
+  EXTERNAL_EDITOR_OPTIONS,
   externalEditorLabel,
   resolveDesktopPreferences,
 } from "./desktop-config";
@@ -13,9 +13,12 @@ describe("desktop config", () => {
     ).externalEditor).toBe("cursor");
   });
 
-  it("falls back to Zed and formats known editor labels", () => {
-    expect(resolveDesktopPreferences(undefined, undefined).externalEditor).toBe(DEFAULT_EXTERNAL_EDITOR);
+  it("requires an explicit editor and formats known editor labels", () => {
+    expect(resolveDesktopPreferences(undefined, undefined).externalEditor).toBeUndefined();
+    expect(EXTERNAL_EDITOR_OPTIONS).toContainEqual({ value: "gram", label: "Gram" });
+    expect(externalEditorLabel("gram")).toBe("Gram");
     expect(externalEditorLabel("vscode")).toBe("VS Code");
     expect(externalEditorLabel("zed")).toBe("Zed");
+    expect(externalEditorLabel(undefined)).toBe("External Editor");
   });
 });

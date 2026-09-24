@@ -32,7 +32,6 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
     "model": "nova-3"
   },
   "desktop": {
-    "externalEditor": "zed",
     "git": {
       "reviewModelRef": "openai-codex/gpt-6-luna:medium",
       "reviewFallbackModels": [],

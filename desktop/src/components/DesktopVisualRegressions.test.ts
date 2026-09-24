@@ -256,16 +256,15 @@ describe("desktop visual regressions", () => {
     expect(sessionSubagentsSource).toContain("{activeCount} active");
   });
 
-  it("keeps Context and Usage scales neutral light gray while percentage text keeps semantic tones", () => {
+  it("uses neutral light-gray normal percentage text while preserving warning/error tones and original tracks", () => {
     expect(runtimeStatusSource).toContain('class={["relative h-1.5 overflow-hidden rounded-sm bg-border"');
-    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 bg-muted-foreground/65"');
+    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 bg-muted-foreground/50"');
     expect(runtimeStatusSource).not.toContain("toneFillClass");
-    expect(runtimeStatusSource).toContain('return "text-tool-success";');
+    expect(runtimeStatusSource).toContain('return "text-muted-foreground";');
     expect(runtimeStatusSource).toContain('return "text-tool-warning";');
     expect(runtimeStatusSource).toContain('return "text-tool-error";');
-    expect(runtimeStatusSource).toContain('return "bg-muted-foreground/65";');
-    expect(runtimeStatusSource).toContain("contextTrackCellClass(segment.kind)");
-    expect(runtimeStatusSource).toContain("contextLegendCellClass(item.kind)");
+    expect(runtimeStatusSource).toContain("contextCellClass(segment.kind)");
+    expect(runtimeStatusSource).toContain("contextCellClass(item.kind)");
     expect(runtimeStatusSource).toContain("class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%");
     expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-muted-foreground"');
   });
@@ -376,6 +375,13 @@ describe("desktop visual regressions", () => {
     expect(desktopSettingsEditorSource).not.toContain('"label": "English"');
     expect(desktopSettingsEditorSource).toContain("LANGUAGE_OPTIONS");
     expect(desktopSettingsEditorSource).toContain("SPEECH_MODEL_OPTIONS");
+  });
+
+  it("offers an explicit Desktop file-editor choice including Gram", () => {
+    expect(desktopSettingsEditorSource).toContain('label="File editor"');
+    expect(desktopSettingsEditorSource).toContain('label: "Choose an editor…"');
+    expect(desktopSettingsEditorSource).toContain("EXTERNAL_EDITOR_OPTIONS");
+    expect(desktopSettingsEditorSource).toContain('["desktop", "externalEditor"]');
   });
 
   it("keeps package terminals interactive, scrollable, bounded, and script rows compact", () => {

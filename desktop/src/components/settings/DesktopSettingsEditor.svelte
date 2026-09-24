@@ -9,6 +9,7 @@
     updateSettingsSource,
     type SettingsSchema,
   } from "../../lib/settings";
+  import { EXTERNAL_EDITOR_OPTIONS } from "../../lib/desktop-config";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
   import SettingsModelList from "./SettingsModelList.svelte";
@@ -45,12 +46,8 @@
     { value: "nova", label: "Nova" },
   ];
   const EDITOR_OPTIONS = [
-    { value: "zed", label: "Zed" },
-    { value: "code", label: "Visual Studio Code" },
-    { value: "cursor", label: "Cursor" },
-    { value: "subl", label: "Sublime Text" },
-    { value: "idea", label: "IntelliJ IDEA" },
-    { value: "webstorm", label: "WebStorm" },
+    { value: "", label: "Choose an editor…" },
+    ...EXTERNAL_EDITOR_OPTIONS,
   ];
 
   let {
@@ -449,13 +446,17 @@
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
-      label="External editor"
-      description="Application used by Open in External Editor. Custom executable names remain available in Advanced JSONC."
+      label="File editor"
+      description="Application used by Project and Preview “Open in External Editor” actions. Custom executable names remain available in Advanced JSONC."
       explicit={has(["desktop", "externalEditor"])}
-      defaultLabel={defaultLabel(["desktop", "externalEditor"])}
+      defaultLabel="No editor selected"
       onReset={() => reset(["desktop", "externalEditor"])}
     >
-      <SettingsSelect value={text(["desktop", "externalEditor"])} options={EDITOR_OPTIONS} onChange={(value) => set(["desktop", "externalEditor"], value)} />
+      <SettingsSelect
+        value={text(["desktop", "externalEditor"])}
+        options={EDITOR_OPTIONS}
+        onChange={(value) => value ? set(["desktop", "externalEditor"], value) : reset(["desktop", "externalEditor"])}
+      />
     </SettingsFieldRow>
   </div>
 {:else if section === "source-control"}

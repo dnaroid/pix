@@ -3847,6 +3847,7 @@ fn launch_external_editor(editor: &str, target: &Path) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn macos_editor_app_name(editor: &str) -> Option<&'static str> {
     match editor.to_ascii_lowercase().as_str() {
+        "gram" => Some("Gram"),
         "zed" => Some("Zed"),
         "code" | "vscode" | "visual studio code" => Some("Visual Studio Code"),
         "cursor" => Some("Cursor"),
@@ -9567,6 +9568,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_external_editor_mapping_includes_gram() {
+        assert_eq!(macos_editor_app_name("gram"), Some("Gram"));
+        assert_eq!(macos_editor_app_name("ZED"), Some("Zed"));
+    }
 
     #[test]
     fn destroyed_reservation_cannot_publish_after_global_slot_is_removed() {
