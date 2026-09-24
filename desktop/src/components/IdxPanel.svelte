@@ -147,8 +147,8 @@
   ]}
   aria-label="IDX repository intelligence"
 >
-  <div class="flex h-9 min-w-0 items-center gap-2 border-b border-sidebar-border bg-panel px-2.5">
-    <ScanSearch class="h-4 w-4 shrink-0 text-tool-search" aria-hidden="true" />
+  <div class="flex h-8 min-w-0 items-center gap-2 border-b border-sidebar-border bg-panel px-2.5">
+    <ScanSearch class="h-3.5 w-3.5 shrink-0 text-tool-search" aria-hidden="true" />
     <div class="min-w-0 flex-1">
       <div class="flex min-w-0 items-center gap-1.5">
         <strong class="truncate text-xs font-medium text-foreground">Repository index</strong>
@@ -221,20 +221,20 @@
         <section class="bg-panel" aria-label="Code index status">
           <div class="flex h-8 items-center gap-2 px-2.5">
             <Activity class="h-3.5 w-3.5 text-tool-info" aria-hidden="true" />
-            <h3 class="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Code index</h3>
+            <h3 class="text-xs font-semibold text-foreground">Code index</h3>
             <span class="ml-auto font-mono text-xs text-muted-foreground">{overview?.indexStatus?.state ?? "unknown"}</span>
           </div>
-          <dl class="grid grid-cols-4 border-y border-sidebar-border/70 bg-sidebar">
-            <div class="border-r border-sidebar-border/70 px-2 py-2"><dt class="text-xs text-muted-foreground">Files</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "files"))}</dd></div>
-            <div class="border-r border-sidebar-border/70 px-2 py-2"><dt class="text-xs text-muted-foreground">Symbols</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "symbols"))}</dd></div>
-            <div class="border-r border-sidebar-border/70 px-2 py-2"><dt class="text-xs text-muted-foreground">Chunks</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "chunks"))}</dd></div>
-            <div class="px-2 py-2"><dt class="text-xs text-muted-foreground">Deps</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "dependencies"))}</dd></div>
+          <dl class="grid grid-cols-2 gap-px border-y border-sidebar-border/70 bg-sidebar-border/70">
+            <div class="bg-sidebar px-2.5 py-2"><dt class="text-xs text-muted-foreground">Files</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "files"))}</dd></div>
+            <div class="bg-sidebar px-2.5 py-2"><dt class="text-xs text-muted-foreground">Symbols</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "symbols"))}</dd></div>
+            <div class="bg-sidebar px-2.5 py-2"><dt class="text-xs text-muted-foreground">Chunks</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "chunks"))}</dd></div>
+            <div class="bg-sidebar px-2.5 py-2"><dt class="text-xs text-muted-foreground">Deps</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "dependencies"))}</dd></div>
           </dl>
           <div class="space-y-1 px-2.5 py-2 font-mono text-xs leading-4 text-muted-foreground">
             {#if idxField(overview?.indexStatus, "gitRef")}<div><span class="text-muted-foreground/65">git</span> {idxField(overview?.indexStatus, "gitRef")}</div>{/if}
             {#if idxField(overview?.indexStatus, "languages")}<div class="break-words"><span class="text-muted-foreground/65">languages</span> {idxField(overview?.indexStatus, "languages")}</div>{/if}
           </div>
-          <div class="flex flex-wrap gap-1 border-t border-sidebar-border/70 px-2 py-2">
+          <div class="grid grid-cols-2 gap-1 border-t border-sidebar-border/70 px-2 py-2">
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("index")}>Update index</button>
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("full-index")}>Full reindex</button>
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("dry-run")}>Dry run</button>
@@ -247,7 +247,7 @@
     {:else if activeTab === "knowledge"}
       <section class="bg-panel" aria-label="Task-scoped knowledge audit">
         <div class="flex h-8 items-center gap-2 px-2.5">
-          <h3 class="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Task-scoped audit</h3>
+          <h3 class="text-xs font-semibold text-foreground">Task-scoped audit</h3>
         </div>
         <div class="space-y-2 border-t border-sidebar-border/70 bg-sidebar p-2.5">
           <p class="text-xs leading-4 text-muted-foreground">Enter changed project-relative paths, one per line or comma-separated. Audit is read-only and only checks this task.</p>
@@ -301,17 +301,16 @@
           {/if}
           <details class="mt-2 border-t border-sidebar-border/70 pt-1.5">
             <summary class="cursor-pointer select-none text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Advanced index tools</summary>
-            <div class="mt-1.5 grid grid-cols-[118px_minmax(0,1fr)_52px_52px_auto] gap-1">
+            <div class="mt-1.5 grid grid-cols-2 gap-1">
               <label class="relative"><span class="sr-only">IDX inspect command</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.inspectCommand}><option value="architecture">architecture</option><option value="structure">structure</option><option value="ast">ast</option><option value="explain">explain</option><option value="deps">deps</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
               <input class="h-7 min-w-0 rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX inspect target" placeholder={queryState.inspectCommand === "explain" ? "symbol" : queryState.inspectCommand === "ast" || queryState.inspectCommand === "deps" ? "path / module" : "target not required"} bind:value={queryState.inspectTarget} disabled={queryState.inspectCommand === "architecture" || queryState.inspectCommand === "structure"} spellcheck="false" />
-              <input class="h-7 rounded-md border border-input bg-panel-strong px-1 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="8" aria-label="IDX inspect depth" bind:value={queryState.inspectDepth} />
-              <input class="h-7 rounded-md border border-input bg-panel-strong px-1 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="300" aria-label="IDX inspect result limit" bind:value={queryState.inspectMaxFiles} />
-              <button class="grid h-7 w-7 cursor-pointer place-items-center rounded-md border border-border bg-panel-strong text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Run indexed inspection" aria-label="Run indexed inspection" disabled={queryState.inspectRunning || queryState.queryRunning || Boolean(runningOperation)} onclick={() => void runInspect()}>{#if queryState.inspectRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}</button>
+              <label class="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-panel-strong px-2 text-xs text-muted-foreground"><span>Depth</span><input class="h-5 min-w-0 flex-1 bg-transparent text-right font-mono text-xs text-foreground outline-none" type="number" min="1" max="8" aria-label="IDX inspect depth" bind:value={queryState.inspectDepth} /></label>
+              <label class="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-panel-strong px-2 text-xs text-muted-foreground"><span>Limit</span><input class="h-5 min-w-0 flex-1 bg-transparent text-right font-mono text-xs text-foreground outline-none" type="number" min="1" max="300" aria-label="IDX inspect result limit" bind:value={queryState.inspectMaxFiles} /></label>
+              <button class="col-span-2 inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Run indexed inspection" aria-label="Run indexed inspection" disabled={queryState.inspectRunning || queryState.queryRunning || Boolean(runningOperation)} onclick={() => void runInspect()}>{#if queryState.inspectRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}{queryState.inspectRunning ? "Inspecting…" : "Run inspection"}</button>
             </div>
             <div class="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
               {#if queryState.inspectCommand === "explain"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectIncludeBody} />include body</label>{/if}
               {#if queryState.inspectCommand === "deps"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectShowEdges} />show edges</label><label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectTests} />tests</label>{/if}
-              <span class="font-mono text-muted-foreground/70">depth · limit</span>
             </div>
           </details>
         </section>

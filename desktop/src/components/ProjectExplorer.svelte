@@ -15,10 +15,13 @@
   import ImageIcon from "@lucide/svelte/icons/image";
   import Pencil from "@lucide/svelte/icons/pencil";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import Search from "@lucide/svelte/icons/search";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import X from "@lucide/svelte/icons/x";
   import { onDestroy, tick } from "svelte";
   import type { MenuNavigationItem } from "../lib/keyboard-navigation";
-  import type { ProjectTreeEntry } from "../lib/project-tree";
+  import type { ProjectFileLineRange } from "../lib/project-files";
+  import type { ProjectSearchMatch, ProjectTreeEntry } from "../lib/project-tree";
   import { createProjectExplorerDragController } from "./project-explorer-drag-controller.svelte";
   import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
@@ -36,7 +39,7 @@
     externalEditorLabel: string;
     refreshKey: number;
     onListDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
-    onOpenFile: (path: string) => void;
+    onOpenFile: (path: string, range?: ProjectFileLineRange) => void;
     onOpenExternal: (path: string) => void;
     onHealthChange?: (error: string | null) => void;
   } = $props();
@@ -46,8 +49,14 @@
   let nameInputElement = $state<HTMLInputElement | null>(null);
   let operationBusy = $state(false);
   let operationError = $state<string | null>(null);
+  let searchInputElement = $state<HTMLInputElement | null>(null);
+  let searchQuery = $state("");
+  let searchResults = $state<ProjectSearchMatch[]>([]);
+  let searchLoading = $state(false);
+  let searchError = $state<string | null>(null);
   let entryClipboard = $state<{ workspace: string; entry: ProjectTreeEntry } | null>(null);
   let operationGeneration = 0;
+  let searchGeneration = 0;
   let observedOperationWorkspace: string | undefined;
   let nameDialog = $state<{
     mode: "rename" | "new-file" | "new-directory";
@@ -69,6 +78,7 @@
   const treeState = treeController.state;
   const rootEntries = $derived(treeController.rootEntries);
   const rows = $derived(treeController.rows);
+  const searchActive = $derived(searchQuery.trim().length > 0);
   const rootLoading = $derived(treeController.rootLoading);
   const rootError = $derived(treeController.rootError);
   const tabbablePath = $derived(treeController.tabbablePath);
@@ -94,10 +104,56 @@
     operationGeneration += 1;
     operationBusy = false;
     operationError = null;
+    searchGeneration += 1;
+    searchQuery = "";
+    searchResults = [];
+    searchLoading = false;
+    searchError = null;
     entryClipboard = null;
     nameDialogElement?.close();
     nameDialog = null;
     menuController.close();
+  });
+
+  $effect(() => {
+    const query = searchQuery.trim();
+    const requestWorkspace = workspace;
+    const generation = ++searchGeneration;
+    searchError = null;
+    if (!query || !requestWorkspace) {
+      searchResults = [];
+      searchLoading = false;
+      return;
+    }
+    searchLoading = true;
+    const timer = window.setTimeout(() => {
+      void invoke<ProjectSearchMatch[]>("search_project_files", {
+        workspace: requestWorkspace,
+        query,
+      }).then((results) => {
+        if (
+          generation !== searchGeneration
+          || workspace !== requestWorkspace
+          || searchQuery.trim() !== query
+        ) return;
+        searchResults = results;
+      }).catch((error) => {
+        if (
+          generation !== searchGeneration
+          || workspace !== requestWorkspace
+          || searchQuery.trim() !== query
+        ) return;
+        searchResults = [];
+        searchError = errorMessage(error);
+      }).finally(() => {
+        if (
+          generation === searchGeneration
+          && workspace === requestWorkspace
+          && searchQuery.trim() === query
+        ) searchLoading = false;
+      });
+    }, 180);
+    return () => window.clearTimeout(timer);
   });
 
   function fileIconKind(path: string): "text" | "code" | "image" | "file" {
@@ -390,15 +446,119 @@
     if (entry.kind === "directory") treeController.toggleDirectory(entry.path);
     else treeController.openFile(entry.path);
   }
+
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    const primary = isMacOS ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (
+      primary
+      && event.shiftKey
+      && !event.altKey
+      && event.key.toLocaleLowerCase() === "f"
+    ) {
+      event.preventDefault();
+      menuController.close();
+      searchInputElement?.focus();
+      searchInputElement?.select();
+      return;
+    }
+    menuController.handleWindowKeydown(event);
+  }
+
+  function clearSearch(): void {
+    searchGeneration += 1;
+    searchQuery = "";
+    searchResults = [];
+    searchLoading = false;
+    searchError = null;
+    void tick().then(() => treeRoot?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]')?.focus());
+  }
+
+  function openSearchResult(result: ProjectSearchMatch): void {
+    const range = result.line === undefined
+      ? undefined
+      : { startLine: result.line, endLine: result.line };
+    onOpenFile(result.path, range);
+  }
 </script>
 
 <svelte:window
   onpointerdown={menuController.handleWindowPointerDown}
-  onkeydown={menuController.handleWindowKeydown}
+  onkeydown={handleWindowKeydown}
   onresize={menuController.handleWindowResize}
 />
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files">
+  <div class="border-b border-sidebar-border px-2 py-1.5">
+    <div class="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-panel-strong px-2 focus-within:border-ring">
+      {#if searchLoading}
+        <RotateCw class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+      {:else}
+        <Search class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      {/if}
+      <input
+        bind:this={searchInputElement}
+        bind:value={searchQuery}
+        class="h-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
+        type="search"
+        placeholder="Search project files"
+        aria-label="Search project files"
+        aria-keyshortcuts={isMacOS ? "Meta+Shift+F" : "Control+Shift+F"}
+        autocomplete="off"
+        spellcheck="false"
+        onkeydown={(event) => {
+          if (event.key === "Escape" && searchActive) {
+            event.preventDefault();
+            clearSearch();
+          }
+        }}
+      />
+      {#if searchActive}
+        <button
+          class="grid h-5 w-5 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring"
+          type="button"
+          aria-label="Clear project search"
+          title="Clear project search"
+          onclick={clearSearch}
+        ><X class="h-3 w-3" aria-hidden="true" /></button>
+      {/if}
+    </div>
+  </div>
+
+  {#if searchActive}
+    <div class="min-h-0 flex-1 overflow-auto py-1" data-project-search-results aria-live="polite">
+      {#if searchError}
+        <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">
+          {searchError}
+        </div>
+      {:else if searchLoading && searchResults.length === 0}
+        <div class="flex items-center justify-center gap-1.5 py-8 text-xs text-muted-foreground">
+          <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Searching project…
+        </div>
+      {:else if searchResults.length === 0}
+        <div class="px-3 py-8 text-center text-xs text-muted-foreground">No matches found.</div>
+      {:else}
+        {#each searchResults as result, index (`${result.path}:${result.line ?? ""}:${result.column ?? ""}:${index}`)}
+          <button
+            class="block w-full cursor-pointer px-2.5 py-1.5 text-left hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            type="button"
+            onclick={() => openSearchResult(result)}
+            title={result.line === undefined ? result.path : `${result.path}:${result.line}:${result.column ?? 1}`}
+          >
+            <span class="flex min-w-0 items-baseline gap-1.5">
+              <span class="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{result.path}</span>
+              {#if result.line !== undefined}
+                <span class="shrink-0 font-mono text-xs text-muted-foreground">L{result.line}:{result.column ?? 1}</span>
+              {/if}
+            </span>
+            <span class="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{result.preview}</span>
+          </button>
+        {/each}
+        {#if searchResults.length >= 500}
+          <div class="px-3 py-2 text-xs text-muted-foreground">Showing the first 500 matches.</div>
+        {/if}
+      {/if}
+    </div>
+  {:else}
   <div
     bind:this={treeRoot}
     class="min-h-0 flex-1 overflow-auto py-1"
@@ -425,8 +585,8 @@
         {@const directoryLoading = entry.kind === "directory" && treeState.loadingDirectories.includes(entry.path)}
         <div
           class={[
-            "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
-            treeState.selectedPath === entry.path ? "bg-sidebar-accent/70" : "",
+            "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-panel-hover focus-within:bg-panel-hover",
+            treeState.selectedPath === entry.path ? "bg-panel-selected" : "",
           ]}
           style:padding-left={`${4 + row.depth * 14}px`}
           role="presentation"
@@ -496,6 +656,7 @@
       {/each}
     {/if}
   </div>
+  {/if}
 
   {#if operationError}
     <div class="mx-2 mb-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">

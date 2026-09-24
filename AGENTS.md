@@ -1,5 +1,8 @@
 # Engineering guardrails
 
+- Pix Desktop currently supports macOS only. Existing Windows/Linux Desktop
+  packaging code does not imply supported products; do not treat their validation
+  as a current Desktop delivery requirement. This does not change TUI platform support.
 - Keep hand-written files cohesive; split growing multi-responsibility files by
   ownership instead of continuing to append unrelated behavior.
 - For UI/event code, check the synchronous path for blocking work and avoid heavy

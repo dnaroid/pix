@@ -11,6 +11,13 @@ export interface ProjectTreeRow {
   readonly depth: number;
 }
 
+export interface ProjectSearchMatch {
+  readonly path: string;
+  readonly line?: number;
+  readonly column?: number;
+  readonly preview: string;
+}
+
 export const PROJECT_TREE_DROP_TARGET_SELECTOR = "[data-pix-project-path-drop-target]";
 export const PROJECT_TREE_DRAG_STATE_EVENT = "pix-project-path-drag-state";
 export const PROJECT_TREE_DROP_EVENT = "pix-project-path-drop";

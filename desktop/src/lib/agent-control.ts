@@ -24,6 +24,17 @@ export function agentControlAllowsAutoQueue(state: AgentControlState | undefined
   return (state ?? "idle") === "idle";
 }
 
+export function agentPauseJustTriggered(
+  previous: { sessionId: string | null; state: AgentControlState } | undefined,
+  current: { sessionId: string | null; state: AgentControlState },
+): boolean {
+  return previous !== undefined
+    && current.sessionId !== null
+    && previous.sessionId === current.sessionId
+    && previous.state !== "paused"
+    && current.state === "paused";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

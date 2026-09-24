@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import commandSource from "../app/desktop-command-controller.svelte.ts?raw";
 import statusBarViewModelSource from "../app/desktop-status-bar-view-model.svelte.ts?raw";
+import workbenchPropBuildersSource from "../app/desktop-workbench-prop-builders.ts?raw";
 import modelDraftConfigSource from "../app/model-draft-config.svelte.ts?raw";
 import overlaysViewModelSource from "../app/desktop-overlays-view-model.svelte.ts?raw";
 import modelConfigActionsSource from "../app/model-config-actions.ts?raw";
@@ -79,6 +80,9 @@ describe("desktop visual regressions", () => {
     expect(styles).toContain(".transcript-pane,\n.preview-text-surface,");
     expect(styles).toContain("user-select: text;");
     expect(styles).toContain("user-select: none;");
+    expect(styles).toContain("cursor: default;");
+    expect(styles).toContain(".select-text,");
+    expect(styles).toContain("cursor: text;");
   });
 
   it("uses semantic error and success tokens in diff view instead of primary accent", () => {
@@ -148,6 +152,15 @@ describe("desktop visual regressions", () => {
     expect(transcriptSource).toContain("disabled={promptRunning || operationRunning}");
   });
 
+  it("shows a centered transient chat toast when the active agent reaches paused", () => {
+    expect(workbenchPropBuildersSource).toContain("agentControlState: options.activeAgentControlState()");
+    expect(transcriptSource).toContain("agentPauseJustTriggered");
+    expect(transcriptSource).toContain("data-agent-pause-toast");
+    expect(transcriptSource).toContain("absolute inset-0 z-30 grid place-items-center");
+    expect(transcriptSource).toContain(">Agent paused</span>");
+    expect(transcriptSource).toContain("PAUSE_TOAST_DURATION_MS = 2_400");
+  });
+
   it("keeps the jump-to-latest arrow nearly transparent over transcript content", () => {
     expect(transcriptSource).toContain("bg-panel-strong/15");
     expect(transcriptSource).toContain("backdrop-blur-sm");
@@ -163,11 +176,22 @@ describe("desktop visual regressions", () => {
     expect(workspace).toBeGreaterThan(context);
     expect(usage).toBeGreaterThan(workspace);
     expect(runtimeStatusSource).toContain("({workspaceBranch})");
-    expect(runtimeStatusSource).toContain("runtime-workspace-name");
-    expect(runtimeStatusSource).toContain("--runtime-workspace-color");
-    expect(runtimeStatusSource).toContain('text-muted-foreground">({workspaceBranch})');
+    expect(runtimeStatusSource).toContain('class="min-w-0 truncate text-foreground">{workspaceName}</span>');
+    expect(runtimeStatusSource).toContain('text-muted-foreground/55">({workspaceBranch})');
+    expect(runtimeStatusSource).not.toContain("--runtime-workspace-color");
     expect(runtimeStatusSource).toContain("title={workspacePath ?? workspaceName}");
-    expect(runtimeStatusSource).toContain("{#if status || workspaceName}");
+    expect(runtimeStatusSource).toContain("{#if status || workspaceName || showSkeletons}");
+  });
+
+  it("keeps status-bar slots present as skeletons while draft/start/session state resolves", () => {
+    expect(statusSource).toContain('data-status-bar-skeleton="model"');
+    expect(statusSource).toContain("{showSkeletons}");
+    expect(runtimeStatusSource).toContain("data-runtime-context-skeleton");
+    expect(runtimeStatusSource).toContain("data-runtime-workspace-skeleton");
+    expect(runtimeStatusSource).toContain("data-runtime-workspace-branch-skeleton");
+    expect(runtimeStatusSource).toContain("data-runtime-usage-skeleton");
+    expect(statusBarViewModelSource).toContain("shouldShowStatusBarSkeletons");
+    expect(statusBarViewModelSource).toContain("runtimeStatusAvailable: runtimeStatus !== undefined");
   });
 
   it("opens recorded session spend from Usage instead of refreshing account quota", () => {
@@ -232,10 +256,16 @@ describe("desktop visual regressions", () => {
     expect(sessionSubagentsSource).toContain("{activeCount} active");
   });
 
-  it("keeps danger color on percentages while progress tracks stay neutral", () => {
+  it("keeps Context and Usage scales neutral light gray while percentage text keeps semantic tones", () => {
     expect(runtimeStatusSource).toContain('class={["relative h-1.5 overflow-hidden rounded-sm bg-border"');
-    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 bg-muted-foreground/50"');
+    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 bg-muted-foreground/65"');
     expect(runtimeStatusSource).not.toContain("toneFillClass");
+    expect(runtimeStatusSource).toContain('return "text-tool-success";');
+    expect(runtimeStatusSource).toContain('return "text-tool-warning";');
+    expect(runtimeStatusSource).toContain('return "text-tool-error";');
+    expect(runtimeStatusSource).toContain('return "bg-muted-foreground/65";');
+    expect(runtimeStatusSource).toContain("contextTrackCellClass(segment.kind)");
+    expect(runtimeStatusSource).toContain("contextLegendCellClass(item.kind)");
     expect(runtimeStatusSource).toContain("class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%");
     expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-muted-foreground"');
   });

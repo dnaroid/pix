@@ -1,5 +1,6 @@
 <script lang="ts">
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Mic from "@lucide/svelte/icons/mic";
   import Pause from "@lucide/svelte/icons/pause";
@@ -16,6 +17,7 @@
     voiceCanStart,
     promptRunning,
     agentControlState,
+    canSubmit,
     onToggleMenu,
     onToggleVoice,
     onPause,
@@ -29,6 +31,7 @@
     voiceCanStart: boolean;
     promptRunning: boolean;
     agentControlState: AgentControlState;
+    canSubmit: boolean;
     onToggleMenu: () => void;
     onToggleVoice: () => void;
     onPause?: () => void | Promise<void>;
@@ -101,3 +104,12 @@
     <Play class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
   </button>
 {/if}
+<button
+  class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
+  type="submit"
+  aria-label={promptRunning ? "Queue message" : "Send message"}
+  title={promptRunning ? "Queue message · Enter" : "Send message · Enter"}
+  disabled={!canSubmit}
+>
+  <ArrowUp class="h-4 w-4" aria-hidden="true" />
+</button>

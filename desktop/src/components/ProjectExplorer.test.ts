@@ -67,4 +67,15 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(treeControllerSource).toContain("function focusFallbackAfterRemoval(path: string)");
     expect(treeControllerSource).toContain("function removePath(path: string)");
   });
+
+  it("searches file paths and contents across the project without expanding the lazy tree", () => {
+    expect(explorerSource).toContain('placeholder="Search project files"');
+    expect(explorerSource).toContain('invoke<ProjectSearchMatch[]>("search_project_files"');
+    expect(explorerSource).toContain("event.shiftKey");
+    expect(explorerSource).toContain('event.key.toLocaleLowerCase() === "f"');
+    expect(explorerSource).toContain("data-project-search-results");
+    expect(explorerSource).toContain("openSearchResult(result)");
+    expect(explorerSource).toContain("{ startLine: result.line, endLine: result.line }");
+    expect(explorerSource).toContain("Showing the first 500 matches.");
+  });
 });

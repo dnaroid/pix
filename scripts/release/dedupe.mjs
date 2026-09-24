@@ -65,39 +65,95 @@ async function rewireBins(binDirectory, replacements) {
   }
 }
 
-/** Remove only equivalent top-level ACP duplicates. Do not rewrite lockfile versions or use directory links. */
-export async function dedupeAcp(app) {
+function populateEdges(nodes, boundary) {
+  for (const node of nodes.values()) {
+    node.edges = new Map();
+    for (const name of dependencyNames(node.manifest)) {
+      node.edges.set(`dependency:${name}`, resolveDependency(nodes, boundary, node.path, name));
+    }
+  }
+  for (const nested of nodes.values()) {
+    const modules = dirname(nested.path).split(sep).at(-1).startsWith("@")
+      ? dirname(dirname(nested.path)) : dirname(nested.path);
+    const owner = dirname(modules);
+    const parent = nodes.get(owner);
+    if (parent) parent.edges.set(`nested:${relative(owner, nested.path).split(sep).join("/")}`, nested.path);
+  }
+}
+
+function fallback(nodes, boundary, path, name) {
+  // Begin at the enclosing install site, not at the package being removed.
+  // This is exactly the first candidate Node will inspect after removal.
+  const modules = dirname(path).split(sep).at(-1).startsWith("@") ? dirname(dirname(path)) : dirname(path);
+  for (let directory = dirname(modules); inside(boundary, directory); directory = dirname(directory)) {
+    const candidate = join(directory, "node_modules", ...name.split("/"));
+    if (candidate !== path && nodes.has(candidate)) return candidate;
+    if (directory === boundary) break;
+  }
+  return undefined;
+}
+
+function installedName(path) {
+  const parent = dirname(path);
+  return parent.split(sep).at(-1).startsWith("@")
+    ? `${parent.split(sep).at(-1)}/${path.split(sep).at(-1)}` : path.split(sep).at(-1);
+}
+
+/** Deduplicate nested packages and Desktop's top-level ACP packages by their first
+ * real Node ancestor fallback. Recompute resolution after each deletion: a graph
+ * proved against a now-removed/shadowed target must never authorize another removal.
+ */
+export async function dedupePackages(app, { withDesktop = false, dryRun = false } = {}) {
   app = resolve(app);
   const acp = join(app, "acp");
   const rootPackages = await packages(app);
-  const acpPackages = await packages(acp);
+  const acpPackages = withDesktop ? await packages(acp) : [];
   const nodes = new Map();
   for (const pkg of [...rootPackages, ...acpPackages]) {
     nodes.set(pkg.path, { ...pkg, digest: await ownDigest(pkg.path), edges: new Map() });
   }
-  for (const node of nodes.values()) {
-    for (const name of dependencyNames(node.manifest)) {
-      node.edges.set(`dependency:${name}`, resolveDependency(nodes, app, node.path, name));
-    }
-    for (const nested of nodes.values()) {
-      const parent = dirname(dirname(nested.path));
-      const scopedParent = dirname(parent);
-      if (parent === node.path || (dirname(nested.path).split(sep).at(-1).startsWith("@") && scopedParent === node.path)) {
-        node.edges.set(`nested:${relative(node.path, nested.path).split(sep).join("/")}`, nested.path);
-      }
-    }
-  }
+  populateEdges(nodes, app);
+  // Deepest-first avoids counting descendants twice; every accepted removal
+  // refreshes graph edges and rewires shims before touching the filesystem.
+  const candidates = [...nodes.values()].filter(({ path }) =>
+    path.includes(`${sep}node_modules${sep}`) &&
+    (path.slice(app.length).split(`${sep}node_modules${sep}`).length > 2 ||
+      (withDesktop && inside(join(acp, "node_modules"), path))),
+  ).sort((a, b) => b.path.split(`${sep}node_modules${sep}`).length - a.path.split(`${sep}node_modules${sep}`).length || a.path.localeCompare(b.path));
   const replacements = [];
-  for (const pkg of acpPackages) {
-    const local = relative(join(acp, "node_modules"), pkg.path);
-    if (local.split(sep).includes("node_modules")) continue;
-    const parent = join(app, "node_modules", local);
-    if (equivalentGraph(nodes, pkg.path, parent)) {
-      replacements.push({ from: pkg.path, to: parent, bytes: await bytes(pkg.path) });
+  const binDirectories = [];
+  if (!dryRun) for (const bin of new Set([join(app, "node_modules/.bin"), ...(withDesktop ? [join(acp, "node_modules/.bin")] : []),
+    ...nodes.keys().map((path) => join(path, "node_modules/.bin"))])) {
+    try { if ((await readdir(bin)).length) binDirectories.push(bin); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  // Revisit ancestors after descendant removal; stop only at a fixed point so
+  // a second preparation run cannot remove a target left behind by this run.
+  for (let changed = true; changed && !dryRun;) {
+    changed = false;
+    for (const pkg of candidates) {
+      if (!nodes.has(pkg.path)) continue;
+      const target = fallback(nodes, app, pkg.path, installedName(pkg.path));
+      if (!target || !equivalentGraph(nodes, pkg.path, target)) continue;
+      const replacement = { from: pkg.path, to: target, bytes: await bytes(pkg.path) };
+      replacements.push(replacement);
+      // Includes shims repointed during an earlier iteration to this same target.
+      for (const bin of binDirectories) await rewireBins(bin, [replacement]);
+      await rm(pkg.path, { recursive: true, force: true });
+      for (const path of nodes.keys()) if (inside(pkg.path, path)) nodes.delete(path);
+      populateEdges(nodes, app);
+      changed = true;
     }
   }
-  // Rewire shims while both targets exist. Actual package loading then uses normal parent resolution.
-  await rewireBins(join(acp, "node_modules/.bin"), replacements);
-  for (const { from } of replacements) await rm(from, { recursive: true, force: true });
+  if (dryRun) {
+    // Initial candidates only; do not pretend later graph recomputations have
+    // occurred in a read-only estimate.
+    for (const pkg of candidates) {
+      const target = fallback(nodes, app, pkg.path, installedName(pkg.path));
+      if (target && equivalentGraph(nodes, pkg.path, target)) replacements.push({ from: pkg.path, to: target, bytes: await bytes(pkg.path) });
+    }
+  }
   return replacements.map(({ from, to, bytes }) => ({ from: relative(app, from), to: relative(app, to), bytes }));
 }
+
+export async function dedupeAcp(app) { return dedupePackages(app, { withDesktop: true }); }

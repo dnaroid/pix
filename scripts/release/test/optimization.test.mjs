@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { targets } from "../common.mjs";
 import { cleanBuildOutputs, foreignPackage, pruneDependencies } from "../prune.mjs";
-import { dedupeAcp, equivalentGraph } from "../dedupe.mjs";
+import { dedupeAcp, dedupePackages, equivalentGraph } from "../dedupe.mjs";
 import { assertBudget, auditPayload, budgets } from "../size-budget.mjs";
 
 async function fixture(t) {
@@ -20,6 +20,8 @@ async function file(path, content) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
 }
+
+const portablePath = (path) => path.replaceAll("\\", "/");
 
 async function install(root, name, version = "1.0.0", manifest = {}, source = `module.exports = ${JSON.stringify(version)};`) {
   const path = join(root, "node_modules", name);
@@ -118,6 +120,77 @@ test("same package version is not enough when transitive versions or contents di
   await install(acp, "dep", "2.0.0");
   await file(join(acp, "node_modules/same-version/index.cjs"), "module.exports = 'different';");
   assert.deepEqual(await dedupeAcp(root), []);
+});
+
+test("nested scoped packages share only their first ancestor and preserve relocated loads and nested bin shims", async (t) => {
+  const root = await fixture(t), app = join(root, "app"), sdk = await install(app, "sdk");
+  const mid = await install(sdk, "mid");
+  await install(app, "@scope/tool", "1.0.0", { bin: { tool: "index.cjs" } }, "module.exports = 'top';");
+  await install(sdk, "@scope/tool", "1.0.0", { bin: { tool: "index.cjs" } }, "module.exports = 'top';");
+  const inner = await install(mid, "@scope/tool", "1.0.0", { bin: { tool: "index.cjs" } }, "module.exports = 'top';");
+  const bin = join(mid, "node_modules/.bin");
+  await file(join(bin, "tool.cmd"), '@"%dp0%\\..\\@scope\\tool\\index.cjs" %*\r\n');
+  await file(join(bin, "tool.ps1"), '& "$basedir/../@scope/tool/index.cjs" $args\n');
+  if (process.platform !== "win32") await symlink("../@scope/tool/index.cjs", join(bin, "tool"));
+  const changes = await dedupePackages(app);
+  assert.deepEqual(changes.map(({ from, to }) => [portablePath(from), portablePath(to)]), [
+    ["node_modules/sdk/node_modules/mid/node_modules/@scope/tool", "node_modules/sdk/node_modules/@scope/tool"],
+    ["node_modules/sdk/node_modules/@scope/tool", "node_modules/@scope/tool"],
+  ]);
+  assert.equal(existsSync(inner), false);
+  assert.equal(await realpath(createRequire(join(mid, "index.cjs")).resolve("@scope/tool")), await realpath(join(app, "node_modules/@scope/tool/index.cjs")));
+  assert.match(await readFile(join(bin, "tool.cmd"), "utf8"), /\\\.\.\\\.\.\\\.\.\\\.\.\\\.\.\\@scope\\tool\\index.cjs/u);
+  assert.match(await readFile(join(bin, "tool.ps1"), "utf8"), /\/\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/@scope\/tool\/index.cjs/u);
+  assert.deepEqual(await dedupePackages(app), []);
+  const relocated = join(root, "moved app with spaces");
+  await rename(app, relocated);
+  assert.equal(createRequire(join(relocated, "node_modules/sdk/node_modules/mid/index.cjs"))("@scope/tool"), "top");
+  if (process.platform !== "win32") assert.equal(await realpath(join(relocated, "node_modules/sdk/node_modules/mid/node_modules/.bin/tool")), await realpath(join(relocated, "node_modules/@scope/tool/index.cjs")));
+});
+
+test("shadowing prevents skipping a different nearest fallback even when a farther ancestor matches", async (t) => {
+  const root = await fixture(t), outer = await install(root, "outer"), middle = await install(outer, "middle");
+  await install(root, "dep", "1");
+  await install(outer, "dep", "2");
+  await install(middle, "dep", "1");
+  assert.deepEqual(await dedupePackages(root), []);
+  assert.equal(createRequire(join(middle, "index.cjs"))("dep"), "1");
+});
+
+test("npm aliases resolve by installed slot, not the package manifest name", async (t) => {
+  const root = await fixture(t), sdk = await install(root, "sdk");
+  await install(root, "canonical", "1", { name: "canonical" });
+  const alias = await install(sdk, "alias", "1", { name: "canonical" });
+  assert.deepEqual(await dedupePackages(root), []);
+  assert.ok(existsSync(alias));
+  assert.equal(createRequire(join(sdk, "index.cjs"))("alias"), "1");
+});
+
+test("nested contextual optional and peer dependencies and shrinkwrapped descendants block sharing", async (t) => {
+  const root = await fixture(t), sdk = await install(root, "sdk");
+  for (const [name, manifest] of [
+    ["opt", { optionalDependencies: { addon: "*" } }],
+    ["peer", { peerDependencies: { addon: "*" } }],
+    ["subtree", {}],
+  ]) {
+    await install(root, name, "1", manifest);
+    const nested = await install(sdk, name, "1", manifest);
+    if (name === "subtree") await install(nested, "private");
+  }
+  await install(sdk, "addon");
+  assert.deepEqual(await dedupePackages(root), []);
+});
+
+test("nested graph cycles are compared including their differing exit branch", async (t) => {
+  const root = await fixture(t), sdk = await install(root, "sdk");
+  for (const dir of [root, sdk]) {
+    await install(dir, "cycle-a", "1", { dependencies: { "cycle-b": "*", exit: "*" } });
+    await install(dir, "cycle-b", "1", { dependencies: { "cycle-a": "*" } });
+  }
+  await install(root, "exit", "1");
+  await install(sdk, "exit", "2");
+  const changes = await dedupePackages(root);
+  assert.equal(changes.some(({ from }) => ["/cycle-a", "/cycle-b"].some((suffix) => portablePath(from).endsWith(suffix))), false);
 });
 
 test("dedupe preserves optional/peer context and nested package differences", async (t) => {

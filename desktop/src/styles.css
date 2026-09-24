@@ -259,6 +259,7 @@ html, body, #app {
   overflow: hidden;
   -webkit-user-select: none;
   user-select: none;
+  cursor: default;
 }
 
 /*
@@ -268,6 +269,7 @@ html, body, #app {
  */
 .transcript-pane,
 .preview-text-surface,
+.select-text,
 :where(
   textarea,
   input:not([type]),
@@ -282,6 +284,7 @@ html, body, #app {
 ) {
   -webkit-user-select: text;
   user-select: text;
+  cursor: text;
 }
 
 :where(

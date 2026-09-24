@@ -177,7 +177,7 @@
     <button
       class={[
         "h-8 cursor-pointer border-b-2 px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-        activeKind === "desktop" ? "border-b-primary text-foreground" : "border-b-transparent text-muted-foreground hover:text-foreground",
+        activeKind === "desktop" ? "border-b-primary bg-panel-selected text-foreground" : "border-b-transparent text-muted-foreground hover:bg-chrome-hover hover:text-foreground",
       ]}
       type="button"
       onclick={() => chooseKind("desktop")}
@@ -185,7 +185,7 @@
     <button
       class={[
         "h-8 cursor-pointer border-b-2 px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-        activeKind === "pi-tools-suite" ? "border-b-primary text-foreground" : "border-b-transparent text-muted-foreground hover:text-foreground",
+        activeKind === "pi-tools-suite" ? "border-b-primary bg-panel-selected text-foreground" : "border-b-transparent text-muted-foreground hover:bg-chrome-hover hover:text-foreground",
       ]}
       type="button"
       onclick={() => chooseKind("pi-tools-suite")}
@@ -244,7 +244,7 @@
         </div>
         <div class="p-2 pt-0">
           <textarea
-            class="min-h-[28rem] w-full resize-none rounded-md border border-code-border bg-code p-2.5 font-mono text-xs leading-4 text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
+            class="min-h-[28rem] w-full resize-none rounded-md border border-code-border bg-code p-2.5 font-mono text-xs leading-4 text-foreground outline-none focus-visible:border-ring"
             value={active.source}
             aria-label={`${activeKind} advanced JSONC`}
             spellcheck="false"

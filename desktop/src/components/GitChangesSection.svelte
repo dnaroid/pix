@@ -34,7 +34,7 @@
   {#each visible as change (change.path)}
     {@const stats = gitChangeLineStats(change, scope)}
     {@const separator = change.path.lastIndexOf("/")}
-    <div class="group flex h-8 min-w-0 items-center gap-1 px-2 hover:bg-sidebar-accent focus-within:bg-sidebar-accent">
+    <div class="group flex h-8 min-w-0 items-center gap-1 px-2 hover:bg-panel-hover focus-within:bg-panel-hover">
       <button class="flex h-8 min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" type="button" title={`${change.path} · ${gitChangeLabel(change, scope)}`} disabled={busy} onclick={() => onOpenDiff(change.path, scope)}>
         <span class={["w-3 shrink-0 text-center font-mono text-xs font-bold", tone(change)]}>{gitChangeCode(change, scope)}</span>
         <span class="truncate font-mono text-xs">{change.path.slice(separator + 1)}</span>

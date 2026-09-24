@@ -14,7 +14,7 @@ describe("project settings dialog", () => {
     expect(dialogSource).toContain(">Custom<");
     expect(dialogSource).toContain('type="color"');
     expect(dialogSource).toContain(".pi/workspace.jsonc");
-    expect(dialogSource).toContain("Used by the titlebar badge, status-bar project name, and recent-project folders.");
+    expect(dialogSource).toContain("Used by the titlebar, status-bar project name, and recent-project folders.");
   });
 
   it("keeps filesystem IO outside the presentation component", () => {

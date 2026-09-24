@@ -3,16 +3,22 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Check from "@lucide/svelte/icons/check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FileCode from "@lucide/svelte/icons/file-code";
   import Pencil from "@lucide/svelte/icons/pencil";
+  import Search from "@lucide/svelte/icons/search";
   import WrapText from "@lucide/svelte/icons/wrap-text";
+  import X from "@lucide/svelte/icons/x";
+  import { onDestroy } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import type { PreviewScrollPosition } from "../lib/preview-history";
   import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
   import { highlightCode, languageForFilePath } from "../lib/syntax-highlight";
   import MarkdownText from "./MarkdownText.svelte";
   import { createPreviewEditorController } from "./preview-editor-controller.svelte";
+  import { createPreviewFileSearchController } from "./preview-file-search-controller.svelte";
   import { createPreviewMarkdownController } from "./preview-markdown-controller.svelte";
   import { createPreviewScrollController } from "./preview-scroll-controller.svelte";
 
@@ -21,6 +27,7 @@
     file,
     lineRange,
     previewId,
+    active = true,
     scrollPosition,
     canGoBack = false,
     canGoForward = false,
@@ -44,6 +51,7 @@
     file?: ProjectFilePreview;
     lineRange?: ProjectFileLineRange;
     previewId: number;
+    active?: boolean;
     scrollPosition: PreviewScrollPosition;
     canGoBack?: boolean;
     canGoForward?: boolean;
@@ -65,6 +73,8 @@
   } = $props();
 
   let contentScrollElement = $state<HTMLDivElement | undefined>();
+  let editorElement = $state<HTMLTextAreaElement | undefined>();
+  let searchInputElement = $state<HTMLInputElement | undefined>();
   let wrapLines = $state(false);
 
   const title = $derived(file?.path ?? attachment?.name ?? "Preview");
@@ -90,6 +100,19 @@
   const saving = $derived(editorState.saving);
   const canEdit = $derived(editorController.canEdit);
   const dirty = $derived(editorController.dirty);
+
+  const searchController = createPreviewFileSearchController({
+    active: () => active,
+    previewId: () => previewId,
+    enabled: () => Boolean(file),
+    editing: () => editing,
+    fileText: () => editing ? editorState.draft : (file?.content ?? ""),
+    contentElement: () => contentScrollElement,
+    editorElement: () => editorElement,
+    inputElement: () => searchInputElement,
+  });
+  const searchState = searchController.state;
+  onDestroy(searchController.dispose);
 
   const scrollController = createPreviewScrollController({
     previewId: () => previewId,
@@ -141,6 +164,8 @@
 
 </script>
 
+<svelte:window onkeydown={searchController.handleWindowKeydown} />
+
 <section
   class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
   aria-label={`Preview ${title}`}
@@ -176,6 +201,18 @@
         <span class="shrink-0 rounded border border-tool-warning/30 bg-tool-warning/10 px-1.5 py-0.5 font-mono text-xs text-tool-warning">
           L{lineRange.startLine}{lineRange.endLine === lineRange.startLine ? "" : `–${lineRange.endLine}`}
         </span>
+      {/if}
+      {#if file}
+        <button
+          class={searchState.open
+            ? "grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-accent-foreground transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            : "grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"}
+          type="button"
+          aria-label="Find in file"
+          aria-pressed={searchState.open}
+          title="Find in file (Ctrl/⌘F)"
+          onclick={searchController.open}
+        ><Search class="h-4 w-4" aria-hidden="true" /></button>
       {/if}
       {#if renderAsMarkdown}
         <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -232,9 +269,61 @@
         </button>
       {/if}
     </header>
+    {#if file && searchState.open}
+      <div
+        class="absolute top-11 right-3 z-30 flex h-8 max-w-[min(520px,calc(100%-24px))] items-center gap-1 rounded-md border border-border bg-popover px-1.5 text-popover-foreground shadow-md"
+        data-preview-file-search
+        role="search"
+      >
+        <Search class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <input
+          bind:this={searchInputElement}
+          class="h-6 min-w-[140px] flex-1 bg-transparent px-1 text-xs text-foreground outline-none placeholder:text-muted-foreground"
+          type="search"
+          value={searchState.query}
+          placeholder="Find in file"
+          aria-label="Find in file"
+          autocomplete="off"
+          spellcheck="false"
+          oninput={(event) => searchController.setQuery(event.currentTarget.value)}
+          onkeydown={searchController.handleInputKeydown}
+        />
+        <span class="min-w-12 shrink-0 text-center font-mono text-xs tabular-nums text-muted-foreground">
+          {searchState.query.trim()
+            ? searchState.matchCount > 0
+              ? `${searchState.activeIndex + 1}/${searchState.matchCount}`
+              : "0/0"
+            : ""}
+        </span>
+        <button
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:opacity-35"
+          type="button"
+          aria-label="Previous match"
+          title="Previous match (Shift+Enter)"
+          disabled={searchState.matchCount === 0}
+          onclick={searchController.previous}
+        ><ChevronUp class="h-3.5 w-3.5" aria-hidden="true" /></button>
+        <button
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:opacity-35"
+          type="button"
+          aria-label="Next match"
+          title="Next match (Enter)"
+          disabled={searchState.matchCount === 0}
+          onclick={searchController.next}
+        ><ChevronDown class="h-3.5 w-3.5" aria-hidden="true" /></button>
+        <button
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring"
+          type="button"
+          aria-label="Close find"
+          title="Close find"
+          onclick={searchController.close}
+        ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
+      </div>
+    {/if}
     {#if file}
       {#if editing}
         <textarea
+          bind:this={editorElement}
           class="min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           bind:value={editorState.draft}
           aria-label={`Edit ${file.path}`}
@@ -366,5 +455,13 @@
     left: 0;
     height: auto;
     margin-right: 0;
+  }
+
+  :global(::highlight(pix-preview-search)) {
+    background: color-mix(in srgb, var(--tool-warning) 28%, transparent);
+  }
+
+  :global(::highlight(pix-preview-search-active)) {
+    background: color-mix(in srgb, var(--tool-warning) 55%, transparent);
   }
 </style>

@@ -28,6 +28,7 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 - Preview shows a dirty indicator while its editable project-text draft differs from the loaded file. Any existing UTF-8 project file that is small enough to open in Preview can enter edit mode; home-file and absolute local-file previews remain read-only. Closing dirty Preview asks before discard; cancellation keeps the tab/state intact. Workspace changes and project-reloading Git mutations keep the existing dirty-preview confirmation.
 - File reads and attachment preparation share Preview load ownership. Closing, navigating, opening an immediate preview, or invalidating the workspace prevents an older load from replacing/reopening the current Preview or reporting an obsolete error.
 - Project-text saves capture their workspace and originating Preview entry. Ordinary files use the workspace-confined existing-file writer, while TODO/plan Markdown keeps its specialized project-document writer and Registry sync semantics. Writes to the same workspace/path are serialized; a late save cannot replace a reopened entry with the same path, unlock another edit's save, or close a newer edit. Text typed while saving remains an editable dirty draft rather than being replaced by the saved snapshot.
+- A Preview file surface exposes `Find in file` and intercepts `Ctrl+F` / `Cmd+F` only while the Preview tab is active. The find widget searches the current rendered text in read-only Preview or the live draft while editing, uses literal ASCII-case-insensitive matching, reports the current/total match count, and navigates forward with Enter or backward with Shift+Enter. Read-only matches use non-destructive CSS highlights with the active hit distinguished; editing uses textarea selection/scrolling. Clearing the query, closing find, opening a different Preview history entry, or unmounting Preview immediately removes every search-created CSS highlight, fallback DOM selection, and textarea selection without clearing a newer manual user selection.
 - Git Diff shows a compact busy indicator during LLM review/resolve work without becoming a modal.
 - The unified tablist uses roving focus: Left/Right and Home/End move focus without activation, Enter/Space activate via native button behavior, Delete closes a closable focused tab, and middle-click uses the same close path.
 - Closing Preview/Diff removes only that UI surface. Closing a session uses the existing session-close flow, including running-session confirmation and ACP teardown. When an active session closes next to Preview/Diff, Pix may keep the necessary fallback session runtime active underneath while selecting the logical neighboring workbench tab.
@@ -57,12 +58,14 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/components/preview-editor-controller.svelte.ts`
+- `desktop/src/components/preview-file-search-controller.svelte.ts`
 - `desktop/src/components/preview-scroll-controller.svelte.ts`
 - `desktop/src/components/preview-markdown-controller.svelte.ts`
 - `desktop/src/components/GitDiffPane.svelte`
 - `desktop/src/lib/workbench-tabs.ts`
 - `desktop/src/lib/session-tabs.ts`
 - `desktop/src/lib/preview-history.ts`
+- `desktop/src/lib/file-search.ts`
 - `desktop/src/lib/desktop-commands.ts`
 - `specs/desktop-session-tabs.md`
 - `specs/desktop-session-parity.md`
@@ -74,6 +77,7 @@ Present conversations, file/media Preview, and Source Control Git Diff as siblin
 - `desktop/src/app/workbench-model.test.ts` covers propagation of fork metadata into the session-tab presentation model; `desktop/src/lib/session-tab-status.test.ts` covers status precedence and unseen-completion semantics.
 - Existing session-tab/draft tests verify that session membership and lazy draft materialization remain session-only.
 - `desktop/src/app/preview.test.ts`, `desktop/src/app/project-documents.test.ts`, and `desktop/src/components/preview-editor-controller.test.ts` use controlled promises to verify late-load/save ownership, same-file write serialization, and preservation of newer drafts.
+- `desktop/src/lib/file-search.test.ts` covers literal match offsets, ASCII-case-insensitive behavior, non-overlapping navigation data, and match bounds; editor-surface source tests pin active-tab shortcut gating, find UI, navigation, and highlight wiring.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

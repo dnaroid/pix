@@ -45,6 +45,9 @@ const MAX_ATTACHMENT_COUNT: usize = 10;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PROJECT_SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PROJECT_SEARCH_FILES: usize = 20_000;
+const MAX_PROJECT_SEARCH_RESULTS: usize = 500;
 const MAX_PROJECT_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
@@ -53,6 +56,8 @@ const MAX_GIT_DIFF_BYTES: usize = 512 * 1024;
 const MAX_GIT_COMMIT_MESSAGE_BYTES: usize = 20 * 1024;
 const MAX_GIT_UNTRACKED_STAT_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
+const GIT_INDEX_LOCK_RETRY_ATTEMPTS: usize = 6;
+const GIT_INDEX_LOCK_RETRY_DELAY: Duration = Duration::from_millis(80);
 const MAX_SIDEBAR_GIT_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const SIDEBAR_GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_SIDEBAR_REGISTRY_PROVENANCE_BYTES: u64 = 512 * 1024;
@@ -717,6 +722,17 @@ struct ProjectTreeEntry {
     name: String,
     path: String,
     kind: ProjectTreeEntryKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSearchMatch {
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    column: Option<usize>,
+    preview: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -1491,6 +1507,14 @@ async fn list_project_directory(
         list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))
     })
     .await
+}
+
+#[tauri::command]
+async fn search_project_files(
+    workspace: String,
+    query: String,
+) -> Result<Vec<ProjectSearchMatch>, String> {
+    run_blocking(move || search_project_files_from(Path::new(&workspace), &query)).await
 }
 
 #[tauri::command]
@@ -2501,6 +2525,149 @@ fn list_project_directory_from(
     Ok(entries)
 }
 
+fn search_project_files_from(
+    workspace: &Path,
+    query: &str,
+) -> Result<Vec<ProjectSearchMatch>, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = canonical_workspace(workspace)?;
+    let folded_query = ascii_fold(query);
+    let mut results = Vec::new();
+    let mut files_scanned = 0usize;
+    search_project_directory_from(
+        &root,
+        &root,
+        &folded_query,
+        &mut files_scanned,
+        &mut results,
+    )?;
+    Ok(results)
+}
+
+fn search_project_directory_from(
+    root: &Path,
+    directory: &Path,
+    folded_query: &str,
+    files_scanned: &mut usize,
+    results: &mut Vec<ProjectSearchMatch>,
+) -> Result<(), String> {
+    if results.len() >= MAX_PROJECT_SEARCH_RESULTS || *files_scanned >= MAX_PROJECT_SEARCH_FILES {
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(directory)
+        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        if results.len() >= MAX_PROJECT_SEARCH_RESULTS || *files_scanned >= MAX_PROJECT_SEARCH_FILES
+        {
+            break;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".git" || name == ".DS_Store" {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            if matches!(
+                name.as_str(),
+                "node_modules" | "target" | "dist" | "build" | "coverage" | ".next" | ".svelte-kit"
+            ) {
+                continue;
+            }
+            search_project_directory_from(
+                root,
+                &entry.path(),
+                folded_query,
+                files_scanned,
+                results,
+            )?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        *files_scanned += 1;
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|_| "project search path resolves outside the workspace".to_owned())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if ascii_fold(&relative).contains(folded_query) {
+            results.push(ProjectSearchMatch {
+                path: relative.clone(),
+                line: None,
+                column: None,
+                preview: "File path match".to_owned(),
+            });
+            if results.len() >= MAX_PROJECT_SEARCH_RESULTS {
+                break;
+            }
+        }
+
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+        if metadata.len() > MAX_PROJECT_SEARCH_FILE_BYTES {
+            continue;
+        }
+        let bytes = match fs::read(entry.path()) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let content = match String::from_utf8(bytes) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        for (line_index, line) in content.lines().enumerate() {
+            let folded_line = ascii_fold(line);
+            let mut offset = 0usize;
+            while offset <= folded_line.len() {
+                let Some(found) = folded_line[offset..].find(folded_query) else {
+                    break;
+                };
+                let byte_index = offset + found;
+                let column = line[..byte_index].chars().count() + 1;
+                results.push(ProjectSearchMatch {
+                    path: relative.clone(),
+                    line: Some(line_index + 1),
+                    column: Some(column),
+                    preview: line.trim().chars().take(240).collect(),
+                });
+                if results.len() >= MAX_PROJECT_SEARCH_RESULTS {
+                    return Ok(());
+                }
+                offset = byte_index + folded_query.len().max(1);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ascii_fold(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_uppercase() {
+                character.to_ascii_lowercase()
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
 fn validate_project_entry_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty()
         || name == "."
@@ -2908,6 +3075,7 @@ fn git_command(root: &Path, args: &[&str]) -> Command {
         .arg("-c")
         .arg("core.pager=cat")
         .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
         .env("GIT_EDITOR", "true")
@@ -2970,6 +3138,39 @@ fn git_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String
             &output,
         ))
     }
+}
+
+fn git_output_index_mutation(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    for attempt in 0..GIT_INDEX_LOCK_RETRY_ATTEMPTS {
+        let output = git_output_raw(root, args)?;
+        if output.status.success() {
+            return Ok(output);
+        }
+        if !git_output_is_index_lock_contention(&output) {
+            return Err(git_command_error(
+                &format!("git {}", args.join(" ")),
+                &output,
+            ));
+        }
+        if attempt + 1 < GIT_INDEX_LOCK_RETRY_ATTEMPTS {
+            thread::sleep(GIT_INDEX_LOCK_RETRY_DELAY);
+            continue;
+        }
+        let lock_path = root.join(".git/index.lock");
+        return Err(format!(
+            "Git index is locked by another process. Finish the other Git operation and retry. If no Git process is running, remove {} and retry.",
+            lock_path.display()
+        ));
+    }
+    unreachable!("index-lock retry loop always returns")
+}
+
+fn git_output_is_index_lock_contention(output: &std::process::Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr.contains("index.lock")
+        && (stderr.contains("Unable to create")
+            || stderr.contains("File exists")
+            || stderr.contains("could not lock"))
 }
 
 fn git_command_error(label: &str, output: &std::process::Output) -> String {
@@ -3517,7 +3718,7 @@ fn git_stage_from(workspace: &Path, path: Option<&str>) -> Result<(), String> {
     let root = git_repository_root(workspace)?;
     let path = path.map(validate_git_relative_path).transpose()?;
     let target = path.unwrap_or(".");
-    git_output(&root, &["add", "-A", "--", target]).map(|_| ())
+    git_output_index_mutation(&root, &["add", "-A", "--", target]).map(|_| ())
 }
 
 fn git_has_head(root: &Path) -> Result<bool, String> {
@@ -3530,9 +3731,9 @@ fn git_unstage_from(workspace: &Path, path: Option<&str>) -> Result<(), String> 
     let path = path.map(validate_git_relative_path).transpose()?;
     let target = path.unwrap_or(".");
     if git_has_head(&root)? {
-        git_output(&root, &["reset", "-q", "HEAD", "--", target]).map(|_| ())
+        git_output_index_mutation(&root, &["reset", "-q", "HEAD", "--", target]).map(|_| ())
     } else {
-        git_output(
+        git_output_index_mutation(
             &root,
             &["rm", "--cached", "-r", "--ignore-unmatch", "--", target],
         )
@@ -9242,6 +9443,7 @@ pub fn run() {
             write_project_workspace_config_if_unchanged,
             project_file_exists,
             list_project_directory,
+            search_project_files,
             create_project_entry,
             rename_project_entry,
             copy_project_entry,
@@ -10153,6 +10355,40 @@ mod tests {
     }
 
     #[test]
+    fn searches_project_file_paths_and_utf8_contents_with_bounds() {
+        let workspace = temporary_workspace("project-search");
+        fs::create_dir_all(workspace.join("src")).expect("create src");
+        fs::create_dir_all(workspace.join("node_modules/pkg")).expect("create dependencies");
+        fs::write(
+            workspace.join("src/main.ts"),
+            "const Needle = 1;\n// needle again\n",
+        )
+        .expect("write source");
+        fs::write(workspace.join("needle-notes.md"), "nothing here\n").expect("write notes");
+        fs::write(workspace.join("node_modules/pkg/ignored.js"), "needle\n")
+            .expect("write ignored dependency");
+        fs::write(workspace.join("binary.bin"), [0xff, 0xfe, 0xfd]).expect("write binary");
+
+        let results = search_project_files_from(&workspace, "needle").expect("search project");
+        assert!(results
+            .iter()
+            .any(|result| result.path == "needle-notes.md" && result.line.is_none()));
+        assert!(results.iter().any(|result| {
+            result.path == "src/main.ts" && result.line == Some(1) && result.column == Some(7)
+        }));
+        assert!(results.iter().any(|result| {
+            result.path == "src/main.ts" && result.line == Some(2) && result.column == Some(4)
+        }));
+        assert!(results
+            .iter()
+            .all(|result| !result.path.starts_with("node_modules/")));
+        assert!(search_project_files_from(&workspace, "   ")
+            .expect("empty search")
+            .is_empty());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
     fn mutates_project_entries_without_overwriting_existing_targets() {
         let workspace = temporary_workspace("project-tree-mutations");
         fs::create_dir_all(workspace.join("src/nested")).expect("create source directories");
@@ -10559,6 +10795,54 @@ mod tests {
             .any(|change| { change.path == "tracked.txt" && !change.staged && change.unstaged }));
         assert!(git_stage_from(&workspace, Some("../outside")).is_err());
 
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn git_unstage_retries_transient_index_lock_contention() {
+        let workspace = temporary_workspace("git-unstage-lock-retry");
+        initialize_git_repository(&workspace);
+        fs::write(workspace.join("tracked.txt"), "staged\n").expect("modify tracked file");
+        git_stage_from(&workspace, Some("tracked.txt")).expect("stage tracked file");
+        let lock_path = workspace.join(".git/index.lock");
+        fs::write(&lock_path, b"").expect("create temporary index lock");
+        let lock_to_remove = lock_path.clone();
+        let remover = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(140));
+            fs::remove_file(lock_to_remove).expect("remove temporary index lock");
+        });
+
+        git_unstage_from(&workspace, Some("tracked.txt"))
+            .expect("unstage should retry after transient index lock");
+        remover.join().expect("join index-lock remover");
+        let snapshot = git_status_from(&workspace).expect("read unstaged status");
+        assert!(snapshot
+            .changes
+            .iter()
+            .any(|change| change.path == "tracked.txt" && !change.staged && change.unstaged));
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn git_unstage_reports_persistent_index_lock_without_deleting_it() {
+        let workspace = temporary_workspace("git-unstage-lock-error");
+        initialize_git_repository(&workspace);
+        fs::write(workspace.join("tracked.txt"), "staged\n").expect("modify tracked file");
+        git_stage_from(&workspace, Some("tracked.txt")).expect("stage tracked file");
+        let lock_path = workspace.join(".git/index.lock");
+        fs::write(&lock_path, b"").expect("create persistent index lock");
+
+        let error = git_unstage_from(&workspace, Some("tracked.txt"))
+            .expect_err("persistent index lock must fail clearly");
+        assert!(error.contains("Git index is locked by another process"));
+        assert!(error.contains(".git/index.lock"));
+        assert!(
+            lock_path.exists(),
+            "Pix must not delete an external Git lock automatically"
+        );
+
+        fs::remove_file(&lock_path).expect("remove persistent index lock fixture");
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

@@ -555,9 +555,9 @@
   {#if !layoutController.collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
       <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome px-3">
-        <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{activeTabTitle}</strong>
+        <strong class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
-          <span class="min-w-0 truncate text-xs text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
+          <span class="shrink-0 text-xs text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
           <button
             class="ml-auto flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
@@ -659,7 +659,7 @@
           />
           <div class="grid min-h-0 min-w-0 overflow-hidden">
             {#if !workspace}
-              <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Open a project to browse files</p></div>
+              <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Open a project to browse files</p><p class="mt-1 text-xs leading-4 text-muted-foreground">Project files, search, and local actions appear here.</p></div>
             {:else}
               <ProjectExplorer
                 {workspace}

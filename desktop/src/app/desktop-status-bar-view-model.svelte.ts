@@ -8,6 +8,7 @@ import type { createModelConfig } from "./model-config.svelte";
 import type { createSessionCoordinator } from "./session-coordinator";
 import type { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
+import { shouldShowStatusBarSkeletons } from "./status-bar-skeleton";
 
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
 
@@ -53,9 +54,19 @@ export function createDesktopStatusBarViewModel(options: {
     } else if (sessionId) {
       runtimeStatus = options.runtime.statuses.get(sessionId);
     }
+    const connectionStatus = options.status();
+    const showSkeletons = shouldShowStatusBarSkeletons({
+      connectionStatus,
+      draft,
+      historyLoading,
+      sessionId,
+      runtimeReady,
+      runtimeStatusAvailable: runtimeStatus !== undefined,
+    });
 
     return {
-      status: options.status(),
+      status: connectionStatus,
+      showSkeletons,
       workspacePath: options.workspace() || undefined,
       workspaceName: options.workspace() ? projectName(options.workspace()) : undefined,
       workspaceBranch: options.workspaceBranch(),

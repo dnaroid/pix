@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { hostTarget, npm, outputPaths, readJson, root, run, targetInfo, version } from "./common.mjs";
 import { installNode } from "./node-runtime.mjs";
 import { cleanBuildOutputs, pruneDependencies } from "./prune.mjs";
-import { dedupeAcp } from "./dedupe.mjs";
+import { dedupePackages } from "./dedupe.mjs";
 import { recordSize } from "./size-budget.mjs";
 
 export async function prepare(name = hostTarget(), { withDesktop = true } = {}) {
@@ -28,8 +28,9 @@ export async function prepare(name = hostTarget(), { withDesktop = true } = {}) 
   await copyFile(join(root, "package-lock.json"), join(app, "package-lock.json"));
   npm(["ci", "--omit=dev", "--include=optional", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: app });
   const trimmed = await pruneDependencies(app, target);
+  const tuiShared = await dedupePackages(app);
   const node = await installNode(payload, target);
-  await finalize(payload, name, node, "tui", { pix: trimmed });
+  await finalize(payload, name, node, "tui", { pix: trimmed, shared: tuiShared });
   await recordSize(payload, target, "tui");
 
   if (withDesktop) {
@@ -41,7 +42,8 @@ export async function prepare(name = hostTarget(), { withDesktop = true } = {}) 
     await cp(join(root, "acp/dist"), join(acp, "dist"), { recursive: true });
     npm(["ci", "--omit=dev", "--include=optional", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: acp });
     const acpTrimmed = await pruneDependencies(acp, target);
-    const shared = await dedupeAcp(desktopApp);
+    // Desktop starts as a copy of the deduped TUI payload: report both stages.
+    const shared = [...tuiShared, ...await dedupePackages(desktopApp, { withDesktop: true })];
     await finalize(desktopPayload, name, node, "desktop", { pix: trimmed, acp: acpTrimmed, shared });
     await recordSize(desktopPayload, target, "desktop");
   }

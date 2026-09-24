@@ -167,6 +167,14 @@
   const conversationContextKey = $derived(activeSessionId ?? (draftSession ? "pix:desktop-draft-session" : undefined));
   const hasConversationTarget = $derived(!!conversationContextKey);
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
+  const canSubmitPrompt = $derived(
+    !editorMode
+      && !questionMode
+      && ready
+      && hasConversationTarget
+      && hasQueueableDraft
+      && (!promptRunning || !promptText.trimStart().startsWith("/")),
+  );
   const canOpenPromptHistory = $derived(
     !editorMode
       && !questionMode
@@ -493,7 +501,7 @@
 
 <svelte:window onresize={textareaController.resize} onkeydown={handleWindowKeydown} />
 
-<div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-1.5"}>
+<div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-2"}>
 {#if slashController.open}
   <PromptSlashCommandMenu
     matches={slashController.matches}
@@ -526,7 +534,7 @@
 
 <form
   class={[
-    "overflow-hidden rounded-md border bg-panel-strong focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/25",
+    "overflow-hidden rounded-md border bg-panel-strong",
     dragActive || projectPathDragActive ? "border-ring ring-1 ring-ring/40" : "border-input",
   ]}
   bind:this={composerForm}
@@ -561,7 +569,40 @@
         onOpen={questionnaireController.openDisplayedAttachment}
         onRemove={questionnaireController.removeDisplayedAttachment}
       />
-      <div class="flex items-end gap-1 text-sm">
+      <div class="relative min-w-0 text-sm">
+        {#if textareaController.suggestion && !editorMode && !questionMode}
+          <div
+            class="pointer-events-none absolute inset-0 overflow-hidden px-0.5 leading-relaxed whitespace-pre-wrap break-words"
+            bind:this={ghostLayer}
+            aria-hidden="true"
+          ><span class="text-transparent">{promptText}</span><span class="text-muted-foreground/45">{textareaController.suggestion}</span></div>
+        {/if}
+        <textarea
+          class="relative z-10 block min-h-7 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 leading-relaxed text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-40 [&::placeholder]:whitespace-nowrap disabled:cursor-default disabled:opacity-40"
+          bind:this={textarea}
+          value={textareaValue}
+          oninput={handleInput}
+          onkeydown={handleKeydown}
+          onkeyup={textareaController.handleKeyup}
+          onselect={textareaController.handleSelection}
+          onclick={textareaController.handleSelection}
+          onscroll={textareaController.handleScroll}
+          oncompositionstart={textareaController.handleCompositionStart}
+          oncompositionend={textareaController.handleCompositionEnd}
+          onpaste={handlePaste}
+          aria-label={ariaLabel ?? (questionMode ? `Custom answer for ${questionnaireController.currentQuestion?.label ?? "question"}` : editorMode ? "Editor" : "Message Pix")}
+          aria-describedby="prompt-autocomplete-status"
+          role={!editorMode && !questionMode ? "combobox" : undefined}
+          aria-autocomplete={!editorMode && !questionMode ? "list" : undefined}
+          aria-expanded={!editorMode && !questionMode ? slashController.open : undefined}
+          aria-controls={!editorMode && !questionMode && slashController.open ? slashListboxId : undefined}
+          aria-activedescendant={!editorMode && !questionMode && slashController.open ? `prompt-slash-command-${slashController.selectedIndex}` : undefined}
+          placeholder={composerPlaceholder()}
+          disabled={questionMode ? !questionnaireController.currentQuestion : editorMode ? !ready : !hasConversationTarget || !ready}
+          rows="1"
+        ></textarea>
+      </div>
+      <div class="mt-1.5 flex items-center justify-between gap-2">
         <button
           class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
@@ -575,54 +616,24 @@
         >
           <Paperclip class="h-4 w-4" aria-hidden="true" />
         </button>
-        <div class="relative min-w-0 flex-1">
-          {#if textareaController.suggestion && !editorMode && !questionMode}
-            <div
-              class="pointer-events-none absolute inset-0 overflow-hidden px-0.5 leading-relaxed whitespace-pre-wrap break-words"
-              bind:this={ghostLayer}
-              aria-hidden="true"
-            ><span class="text-transparent">{promptText}</span><span class="text-muted-foreground/45">{textareaController.suggestion}</span></div>
-          {/if}
-          <textarea
-            class="relative z-10 block min-h-6 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 leading-relaxed text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-40 [&::placeholder]:whitespace-nowrap disabled:cursor-default disabled:opacity-40"
-            bind:this={textarea}
-            value={textareaValue}
-            oninput={handleInput}
-            onkeydown={handleKeydown}
-            onkeyup={textareaController.handleKeyup}
-            onselect={textareaController.handleSelection}
-            onclick={textareaController.handleSelection}
-            onscroll={textareaController.handleScroll}
-            oncompositionstart={textareaController.handleCompositionStart}
-            oncompositionend={textareaController.handleCompositionEnd}
-            onpaste={handlePaste}
-            aria-label={ariaLabel ?? (questionMode ? `Custom answer for ${questionnaireController.currentQuestion?.label ?? "question"}` : editorMode ? "Editor" : "Message Pix")}
-            aria-describedby="prompt-autocomplete-status"
-            role={!editorMode && !questionMode ? "combobox" : undefined}
-            aria-autocomplete={!editorMode && !questionMode ? "list" : undefined}
-            aria-expanded={!editorMode && !questionMode ? slashController.open : undefined}
-            aria-controls={!editorMode && !questionMode && slashController.open ? slashListboxId : undefined}
-            aria-activedescendant={!editorMode && !questionMode && slashController.open ? `prompt-slash-command-${slashController.selectedIndex}` : undefined}
-            placeholder={composerPlaceholder()}
-            disabled={questionMode ? !questionnaireController.currentQuestion : editorMode ? !ready : !hasConversationTarget || !ready}
-            rows="1"
-          ></textarea>
-        </div>
         {#if !editorMode && !questionMode}
-          <PromptComposerControls
-            bind:menuTrigger={composerMenuTrigger}
-            menuOpen={composerMenuOpen}
-            voiceState={voiceController.state}
-            voiceSupported={voiceController.supported}
-            voiceCanStart={voiceController.canStart}
-            {promptRunning}
-            {agentControlState}
-            onToggleMenu={toggleComposerMenu}
-            onToggleVoice={() => void voiceController.toggle()}
-            {onPause}
-            {onCancel}
-            {onContinue}
-          />
+          <div class="flex items-center gap-1">
+            <PromptComposerControls
+              bind:menuTrigger={composerMenuTrigger}
+              menuOpen={composerMenuOpen}
+              voiceState={voiceController.state}
+              voiceSupported={voiceController.supported}
+              voiceCanStart={voiceController.canStart}
+              {promptRunning}
+              {agentControlState}
+              canSubmit={canSubmitPrompt}
+              onToggleMenu={toggleComposerMenu}
+              onToggleVoice={() => void voiceController.toggle()}
+              {onPause}
+              {onCancel}
+              {onContinue}
+            />
+          </div>
         {/if}
       </div>
       {#if !editorMode && !questionMode && (voiceController.interim || voiceController.error)}

@@ -115,12 +115,20 @@
 
   function typeTone(type: RegistryResourceType): string {
     if (type === "skill") {
-      return "border-cyan-500/20 bg-cyan-500/5 text-cyan-500";
+      return "border-tool-info/25 bg-tool-info/5 text-tool-info";
     }
     if (type === "agent") {
-      return "border-violet-500/20 bg-violet-500/5 text-violet-500";
+      return "border-primary/25 bg-primary/5 text-primary";
     }
-    return "border-slate-400/25 bg-slate-400/5 text-slate-400";
+    return "border-border bg-muted/20 text-muted-foreground";
+  }
+
+  function statusBorderTone(status: RegistryStatus): string {
+    if (status === "up-to-date") return "border-l-transparent";
+    if (status === "update-available" || status === "missing-local" || status === "not-installed") return "border-l-tool-warning/60";
+    if (status === "diverged" || status === "registry-changed" || status === "removed-remote") return "border-l-tool-error/60";
+    if (status === "local-changes" || status === "local-only" || status === "untracked-local") return "border-l-tool-info/60";
+    return "border-l-border";
   }
 
   function requestFor(item: RegistryItem, action: RegistryItemAction): RegistryActionRequest | undefined {
@@ -177,8 +185,8 @@
 </script>
 
 <section class="flex min-h-0 min-w-0 w-full flex-col overflow-hidden" aria-label="Resource registry">
-  <div class="min-w-0 space-y-2 border-b border-sidebar-border p-2.5">
-    <div class="flex min-w-0 items-center gap-2 rounded-md border border-sidebar-border bg-panel px-2 py-1.5">
+  <div class="min-w-0 space-y-1.5 border-b border-sidebar-border bg-panel p-2">
+    <div class="flex min-w-0 items-center gap-2 px-1 py-1">
       <span class="min-w-0 flex-1">
         <span class="block truncate font-mono text-xs font-medium text-foreground">.pi storage</span>
         <span class="block truncate text-xs text-muted-foreground" title={projectPiStorageError ?? undefined}>
@@ -213,9 +221,9 @@
     </div>
 
     {#if snapshot?.configured}
-      <div class="rounded-md border border-sidebar-border bg-panel p-1.5">
+      <div class="border-t border-sidebar-border/70 pt-1.5">
         <button
-          class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+          class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-left hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
           type="button"
           disabled={remoteBusy || !snapshot.projectKey || projectItems.length === 0}
           aria-expanded={projectReviewOpen}
@@ -232,7 +240,7 @@
         </button>
 
         {#if projectReviewOpen}
-          <div class="mt-1 space-y-0.5 border-t border-sidebar-border pt-1.5">
+          <div class="mt-1 space-y-0.5 border-t border-sidebar-border/70 pt-1.5">
             {#each projectItems as item (item.id)}
               {@const projectPrimary = registryPrimaryAction(item)}
               <div class="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5">
@@ -284,7 +292,7 @@
         <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <input
           id="registry-search"
-          class="h-7 w-full min-w-0 rounded-md border border-input bg-background py-0 pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
+          class="h-7 w-full min-w-0 rounded-md border border-input bg-panel-strong py-0 pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground/70"
           type="search"
           placeholder="Search names…"
           bind:value={query}
@@ -296,7 +304,7 @@
         <label class="sr-only" for="registry-filter">Registry filter</label>
         <select
           id="registry-filter"
-          class="h-7 w-full appearance-none rounded-md border border-input bg-background py-0 pr-7 pl-2.5 text-xs font-medium text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+          class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong py-0 pr-7 pl-2.5 text-xs font-medium text-foreground shadow-none hover:bg-panel-hover"
           bind:value={filter}
         >
           <option value="all">All resources</option>
@@ -309,9 +317,9 @@
     </div>
   </div>
 
-  <div class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
+  <div class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-1.5">
     {#if projectInitialized === false}
-      <div class="rounded-md border border-sidebar-border bg-panel px-3 py-5 text-center">
+      <div class="px-3 py-6 text-center">
         <FolderPlus class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Project Registry state is not initialized</p>
         <p class="mx-auto mt-1 max-w-72 text-xs leading-4 text-muted-foreground">Create <span class="font-mono">.pi</span> with an empty task document plus plans and task-attachment directories.</p>
@@ -323,7 +331,7 @@
     {:else if loading && !snapshot}
       <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RefreshCw class="h-4 w-4 animate-spin" aria-hidden="true" />Checking registry…</div>
     {:else if snapshot && !snapshot.configured}
-      <div class="rounded-md border border-sidebar-border bg-panel px-3 py-4 text-center">
+      <div class="px-3 py-6 text-center">
         <Database class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Registry is not configured</p>
         <p class="mt-1 text-xs leading-4 text-muted-foreground">Connect the private Git repository used for skills, agents, and project state.</p>
@@ -344,9 +352,9 @@
       {#if visibleItems.length === 0}
         <div class="px-3 py-8 text-center text-xs text-muted-foreground">No matching registry resources.</div>
       {:else}
-        <div class="min-w-0 space-y-1.5">
+        <div class="min-w-0 space-y-0.5">
           {#each visibleItems as item (item.id)}
-            <article class="relative min-w-0 rounded-md border border-sidebar-border bg-panel p-2 transition-colors hover:bg-panel-hover">
+            <article class={["relative min-w-0 rounded-md border-l-2 p-2 transition-colors hover:bg-panel-hover", statusBorderTone(item.status)]}>
               <div class="flex min-w-0 items-start gap-2">
                 <span
                   class={["mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-panel-hover", iconTone(item.status)]}

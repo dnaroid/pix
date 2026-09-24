@@ -6,6 +6,9 @@ Pix ships standalone Node runtime payloads in portable TUI archives and Tauri
 Desktop installers. The two variants share preparation code, not an identical
 file inventory: only Desktop includes ACP. GitHub Releases are the only supported
 distribution channel; the root package is private and must not be published to npm.
+Desktop product support is currently macOS only. Windows/Linux Desktop packaging
+paths and historical measurements below do not make those supported products;
+their validation is not a current Desktop delivery gate. TUI target support is unchanged.
 Root `package.json` is the authoritative application version. ACP, Desktop,
 Tauri, the Pix Cargo package, and the three npm lockfile root records share it.
 `npm version` runs `scripts/release/sync-version.mjs --stage` before creating its
@@ -59,13 +62,33 @@ before pruning; smoke executes every remaining esbuild instance to prove native
 resolution after relocation. Debug JavaScript/declaration source maps are removed;
 runtime TypeScript, declarations, WASM, data, documentation and licenses stay.
 
-Only top-level ACP packages whose files, executable modes and complete declared
-dependency graphs match their parent installation can be removed. Graph comparison
-includes optional/peer dependencies, nested shrinkwrapped packages and cycles.
-Same package name/version is not sufficient. Different contents or dependency
-contexts remain isolated. Unix and Windows npm bin shims are repointed before
-removal; package loading then uses normal parent node_modules resolution. No
-directory links, dependency upgrades or lockfile edits are used for deduplication.
+Nested TUI and Desktop packages, as well as top-level ACP packages, can be
+removed only when their files, executable modes and complete declared dependency
+graphs match the **first** existing ancestor package Node would resolve after
+removal. Graph comparison includes optional/peer dependencies, nested
+shrinkwrapped packages and cycles. Same package name/version is not sufficient;
+a different nearer ancestor shadows even an equivalent farther copy. Package
+edges are recomputed after each removal, including multi-level fallback chains.
+Unix and Windows npm bin shims are repointed throughout the payload before
+removal, including shims already repointed to a subsequently removed ancestor;
+loading uses normal ancestor `node_modules` resolution. No directory links,
+dependency upgrades or lockfile edits are used for deduplication. The existing
+`shared` entries in `OPTIMIZATIONS.json` now include nested paths and also
+appear for TUI. Desktop preparation copies the already-deduped TUI payload and
+then dedupes the installed ACP tree: the Desktop report includes both inherited
+TUI removals and additional Desktop-stage removals, in stage order. Each entry's
+`bytes` counts regular files removed at that stage without double-counting
+descendant removals; sum the Desktop report only once, not alongside the TUI
+report. A Desktop report's entry count is thus not just the number of packages
+removed from the copied Desktop tree.
+
+Dependency maintenance is separate from payload deduplication. Root and ACP
+lockfiles may deliberately align compatible transitive resolutions, with exact
+registry integrity metadata, all consumer ranges checked, and clean-install and
+runtime checks. This does not authorize rewriting SDK shrinkwraps, forcing
+incompatible peers, or treating equal versions as proof of equivalent graphs.
+Preparation itself still uses the committed locks without changing them; sharing
+must pass the same file/mode and full-graph comparison after any alignment.
 
 `SIZE.json` records logical regular-file bytes/counts and section totals.
 `OPTIMIZATIONS.json` records removed platform packages/maps and shared dependencies.
@@ -141,6 +164,77 @@ Local evidence was saved in `.artifacts/release-size-comparison.json`,
 version-controlled dependencies of this spec; the dated table above preserves the
 baseline when artifacts are cleaned. Subsequent measurements must record their own
 version, target and signing mode rather than treating this snapshot as current.
+
+#### Nested deduplication measurement (2026-09-24, local macos-arm64)
+
+Pix 2.0.14, Pi SDK 0.87.1, bundled Node 26.7.0. On the prepared macOS ARM64
+payloads, a read-only
+first-fallback scan found 48 TUI candidates (13,940,865 regular-file bytes) and
+100 Desktop candidates (33,755,119 bytes) on payloads **already** sharing 53
+top-level ACP packages. These are candidate estimates, not additive final savings. The
+previous reports and a compressed TUI baseline are preserved under
+`.artifacts/release-nested-baseline/` on the measuring machine.
+
+Fresh full preparation removed 49 TUI packages (13,951,897 reported bytes).
+The Desktop report retains those 49 inherited removals plus 105 additional
+Desktop-stage removals (34,629,264 bytes): 154 entries / 48,581,161 reported
+bytes in total. Do not count the TUI stage a second time when using the Desktop
+report. These reported bytes are removed-package file totals, not the net
+payload size change (generated reports and inventories change size too).
+
+TUI regular-file bytes/count went from 304,654,710 / 24,395 to
+290,843,478 / 21,969; Desktop backend from 443,881,566 / 43,793 to
+410,113,695 / 38,950. After the full prepare, a temporary local measurement
+path ran the production signing, archiving and smoke steps on the prepared
+TUI without a second preparation; it is not a supported release CLI mode.
+TUI compressed size went from 83,659,539
+bytes (a manually generated archive of the prior prepared payload) to
+81,023,779 bytes (the signed production bundle helper's tarball). The archive
+comparison is indicative, **not** a controlled before/after signing/build
+comparison. Both isolated variant probes passed with the bundled Node on PATH;
+the Desktop GUI installer was not rebuilt or visually tested. Final reports and
+logs are under `.artifacts/release-nested-baseline/` (the original before reports
+and archive remain untouched).
+
+#### Compatible ACP resolution alignment (2026-09-24, local macos-arm64)
+
+With Pix 2.0.14, Pi SDK 0.87.1 and bundled Node 26.7.0 unchanged, ACP's
+top-level `zod` resolution was aligned from 4.5.4 to root's 4.6.4. Only its
+version, registry URL and integrity changed in `acp/package-lock.json`; existing
+peer ranges accept 4.6.4. Manifests, SDK shrinkwrap descendants, `ws` versions
+and the graph-equivalence algorithm were not changed. A clean ACP install passed.
+
+Fresh preparation then shared ACP's `zod` and `@anthropic-ai/sdk` with their
+root copies: two additional removals totaling 12,994,348 regular-file bytes.
+The Desktop report now contains 156 shared entries / 61,575,509 removed bytes,
+including the inherited TUI stage. Desktop backend size changed from
+410,113,695 bytes / 38,950 files (391.11 MiB) to 397,461,402 bytes / 37,151 files
+(379.05 MiB): an observed net reduction of 12,652,293 bytes (12.07 MiB, 3.09%).
+The removed-package total is not the net saving: the retained dependency version
+and generated inventories changed, and rebuilt application files grew by 863 bytes.
+
+TUI dependencies were unchanged. Its signed payload is 290,844,341 bytes /
+21,969 files, and the measured tarball is 81,031,825 bytes (77.28 MiB).
+Small TUI differences from the previous run are not savings from the ACP change.
+The complete ACP Pi SDK tree still cannot be shared: other version/context and
+nested-inventory differences remain. This is not a maximum-size-reduction claim.
+
+ACP typecheck, 215 tests and stdio smoke, 44 release tests, SDK/version checks,
+and full preparation passed. ACP tests ran with the inherited Desktop config
+profile and ACP bridge overrides cleared; the initial ambient-profile run failed
+six configuration expectations. The TUI was ad-hoc signed and archived using the
+production helpers without another prepare; its extracted payload and a separately
+relocated Desktop backend passed isolated runtime probes (native PTY, extensions,
+all retained esbuild instances, and Desktop ACP initialize/new/close). This local
+measurement path does not add a release CLI option. Evidence is under
+`.artifacts/release-alignment/{before,after}/` and sibling logs.
+
+No DMG, updater bundle or full `.app` comparison was produced during this
+measurement: the then-current updater private key was unavailable after cleanup
+of `.artifacts`. No replacement key was generated during the measurement, signing
+requirement bypassed, or real Desktop UI verification claimed. The later key
+rotation below does not retroactively validate the deferred installer build and
+installed-host smoke.
 
 To validate a later packaging change on a supported native host, run
 `npm run test:release` and `npm run release:build -- <target>`. Compare actual
@@ -238,6 +332,47 @@ JSON, disables package-manager self-mutation. A valid format-2 marker additional
 identifies `variant` and native `target`. npm installs retain their existing npm
 update/ABI-alignment behavior; `--force` on a release installation never mutates
 global Pix/Pi packages. Settings and sessions stay in the user profile.
+
+### Updater key rotation (2026-09-24)
+
+The prior private key was lost after local build-artifact cleanup and its matching
+old public key could already have reached some Desktop installations; distribution
+is uncertain. With explicit approval to break old trust, a new Tauri signer pair
+was generated locally for unattended use with an **empty password**. The new
+private key is stored outside the checkout at
+`~/.config/pix/release-signing/pix-updater.key` (directory `0700`, key and public
+file `0600`), and the exact new `.pub` contents replace only
+`plugins.updater.pubkey` in `desktop/src-tauri/tauri.release.conf.json`. Endpoint
+and updater signature verification remain enabled. New `.pub` SHA-256 fingerprint:
+`05f3494ed57d62bfcdcf0311bb01ab9cc0074bf5e08cb7fd75fc7b4df107f439`
+(public-key comment `60FC3A7427E9135`). A benign message signed with the new key
+verified against the configured public key using `minisign-verify` 0.2.5;
+altering the message was rejected. This is a key-pair check, not an installer
+build or a claim that any Desktop release was published.
+
+Old-trust installs cannot verify updates with this new key: users of any
+previously distributed Desktop must **manually reinstall** a release carrying
+the new public key. There is no automatic updater migration. Keep an independent
+secure backup of the private key; do not place the only copy in `.artifacts`,
+commit it, or expose it in logs. For a local Desktop release use
+`TAURI_SIGNING_PRIVATE_KEY_PATH` pointing to the durable key. Before any future
+updater-enabled release, a maintainer must manually replace the Actions
+`TAURI_SIGNING_PRIVATE_KEY` secret with this key (see `docs/release.md`);
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` must be unset or empty both locally and in
+CI. No CI secret was changed during rotation. Pix remains at **2.0.14**;
+increment the version for the next updater-capable release.
+
+After rotation, a full local `npm run release:build -- macos-arm64` passed with
+the new key path, including extracted TUI smoke and installed native-host/runtime
+smoke from the mounted DMG. The resulting updater archive's signature verified
+against the configured public key with `minisign-verify` 0.2.5, and a tampered
+archive was rejected. The DMG is 118,004,115 bytes, updater tarball 118,632,021
+bytes, and TUI tarball 81,024,001 bytes. The full `.app` contains 437,517,183
+logical regular-file bytes / 37,180 files (not allocated disk usage). Evidence is
+under `.artifacts/release-key-rotation/`; downloads are under
+`.artifacts/releases/macos-arm64/assets/`. This is an unpublished local 2.0.14
+test build with ad-hoc macOS signing, not Apple notarization, visual GUI QA, an
+end-to-end in-app update test, or a before/after DMG comparison.
 
 ### Portable TUI updater
 

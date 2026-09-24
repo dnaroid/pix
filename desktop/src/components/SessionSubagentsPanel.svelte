@@ -70,27 +70,35 @@
 <details bind:this={details} class="group border-b border-border" ontoggle={noteToggle}>
   <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2.5 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <Workflow class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-    <span class="font-semibold uppercase tracking-wide text-foreground">Agents</span>
+    <span class="font-semibold text-foreground">Agents</span>
     <span class="ml-auto font-mono tabular-nums text-muted-foreground">{activeCount} active</span>
     <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
   </summary>
 
   <div>
     {#if runs.length === 0}
-      <div class="border-b border-border px-2.5 py-3 text-xs text-muted-foreground">No active agents</div>
+      <div class="px-2.5 py-3 text-xs text-muted-foreground">No active agents</div>
     {:else}
-      <div>
+      <div class="pb-1.5">
         {#each runs as run (run.runDir)}
           <section aria-label={`Subagent run ${sessionSubagentRunName(run.runDir)}`}>
-            <h3 class="truncate border-b border-border bg-chrome/45 px-2.5 py-1 font-mono text-xs font-medium text-muted-foreground" title={run.runDir}>
+            <h3 class="truncate px-2.5 py-1.5 font-mono text-xs font-medium text-muted-foreground" title={run.runDir}>
               {sessionSubagentRunName(run.runDir)}
             </h3>
-            <div>
+            <div class="space-y-0.5 px-1.5">
               {#each run.agents as agent (`${run.runDir}\0${agent.id}`)}
                 {@const preview = sessionSubagentTaskPreview(run, agent.id)}
                 {@const task = preview?.task?.trim() || preview?.scope?.trim() || "Task unavailable"}
                 {@const AgentIcon = agentIcon(preview?.icon)}
-                <article class="border-b border-border px-2.5 py-2 transition-colors hover:bg-panel-hover" aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}>
+                <article
+                  class={[
+                    "rounded-md border-l-2 px-2 py-2 transition-colors hover:bg-panel-hover",
+                    agent.status === "running" || agent.status === "retrying"
+                      ? "border-l-primary bg-panel-selected"
+                      : "border-l-transparent",
+                  ]}
+                  aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}
+                >
                   <div class="flex min-w-0 items-start gap-2">
                     <span class={["mt-px shrink-0", statusTone(agent.status)]} title={`Agent type: ${preview?.icon?.trim() || "agent"} · ${statusLabel(agent.status)}`}>
                       <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
@@ -101,7 +109,7 @@
                         <span class={["shrink-0 text-xs font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
                         <span class="shrink-0 font-mono text-xs text-muted-foreground">{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                       </div>
-                      <p class="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-muted-foreground">{task}</p>
+                      <p class="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-foreground/80">{task}</p>
                       <div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                         <span class="shrink-0 font-mono">{sessionSubagentModelLabel(preview)}</span>
                         {#if agent.lastActivity}

@@ -61,6 +61,9 @@ while project selection/open state remains separate from transient focus.
 - Delete is destructive and requires confirmation before the filesystem mutation.
 - Existing pointer drag/drop behavior and lazy directory loading remain unchanged.
 - Project Explorer keeps dotfiles and dotfolders in the normal tree. Entries whose basename starts with `.` use muted opacity by default so ordinary source files retain visual priority; hover, keyboard focus, and selected/open state restore normal readability.
+- The Files panel keeps a compact project-search field above the lazy tree. Typing a query runs a bounded background search over project-relative file paths and UTF-8 file contents without expanding tree nodes; `Ctrl+Shift+F` / `Cmd+Shift+F` focuses that field while the Files panel is active.
+- Project search does not follow symbolic links and skips dependency/generated directories such as `.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, and `.svelte-kit`. Individual content reads are bounded to 2 MB, scanning stops after 20,000 files, and at most 500 path/content matches are returned so searching cannot turn the renderer into an unbounded filesystem walk.
+- Search results show the relative path, source line/column when the hit came from file contents, and a compact line preview. Activating a content hit opens Preview at that exact source line; activating a path-only hit opens the file normally. Clearing the query returns to the existing lazy tree with its expansion/selection state intact.
 
 ## Activity Bar behavior
 
@@ -81,6 +84,7 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/lib/project-tree.ts`
 - `desktop/src/lib/sidebar-indicators.ts`
+- `desktop/src-tauri/src/lib.rs`
 
 ## Verification
 
@@ -91,6 +95,10 @@ while project selection/open state remains separate from transient focus.
   keyboard external-editor route.
 - `desktop/src/components/WorkspaceSidebar.test.ts` covers Activity Bar composite
   wiring.
+- Native project-search tests cover path/content hits, case-insensitive ASCII
+  matching, ignored dependency directories, binary-file skipping, and empty
+  queries; Project Explorer source tests pin the search command, shortcut,
+  bounded result UI, and matched-line Preview navigation.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

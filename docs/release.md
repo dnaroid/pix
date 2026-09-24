@@ -2,6 +2,10 @@
 
 Use this checklist before publishing a Pix GitHub Release so installs work on macOS, Linux, and Windows and the `pi-tools-suite` extension payload is included.
 
+**Desktop support is currently macOS only.** Windows/Linux Desktop packaging
+remains in the tooling but is not a supported product or a current Desktop
+validation requirement. TUI support on those platforms is unchanged.
+
 ## Downloadable TUI and Desktop releases
 
 One stable `vX.Y.Z` tag produces a **published GitHub Release** containing portable
@@ -10,9 +14,9 @@ TUI and Desktop installers. The contract is in
 
 | Target | TUI | Desktop |
 | --- | --- | --- |
-| Windows x64 | `.zip` with `pix.cmd` | NSIS `-setup.exe` |
+| Windows x64 | `.zip` with `pix.cmd` | Legacy tooling only; unsupported |
 | macOS Apple Silicon | `.tar.gz` with `pix` | `.dmg` |
-| Linux x64 | `.tar.gz` with `pix` | `.AppImage` and `.deb` |
+| Linux x64 | `.tar.gz` with `pix` | Legacy tooling only; unsupported |
 
 Each download contains its own Node.js runtime and dependencies. The bundled
 runtime version matches the Node selected from `PATH` on that native release
@@ -63,19 +67,41 @@ reads it from the `TAURI_SIGNING_PRIVATE_KEY` repository secret. A local release
 can provide that environment variable or `TAURI_SIGNING_PRIVATE_KEY_PATH`; the
 release helper also recognizes the ignored local path
 `.artifacts/release-signing/pix-updater.key`. Never commit the private key, and
-keep a durable secure backup: existing Desktop installations cannot accept future
-updates signed by an unrelated replacement key.
+keep a durable secure backup. This checkout's rotated key is stored at
+`~/.config/pix/release-signing/pix-updater.key` (owner-only directory and files);
+use `TAURI_SIGNING_PRIVATE_KEY_PATH="$HOME/.config/pix/release-signing/pix-updater.key"`
+for local builds. Keep a separate, securely backed-up copy outside build artifacts
+and the repository; if this key is lost, the public key and Actions secret cannot
+recover it. Do not print the private key or include it in logs or artifacts.
 
-For this repository the key pair has already been generated locally and the
-public half is embedded in the release config. Configure Actions with the same
-private key before pushing an updater-enabled release tag:
+Prefer keeping the durable key outside `.artifacts` and supplying its path via
+`TAURI_SIGNING_PRIVATE_KEY_PATH`: deleting build artifacts must not delete your
+only key copy. The rotated key was generated with an empty password for unattended
+signing: leave `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` unset (or empty) locally and in
+CI; a nonempty password will not unlock this key. Protect the private key via
+filesystem permissions and a secure backup instead.
+
+The old updater signing key was lost. Its prior distribution is uncertain. On
+2026-09-24 the committed Desktop updater public key was rotated; any clients
+already installed with the **old** public key cannot verify updates signed by
+this replacement. They must manually download and reinstall a new Desktop release
+to establish the new trust root; no in-app migration or automatic update from
+old-trust installs is promised. The current version remains **2.0.14**; increment
+the version before shipping any new updater-enabled Desktop release so installed
+clients can detect it. The new public key's SHA-256 fingerprint (of the `.pub`
+file's exact bytes) is
+`05f3494ed57d62bfcdcf0311bb01ab9cc0074bf5e08cb7fd75fc7b4df107f439`.
+
+**Manual CI action required:** replace the repository's `TAURI_SIGNING_PRIVATE_KEY`
+secret with the *new* private key before running release CI or pushing a release
+tag; this command is for the maintainer to run, not a completed secret update:
 
 ```bash
-gh secret set TAURI_SIGNING_PRIVATE_KEY < .artifacts/release-signing/pix-updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY < "$HOME/.config/pix/release-signing/pix-updater.key"
 ```
 
-Do not generate a replacement key merely because the CI secret is missing; that
-would strand clients that already trust the committed public key.
+Do not rotate again merely because CI has not yet been updated; it would strand
+clients that trust this newly committed public key.
 
 ### Package contents and size checks
 
@@ -85,9 +111,15 @@ before compilation so old emitted files or Vosk models cannot leak into a releas
 it does not delete source files or the user's `models/` directory.
 
 The packager removes foreign esbuild/PTY/clipboard variants and debug source maps,
-then shares only ACP packages proven equivalent to the parent installation by
-file content and dependency graph. Different dependency versions/contexts remain
-isolated. Runtime TypeScript, declarations, native binaries for this target,
+then shares equivalent nested TUI/Desktop packages and top-level ACP packages
+only with their first Node ancestor fallback, after file/mode and complete
+dependency-graph comparison. Differing versions, dependency contexts and nearer
+shadowing packages remain isolated. The `shared` optimization report applies to
+both variants and lists each removed package's original and fallback path.
+Compatible root/ACP transitive lock resolutions can be aligned as a separate
+dependency change, after checking consumer ranges and clean installs. Preparation
+never edits locks or weakens graph equivalence to increase sharing.
+Runtime TypeScript, declarations, native binaries for this target,
 WASM and license files are preserved.
 
 Inspect `.artifacts/releases/<target>/pix/SIZE.json` for TUI and

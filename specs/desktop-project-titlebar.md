@@ -75,6 +75,11 @@ without blocking desktop interactions.
   and stays neutral;
   recent-project badges show two-letter project abbreviations and remain
   identity-colored so different projects stay easy to distinguish.
+- The window titlebar background also receives a restrained tint from that same
+  active-project identity color. The tint is mixed lightly into the semantic
+  `window-titlebar` surface rather than replacing it, uses the configured
+  workspace color when present, and otherwise follows the same deterministic
+  full-path fallback hue as the titlebar badge.
 - Hovering the compact project/branch identity in the bottom status bar shows
   the full active workspace path.
 - The titlebar badge, status-bar project name, and recent-project badges use a stable fallback hue
@@ -115,7 +120,8 @@ without blocking desktop interactions.
 
 - Replacing native window controls on Windows or Linux.
 - Creating project scaffolding or initializing a repository inside a chosen folder.
-- Recoloring global IDE chrome or semantic status colors from the project color.
+- Recoloring global IDE chrome or semantic status colors from the project color;
+  the subtle active-project tint is limited to the window titlebar.
 - Treating a missing or invalid workspace color override as a desktop error.
 
 ## Invariants

@@ -1,6 +1,7 @@
 <script lang="ts">
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import type { ComponentProps } from "svelte";
+  import { projectFolderHue } from "../lib/recent-projects";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import SessionSelector from "./SessionSelector.svelte";
   import WorkbenchTabs from "./WorkbenchTabs.svelte";
@@ -22,10 +23,23 @@
     workbench: ComponentProps<typeof WorkbenchTabs>;
     selector: ComponentProps<typeof SessionSelector> | null;
   } = $props();
+
+  const projectWorkspace = $derived(projectSwitcher?.workspace ?? "");
+  const projectTitlebarColor = $derived(
+    projectWorkspace ? projectSwitcher?.projectColors.get(projectWorkspace) : undefined,
+  );
+  const projectTitlebarHue = $derived(
+    projectWorkspace ? projectFolderHue(projectWorkspace) : undefined,
+  );
 </script>
 
 <header
-  class="flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground"
+  class={[
+    "flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground",
+    projectWorkspace && "project-window-titlebar",
+  ]}
+  style:--project-window-titlebar-color={projectTitlebarColor}
+  style:--project-window-titlebar-hue={projectTitlebarHue}
   data-tauri-drag-region
 >
   <div class={["shrink-0", isMacOS ? "w-[76px]" : "w-3"]} data-tauri-drag-region></div>
@@ -57,3 +71,31 @@
     </div>
   {/if}
 </header>
+
+<style>
+  .project-window-titlebar {
+    background-color: color-mix(
+      in srgb,
+      var(
+          --project-window-titlebar-color,
+          oklch(0.62 0.15 var(--project-window-titlebar-hue))
+        )
+        8%,
+      var(--window-titlebar)
+    );
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .project-window-titlebar {
+      background-color: color-mix(
+        in srgb,
+        var(
+            --project-window-titlebar-color,
+            oklch(0.74 0.13 var(--project-window-titlebar-hue))
+          )
+          8%,
+        var(--window-titlebar)
+      );
+    }
+  }
+</style>

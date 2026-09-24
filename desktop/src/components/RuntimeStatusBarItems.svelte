@@ -28,11 +28,10 @@
 
   let {
     status,
+    showSkeletons = false,
     workspacePath,
     workspaceName,
     workspaceBranch,
-    workspaceHue,
-    workspaceColor,
     loadingDcpStats = false,
     sessionUsage,
     loadingSessionUsage = false,
@@ -46,11 +45,10 @@
     onCompressContext,
   }: {
     status?: RuntimeStatus;
+    showSkeletons?: boolean;
     workspacePath?: string;
     workspaceName?: string;
     workspaceBranch?: string;
-    workspaceHue?: number;
-    workspaceColor?: string;
     loadingDcpStats?: boolean;
     sessionUsage?: SessionUsageReport;
     loadingSessionUsage?: boolean;
@@ -136,7 +134,13 @@
     return "text-tool-success";
   }
 
-  function contextCellClass(kind: DcpContextMapCellKind): string {
+  function contextTrackCellClass(kind: DcpContextMapCellKind): string {
+    if (kind === "free") return "bg-border";
+    if (kind === "unknown") return "bg-muted";
+    return "bg-muted-foreground/65";
+  }
+
+  function contextLegendCellClass(kind: DcpContextMapCellKind): string {
     if (kind === "free") return "bg-border";
     if (kind === "retained" || kind === "occupied") return "bg-muted-foreground/45";
     if (kind === "candidate") return "bg-primary";
@@ -204,10 +208,14 @@
 
 <svelte:window onpointerdown={closeOutside} onkeydown={handleKeydown} />
 
-{#if status || workspaceName}
-  <div bind:this={root} class="flex min-w-0 items-center gap-1" data-runtime-status>
+{#if status || workspaceName || showSkeletons}
+  <div
+    bind:this={root}
+    class="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 max-[900px]:flex"
+    data-runtime-status
+  >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
-      <div class="group relative shrink-0" data-runtime-context>
+      <div class="group relative col-start-1 shrink-0 justify-self-start" data-runtime-context>
         <button
           class="flex h-6 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
@@ -224,7 +232,7 @@
               <span class="flex h-full min-w-0 flex-1">
                 {#each cell.segments as segment}
                   <span
-                    class={["h-full min-w-0", contextCellClass(segment.kind)]}
+                    class={["h-full min-w-0", contextTrackCellClass(segment.kind)]}
                     style:flex-grow={segment.share}
                   ></span>
                 {/each}
@@ -245,7 +253,7 @@
             <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Context color legend">
               {#each contextLegend as item}
                 <span class="inline-flex items-center gap-1">
-                  <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
+                  <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextLegendCellClass(item.kind)]} aria-hidden="true"></i>
                   <span>{item.label}{item.value ? ` ${item.value}` : ""}</span>
                 </span>
               {/each}
@@ -305,27 +313,49 @@
           </div>
         {/if}
       </div>
+    {:else if showSkeletons}
+      <div
+        class="col-start-1 flex h-6 shrink-0 items-center gap-1.5 justify-self-start px-1.5"
+        data-runtime-context-skeleton
+        aria-hidden="true"
+      >
+        <span class="font-sans text-xs text-muted-foreground max-[860px]:hidden">Context</span>
+        <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
+        <span class="h-1.5 w-16 rounded-sm bg-border"></span>
+        <span class="h-3 w-14 rounded-sm bg-muted-foreground/15"></span>
+      </div>
     {/if}
 
     {#if workspaceName}
       <div
-        class="flex min-w-0 max-w-[260px] items-center gap-1 px-1.5 font-mono text-xs"
+        class="col-start-2 flex min-w-0 max-w-[260px] items-center gap-1 justify-self-center px-1.5 font-mono text-xs"
         title={workspacePath ?? workspaceName}
         data-runtime-workspace
       >
-        <span
-          class="runtime-workspace-name min-w-0 truncate"
-          style:--runtime-workspace-hue={workspaceHue}
-          style:--runtime-workspace-color={workspaceColor}
-        >{workspaceName}</span>
+        <span class="min-w-0 truncate text-foreground">{workspaceName}</span>
         {#if workspaceBranch}
-          <span class="max-w-36 shrink truncate text-muted-foreground">({workspaceBranch})</span>
+          <span class="max-w-36 shrink truncate text-muted-foreground/55">({workspaceBranch})</span>
+        {:else if showSkeletons}
+          <span
+            class="h-3 w-14 shrink-0 rounded-sm bg-muted-foreground/15"
+            data-runtime-workspace-branch-skeleton
+            aria-hidden="true"
+          ></span>
         {/if}
+      </div>
+    {:else if showSkeletons}
+      <div
+        class="col-start-2 flex min-w-0 items-center gap-1 justify-self-center px-1.5"
+        data-runtime-workspace-skeleton
+        aria-hidden="true"
+      >
+        <span class="h-3 w-24 rounded-sm bg-muted-foreground/20"></span>
+        <span class="h-3 w-14 rounded-sm bg-muted-foreground/15"></span>
       </div>
     {/if}
 
     {#if sessionUsageAvailable || status?.modelUsage}
-      <div class="relative shrink-0">
+      <div class="relative col-start-3 shrink-0 justify-self-end">
         <button
           class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
@@ -352,7 +382,7 @@
                   aria-hidden="true"
                 >
                   <span
-                    class="absolute inset-y-0 left-0 bg-muted-foreground/50"
+                    class="absolute inset-y-0 left-0 bg-muted-foreground/65"
                     style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
                   ></span>
                   {#if label === "W"}
@@ -444,18 +474,17 @@
           </div>
         {/if}
       </div>
+    {:else if showSkeletons}
+      <div
+        class="col-start-3 flex h-6 shrink-0 items-center gap-1.5 justify-self-end px-1.5 font-mono text-xs"
+        data-runtime-usage-skeleton
+        aria-hidden="true"
+      >
+        <span class="font-sans text-xs text-muted-foreground max-[900px]:hidden">Usage</span>
+        <span class="h-1.5 w-8 rounded-sm bg-border"></span>
+        <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
+        <span class="h-3 w-16 rounded-sm bg-muted-foreground/15 max-[980px]:hidden"></span>
+      </div>
     {/if}
   </div>
 {/if}
-
-<style>
-  .runtime-workspace-name {
-    color: var(--runtime-workspace-color, oklch(0.62 0.15 var(--runtime-workspace-hue)));
-  }
-
-  @media (prefers-color-scheme: dark) {
-    .runtime-workspace-name {
-      color: var(--runtime-workspace-color, oklch(0.74 0.13 var(--runtime-workspace-hue)));
-    }
-  }
-</style>

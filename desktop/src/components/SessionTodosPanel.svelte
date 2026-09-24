@@ -80,7 +80,7 @@
 <details bind:this={details} class="group border-b border-border" ontoggle={noteToggle}>
   <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2.5 pr-9 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ListChecks class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-    <span class="font-semibold uppercase tracking-wide text-foreground">Plan</span>
+    <span class="font-semibold text-foreground">Plan</span>
     <span class="ml-auto font-mono tabular-nums text-muted-foreground">{summary.completedTodos}/{summary.totalTodos} tasks</span>
     <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
   </summary>
@@ -89,12 +89,16 @@
     {#if rows.length === 0}
       <div class="px-2.5 py-3 text-xs text-muted-foreground">No open plan</div>
     {:else}
-      <div>
+      <div class="space-y-0.5 px-1.5 pb-1.5">
         {#each rows as row (row.task.id)}
           {@const task = row.task}
           <article
-            class={["border-b border-border py-1.5 pr-2.5 transition-colors hover:bg-panel-hover", task.status === "completed" && "opacity-60"]}
-            style:padding-left={`${10 + Math.min(row.depth, 4) * 12}px`}
+            class={[
+              "rounded-md border-l-2 py-1.5 pr-2 transition-colors hover:bg-panel-hover",
+              task.status === "in_progress" ? "border-l-primary bg-panel-selected" : "border-l-transparent",
+              task.status === "completed" && "opacity-60",
+            ]}
+            style:padding-left={`${8 + Math.min(row.depth, 4) * 12}px`}
             aria-label={`Todo ${task.id}: ${task.subject}`}
           >
             <div class="flex min-w-0 items-start gap-1.5">
@@ -109,7 +113,7 @@
                   <span class="mr-1 font-mono text-xs text-muted-foreground">#{task.id}</span>{task.subject}
                 </h3>
                 {#if task.status === "in_progress" && task.activeForm}
-                  <p class="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-tool-warning">{task.activeForm}</p>
+                  <p class="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-foreground/80">{task.activeForm}</p>
                 {:else if task.description}
                   <p class="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-muted-foreground">{task.description}</p>
                 {/if}

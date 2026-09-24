@@ -14,9 +14,9 @@
   } = $props();
 </script>
 
-<div class="flex items-center gap-2 border-b border-sidebar-border bg-chrome px-2.5 py-1.5">
-  <span class="shrink-0 text-xs font-medium text-muted-foreground">Section</span>
-  <div class="relative min-w-0 flex-1">
+<div class="border-b border-sidebar-border bg-sidebar px-2 py-1.5">
+  <div class="relative min-w-0">
+    <span class="sr-only">Section</span>
     <select
       class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong py-0 pr-7 pl-2 text-xs font-medium text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30"
       value={active}

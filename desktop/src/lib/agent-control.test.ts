@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentControlAllowsAutoQueue,
   agentControlStateFromSessionState,
+  agentPauseJustTriggered,
   isAgentControlState,
 } from "./agent-control";
 
@@ -41,5 +42,28 @@ describe("Desktop agent control state", () => {
     expect(agentControlAllowsAutoQueue("paused")).toBe(false);
     expect(agentControlAllowsAutoQueue("continuable")).toBe(false);
     expect(agentControlAllowsAutoQueue("resuming")).toBe(false);
+  });
+
+  it("detects only a live same-session transition into paused", () => {
+    expect(agentPauseJustTriggered(
+      { sessionId: "session-1", state: "pause-requested" },
+      { sessionId: "session-1", state: "paused" },
+    )).toBe(true);
+    expect(agentPauseJustTriggered(
+      { sessionId: "session-1", state: "idle" },
+      { sessionId: "session-1", state: "paused" },
+    )).toBe(true);
+    expect(agentPauseJustTriggered(
+      undefined,
+      { sessionId: "session-1", state: "paused" },
+    )).toBe(false);
+    expect(agentPauseJustTriggered(
+      { sessionId: "session-1", state: "paused" },
+      { sessionId: "session-1", state: "paused" },
+    )).toBe(false);
+    expect(agentPauseJustTriggered(
+      { sessionId: "session-1", state: "pause-requested" },
+      { sessionId: "session-2", state: "paused" },
+    )).toBe(false);
   });
 });

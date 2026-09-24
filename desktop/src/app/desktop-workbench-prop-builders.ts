@@ -149,6 +149,7 @@ export function buildWorkbenchConversationProps(
       activeSessionId: sessionId,
       workspace: options.workspace(),
       promptRunning: options.promptRunning(),
+      agentControlState: options.activeAgentControlState(),
       operationRunning: options.operationRunning(),
       historyLoading: options.sessionHistoryLoading(),
       showScrollToBottom: !options.transcriptScroll.followsLatest,
@@ -220,6 +221,7 @@ export function buildWorkbenchEditorProps(
   return {
     preview: activePreview ? {
       previewId: activePreview.id,
+      active: options.activeWorkbenchTabId() === "preview",
       scrollPosition: activePreview.scrollPosition,
       file: activePreview.kind === "file" ? activePreview.file : undefined,
       lineRange: activePreview.kind === "file" ? activePreview.lineRange : undefined,

@@ -107,7 +107,7 @@
 
 <section
   id="workspace-tasks-panel"
-  class="min-h-0 select-none overflow-y-auto p-1.5"
+  class="min-h-0 select-none overflow-y-auto p-2"
   aria-label="Tasks"
   onpointerdown={onPanelPointerDown}
 >
@@ -126,24 +126,24 @@
     {:else if tasks.length === 0}
       <div class="px-4 py-8 text-center"><ListTodo class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">No tasks yet</p><p class="mt-1 text-xs text-muted-foreground">Add the first project task.</p></div>
     {:else}
-      <div class="space-y-2.5">
+      <div class="space-y-2">
         {#each TASK_GROUPS as group (group.type)}
           {@const groupTasks = tasks.filter((task) => task.type === group.type)}
-          <section class="space-y-1" aria-label={`${group.label} tasks`} data-task-group={group.type}>
-            <div class="flex h-5 items-center gap-1.5 px-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <section class="space-y-0.5" aria-label={`${group.label} tasks`} data-task-group={group.type}>
+            <div class="flex h-6 items-center gap-1.5 px-1.5 text-xs font-medium text-muted-foreground">
               <span>{group.label}</span>
               <span class="font-mono text-xs font-normal opacity-65">{groupTasks.length}</span>
             </div>
 
             <div
               class={[
-                "min-h-8 divide-y divide-sidebar-border/60 transition-colors",
-                draggedTaskId && taskDropTarget?.type === group.type ? "bg-panel-hover/40" : "",
+                "min-h-8 space-y-0.5 rounded-md transition-colors",
+                draggedTaskId && taskDropTarget?.type === group.type ? "bg-panel-hover/35" : "",
               ]}
               role="list"
             >
               {#if groupTasks.length === 0 && !isDropPlaceholder(group.type, null, "after")}
-                <div class="pointer-events-none grid h-8 place-items-center border border-dashed border-sidebar-border/70 text-xs text-muted-foreground/55">Empty</div>
+                <div class="pointer-events-none grid h-8 place-items-center rounded-md bg-panel/45 text-xs text-muted-foreground/55">Empty</div>
               {/if}
 
               {#each groupTasks as task (task.id)}
@@ -161,7 +161,7 @@
                   data-task-card
                   data-task-id={task.id}
                   class={[
-                    "group relative px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-panel-hover",
+                    "group relative rounded-md border-l-2 border-l-transparent px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-panel-hover",
                     draggedTaskId === task.id ? "border border-dashed border-primary/35 bg-primary/5 opacity-25" : "",
                     revealedTaskId === task.id ? "border-l-2 border-l-primary bg-panel-selected" : "",
                   ]}
@@ -233,7 +233,10 @@
                             {/if}
                           </div>
                           <button
-                            class="grid h-6 w-6 place-items-center rounded-md text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35"
+                            class={[
+                              "grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35",
+                              activeTaskId === task.id ? "text-primary" : "text-muted-foreground hover:text-primary",
+                            ]}
                             type="button"
                             title={task.sessionId ? "Open session" : "Run task"}
                             aria-label={`${task.sessionId ? "Open session for" : "Run"} ${taskLabel}`}

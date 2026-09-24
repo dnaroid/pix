@@ -43,6 +43,16 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(navigationViewModelSource).not.toContain("projectColors.get(options.workspace())");
   });
 
+  it("subtly tints the window titlebar with the active project identity color", () => {
+    expect(titlebarSource).toContain("projectFolderHue(projectWorkspace)");
+    expect(titlebarSource).toContain("style:--project-window-titlebar-color={projectTitlebarColor}");
+    expect(titlebarSource).toContain("style:--project-window-titlebar-hue={projectTitlebarHue}");
+    expect(titlebarSource).toContain("project-window-titlebar");
+    expect(titlebarSource).toContain("color-mix(");
+    expect(titlebarSource).toContain("8%");
+    expect(titlebarSource).toContain("var(--window-titlebar)");
+  });
+
   it("keeps pointer close outside the normal Tab sequence and supports Delete plus middle-click close", () => {
     expect(source).toContain('tabindex="-1"');
     expect(source).toContain('event.key !== "Delete"');

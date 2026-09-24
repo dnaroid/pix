@@ -19,6 +19,7 @@
 
   let {
     status,
+    showSkeletons = false,
     workspacePath,
     workspaceName,
     workspaceBranch,
@@ -56,6 +57,7 @@
     onOpenCommandPalette,
   }: {
     status: ConnectionStatus;
+    showSkeletons?: boolean;
     workspacePath?: string;
     workspaceName?: string;
     workspaceBranch?: string;
@@ -133,7 +135,7 @@
 
 <footer class="flex h-full min-w-0 select-none items-center gap-2 border-t border-border bg-chrome px-2.5 text-xs text-muted-foreground">
   <div class={[
-    "flex items-center gap-2",
+    "flex shrink-0 items-center gap-2",
     status === "error" && "text-destructive",
   ]}>
     <span
@@ -149,7 +151,7 @@
     <span class="max-[760px]:hidden">{connectionLabel(status)}</span>
   </div>
 
-  <div class="flex min-w-0 items-center gap-2">
+  <div class="flex min-w-0 flex-1 items-center gap-2">
     {#if modelThinking.currentModel}
       <button
         class={[
@@ -163,7 +165,6 @@
         disabled={!canConfigure || changingConfig !== null}
         onclick={onOpenModelThinking}
       >
-        <span class="text-muted-foreground/70 max-[760px]:hidden">Model</span>
         <span class={[
           "max-w-[220px] truncate font-medium",
           modelDisplayToneClass(modelThinking.currentModel.tone),
@@ -177,14 +178,24 @@
         {/if}
         <ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
+    {:else if showSkeletons}
+      <div
+        class="flex h-6 min-w-0 items-center gap-1.5 px-1"
+        data-status-bar-skeleton="model"
+        aria-hidden="true"
+      >
+        <span class="h-3 w-8 rounded-sm bg-muted-foreground/15 max-[760px]:hidden"></span>
+        <span class="h-3 w-24 rounded-sm bg-muted-foreground/20"></span>
+        <span class="h-3 w-10 rounded-sm bg-muted-foreground/15"></span>
+        <span class="h-3 w-3 rounded-sm bg-muted-foreground/15"></span>
+      </div>
     {/if}
     <RuntimeStatusBarItems
       status={runtimeStatus}
+      {showSkeletons}
       {workspacePath}
       {workspaceName}
       {workspaceBranch}
-      {workspaceHue}
-      {workspaceColor}
       {sessionUsage}
       loadingSessionUsage={sessionUsageRefreshing}
       {sessionUsageFailed}
@@ -233,7 +244,6 @@
     {/each}
   </div>
 
-  <span class="flex-1"></span>
   <div class="flex shrink-0 items-center gap-0.5" aria-label="Status bar actions">
     <button
       class={[

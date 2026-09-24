@@ -6,9 +6,11 @@
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
   import GitFork from "@lucide/svelte/icons/git-fork";
   import PanelTopOpen from "@lucide/svelte/icons/panel-top-open";
+  import Pause from "@lucide/svelte/icons/pause";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import { onDestroy, tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
+  import { agentPauseJustTriggered, type AgentControlState } from "../lib/agent-control";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import {
     formatTranscriptDuration,
@@ -31,6 +33,7 @@
     activeSessionId,
     workspace,
     promptRunning,
+    agentControlState = "idle",
     operationRunning,
     historyLoading,
     pane = $bindable(null),
@@ -55,6 +58,7 @@
     activeSessionId: string | null;
     workspace: string;
     promptRunning: boolean;
+    agentControlState?: AgentControlState;
     operationRunning: boolean;
     historyLoading: boolean;
     pane?: HTMLDivElement | null;
@@ -79,6 +83,10 @@
   let displayItems = $derived(groupTranscriptItems(transcript.items));
   let activityNowMs = $state(Date.now());
   const hasActiveActivity = $derived(displayItems.some((item) => item.type === "activity-group" && item.active));
+  let pauseToastVisible = $state(false);
+  let pauseToastTimer: number | undefined;
+  let previousAgentControl: { sessionId: string | null; state: AgentControlState } | undefined;
+  const PAUSE_TOAST_DURATION_MS = 2_400;
 
   // One pane-level clock updates every live collapsed header. Completed rows
   // receive no clock prop, so their persisted final duration stays static.
@@ -109,6 +117,35 @@
   const activeUserMessage = $derived(userMessageMenuController.activeMessage);
 
   onDestroy(userMessageMenuController.dispose);
+  onDestroy(() => {
+    if (pauseToastTimer !== undefined) window.clearTimeout(pauseToastTimer);
+  });
+
+  $effect(() => {
+    const current = { sessionId: activeSessionId, state: agentControlState };
+    const previous = previousAgentControl;
+    const showPauseToast = agentPauseJustTriggered(previous, current);
+    const sessionChanged = previous !== undefined && previous.sessionId !== current.sessionId;
+    previousAgentControl = current;
+
+    if (showPauseToast) {
+      if (pauseToastTimer !== undefined) window.clearTimeout(pauseToastTimer);
+      pauseToastVisible = true;
+      pauseToastTimer = window.setTimeout(() => {
+        pauseToastTimer = undefined;
+        pauseToastVisible = false;
+      }, PAUSE_TOAST_DURATION_MS);
+      return;
+    }
+
+    if (sessionChanged || current.state !== "paused") {
+      if (pauseToastTimer !== undefined) {
+        window.clearTimeout(pauseToastTimer);
+        pauseToastTimer = undefined;
+      }
+      pauseToastVisible = false;
+    }
+  });
 
   function isServiceItem(item: TranscriptDisplayItem | undefined): boolean {
     return item?.type === "activity-group"
@@ -233,7 +270,7 @@
       </p>
     </section>
   {:else}
-    <div class="w-full px-6 pt-[22px] pb-8 max-[760px]:px-3" bind:this={content}>
+    <div class="mx-auto w-full max-w-4xl px-6 pt-[22px] pb-8 max-[760px]:px-3" bind:this={content}>
       {#each displayItems as item, index (item.id)}
         {@const gapClass = transcriptGapClass(item, displayItems[index + 1])}
         {#if item.type === "message"}
@@ -299,6 +336,18 @@
     </div>
     {/if}
   </div>
+  {#if pauseToastVisible}
+    <div class="pointer-events-none absolute inset-0 z-30 grid place-items-center p-4" aria-live="polite">
+      <div
+        class="flex items-center gap-2 rounded-md border border-border bg-popover/95 px-3 py-2 text-xs font-medium text-popover-foreground shadow-md"
+        role="status"
+        data-agent-pause-toast
+      >
+        <Pause class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+        <span>Agent paused</span>
+      </div>
+    </div>
+  {/if}
   {#if activeSessionId && showScrollToBottom}
     <button
       type="button"

@@ -44,8 +44,8 @@
   onMount(() => onRefresh());
 </script>
 
-<section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel" aria-label="Git source control">
-  <header class="shrink-0 space-y-1 border-b border-sidebar-border p-2">
+<section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-sidebar" aria-label="Git source control">
+  <header class="shrink-0 space-y-1 border-b border-sidebar-border bg-panel p-2">
     <div class="flex min-w-0 items-center gap-1.5">
       <GitBranch class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       {#if snapshot}
@@ -101,9 +101,9 @@
       {#if snapshot.changes.length === 0}
         <div class="flex items-start gap-2 px-3 py-5 text-muted-foreground"><Check class="mt-0.5 h-4 w-4 shrink-0 text-tool-success" aria-hidden="true" /><div><p class="text-xs font-medium text-foreground">Working tree clean</p><p class="mt-1 text-xs">{snapshot.ahead ? "Local commits are ready to push." : "No uncommitted changes."}</p></div></div>
       {:else}
-        <div class="flex gap-1 px-2 py-2">
+        <div class="flex gap-1 border-b border-sidebar-border/60 px-2 py-2">
           <input type="search" class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-xs outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Filter changed files" placeholder="Filter changed files…" bind:value={query} />
-          <button class="shrink-0 rounded-sm px-1.5 text-xs text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!gitAssistantReady || busy || Boolean(conflicts)} title="Review staged, unstaged and untracked changes together" onclick={() => onReview(undefined, "all")}>Review all</button>
+          <button class="h-7 shrink-0 rounded-md px-2 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={!gitAssistantReady || busy || Boolean(conflicts)} title="Review staged, unstaged and untracked changes together" onclick={() => onReview(undefined, "all")}>Review all</button>
         </div>
         <GitChangesSection changes={staged} scope="staged" {query} {busy} {onOpenDiff} onToggle={(path) => onUnstage(path)} onDiscard={() => {}} />
         <GitChangesSection changes={unstaged} scope="unstaged" {query} {busy} {onOpenDiff} onToggle={(path) => void onStage(path)} onDiscard={(path) => void workflow.onRepositoryAction("discard", path)} />

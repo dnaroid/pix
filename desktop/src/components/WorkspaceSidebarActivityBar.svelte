@@ -66,7 +66,7 @@
   aria-orientation="vertical"
 >
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "project" ? 0 : -1}
@@ -81,7 +81,7 @@
     <SidebarIndicatorDot indicator={indicators.project} />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "tasks" ? 0 : -1}
@@ -96,7 +96,7 @@
     <SidebarIndicatorDot indicator={indicators.tasks} />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "git" ? 0 : -1}
@@ -111,7 +111,7 @@
     <SidebarIndicatorDot indicator={indicators.git} />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "registry" ? 0 : -1}
@@ -126,7 +126,7 @@
     <SidebarIndicatorDot indicator={indicators.registry} />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "scripts" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "scripts" ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "scripts" ? 0 : -1}
@@ -138,7 +138,7 @@
     onclick={() => onSelect("scripts")}
   ><SquareTerminal class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.scripts} /></button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "idx" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "idx" ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "idx" ? 0 : -1}
@@ -153,7 +153,7 @@
     <SidebarIndicatorDot indicator={indicators.idx} />
   </button>
   <button
-    class={["relative mt-auto grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "settings" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative mt-auto grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "settings" ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "settings" ? 0 : -1}

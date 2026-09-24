@@ -280,7 +280,7 @@
       aria-label="Select project"
       onkeydown={handleMenuKeydown}
     >
-      <div class="flex h-7 items-center px-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <div class="flex h-7 items-center px-2.5 text-xs font-medium text-muted-foreground">
         <span>Recent projects</span>
         <span class="ml-auto font-mono font-normal tracking-normal opacity-70">{recentProjects.length}/{MAX_RECENT_PROJECTS}</span>
       </div>

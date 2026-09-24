@@ -3,6 +3,7 @@ import workbenchBuilderSource from "../app/desktop-workbench-prop-builders.ts?ra
 import diffSource from "./GitDiffPane.svelte?raw";
 import previewSource from "./PreviewPane.svelte?raw";
 import previewEditorControllerSource from "./preview-editor-controller.svelte.ts?raw";
+import previewFileSearchControllerSource from "./preview-file-search-controller.svelte.ts?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
 import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
 
@@ -54,6 +55,22 @@ describe("desktop editor work surfaces", () => {
   it("gives the editor host an explicit full-height grid so the conversation composer stays bottom-anchored", () => {
     expect(workbenchSurfaceSource).toContain("relative grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden bg-background");
     expect(workbenchSurfaceSource).toContain("col-start-1 row-start-1 min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto]");
+  });
+
+  it("provides find-in-file in Preview with active-tab Ctrl/Cmd+F and match navigation", () => {
+    expect(workbenchBuilderSource).toContain('active: options.activeWorkbenchTabId() === "preview"');
+    expect(previewSource).toContain('aria-label="Find in file"');
+    expect(previewSource).toContain("data-preview-file-search");
+    expect(previewSource).toContain("searchController.handleWindowKeydown");
+    expect(previewSource).toContain("searchController.previous");
+    expect(previewSource).toContain("searchController.next");
+    expect(previewFileSearchControllerSource).toContain('event.key.toLocaleLowerCase() === "f"');
+    expect(previewFileSearchControllerSource).toContain("event.shiftKey ? -1 : 1");
+    expect(previewFileSearchControllerSource).toContain("pix-preview-search-active");
+    expect(previewFileSearchControllerSource).toContain("clearSearchDecorations()");
+    expect(previewFileSearchControllerSource).toContain("selection.removeAllRanges()");
+    expect(previewFileSearchControllerSource).toContain("element.setSelectionRange(end, end)");
+    expect(previewFileSearchControllerSource).toContain("if (!query.trim()) {");
   });
 });
 
