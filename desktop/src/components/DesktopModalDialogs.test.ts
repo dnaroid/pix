@@ -23,7 +23,7 @@ describe("desktop modal dialog lifecycle", () => {
     expect(elicitationSource).toContain('field.type === "editor"');
     expect(elicitationSource).toContain("<textarea");
     expect(elicitationSource).toContain('type="text"');
-    expect(elicitationSource).toContain("class:sr-only={field.label === message}");
+    expect(elicitationSource).toContain("class:sr-only={field.label.trim() === message.trim()}");
   });
 
   it("keeps picker result rows outside the normal Tab sequence", () => {
