@@ -393,10 +393,6 @@ enum IdxQuery {
         max_tests: u32,
         path_prefix: Option<String>,
     },
-    Ask {
-        question: String,
-        budget: u32,
-    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -5520,12 +5516,6 @@ fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
             }
             Ok(args)
         }
-        IdxQuery::Ask { question, budget } => Ok(vec![
-            "ask".to_owned(),
-            non_empty_idx_argument(question, "question", 4_000)?,
-            "--budget".to_owned(),
-            (*budget).clamp(200, 20_000).to_string(),
-        ]),
     }
 }
 
@@ -9470,23 +9460,6 @@ mod tests {
             ]
         );
 
-        assert_eq!(
-            idx_query_args(&IdxQuery::Ask {
-                question: "why?".to_owned(),
-                budget: 100_000
-            })
-            .expect("ask args"),
-            ["ask", "why?", "--budget", "20000"]
-        );
-        assert_eq!(
-            idx_query_args(&IdxQuery::Ask {
-                question: "why?".to_owned(),
-                budget: 0
-            })
-            .expect("minimum budget"),
-            ["ask", "why?", "--budget", "200"]
-        );
-
         let decoded: IdxQueryRequest = serde_json::from_value(serde_json::json!({
             "workspace": "/workspace",
             "query": {
@@ -9499,11 +9472,6 @@ mod tests {
         }))
         .expect("camelCase query request");
         assert!(matches!(decoded.query, IdxQuery::Code { max_files: 5, .. }));
-        let ask: IdxQueryRequest = serde_json::from_value(serde_json::json!({
-            "workspace": "/workspace", "query": { "kind": "ask", "question": "Why?", "budget": 900 }
-        }))
-        .expect("typed ask request");
-        assert!(matches!(ask.query, IdxQuery::Ask { budget: 900, .. }));
     }
 
     #[test]

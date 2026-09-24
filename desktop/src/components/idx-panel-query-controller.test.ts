@@ -5,7 +5,7 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 describe("IDX v2 queries", () => {
-  it("sends document-domain and ask wire requests without legacy secondary options", async () => {
+  it("sends document-domain and context wire requests without legacy secondary options", async () => {
     let workspace = "/repo";
     const controller = createIdxPanelQueryController({ workspace: () => workspace, indexReady: () => true, operationRunning: () => false, setError: vi.fn() });
     invoke.mockReset().mockResolvedValue({ stdout: "answer", stderr: "", truncated: false });
@@ -13,10 +13,10 @@ describe("IDX v2 queries", () => {
     controller.state.queryKind = "knowledge";
     await controller.runQuery();
     expect(invoke).toHaveBeenCalledWith("idx_query", { request: { workspace, query: { kind: "knowledge", query: "design", limit: 5, pathPrefix: undefined } } });
-    controller.state.queryKind = "ask";
-    controller.state.askBudget = 20000;
+    controller.state.queryKind = "context";
+    controller.state.contextBudget = 2000;
     await controller.runQuery();
-    expect(invoke).toHaveBeenLastCalledWith("idx_query", { request: { workspace, query: { kind: "ask", question: "design", budget: 20000 } } });
+    expect(invoke).toHaveBeenLastCalledWith("idx_query", { request: { workspace, query: { kind: "context", query: "design", budget: 2000, maxSpecs: 4, maxCode: 6, maxTests: 4, pathPrefix: undefined } } });
     workspace = "/other";
     expect(controller.output).toBe("");
   });

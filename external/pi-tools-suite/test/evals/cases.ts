@@ -3,7 +3,7 @@ import type { EvalCase, EvalRunResult } from "./harness/types.js";
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
 const NO_ORCHESTRATION = ["subagents", "async_subagents_spawn"];
-const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_ask", "repo_context", "repo_audit"];
+const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_context", "repo_audit"];
 
 export const EVAL_CASES: EvalCase[] = [
 	{
@@ -27,14 +27,14 @@ export const EVAL_CASES: EvalCase[] = [
 		assert: { requiredTools: ["repo_architecture"], forbiddenTools: [...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["repo_architecture", "todo"] },
 	},
 	{
-		id: "tool.repo-ask",
+		id: "tool.repo-context-general",
 		category: "tool-selection",
-		description: "General unfamiliar-repository discovery should start with repo_ask.",
+		description: "General unfamiliar-repository discovery should start with repo_context.",
 		fixture: "demo",
 		indexed: true,
 		fakeIdx: true,
 		prompt: "I am new to this checkout repository. Where does payment retry behavior live, and what should I read to understand it? Give me a concise starting point before I inspect files.",
-		assert: { requiredTools: ["repo_ask"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_ask", stdoutIncludes: ["src/payments.ts"] },
+		assert: { requiredTools: ["repo_context"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_context", stdoutIncludes: ["src/payments.ts"] },
 	},
 	{
 		id: "tool.repo-context",

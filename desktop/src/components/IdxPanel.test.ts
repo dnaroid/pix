@@ -38,15 +38,16 @@ describe("IdxPanel managed installation", () => {
 });
 
 describe("IDX v2 panel contract", () => {
-  it("offers document search, context, ask and an explicit read-only task audit without wiki controls", () => {
+  it("offers document search, context and an explicit read-only task audit without removed ask/wiki controls", () => {
     expect(panelSource).toContain('["knowledge", "Documents"]');
-    expect(panelSource).toContain('["ask", "Ask"]');
+    expect(panelSource).toContain('["context", "Context"]');
+    expect(panelSource).not.toContain('["ask", "Ask"]');
     expect(panelSource).toContain("value={auditState.pathsInput}");
     expect(panelSource).toContain("auditController.setPathsInput(event.currentTarget.value)");
     expect(panelSource).toContain("<IdxOutput text={auditOutput}");
     expect(panelSource).not.toContain("wikiStatus");
     expect(panelSource).not.toContain("runKnowledgeAction");
-    expect(querySource).toContain('kind: "ask" as const, question: text, budget: state.askBudget');
+    expect(querySource).not.toContain('kind: "ask"');
     expect(querySource).not.toContain("includeSecondary");
     expect(auditSource).toContain('invoke<IdxCommandResult>("idx_audit", { request: { workspace, paths } })');
   });

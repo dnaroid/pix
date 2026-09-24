@@ -52,7 +52,7 @@ describe("IDX update in new session", () => {
     const prompt = appendUserMessage.mock.calls[0]?.[1] as string;
     expect(prompt).toContain("idx search");
     expect(prompt).toContain("idx context");
-    expect(prompt).toContain("idx ask");
+    expect(prompt).not.toContain("idx ask");
     expect(prompt).toContain("idx audit <changed-paths...>");
     expect(prompt).toContain(".indexer-cli/spec-template.md");
     expect(prompt).toContain("Review each affected primary spec against code and tests");

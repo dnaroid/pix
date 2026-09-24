@@ -11,7 +11,7 @@ import { materializeComposerTaskAttachments } from "./attachment-io";
 
 const KNOWLEDGE_REFRESH_PROMPT = [
   "Update the project knowledge documentation to match the current repository.",
-  "Use idx search, idx context, and idx ask to discover relevant primary specs and current implementation/tests. Read the primary sources and verify the actual behavior rather than treating search results or generated answers as proof.",
+  "Use idx context for general behavior/task discovery and idx search for focused code/document lookup. Read the primary sources and verify the actual behavior rather than treating retrieval rankings as proof.",
   "Review each affected primary spec against code and tests; update an existing spec if behavior changed. Only when no current spec covers the behavior, create a focused new spec using .indexer-cli/spec-template.md (ask before setup if the template is missing).",
   "After material changes, run idx audit <changed-paths...> with only the paths changed for this task. Review its document relationships against final code and tests, resolve real semantic drift, and report any remaining gaps; audit candidates alone are not proof of drift.",
   "Do not add or preserve legacy compatibility unless current product requirements explicitly demand it. Treat legacy behavior found in active code/specs as a mismatch to investigate, not as automatically supported behavior.",

@@ -29,7 +29,6 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
     contextMaxSpecs: 4,
     contextMaxCode: 6,
     contextMaxTests: 4,
-    askBudget: 2000,
     inspectCommand: "architecture" as IdxInspectCommand,
     inspectTarget: "",
     inspectDepth: 2,
@@ -79,7 +78,7 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
             limit: state.knowledgeLimit,
             pathPrefix,
           }
-        : state.queryKind === "context" ? {
+        : {
             kind: "context" as const,
             query: text,
             budget: state.contextBudget,
@@ -87,7 +86,7 @@ export function createIdxPanelQueryController(options: IdxPanelQueryControllerOp
             maxCode: state.contextMaxCode,
             maxTests: state.contextMaxTests,
             pathPrefix,
-          } : { kind: "ask" as const, question: text, budget: state.askBudget };
+          };
     try {
       const result = await invoke<IdxCommandResult>("idx_query", { request: { workspace, query } });
       if (generation === requestGeneration && options.workspace() === workspace) state.queryResult = result;

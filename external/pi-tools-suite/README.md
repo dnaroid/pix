@@ -13,7 +13,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
 - `src/session-recovery` — branch- and compaction-aware `session_overview`, `session_read_section`, `session_search`, and `session_recovery_context` tools for bounded recovery from Pi's raw append-only session history
 - `src/context-gateway` — off/observe/enforce result shaping; enforce keeps safe test/build compacts and bounds over-budget structured `web_search` / `web_fetch` provider content while retaining the complete producer details in raw session history for `session-recovery`; active modes also keep a privacy-safe rotated JSONL efficiency log with gross avoided context, recovery/artifact-read tax, conservative net estimates, and finalized provider usage
-- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_ask` / `repo_context` / `repo_audit` / `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
+- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_context` / `repo_audit` / `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, model registration with live route mapping (current Antigravity catalog: Gemini 3.5/3.6/3.7/3.8 Flash, Gemini 3.1 Pro, Claude Sonnet 4.6 Thinking, Claude Opus 4.6 Thinking, GPT-OSS 120B Medium, plus legacy Antigravity aliases and Gemini CLI mirrors), and streaming through the Cloud Code Assist unified gateway
 - `src/opencode-import` — `/opencode-import` for bounded migration of supported OpenCode OpenAI/Codex, GitHub Copilot, Z.ai, and Antigravity credentials into Pi; existing entries are preserved unless `--force` is passed
 - `src/question` — clean-Pi-only native `question` tool with the suite questionnaire contract, multi-select/custom-answer support, and a transient questionnaire widget kept immediately above the real Pi composer; Pix deliberately skips this module because Pix owns its bundled question renderer/Desktop bridge
@@ -31,13 +31,11 @@ Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, 
 
 ## Repository knowledge and spec maintenance
 
-When repo-aware mode is available, use `repo_ask` for general coding discovery:
-it orchestrates read-only indexed tools and cites evidence. Verify cited primary
-sources before changing code; generated prose is not a contract. If its LLM is
-unavailable, use `repo_search` in lexical mode rather than assuming `ask` has an
-offline mode. Use `repo_context` for a bounded view of project behavior,
-documents, implementation ranges, and tests; use `repo_search` (or `repo_ask`)
-to find project documents alongside code. All indexed Markdown documents are
+When repo-aware mode is available, use `repo_context` for general behavior/task
+discovery: it returns a bounded view of project documents, implementation ranges,
+and tests. The parent model performs reasoning and synthesis from those primary
+retrieval results. Use `repo_search` for focused code/document lookup, including
+lexical mode when semantic retrieval is unavailable. All indexed Markdown documents are
 searchable subject to ignore/exclusion filters; they are not split into primary
 and secondary collections. Follow truncation/degradation diagnostics and read
 the primary source itself before relying on a summary.

@@ -25,13 +25,12 @@ without treating generated answers or audit candidates as semantic proof.
 
 - Repo-aware tools are available only with indexed project state and an executable
   `idx`. Setup and indexing remain explicit operations.
-- `repo_ask` is the first choice for a general coding discovery task. It calls
-  read-only indexed tools and produces a cited answer. Its output budget limits
-  generated text, not retrieved pages; the agent checks cited sources before
-  editing. If the LLM is unavailable, use lexical `repo_search`: `ask` has no
-  offline mode or cursor continuation.
-- `repo_context` retrieves bounded project behavior, documents, implementation
-  and tests. `repo_search` and `repo_ask` find documents alongside code. There is
+- `repo_context` is the first choice for general behavior/task discovery. It
+  retrieves bounded project behavior, documents, implementation and tests; the
+  parent model reasons directly over that evidence rather than delegating to a
+  second repository-answer model.
+- `repo_search` finds documents alongside code and is the focused lookup path,
+  including lexical mode when semantic retrieval is unavailable. There is
   no secondary document collection or `--include-secondary` option. All Markdown
   documents are indexed subject to ignore/exclusion filters. Explicit frontmatter
   kind/status takes precedence; inferred purpose is advisory.
@@ -45,8 +44,8 @@ without treating generated answers or audit candidates as semantic proof.
   the first pass. For a known symbol use file-scoped explain; for dependencies
   use one direction and depth 1. Read exact returned ranges directly; only
   expand for a named gap. Exact path/identifier lookup uses direct file tools.
-- Before a material behavior change, find the governing document with context,
-  search or ask. Keep its behavior/scenarios/constraints/interfaces aligned in
+- Before a material behavior change, find the governing document with context or
+  search. Keep its behavior/scenarios/constraints/interfaces aligned in
   the same task; create a focused spec only if needed. New specs use the
   non-overwriting template installed by `idx init` at
   `.indexer-cli/spec-template.md`, with `kind: spec` and intended `status`, and

@@ -54,13 +54,13 @@ describe("repo discovery output truncation", () => {
 					promptSnippet: description.promptSnippet,
 					promptGuidelines: description.promptGuidelines,
 				});
-				expect(tool.parameters.properties.maxLines.default).toBe(["repo_ask", "repo_context", "repo_audit"].includes(tool.name) ? 600 : 2000);
-				expect(tool.parameters.properties.maxBytes.default).toBe(["repo_ask", "repo_context", "repo_audit"].includes(tool.name) ? 20000 : 50000);
+				expect(tool.parameters.properties.maxLines.default).toBe(["repo_context", "repo_audit"].includes(tool.name) ? 600 : 2000);
+				expect(tool.parameters.properties.maxBytes.default).toBe(["repo_context", "repo_audit"].includes(tool.name) ? 20000 : 50000);
 				expect(tool.parameters.properties.outputMode).toBeUndefined();
-				if (!["repo_ask", "repo_context", "repo_audit"].includes(tool.name)) expect(tool.parameters.properties.maxLines.description).toContain("Prefer native limits/cursors");
+				if (!["repo_context", "repo_audit"].includes(tool.name)) expect(tool.parameters.properties.maxLines.description).toContain("Prefer native limits/cursors");
 			}
 			const search = tools.find((tool) => tool.name === "repo_search")!;
-			expect(tools.map((tool) => tool.name)).toContain("repo_ask");
+			expect(tools.map((tool) => tool.name)).not.toContain("repo_ask");
 			expect(search.parameters.properties.args.description).toContain("default 3 results without code");
 			expect(search.parameters.properties.args.description).toContain("--include-content only for narrow follow-up");
 			await search.execute("first-pass", { target: "session persistence" }, undefined, undefined, { cwd: projectRoot });
@@ -77,7 +77,7 @@ describe("repo discovery output truncation", () => {
 		}
 	});
 
-	test("ask/context/audit use supported idx commands and refuse unsafe or obsolete inputs", async () => {
+	test("context/audit use supported idx commands and refuse unsafe or obsolete inputs", async () => {
 		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-idx-commands-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
 		const restorePath = installFakeIdxOnPath(projectRoot);
@@ -91,17 +91,14 @@ describe("repo discovery output truncation", () => {
 			} as never, { profile: "baseline", cwd: projectRoot });
 			const run = (name: string, params: Record<string, unknown>) => tools.find((tool) => tool.name === name)!.execute("call", params, undefined, undefined, { cwd: projectRoot });
 			expect(tools.some((tool) => tool.name === "repo_knowledge")).toBe(false);
-			expect((await run("repo_ask", { query: "where is session persistence?" })).isError).toBe(false);
 			expect((await run("repo_context", { query: "session refresh retry", maxCode: 2, pathPrefix: "src/session" })).isError).toBe(false);
 			expect((await run("repo_audit", { paths: ["src/session.ts", "specs/session.md"], noSemantic: true })).isError).toBe(false);
 			expect(calls).toEqual([
-				["ask", "where is session persistence?", "--budget", "2000"],
 				["context", "session refresh retry", "--budget", "1400", "--max-specs", "4", "--max-code", "2", "--max-tests", "4", "--path-prefix", "src/session"],
 				["audit", "src/session.ts", "specs/session.md", "--no-semantic"],
 			]);
 			for (const [name, params] of [
-				["repo_ask", { query: "--help" }],
-				["repo_ask", { query: "valid", budget: 201.5 }],
+				["repo_context", { query: "--help" }],
 				["repo_context", { query: "valid", maxSpecs: 100 }],
 				["repo_context", { query: "valid", pathPrefix: "../outside" }],
 				["repo_audit", { paths: [] }],
@@ -109,8 +106,8 @@ describe("repo discovery output truncation", () => {
 				["repo_audit", { paths: ["--json"] }],
 				["repo_audit", { paths: ["C:\\outside"] }],
 			] as const) expect((await run(name, params)).isError).toBe(true);
-			expect(calls).toHaveLength(3);
-			for (const name of ["repo_ask", "repo_context", "repo_audit"]) {
+			expect(calls).toHaveLength(2);
+			for (const name of ["repo_context", "repo_audit"]) {
 				const properties = tools.find((tool) => tool.name === name)!.parameters.properties as Record<string, unknown>;
 				expect(properties).not.toHaveProperty("includeSecondary");
 				expect(properties).not.toHaveProperty("action");
@@ -138,10 +135,10 @@ describe("repo discovery output truncation", () => {
 			mkdirSync(path.join(projectRoot, ".indexer-cli"));
 			repoDiscoveryExtension({ registerCommand: () => undefined, registerTool: (tool: RegisteredTool) => tools.push(tool), exec: async () => ({ stdout: "ok", stderr: "", code: 0 }) } as never,
 				{ profile: "native-compact", cwd: projectRoot });
-			const ask = tools.find((tool) => tool.name === "repo_ask")!;
-			expect(ask.parameters.properties.outputMode?.default).toBe("compact");
-			expect((await ask.execute("call", { query: "task", maxLines: 401 }, undefined, undefined, { cwd: projectRoot })).isError).toBe(true);
-			expect((await ask.execute("call", { query: "task", outputMode: "full", maxLines: 401 }, undefined, undefined, { cwd: projectRoot })).isError).toBe(false);
+			const context = tools.find((tool) => tool.name === "repo_context")!;
+			expect(context.parameters.properties.outputMode?.default).toBe("compact");
+			expect((await context.execute("call", { query: "task", maxLines: 401 }, undefined, undefined, { cwd: projectRoot })).isError).toBe(true);
+			expect((await context.execute("call", { query: "task", outputMode: "full", maxLines: 401 }, undefined, undefined, { cwd: projectRoot })).isError).toBe(false);
 		} finally { restorePath(); rmSync(projectRoot, { recursive: true, force: true }); }
 	});
 

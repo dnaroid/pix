@@ -9,7 +9,7 @@ export type IdxMaintenanceKind =
 
 export type IdxOperationStatus = "running" | "succeeded" | "failed" | "cancelled" | "timed-out";
 export type IdxSearchMode = "hybrid" | "semantic" | "lexical" | "symbol";
-export type IdxQueryKind = "code" | "knowledge" | "context" | "ask";
+export type IdxQueryKind = "code" | "knowledge" | "context";
 export type IdxInspectCommand = "architecture" | "structure" | "ast" | "explain" | "deps";
 
 export interface IdxParsedStatus {

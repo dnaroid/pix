@@ -38,7 +38,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Read ranges use the TUI `path:offset+limit` form.
 - Shell commands collapse whitespace to one line.
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.
-- The separately registered `repo_ask` and `repo_context` rows put their query first; `repo_context` also shows its path prefix before limits. `repo_audit` shows every task-changed path before options. `repo_ask` uses the search role, while `repo_context` and `repo_audit` use inspect. Historical `repo_knowledge` calls retain their action-dependent role and argument presentation.
+- `repo_context` rows put their query first and show their path prefix before limits. `repo_audit` shows every task-changed path before options; both use the inspect role. Historical `repo_ask` and `repo_knowledge` calls retain their legacy role and argument presentation for replay compatibility.
 - Tool names use operation roles (`inspect`, `search`, `mutation`, `execute`, `interact`, `context`, `agent`, `neutral`) rather than outcome roles such as success or warning; subagent calls use a distinct agent color rather than muted text.
 - Legacy ACP updates without a programmatic name or raw input fall back to splitting the existing title.
 - Consecutive thinking and tool entries share one collapsible activity group until a visible user, assistant, or system message boundary.

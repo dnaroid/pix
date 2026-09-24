@@ -10,7 +10,7 @@ export type ToolDescription = {
 	promptGuidelines?: string[];
 };
 
-export type RepoDiscoveryCommand = "ask" | "context" | "audit" | "architecture" | "structure" | "ast" | "search" | "explain" | "deps";
+export type RepoDiscoveryCommand = "context" | "audit" | "architecture" | "structure" | "ast" | "search" | "explain" | "deps";
 
 export type RepoDiscoveryToolDescription = ToolDescription & Required<Pick<ToolDescription, "promptSnippet" | "promptGuidelines">> & {
 	command: RepoDiscoveryCommand;
@@ -87,7 +87,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"For other work, use subagents action='spawn' for economical execution or context isolation, including one bounded sequential task or explicit delegate/parallelize/split work requests. " +
 				SUBAGENT_TYPE_SELECTION_GUIDANCE + " Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
-					? "For general repo discovery, start with repo_ask; use repo_search for focused code lookup. Delegate independent tracks/hypotheses/review axes even when repo_* tools exist. Read result only after completion when findings are needed."
+					? "For general repo discovery, start with repo_context; use repo_search for focused code lookup. Delegate independent tracks/hypotheses/review axes even when repo_* tools exist. Read result only after completion when findings are needed."
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, delegate bounded research tracks for broad discovery rather than flooding parent context. Read result only after completion when findings are needed."),
 			promptGuidelines: [
 				"Treat every real UI QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"ui-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, UI automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-UI checks.",
@@ -96,7 +96,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"After ui-qa completes a test, preserve its clickable screenshot, terminal capture, video, trace, and other evidence links in the final user-facing response whenever those artifacts exist.",
 				SUBAGENT_DELEGATION_GUIDANCE,
 				repoDiscovery
-					? "For general discovery, start with repo_ask; use repo_search for focused code lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
+					? "For general discovery, start with repo_context; use repo_search for focused code lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
 					: "For one small discovery question, use direct read/grep; when repo_* tools are unavailable, delegate scoped research to keep broad search output outside the parent context.",
 				repoDiscovery
 					? "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks, prefer focused agents over serial parent-context work."
@@ -154,16 +154,13 @@ export const ASYNC_SUBAGENT_TOOL_DESCRIPTIONS_WITH_REPO = asyncSubagentToolDescr
 
 export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 	{
-		name: "repo_ask", label: "Repo Ask", command: "ask",
-		description: "First choice for general indexed repo discovery. Produces an evidence-cited answer using read-only idx tools; requires a configured LLM.",
-		promptSnippet: "Start general discovery with repo_ask and budget 2000. Verify cited primary sources before editing; when the LLM is unavailable, use repo_search with lexical mode.",
-		promptGuidelines: ["Answer one question, then stop; mandatory retrieval warnings and truncation hints are evidence, not optional prose. No offline ask mode or cursor continuation."],
-	},
-	{
 		name: "repo_context", label: "Repo Context", command: "context",
-		description: "Compact indexed documents plus implementation and tests for a behavior/contract question.",
-		promptSnippet: "Before a material behavior change, find the primary contract with repo_context; scope narrowly and read returned sources directly.",
-		promptGuidelines: ["Documents remain searchable even without frontmatter. Retrieval rankings are navigation, not authoritative contracts; an empty result does not prove no contract exists."],
+		description: "First choice for general indexed behavior/task discovery: compact documents plus implementation and tests.",
+		promptSnippet: "Start general behavior/task discovery with repo_context; before a material behavior change, find the primary contract, scope narrowly, and read returned sources directly.",
+		promptGuidelines: [
+			"The parent model owns reasoning and synthesis from retrieved evidence; repo_context is retrieval, not a second answer-generating model.",
+			"Documents remain searchable even without frontmatter. Retrieval rankings are navigation, not authoritative contracts; an empty result does not prove no contract exists.",
+		],
 	},
 	{
 		name: "repo_audit", label: "Repo Audit", command: "audit",

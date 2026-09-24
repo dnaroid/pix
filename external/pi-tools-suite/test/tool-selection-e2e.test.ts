@@ -165,8 +165,6 @@ if (command === "context" && joined.includes("shipment freeze")) {
   console.log("CONTEXT query=shipment freeze behavior\\nWarnings:\\n! No primary knowledge matched the query.\\nRead next:\\n> src/payments.ts");
 } else if (command === "context") {
   console.log("CONTEXT query=payment retry idempotency\\nPrimary knowledge:\\nS specs/payment-retry.md status=fresh lifecycle=active score=9.10\\nImplementation:\\nC src/payments.ts:19-33 reason=tracked+semantic\\nTests:\\nT test/payments.test.ts reason=explicit conf=high");
-} else if (command === "ask") {
-  console.log("Checkout payment behavior is implemented in src/payments.ts; specs/payment-retry.md is the primary contract.");
 } else if (command === "audit") {
   if (joined.includes("src/audit.ts")) {
     console.log("changed: 1 | known affected: 0 | uncovered: 1 | changed docs: 0 | semantic sweep: yes\\n  uncovered src/audit.ts\\n  candidates src/audit.ts: specs/payment-retry.md");
@@ -468,18 +466,18 @@ describe("repo-aware tool-selection live e2e", () => {
 				const names = toolCallNames(result.events);
 				expect(names).not.toContain("repo_architecture");
 				expect(names).not.toContain("repo_search");
-				for (const name of ["repo_ask", "repo_context", "repo_audit"]) expect(names).not.toContain(name);
+				for (const name of ["repo_context", "repo_audit"]) expect(names).not.toContain(name);
 				expect(names.some((name) => DIRECT_DISCOVERY_TOOLS.includes(name))).toBe(true);
 				expect(firstMatchingTool(names, ["repo_architecture", "repo_search", ...DIRECT_DISCOVERY_TOOLS])).not.toMatch(/^repo_/);
 			});
 		}, E2E_TIMEOUT_MS);
 	}
 
-	e2eTest("starts general repository discovery with repo_ask", async () => {
+	e2eTest("starts general repository discovery with repo_context", async () => {
 		await withFixtureProject({ indexed: true }, async (projectDir) => {
-			const result = await runPiToolSelectionE2E(projectDir, GENERAL_DISCOVERY_PROMPT, "repo-ask selection", { fakeIdx: true });
+			const result = await runPiToolSelectionE2E(projectDir, GENERAL_DISCOVERY_PROMPT, "repo-context general selection", { fakeIdx: true });
 			const calls = result.events.filter((event) => event.type === "tool_call");
-			expect(calls[0]?.toolName).toBe("repo_ask");
+			expect(calls[0]?.toolName).toBe("repo_context");
 			expect(calls[0]?.input).toMatchObject({ query: expect.any(String) });
 			expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("src/payments.ts");
 		});

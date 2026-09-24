@@ -33,7 +33,7 @@ type RepoDiscoveryParams = {
 
 type RepoDiscoveryWrapperParams = Omit<RepoDiscoveryParams, "command">;
 
-type KnowledgeCommand = "ask" | "context" | "audit";
+type KnowledgeCommand = "context" | "audit";
 type KnowledgeParams = {
 	query?: string;
 	paths?: string[];
@@ -324,10 +324,6 @@ function buildKnowledgeArgs(command: KnowledgeCommand, params: KnowledgeParams):
 	}
 	const query = params.query?.trim();
 	if (!query || query.startsWith("-")) return `repo_${command} requires a nonempty query (not an option).`;
-	if (command === "ask") {
-		const budget = boundedOption(params.budget, 2000, 20_000, 200);
-		return budget === undefined ? "repo_ask budget must be an integer from 200 to 20000." : [command, query, "--budget", String(budget)];
-	}
 	const budget = boundedOption(params.budget, 1400, 8000);
 	const specs = boundedOption(params.maxSpecs, 4, 20);
 	const code = boundedOption(params.maxCode, 6, 30);
@@ -515,9 +511,6 @@ function registerKnowledgeCommand(pi: ExtensionAPI, command: KnowledgeCommand, p
 	const properties = command === "audit" ? {
 		paths: { type: "array", items: stringSchema("Task-changed project-relative path"), minItems: 1, description: "Task-scoped changed paths; do not include unrelated worktree changes." },
 		noSemantic: { type: "boolean", description: "Skip semantic retrieval when unavailable." },
-	} : command === "ask" ? {
-		query: stringSchema("General repository question or coding task."),
-		budget: boundedIntegerSchema("Maximum answer tokens (200..20000); not the retrieval budget.", 2000, 20_000),
 	} : {
 		query: stringSchema("Behavior/contract query with implementation and tests."),
 		budget: boundedIntegerSchema("Approximate output token budget.", 1400, 8000),
@@ -619,7 +612,7 @@ export default function repoDiscoveryExtension(pi: ExtensionAPI, options: RepoDi
 	if (!hasAvailableIndexedProjectRoot(registrationCwd)) return;
 
 	for (const tool of REPO_DISCOVERY_TOOLS) {
-		if (tool.command === "ask" || tool.command === "context" || tool.command === "audit") registerKnowledgeCommand(pi, tool.command, profile);
+		if (tool.command === "context" || tool.command === "audit") registerKnowledgeCommand(pi, tool.command, profile);
 		else registerRepoCommandTool(pi, { ...tool, command: tool.command }, profile);
 	}
 

@@ -271,16 +271,16 @@
       <div class="grid min-h-full grid-rows-[auto_minmax(180px,1fr)]">
         <section class="border-b border-sidebar-border bg-panel p-2.5" aria-label="Semantic query">
           <div class="flex h-7 items-stretch border-b border-sidebar-border/70" role="tablist" aria-label="Query source">
-            {#each [["code", "Code"], ["knowledge", "Documents"], ["context", "Context"], ["ask", "Ask"]] as item}
+            {#each [["code", "Code"], ["knowledge", "Documents"], ["context", "Context"]] as item}
               {@const kind = item[0] as IdxQueryKind}
               <button class={["cursor-pointer border-b-2 px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring", queryState.queryKind === kind ? "border-b-primary text-foreground" : "border-b-transparent text-muted-foreground hover:text-foreground"]} type="button" role="tab" aria-selected={queryState.queryKind === kind} onclick={() => queryState.queryKind = kind}>{item[1]}</button>
             {/each}
           </div>
           <div class="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
-            <input class="h-8 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/70" aria-label="IDX semantic query" placeholder={queryState.queryKind === "ask" ? "Ask a repository question…" : queryState.queryKind === "context" ? "Describe the behavior or change…" : "Search repository…"} bind:value={queryState.queryText} onkeydown={(event) => { if (event.key === "Enter") void runQuery(); }} />
+            <input class="h-8 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/70" aria-label="IDX semantic query" placeholder={queryState.queryKind === "context" ? "Describe the behavior or change…" : "Search repository…"} bind:value={queryState.queryText} onkeydown={(event) => { if (event.key === "Enter") void runQuery(); }} />
             <button class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!queryState.queryText.trim() || queryState.queryRunning || !indexReady || Boolean(runningOperation)} onclick={() => void runQuery()}>{#if queryState.queryRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Run</button>
           </div>
-          {#if queryState.queryKind !== "ask"}<div class="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
+          <div class="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
             <input class="h-7 min-w-40 basis-56 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX path prefix" placeholder="path prefix (optional)" bind:value={queryState.queryPathPrefix} spellcheck="false" />
             {#if queryState.queryKind === "code"}
               <label class="relative w-24 shrink-0"><span class="sr-only">Search mode</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.codeMode}><option value="hybrid">hybrid</option><option value="semantic">semantic</option><option value="lexical">lexical</option><option value="symbol">symbol</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
@@ -291,10 +291,7 @@
             {:else}
               <input class="h-7 w-20 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-xs text-foreground outline-none" type="number" min="200" max="8000" aria-label="Context token budget" bind:value={queryState.contextBudget} />
             {/if}
-          </div>{/if}
-          {#if queryState.queryKind === "ask"}
-            <div class="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><label for="idx-ask-budget">Answer budget</label><input id="idx-ask-budget" class="h-7 w-20 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-xs text-foreground outline-none" type="number" min="200" max="20000" bind:value={queryState.askBudget} /></div>
-          {/if}
+          </div>
           {#if queryState.queryKind === "context"}
             <div class="mt-1 flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
               <span>specs</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum context specs" bind:value={queryState.contextMaxSpecs} />
@@ -327,7 +324,7 @@
             </div>
             {#if queryController.activeResult?.truncated}<div class="absolute right-2 bottom-2 rounded-md border border-border bg-popover px-1.5 py-0.5 text-xs text-tool-warning">output truncated</div>{/if}
           {:else}
-            <div class="absolute inset-0 flex items-center justify-center px-4 text-center"><div class="max-w-72"><Search class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium text-foreground">Repository query</p><p class="mt-1 text-xs leading-4 text-muted-foreground">Search code or documents, build context, or ask a question.</p></div></div>
+            <div class="absolute inset-0 flex items-center justify-center px-4 text-center"><div class="max-w-72"><Search class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium text-foreground">Repository query</p><p class="mt-1 text-xs leading-4 text-muted-foreground">Search code or documents, or build a context pack.</p></div></div>
           {/if}
         </div>
       </div>

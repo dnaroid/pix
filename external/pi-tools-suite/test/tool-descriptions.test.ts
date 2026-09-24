@@ -92,8 +92,8 @@ describe("tool descriptions", () => {
 	});
 
 	test("repo guidance fits within the pre-economy description budget", () => {
-		const existing = REPO_DISCOVERY_TOOLS.filter((tool) => !["ask", "context", "audit"].includes(tool.command));
-		expect(REPO_DISCOVERY_TOOLS).toHaveLength(9);
+		const existing = REPO_DISCOVERY_TOOLS.filter((tool) => !["context", "audit"].includes(tool.command));
+		expect(REPO_DISCOVERY_TOOLS).toHaveLength(8);
 		const size = existing.reduce((total, tool) => total + [
 			tool.description, tool.promptSnippet, ...tool.promptGuidelines, tool.targetDescription ?? "",
 		].join("\n").length, 0);
@@ -101,19 +101,19 @@ describe("tool descriptions", () => {
 		for (const tool of REPO_DISCOVERY_TOOLS) expect(tool.promptGuidelines.length).toBeLessThanOrEqual(3);
 	});
 
-	test("repo guidance starts with ask, routes contracts and changed paths, and omits removed wiki lifecycle", () => {
+	test("repo guidance starts with context, routes contracts and changed paths, and omits removed wiki lifecycle", () => {
 		const names = REPO_DISCOVERY_TOOLS.map((tool) => tool.name);
-		expect(names.slice(0, 3)).toEqual(["repo_ask", "repo_context", "repo_audit"]);
+		expect(names.slice(0, 2)).toEqual(["repo_context", "repo_audit"]);
 		const text = REPO_DISCOVERY_TOOLS.flatMap((tool) => [tool.description, tool.promptSnippet, ...tool.promptGuidelines]).join("\n");
-		expect(text).toContain("general indexed repo discovery");
-		expect(text).toContain("configured LLM");
-		expect(text).toContain("lexical mode");
+		expect(text).toContain("general indexed behavior/task discovery");
+		expect(text).toContain("parent model");
 		expect(text).toContain("material behavior change");
 		expect(text).toContain("primary spec");
 		expect(text).toContain("semantic drift");
 		expect(text).toContain(".indexer-cli/spec-template.md");
 		expect(text).toContain("kind: spec");
 		expect(text).toContain("ask before running setup");
+		expect(text).not.toContain("repo_ask");
 		expect(text).not.toMatch(/wiki|include-secondary|action=impact|receiptPath/);
 		for (const tool of [CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Edit, CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Write, codexAliasToolDescriptions(true).applyPatch]) {
 			expect(tool.description).toContain("repo_audit");
