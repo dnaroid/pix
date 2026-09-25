@@ -433,12 +433,24 @@ describe("desktop visual regressions", () => {
     expect(desktopSettingsEditorSource).toContain("Send native notifications for completed work, questions, and errors");
   });
 
-  it("keeps one full xterm surface shared by package scripts and the workbench terminal", () => {
+  it("keeps one full xterm surface shared by package scripts and the workbench terminal", async () => {
+    // @ts-expect-error Node fs import in Vitest runner
+    const { readFileSync } = await import("node:fs");
+    const terminalFontSource = readFileSync(new URL("./terminal-font.css", import.meta.url), "utf8");
     expect(terminalSource).toContain("const TERMINAL_SCROLLBACK_LINES = 5_000;");
-    expect(terminalSource).toContain(`fontFamily: '"Geist Mono", ui-monospace, monospace'`);
+    expect(terminalSource).toContain(`fontFamily: '"Geist Mono", "Pix Terminal Nerd Glyphs", ui-monospace, monospace'`);
+    expect(terminalSource).toContain('import "./terminal-font.css"');
+    expect(terminalFontSource).toContain('font-family: "Pix Terminal Nerd Glyphs"');
+    expect(terminalFontSource).toContain('url("./fonts/JetBrainsMonoNerdFontMono-Regular.ttf")');
+    expect(terminalSource).toContain('refreshAfterTerminalFontLoad(');
+    expect(terminalSource).toContain('document.fonts.load(');
+    expect(terminalSource).toContain('lifetime.isActive() && terminal === next');
+    expect(terminalSource).toContain('      next,');
     expect(terminalSource).toContain("fontWeight: 400");
     expect(terminalSource).toContain("fontWeightBold: 500");
     expect(terminalSource).toContain("fontSize: 10");
+    expect(terminalSource).toContain("minimumContrastRatio: 1");
+    expect(terminalSource).not.toContain("minimumContrastRatio: 4.5");
     expect(terminalSource).toContain("bg-code font-mono text-foreground");
     expect(terminalSource).not.toContain("font-family:");
     expect(terminalSource).toContain('cursorStyle: "block"');
@@ -459,7 +471,11 @@ describe("desktop visual regressions", () => {
     expect(tauriLibSource).toContain('command.env("TERM", "xterm-256color")');
     expect(tauriLibSource).toContain('command.env("COLORTERM", "truecolor")');
     expect(tauriLibSource).toContain('command.env("CLICOLOR", "1")');
-    expect(tauriLibSource).toContain('command.env("FORCE_COLOR", "1")');
+    expect(tauriLibSource).toContain('command.env_remove("NO_COLOR")');
+    expect(tauriLibSource).toContain('command.env_remove("NODE_DISABLE_COLORS")');
+    expect(tauriLibSource).toContain('command.env("FORCE_COLOR", "3")');
+    expect(tauriLibSource).toContain('command.env("PI_TRUE_COLOR", "1")');
+    expect(tauriLibSource).toContain('command.env("PI_HARDWARE_CURSOR", "1")');
     expect(packageScriptsSource).toContain("<TerminalSessionsPane");
     expect(workbenchTerminalPaneSource).toContain("<TerminalSessionsPane");
     expect(terminalSessionsPaneSource).toContain("<TerminalView");

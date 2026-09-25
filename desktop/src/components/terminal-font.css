@@ -1,0 +1,8 @@
+/* Terminal-only fallback; Geist Mono remains the normal Desktop technical font. */
+@font-face {
+  font-family: "Pix Terminal Nerd Glyphs";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+}

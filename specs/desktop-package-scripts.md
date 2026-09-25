@@ -28,9 +28,10 @@ Expose project-root package scripts, project-defined launch commands, and window
 - Terminal output arrives as base64 byte chunks. A per-terminal streaming `TextDecoder` preserves split UTF-8 sequences; the decoder is flushed on exit. Retained frontend output is bounded to 512,000 characters, backend retained PTY output is bounded to 512 KiB, and xterm live scrollback is bounded to 5,000 lines.
 - Output for the active terminal is written incrementally into the mounted terminal surface while the same text is retained in terminal state for tab switches/remounts.
 - Terminal input and resize operations are accepted only while the terminal is running. Both Desktop terminal surfaces render through the same shared xterm component and rely on xterm's own cursor geometry: a blinking block cursor while focused and the native outline cursor while inactive. Pix does not draw or reposition a second caret overlay. They also expose a Pix-owned visible vertical scrollbar for xterm history instead of relying on macOS overlay-scrollbar policy. Resize is best-effort because the process may exit concurrently.
-- Terminal text uses the bundled Geist Mono face at 10 px through xterm's runtime font configuration. Pix does not override xterm's internal DOM font CSS, avoiding renderer/textarea metric drift.
-- PTY children are launched with `TERM=xterm-256color`, `COLORTERM=truecolor`, `CLICOLOR=1`, and `FORCE_COLOR=1`. ANSI/256-color/truecolor output is therefore preserved and common CLI tools are encouraged to emit color while attached to the Pix terminal.
-- Pix themes only xterm's background, foreground, cursor, and selection. The terminal's ANSI 16-color palette remains xterm's standard palette, while 256-color and truecolor escape sequences are rendered directly instead of being remapped to Pix semantic tool colors.
+- Terminal text uses bundled Geist Mono at 10 px through xterm's runtime font configuration, with a terminal-only bundled JetBrainsMono Nerd Font Mono fallback for missing icon/powerline glyphs (including supplementary PUA icons). The fallback loads asynchronously, invalidates xterm's cached font measurements through its public font-family option, and refreshes the still-mounted terminal; a late load cannot refresh an unmounted/replaced terminal. The distributed frontend includes the font's full OFL license. Pix does not override xterm's internal DOM font CSS, avoiding renderer/textarea metric drift. General UI typography remains unchanged.
+- The packaged Desktop CSP retains `style-src 'self' 'unsafe-inline'` without Tauri's asset `style-src` nonce/hash injection: xterm's DOM renderer creates runtime `<style>` tags for terminal color, font, and cursor rules without nonces. The exemption is limited to `style-src`; script and other directive injection remains enabled. This permits runtime styles (and weakens style injection protection compared with nonce-only styles), not inline scripts. The release override inherits this base security setting.
+- PTY children are launched with `TERM=xterm-256color`, `COLORTERM=truecolor`, `CLICOLOR=1`, and `FORCE_COLOR=3`; inherited `NO_COLOR` / `NODE_DISABLE_COLORS` are removed for this explicitly color-capable terminal surface. Pix additionally advertises `PI_TRUE_COLOR=1` and `PI_HARDWARE_CURSOR=1` to an embedded Pix/Pi TUI, because the child otherwise treats the unknown `TERM_PROGRAM=Pix` conservatively and defaults to a software cursor. ANSI/256-color/truecolor output is preserved and the TUI exposes its real xterm-owned cursor.
+- Pix themes only xterm's background, foreground, cursor, and selection. The terminal's ANSI 16-color palette remains xterm's standard palette, while 256-color and truecolor escape sequences are rendered directly instead of being remapped to Pix semantic tool colors. xterm's minimum contrast rewriting stays disabled (`minimumContrastRatio: 1`) so application-selected RGB values are not normalized toward the Desktop foreground color.
 - Terminal teardown cancels pending initial-render and ResizeObserver fit frames, ignores link resolution success/failure after unmount, and removes active resize/input timers and pointer-drag listeners. A late dynamic import cannot mount an orphaned terminal.
 - The `+` shell terminal starts the user's configured shell normally on the PTY instead of suppressing zsh/bash startup files or replacing the prompt. Interactive shell configuration, prompt themes, aliases, and their normal ANSI colors therefore behave the same way they do in a regular terminal, subject to the shell's own configuration.
 - Input is serialized per terminal with one IPC write in flight for that terminal. Large pastes are split into native-limit-safe chunks without splitting UTF-16 surrogate pairs, and later keystrokes cannot overtake them. Other terminals are independent. A mounted terminal's callbacks retain that terminal's id through tab switching and final buffer flushes.
@@ -45,6 +46,11 @@ Expose project-root package scripts, project-defined launch commands, and window
 - `desktop/src/components/SavedLaunchCommands.svelte`
 - `desktop/src/components/package-scripts-controller.svelte.ts`
 - `desktop/src/components/TerminalView.svelte`
+- `desktop/src/components/terminal-font.css`
+- `desktop/src/components/terminal-font.ts`
+- `desktop/src/components/fonts/JetBrainsMonoNerdFontMono-Regular.ttf`
+- `desktop/public/fonts/OFL.txt` (Vite copies the full license into the packaged frontend)
+- `desktop/src/components/terminal-font.test.ts`
 - `desktop/src/components/terminal-view-lifetime.ts`
 - `desktop/src/components/terminal-view-lifetime.test.ts`
 - `desktop/src/lib/package-scripts.ts`
@@ -56,11 +62,14 @@ Expose project-root package scripts, project-defined launch commands, and window
 - `desktop/src/lib/terminal-input.test.ts`
 - `desktop/src/components/package-scripts-controller.test.ts`
 - `desktop/src-tauri/src/lib.rs`
+- `desktop/src-tauri/tauri.conf.json`
+- `desktop/src/lib/desktop-asset-csp.test.ts`
 
 ## Verification
 
 - `desktop/src/lib/package-scripts.test.ts` covers compact name-only package-script filtering, terminal snapshot decoding, bounded output, and status helpers.
-- Desktop visual/source regressions cover the shared full xterm surface, native block/outline cursor behavior, Geist Mono 10 px terminal font, standard ANSI palette retention, color-capable PTY environment, explicit 5,000-line xterm scrollback, visible scrollbar styling, and name-only script rows.
+- `desktop/src/lib/desktop-asset-csp.test.ts` checks the narrowly scoped style-only Tauri CSP exemption, declared inline style policy, lack of inline script allowance, and release override inheritance.
+- Desktop visual/source regressions cover the shared full xterm surface, native block/outline cursor behavior, Geist Mono 10 px terminal font and bundled Nerd fallback, standard ANSI palette retention, color-capable PTY environment, explicit 5,000-line xterm scrollback, visible scrollbar styling, and name-only script rows. The font tests check actual bundled cmap coverage for representative BMP and supplementary Nerd glyphs, the full license in the public assets copied into the Desktop frontend, and guarded DOM width-cache invalidation/repaint on late font loads.
 - Terminal lifetime tests use controlled animation frames and link promises to check unmount cancellation, late success/failure suppression, and normal initial/resize/link behavior.
 - Input tests use controlled acknowledgements to check ordering, independent terminals, Unicode boundaries, and recovery after failed writes. Controller tests cover workspace changes during launch/restart, initial shell-command ownership, launch reservation, and teardown.
 - Launch-command tests cover JSONC round-tripping alongside other project settings, create/update/delete conflict handling, stale workspace completion, and the UI lifecycle for edit/delete/launch.

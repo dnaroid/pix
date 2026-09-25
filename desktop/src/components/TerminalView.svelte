@@ -1,8 +1,10 @@
 <script lang="ts">
   import "@xterm/xterm/css/xterm.css";
+  import "./terminal-font.css";
   import { onMount } from "svelte";
   import type { FitAddon } from "@xterm/addon-fit";
   import type { ILink, Terminal } from "@xterm/xterm";
+  import { refreshAfterTerminalFontLoad } from "./terminal-font";
   import { createTerminalViewLifetime, type TerminalViewLifetime } from "./terminal-view-lifetime";
 
   type TerminalTextLink = {
@@ -126,12 +128,15 @@
       cursorInactiveStyle: "outline",
       cursorStyle: "block",
       disableStdin: !running,
-      fontFamily: '"Geist Mono", ui-monospace, monospace',
+      // Keep Geist for normal text; the bundled mono Nerd face fills missing icon glyphs.
+      fontFamily: '"Geist Mono", "Pix Terminal Nerd Glyphs", ui-monospace, monospace',
       fontWeight: 400,
       fontWeightBold: 500,
       fontSize: 10,
       lineHeight: 1.25,
-      minimumContrastRatio: 4.5,
+      // A terminal emulator must render the application's chosen ANSI/RGB colors
+      // verbatim. Raising this causes xterm to rewrite low-contrast colors.
+      minimumContrastRatio: 1,
       scrollback: TERMINAL_SCROLLBACK_LINES,
       theme: terminalTheme(container),
     });
@@ -140,6 +145,14 @@
     next.open(container);
     terminal = next;
     fitAddon = fit;
+
+    // xterm's DOM renderer caches glyph widths; remeasure after the font arrives.
+    // Do not hold up terminal startup on font loading.
+    refreshAfterTerminalFontLoad(
+      () => document.fonts.load('10px "Pix Terminal Nerd Glyphs"', "\uf013"),
+      () => lifetime.isActive() && terminal === next,
+      next,
+    );
 
     if (content !== undefined) {
       renderedControlledContent = content;

@@ -6592,12 +6592,7 @@ fn spawn_package_terminal(
     let pair = pty_system
         .openpty(size)
         .map_err(|error| format!("failed to create terminal: {error}"))?;
-    command.cwd(&root);
-    command.env("TERM", "xterm-256color");
-    command.env("COLORTERM", "truecolor");
-    command.env("CLICOLOR", "1");
-    command.env("FORCE_COLOR", "1");
-    command.env("TERM_PROGRAM", "Pix");
+    configure_package_terminal_environment(&mut command, &root);
     let child = pair
         .slave
         .spawn_command(command)
@@ -6718,6 +6713,23 @@ fn spawn_package_terminal(
         .get(&id)
         .map(|session| package_terminal_snapshot(&id, session))
         .ok_or_else(|| "package terminal disappeared during startup".to_owned())
+}
+
+fn configure_package_terminal_environment(command: &mut CommandBuilder, root: &Path) {
+    command.cwd(root);
+    command.env_remove("NO_COLOR");
+    command.env_remove("NODE_DISABLE_COLORS");
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("CLICOLOR", "1");
+    command.env("FORCE_COLOR", "3");
+    command.env("TERM_PROGRAM", "Pix");
+    // The embedded terminal is known to support truecolor even though "Pix" is
+    // not a public terminal-emulator identifier recognized by pi-tui.
+    command.env("PI_TRUE_COLOR", "1");
+    // pi-tui otherwise defaults to its software cursor and explicitly hides the
+    // terminal cursor. xterm already owns an exact cell-aligned hardware cursor.
+    command.env("PI_HARDWARE_CURSOR", "1");
 }
 
 /// Every fallible operation between PTY spawn and supervisor transfer must reap the child.
@@ -10332,6 +10344,21 @@ mod tests {
             .map(|value| value.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         assert_eq!(argv, vec![command_label]);
+    }
+
+    #[test]
+    fn embedded_terminal_environment_keeps_pix_color_and_hardware_cursor_capabilities() {
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.env("NO_COLOR", "1");
+        command.env("NODE_DISABLE_COLORS", "1");
+        configure_package_terminal_environment(&mut command, Path::new("/tmp"));
+        assert_eq!(command.get_env("TERM"), Some(std::ffi::OsStr::new("xterm-256color")));
+        assert_eq!(command.get_env("COLORTERM"), Some(std::ffi::OsStr::new("truecolor")));
+        assert_eq!(command.get_env("FORCE_COLOR"), Some(std::ffi::OsStr::new("3")));
+        assert_eq!(command.get_env("NO_COLOR"), None);
+        assert_eq!(command.get_env("NODE_DISABLE_COLORS"), None);
+        assert_eq!(command.get_env("PI_TRUE_COLOR"), Some(std::ffi::OsStr::new("1")));
+        assert_eq!(command.get_env("PI_HARDWARE_CURSOR"), Some(std::ffi::OsStr::new("1")));
     }
 
     #[test]
