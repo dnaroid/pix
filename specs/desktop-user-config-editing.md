@@ -53,11 +53,16 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
   user-level bundled-role visibility control.
 - Pi Tools Suite module enablement is edited as one bundled-module checklist
   rather than exposing `enabledModules`, `disabledModules`, or the `modules`
-  object as raw controls. The checklist starts from each module's runtime
+  object as raw controls. The checklist consumes the suite's ordered
+  metadata-only module catalog, which is also the single source used to derive
+  runtime module registration by the conventional `src/<module-name>/index.ts`
+  path. The checklist starts from each module's runtime
   default, replays the supported list/map precedence (including legacy
   `*Extensions` aliases), and writes checkbox choices as final `modules` map
-  overrides. Unknown configured names remain preserved and are reported below
-  the checklist; the full raw forms remain available in `Advanced` JSONC.
+  overrides. The lightweight shared module catalog also supplies a short
+  description shown on row hover, matching the bundled-agent checklist pattern.
+  Unknown configured names remain preserved and are reported below the checklist;
+  the full raw forms remain available in `Advanced` JSONC.
 - DCP defaults in Desktop are not read from the starter `pi-tools-suite.jsonc`
   template. For any omitted `dcp.*` key, Desktop resolves the same built-in
   runtime default object used by TUI `loadConfig()`; debug-log size/backup

@@ -39,6 +39,7 @@
     activeSessionId,
     draftSession = false,
     ready,
+    activeWorking = false,
     promptRunning,
     agentControlState = "idle",
     dragActive,
@@ -69,6 +70,7 @@
     activeSessionId: string | null;
     draftSession?: boolean;
     ready: boolean;
+    activeWorking?: boolean;
     promptRunning: boolean;
     agentControlState?: AgentControlState;
     dragActive: boolean;
@@ -536,6 +538,7 @@
   class={[
     "overflow-hidden rounded-md border bg-panel-strong focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/25",
     dragActive || projectPathDragActive ? "border-ring ring-1 ring-ring/40" : "border-input",
+    activeWorking && "composer-working border-primary",
   ]}
   bind:this={composerForm}
   data-pix-project-path-drop-target="true"
@@ -682,3 +685,17 @@
   </p>
 </form>
 </div>
+
+<style>
+  .composer-working {
+    animation: composer-working-border-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes composer-working-border-pulse {
+    50% { border-color: var(--color-input); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .composer-working { animation: none; }
+  }
+</style>

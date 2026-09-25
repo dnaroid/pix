@@ -26,6 +26,7 @@ import settingsModelListSource from "./settings/SettingsModelList.svelte?raw";
 import settingsModelRoutingTiersSource from "./settings/SettingsModelRoutingTiers.svelte?raw";
 import settingsModelSelectSource from "./settings/SettingsModelSelect.svelte?raw";
 import settingsModelVisibilitySource from "./settings/SettingsModelVisibility.svelte?raw";
+import settingsModuleVisibilitySource from "./settings/SettingsModuleVisibility.svelte?raw";
 import settingsNumberInputSource from "./settings/SettingsNumberInput.svelte?raw";
 import settingsSectionNavSource from "./settings/SettingsSectionNav.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
@@ -177,12 +178,17 @@ describe("desktop visual regressions", () => {
     expect(statusBarViewModelSource).not.toContain("onToggleSessionActivity");
   });
 
-  it("uses the ready ACP dot for active-conversation work without a transcript-bottom spinner", () => {
-    expect(statusSource).toContain('status === "ready" && promptRunning');
-    expect(statusSource).toContain('"bg-primary connection-activity"');
-    expect(statusSource).toContain('"ACP ready; active conversation working"');
-    expect(statusSource).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(statusSource).toContain(".connection-activity { animation: none; }");
+  it("keeps ACP status out of chrome and pulses the composer border for active-conversation work", () => {
+    expect(statusSource).not.toContain("ACP");
+    expect(statusSource).not.toContain("connection-activity");
+    expect(statusSource).not.toContain("bg-status");
+    expect(statusBarViewModelSource).not.toContain("status: connectionStatus");
+    expect(workbenchPropBuildersSource).toContain("activeWorking: options.statusReady() && options.promptRunning()");
+    expect(composerSource).toContain('activeWorking && "composer-working border-primary"');
+    expect(composerSource).toContain("animation: composer-working-border-pulse 1.8s ease-in-out infinite");
+    expect(composerSource).toContain("50% { border-color: var(--color-input); }");
+    expect(composerSource).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(composerSource).toContain(".composer-working { animation: none; }");
 
     expect(transcriptSource).not.toContain('aria-label="Pix is working"');
     expect(transcriptSource).not.toContain('LoaderCircle from "@lucide/svelte/icons/loader-circle"');
@@ -398,6 +404,11 @@ describe("desktop visual regressions", () => {
     expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');
+  });
+
+  it("shows pi-tools-suite module descriptions on hover like bundled agents", () => {
+    expect(settingsModuleVisibilitySource).toContain("title={module.description}");
+    expect(settingsModuleVisibilitySource).toContain("{module.name}");
   });
 
   it("exposes semantic first-prompt model routing in curated Desktop settings", () => {

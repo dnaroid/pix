@@ -3,6 +3,7 @@ import { removeSettingsValue, settingsValue, updateSettingsSource } from "./sett
 export interface ToolsSuiteModuleCatalogEntry {
   readonly name: string;
   readonly defaultEnabled: boolean;
+  readonly description: string;
 }
 
 export interface ToolsSuiteModuleState extends ToolsSuiteModuleCatalogEntry {

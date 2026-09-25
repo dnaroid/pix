@@ -17,8 +17,11 @@ function tempDir(): string {
 }
 
 describe("pi-tools-suite config", () => {
-	test("keeps the lightweight module catalog aligned with runtime registration", () => {
-		expect(PI_TOOLS_SUITE_MODULE_CATALOG.map((module) => module.name)).toEqual(REGISTERED_MODULES.map((module) => module.name));
+	test("derives runtime registration from the lightweight module catalog", () => {
+		expect(REGISTERED_MODULES.map(({ load: _load, ...module }) => module)).toEqual(PI_TOOLS_SUITE_MODULE_CATALOG);
+		expect(PI_TOOLS_SUITE_MODULE_CATALOG.every((module) => module.description.trim().length > 0)).toBe(true);
+		expect(PI_TOOLS_SUITE_MODULE_CATALOG.every((module) => existsSync(new URL(`../src/${module.name}/index.ts`, import.meta.url)))).toBe(true);
+		expect(PI_TOOLS_SUITE_MODULE_CATALOG.find((module) => module.name === "question")?.cleanPiOnly).toBe(true);
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name).sort())
 			.toEqual(["credential-firewall", "truncation-metadata-normalizer"]);
 	});

@@ -10,11 +10,9 @@
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
 
-  type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
   type ConfigValue = { value: string; name: string; group?: string };
 
   let {
-    status,
     showSkeletons = false,
     workspacePath,
     workspaceName,
@@ -47,7 +45,6 @@
     onCompressDcpContext,
     onOpenSessionActivity,
   }: {
-    status: ConnectionStatus;
     showSkeletons?: boolean;
     workspacePath?: string;
     workspaceName?: string;
@@ -82,19 +79,6 @@
   } = $props();
 
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
-  const activeConversationWorking = $derived(status === "ready" && promptRunning);
-
-  function connectionLabel(value: ConnectionStatus): string {
-    if (value === "ready") return "ACP";
-    if (value === "starting") return "starting…";
-    return value;
-  }
-
-  function connectionActivityLabel(value: ConnectionStatus, working: boolean): string {
-    if (working) return "ACP ready; active conversation working";
-    if (value === "ready") return "ACP ready";
-    return `ACP ${connectionLabel(value)}`;
-  }
 
   function configValues(option: SessionConfigOption): ConfigValue[] {
     if (option.type !== "select") return [];
@@ -112,23 +96,6 @@
 </script>
 
 <footer class="flex h-full min-w-0 select-none items-center gap-2 border-t border-border bg-chrome px-2.5 text-xs text-muted-foreground">
-  <div class={[
-    "flex shrink-0 items-center gap-2",
-    status === "error" && "text-destructive",
-  ]}>
-    <span
-      class={[
-        "h-1.5 w-1.5 rounded-full bg-status",
-        activeConversationWorking && "bg-primary connection-activity",
-        status === "error" && "bg-destructive",
-      ]}
-      role={activeConversationWorking ? "img" : undefined}
-      aria-label={activeConversationWorking ? connectionActivityLabel(status, activeConversationWorking) : undefined}
-      title={connectionActivityLabel(status, activeConversationWorking)}
-    ></span>
-    <span class="max-[760px]:hidden">{connectionLabel(status)}</span>
-  </div>
-
   <div class="flex min-w-0 flex-1 items-center gap-2">
     {#if modelThinking.currentModel}
       <button
@@ -232,17 +199,3 @@
     {onOpenSessionActivity}
   />
 </footer>
-
-<style>
-  .connection-activity {
-    animation: connection-activity-pulse 1.8s ease-in-out infinite;
-  }
-
-  @keyframes connection-activity-pulse {
-    50% { opacity: 0.55; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .connection-activity { animation: none; }
-  }
-</style>

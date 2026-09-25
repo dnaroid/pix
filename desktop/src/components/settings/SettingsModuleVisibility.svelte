@@ -21,7 +21,10 @@
   </summary>
   <div class="border-t border-border px-2 py-1.5">
     {#each modules as module (module.name)}
-      <label class="flex min-h-7 cursor-pointer items-center gap-2 py-1 text-xs text-foreground">
+      <label
+        class="flex min-h-7 cursor-pointer items-center gap-2 py-1 text-xs text-foreground"
+        title={module.description}
+      >
         <input
           class="h-3.5 w-3.5 accent-primary"
           type="checkbox"

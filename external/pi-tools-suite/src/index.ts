@@ -1,7 +1,8 @@
 import { loadPiToolsSuiteConfig } from "./config";
 import { publishContextInventoryState } from "./context-inventory";
-import { publishStartupModuleList } from "./startup-section";
 import { isPixOwnedHost } from "./lib/native-pi-tui.js";
+import { PI_TOOLS_SUITE_MODULE_CATALOG, type PiToolsSuiteModuleCatalogEntry } from "./module-catalog.js";
+import { publishStartupModuleList } from "./startup-section";
 
 type ExtensionAPI = any;
 
@@ -11,40 +12,19 @@ type ExtensionModule = {
 	default: ExtensionFactory;
 };
 
-export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule>; cleanPiOnly?: boolean }> = [
-	{ name: "coding-discipline", load: () => import("./coding-discipline/index") },
-	{ name: "ast-grep", load: () => import("./ast-grep/index") },
-	{ name: "async-subagents", load: () => import("./async-subagents/index") },
-	{ name: "lsp", load: () => import("./lsp/index") },
-	{ name: "comment-checker", load: () => import("./comment-checker/index") },
-	{ name: "session-name", load: () => import("./session-name/index") },
-	{ name: "session-recovery", load: () => import("./session-recovery/index") },
-	{ name: "repo-discovery", load: () => import("./repo-discovery/index") },
-	{ name: "antigravity-auth", load: () => import("./antigravity-auth/index") },
-	{ name: "opencode-import", load: () => import("./opencode-import/index") },
-	{ name: "question", load: () => import("./question/index"), cleanPiOnly: true },
-	{ name: "todo", load: () => import("./todo/index") },
-	{ name: "model-tools", load: () => import("./model-tools/index") },
-	{ name: "usage", load: () => import("./usage/index") },
-	{ name: "web-search", load: () => import("./web-search/index") },
-	// Observe-only Context Gateway currently runs after result enrichers. P01-R
-	// keeps this independent result chain; a coordinator is conditional future
-	// enforce work only if a concrete ordering conflict is proven.
-	{ name: "context-gateway", load: () => import("./context-gateway/index") },
-	// Explicit opt-in, non-store cleanup. Keep after Gateway observe so passive
-	// telemetry measures the original boundary, and before downstream result
-	// observers. This ordering does not depend on any particular DCP persistence
-	// design; DCP is scheduled for a separate redesign.
-	{ name: "truncation-metadata-normalizer", load: () => import("./truncation-metadata-normalizer/index") },
-	{ name: "dcp", load: () => import("./dcp/index") },
-	{ name: "prompt-commands", load: () => import("./prompt-commands/index") },
-	{ name: "resource-registry", load: () => import("./resource-registry/index") },
-	// Secret firewall is intentionally opt-in. Keep it after payload-shaping modules.
-	{ name: "credential-firewall", load: () => import("./credential-firewall/index") },
-	// Keep this last within the suite, after its other payload modifiers. Other
-	// extensions may register later handlers; this is not a global ordering guarantee.
-	{ name: "codex-reasoning-fix", load: () => import("./codex-reasoning-fix/index") },
-];
+export type RegisteredPiToolsSuiteModule = PiToolsSuiteModuleCatalogEntry & {
+	load: () => Promise<ExtensionModule>;
+};
+
+/**
+ * Runtime registration is derived from the metadata-only catalog so config,
+ * Desktop Settings, defaults, ordering, and runtime loading share one module list.
+ * Module entrypoints follow the suite convention src/<module-name>/index.ts.
+ */
+export const MODULES: readonly RegisteredPiToolsSuiteModule[] = PI_TOOLS_SUITE_MODULE_CATALOG.map((module) => ({
+	...module,
+	load: () => import(`./${module.name}/index`) as Promise<ExtensionModule>,
+}));
 
 export default async function piToolsSuite(pi: ExtensionAPI) {
 	const loadedModuleNames: string[] = [];

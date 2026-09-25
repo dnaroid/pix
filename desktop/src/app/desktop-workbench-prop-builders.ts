@@ -189,6 +189,7 @@ export function buildWorkbenchConversationProps(
         && !options.sessionMutationRunning()
         && !options.sessionHistoryLoading()
         && (options.draft.active || options.activeSessionRuntimeReady()),
+      activeWorking: options.statusReady() && options.promptRunning(),
       promptRunning: options.promptRunning(),
       agentControlState: options.activeAgentControlState(),
       dragActive: options.dragActive(),

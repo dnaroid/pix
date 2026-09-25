@@ -7,8 +7,8 @@ import {
 } from "./tools-suite-module-visibility.js";
 
 const catalog = [
-  { name: "normal", defaultEnabled: true },
-  { name: "opt-in", defaultEnabled: false },
+  { name: "normal", defaultEnabled: true, description: "Normal module" },
+  { name: "opt-in", defaultEnabled: false, description: "Optional module" },
 ] as const;
 
 describe("tools-suite module visibility", () => {
@@ -22,6 +22,10 @@ describe("tools-suite module visibility", () => {
     expect(toolsSuiteModuleStates(root, catalog).map(({ name, enabled }) => ({ name, enabled }))).toEqual([
       { name: "normal", enabled: true },
       { name: "opt-in", enabled: false },
+    ]);
+    expect(toolsSuiteModuleStates(root, catalog).map(({ description }) => description)).toEqual([
+      "Normal module",
+      "Optional module",
     ]);
   });
 
