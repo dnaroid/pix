@@ -16,6 +16,7 @@ import idxSource from "./IdxPanel.svelte?raw";
 import lspInstallPaneSource from "./LspInstallPane.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
+import sessionActivityStatusHudSource from "./SessionActivityStatusHud.svelte?raw";
 import sessionInspectorSource from "./SessionInspector.svelte?raw";
 import sessionSubagentsSource from "./SessionSubagentsPanel.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
@@ -147,18 +148,27 @@ describe("desktop visual regressions", () => {
     expect(idxSource).toContain('focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum context tests"');
   });
 
-  it("shows Session status only for real hidden activity and removes low-value status actions", () => {
+  it("shows detailed hover/focus Session status only for real hidden activity", () => {
     expect(statusSource).not.toContain('>Session</span>');
     expect(statusSource).not.toContain('aria-label="Open command palette"');
     expect(statusSource).not.toContain('title="Jump to user message"');
     expect(statusSource).not.toContain('import Command from "@lucide/svelte/icons/command"');
     expect(statusSource).not.toContain('import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down"');
     expect(statusSource).not.toContain('import Activity from "@lucide/svelte/icons/activity"');
-    expect(statusSource).toContain("compactSessionActivityVisible");
-    expect(statusSource).toContain("sessionSubagentIcons.slice(0, 3)");
-    expect(statusSource).toContain('data-session-activity-summary');
-    expect(statusSource).toContain("{sessionActivity.completedTodos}/{sessionActivity.totalTodos}");
-    expect(statusSource).toContain("agentIcon(iconName)");
+    expect(statusSource).toContain("<SessionActivityStatusHud");
+    expect(statusBarViewModelSource).toContain("sessionSubagentSnapshot: options.sessionSubagentSnapshot()");
+    expect(statusBarViewModelSource).toContain("sessionTodoSnapshot: options.sessionTodoSnapshot()");
+    expect(sessionActivityStatusHudSource).toContain("sessionSubagentIndicators(subagentSnapshot)");
+    expect(sessionActivityStatusHudSource).toContain("currentSessionTodoTask(todoSnapshot)");
+    expect(sessionActivityStatusHudSource).toContain('data-session-activity-summary');
+    expect(sessionActivityStatusHudSource).toContain('data-session-subagent-tooltip');
+    expect(sessionActivityStatusHudSource).toContain('data-session-todo-tooltip');
+    expect(sessionActivityStatusHudSource).toContain("group-hover:block group-focus-within:block");
+    expect(sessionActivityStatusHudSource).toContain("formatSessionSubagentElapsed");
+    expect(sessionActivityStatusHudSource).toContain("sessionSubagentModelLabel");
+    expect(sessionActivityStatusHudSource).toContain("currentTodo.activeForm");
+    expect(sessionActivityStatusHudSource).toContain("currentTodo.blockedBy");
+    expect(sessionActivityStatusHudSource).toContain("{summary.completedTodos}/{summary.totalTodos}");
     expect(statusSource).not.toContain('disabled={!canOpenSessionActivity}');
     expect(statusSource).not.toContain('title={`Session activity · ${activityLabel}`}');
     expect(statusBarViewModelSource).toContain("onOpenSessionActivity: () => options.inspectorPreference.setOpen(true)");

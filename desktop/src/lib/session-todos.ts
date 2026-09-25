@@ -66,6 +66,13 @@ export function hasOpenSessionTodos(snapshot: SessionTodoSnapshot | undefined): 
   ) ?? false;
 }
 
+export function currentSessionTodoTask(snapshot: SessionTodoSnapshot | undefined): SessionTodoTask | undefined {
+  const tasks = snapshot?.details.tasks ?? [];
+  return tasks.find((task) => task.status === "in_progress")
+    ?? tasks.find((task) => task.status === "pending")
+    ?? tasks.find((task) => task.status === "deferred");
+}
+
 /** Match the TUI: completed tasks are included only while an open task exists. */
 export function visibleSessionTodoRows(snapshot: SessionTodoSnapshot | undefined): SessionTodoRow[] {
   if (!snapshot || !hasOpenSessionTodos(snapshot)) return [];

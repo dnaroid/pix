@@ -27,7 +27,8 @@ export function createDesktopStatusBarViewModel(options: {
   activeAgentControlState: () => string;
   dcpCompressionAvailable: () => boolean;
   sessionActivity: () => StatusBarProps["sessionActivity"];
-  sessionSubagentIcons: () => StatusBarProps["sessionSubagentIcons"];
+  sessionSubagentSnapshot: () => StatusBarProps["sessionSubagentSnapshot"];
+  sessionTodoSnapshot: () => StatusBarProps["sessionTodoSnapshot"];
   sessionNeedsInput: () => boolean;
   runtime: ReturnType<typeof createSessionRuntimeStore>;
   dcp: ReturnType<typeof createDcpCompression>;
@@ -93,7 +94,8 @@ export function createDesktopStatusBarViewModel(options: {
         && !promptRunning
         && options.activeAgentControlState() === "idle",
       sessionActivity,
-      sessionSubagentIcons: options.sessionSubagentIcons(),
+      sessionSubagentSnapshot: options.sessionSubagentSnapshot(),
+      sessionTodoSnapshot: options.sessionTodoSnapshot(),
       sessionActivityOpen: options.inspectorPreference.open,
       sessionNeedsInput: options.sessionNeedsInput(),
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),

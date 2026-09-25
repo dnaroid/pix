@@ -1,4 +1,3 @@
-import { sessionSubagentIconNames } from "../lib/session-subagents";
 import { createDesktopOverlaysViewModel } from "./desktop-overlays-view-model.svelte";
 import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model.svelte";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
@@ -35,7 +34,8 @@ export function createDesktopShellViewModelServices(options: DesktopViewModelSer
     activeAgentControlState: () => options.presentation.activeAgentControlState,
     dcpCompressionAvailable: () => options.presentation.dcpCompressionAvailable,
     sessionActivity: () => options.presentation.activeSessionActivity,
-    sessionSubagentIcons: () => sessionSubagentIconNames(options.presentation.activeSubagentSnapshot),
+    sessionSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
+    sessionTodoSnapshot: () => options.presentation.activeTodoSnapshot,
     sessionNeedsInput: () => options.presentation.activePendingElicitation !== null,
     runtime: options.sessions.runtime,
     dcp: options.orchestration.dcp,

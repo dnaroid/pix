@@ -1,17 +1,14 @@
 <script lang="ts">
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ListTodo from "@lucide/svelte/icons/list-todo";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
-  import { agentIcon } from "../lib/agent-icons";
-  import {
-    sessionActivityLabel,
-    sessionActivityTone,
-    type SessionActivitySummary,
-  } from "../lib/session-activity";
+  import type { SessionActivitySummary } from "../lib/session-activity";
+  import type { SessionSubagentSnapshot } from "../lib/session-subagents";
+  import type { SessionTodoSnapshot } from "../lib/session-todos";
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
+  import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
 
   type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
   type ConfigValue = { value: string; name: string; group?: string };
@@ -39,7 +36,8 @@
     dcpCompressionAvailable,
     canCompressContext,
     sessionActivity,
-    sessionSubagentIcons,
+    sessionSubagentSnapshot,
+    sessionTodoSnapshot,
     sessionActivityOpen,
     sessionNeedsInput,
     onSetConfig,
@@ -71,7 +69,8 @@
     dcpCompressionAvailable: boolean;
     canCompressContext: boolean;
     sessionActivity: SessionActivitySummary;
-    sessionSubagentIcons: readonly (string | undefined)[];
+    sessionSubagentSnapshot: SessionSubagentSnapshot | undefined;
+    sessionTodoSnapshot: SessionTodoSnapshot | undefined;
     sessionActivityOpen: boolean;
     sessionNeedsInput: boolean;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
@@ -83,14 +82,6 @@
   } = $props();
 
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
-  const activityTone = $derived(sessionActivityTone(sessionActivity, promptRunning, sessionNeedsInput));
-  const activityLabel = $derived(sessionActivityLabel(sessionActivity, promptRunning, sessionNeedsInput));
-  const hasTodoProgress = $derived(sessionActivity.openTodos > 0 && sessionActivity.totalTodos > 0);
-  const compactSessionActivityVisible = $derived(
-    !sessionActivityOpen && (sessionActivity.activeSubagents > 0 || hasTodoProgress),
-  );
-  const compactAgentIcons = $derived(sessionSubagentIcons.slice(0, 3));
-  const hiddenAgentCount = $derived(Math.max(0, sessionSubagentIcons.length - compactAgentIcons.length));
   const activeConversationWorking = $derived(status === "ready" && promptRunning);
 
   function connectionLabel(value: ConnectionStatus): string {
@@ -116,12 +107,6 @@
       }
     }
     return values;
-  }
-
-  function activityToneClass(): string {
-    if (activityTone === "warning") return "text-tool-warning";
-    if (activityTone === "info") return "text-tool-info";
-    return "text-muted-foreground";
   }
 
 </script>
@@ -237,40 +222,15 @@
     {/each}
   </div>
 
-  {#if compactSessionActivityVisible}
-    <div class="flex shrink-0 items-center" aria-label="Session activity">
-      <button
-        class={[
-          "flex h-6 cursor-pointer items-center gap-1 rounded-sm bg-transparent px-1.5 transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-          activityToneClass(),
-        ]}
-        type="button"
-        title={`Open session activity · ${activityLabel}`}
-        aria-label={`Open session activity. ${activityLabel}`}
-        aria-expanded="false"
-        data-session-activity-summary
-        onclick={onOpenSessionActivity}
-      >
-        {#if compactAgentIcons.length > 0}
-          <span class="flex items-center gap-0.5" aria-hidden="true">
-            {#each compactAgentIcons as iconName, index (`${iconName ?? "agent"}:${index}`)}
-              {@const AgentIcon = agentIcon(iconName)}
-              <AgentIcon class="h-3.5 w-3.5 shrink-0" />
-            {/each}
-            {#if hiddenAgentCount > 0}
-              <span class="font-mono text-xs leading-none tabular-nums">+{hiddenAgentCount}</span>
-            {/if}
-          </span>
-        {/if}
-        {#if hasTodoProgress}
-          <span class="flex items-center gap-0.5 font-mono tabular-nums">
-            <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{sessionActivity.completedTodos}/{sessionActivity.totalTodos}</span>
-          </span>
-        {/if}
-      </button>
-    </div>
-  {/if}
+  <SessionActivityStatusHud
+    summary={sessionActivity}
+    subagentSnapshot={sessionSubagentSnapshot}
+    todoSnapshot={sessionTodoSnapshot}
+    {promptRunning}
+    {sessionNeedsInput}
+    {sessionActivityOpen}
+    {onOpenSessionActivity}
+  />
 </footer>
 
 <style>

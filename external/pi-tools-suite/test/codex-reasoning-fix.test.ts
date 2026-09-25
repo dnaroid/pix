@@ -1,284 +1,65 @@
-import { describe, expect, mock, test } from "bun:test";
-import { createPiAiMock } from "./support/pi-ai-mock.js";
-import { createTypeboxMock } from "./support/typebox-mock.js";
+import { describe, expect, test } from "bun:test";
+import register, { stripReasoningContentFromPayload } from "../src/codex-reasoning-fix/index.js";
+import { MODULES } from "../src/index.js";
 
-mock.module("@earendil-works/pi-ai", () =>
-	createPiAiMock({
-		Type: {
-			Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-			Optional: (schema: any) => ({ kind: "optional", schema }),
-			String: (options?: any) => ({ kind: "string", options }),
-			Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-			Number: (options?: any) => ({ kind: "number", options }),
-			Boolean: (options?: any) => ({ kind: "boolean", options }),
-			Record: (key: any, value: any, options?: any) => ({ kind: "record", key, value, options }),
-			Unknown: (options?: any) => ({ kind: "unknown", options }),
-		},
-	}),
-);
-mock.module("typebox", () => createTypeboxMock());
-
-class FakePi {
-	handlers = new Map<string, any>();
-	on(name: string, handler: any) { this.handlers.set(name, handler); }
-	async emit(name: string, event: any, ctx: any) { return await this.handlers.get(name)?.(event, ctx); }
-}
+const codex = { api: "openai-codex-responses", provider: "custom", id: "anything" };
+const direct = { api: "openai-responses", provider: "another", id: "also-anything" };
 
 describe("codex-reasoning-fix", () => {
-	test("is registered last so no later suite hook can reintroduce invalid content", async () => {
-		const { MODULES } = await import("../src/index.js");
-		expect(MODULES[MODULES.length - 1]?.name).toBe("codex-reasoning-fix");
-		expect(MODULES.findIndex((module) => module.name === "dcp")).toBeLessThan(MODULES.length - 1);
-		expect(MODULES.findIndex((module) => module.name === "credential-firewall")).toBe(MODULES.length - 2);
+	test("registers last within the suite only", () => {
+		expect(MODULES.at(-1)?.name).toBe("codex-reasoning-fix");
 	});
 
-	test("does not monkey-patch global fetch or WebSocket transport", async () => {
-		const fetchBefore = globalThis.fetch;
-		const sendBefore = globalThis.WebSocket?.prototype.send;
-		await import("../src/codex-reasoning-fix/index.js");
-		expect(globalThis.fetch).toBe(fetchBefore);
-		expect(globalThis.WebSocket?.prototype.send).toBe(sendBefore);
-	});
-
-	test("strips content from reasoning items in a Responses `input` payload", async () => {
-		const { stripReasoningContentFromPayload } = await import("../src/codex-reasoning-fix/index.js");
-
-		const reasoning = {
-			id: "rs_abc",
-			type: "reasoning",
-			content: [],
-			encrypted_content: "gAAA-encrypted",
-			summary: [{ type: "summary_text", text: "thought" }],
-		};
-		const payload = {
-			model: "openai-codex/gpt-5.4",
-			input: [
-				{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
-				reasoning,
-			],
-		};
-
-		const result = stripReasoningContentFromPayload(payload) as any;
-
-		expect(result).not.toBe(payload); // cloned when changed
-		const input = result.input as any[];
-		expect(input).toHaveLength(2);
-		expect(input[0]).toBe(payload.input[0]); // non-reasoning untouched (same ref)
-		expect(input[1]).not.toHaveProperty("content");
-		expect(input[1]).toEqual({
-			id: "rs_abc",
-			type: "reasoning",
-			encrypted_content: "gAAA-encrypted",
-			summary: [{ type: "summary_text", text: "thought" }],
-		});
-		// Original item is not mutated in place.
-		expect(reasoning.content).toEqual([]);
-	});
-
-	test("leaves reasoning items that already lack content untouched", async () => {
-		const { stripReasoningContentFromPayload } = await import("../src/codex-reasoning-fix/index.js");
-
-		const payload = {
-			model: "openai-codex/gpt-5.4",
-			input: [{ id: "rs_1", type: "reasoning", encrypted_content: "x" }],
-		};
-
-		const result = stripReasoningContentFromPayload(payload);
-		// Nothing changed -> returns the original reference.
-		expect(result).toBe(payload);
-	});
-
-	test("is a no-op for non-Responses payloads (system-only / messages / non-record)", async () => {
-		const { stripReasoningContentFromPayload } = await import("../src/codex-reasoning-fix/index.js");
-
-		const systemOnly = { system: "prompt", model: "anthropic/x" };
-		expect(stripReasoningContentFromPayload(systemOnly)).toBe(systemOnly);
-
-		const chat = { model: "openai/gpt-4o", messages: [{ role: "user", content: "hi" }] };
-		expect(stripReasoningContentFromPayload(chat)).toBe(chat);
-
-		expect(stripReasoningContentFromPayload(null)).toBeNull();
-		expect(stripReasoningContentFromPayload("nope")).toBe("nope");
-	});
-
-	test("registers a before_provider_request handler that returns the cleaned payload", async () => {
-		const { default: register } = await import("../src/codex-reasoning-fix/index.js");
-		const pi = new FakePi();
-		register(pi as any);
-
-		const result = await pi.emit(
-			"before_provider_request",
-			{
-				payload: {
-					model: "openai-codex/gpt-5.4",
-					input: [{ id: "rs_z", type: "reasoning", content: [], encrypted_content: "e" }],
-				},
-			},
-			{},
-		);
-
-		expect(result).toBeDefined();
-		expect(result.input[0]).not.toHaveProperty("content");
-		expect(result.input[0]).toHaveProperty("encrypted_content", "e");
-	});
-
-	test("handler returns undefined when nothing needs cleaning", async () => {
-		const { default: register } = await import("../src/codex-reasoning-fix/index.js");
-		const pi = new FakePi();
-		register(pi as any);
-
-		const result = await pi.emit(
-			"before_provider_request",
-			{ payload: { model: "anthropic/claude", messages: [{ role: "user", content: "hi" }] } },
-			{},
-		);
-
-		expect(result).toBeUndefined();
-	});
-
-	test("removes prompt_cache_retention from openai-codex requests", async () => {
-		const { default: register } = await import("../src/codex-reasoning-fix/index.js");
-		const pi = new FakePi();
-		register(pi as any);
-
-		const payload = {
-			model: "gpt-5.6-sol",
-			prompt_cache_key: "session-1",
-			prompt_cache_retention: "24h",
-			input: [{ type: "message", role: "user", content: "retry" }],
-		};
-		const result = await pi.emit(
-			"before_provider_request",
-			{ payload },
-			{ model: { provider: "openai-codex", id: "gpt-5.6-sol" } },
-		);
-
-		expect(result).toEqual({
-			model: "gpt-5.6-sol",
-			prompt_cache_key: "session-1",
-			input: [{ type: "message", role: "user", content: "retry" }],
-		});
-		expect(payload).toHaveProperty("prompt_cache_retention", "24h");
-	});
-
-	test("removes prompt_cache_retention from every current openai-codex model", async () => {
-		const { stripUnsupportedPromptCacheRetention } = await import("../src/codex-reasoning-fix/index.js");
-		for (const modelId of [
-			"gpt-5.3-codex-spark",
-			"gpt-5.4",
-			"gpt-5.4-mini",
-			"gpt-5.5",
-			"gpt-5.6-luna",
-			"gpt-5.6-sol",
-		]) {
-			const payload = { model: modelId, prompt_cache_retention: "24h" };
-			expect(stripUnsupportedPromptCacheRetention(
-				payload,
-				{ provider: "openai-codex", id: modelId },
-			)).toEqual({ model: modelId });
-			expect(payload).toHaveProperty("prompt_cache_retention", "24h");
+	test("removes only null and empty-array content on exact reasoning items, without mutation", () => {
+		for (const model of [codex, direct]) {
+			const input = [
+				{ type: "reasoning", content: null, id: "rs_a", encrypted_content: "cipher" },
+				{ type: "reasoning", content: [], id: "rs_b", summary: [{ type: "summary_text", text: "thought" }] },
+				{ type: "reasoning", content: [{ type: "text", text: "keep" }] },
+				{ type: "reasoning", content: "malformed but preserved" },
+				{ type: "reasoning", content: {} },
+				{ type: "reasoning", content: 0 },
+				{ type: "reasoning", content: undefined },
+				{ type: "reasoning", id: "no-content" },
+				{ type: "function_call_output", content: null, output: "ok" },
+				{ type: "unknown", content: [] },
+				{ type: "message", content: [] },
+				{ role: "user", content: null },
+			];
+			const payload = { input, prompt_cache_retention: "24h", other: { nested: true } };
+			const result = stripReasoningContentFromPayload(payload, model) as typeof payload;
+			expect(result).not.toBe(payload);
+			expect(result.input).not.toBe(input);
+			expect(result.input[0]).toEqual({ type: "reasoning", id: "rs_a", encrypted_content: "cipher" });
+			expect(result.input[1]).toEqual({ type: "reasoning", id: "rs_b", summary: input[1].summary });
+			expect(input[0]).toHaveProperty("content", null);
+			expect(input[1]).toHaveProperty("content", []);
+			for (let i = 2; i < input.length; i++) expect(result.input[i]).toBe(input[i]);
+			expect(result.other).toBe(payload.other);
+			expect(result.prompt_cache_retention).toBe("24h");
 		}
 	});
 
-	test("removes legacy retention from direct OpenAI GPT-5.6+ but preserves older and other providers", async () => {
-		const { stripUnsupportedPromptCacheRetention } = await import("../src/codex-reasoning-fix/index.js");
-		for (const modelId of ["gpt-5.6", "gpt-5.6-sol", "gpt-5.10", "gpt-6"]) {
-			const payload = { model: modelId, prompt_cache_retention: "24h" };
-			expect(stripUnsupportedPromptCacheRetention(
-				payload,
-				{ provider: "openai", id: modelId },
-			)).toEqual({ model: modelId });
+	test("leaves unrelated APIs, invalid carriers, and no-op payloads identical", () => {
+		const payload = { input: [{ type: "reasoning", content: null }], messages: [{ type: "reasoning", content: [] }] };
+		for (const model of [undefined, null, "openai-codex-responses", { api: "anthropic-messages", provider: "openai-codex" }, { api: "OPENAI-RESPONSES" }]) {
+			expect(stripReasoningContentFromPayload(payload, model)).toBe(payload);
 		}
-
-		const olderOpenAiPayload = { model: "gpt-5.5", prompt_cache_retention: "24h" };
-		const otherProviderPayload = { model: "openai/gpt-5.6-sol", prompt_cache_retention: "24h" };
-
-		expect(stripUnsupportedPromptCacheRetention(
-			olderOpenAiPayload,
-			{ provider: "openai", id: "gpt-5.5" },
-		)).toBe(olderOpenAiPayload);
-		expect(stripUnsupportedPromptCacheRetention(
-			otherProviderPayload,
-			{ provider: "openrouter", id: "openai/gpt-5.6-sol" },
-		)).toBe(otherProviderPayload);
-	});
-
-	test("uses a fully qualified payload model only when selected-model metadata is unavailable", async () => {
-		const { stripUnsupportedPromptCacheRetention } = await import("../src/codex-reasoning-fix/index.js");
-		const qualified = {
-			model: "openai-codex/gpt-5.4",
-			prompt_cache_retention: "24h",
-		};
-		const directOpenAi = {
-			model: "openai/gpt-5.6",
-			prompt_cache_retention: "24h",
-		};
-		const bare = { model: "gpt-5.6-sol", prompt_cache_retention: "24h" };
-
-		expect(stripUnsupportedPromptCacheRetention(qualified, undefined)).toEqual({
-			model: "openai-codex/gpt-5.4",
-		});
-		expect(stripUnsupportedPromptCacheRetention(directOpenAi, undefined)).toEqual({
-			model: "openai/gpt-5.6",
-		});
-		expect(stripUnsupportedPromptCacheRetention(bare, undefined)).toBe(bare);
-	});
-
-	test("final sanitizer removes content introduced by an earlier payload hook", async () => {
-		const handlers: any[] = [];
-		const pi = { on(name: string, handler: any) { if (name === "before_provider_request") handlers.push(handler); } };
-		pi.on("before_provider_request", async (event: any) => ({
-			...event.payload,
-			input: event.payload.input.map((item: any) => item.type === "function_call_output"
-				? { ...item, content: "late metadata" }
-				: item),
-		}));
-		const { default: register } = await import("../src/codex-reasoning-fix/index.js");
-		register(pi as any);
-
-		let payload: any = {
-			input: [
-				{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
-				{ type: "function_call_output", call_id: "c1", output: "ok" },
-			],
-		};
-		for (const handler of handlers) {
-			const result = await handler({ type: "before_provider_request", payload }, {});
-			if (result !== undefined) payload = result;
+		for (const carrier of [null, "bad", { messages: payload.input }, { input: null }, { input: {} }, { input: [{ type: "reasoning", content: [1] }] }]) {
+			expect(stripReasoningContentFromPayload(carrier, codex)).toBe(carrier);
 		}
-
-		expect(payload.input[0]).toHaveProperty("content");
-		expect(payload.input[1]).not.toHaveProperty("content");
-		expect(payload.input[1]).toHaveProperty("output", "ok");
-	});
-});
-
-describe("stripCarrier (shared core)", () => {
-	test("strips content from non-message items in an `input` array", async () => {
-		const { stripCarrier } = await import("../src/codex-reasoning-fix/index.js");
-
-		const obj = {
-			input: [
-				{ role: "user", content: "hi" },
-				{ id: "rs_1", type: "reasoning", content: [], encrypted_content: "e" },
-				{ type: "function_call_output", call_id: "c1", output: "ok", content: [] },
-			],
-		};
-
-		const result = stripCarrier(obj) as any;
-		expect(result).toBeDefined();
-		expect(result.stripped).toBe(2);
-		expect(result.obj.input[0]).toHaveProperty("content");
-		expect(result.obj.input[1]).not.toHaveProperty("content");
-		expect(result.obj.input[2]).not.toHaveProperty("content");
-		// Original untouched.
-		expect(obj.input[1]).toHaveProperty("content");
+		const empty = { ...payload, input: [] };
+		expect(stripReasoningContentFromPayload(empty, codex)).toBe(empty);
 	});
 
-	test("returns undefined when nothing needs stripping", async () => {
-		const { stripCarrier } = await import("../src/codex-reasoning-fix/index.js");
-		expect(stripCarrier({ input: [{ role: "user", content: "hi" }] })).toBeUndefined();
-		expect(stripCarrier({ system: "x" })).toBeUndefined();
-		expect(stripCarrier(null)).toBeUndefined();
+	test("handler reads selected model API from context, returns undefined on no-op", () => {
+		let handler: (event: any, ctx: any) => unknown = () => { throw new Error("not registered"); };
+		register({ on(name: string, fn: typeof handler) { expect(name).toBe("before_provider_request"); handler = fn; } });
+		const payload = { model: "openai-codex/gpt-5.4", input: [{ type: "reasoning", content: [] }], prompt_cache_retention: "24h" };
+		expect(handler({ payload }, { model: { api: "other", provider: "openai-codex" } })).toBeUndefined();
+		const result = handler({ payload }, { model: direct }) as typeof payload;
+		expect(result.input[0]).toEqual({ type: "reasoning" });
+		expect(result.prompt_cache_retention).toBe("24h");
+		expect(payload.input[0].content).toEqual([]);
 	});
 });

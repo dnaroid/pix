@@ -5,6 +5,7 @@ import {
   formatSessionSubagentElapsed,
   sessionSubagentCount,
   sessionSubagentIconNames,
+  sessionSubagentIndicators,
   sessionSubagentModelLabel,
   sessionSubagentRunName,
   sessionSubagentSnapshot,
@@ -117,6 +118,14 @@ describe("desktop session subagents", () => {
     }]);
 
     expect(sessionSubagentIconNames(state)).toEqual(["search", undefined]);
+    expect(sessionSubagentIndicators(state).map((indicator) => [
+      indicator.runName,
+      indicator.agent.id,
+      indicator.preview?.icon,
+    ])).toEqual([
+      ["run", "searcher", "search"],
+      ["run", "worker", undefined],
+    ]);
   });
 
   it("formats queued, seconds, minutes, hours, and invalid elapsed states", () => {

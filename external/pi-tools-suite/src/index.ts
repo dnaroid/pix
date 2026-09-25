@@ -41,8 +41,8 @@ export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule>
 	{ name: "resource-registry", load: () => import("./resource-registry/index") },
 	// Secret firewall is intentionally opt-in. Keep it after payload-shaping modules.
 	{ name: "credential-firewall", load: () => import("./credential-firewall/index") },
-	// Keep this last: its before_provider_request handler is the final payload
-	// sanitizer after DCP and any other provider-payload modifiers.
+	// Keep this last within the suite, after its other payload modifiers. Other
+	// extensions may register later handlers; this is not a global ordering guarantee.
 	{ name: "codex-reasoning-fix", load: () => import("./codex-reasoning-fix/index") },
 ];
 

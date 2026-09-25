@@ -47,6 +47,13 @@ export interface SessionSubagentSnapshot {
   readonly checkedAt: number;
 }
 
+export interface SessionSubagentIndicator {
+  readonly runDir: string;
+  readonly runName: string;
+  readonly agent: SessionSubagentAgent;
+  readonly preview?: SessionSubagentTaskPreview;
+}
+
 const SUBAGENT_STATUSES: readonly SessionSubagentStatus[] = [
   "planned",
   "running",
@@ -89,12 +96,23 @@ export function sessionSubagentCount(snapshot: SessionSubagentSnapshot | undefin
   return visibleSessionSubagentRuns(snapshot).reduce((count, run) => count + run.agents.length, 0);
 }
 
+export function sessionSubagentIndicators(
+  snapshot: SessionSubagentSnapshot | undefined,
+): SessionSubagentIndicator[] {
+  return visibleSessionSubagentRuns(snapshot).flatMap((run) => (
+    run.agents.map((agent) => ({
+      runDir: run.runDir,
+      runName: sessionSubagentRunName(run.runDir),
+      agent,
+      preview: sessionSubagentTaskPreview(run, agent.id),
+    }))
+  ));
+}
+
 export function sessionSubagentIconNames(
   snapshot: SessionSubagentSnapshot | undefined,
 ): Array<string | undefined> {
-  return visibleSessionSubagentRuns(snapshot).flatMap((run) => (
-    run.agents.map((agent) => sessionSubagentTaskPreview(run, agent.id)?.icon)
-  ));
+  return sessionSubagentIndicators(snapshot).map((indicator) => indicator.preview?.icon);
 }
 
 export function sessionSubagentTaskPreview(

@@ -1398,18 +1398,18 @@ describe("context gateway P00: installed SDK tool_result pipeline", () => {
 	test("provider firewall runs before the final Codex sanitizer without restoring secrets or invalid fields", async () => {
 		const secret = `glpat-${"P".repeat(32)}`;
 		const runner = createRunner([credentialFirewallExtension(), codexReasoningFixExtension()]);
-		(runner as any).getModel = () => ({ provider: "openai-codex", id: "gpt-5.6-sol" });
+		(runner as any).getModel = () => ({ api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.6-sol" });
 		const payload = {
 			model: "openai-codex/gpt-5.6-sol",
 			prompt_cache_retention: "24h",
 			input: [
 				{ type: "message", role: "user", content: `token ${secret}` },
-				{ type: "reasoning", content: "spurious-content", summary: [] },
+				{ type: "reasoning", content: [], summary: [] },
 			],
 		};
 		const sanitized = await runner.emitBeforeProviderRequest(payload) as any;
 		expect(JSON.stringify(sanitized)).not.toContain(secret);
-		expect(sanitized.prompt_cache_retention).toBeUndefined();
+		expect(sanitized.prompt_cache_retention).toBe("24h");
 		expect(sanitized.input[0].content).toContain("<SECRET:gitlab_token:1>");
 		expect(sanitized.input[1].content).toBeUndefined();
 		expect(sanitized.input[1].summary).toEqual([]);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionStateNotification } from "./session-state";
 import {
+  currentSessionTodoTask,
   hasOpenSessionTodos,
   sessionTodoCounts,
   sessionTodoSnapshot,
@@ -60,6 +61,25 @@ describe("desktop session todos", () => {
     const completed = snapshot([{ id: 1, subject: "Done", status: "completed" }]);
     expect(hasOpenSessionTodos(completed)).toBe(false);
     expect(visibleSessionTodoRows(completed)).toEqual([]);
+  });
+
+  it("selects the current plan item by active priority", () => {
+    expect(currentSessionTodoTask(snapshot([
+      { id: 1, subject: "Pending first", status: "pending" },
+      { id: 2, subject: "Working now", status: "in_progress" },
+      { id: 3, subject: "Deferred", status: "deferred" },
+    ]))?.id).toBe(2);
+    expect(currentSessionTodoTask(snapshot([
+      { id: 3, subject: "Deferred", status: "deferred" },
+      { id: 1, subject: "Pending first", status: "pending" },
+    ]))?.id).toBe(1);
+    expect(currentSessionTodoTask(snapshot([
+      { id: 3, subject: "Deferred", status: "deferred" },
+      { id: 4, subject: "Done", status: "completed" },
+    ]))?.id).toBe(3);
+    expect(currentSessionTodoTask(snapshot([
+      { id: 4, subject: "Done", status: "completed" },
+    ]))).toBeUndefined();
   });
 
   it("keeps the newest snapshot for each ACP session", () => {
