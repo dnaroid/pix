@@ -26,95 +26,53 @@ function subagents(runs: SessionSubagentSnapshot["runs"]): SessionSubagentSnapsh
 }
 
 describe("session inspector activity policy", () => {
-  it("opens for first-visible and newly added todo or live-subagent identities", () => {
+  it("never opens when todo or live-subagent activity appears", () => {
     const tracker = createSessionInspectorActivityTracker();
     const firstTodo = todos([{ id: 1, subject: "Plan", status: "pending" }]);
-    const sameTodoWithChangedStatus = todos([{ id: 1, subject: "Plan", status: "in_progress" }]);
     const liveAgent = subagents([{ runDir: "/run", agents: [{ id: "worker", status: "running" }] }]);
 
     expect(tracker.observe("session-a", undefined, undefined)).toBe("close");
-    expect(tracker.observe("session-a", firstTodo, undefined)).toBe("open");
-    expect(tracker.observe("session-a", sameTodoWithChangedStatus, undefined)).toBeNull();
-    expect(tracker.observe("session-a", sameTodoWithChangedStatus, liveAgent)).toBe("open");
-    expect(tracker.observe("session-a", sameTodoWithChangedStatus, liveAgent)).toBeNull();
+    expect(tracker.observe("session-a", firstTodo, undefined)).toBeNull();
+    expect(tracker.observe("session-a", undefined, liveAgent)).toBeNull();
+    expect(tracker.observe("session-a", firstTodo, liveAgent)).toBeNull();
   });
 
-  it("uses the existing visible-list filters and closes only when both lists clear", () => {
+  it("uses visible todo and active-agent filters and closes only when both are empty", () => {
     const tracker = createSessionInspectorActivityTracker();
     const completedOnly = todos([{ id: 1, subject: "Done", status: "completed" }]);
+    const pendingTodo = todos([{ id: 2, subject: "Pending", status: "pending" }]);
     const liveAgent = subagents([{ runDir: "/run", agents: [{ id: "worker", status: "running" }] }]);
     const terminalAgent = subagents([{ runDir: "/run", agents: [{ id: "worker", status: "done" }] }]);
 
     expect(tracker.observe("session-a", completedOnly, undefined)).toBe("close");
-    expect(tracker.observe("session-a", completedOnly, liveAgent)).toBe("open");
+    expect(tracker.observe("session-a", completedOnly, liveAgent)).toBeNull();
+    expect(tracker.observe("session-a", pendingTodo, terminalAgent)).toBeNull();
     expect(tracker.observe("session-a", completedOnly, terminalAgent)).toBe("close");
-    expect(tracker.observe("session-a", completedOnly, terminalAgent)).toBeNull();
   });
 
-  it("keeps activity history session-scoped so unchanged activity never overrides a manual toggle", () => {
+  it("closes an open inspector when activity clears but preserves a closed inspector when activity appears", () => {
     const tracker = createSessionInspectorActivityTracker();
-    const sessionATodo = todos([{ id: 1, subject: "A", status: "pending" }]);
-    const sessionBTodo = todos([{ id: 1, subject: "B", status: "pending" }]);
-
-    expect(tracker.observe("session-a", sessionATodo, undefined)).toBe("open");
-    // A manual close occurs outside the tracker. An unchanged snapshot must not reopen it.
-    expect(tracker.observe("session-a", sessionATodo, undefined)).toBeNull();
-    expect(tracker.observe("session-b", undefined, undefined)).toBe("close");
-    expect(tracker.observe("session-a", sessionATodo, undefined)).toBeNull();
-    expect(tracker.observe("session-b", sessionBTodo, undefined)).toBe("open");
-  });
-
-  it("applies only active-session transitions and preserves a manual close for unchanged activity", () => {
-    const tracker = createSessionInspectorActivityTracker();
-    const sessionATodo = todos([{ id: 1, subject: "A", status: "pending" }]);
-    const sessionBTodo = todos([{ id: 2, subject: "B", status: "pending" }]);
+    const activeTodo = todos([{ id: 1, subject: "Active", status: "pending" }]);
     let open = false;
     const setOpen = (next: boolean): void => { open = next; };
 
-    syncSessionInspectorActivity(tracker, "session-a", sessionATodo, undefined, setOpen);
-    expect(open).toBe(true);
-
-    open = false;
-    syncSessionInspectorActivity(tracker, "session-a", sessionATodo, undefined, setOpen);
+    syncSessionInspectorActivity(tracker, "session-a", activeTodo, undefined, open, setOpen);
     expect(open).toBe(false);
 
-    // A background snapshot is not passed to the active-session effect. It is
-    // observed only after that session becomes active.
-    syncSessionInspectorActivity(tracker, "session-b", sessionBTodo, undefined, setOpen);
+    open = true;
+    syncSessionInspectorActivity(tracker, "session-a", activeTodo, undefined, open, setOpen);
     expect(open).toBe(true);
 
-    syncSessionInspectorActivity(tracker, "session-b", undefined, undefined, setOpen);
+    syncSessionInspectorActivity(tracker, "session-a", undefined, undefined, open, setOpen);
     expect(open).toBe(false);
   });
 
-  it("decides each tab's first display from its own current activity", () => {
+  it("closes a restored or manually opened empty inspector", () => {
     const tracker = createSessionInspectorActivityTracker();
-    const activeTodo = todos([{ id: 1, subject: "Active", status: "pending" }]);
     let open = true;
     const setOpen = (next: boolean): void => { open = next; };
 
-    // A restored inspector closes when the first tab has no visible activity.
-    syncSessionInspectorActivity(tracker, "empty", undefined, undefined, setOpen);
+    syncSessionInspectorActivity(tracker, "empty", undefined, undefined, open, setOpen);
     expect(open).toBe(false);
-
-    // A different tab's already-arrived activity opens on its first display.
-    syncSessionInspectorActivity(tracker, "active", activeTodo, undefined, setOpen);
-    expect(open).toBe(true);
-
-    // Re-observing either tab is an ordinary update and cannot override a
-    // manual choice.
-    open = false;
-    syncSessionInspectorActivity(tracker, "active", activeTodo, undefined, setOpen);
-    expect(open).toBe(false);
-  });
-
-  it("opens when first startup activity arrives after an empty first display", () => {
-    const tracker = createSessionInspectorActivityTracker();
-    const activeTodo = todos([{ id: 1, subject: "Late", status: "pending" }]);
-
-    expect(tracker.observe("session-a", undefined, undefined)).toBe("close");
-    expect(tracker.observe("session-a", activeTodo, undefined)).toBe("open");
-    // Once shown, unchanged late data respects a subsequent manual close.
-    expect(tracker.observe("session-a", activeTodo, undefined)).toBeNull();
   });
 });

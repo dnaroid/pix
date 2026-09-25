@@ -63,6 +63,7 @@ export function createDesktopWorkbenchViewModelServices(options: DesktopViewMode
       attachments: options.interactions.attachments,
       elicitation: options.interactions.elicitation,
       questionImages: options.interactions.questionImages,
+      lspOnboarding: options.lspOnboarding,
     },
     editor: {
       workspace: options.workspace,
@@ -70,12 +71,14 @@ export function createDesktopWorkbenchViewModelServices(options: DesktopViewMode
       clientAvailable: options.clientAvailable,
       operationRunning: options.operationRunning,
       activeWorkbenchTabId: options.activeWorkbenchTabId,
+      terminalOpen: () => options.presentation.workbenchTabs.some((tab) => tab.id === "terminal"),
       externalEditorLabel: () => externalEditorLabel(options.project.workspace.externalEditor),
       preview: options.project.preview,
       projectDocuments: options.project.documents,
       projectWorkspace: options.project.workspace,
       git: options.project.git,
       gitAssist: options.workbenchGit.gitAssist,
+      lspOnboarding: options.lspOnboarding,
     },
     inspector: {
       activeSessionId: () => options.state.sessionId,

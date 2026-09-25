@@ -79,6 +79,12 @@ while project selection/open state remains separate from transient focus.
   must preserve visible focus and the single-composite keyboard model.
 - ArrowUp/ArrowDown and Home/End move focus without activating a destination.
 - Enter/Space/click keeps the existing view-selection/collapse behavior.
+- Every expanded workspace panel header includes a compact Close control. It uses
+  the same collapse path as activating the already-selected Activity Bar item,
+  so closing the panel preserves the current destination for the next reopen.
+- The expanded workspace panel has no per-view maximum width. Pointer or keyboard
+  resizing may keep widening it until the window reaches the shared minimum width
+  reserved for the main conversation/workbench area.
 - Focus movement does not alter indicator state or acknowledge a destination;
   acknowledgement remains tied to the view actually becoming visible.
 

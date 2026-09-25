@@ -11,6 +11,7 @@ import type { createSessionHistory } from "./session-history.svelte";
 import type { createSessionMetadataStore } from "./session-metadata.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createSessionUpdateBatcher } from "./session-update-batcher";
+import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 
 type DcpCompression = ReturnType<typeof createDcpCompression>;
 type GitWorkspace = ReturnType<typeof createGitWorkspaceStore>;
@@ -36,6 +37,7 @@ type SessionCoordinatorOptions = {
   git: GitWorkspace;
   metadata: SessionMetadata;
   prompts: PromptRuntime;
+  lspOnboarding: LspOnboardingStore;
   dcp: DcpCompression;
   updates: SessionUpdates;
 };
@@ -56,6 +58,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     options.git.setResolveRunning(false);
     options.metadata.reset();
     options.prompts.reset();
+    options.lspOnboarding.reset();
     options.dcp.reset();
     options.state.resetContent();
     options.setOperationRunning(false);
@@ -74,6 +77,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
       return;
     }
     if (options.registry.handleSessionState(notification)) return;
+    if (options.lspOnboarding.handleSessionState(notification)) return;
     options.activity.handle(notification);
   }
 
@@ -96,6 +100,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     options.activity.clear(sessionId);
     options.metadata.clear(sessionId);
     options.prompts.clearSession(sessionId);
+    options.lspOnboarding.clearSession(sessionId);
   }
 
   function forgetRuntime(sessionId: string): void {

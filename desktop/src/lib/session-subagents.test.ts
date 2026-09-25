@@ -4,6 +4,7 @@ import {
   formatSessionSubagentActivity,
   formatSessionSubagentElapsed,
   sessionSubagentCount,
+  sessionSubagentIconNames,
   sessionSubagentModelLabel,
   sessionSubagentRunName,
   sessionSubagentSnapshot,
@@ -98,6 +99,24 @@ describe("desktop session subagents", () => {
       tasks: [{ id: "agent-1", icon: 7 } as unknown as { id: string; icon: string }],
     }]);
     expect(sessionSubagentSnapshot(notification(invalid))).toBeUndefined();
+  });
+
+  it("collects one icon slot for every active agent", () => {
+    const state = snapshot([{
+      runDir: "/run",
+      agents: [
+        { id: "searcher", status: "running" },
+        { id: "worker", status: "retrying" },
+        { id: "done", status: "done" },
+      ],
+      tasks: [
+        { id: "searcher", icon: "search" },
+        { id: "worker" },
+        { id: "done", icon: "terminal" },
+      ],
+    }]);
+
+    expect(sessionSubagentIconNames(state)).toEqual(["search", undefined]);
   });
 
   it("formats queued, seconds, minutes, hours, and invalid elapsed states", () => {

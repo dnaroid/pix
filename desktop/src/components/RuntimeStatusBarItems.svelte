@@ -326,7 +326,7 @@
         title={workspacePath ?? workspaceName}
         data-runtime-workspace
       >
-        <span class="min-w-0 truncate text-foreground">{workspaceName}</span>
+        <span class="min-w-0 truncate text-muted-foreground">{workspaceName}</span>
         {#if workspaceBranch}
           <span class="max-w-36 shrink truncate text-muted-foreground/55">({workspaceBranch})</span>
         {:else if showSkeletons}

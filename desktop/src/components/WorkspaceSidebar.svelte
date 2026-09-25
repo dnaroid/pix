@@ -9,6 +9,7 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Settings from "@lucide/svelte/icons/settings";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
+  import X from "@lucide/svelte/icons/x";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount, tick } from "svelte";
   import {
@@ -240,7 +241,6 @@
 
   let sidebarElement = $state<HTMLElement | null>(null);
   let projectSwitcher = $state<{ close: () => void } | null>(null);
-  let packageScriptsPanel = $state<{ openTerminal: (command: string) => Promise<void> } | null>(null);
   let activeTab = $state<SidebarTab>("tasks");
   const layoutController = createWorkspaceSidebarLayoutController({ activeTab: () => activeTab });
   const projectSettingsController = createWorkspaceSidebarProjectSettingsController({
@@ -433,6 +433,11 @@
     if (layoutController.collapsed) layoutController.setCollapsed(false);
   }
 
+  function closeActivePanel(): void {
+    if (layoutController.collapsed) return;
+    selectTab(activeTab);
+  }
+
   /** Open the project Tasks view for actions initiated outside the sidebar. */
   export async function openTasksPanel(taskId?: string): Promise<void> {
     statusMenuController.close();
@@ -448,19 +453,6 @@
     const taskCard = [...(sidebarElement?.querySelectorAll<HTMLElement>("[data-task-card]") ?? [])]
       .find((card) => card.dataset.taskId === taskId);
     taskCard?.scrollIntoView({ block: "nearest" });
-  }
-
-  /** Open an interactive workspace shell and submit one command into it. */
-  export async function openTerminal(command: string): Promise<void> {
-    statusMenuController.close();
-    planSelectorOpen = false;
-    planSelectorQuery = "";
-    editorOpen = false;
-    deleteTaskId = null;
-    setActiveTab("scripts");
-    if (layoutController.collapsed) layoutController.setCollapsed(false);
-    await tick();
-    await packageScriptsPanel?.openTerminal(command);
   }
 
   /** Close the project picker when another top-level interaction takes focus. */
@@ -554,7 +546,7 @@
 
   {#if !layoutController.collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
-      <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome px-3">
+      <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome pl-3 pr-1">
         <strong class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
           <span class="shrink-0 text-xs text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
@@ -611,6 +603,13 @@
             ><RefreshCw class={["h-3.5 w-3.5", registryLoading || registryActionId === "refresh" ? "animate-spin" : ""]} aria-hidden="true" /></button>
           </div>
         {/if}
+        <button
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          type="button"
+          title={`Close ${activeTabTitle}`}
+          aria-label={`Close ${activeTabTitle}`}
+          onclick={closeActivePanel}
+        ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>
 
       {#if activeTab === "tasks"}
@@ -720,7 +719,7 @@
         </div>
       {:else if activeTab === "scripts"}
         <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Package Scripts">
-          <PackageScriptsPanel bind:this={packageScriptsPanel} {workspace} afterWorkspaceSave={onWorkspaceSettingsSave} />
+          <PackageScriptsPanel {workspace} afterWorkspaceSave={onWorkspaceSettingsSave} />
         </div>
       {:else if activeTab === "idx"}
         <div id="workspace-idx-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="IDX">

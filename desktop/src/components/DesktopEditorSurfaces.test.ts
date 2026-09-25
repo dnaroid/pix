@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import appSource from "../App.svelte?raw";
 import workbenchBuilderSource from "../app/desktop-workbench-prop-builders.ts?raw";
 import diffSource from "./GitDiffPane.svelte?raw";
 import previewSource from "./PreviewPane.svelte?raw";
@@ -6,6 +7,7 @@ import previewEditorControllerSource from "./preview-editor-controller.svelte.ts
 import previewFileSearchControllerSource from "./preview-file-search-controller.svelte.ts?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
 import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
+import terminalPaneSource from "./WorkbenchTerminalPane.svelte?raw";
 
 describe("desktop editor work surfaces", () => {
   it("renders Preview and Git Diff as top-level workbench tabs instead of modal or nested editor tabs", () => {
@@ -17,6 +19,16 @@ describe("desktop editor work surfaces", () => {
     expect(workbenchSurfaceSource).toContain("<GitDiffPane");
     expect(previewSource).not.toContain("<dialog");
     expect(diffSource).not.toContain("<dialog");
+  });
+
+  it("routes !! commands into a dedicated top-level Terminal workbench tab", () => {
+    expect(appSource).toContain("workbenchTerminal.show();");
+    expect(appSource).toContain("await pane.openTerminal(command);");
+    expect(appSource).not.toContain("workspaceSidebar?.openTerminal(command)");
+    expect(workbenchSurfaceSource).toContain('id="workbench-panel-terminal"');
+    expect(workbenchSurfaceSource).toContain("<WorkbenchTerminalPane");
+    expect(terminalPaneSource).toContain("export async function openTerminal(command: string): Promise<void>");
+    expect(terminalPaneSource).toContain("controller.openShellTerminal(command)");
   });
 
   it("exposes a copy action for the exact Git review resolution prompt", () => {

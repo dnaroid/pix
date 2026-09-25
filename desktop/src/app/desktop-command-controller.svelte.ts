@@ -24,7 +24,7 @@ type DesktopCommandControllerOptions = {
   taskActionId: () => string | null;
   activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
   activeWorkbenchTabId: () => WorkbenchTabId | null;
-  activeWorkbenchTabKind: () => "session" | "preview" | "diff" | undefined;
+  activeWorkbenchTabKind: () => "session" | "preview" | "diff" | "lsp-install" | "terminal" | undefined;
   workbenchTabs: () => readonly WorkbenchTab[];
   previewOpen: () => boolean;
   gitDiffOpen: () => boolean;
@@ -81,7 +81,10 @@ export function createDesktopCommandController(options: DesktopCommandController
       case "editor.gitDiff":
         return options.gitDiffOpen() && options.activeWorkbenchTabId() !== "git-diff";
       case "editor.close":
-        return options.activeWorkbenchTabKind() === "preview" || options.activeWorkbenchTabKind() === "diff";
+        return options.activeWorkbenchTabKind() === "preview"
+          || options.activeWorkbenchTabKind() === "diff"
+          || options.activeWorkbenchTabKind() === "lsp-install"
+          || options.activeWorkbenchTabKind() === "terminal";
       case "session.new":
         return options.canUseSession();
       case "session.open":

@@ -3,7 +3,6 @@
   import { onMount } from "svelte";
   import type { FitAddon } from "@xterm/addon-fit";
   import type { ILink, Terminal } from "@xterm/xterm";
-  import { createAnimationFrameCoalescer } from "../lib/animation-frame-coalescer";
   import { createTerminalViewLifetime, type TerminalViewLifetime } from "./terminal-view-lifetime";
 
   type TerminalTextLink = {
@@ -43,7 +42,6 @@
   } = $props();
 
   let container: HTMLDivElement | undefined;
-  let terminalFrame: HTMLDivElement | undefined;
   let scrollTrack: HTMLDivElement | undefined;
   let terminal: Terminal | undefined;
   let fitAddon: FitAddon | undefined;
@@ -56,11 +54,6 @@
   let scrollbarVisible = $state(false);
   let scrollThumbTop = $state(0);
   let scrollThumbHeight = $state(0);
-  let caretVisible = $state(false);
-  let caretLeft = $state(0);
-  let caretTop = $state(0);
-  let caretHeight = $state(0);
-  const caretSync = createAnimationFrameCoalescer(syncCaret);
 
   export function write(data: string): void {
     if (data) terminal?.write(data);
@@ -81,8 +74,8 @@
   $effect(() => {
     if (!terminal) return;
     terminal.options.disableStdin = !running;
-    terminal.options.cursorBlink = false;
-    terminal.options.cursorInactiveStyle = "none";
+    terminal.options.cursorBlink = true;
+    terminal.options.cursorInactiveStyle = "outline";
     terminal.options.convertEol = convertEol;
     scheduleTerminalChromeSync();
   });
@@ -129,13 +122,14 @@
     const next = new TerminalConstructor({
       allowTransparency: false,
       convertEol,
-      cursorBlink: false,
-      cursorInactiveStyle: "none",
-      cursorStyle: "bar",
-      cursorWidth: 2,
+      cursorBlink: true,
+      cursorInactiveStyle: "outline",
+      cursorStyle: "block",
       disableStdin: !running,
       fontFamily: '"Geist Mono", ui-monospace, monospace',
-      fontSize: 12,
+      fontWeight: 400,
+      fontWeightBold: 500,
+      fontSize: 10,
       lineHeight: 1.25,
       minimumContrastRatio: 4.5,
       scrollback: TERMINAL_SCROLLBACK_LINES,
@@ -194,7 +188,6 @@
     const syncIfActive = () => { if (lifetime.isActive()) scheduleTerminalChromeSync(); };
     const scrollDisposable = next.onScroll(syncIfActive);
     const writeDisposable = next.onWriteParsed(syncIfActive);
-    const cursorDisposable = next.onCursorMove(syncIfActive);
 
     const fitTerminal = () => {
       if (!lifetime.isActive() || !container?.isConnected || !fitAddon || !terminal) return;
@@ -225,27 +218,23 @@
       lifetime.dispose();
       cancelAnimationFrame(scrollbarFrame);
       scrollbarFrame = 0;
-      caretSync.cancel();
       flushInput();
       resizeObserver.disconnect();
       dataDisposable.dispose();
       resizeDisposable.dispose();
       scrollDisposable.dispose();
       writeDisposable.dispose();
-      cursorDisposable.dispose();
       linkDisposable?.dispose();
       next.dispose();
       terminal = undefined;
       fitAddon = undefined;
       renderedControlledContent = "";
       scrollbarVisible = false;
-      caretVisible = false;
     };
   }
 
   function scheduleTerminalChromeSync(): void {
     scheduleScrollbarSync();
-    caretSync.schedule();
   }
 
   function scheduleScrollbarSync(): void {
@@ -276,33 +265,6 @@
     scrollbarVisible = true;
     scrollThumbHeight = thumbHeight;
     scrollThumbTop = maxThumbTop === 0 ? 0 : Math.round(maxThumbTop * buffer.viewportY / maxViewportY);
-  }
-
-  function syncCaret(): void {
-    const currentTerminal = terminal;
-    const frame = terminalFrame;
-    const terminalElement = currentTerminal?.element;
-    const screen = terminalElement?.querySelector<HTMLElement>(".xterm-screen");
-    if (!running || !currentTerminal || !frame || !screen || currentTerminal.cols <= 0 || currentTerminal.rows <= 0) {
-      caretVisible = false;
-      return;
-    }
-
-    const frameRect = frame.getBoundingClientRect();
-    const screenRect = screen.getBoundingClientRect();
-    if (screenRect.width <= 0 || screenRect.height <= 0) {
-      caretVisible = false;
-      return;
-    }
-
-    const cellWidth = screenRect.width / currentTerminal.cols;
-    const cellHeight = screenRect.height / currentTerminal.rows;
-    const cursorX = Math.max(0, Math.min(currentTerminal.cols - 1, currentTerminal.buffer.active.cursorX));
-    const cursorY = Math.max(0, Math.min(currentTerminal.rows - 1, currentTerminal.buffer.active.cursorY));
-    caretLeft = screenRect.left - frameRect.left + cursorX * cellWidth;
-    caretTop = screenRect.top - frameRect.top + cursorY * cellHeight;
-    caretHeight = cellHeight;
-    caretVisible = true;
   }
 
   function scrollToPointer(clientY: number, grabOffset = scrollThumbHeight / 2): void {
@@ -364,69 +326,25 @@
     const background = styles.backgroundColor;
     const foreground = styles.color;
     const value = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
-    const primary = value("--primary", foreground);
-    const muted = value("--muted-foreground", foreground);
-    const error = value("--tool-error", foreground);
-    const success = value("--tool-success", foreground);
-    const warning = value("--tool-warning", foreground);
-    const info = value("--tool-info", primary);
-    const mutation = value("--tool-mutation", primary);
-    const search = value("--tool-search", info);
     return {
       background,
       foreground,
-      cursor: primary,
-      cursorAccent: value("--primary-foreground", background),
-      selectionBackground: colorWithAlpha(primary, 0.24),
-      black: muted,
-      red: error,
-      green: success,
-      yellow: warning,
-      blue: info,
-      magenta: mutation,
-      cyan: search,
-      white: foreground,
-      brightBlack: muted,
-      brightRed: error,
-      brightGreen: success,
-      brightYellow: warning,
-      brightBlue: info,
-      brightMagenta: mutation,
-      brightCyan: search,
-      brightWhite: foreground,
+      cursor: foreground,
+      cursorAccent: background,
+      selectionBackground: value("--selection", foreground),
     };
-  }
-
-  function colorWithAlpha(color: string, alpha: number): string {
-    if (/^#[0-9a-f]{6}$/iu.test(color)) {
-      const red = Number.parseInt(color.slice(1, 3), 16);
-      const green = Number.parseInt(color.slice(3, 5), 16);
-      const blue = Number.parseInt(color.slice(5, 7), 16);
-      return `rgb(${red} ${green} ${blue} / ${alpha})`;
-    }
-    return color;
   }
 </script>
 
-<div bind:this={terminalFrame} class="relative h-full min-h-0 min-w-0 w-full max-w-full bg-code">
+<div class="relative h-full min-h-0 min-w-0 w-full max-w-full bg-code">
   <div
     bind:this={container}
-    class="terminal-host absolute inset-y-0 left-0 right-2 overflow-hidden bg-code text-foreground [&_.xterm]:h-full [&_.xterm]:max-w-full"
+    class="terminal-host absolute inset-y-0 left-0 right-2 overflow-hidden bg-code font-mono text-foreground [&_.xterm]:h-full [&_.xterm]:max-w-full"
     role="application"
     aria-label={ariaLabel}
     data-terminal-readonly={!running}
     onpointerdown={() => { if (running) terminal?.focus(); }}
   ></div>
-  {#if caretVisible}
-    <div
-      class="pointer-events-none absolute z-10 w-0.5 bg-primary"
-      style:left={`${caretLeft}px`}
-      style:top={`${caretTop}px`}
-      style:height={`${caretHeight}px`}
-      aria-hidden="true"
-      data-terminal-caret
-    ></div>
-  {/if}
   <div
     bind:this={scrollTrack}
     class="absolute top-1 right-0 bottom-1 w-2 cursor-default rounded-full bg-border/25"
@@ -453,12 +371,5 @@
   :global(.terminal-host .xterm-viewport::-webkit-scrollbar) {
     width: 0;
     height: 0;
-  }
-
-  :global(.terminal-host .xterm-cursor) {
-    background: transparent !important;
-    border: 0 !important;
-    box-shadow: none !important;
-    outline: 0 !important;
   }
 </style>

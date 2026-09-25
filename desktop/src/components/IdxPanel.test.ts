@@ -51,4 +51,11 @@ describe("IDX v2 panel contract", () => {
     expect(querySource).not.toContain("includeSecondary");
     expect(auditSource).toContain('invoke<IdxCommandResult>("idx_audit", { request: { workspace, paths } })');
   });
+
+  it("offers an OpenRouter embedding flag for initialization and doctor reinitialization", () => {
+    expect(panelSource).toContain("--embedding openrouter");
+    expect(panelSource).toContain('startOperation("init", { openrouterEmbeddings })');
+    expect(panelSource).toContain('startOperation("doctor", { openrouterEmbeddings })');
+    expect(runtimeSource).toContain("openrouterEmbeddings: operationOptions.openrouterEmbeddings === true");
+  });
 });

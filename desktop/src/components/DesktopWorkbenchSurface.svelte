@@ -2,12 +2,14 @@
   import type { ComponentProps } from "svelte";
   import ErrorBanner from "./ErrorBanner.svelte";
   import GitDiffPane from "./GitDiffPane.svelte";
+  import LspInstallPane from "./LspInstallPane.svelte";
   import PreviewPane from "./PreviewPane.svelte";
   import PromptComposer from "./PromptComposer.svelte";
   import QueuedMessagesPanel from "./QueuedMessagesPanel.svelte";
   import SessionInspector from "./SessionInspector.svelte";
   import SessionStartView from "./SessionStartView.svelte";
   import TranscriptPane from "./TranscriptPane.svelte";
+  import WorkbenchTerminalPane from "./WorkbenchTerminalPane.svelte";
 
   export type PromptComposerHandle = {
     focus: () => Promise<void>;
@@ -16,6 +18,10 @@
 
   export type PreviewPaneHandle = {
     requestClose: () => boolean;
+  };
+
+  export type WorkbenchTerminalPaneHandle = {
+    openTerminal: (command: string) => Promise<void>;
   };
 
   let {
@@ -30,12 +36,17 @@
     previewVisible,
     gitDiff,
     gitDiffVisible,
+    lspInstall,
+    lspInstallVisible,
+    terminal,
+    terminalVisible,
     inspector,
     transcriptPane = $bindable(null),
     transcriptContent = $bindable(null),
     promptComposer = $bindable(null),
     promptText = $bindable(""),
     previewPane = $bindable(null),
+    terminalPane = $bindable(null),
   }: {
     conversationVisible: boolean;
     conversationLabelledBy?: string;
@@ -48,12 +59,17 @@
     previewVisible: boolean;
     gitDiff: ComponentProps<typeof GitDiffPane> | null;
     gitDiffVisible: boolean;
+    lspInstall: ComponentProps<typeof LspInstallPane> | null;
+    lspInstallVisible: boolean;
+    terminal: ComponentProps<typeof WorkbenchTerminalPane> | null;
+    terminalVisible: boolean;
     inspector: ComponentProps<typeof SessionInspector> | null;
     transcriptPane?: HTMLDivElement | null;
     transcriptContent?: HTMLDivElement | null;
     promptComposer?: PromptComposerHandle | null;
     promptText?: string;
     previewPane?: PreviewPaneHandle | null;
+    terminalPane?: WorkbenchTerminalPaneHandle | null;
   } = $props();
 </script>
 
@@ -105,6 +121,28 @@
         aria-labelledby="workbench-tab-git-diff"
       >
         <GitDiffPane {...gitDiff} />
+      </div>
+    {/if}
+
+    {#if lspInstall}
+      <div
+        id="workbench-panel-lsp-install"
+        class={lspInstallVisible ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
+        role="tabpanel"
+        aria-labelledby="workbench-tab-lsp-install"
+      >
+        <LspInstallPane {...lspInstall} />
+      </div>
+    {/if}
+
+    {#if terminal}
+      <div
+        id="workbench-panel-terminal"
+        class={terminalVisible ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
+        role="tabpanel"
+        aria-labelledby="workbench-tab-terminal"
+      >
+        <WorkbenchTerminalPane bind:this={terminalPane} {...terminal} />
       </div>
     {/if}
   </div>

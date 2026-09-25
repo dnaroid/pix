@@ -265,6 +265,26 @@ fn idx_start_record(window: &str, workspace: &str) -> IdxOperationRecord {
     }
 }
 
+#[test]
+fn idx_operation_args_add_openrouter_only_to_initialization_flows() {
+    assert_eq!(
+        idx_operation_args(IdxMaintenanceKind::Init, true),
+        vec!["init", "--embedding", "openrouter"]
+    );
+    assert_eq!(
+        idx_operation_args(IdxMaintenanceKind::Doctor, true),
+        vec!["doctor", "--force", "--embedding", "openrouter", "."]
+    );
+    assert_eq!(
+        idx_operation_args(IdxMaintenanceKind::FullIndex, true),
+        vec!["index", "--full"]
+    );
+    assert_eq!(
+        idx_operation_args(IdxMaintenanceKind::Init, false),
+        vec!["init"]
+    );
+}
+
 #[cfg(unix)]
 fn idx_test_child(pipes: bool) -> IdxStartupGuard {
     use std::os::unix::process::CommandExt;

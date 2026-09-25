@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
@@ -43,6 +43,8 @@
   import { resolveDesktopPreferences } from "./lib/desktop-config";
   import { createDesktopUpdater } from "./app/desktop-updater.svelte";
   import { createDesktopWatchRestart } from "./app/desktop-watch-restart.svelte";
+  import { createLspOnboardingStore } from "./app/lsp-onboarding.svelte";
+  import { createWorkbenchTerminalState } from "./app/workbench-terminal.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
@@ -60,7 +62,13 @@
   let dragActive = $state(false);
   let activeWorkbenchTabId = $state<WorkbenchTabId | null>(null);
   let workbenchAuxSequence = 0;
+  const workbenchTerminal = createWorkbenchTerminalState({
+    activeWorkbenchTabId: () => activeWorkbenchTabId,
+    setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
+    nextWorkbenchAuxOrder: () => ++workbenchAuxSequence,
+  });
   let previewPane = $state<{ requestClose: () => boolean } | null>(null);
+  let workbenchTerminalPane = $state<{ openTerminal: (command: string) => Promise<void> } | null>(null);
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let transcriptContent = $state<HTMLDivElement | null>(null);
   let promptComposer = $state<{
@@ -69,7 +77,6 @@
   } | null>(null);
   let workspaceSidebar = $state<{
     openTasksPanel: (taskId?: string) => Promise<void>;
-    openTerminal: (command: string) => Promise<void>;
     closeProjectSwitcher: () => void;
   } | null>(null);
   let localMessageId = 0;
@@ -218,6 +225,15 @@
   const queuedMessages = promptServices.queue;
   const queueItemsBySession = $derived(promptRuntime.queueItemsBySession);
   const refreshQueueState = promptRuntime.refreshQueueState;
+  const lspOnboarding = createLspOnboardingStore({
+    workspace: () => workspace,
+    activeSessionId: () => activeSessionId,
+    promptRunning: promptRuntime.isRunning,
+    agentState: promptRuntime.agentState,
+    pauseActiveAgent: promptRuntime.pauseActiveAgent,
+    setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
+    nextWorkbenchAuxOrder: () => ++workbenchAuxSequence,
+  });
 
   const projectServices = createDesktopProjectServices({
     client: () => client,
@@ -249,6 +265,7 @@
     projectActions: () => projectActions,
     startup: () => workspaceSessionStartup,
     resetWorkbench: () => {
+      workbenchTerminal.reset();
       activeWorkbenchTabId = null;
       rootEffects.resetWorkbenchTracking();
       workbenchAuxSequence = 0;
@@ -475,7 +492,14 @@
     requestLocalTextInput: (message, title) => elicitationStore.requestLocalTextInput(message, title),
     navigation: conversationNavigation,
     forkConversation,
-    openInteractiveTerminal: async (command) => { await workspaceSidebar?.openTerminal(command); },
+    openInteractiveTerminal: async (command) => {
+      if (!workspace) throw new Error("Open a project before starting a terminal.");
+      workbenchTerminal.show();
+      await tick();
+      const pane = workbenchTerminalPane;
+      if (!pane) throw new Error("Terminal workbench is unavailable.");
+      await pane.openTerminal(command);
+    },
     closeProjectSelector: () => workspaceSidebar?.closeProjectSwitcher(),
     applyModelSlashCommand: modelConfig.applyModelSlashCommand,
     applyThinkingSlashCommand: modelConfig.applyThinkingSlashCommand,
@@ -510,9 +534,11 @@
     activeConversationTabId: () => activeConversationWorkbenchTabId,
     setActiveTabId: (id) => activeWorkbenchTabId = id,
     previewPane: () => previewPane,
+    closeTerminal: workbenchTerminal.close,
     nextLocalMessageId: () => `local:${++localMessageId}`,
     scrollToLatest,
     reportError,
+    lspOnboarding,
   });
   const workbenchController = workbenchGitServices.workbench;
 
@@ -541,6 +567,8 @@
     interactions: interactionServices,
     draft: draftSession,
     tabAttention: sessionTabAttention,
+    lspOnboarding,
+    workbenchTerminal,
   });
   const sessionMutationRunning = $derived(presentationState.sessionMutationRunning);
   const canUseSession = $derived(presentationState.canUseSession);
@@ -588,6 +616,7 @@
     sessionServices,
     projectServices,
     promptServices,
+    lspOnboarding,
     reportError,
   });
   const sessionCoordinator = sessionOrchestration.coordinator;
@@ -609,6 +638,7 @@
     workbenchTabs: () => workbenchTabs,
     activeTodoSnapshot: () => presentationState.activeTodoSnapshot,
     activeSubagentSnapshot: () => presentationState.activeSubagentSnapshot,
+    sessionInspectorOpen: () => sessionInspectorOpen,
     setSessionInspectorOpen,
     markSessionTabViewed: sessionTabAttention.clear,
   });
@@ -644,6 +674,7 @@
     transcriptScroll,
     transcriptAttachments,
     orchestration: sessionOrchestration,
+    lspOnboarding,
   });
   const titlebarViewModel = viewModels.titlebar;
   const sidebarViewModel = viewModels.sidebar;
@@ -681,6 +712,7 @@
       bind:promptComposer
       bind:promptText
       bind:previewPane
+      bind:terminalPane={workbenchTerminalPane}
     />
   </div>
 

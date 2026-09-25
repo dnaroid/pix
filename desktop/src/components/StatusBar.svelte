@@ -1,12 +1,11 @@
 <script lang="ts">
-  import Activity from "@lucide/svelte/icons/activity";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import Command from "@lucide/svelte/icons/command";
-  import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down";
+  import ListTodo from "@lucide/svelte/icons/list-todo";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
+  import { agentIcon } from "../lib/agent-icons";
   import {
     sessionActivityLabel,
     sessionActivityTone,
@@ -39,22 +38,16 @@
     dcpCompressionRunning,
     dcpCompressionAvailable,
     canCompressContext,
-    canNavigateMessages,
-    messageNavigationOpen,
     sessionActivity,
+    sessionSubagentIcons,
     sessionActivityOpen,
-    canOpenSessionActivity,
     sessionNeedsInput,
-    commandPaletteOpen,
-    commandPaletteShortcut,
     onSetConfig,
     onOpenModelThinking,
     onOpenSessionUsage,
     onOpenDcpStats,
     onCompressDcpContext,
-    onNavigateMessages,
-    onToggleSessionActivity,
-    onOpenCommandPalette,
+    onOpenSessionActivity,
   }: {
     status: ConnectionStatus;
     showSkeletons?: boolean;
@@ -77,27 +70,27 @@
     dcpCompressionRunning: boolean;
     dcpCompressionAvailable: boolean;
     canCompressContext: boolean;
-    canNavigateMessages: boolean;
-    messageNavigationOpen: boolean;
     sessionActivity: SessionActivitySummary;
+    sessionSubagentIcons: readonly (string | undefined)[];
     sessionActivityOpen: boolean;
-    canOpenSessionActivity: boolean;
     sessionNeedsInput: boolean;
-    commandPaletteOpen: boolean;
-    commandPaletteShortcut?: string;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
     onOpenSessionUsage: () => void;
     onOpenDcpStats: () => void;
     onCompressDcpContext: () => void;
-    onNavigateMessages: () => void;
-    onToggleSessionActivity: () => void;
-    onOpenCommandPalette: () => void;
+    onOpenSessionActivity: () => void;
   } = $props();
 
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
   const activityTone = $derived(sessionActivityTone(sessionActivity, promptRunning, sessionNeedsInput));
   const activityLabel = $derived(sessionActivityLabel(sessionActivity, promptRunning, sessionNeedsInput));
+  const hasTodoProgress = $derived(sessionActivity.openTodos > 0 && sessionActivity.totalTodos > 0);
+  const compactSessionActivityVisible = $derived(
+    !sessionActivityOpen && (sessionActivity.activeSubagents > 0 || hasTodoProgress),
+  );
+  const compactAgentIcons = $derived(sessionSubagentIcons.slice(0, 3));
+  const hiddenAgentCount = $derived(Math.max(0, sessionSubagentIcons.length - compactAgentIcons.length));
   const activeConversationWorking = $derived(status === "ready" && promptRunning);
 
   function connectionLabel(value: ConnectionStatus): string {
@@ -244,53 +237,40 @@
     {/each}
   </div>
 
-  <div class="flex shrink-0 items-center gap-0.5" aria-label="Status bar actions">
-    <button
-      class={[
-        "grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-        commandPaletteOpen && "bg-chrome-hover text-foreground",
-      ]}
-      type="button"
-      title={commandPaletteShortcut ? `Command palette · ${commandPaletteShortcut}` : "Command palette"}
-      aria-label="Open command palette"
-      aria-haspopup="dialog"
-      aria-expanded={commandPaletteOpen}
-      onclick={onOpenCommandPalette}
-    ><Command class="h-3.5 w-3.5" aria-hidden="true" /></button>
-    <button
-      class={[
-        "grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-        messageNavigationOpen && "bg-chrome-hover text-foreground",
-      ]}
-      type="button"
-      title="Jump to user message"
-      aria-label="Jump to user message"
-      aria-haspopup="dialog"
-      aria-expanded={messageNavigationOpen}
-      onclick={onNavigateMessages}
-      disabled={!canNavigateMessages}
-    ><ListChevronsUpDown class="h-3.5 w-3.5" aria-hidden="true" /></button>
-    <button
-      class={[
-        "grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-        sessionActivityOpen && "bg-chrome-hover text-foreground",
-      ]}
-      type="button"
-      title={`Session activity · ${activityLabel}`}
-      aria-label={`Session activity. ${activityLabel}`}
-      aria-expanded={sessionActivityOpen}
-      onclick={onToggleSessionActivity}
-      disabled={!canOpenSessionActivity}
-    >
-      <Activity
+  {#if compactSessionActivityVisible}
+    <div class="flex shrink-0 items-center" aria-label="Session activity">
+      <button
         class={[
-          "h-3.5 w-3.5",
-          sessionActivityOpen ? "text-foreground" : activityToneClass(),
+          "flex h-6 cursor-pointer items-center gap-1 rounded-sm bg-transparent px-1.5 transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          activityToneClass(),
         ]}
-        aria-hidden="true"
-      />
-    </button>
-  </div>
+        type="button"
+        title={`Open session activity · ${activityLabel}`}
+        aria-label={`Open session activity. ${activityLabel}`}
+        aria-expanded="false"
+        data-session-activity-summary
+        onclick={onOpenSessionActivity}
+      >
+        {#if compactAgentIcons.length > 0}
+          <span class="flex items-center gap-0.5" aria-hidden="true">
+            {#each compactAgentIcons as iconName, index (`${iconName ?? "agent"}:${index}`)}
+              {@const AgentIcon = agentIcon(iconName)}
+              <AgentIcon class="h-3.5 w-3.5 shrink-0" />
+            {/each}
+            {#if hiddenAgentCount > 0}
+              <span class="font-mono text-xs leading-none tabular-nums">+{hiddenAgentCount}</span>
+            {/if}
+          </span>
+        {/if}
+        {#if hasTodoProgress}
+          <span class="flex items-center gap-0.5 font-mono tabular-nums">
+            <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{sessionActivity.completedTodos}/{sessionActivity.totalTodos}</span>
+          </span>
+        {/if}
+      </button>
+    </div>
+  {/if}
 </footer>
 
 <style>

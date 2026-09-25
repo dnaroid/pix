@@ -45,10 +45,12 @@
 
   type PanelTab = "overview" | "knowledge" | "query";
   let activeTab = $state<PanelTab>("overview");
+  let openrouterEmbeddings = $state(false);
   const operationLinkValidation = new Map<string, Promise<boolean>>();
   $effect(() => {
     workspace;
     operationLinkValidation.clear();
+    openrouterEmbeddings = false;
   });
 
   const runtime = createIdxPanelRuntimeController({
@@ -209,12 +211,18 @@
         <ScanSearch class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Project is not indexed</p>
         <p class="mx-auto mt-1 max-w-80 text-xs leading-4 text-muted-foreground">Initialize project-local IDX storage before using code and knowledge search.</p>
-        <button
-          class="mt-3 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-          type="button"
-          disabled={Boolean(runningOperation)}
-          onclick={() => void startOperation("init")}
-        ><Play class="h-3 w-3" aria-hidden="true" />Initialize IDX</button>
+        <label class="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+          <input type="checkbox" bind:checked={openrouterEmbeddings} disabled={Boolean(runningOperation)} />
+          <span>Use <span class="font-mono">--embedding openrouter</span></span>
+        </label>
+        <div>
+          <button
+            class="mt-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            type="button"
+            disabled={Boolean(runningOperation)}
+            onclick={() => void startOperation("init", { openrouterEmbeddings })}
+          ><Play class="h-3 w-3" aria-hidden="true" />Initialize IDX</button>
+        </div>
       </div>
     {:else if activeTab === "overview"}
       <div class="divide-y divide-sidebar-border">
@@ -238,8 +246,12 @@
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("index")}>Update index</button>
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("full-index")}>Full reindex</button>
             <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("dry-run")}>Dry run</button>
-            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("doctor")}><span class="inline-flex items-center gap-1"><Wrench class="h-3 w-3" aria-hidden="true" />Doctor</span></button>
+            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("doctor", { openrouterEmbeddings })}><span class="inline-flex items-center gap-1"><Wrench class="h-3 w-3" aria-hidden="true" />Doctor</span></button>
           </div>
+          <label class="flex cursor-pointer items-center gap-1.5 border-t border-sidebar-border/70 px-2.5 py-2 text-xs text-muted-foreground">
+            <input type="checkbox" bind:checked={openrouterEmbeddings} disabled={Boolean(runningOperation)} />
+            <span>Use <span class="font-mono">--embedding openrouter</span> when reinitializing</span>
+          </label>
         </section>
 
 

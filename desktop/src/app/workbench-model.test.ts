@@ -1,6 +1,7 @@
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
-import { buildSessionWorkbenchTabs } from "./workbench-model";
+import { buildDesktopWorkbenchTabs, buildSessionWorkbenchTabs } from "./workbench-model";
+import { workbenchSessionTabId } from "../lib/workbench-tabs";
 
 function build(sessions: SessionInfo[]) {
   return buildSessionWorkbenchTabs({
@@ -58,5 +59,63 @@ describe("session workbench model", () => {
 
     expect(tab?.statusKind).toBe("paused");
     expect(tab?.title).toContain("Paused");
+  });
+
+  it("inserts a dedicated LSP installer beside the owning conversation and locks close while busy", () => {
+    const [session] = build([{ sessionId: "session-1", cwd: "/tmp/project", title: "Session" }]);
+    const tabs = buildDesktopWorkbenchTabs({
+      sessionTabs: session ? [session] : [],
+      previewDirty: false,
+      previewAnchorId: null,
+      previewOpenedOrder: 0,
+      gitDiff: null,
+      gitReviewLoading: false,
+      gitResolveRunning: false,
+      gitAnchorId: null,
+      gitOpenedOrder: 0,
+      lspInstall: {
+        languageLabel: "Rust",
+        serverLabel: "rust-analyzer",
+        phase: "installing",
+        insertAfterId: workbenchSessionTabId("session-1"),
+        openedOrder: 1,
+      },
+    });
+
+    expect(tabs.map((tab) => tab.id)).toEqual([workbenchSessionTabId("session-1"), "lsp-install"]);
+    expect(tabs[1]).toMatchObject({
+      kind: "lsp-install",
+      label: "Rust · LSP",
+      closable: false,
+      busy: true,
+    });
+  });
+
+  it("inserts a closable Terminal tab beside the workbench surface that opened it", () => {
+    const [session] = build([{ sessionId: "session-1", cwd: "/tmp/project", title: "Session" }]);
+    const tabs = buildDesktopWorkbenchTabs({
+      sessionTabs: session ? [session] : [],
+      previewDirty: false,
+      previewAnchorId: null,
+      previewOpenedOrder: 0,
+      gitDiff: null,
+      gitReviewLoading: false,
+      gitResolveRunning: false,
+      gitAnchorId: null,
+      gitOpenedOrder: 0,
+      lspInstall: null,
+      terminal: {
+        insertAfterId: workbenchSessionTabId("session-1"),
+        openedOrder: 1,
+      },
+    });
+
+    expect(tabs.map((tab) => tab.id)).toEqual([workbenchSessionTabId("session-1"), "terminal"]);
+    expect(tabs[1]).toMatchObject({
+      kind: "terminal",
+      label: "Terminal",
+      panelId: "workbench-panel-terminal",
+      closable: true,
+    });
   });
 });

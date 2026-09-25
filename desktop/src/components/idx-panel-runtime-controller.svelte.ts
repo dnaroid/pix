@@ -7,6 +7,7 @@ import {
   appendIdxLog,
   reconcileIdxOperationSnapshot,
   type IdxMaintenanceKind,
+  type IdxOperationStartOptions,
   type IdxOperationExitEvent,
   type IdxOperationOutputEvent,
   type IdxOperationSnapshot,
@@ -130,13 +131,21 @@ export function createIdxPanelRuntimeController(options: IdxPanelRuntimeControll
     }
   }
 
-  async function startOperation(kind: IdxMaintenanceKind): Promise<void> {
+  async function startOperation(
+    kind: IdxMaintenanceKind,
+    operationOptions: IdxOperationStartOptions = {},
+  ): Promise<void> {
     const requestWorkspace = options.workspace();
     if (!requestWorkspace || runningOperation()) return;
     error = null;
     try {
       const started = await invoke<IdxOperationSnapshot>("idx_operation_start", {
-        request: { windowLabel, workspace: requestWorkspace, kind },
+        request: {
+          windowLabel,
+          workspace: requestWorkspace,
+          kind,
+          openrouterEmbeddings: operationOptions.openrouterEmbeddings === true,
+        },
       });
       if (options.workspace() !== requestWorkspace) return;
       operations = [...operations, started];

@@ -7,10 +7,12 @@
   import GitFork from "@lucide/svelte/icons/git-fork";
   import PanelTopOpen from "@lucide/svelte/icons/panel-top-open";
   import Pause from "@lucide/svelte/icons/pause";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import { onDestroy, tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import { agentPauseJustTriggered, type AgentControlState } from "../lib/agent-control";
+  import type { LspMissingSuggestion } from "../lib/lsp-onboarding";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import {
     formatTranscriptDuration,
@@ -53,6 +55,9 @@
     onResolveLocalMedia,
     onLoadToolResult,
     onUserMessageAction,
+    lspSuggestion,
+    onInstallLsp,
+    onDismissLsp,
   }: {
     transcript: TranscriptState;
     activeSessionId: string | null;
@@ -78,6 +83,9 @@
     onResolveLocalMedia: (path: string) => Promise<Attachment | undefined>;
     onLoadToolResult: (toolCallId: string) => void;
     onUserMessageAction: (message: MessageItem, action: UserMessageAction) => void | Promise<void>;
+    lspSuggestion?: LspMissingSuggestion;
+    onInstallLsp?: () => void;
+    onDismissLsp?: () => void;
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
@@ -345,6 +353,27 @@
       >
         <Pause class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
         <span>Agent paused</span>
+      </div>
+    </div>
+  {/if}
+  {#if lspSuggestion}
+    <div class="pointer-events-none absolute inset-0 z-40 grid place-items-center p-4" aria-live="polite">
+      <div class="pointer-events-auto w-full max-w-md rounded-md border border-tool-warning/35 bg-popover p-3 text-popover-foreground shadow-md" role="alert" data-lsp-onboarding-toast>
+        <div class="flex items-start gap-2.5">
+          <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-tool-warning" aria-hidden="true" />
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-medium text-foreground">No LSP registered for {lspSuggestion.languageLabel}</div>
+            <div class="mt-1 text-xs leading-4 text-muted-foreground">
+              Pix edited <span class="font-mono text-foreground">{lspSuggestion.path}</span>. Pause at the next safe turn boundary and install {lspSuggestion.serverLabel} automatically?
+            </div>
+            <div class="mt-2.5 flex items-center gap-2">
+              <button class="h-7 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" type="button" onclick={onInstallLsp}>
+                {promptRunning && agentControlState !== "paused" ? "Pause & install" : "Install LSP"}
+              </button>
+              <button class="h-7 rounded-md border border-border bg-panel-strong px-2.5 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onDismissLsp}>Not now</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   {/if}

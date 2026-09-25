@@ -29,6 +29,7 @@ mod backend_runtime;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod git_operations;
+mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
 mod native_process;
@@ -495,6 +496,7 @@ struct IdxOperationRequest {
     window_label: String,
     workspace: String,
     kind: IdxMaintenanceKind,
+    openrouter_embeddings: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5918,14 +5920,25 @@ fn idx_inspect_args(request: &IdxInspectRequest) -> Result<Vec<String>, String> 
     }
 }
 
-fn idx_operation_args(kind: IdxMaintenanceKind) -> Vec<String> {
+fn idx_operation_args(kind: IdxMaintenanceKind, openrouter_embeddings: bool) -> Vec<String> {
     match kind {
-        IdxMaintenanceKind::Init => vec!["init".to_owned()],
+        IdxMaintenanceKind::Init => {
+            let mut args = vec!["init".to_owned()];
+            if openrouter_embeddings {
+                args.extend(["--embedding".to_owned(), "openrouter".to_owned()]);
+            }
+            args
+        }
         IdxMaintenanceKind::Index => vec!["index".to_owned()],
         IdxMaintenanceKind::FullIndex => vec!["index".to_owned(), "--full".to_owned()],
         IdxMaintenanceKind::DryRun => vec!["index".to_owned(), "--dry-run".to_owned()],
         IdxMaintenanceKind::Doctor => {
-            vec!["doctor".to_owned(), "--force".to_owned(), ".".to_owned()]
+            let mut args = vec!["doctor".to_owned(), "--force".to_owned()];
+            if openrouter_embeddings {
+                args.extend(["--embedding".to_owned(), "openrouter".to_owned()]);
+            }
+            args.push(".".to_owned());
+            args
         }
     }
 }
@@ -6005,7 +6018,10 @@ fn start_idx_operation(
         return Err("this project is not indexed yet; initialize IDX first".to_owned());
     }
     let launcher = idx_launcher(&app)?;
-    let args = idx_operation_args(request.kind);
+    let args = idx_operation_args(
+        request.kind,
+        request.openrouter_embeddings.unwrap_or(false),
+    );
     let command_label = format!("idx {}", args.join(" "));
     let mut command = idx_process_command(&launcher, &root, &args)?;
     let child = command
@@ -6579,6 +6595,8 @@ fn spawn_package_terminal(
     command.cwd(&root);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
+    command.env("CLICOLOR", "1");
+    command.env("FORCE_COLOR", "1");
     command.env("TERM_PROGRAM", "Pix");
     let child = pair
         .slave
@@ -6727,23 +6745,7 @@ fn shell_terminal_command() -> Result<(CommandBuilder, String, String), String> 
         .unwrap_or("shell")
         .to_owned();
     let command_label = executable.to_string_lossy().into_owned();
-    let mut command = CommandBuilder::new(&executable);
-    match label.as_str() {
-        "zsh" => {
-            command.arg("-f");
-            command.env("PS1", "pix:%1~ $ ");
-            command.env("PROMPT", "pix:%1~ $ ");
-            command.env("RPROMPT", "");
-        }
-        "bash" => {
-            command.args(["--noprofile", "--norc"]);
-            command.env("PS1", r"pix:\W $ ");
-        }
-        _ => {
-            command.env("PS1", "pix:$ ");
-        }
-    }
-    Ok((command, label, command_label))
+    Ok((CommandBuilder::new(&executable), label, command_label))
 }
 
 #[cfg(windows)]
@@ -9553,6 +9555,7 @@ pub fn run() {
             read_user_config,
             write_user_config,
             write_user_config_if_unchanged,
+            lsp_install::install_lsp_server,
             workspace_sidebar_indicator_poll,
             idx_overview,
             idx_query,
@@ -10328,18 +10331,7 @@ mod tests {
             .iter()
             .map(|value| value.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        match label.as_str() {
-            "zsh" => assert_eq!(argv, vec![command_label.clone(), "-f".to_owned()]),
-            "bash" => assert_eq!(
-                argv,
-                vec![
-                    command_label.clone(),
-                    "--noprofile".to_owned(),
-                    "--norc".to_owned(),
-                ]
-            ),
-            _ => assert_eq!(argv.len(), 1),
-        }
+        assert_eq!(argv, vec![command_label]);
     }
 
     #[test]

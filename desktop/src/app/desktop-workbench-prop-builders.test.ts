@@ -36,6 +36,7 @@ describe("workbench Git diff props", () => {
       clientAvailable: () => true,
       operationRunning: () => false,
       activeWorkbenchTabId: () => "git-diff",
+      terminalOpen: () => false,
       externalEditorLabel: () => "Editor",
       preview: { active: null } as any,
       projectDocuments: {} as any,
@@ -53,6 +54,7 @@ describe("workbench Git diff props", () => {
         copyReviewResolutionPrompt: vi.fn(),
         resolveReviewInNewSession: vi.fn(),
       } as any,
+      lspOnboarding: { installer: null } as any,
     });
 
     expect(props.gitDiff?.canReview).toBe(true);
@@ -65,6 +67,7 @@ describe("workbench Git diff props", () => {
       clientAvailable: () => true,
       operationRunning: () => false,
       activeWorkbenchTabId: () => "preview",
+      terminalOpen: () => false,
       externalEditorLabel: () => "Editor",
       preview: {
         active: { id: 1, kind: "file", file: { path: "src/main.ts", content: "x" }, scrollPosition: { left: 0, top: 0 } },
@@ -85,6 +88,7 @@ describe("workbench Git diff props", () => {
       projectWorkspace: { openInEditor: vi.fn() },
       git: { diffPreview: null },
       gitAssist: {},
+      lspOnboarding: { installer: null },
     } as any;
 
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(true);
@@ -94,5 +98,26 @@ describe("workbench Git diff props", () => {
     const local = buildWorkbenchEditorProps(options).preview;
     expect(local?.editable).toBe(false);
     expect(local?.externalEditorLabel).toBeUndefined();
+  });
+
+  it("renders the dedicated terminal workbench surface only while its tab is open", () => {
+    const props = buildWorkbenchEditorProps({
+      workspace: () => "/workspace",
+      statusReady: () => true,
+      clientAvailable: () => true,
+      operationRunning: () => false,
+      activeWorkbenchTabId: () => "terminal",
+      terminalOpen: () => true,
+      externalEditorLabel: () => "Editor",
+      preview: { active: null } as any,
+      projectDocuments: {} as any,
+      projectWorkspace: {} as any,
+      git: { diffPreview: null } as any,
+      gitAssist: {} as any,
+      lspOnboarding: { installer: null } as any,
+    });
+
+    expect(props.terminal).toEqual({ workspace: "/workspace" });
+    expect(props.terminalVisible).toBe(true);
   });
 });

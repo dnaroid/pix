@@ -4,7 +4,6 @@
 
   export type DesktopSidebarHandle = {
     openTasksPanel: (taskId?: string) => Promise<void>;
-    openTerminal: (command: string) => Promise<void>;
     closeProjectSwitcher: () => void;
   };
 

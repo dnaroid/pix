@@ -4,6 +4,7 @@ import { toAbsolutePath } from "../lsp/_shared/paths.js";
 import { LSP_DIAGNOSTIC_ICON } from "../lsp/_shared/output.js";
 import { getGlobalLspManager } from "../lsp/manager.js";
 import { getEventPaths, isMutationToolResult } from "../lsp/mutation-events.js";
+import { publishMissingLspSuggestion } from "../lsp/onboarding.js";
 
 export type LspEnrichableToolResult<TDetails = unknown> = AgentToolResult<TDetails>;
 
@@ -36,6 +37,7 @@ export async function appendLspDiagnosticsToMutationResult<T extends LspEnrichab
     if (files.length === 0) return options.result;
 
     const manager = getGlobalLspManager();
+    await Promise.all(files.map((file) => publishMissingLspSuggestion(options.ctx, file)));
     const summaries = (await Promise.all(files.map((file) => manager.updateDiagnosticsForFile(options.ctx, file))))
       .filter((summary) => summary.trim());
 

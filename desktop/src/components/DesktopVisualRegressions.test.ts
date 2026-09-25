@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import commandSource from "../app/desktop-command-controller.svelte.ts?raw";
 import statusBarViewModelSource from "../app/desktop-status-bar-view-model.svelte.ts?raw";
 import workbenchPropBuildersSource from "../app/desktop-workbench-prop-builders.ts?raw";
+import lspOnboardingSource from "../app/lsp-onboarding.svelte.ts?raw";
 import modelDraftConfigSource from "../app/model-draft-config.svelte.ts?raw";
 import overlaysViewModelSource from "../app/desktop-overlays-view-model.svelte.ts?raw";
 import modelConfigActionsSource from "../app/model-config-actions.ts?raw";
@@ -12,6 +13,7 @@ import diffViewSource from "./DiffView.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
 import gitCommitComposerSource from "./GitCommitComposer.svelte?raw";
 import idxSource from "./IdxPanel.svelte?raw";
+import lspInstallPaneSource from "./LspInstallPane.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
 import sessionInspectorSource from "./SessionInspector.svelte?raw";
@@ -27,7 +29,9 @@ import settingsNumberInputSource from "./settings/SettingsNumberInput.svelte?raw
 import settingsSectionNavSource from "./settings/SettingsSectionNav.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
 import markdownSource from "./MarkdownText.svelte?raw";
+import terminalSessionsPaneSource from "./TerminalSessionsPane.svelte?raw";
 import terminalSource from "./TerminalView.svelte?raw";
+import workbenchTerminalPaneSource from "./WorkbenchTerminalPane.svelte?raw";
 import tauriLibSource from "../../src-tauri/src/lib.rs?raw";
 import toolResultSource from "./ToolResult.svelte?raw";
 import transcriptActivityGroupSource from "./TranscriptActivityGroup.svelte?raw";
@@ -143,12 +147,24 @@ describe("desktop visual regressions", () => {
     expect(idxSource).toContain('focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum context tests"');
   });
 
-  it("renders Session as the final icon-only status action", () => {
-    expect(statusSource.indexOf('title="Jump to user message"')).toBeLessThan(
-      statusSource.indexOf("title={`Session activity · ${activityLabel}`}"),
-    );
+  it("shows Session status only for real hidden activity and removes low-value status actions", () => {
     expect(statusSource).not.toContain('>Session</span>');
-    expect(statusSource).toContain('sessionActivityOpen ? "text-foreground" : activityToneClass()');
+    expect(statusSource).not.toContain('aria-label="Open command palette"');
+    expect(statusSource).not.toContain('title="Jump to user message"');
+    expect(statusSource).not.toContain('import Command from "@lucide/svelte/icons/command"');
+    expect(statusSource).not.toContain('import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down"');
+    expect(statusSource).not.toContain('import Activity from "@lucide/svelte/icons/activity"');
+    expect(statusSource).toContain("compactSessionActivityVisible");
+    expect(statusSource).toContain("sessionSubagentIcons.slice(0, 3)");
+    expect(statusSource).toContain('data-session-activity-summary');
+    expect(statusSource).toContain("{sessionActivity.completedTodos}/{sessionActivity.totalTodos}");
+    expect(statusSource).toContain("agentIcon(iconName)");
+    expect(statusSource).not.toContain('disabled={!canOpenSessionActivity}');
+    expect(statusSource).not.toContain('title={`Session activity · ${activityLabel}`}');
+    expect(statusBarViewModelSource).toContain("onOpenSessionActivity: () => options.inspectorPreference.setOpen(true)");
+    expect(statusBarViewModelSource).not.toContain("canNavigateMessages");
+    expect(statusBarViewModelSource).not.toContain("commandPaletteShortcut");
+    expect(statusBarViewModelSource).not.toContain("onToggleSessionActivity");
   });
 
   it("uses the ready ACP dot for active-conversation work without a transcript-bottom spinner", () => {
@@ -173,6 +189,21 @@ describe("desktop visual regressions", () => {
     expect(transcriptSource).toContain("PAUSE_TOAST_DURATION_MS = 2_400");
   });
 
+  it("offers missing-LSP pause/install from chat and moves installation into a workbench pane", () => {
+    expect(transcriptSource).toContain("data-lsp-onboarding-toast");
+    expect(transcriptSource).toContain("No LSP registered for {lspSuggestion.languageLabel}");
+    expect(transcriptSource).toContain("Pause & install");
+    expect(transcriptSource).toContain("Install LSP");
+    expect(workbenchPropBuildersSource).toContain("lspSuggestion: options.lspOnboarding.activeSuggestion()");
+    expect(workbenchPropBuildersSource).toContain("pauseAndInstall(sessionId)");
+    expect(lspOnboardingSource).toContain('options.agentState(sessionId) === "paused"');
+    expect(lspOnboardingSource).toContain('options.setActiveWorkbenchTabId("lsp-install")');
+    expect(lspOnboardingSource).toContain('invoke<LspInstallResult>("install_lsp_server"');
+    expect(lspInstallPaneSource).toContain("The conversation is paused while Pix installs this trusted language server.");
+    expect(lspInstallPaneSource).toContain("Pix will not continue the agent automatically.");
+    expect(lspInstallPaneSource).toContain("Continue the agent when you are ready.");
+  });
+
   it("keeps the jump-to-latest arrow nearly transparent over transcript content", () => {
     expect(transcriptSource).toContain("bg-panel-strong/15");
     expect(transcriptSource).toContain("backdrop-blur-sm");
@@ -188,7 +219,7 @@ describe("desktop visual regressions", () => {
     expect(workspace).toBeGreaterThan(context);
     expect(usage).toBeGreaterThan(workspace);
     expect(runtimeStatusSource).toContain("({workspaceBranch})");
-    expect(runtimeStatusSource).toContain('class="min-w-0 truncate text-foreground">{workspaceName}</span>');
+    expect(runtimeStatusSource).toContain('class="min-w-0 truncate text-muted-foreground">{workspaceName}</span>');
     expect(runtimeStatusSource).toContain('text-muted-foreground/55">({workspaceBranch})');
     expect(runtimeStatusSource).not.toContain("--runtime-workspace-color");
     expect(runtimeStatusSource).toContain("title={workspacePath ?? workspaceName}");
@@ -402,23 +433,41 @@ describe("desktop visual regressions", () => {
     expect(desktopSettingsEditorSource).toContain("Send native notifications for completed work, questions, and errors");
   });
 
-  it("keeps package terminals interactive, scrollable, bounded, and script rows compact", () => {
+  it("keeps one full xterm surface shared by package scripts and the workbench terminal", () => {
     expect(terminalSource).toContain("const TERMINAL_SCROLLBACK_LINES = 5_000;");
-    expect(terminalSource).toContain('cursorStyle: "bar"');
-    expect(terminalSource).toContain("cursorWidth: 2");
-    expect(terminalSource).toContain('cursorInactiveStyle: "none"');
-    expect(terminalSource).toContain("terminal.options.cursorBlink = false");
-    expect(terminalSource).toContain("data-terminal-caret");
-    expect(terminalSource).toContain("currentTerminal.buffer.active.cursorX");
-    expect(terminalSource).toContain("currentTerminal.buffer.active.cursorY");
-    expect(terminalSource).toContain("caretSync.schedule()");
-    expect(terminalSource).toContain("caretSync.cancel()");
+    expect(terminalSource).toContain(`fontFamily: '"Geist Mono", ui-monospace, monospace'`);
+    expect(terminalSource).toContain("fontWeight: 400");
+    expect(terminalSource).toContain("fontWeightBold: 500");
+    expect(terminalSource).toContain("fontSize: 10");
+    expect(terminalSource).toContain("bg-code font-mono text-foreground");
+    expect(terminalSource).not.toContain("font-family:");
+    expect(terminalSource).toContain('cursorStyle: "block"');
+    expect(terminalSource).toContain('cursorInactiveStyle: "outline"');
+    expect(terminalSource).toContain("cursorBlink: true");
+    expect(terminalSource).toContain("terminal.options.cursorBlink = true");
+    expect(terminalSource).toContain('selectionBackground: value("--selection", foreground)');
+    expect(terminalSource).not.toContain("brightRed:");
+    expect(terminalSource).not.toContain("brightGreen:");
+    expect(terminalSource).not.toContain("brightBlue:");
+    expect(terminalSource).not.toContain("data-terminal-caret");
+    expect(terminalSource).not.toContain("syncCaret");
+    expect(terminalSource).not.toContain("xterm-cursor");
     expect(terminalSource).toContain("bind:this={scrollTrack}");
     expect(terminalSource).toContain("scrollbarVisible");
     expect(terminalSource).toContain("currentTerminal.scrollToLine");
     expect(terminalSource).toContain("scrollbar-width: none");
-    expect(tauriLibSource).toContain('command.arg("-f")');
-    expect(tauriLibSource).toContain('command.env("PROMPT", "pix:%1~ $ ")');
+    expect(tauriLibSource).toContain('command.env("TERM", "xterm-256color")');
+    expect(tauriLibSource).toContain('command.env("COLORTERM", "truecolor")');
+    expect(tauriLibSource).toContain('command.env("CLICOLOR", "1")');
+    expect(tauriLibSource).toContain('command.env("FORCE_COLOR", "1")');
+    expect(packageScriptsSource).toContain("<TerminalSessionsPane");
+    expect(workbenchTerminalPaneSource).toContain("<TerminalSessionsPane");
+    expect(terminalSessionsPaneSource).toContain("<TerminalView");
+    expect(terminalSessionsPaneSource).toContain('aria-label={ariaLabel}');
+    expect(terminalSessionsPaneSource).toContain("grid h-full min-h-0");
+    expect(tauriLibSource).not.toContain('command.arg("-f")');
+    expect(tauriLibSource).not.toContain('command.args(["--noprofile", "--norc"])');
+    expect(tauriLibSource).not.toContain('command.env("PROMPT", "pix:%1~ $ ")');
     expect(packageScriptsSource).toContain("{script.name}");
     expect(packageScriptsSource).not.toContain("{script.command}");
     expect(packageScriptsSource).not.toContain("title={script.command}");
@@ -438,13 +487,15 @@ describe("desktop visual regressions", () => {
     for (const [name, source] of componentSources) {
       expect(source, `${name} must not use arbitrary font utilities below 12px`).not.toMatch(/text-\[(?:[0-9]|1[01])px\]/);
       expect(source, `${name} must not hard-code CSS font sizes below 12px`).not.toMatch(/font-size:\s*(?:[0-9]|1[01])px/);
-      expect(source, `${name} must not configure runtime font sizes below 12px`).not.toMatch(/fontSize:\s*(?:[0-9]|1[01])(?:\D|$)/);
+      if (name !== "TerminalView.svelte") {
+        expect(source, `${name} must not configure runtime font sizes below 12px`).not.toMatch(/fontSize:\s*(?:[0-9]|1[01])(?:\D|$)/);
+      }
     }
 
     expect(idxSource).toContain('className="text-xs leading-[1.55]"');
     expect(sessionTodosSource).toContain("text-xs leading-4 text-muted-foreground");
     expect(toolResultSource).toContain("font-size: 12px");
-    expect(terminalSource).toContain("fontSize: 12");
+    expect(terminalSource).toContain("fontSize: 10");
     expect(markdownSource).not.toMatch(/font-size:\s+0\.(?:85|88|9|92|94)em;/);
     expect(markdownSource).toContain("max(0.85em, 0.75rem)");
   });

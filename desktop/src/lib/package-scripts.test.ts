@@ -25,4 +25,9 @@ describe("package scripts helpers", () => {
   it("bounds retained terminal output", () => {
     expect(appendTerminalOutput("abc", "def", 5)).toBe("bcdef");
   });
+
+  it("preserves ANSI escape sequences for xterm instead of flattening terminal colors", () => {
+    const colored = "\u001b[31mred\u001b[0m";
+    expect(appendTerminalOutput("", colored)).toBe(colored);
+  });
 });

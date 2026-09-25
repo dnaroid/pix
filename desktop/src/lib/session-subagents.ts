@@ -89,6 +89,14 @@ export function sessionSubagentCount(snapshot: SessionSubagentSnapshot | undefin
   return visibleSessionSubagentRuns(snapshot).reduce((count, run) => count + run.agents.length, 0);
 }
 
+export function sessionSubagentIconNames(
+  snapshot: SessionSubagentSnapshot | undefined,
+): Array<string | undefined> {
+  return visibleSessionSubagentRuns(snapshot).flatMap((run) => (
+    run.agents.map((agent) => sessionSubagentTaskPreview(run, agent.id)?.icon)
+  ));
+}
+
 export function sessionSubagentTaskPreview(
   run: SessionSubagentRun,
   agentId: string,

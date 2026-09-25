@@ -10,7 +10,7 @@ import statusIconSource from "./SessionTabStatusIcon.svelte?raw";
 import source from "./WorkbenchTabs.svelte?raw";
 
 describe("WorkbenchTabs desktop interaction", () => {
-  it("uses one roving ARIA tablist for session, Preview, and Git Diff surfaces", () => {
+  it("uses one roving ARIA tablist for sessions and auxiliary workbench surfaces", () => {
     expect(source).toContain('aria-label="Workbench tabs"');
     expect(source).toContain('role="tablist"');
     expect(source).toContain('role="tab"');
@@ -23,6 +23,8 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).toContain("GitFork");
     expect(source).toContain('tab.kind === "preview"');
     expect(source).toContain("GitCompareArrows");
+    expect(source).toContain('tab.kind === "terminal"');
+    expect(source).toContain("SquareTerminal");
     expect(source).toContain("text-left text-xs text-muted-foreground");
     expect(titlebarSource).toContain("<WorkbenchTabs {...workbench} />");
     expect(titlebarViewModelSource).toContain("tabs: options.tabs()");
@@ -82,13 +84,14 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).not.toContain("max-w-[240px]");
   });
 
-  it("keeps session-only lifecycle semantics while Preview/Diff are ordinary UI tabs", () => {
+  it("keeps session-only lifecycle semantics while auxiliary surfaces close locally", () => {
     expect(workbenchControllerSource).toContain('if (tab.kind === "session")');
     expect(workbenchControllerSource).toContain("options.closeSessionTab(tab.sessionId, preferredNextSessionId)");
     expect(workbenchControllerSource).toContain("const wasSelected = options.activeTabId() === id");
     expect(workbenchControllerSource).toContain("if (closed && wasSelected)");
     expect(workbenchControllerSource).toContain("pane ? pane.requestClose() : (options.closePreview(), true)");
     expect(workbenchControllerSource).toContain("options.closeGitDiff();");
+    expect(workbenchControllerSource).toContain("options.closeTerminal();");
     expect(sessionTabClosureSource).toContain("if (options.promptRunning(sessionId))");
     expect(sessionTabClosureSource).toContain("Closing this tab will stop the active run. Close it?");
   });

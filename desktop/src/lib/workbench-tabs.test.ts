@@ -8,6 +8,7 @@ import {
   type WorkbenchDiffTab,
   type WorkbenchPreviewTab,
   type WorkbenchSessionTab,
+  type WorkbenchTerminalTab,
 } from "./workbench-tabs";
 
 function session(sessionId: string): WorkbenchSessionTab {
@@ -46,6 +47,15 @@ const diff: WorkbenchDiffTab = {
   busy: false,
 };
 
+const terminal: WorkbenchTerminalTab = {
+  id: "terminal",
+  kind: "terminal",
+  label: "Terminal",
+  title: "Interactive terminal",
+  panelId: "workbench-panel-terminal",
+  closable: true,
+};
+
 describe("workbench tabs", () => {
   it("keeps canonical session order while inserting editor surfaces beside their opener", () => {
     const tabs = buildWorkbenchTabs([session("a"), session("b")], [
@@ -63,8 +73,16 @@ describe("workbench tabs", () => {
   it("keeps runtime session identity separate from workbench-only tabs", () => {
     expect(workbenchSessionId(workbenchSessionTabId("session-1"))).toBe("session-1");
     expect(workbenchSessionId("preview")).toBeNull();
+    expect(workbenchSessionId("terminal")).toBeNull();
     expect(workbenchTabCloseFallback([session("a"), preview, session("b")], "preview")).toBe("session:b");
     expect(normalizeWorkbenchTab("git-diff", [session("a"), preview], workbenchSessionTabId("a")))
       .toBe("session:a");
+  });
+
+  it("places Terminal like other workbench-only surfaces without changing session order", () => {
+    const tabs = buildWorkbenchTabs([session("a"), session("b")], [
+      { tab: terminal, insertAfterId: workbenchSessionTabId("a"), openedOrder: 1 },
+    ]);
+    expect(tabs.map((tab) => tab.id)).toEqual(["session:a", "terminal", "session:b"]);
   });
 });

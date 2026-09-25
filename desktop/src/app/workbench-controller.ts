@@ -15,6 +15,8 @@ type WorkbenchControllerOptions = {
   previewPane: () => { requestClose: () => boolean } | null;
   closePreview: () => void;
   closeGitDiff: () => void;
+  closeLspInstall: () => void;
+  closeTerminal: () => void;
   retargetPreviewAnchor: (sourceId: WorkbenchTabId, targetId: WorkbenchTabId | null) => void;
   retargetGitAnchor: (sourceId: WorkbenchTabId, targetId: WorkbenchTabId | null) => void;
 };
@@ -46,8 +48,14 @@ export function createWorkbenchController(options: WorkbenchControllerOptions) {
     } else if (tab.kind === "preview") {
       const pane = options.previewPane();
       closed = pane ? pane.requestClose() : (options.closePreview(), true);
-    } else {
+    } else if (tab.kind === "diff") {
       options.closeGitDiff();
+      closed = true;
+    } else if (tab.kind === "lsp-install") {
+      options.closeLspInstall();
+      closed = true;
+    } else {
+      options.closeTerminal();
       closed = true;
     }
 

@@ -4,6 +4,7 @@ import { createDcpCompression } from "./dcp-compression.svelte";
 import type { createDesktopProjectServices } from "./desktop-project-services";
 import type { createDesktopPromptServices } from "./desktop-prompt-services";
 import type { createDesktopSessionServices } from "./desktop-session-services";
+import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import { createSessionCoordinator } from "./session-coordinator";
 
 type ActiveSessionState = ReturnType<typeof createActiveSessionState>;
@@ -27,6 +28,7 @@ type DesktopSessionOrchestrationOptions = {
   sessionServices: SessionServices;
   projectServices: ProjectServices;
   promptServices: PromptServices;
+  lspOnboarding: LspOnboardingStore;
   reportError: (error: unknown) => void;
 };
 
@@ -57,6 +59,7 @@ export function createDesktopSessionOrchestration(options: DesktopSessionOrchest
     git: options.projectServices.git,
     metadata: options.sessionServices.metadata,
     prompts: options.promptServices.runtime,
+    lspOnboarding: options.lspOnboarding,
     dcp,
     updates: options.promptServices.updates,
   });

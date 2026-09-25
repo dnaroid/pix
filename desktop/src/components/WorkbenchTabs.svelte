@@ -2,7 +2,9 @@
   import FileCode from "@lucide/svelte/icons/file-code";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
   import GitFork from "@lucide/svelte/icons/git-fork";
+  import CodeXml from "@lucide/svelte/icons/code-xml";
   import Plus from "@lucide/svelte/icons/plus";
+  import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
   import { linearFocusIndex } from "../lib/keyboard-navigation";
@@ -131,8 +133,12 @@
               {/if}
             {:else if tab.kind === "preview"}
               <FileCode class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {:else}
+            {:else if tab.kind === "diff"}
               <GitCompareArrows class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {:else if tab.kind === "terminal"}
+              <SquareTerminal class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {:else}
+              <CodeXml class="h-3.5 w-3.5 shrink-0 text-tool-info" aria-hidden="true" />
             {/if}
 
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{tab.label}</span>

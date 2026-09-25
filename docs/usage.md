@@ -59,7 +59,8 @@ additional commands.
 - `!command` runs a shell command and renders the result as local UI activity;
   it is not written to the Pi session.
 - While it runs, editor input can be sent to stdin and `Ctrl-C` interrupts it.
-- `!!command` opens a raw interactive terminal for REPLs, TUIs, debuggers and
+- `!!command` opens or activates the Desktop **Terminal** workbench tab and
+  starts a raw interactive terminal there for REPLs, TUIs, debuggers and
   development servers.
 
 ## Git helpers

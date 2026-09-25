@@ -16,6 +16,8 @@ import type { DesktopPromptServices } from "./desktop-prompt-services";
 import type { DesktopSessionServices } from "./desktop-session-services";
 import { DRAFT_SESSION_TAB_ID, type createDraftSession } from "./draft-session.svelte";
 import type { SessionTabAttentionStore } from "./session-tab-attention.svelte";
+import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
+import type { WorkbenchTerminalState } from "./workbench-terminal.svelte";
 import {
   buildDesktopWorkbenchTabs,
   buildSessionWorkbenchTabs,
@@ -35,6 +37,8 @@ type DesktopPresentationStateOptions = {
   interactions: DesktopInteractionServices;
   draft: DraftSession;
   tabAttention: SessionTabAttentionStore;
+  lspOnboarding: LspOnboardingStore;
+  workbenchTerminal: WorkbenchTerminalState;
 };
 
 export function createDesktopPresentationState(options: DesktopPresentationStateOptions) {
@@ -113,6 +117,17 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     gitResolveRunning: options.project.git.resolveRunning,
     gitAnchorId: options.project.git.workbenchAnchorId,
     gitOpenedOrder: options.project.git.workbenchOpenedOrder,
+    lspInstall: options.lspOnboarding.installer ? {
+      languageLabel: options.lspOnboarding.installer.suggestion.languageLabel,
+      serverLabel: options.lspOnboarding.installer.suggestion.serverLabel,
+      phase: options.lspOnboarding.installer.phase,
+      insertAfterId: options.lspOnboarding.installer.insertAfterId,
+      openedOrder: options.lspOnboarding.installer.openedOrder,
+    } : null,
+    terminal: options.workbenchTerminal.open ? {
+      insertAfterId: options.workbenchTerminal.insertAfterId,
+      openedOrder: options.workbenchTerminal.openedOrder,
+    } : null,
   }));
   const activeWorkbenchTab = $derived(
     workbenchTabs.find((tab) => tab.id === options.activeWorkbenchTabId()),

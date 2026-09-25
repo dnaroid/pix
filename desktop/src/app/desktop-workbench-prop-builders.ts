@@ -9,6 +9,7 @@ import type { createConversationSessionActions } from "./conversation-session-ac
 import type { createErrorState } from "./error-state.svelte";
 import type { createGitAssist } from "./git-assist";
 import type { createGitWorkspaceStore } from "./git-workspace.svelte";
+import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { createPreviewStore } from "./preview.svelte";
 import type { createProjectActions } from "./project-actions.svelte";
 import type { createProjectDocumentsStore } from "./project-documents.svelte";
@@ -26,7 +27,7 @@ import type { createWorkspaceController } from "./workspace-controller";
 
 export type DesktopWorkbenchSurfaceViewProps = Omit<
   ComponentProps<typeof DesktopWorkbenchSurface>,
-  "transcriptPane" | "transcriptContent" | "promptComposer" | "promptText" | "previewPane"
+  "transcriptPane" | "transcriptContent" | "promptComposer" | "promptText" | "previewPane" | "terminalPane"
 >;
 
 type InspectorProps = NonNullable<DesktopWorkbenchSurfaceViewProps["inspector"]>;
@@ -76,6 +77,7 @@ export type WorkbenchConversationBuilderOptions = {
   attachments: ReturnType<typeof createAttachmentDraftController>;
   elicitation: ReturnType<typeof createElicitationStore>;
   questionImages: ReturnType<typeof createQuestionImageController>;
+  lspOnboarding: LspOnboardingStore;
 };
 
 export type WorkbenchEditorBuilderOptions = {
@@ -84,12 +86,14 @@ export type WorkbenchEditorBuilderOptions = {
   clientAvailable: () => boolean;
   operationRunning: () => boolean;
   activeWorkbenchTabId: () => string | null;
+  terminalOpen: () => boolean;
   externalEditorLabel: () => string;
   preview: ReturnType<typeof createPreviewStore>;
   projectDocuments: ReturnType<typeof createProjectDocumentsStore>;
   projectWorkspace: ReturnType<typeof createProjectWorkspaceStore>;
   git: ReturnType<typeof createGitWorkspaceStore>;
   gitAssist: ReturnType<typeof createGitAssist>;
+  lspOnboarding: LspOnboardingStore;
 };
 
 export type WorkbenchInspectorBuilderOptions = {
@@ -167,6 +171,9 @@ export function buildWorkbenchConversationProps(
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onLoadToolResult: (toolCallId) => void options.history.loadDeferredToolResult(toolCallId),
       onUserMessageAction: (message, action) => void options.branchActions.runUserMessageContextAction(message, action),
+      lspSuggestion: options.lspOnboarding.activeSuggestion(),
+      onInstallLsp: sessionId ? () => void options.lspOnboarding.pauseAndInstall(sessionId) : undefined,
+      onDismissLsp: sessionId ? () => options.lspOnboarding.dismiss(sessionId) : undefined,
     },
     queue: {
       items: sessionId ? (options.promptRuntime.queueItemsBySession.get(sessionId) ?? []) : [],
@@ -214,9 +221,13 @@ export function buildWorkbenchConversationProps(
 
 export function buildWorkbenchEditorProps(
   options: WorkbenchEditorBuilderOptions,
-): Pick<DesktopWorkbenchSurfaceViewProps, "preview" | "previewVisible" | "gitDiff" | "gitDiffVisible"> {
+): Pick<
+  DesktopWorkbenchSurfaceViewProps,
+  "preview" | "previewVisible" | "gitDiff" | "gitDiffVisible" | "lspInstall" | "lspInstallVisible" | "terminal" | "terminalVisible"
+> {
   const activePreview = options.preview.active;
   const gitDiffPreview = options.git.diffPreview;
+  const lspInstaller = options.lspOnboarding.installer;
 
   return {
     preview: activePreview ? {
@@ -266,6 +277,13 @@ export function buildWorkbenchEditorProps(
       onResolve: () => void options.gitAssist.resolveReviewInNewSession(),
     } : null,
     gitDiffVisible: options.activeWorkbenchTabId() === "git-diff",
+    lspInstall: lspInstaller ? {
+      state: lspInstaller,
+      onRetry: options.lspOnboarding.retry,
+    } : null,
+    lspInstallVisible: options.activeWorkbenchTabId() === "lsp-install",
+    terminal: options.terminalOpen() ? { workspace: options.workspace() } : null,
+    terminalVisible: options.activeWorkbenchTabId() === "terminal",
   };
 }
 

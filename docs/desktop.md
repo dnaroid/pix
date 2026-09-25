@@ -40,8 +40,9 @@ The left Activity Bar exposes:
 - **Settings** — Desktop-specific model, voice, editor and Source Control
   preferences.
 
-Long-lived files, media and Git diff/review surfaces open in the main workbench
-tab strip rather than modal windows.
+Long-lived files, media, Git diff/review surfaces, and the interactive Terminal
+opened by composer `!!` commands live in the main workbench tab strip rather
+than modal windows.
 
 ## First run
 

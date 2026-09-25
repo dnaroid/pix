@@ -1,6 +1,6 @@
 import type { SessionTabStatusKind } from "./session-tab-status";
 
-export type WorkbenchTabId = `session:${string}` | "preview" | "git-diff";
+export type WorkbenchTabId = `session:${string}` | "preview" | "git-diff" | "lsp-install" | "terminal";
 
 interface WorkbenchTabBase {
   readonly id: WorkbenchTabId;
@@ -31,10 +31,24 @@ export interface WorkbenchDiffTab extends WorkbenchTabBase {
   readonly busy: boolean;
 }
 
-export type WorkbenchTab = WorkbenchSessionTab | WorkbenchPreviewTab | WorkbenchDiffTab;
+export interface WorkbenchLspInstallTab extends WorkbenchTabBase {
+  readonly kind: "lsp-install";
+  readonly busy: boolean;
+}
+
+export interface WorkbenchTerminalTab extends WorkbenchTabBase {
+  readonly kind: "terminal";
+}
+
+export type WorkbenchTab =
+  | WorkbenchSessionTab
+  | WorkbenchPreviewTab
+  | WorkbenchDiffTab
+  | WorkbenchLspInstallTab
+  | WorkbenchTerminalTab;
 
 export interface WorkbenchAuxiliaryPlacement {
-  readonly tab: WorkbenchPreviewTab | WorkbenchDiffTab;
+  readonly tab: WorkbenchPreviewTab | WorkbenchDiffTab | WorkbenchLspInstallTab | WorkbenchTerminalTab;
   readonly insertAfterId?: WorkbenchTabId | null;
   readonly openedOrder: number;
 }
@@ -50,7 +64,7 @@ export function workbenchSessionId(tabId: WorkbenchTabId | null | undefined): st
 
 /**
  * Merge workspace-only editor tabs into the canonical session order without
- * letting Preview/Diff participate in ACP/TUI session membership.
+ * letting Preview/Diff/LSP install participate in ACP/TUI session membership.
  *
  * Auxiliary tabs remember which visible workbench tab opened them. Processing
  * placements in creation order lets a Preview opened from Diff (or vice versa)

@@ -106,6 +106,7 @@ not duplicate those; IDX document retrieval can find them independently.
 | [desktop-tool-rows](./desktop-tool-rows.md) | Desktop tool result rows |
 | [desktop-autocomplete](./desktop-autocomplete.md) | Desktop prompt autocomplete |
 | [desktop-agent-pause](./desktop-agent-pause.md) | Desktop turn-boundary pause and continuation |
+| [desktop-lsp-onboarding](./desktop-lsp-onboarding.md) | Desktop missing-LSP warning, safe pause, and trusted automatic installation |
 | [desktop-live-model-switching](./desktop-live-model-switching.md) | Live Desktop model/thinking switching while an agent run is active |
 | [desktop-runtime-status](./desktop-runtime-status.md) | Desktop context usage, DCP statistics, and model quota status |
 | [desktop-session-sidebar](./desktop-session-sidebar.md) | Session activity tab indicators, status entry point, and contextual inspector |

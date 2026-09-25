@@ -10,6 +10,7 @@ import type { DesktopProjectServices } from "./desktop-project-services";
 import type { DesktopPromptServices } from "./desktop-prompt-services";
 import type { DesktopSessionServices } from "./desktop-session-services";
 import type { DesktopSessionTransitionServices } from "./desktop-session-transition-services";
+import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import { createGitAssist } from "./git-assist";
 import { createWorkbenchController } from "./workbench-controller";
 
@@ -33,9 +34,11 @@ type DesktopWorkbenchGitServicesOptions = {
   activeConversationTabId: () => WorkbenchTabId | null;
   setActiveTabId: (id: WorkbenchTabId | null) => void;
   previewPane: () => { requestClose: () => boolean } | null;
+  closeTerminal: () => void;
   nextLocalMessageId: () => string;
   scrollToLatest: () => Promise<void>;
   reportError: (error: unknown) => void;
+  lspOnboarding: LspOnboardingStore;
 };
 
 export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitServicesOptions) {
@@ -49,6 +52,8 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
     previewPane: options.previewPane,
     closePreview: options.project.preview.close,
     closeGitDiff: options.project.git.closeDiff,
+    closeLspInstall: options.lspOnboarding.closeInstaller,
+    closeTerminal: options.closeTerminal,
     retargetPreviewAnchor: options.project.preview.retargetAnchor,
     retargetGitAnchor: options.project.git.retargetAnchor,
   });

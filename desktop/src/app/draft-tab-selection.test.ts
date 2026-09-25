@@ -69,7 +69,8 @@ describe("selecting an existing tab during draft materialization", () => {
       activeTabId: () => null, activeConversationTabId: () => null,
       setActiveTabId: vi.fn(), handleSessionTabClick: (id) => { void selection.loadSession(id); },
       closeSessionTab: vi.fn(async () => true), previewPane: () => null, closePreview: vi.fn(),
-      closeGitDiff: vi.fn(), retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
+      closeGitDiff: vi.fn(), closeLspInstall: vi.fn(), closeTerminal: vi.fn(),
+      retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
     });
     controller.select(workbenchSessionTabId("existing"));
     expect(current).toBe("existing");

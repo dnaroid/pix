@@ -30,6 +30,7 @@ type DesktopRootEffectsOptions = {
   workbenchTabs: () => readonly WorkbenchTab[];
   activeTodoSnapshot: () => SessionTodoSnapshot | undefined;
   activeSubagentSnapshot: () => SessionSubagentSnapshot | undefined;
+  sessionInspectorOpen: () => boolean;
   setSessionInspectorOpen: (open: boolean) => void;
   markSessionTabViewed: (sessionId: string) => void;
 };
@@ -77,6 +78,7 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
       options.activeSessionId(),
       options.activeTodoSnapshot(),
       options.activeSubagentSnapshot(),
+      options.sessionInspectorOpen(),
       options.setSessionInspectorOpen,
     );
   });

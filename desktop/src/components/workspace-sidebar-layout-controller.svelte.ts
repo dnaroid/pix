@@ -8,9 +8,6 @@ const REGISTRY_MIN_WIDTH = 344;
 const SETTINGS_MIN_WIDTH = 360;
 const SCRIPTS_MIN_WIDTH = 400;
 const IDX_MIN_WIDTH = 420;
-const DEFAULT_MAX_WIDTH = 420;
-const SCRIPTS_MAX_WIDTH = 720;
-const IDX_MAX_WIDTH = 760;
 const MIN_MAIN_WORKSPACE_WIDTH = 280;
 const WIDTH_KEY = "pix.desktop.taskSidebarWidth";
 const COLLAPSED_KEY = "pix.desktop.taskSidebarCollapsed";
@@ -31,9 +28,9 @@ export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebar
   let previousDocumentCursor: string | null = null;
 
   const activeMinWidth = $derived(sidebarMinWidth(options.activeTab()));
-  const activeMaxWidth = $derived(Math.min(
-    sidebarMaxWidth(options.activeTab()),
-    Math.max(activeMinWidth, viewportWidth - ACTIVITY_BAR_WIDTH - MIN_MAIN_WORKSPACE_WIDTH),
+  const activeMaxWidth = $derived(Math.max(
+    activeMinWidth,
+    viewportWidth - ACTIVITY_BAR_WIDTH - MIN_MAIN_WORKSPACE_WIDTH,
   ));
   const expandedWidth = $derived(clampWidth(sidebarWidth, activeMinWidth, activeMaxWidth));
   const renderedWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : expandedWidth));
@@ -151,13 +148,7 @@ export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebar
     return MIN_WIDTH;
   }
 
-  function sidebarMaxWidth(tab: SidebarIndicatorTab): number {
-    if (tab === "scripts") return SCRIPTS_MAX_WIDTH;
-    if (tab === "idx") return IDX_MAX_WIDTH;
-    return DEFAULT_MAX_WIDTH;
-  }
-
-  function clampWidth(width: number, minimum = MIN_WIDTH, maximum = DEFAULT_MAX_WIDTH): number {
+  function clampWidth(width: number, minimum = MIN_WIDTH, maximum = Number.POSITIVE_INFINITY): number {
     return Math.min(maximum, Math.max(minimum, width));
   }
 

@@ -43,11 +43,20 @@ workspace/launcher preparation or spawn, then publishes only while the original
 slot still owns the label and the window is available and not exiting. Its
 slots-to-operations publication lock excludes synchronous destruction capture;
 pipe failures, conflicts, and rejected publication kill and reap the guarded
-child outside registry locks. Window destruction captures the exact terminal and IDX
+child outside registry locks. Window destruction captures the exact terminal
+and IDX
 operation IDs (including completed history) while cancelling the old lifetime;
 delayed stop and pruning touch only those captured IDs, not resources published
 by a replacement window using the same label. Workspace cleanup and application
 exit still stop resources in their existing scopes.
+
+LSP onboarding package-manager commands are a separate transient class rather
+than a long-lived per-window runtime. `install_lsp_server` runs its fixed,
+user-approved command on Tauri's blocking pool and waits for that child to exit
+before returning bounded output; it does not publish an ACP/PTY/IDX process
+slot. Workspace/session invalidation therefore suppresses stale registration/UI
+continuations but does not cancel a package-manager command that is already
+running. See [desktop-lsp-onboarding.md](./desktop-lsp-onboarding.md).
 
 ## Constraints and failure cases
 
@@ -71,6 +80,7 @@ exit still stop resources in their existing scopes.
 - `desktop/src-tauri/src/lib.rs::start_idx_operation`
 - `desktop/src-tauri/src/lib.rs::publish_idx_operation`
 - `desktop/src-tauri/src/lib.rs::capture_destroyed_window`
+- `desktop/src-tauri/src/lsp_install.rs::install_lsp_server`
 - `desktop/src-tauri/src/acp_queue.rs::Queue`
 - `desktop/src-tauri/src/native_process.rs::force_stop`
 - `desktop/src-tauri/src/native_process/windows.rs` (suspended spawn, job ownership)

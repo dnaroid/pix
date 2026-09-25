@@ -9,10 +9,12 @@ import {
   workbenchSessionTabId,
   type WorkbenchAuxiliaryPlacement,
   type WorkbenchDiffTab,
+  type WorkbenchLspInstallTab,
   type WorkbenchPreviewTab,
   type WorkbenchSessionTab,
   type WorkbenchTab,
   type WorkbenchTabId,
+  type WorkbenchTerminalTab,
 } from "../lib/workbench-tabs";
 import { sessionIsFork } from "../lib/session-tabs";
 
@@ -94,6 +96,17 @@ export function buildDesktopWorkbenchTabs(options: {
   gitResolveRunning: boolean;
   gitAnchorId: WorkbenchTabId | null;
   gitOpenedOrder: number;
+  lspInstall?: {
+    languageLabel: string;
+    serverLabel: string;
+    phase: string;
+    insertAfterId: WorkbenchTabId | null;
+    openedOrder: number;
+  } | null;
+  terminal?: {
+    insertAfterId: WorkbenchTabId | null;
+    openedOrder: number;
+  } | null;
 }): WorkbenchTab[] {
   const auxiliary: WorkbenchAuxiliaryPlacement[] = [];
   if (options.preview) {
@@ -130,6 +143,37 @@ export function buildDesktopWorkbenchTabs(options: {
       tab: diffTab,
       insertAfterId: options.gitAnchorId,
       openedOrder: options.gitOpenedOrder || 2,
+    });
+  }
+  if (options.lspInstall) {
+    const lspTab: WorkbenchLspInstallTab = {
+      id: "lsp-install",
+      label: `${options.lspInstall.languageLabel} · LSP`,
+      title: `${options.lspInstall.serverLabel} · LSP installation`,
+      panelId: "workbench-panel-lsp-install",
+      kind: "lsp-install",
+      closable: options.lspInstall.phase === "success" || options.lspInstall.phase === "error",
+      busy: options.lspInstall.phase === "installing",
+    };
+    auxiliary.push({
+      tab: lspTab,
+      insertAfterId: options.lspInstall.insertAfterId,
+      openedOrder: options.lspInstall.openedOrder || 3,
+    });
+  }
+  if (options.terminal) {
+    const terminalTab: WorkbenchTerminalTab = {
+      id: "terminal",
+      label: "Terminal",
+      title: "Interactive terminal",
+      panelId: "workbench-panel-terminal",
+      kind: "terminal",
+      closable: true,
+    };
+    auxiliary.push({
+      tab: terminalTab,
+      insertAfterId: options.terminal.insertAfterId,
+      openedOrder: options.terminal.openedOrder || 4,
     });
   }
   return buildWorkbenchTabs([...options.sessionTabs], auxiliary);

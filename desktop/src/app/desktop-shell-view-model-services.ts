@@ -1,4 +1,4 @@
-import { desktopCommandShortcutLabel } from "../lib/desktop-commands";
+import { sessionSubagentIconNames } from "../lib/session-subagents";
 import { createDesktopOverlaysViewModel } from "./desktop-overlays-view-model.svelte";
 import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model.svelte";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
@@ -35,15 +35,13 @@ export function createDesktopShellViewModelServices(options: DesktopViewModelSer
     activeAgentControlState: () => options.presentation.activeAgentControlState,
     dcpCompressionAvailable: () => options.presentation.dcpCompressionAvailable,
     sessionActivity: () => options.presentation.activeSessionActivity,
+    sessionSubagentIcons: () => sessionSubagentIconNames(options.presentation.activeSubagentSnapshot),
     sessionNeedsInput: () => options.presentation.activePendingElicitation !== null,
-    commandPaletteShortcut: () => desktopCommandShortcutLabel("application.commandPalette", options.platform),
     runtime: options.sessions.runtime,
     dcp: options.orchestration.dcp,
     modelConfig: options.model.config,
     sessionCoordinator: options.orchestration.coordinator,
     inspectorPreference: options.sessions.inspectorPreference,
-    navigation: options.conversation.navigation,
-    commands: options.commands.controller,
   });
 
   return { overlays, statusBar };

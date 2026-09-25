@@ -21,6 +21,15 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(layoutControllerSource).toContain('if (tab === "git") return GIT_MIN_WIDTH');
   });
 
+  it("lets any sidebar view grow until the main workspace reaches its minimum width", () => {
+    expect(layoutControllerSource).toContain("const MIN_MAIN_WORKSPACE_WIDTH = 280");
+    expect(layoutControllerSource).toContain("viewportWidth - ACTIVITY_BAR_WIDTH - MIN_MAIN_WORKSPACE_WIDTH");
+    expect(layoutControllerSource).not.toContain("DEFAULT_MAX_WIDTH");
+    expect(layoutControllerSource).not.toContain("SCRIPTS_MAX_WIDTH");
+    expect(layoutControllerSource).not.toContain("IDX_MAX_WIDTH");
+    expect(layoutControllerSource).not.toContain("sidebarMaxWidth");
+  });
+
   it("treats the Activity Bar as one vertical keyboard toolbar", () => {
     expect(activityBarSource).toContain('role="toolbar"');
     expect(activityBarSource).toContain('aria-orientation="vertical"');
@@ -32,12 +41,29 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(layoutControllerSource).toContain("const ACTIVITY_BAR_WIDTH = 40");
     expect(activityBarSource).toContain("h-full w-10 shrink-0");
     expect(activityBarSource).toContain("h-10 w-10 place-items-center");
+    expect(activityBarSource).toContain("pt-1 pb-2");
+    expect(activityBarSource).toContain("mt-auto grid h-10 w-10 -translate-y-px");
   });
 
   it("keeps the Activity Bar project icon neutral", () => {
     expect(activityBarSource).toContain('<Folder class="h-5 w-5" aria-hidden="true" />');
     expect(activityBarSource).not.toContain("ProjectFolderIcon");
     expect(activityBarSource).not.toContain("projectColors");
+  });
+
+  it("shows selected Activity Bar styling only while the sidebar is expanded", () => {
+    expect(activityBarSource).toContain("return activeTab === tab && !collapsed;");
+    expect(activityBarSource).toContain('selected("project") ? "border-l-primary bg-panel-selected text-foreground"');
+    expect(activityBarSource).toContain('selected("settings") ? "border-l-primary bg-panel-selected text-foreground"');
+  });
+
+  it("gives every expanded sidebar panel a shared close button", () => {
+    expect(sidebarSource).toContain('import X from "@lucide/svelte/icons/x"');
+    expect(sidebarSource).toContain("function closeActivePanel(): void");
+    expect(sidebarSource).toContain("selectTab(activeTab);");
+    expect(sidebarSource).toContain('title={`Close ${activeTabTitle}`}');
+    expect(sidebarSource).toContain('aria-label={`Close ${activeTabTitle}`}');
+    expect(sidebarSource).toContain("bg-chrome pl-3 pr-1");
   });
 
   it("uses the shared menu navigation contract for task status", () => {

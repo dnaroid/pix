@@ -43,6 +43,20 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 ### Entry point
 - `LspManager.matchingServers` → `loadLspConfig` → spawns as needed; called from `appendLspDiagnosticsToMutationResult` on `tool_result` for mutation tools (`apply_patch`, `ast_apply`, `Write`, `Edit`). `[confirmed by code: manager.ts 73; lib/lsp.ts 30-48]`
 
+### Desktop missing-LSP onboarding
+- Successful mutation results also compare each changed file with the effective
+  registered LSP set before diagnostics run. A configured matching server is
+  treated as registered even when its root marker/binary later fails; onboarding
+  must not reinterpret an operational failure as permission to install another
+  server.
+- Desktop automatic installation accepts only a fixed cross-checked installer
+  identifier catalog. The native installer never executes command text supplied
+  by a model or project file.
+- Automatic registrations are written to the trusted user
+  `~/.config/pi/pi-tools-suite.jsonc` layer with an absolute installed binary
+  path. Project-local config remains trust-gated exactly as described above and
+  is never auto-trusted or rewritten by onboarding.
+
 ## Public contracts / inputs / outputs
 
 ### Config locations & format
@@ -89,9 +103,11 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 - `external/pi-tools-suite/src/lsp/manager.ts`
 - `external/pi-tools-suite/src/lsp/child-process.ts`
 - `external/pi-tools-suite/src/lsp/index.ts`
+- `external/pi-tools-suite/src/lsp/onboarding.ts`
 - `external/pi-tools-suite/src/lib/lsp.ts`
 - `external/pi-tools-suite/src/config.ts`
 - `external/pi-tools-suite/test/lsp.test.ts`
+- `external/pi-tools-suite/test/lsp-onboarding.test.ts`
 
 ## Existing tests
 - `lsp.test.ts` `[confirmed by tests]`:

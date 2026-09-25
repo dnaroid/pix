@@ -22,6 +22,7 @@ import type { DesktopWorkspaceServices } from "./desktop-workspace-services";
 import type { createErrorState } from "./error-state.svelte";
 import type { createTranscriptAttachmentController } from "./transcript-attachments";
 import type { createTranscriptScrollController } from "./transcript-scroll.svelte";
+import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 
 type ErrorState = ReturnType<typeof createErrorState>;
 type SessionOrchestration = ReturnType<typeof createDesktopSessionOrchestration>;
@@ -60,4 +61,5 @@ export type DesktopViewModelServicesOptions = {
   transcriptScroll: TranscriptScroll;
   transcriptAttachments: TranscriptAttachments;
   orchestration: SessionOrchestration;
+  lspOnboarding: LspOnboardingStore;
 };
