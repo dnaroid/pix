@@ -22,6 +22,7 @@ type PromptSubmitOptions = {
   setPromptText: (text: string) => void;
   activeSessionId: () => string | null;
   draftSessionTabActive: () => boolean;
+  beginOptimisticDraftSubmit: (text: string, attachments: readonly Attachment[]) => boolean;
   materializeDraftSession: (prompt?: string, attachmentCount?: number) => Promise<string | null>;
   activeSessionRuntimeReady: () => boolean;
   promptRunning: () => boolean;
@@ -58,7 +59,7 @@ type PromptSubmitOptions = {
   imagePromptSupported: () => boolean;
   invalidateAttachmentDraft: () => void;
   nextLocalMessageId: () => string;
-  appendUserMessage: (text: string, id: string, attachments: readonly Attachment[]) => void;
+  appendUserMessage: (text: string, id: string, attachments: readonly Attachment[]) => () => void;
   scrollToLatest: () => Promise<void>;
   prompts: PromptRuntime;
   refreshAutocompleteSettings: (sessionId: string) => Promise<void>;
@@ -68,6 +69,11 @@ type PromptSubmitOptions = {
 };
 
 export function createPromptSubmit(options: PromptSubmitOptions) {
+  type PreparedPrompt = ReturnType<typeof buildPromptPayload> & {
+    transcriptMessageId: string;
+    rollback?: () => void;
+  };
+
   async function submit(): Promise<void> {
     if (options.sessionMutationRunning() || options.sessionHistoryLoading()) return;
     const initialDraftKey = options.attachmentDraftKey();
@@ -78,6 +84,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     let sessionId = options.activeSessionId();
     let draftKey = options.attachmentDraftKey();
     let draftGeneration = options.attachmentGeneration();
+    let preparedPrompt: PreparedPrompt | null = null;
     if (
       (!text && attachments.length === 0)
       || options.sessionMutationRunning()
@@ -196,11 +203,30 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
 
     if (!sessionId) {
       if (!options.draftSessionTabActive()) return;
+      if (!terminalCommand) {
+        try {
+          const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
+          if (!options.beginOptimisticDraftSubmit(text, attachments)) return;
+          options.setErrorMessage(null);
+          options.setPromptText("");
+          options.invalidateAttachmentDraft();
+          const transcriptMessageId = options.nextLocalMessageId();
+          const rollback = options.appendUserMessage(text, transcriptMessageId, attachments);
+          void options.scrollToLatest();
+          preparedPrompt = { ...payload, transcriptMessageId, rollback };
+        } catch (error) {
+          options.reportError(error);
+          return;
+        }
+      }
       sessionId = await options.materializeDraftSession(
         terminalCommand?.kind === "chat" ? undefined : text,
         terminalCommand?.kind === "chat" ? 0 : attachments.length,
       );
-      if (!sessionId) return;
+      if (!sessionId) {
+        preparedPrompt?.rollback?.();
+        return;
+      }
       draftKey = options.attachmentDraftKey();
       draftGeneration = options.attachmentGeneration();
     }
@@ -240,21 +266,30 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     let reloadAfterSlash = false;
     options.setErrorMessage(null);
     try {
-      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported());
-      if (
-        sessionId !== options.activeSessionId()
-        || draftKey !== options.attachmentDraftKey()
-        || draftGeneration !== options.attachmentGeneration()
-        || attachments !== options.promptAttachments()
-      ) return;
-      options.setPromptText("");
-      options.invalidateAttachmentDraft();
-      const transcriptMessageId = options.nextLocalMessageId();
-      options.appendUserMessage(text, transcriptMessageId, attachments);
-      await options.scrollToLatest();
+      if (!preparedPrompt) {
+        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
+        if (
+          sessionId !== options.activeSessionId()
+          || draftKey !== options.attachmentDraftKey()
+          || draftGeneration !== options.attachmentGeneration()
+          || attachments !== options.promptAttachments()
+        ) return;
+        options.setPromptText("");
+        options.invalidateAttachmentDraft();
+        const transcriptMessageId = options.nextLocalMessageId();
+        options.appendUserMessage(text, transcriptMessageId, attachments);
+        await options.scrollToLatest();
+        preparedPrompt = { ...payload, transcriptMessageId };
+      }
       const requestClient = options.client();
       if (!requestClient) return;
-      await options.prompts.runPromptRequest(requestClient, sessionId, blocks, fileImages, transcriptMessageId);
+      await options.prompts.runPromptRequest(
+        requestClient,
+        sessionId,
+        preparedPrompt.blocks,
+        preparedPrompt.fileImages,
+        preparedPrompt.transcriptMessageId,
+      );
       if (text.startsWith("/")) await options.refreshAutocompleteSettings(sessionId);
       reloadAfterSlash = /^\/(?:scoped-models|no-context-files)(?:\s|$)/i.test(text);
       void options.refreshSessions();

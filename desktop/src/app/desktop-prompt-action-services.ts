@@ -92,6 +92,7 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     setPromptText: options.setPromptText,
     activeSessionId: () => options.state.sessionId,
     draftSessionTabActive: () => options.transitions.draft.active,
+    beginOptimisticDraftSubmit: options.transitions.draft.beginOptimisticSubmit,
     materializeDraftSession: options.transitions.draft.materialize,
     activeSessionRuntimeReady: () => options.state.runtimeReady,
     promptRunning: () => options.state.sessionId
@@ -123,11 +124,17 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     nextLocalMessageId: options.nextLocalMessageId,
     appendUserMessage: (text, id, attachments) => {
       const sessionId = options.state.sessionId;
-      if (!sessionId) return;
-      options.state.setActiveTranscriptForSession(
-        sessionId,
-        appendLocalUserMessage(options.state.transcript, text, id, attachments),
-      );
+      const previous = options.state.transcript;
+      const next = appendLocalUserMessage(previous, text, id, attachments);
+      if (sessionId) options.state.setActiveTranscriptForSession(sessionId, next);
+      else options.state.setTranscript(next);
+      return () => {
+        if (options.state.transcript !== next) return;
+        options.state.setTranscript(previous);
+        if (sessionId && options.state.sessionId === sessionId) {
+          options.state.setSessionTranscript(sessionId, previous);
+        }
+      };
     },
     scrollToLatest: options.scrollToLatest,
     prompts: options.prompt.runtime,

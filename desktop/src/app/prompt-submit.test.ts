@@ -3,14 +3,20 @@ import type { AcpClient } from "../lib/acp-client";
 import { createPromptSubmit } from "./prompt-submit";
 
 describe("createPromptSubmit terminal commands", () => {
-  it("passes the first normal draft prompt to model routing before materialization", async () => {
+  it("renders the first normal draft prompt optimistically before materialization finishes", async () => {
     let promptText = "Implement the subsystem";
     const promptAttachments: never[] = [];
     let activeSessionId: string | null = null;
-    const materializeDraftSession = vi.fn(async () => {
-      activeSessionId = "session-auto";
-      return activeSessionId;
-    });
+    let finishMaterialization!: (sessionId: string | null) => void;
+    const materializeDraftSession = vi.fn(() => new Promise<string | null>((resolve) => {
+      finishMaterialization = (sessionId) => {
+        activeSessionId = sessionId;
+        resolve(sessionId);
+      };
+    }));
+    const rollbackOptimisticMessage = vi.fn();
+    const appendUserMessage = vi.fn(() => rollbackOptimisticMessage);
+    const beginOptimisticDraftSubmit = vi.fn(() => true);
     const runPromptRequest = vi.fn(async () => {});
     const client = {} as AcpClient;
     const submit = createPromptSubmit({
@@ -18,13 +24,14 @@ describe("createPromptSubmit terminal commands", () => {
       sessionMutationRunning: () => false,
       sessionHistoryLoading: () => false,
       waitForAttachmentDraftSettled: async () => {},
-      attachmentDraftKey: () => "draft",
+      attachmentDraftKey: () => activeSessionId ? "session" : "draft",
       attachmentGeneration: () => 1,
       promptText: () => promptText,
       promptAttachments: () => promptAttachments,
       setPromptText: (text: string) => { promptText = text; },
       activeSessionId: () => activeSessionId,
-      draftSessionTabActive: () => true,
+      draftSessionTabActive: () => activeSessionId === null,
+      beginOptimisticDraftSubmit,
       materializeDraftSession,
       activeSessionRuntimeReady: () => true,
       promptRunning: () => false,
@@ -52,7 +59,7 @@ describe("createPromptSubmit terminal commands", () => {
       imagePromptSupported: () => true,
       invalidateAttachmentDraft: () => {},
       nextLocalMessageId: () => "local:1",
-      appendUserMessage: () => {},
+      appendUserMessage,
       scrollToLatest: async () => {},
       prompts: { runPromptRequest } as never,
       refreshAutocompleteSettings: async () => {},
@@ -61,10 +68,20 @@ describe("createPromptSubmit terminal commands", () => {
       reportError: (error: unknown) => { throw error; },
     });
 
-    await submit.submit();
+    const pendingSubmit = submit.submit();
+    await vi.waitFor(() => expect(materializeDraftSession).toHaveBeenCalled());
 
+    expect(beginOptimisticDraftSubmit).toHaveBeenCalledWith("Implement the subsystem", []);
+    expect(promptText).toBe("");
+    expect(appendUserMessage).toHaveBeenCalledWith("Implement the subsystem", "local:1", []);
     expect(materializeDraftSession).toHaveBeenCalledWith("Implement the subsystem", 0);
+    expect(runPromptRequest).not.toHaveBeenCalled();
+
+    finishMaterialization("session-auto");
+    await pendingSubmit;
+
     expect(runPromptRequest).toHaveBeenCalled();
+    expect(rollbackOptimisticMessage).not.toHaveBeenCalled();
   });
 
   it("opens !! in the interactive terminal without materializing or queueing a Pi session", async () => {
@@ -87,6 +104,7 @@ describe("createPromptSubmit terminal commands", () => {
       setPromptText: (text: string) => { promptText = text; },
       activeSessionId: () => null,
       draftSessionTabActive: () => true,
+      beginOptimisticDraftSubmit: () => true,
       materializeDraftSession: vi.fn(async () => { throw new Error("must not materialize"); }),
       activeSessionRuntimeReady: () => false,
       promptRunning: () => true,
@@ -114,7 +132,7 @@ describe("createPromptSubmit terminal commands", () => {
       imagePromptSupported: () => true,
       invalidateAttachmentDraft: () => {},
       nextLocalMessageId: () => "local:1",
-      appendUserMessage: () => {},
+      appendUserMessage: () => () => {},
       scrollToLatest: async () => {},
       prompts: { runPromptRequest } as never,
       refreshAutocompleteSettings: async () => {},
@@ -150,6 +168,7 @@ describe("createPromptSubmit terminal commands", () => {
       setPromptText: (text: string) => { promptText = text; },
       activeSessionId: () => "session-1",
       draftSessionTabActive: () => false,
+      beginOptimisticDraftSubmit: () => false,
       materializeDraftSession: async () => null,
       activeSessionRuntimeReady: () => true,
       promptRunning: () => false,
@@ -177,7 +196,7 @@ describe("createPromptSubmit terminal commands", () => {
       imagePromptSupported: () => true,
       invalidateAttachmentDraft: () => {},
       nextLocalMessageId: () => "local:1",
-      appendUserMessage: () => {},
+      appendUserMessage: () => () => {},
       scrollToLatest: async () => {},
       prompts: { runPromptRequest: vi.fn(async () => {}) } as never,
       refreshAutocompleteSettings: async () => {},
@@ -191,5 +210,62 @@ describe("createPromptSubmit terminal commands", () => {
     expect(bash).toHaveBeenCalledWith("session-1", "pwd", false, "!pwd");
     expect(openInteractiveTerminal).not.toHaveBeenCalled();
     expect(promptText).toBe("");
+  });
+
+  it("rolls back the optimistic draft message when materialization fails", async () => {
+    let promptText = "Retry me";
+    const rollbackOptimisticMessage = vi.fn();
+    const submit = createPromptSubmit({
+      client: () => ({} as AcpClient),
+      sessionMutationRunning: () => false,
+      sessionHistoryLoading: () => false,
+      waitForAttachmentDraftSettled: async () => {},
+      attachmentDraftKey: () => "draft",
+      attachmentGeneration: () => 1,
+      promptText: () => promptText,
+      promptAttachments: () => [],
+      setPromptText: (text: string) => { promptText = text; },
+      activeSessionId: () => null,
+      draftSessionTabActive: () => true,
+      beginOptimisticDraftSubmit: () => true,
+      materializeDraftSession: async () => null,
+      activeSessionRuntimeReady: () => false,
+      promptRunning: () => false,
+      openSessionStartTab: async () => {},
+      enhancePromptDraft: async () => {},
+      importConversationPath: async () => {},
+      chooseImportSession: async () => {},
+      requestLocalTextInput: async () => undefined,
+      deferDraft: async () => {},
+      resumeConversationPath: async () => {},
+      openSessionSelector: () => {},
+      openJumpPicker: async () => {},
+      openHistoryPicker: async () => {},
+      showDesktopHotkeys: () => {},
+      reloadResources: async () => {},
+      forkConversation: async () => {},
+      openInteractiveTerminal: async () => {},
+      closeProjectSelector: () => {},
+      closeSessionSelector: () => {},
+      applyModelSlashCommand: async () => {},
+      applyThinkingSlashCommand: async () => {},
+      setCommandPicker: () => {},
+      displayedConfigOptions: () => [],
+      queueDraftForCurrentRun: async () => {},
+      imagePromptSupported: () => true,
+      invalidateAttachmentDraft: () => {},
+      nextLocalMessageId: () => "local:1",
+      appendUserMessage: () => rollbackOptimisticMessage,
+      scrollToLatest: async () => {},
+      prompts: { runPromptRequest: vi.fn(async () => {}) } as never,
+      refreshAutocompleteSettings: async () => {},
+      refreshSessions: async () => {},
+      setErrorMessage: () => {},
+      reportError: (error: unknown) => { throw error; },
+    });
+
+    await submit.submit();
+
+    expect(rollbackOptimisticMessage).toHaveBeenCalledOnce();
   });
 });

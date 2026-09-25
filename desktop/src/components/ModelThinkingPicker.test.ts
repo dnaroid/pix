@@ -16,4 +16,13 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("thinkingByModel.get(model.ref) ?? config.currentThinking");
     expect(pickerSource).toContain("model.thinkingLevels");
   });
+
+  it("confirms the staged selection with Enter from model rows in select mode only", () => {
+    expect(pickerSource).toContain("function handleModelKeydown(event: KeyboardEvent): void {");
+    expect(pickerSource).toContain('if (visibilityMode || event.key !== "Enter") return;');
+    expect(pickerSource).toContain("void applySelection();");
+    expect(pickerSource).toContain("onkeydown={(event) => handleModelKeydown(event)}");
+    // Manage mode keeps the native row activation (visibility toggle).
+    expect(pickerSource).toContain("if (visibilityMode) void toggleModelVisibility(model);");
+  });
 });

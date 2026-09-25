@@ -21,8 +21,8 @@ export function createSessionTabSelection(options: SessionTabControllerOptions) 
     const currentSessionId = options.state.sessionId;
     const sourceOwnerId = options.draft.active ? DRAFT_SESSION_TAB_ID : currentSessionId;
     if (currentSessionId) options.state.setSessionTranscript(currentSessionId, options.state.transcript);
-    options.switchComposerDraft(sourceOwnerId, sessionId);
     options.draft.deactivate();
+    options.switchComposerDraft(sourceOwnerId, sessionId);
     options.state.setSessionId(sessionId);
     const cachedTranscript = options.state.sessionTranscript(sessionId);
     options.state.setTranscript(cachedTranscript ?? emptyTranscript);

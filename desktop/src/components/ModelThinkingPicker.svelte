@@ -246,6 +246,14 @@
     }
   }
 
+  function handleModelKeydown(event: KeyboardEvent): void {
+    // Select mode: Enter confirms the staged selection like the Apply button.
+    // Manage mode keeps the native button activation (visibility toggle).
+    if (visibilityMode || event.key !== "Enter") return;
+    event.preventDefault();
+    void applySelection();
+  }
+
   function handleThinkingKeydown(event: KeyboardEvent, index: number): void {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -366,6 +374,7 @@
           aria-selected={visibilityMode ? index === selectedIndex : model.ref === selectedModelRef}
           data-model-ref={model.ref}
           onmouseenter={() => selectedIndex = index}
+          onkeydown={(event) => handleModelKeydown(event)}
           onclick={() => {
             selectedIndex = index;
             if (visibilityMode) void toggleModelVisibility(model);

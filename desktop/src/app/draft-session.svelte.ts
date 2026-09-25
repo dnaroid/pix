@@ -1,6 +1,7 @@
 import { tick } from "svelte";
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { AcpClient } from "../lib/acp-client";
+import type { Attachment } from "../lib/attachments";
 
 export const DRAFT_SESSION_TAB_ID = "pix:desktop-draft-session";
 
@@ -30,13 +31,15 @@ type DraftSessionOptions = {
     options?: { resetTarget?: boolean; preserveSource?: boolean },
   ) => void;
   forgetComposerDraft: (ownerId: string) => void;
+  setPromptText: (text: string) => void;
+  replacePromptAttachments: (attachments: readonly Attachment[]) => void;
   focusComposer: () => void | Promise<void>;
   forgetRuntime: (sessionId: string) => void;
   ensureProvisionalSession: (sessionId: string, workspace: string) => void;
   showSessionTab: (sessionId: string) => void;
   retargetWorkbenchAnchors: (sourceSessionId: string, targetSessionId?: string) => void;
   retargetAttachmentDraftKey: (workspace: string, sessionId: string) => void;
-  setMaterializedTranscript: (sessionId: string) => void;
+  adoptMaterializedTranscript: (sessionId: string) => void;
   setConfigOptions: (options: SessionConfigOption[]) => void;
   markRuntimeReady: (sessionId: string, options: SessionConfigOption[]) => void;
   rememberActiveSession: (workspace: string, sessionId: string) => void;
@@ -51,6 +54,25 @@ export function createDraftSession(options: DraftSessionOptions) {
   let materializing = $state(false);
   let materializationGeneration = 0;
   let materializationController: AbortController | null = null;
+  let optimisticComposerSnapshot: { text: string; attachments: Attachment[] } | null = null;
+
+  function beginOptimisticSubmit(text: string, attachments: readonly Attachment[]): boolean {
+    if (!active || materializing || optimisticComposerSnapshot) return false;
+    optimisticComposerSnapshot = { text, attachments: [...attachments] };
+    return true;
+  }
+
+  function clearOptimisticSubmit(): void {
+    optimisticComposerSnapshot = null;
+  }
+
+  function restoreOptimisticSubmit(): void {
+    const snapshot = optimisticComposerSnapshot;
+    if (!snapshot) return;
+    optimisticComposerSnapshot = null;
+    options.setPromptText(snapshot.text);
+    options.replacePromptAttachments(snapshot.attachments);
+  }
 
   function invalidateMaterialization(): void {
     materializationGeneration += 1;
@@ -63,7 +85,10 @@ export function createDraftSession(options: DraftSessionOptions) {
     if (!options.workspace() || !options.statusReady()) return;
     options.closeProjectSelector();
     options.closeSessionSelector();
-    if (config.resetComposer) invalidateMaterialization();
+    if (config.resetComposer) {
+      clearOptimisticSubmit();
+      invalidateMaterialization();
+    }
     const currentSessionId = options.activeSessionId();
     const sourceOwnerId = active ? DRAFT_SESSION_TAB_ID : currentSessionId;
     if (currentSessionId) options.saveActiveTranscript(currentSessionId);
@@ -147,9 +172,10 @@ export function createDraftSession(options: DraftSessionOptions) {
       open = false;
       active = false;
       touched = false;
+      clearOptimisticSubmit();
       options.forgetComposerDraft(DRAFT_SESSION_TAB_ID);
       options.resetModelDraft();
-      options.setMaterializedTranscript(created.sessionId);
+      options.adoptMaterializedTranscript(created.sessionId);
       const configOptions = loaded.configOptions ?? created.configOptions ?? [];
       options.setConfigOptions(configOptions);
       options.markRuntimeReady(created.sessionId, configOptions);
@@ -162,7 +188,10 @@ export function createDraftSession(options: DraftSessionOptions) {
         && requestWorkspace === options.workspace()
         && generation === materializationGeneration
         && active
-      ) options.reportError(error);
+      ) {
+        restoreOptimisticSubmit();
+        options.reportError(error);
+      }
       return null;
     } finally {
       if (generation === materializationGeneration) {
@@ -173,11 +202,13 @@ export function createDraftSession(options: DraftSessionOptions) {
   }
 
   function deactivate(): void {
+    restoreOptimisticSubmit();
     invalidateMaterialization();
     active = false;
   }
 
   function close(): void {
+    clearOptimisticSubmit();
     invalidateMaterialization();
     options.forgetComposerDraft(DRAFT_SESSION_TAB_ID);
     open = false;
@@ -198,6 +229,7 @@ export function createDraftSession(options: DraftSessionOptions) {
     get active() { return active; },
     get touched() { return touched; },
     get materializing() { return materializing; },
+    beginOptimisticSubmit,
     invalidateMaterialization,
     activate,
     openStartTab,
