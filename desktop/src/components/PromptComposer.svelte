@@ -534,7 +534,7 @@
 
 <form
   class={[
-    "overflow-hidden rounded-md border bg-panel-strong",
+    "overflow-hidden rounded-md border bg-panel-strong focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/25",
     dragActive || projectPathDragActive ? "border-ring ring-1 ring-ring/40" : "border-input",
   ]}
   bind:this={composerForm}
