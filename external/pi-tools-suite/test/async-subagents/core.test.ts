@@ -556,6 +556,32 @@ describe.serial("subagent type config", () => {
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
 	});
 
+	test.serial("can hide selected bundled roles while allowing project-local replacements with the same names", async () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		writeFile(
+			path.join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			JSON.stringify({ disabledBuiltinAgents: ["oracle", "research", "ui-qa"] }),
+		);
+		writeFile(path.join(cwd, ".pi", "agents", "research.md"), `---
+description: Project-specific research role.
+models: [zai/glm-5-turbo]
+---
+Research only this project.
+`);
+
+		const config = loadSubagentConfig(cwd, { HOME: homeDir });
+		expect(config.types.oracle).toBeUndefined();
+		expect(config.types["ui-qa"]).toBeUndefined();
+		expect(config.types.research?.description).toBe("Project-specific research role.");
+		expect(buildSubagentCatalogPrompt(config)).not.toContain("- oracle:");
+		expect(buildSubagentCatalogPrompt(config)).not.toContain("- ui-qa:");
+		expect(buildSubagentCatalogPrompt(config)).toContain("- research: Project-specific research role.");
+		await expect(routeSubagentTasks([
+			{ id: "oracle", task: "second opinion", subagentType: "oracle" },
+		], config, {})).rejects.toThrow(/Unknown subagentType/);
+	});
+
 	test.serial("filters roles by parent model with deny taking precedence over allow", () => {
 		const profile = {
 			forParentModels: ["openai-codex/*", "zai/*"],

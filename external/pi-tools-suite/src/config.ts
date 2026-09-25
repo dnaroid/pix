@@ -4,10 +4,12 @@ import { dirname, join, parse, resolve } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "./default-pi-tools-suite-config.js";
+import { PI_TOOLS_SUITE_MODULE_CATALOG } from "./module-catalog.js";
 
 export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
+	disabledBuiltinAgents: string[];
 	todoThinking: boolean;
 	todoThinkingOverrides: Record<string, TodoThinkingLevel>;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
@@ -29,6 +31,7 @@ export interface ResourceRegistryConfig {
 type MutableConfig = {
 	enabled: boolean;
 	disabledModules: Set<string>;
+	disabledBuiltinAgents: Set<string>;
 	todoThinking: boolean;
 	todoThinkingOverrides: Map<string, TodoThinkingLevel>;
 	lookupModel: string | undefined;
@@ -41,13 +44,27 @@ export type TodoThinkingLevel = (typeof TODO_THINKING_OVERRIDE_LEVELS)[number];
 
 type Env = Record<string, string | undefined>;
 
+export interface LoadPiToolsSuiteConfigOptions {
+	cwd?: string;
+	env?: Env;
+	homeDir?: string;
+	/** Read the user-level ~/.config/pi/pi-tools-suite.jsonc layer. Defaults to true. */
+	includeUserConfig?: boolean;
+	/** Create the default user config when the user layer is enabled but missing. Defaults to true. */
+	ensureUserConfig?: boolean;
+}
+
 const TRUE_VALUES = new Set(["1", "true", "on", "yes"]);
 const FALSE_VALUES = new Set(["0", "false", "off", "no"]);
 
 const DISABLED_LIST_KEYS = ["disabledModules", "disabledExtensions"];
 const ENABLED_LIST_KEYS = ["enabledModules", "enabledExtensions"];
 const MODULE_MAP_KEYS = ["modules", "extensions"];
-const DEFAULT_DISABLED_MODULES = new Set<string>(["credential-firewall", "truncation-metadata-normalizer"]);
+const DISABLED_BUILTIN_AGENT_LIST_KEYS = ["disabledBuiltinAgents"];
+const ENABLED_BUILTIN_AGENT_LIST_KEYS = ["enabledBuiltinAgents"];
+const DEFAULT_DISABLED_MODULES = new Set<string>(
+	PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name),
+);
 const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingLevel>([["zai/glm-5.3", "max"]]);
 const DEFAULT_RESOURCE_REGISTRY_BRANCH = "main";
 
@@ -181,6 +198,20 @@ function removeDisabled(config: MutableConfig, value: unknown, knownModules: Rea
 	}
 }
 
+function addDisabledBuiltinAgents(config: MutableConfig, value: unknown): void {
+	for (const name of splitNameList(value)) {
+		const normalized = name.trim().toLowerCase();
+		if (normalized) config.disabledBuiltinAgents.add(normalized);
+	}
+}
+
+function removeDisabledBuiltinAgents(config: MutableConfig, value: unknown): void {
+	for (const name of splitNameList(value)) {
+		const normalized = name.trim().toLowerCase();
+		if (normalized) config.disabledBuiltinAgents.delete(normalized);
+	}
+}
+
 function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, knownModules: ReadonlySet<string>): MutableConfig {
 	if (typeof raw.enabled === "boolean") config.enabled = raw.enabled;
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
@@ -191,6 +222,8 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
 	for (const key of ENABLED_LIST_KEYS) removeDisabled(config, raw[key], knownModules);
+	for (const key of DISABLED_BUILTIN_AGENT_LIST_KEYS) addDisabledBuiltinAgents(config, raw[key]);
+	for (const key of ENABLED_BUILTIN_AGENT_LIST_KEYS) removeDisabledBuiltinAgents(config, raw[key]);
 
 	for (const key of MODULE_MAP_KEYS) {
 		const modules = raw[key];
@@ -244,22 +277,24 @@ function applyEnv(config: MutableConfig, env: Env, knownModules: ReadonlySet<str
 	return config;
 }
 
-export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: { cwd?: string; env?: Env; homeDir?: string } = {}): PiToolsSuiteConfig {
+export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: LoadPiToolsSuiteConfigOptions = {}): PiToolsSuiteConfig {
 	const env = options.env ?? process.env;
 	const knownModules = new Set(moduleNames.map((name) => name.toLowerCase()));
 	const config: MutableConfig = {
 		enabled: true,
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
+		disabledBuiltinAgents: new Set(),
 		todoThinking: false,
 		todoThinkingOverrides: new Map(DEFAULT_TODO_THINKING_OVERRIDES),
 		lookupModel: undefined,
 		lookupFallbackModels: [],
 		resourceRegistry: { branch: DEFAULT_RESOURCE_REGISTRY_BRANCH },
 	};
-	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
-
-	ensureUserConfig(userConfigPath);
-	mergeConfigLayer(config, readJsonc(userConfigPath), knownModules);
+	if (options.includeUserConfig !== false) {
+		const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
+		if (options.ensureUserConfig !== false) ensureUserConfig(userConfigPath);
+		mergeConfigLayer(config, readJsonc(userConfigPath), knownModules);
+	}
 
 	const piConfigDir = env.PI_CONFIG_DIR;
 	if (piConfigDir) mergeConfigLayer(config, readJsonc(join(piConfigDir, "pi-tools-suite.jsonc")), knownModules);
@@ -272,6 +307,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 	return {
 		enabled: config.enabled,
 		disabledModules: [...config.disabledModules].sort(),
+		disabledBuiltinAgents: [...config.disabledBuiltinAgents].sort(),
 		todoThinking: config.todoThinking,
 		todoThinkingOverrides: Object.fromEntries(config.todoThinkingOverrides),
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),

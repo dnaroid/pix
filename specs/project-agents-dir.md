@@ -99,16 +99,20 @@ You are a ... role prompt (markdown body).
 Within `loadSubagentConfig` (no caching — re-read per spawn/command call):
 
 1. bundled built-in role definitions and preset defaults;
-2. project `<project>/.pi/agents/presets.jsonc` from the nearest discovered
+2. top-level pi-tools-suite `disabledBuiltinAgents` removes selected bundled
+   roles; `enabledBuiltinAgents` in a later suite config layer can re-enable an
+   inherited disable;
+3. project `<project>/.pi/agents/presets.jsonc` from the nearest discovered
    agents dir;
-3. project `.pi/agents/*.md`, with agent-file fields overriding same-named
-   built-in role fields;
-4. environment model, routing, concurrency, result-size, and timeout overrides.
+4. project `.pi/agents/*.md`, with agent-file fields overriding same-named
+   built-in role fields or recreating a name removed by the bundled-role filter;
+5. environment model, routing, concurrency, result-size, and timeout overrides.
 
 User/global `pi-tools-suite.jsonc`, `$PI_CONFIG_DIR`, project
-`<project>/.pi/pi-tools-suite.jsonc`, and the former `ASYNC_SUBAGENTS_CONFIG` /
-`PI_SUBAGENTS_CONFIG` file path are not part of the current sub-agent profile
-merge pipeline.
+`<project>/.pi/pi-tools-suite.jsonc` affect only bundled-role visibility through
+the two top-level keys above; they do not define or override role profiles. The
+former `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` file path is not part of
+the current sub-agent profile merge pipeline.
 
 ### Reload semantics (original user requirement: "respect `/reload`")
 
@@ -161,4 +165,5 @@ mutated between two `loadSubagentConfig` calls).
 Additional tests verify that bundled roles are sourced from individual Markdown
 files and that `before_agent_start` exposes a project-local role in the effective
 system-prompt catalog while omitting that catalog when `subagents` is not an
-available tool.
+available tool. Config tests also cover layered bundled-role disable/re-enable,
+and core tests verify that a same-named project role survives a bundled disable.

@@ -42,6 +42,22 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - Field edits and resets apply through JSONC-aware path modification so comments elsewhere in the file survive. Booleans use switches; bounded enums use selects; numbers use constrained number inputs; secrets use password inputs. Desktop model fields and fallback lists consume the same ACP session model catalog as the existing Model & Thinking picker instead of requiring `provider/model` text entry. Existing configured refs that are absent from the current catalog remain representable and are never rewritten merely because the catalog changed.
 - `visibleModels` is edited as an explicit “limit model picker” switch plus a model checklist; omitting the key means every catalog model is visible. Internal `thinkingByModel` memory is not exposed in the normal settings UI because Desktop maintains it automatically; it remains visible/editable only in `Advanced` JSONC.
 - Pi Tools Suite fields that are semantically model references (lookup model/fallbacks and DCP summarizer/fallbacks) reuse the same catalog-backed model selectors; free-form model-pattern maps such as todo/DCP overrides remain structured JSON because wildcard keys are part of their contract.
+- Pi Tools Suite `disabledBuiltinAgents` is edited as a curated checklist of the
+  bundled async-subagent catalog. Desktop discovers the top-level bundled
+  `agents/*.md` definitions at frontend build time, so adding/removing a bundled
+  role automatically changes the checklist on the next build; `icon` and
+  `description` frontmatter provide display metadata, with the neutral agent
+  icon as fallback. Checked means the bundled role remains available; unchecked
+  stores that role name in `disabledBuiltinAgents`. Unknown configured names are
+  preserved. Project-local `.pi/agents/<name>.md` roles are unaffected by this
+  user-level bundled-role visibility control.
+- Pi Tools Suite module enablement is edited as one bundled-module checklist
+  rather than exposing `enabledModules`, `disabledModules`, or the `modules`
+  object as raw controls. The checklist starts from each module's runtime
+  default, replays the supported list/map precedence (including legacy
+  `*Extensions` aliases), and writes checkbox choices as final `modules` map
+  overrides. Unknown configured names remain preserved and are reported below
+  the checklist; the full raw forms remain available in `Advanced` JSONC.
 - DCP defaults in Desktop are not read from the starter `pi-tools-suite.jsonc`
   template. For any omitted `dcp.*` key, Desktop resolves the same built-in
   runtime default object used by TUI `loadConfig()`; debug-log size/backup
@@ -74,6 +90,10 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - `desktop/src/components/SettingsPanel.svelte`
 - `desktop/src/components/settings/DesktopSettingsEditor.svelte`
 - `desktop/src/components/settings/ToolsSuiteSettingsEditor.svelte`
+- `desktop/src/components/settings/SettingsBuiltinAgentVisibility.svelte`
+- `desktop/src/lib/builtin-agent-catalog.ts`
+- `desktop/src/components/settings/SettingsModuleVisibility.svelte`
+- `desktop/src/lib/tools-suite-module-visibility.ts`
 - `desktop/src/components/settings/SettingsFieldRow.svelte` and typed control components in the same directory
 - `desktop/src/lib/settings.ts`
 - `desktop/src/lib/default-desktop-config.ts`

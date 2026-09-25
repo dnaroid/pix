@@ -6,6 +6,8 @@ import { parse } from "jsonc-parser";
 
 import { getPiToolsSuiteUserConfigPath, loadPiToolsSuiteConfig } from "../src/config.js";
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "../src/default-pi-tools-suite-config.js";
+import { MODULES as REGISTERED_MODULES } from "../src/index.js";
+import { PI_TOOLS_SUITE_MODULE_CATALOG } from "../src/module-catalog.js";
 
 const MODULES = ["ast-grep", "usage", "dcp", "prompt-commands"];
 const PI_TOOLS_SUITE_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json";
@@ -15,6 +17,11 @@ function tempDir(): string {
 }
 
 describe("pi-tools-suite config", () => {
+	test("keeps the lightweight module catalog aligned with runtime registration", () => {
+		expect(PI_TOOLS_SUITE_MODULE_CATALOG.map((module) => module.name)).toEqual(REGISTERED_MODULES.map((module) => module.name));
+		expect(PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name).sort())
+			.toEqual(["credential-firewall", "truncation-metadata-normalizer"]);
+	});
 	test("resolves the user config path from a supplied home directory", () => {
 		const homeDir = tempDir();
 		expect(getPiToolsSuiteUserConfigPath(homeDir)).toBe(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"));
@@ -51,6 +58,24 @@ describe("pi-tools-suite config", () => {
 		expect(config.disabledModules).toEqual(["ast-grep", "usage"]);
 		expect(config.todoThinking).toBe(false);
 		expect(config.todoThinkingOverrides).toEqual({ "zai/glm-5.3": "max" });
+	});
+
+	test("merges bundled-agent disable and re-enable lists across config layers", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{ "disabledBuiltinAgents": ["oracle", "ui-qa", "ORACLE"] }`,
+		);
+		writeFileSync(
+			join(cwd, ".pi", "pi-tools-suite.jsonc"),
+			`{ "enabledBuiltinAgents": ["ui-qa"] }`,
+		);
+
+		const config = loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} });
+		expect(config.disabledBuiltinAgents).toEqual(["oracle"]);
 	});
 
 	test("loads lookupModel from config layers and allows disabling it", () => {
@@ -169,6 +194,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toBe(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC);
 		expect(content.startsWith(`{\n  "$schema": "${PI_TOOLS_SUITE_SCHEMA_URL}",`)).toBe(true);
 		expect(content).toContain('"disabledModules"');
+		expect(content).toContain('"disabledBuiltinAgents"');
 		expect(content).toContain('"todoThinking": true');
 		expect(content).toContain('"todoThinkingOverrides"');
 		expect(content).toContain('"zai/glm-5.3": "max"');

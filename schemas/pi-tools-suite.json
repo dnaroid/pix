@@ -32,6 +32,20 @@
       },
       "description": "Per-module enable/disable map. credential-firewall is disabled by default and can be enabled here."
     },
+    "disabledBuiltinAgents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Bundled async-subagent role names to hide. Project-local .pi/agents/<name>.md definitions with the same names remain available."
+    },
+    "enabledBuiltinAgents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Bundled async-subagent role names to re-enable after an earlier config layer disabled them."
+    },
     "todoThinking": {
       "type": "boolean",
       "description": "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed."

@@ -314,6 +314,8 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		disabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of disabled module names (e.g. ['lsp', 'prompt-commands'])." })),
 		enabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of module names to explicitly enable, including modules that are disabled by default." })),
 		modules: Type.Optional(Type.Record(Type.String(), Type.Boolean(), { description: "Per-module enable/disable map. credential-firewall is disabled by default and can be enabled here." })),
+		disabledBuiltinAgents: Type.Optional(Type.Array(Type.String(), { description: "Bundled async-subagent role names to hide. Project-local .pi/agents/<name>.md definitions with the same names remain available." })),
+		enabledBuiltinAgents: Type.Optional(Type.Array(Type.String(), { description: "Bundled async-subagent role names to re-enable after an earlier config layer disabled them." })),
 		todoThinking: Type.Optional(Type.Boolean({ description: "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed." })),
 		todoThinkingOverrides: Type.Optional(Type.Record(
 			Type.String(),

@@ -155,7 +155,11 @@ in one array and are not wrapped in an additional fallback field.
 The removed `asyncSubagents` section is no longer part of the public config
 schema and is not read at runtime. Existing legacy files are left untouched but
 have no effect. Migrate role definitions to `<project>/.pi/agents/*.md` and
-custom pools to `<project>/.pi/agents/presets.jsonc`.
+custom pools to `<project>/.pi/agents/presets.jsonc`. To hide only selected
+bundled roles, use top-level `disabledBuiltinAgents` in `pi-tools-suite.jsonc`;
+later config layers may re-enable names with `enabledBuiltinAgents`. The filter
+runs before project-local Markdown is merged, so a same-named project role can
+intentionally replace a disabled built-in.
 
 ## Compact handoff
 

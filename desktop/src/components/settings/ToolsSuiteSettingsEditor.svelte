@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PI_TOOLS_SUITE_MODULE_CATALOG } from "../../../../external/pi-tools-suite/src/module-catalog.js";
   import {
     formatSettingsDefaultValue,
     parseSettingsSource,
@@ -10,10 +11,18 @@
     type SettingsSchema,
   } from "../../lib/settings";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
+  import { BUILTIN_AGENT_CATALOG } from "../../lib/builtin-agent-catalog";
+  import {
+    toolsSuiteModuleStates,
+    toolsSuiteUnknownModuleNames,
+    updateToolsSuiteModuleSource,
+  } from "../../lib/tools-suite-module-visibility";
+  import SettingsBuiltinAgentVisibility from "./SettingsBuiltinAgentVisibility.svelte";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
   import SettingsJsonValue from "./SettingsJsonValue.svelte";
   import SettingsModelList from "./SettingsModelList.svelte";
   import SettingsModelSelect from "./SettingsModelSelect.svelte";
+  import SettingsModuleVisibility from "./SettingsModuleVisibility.svelte";
   import SettingsNumberInput from "./SettingsNumberInput.svelte";
   import SettingsSelect from "./SettingsSelect.svelte";
   import SettingsStringList from "./SettingsStringList.svelte";
@@ -56,6 +65,8 @@
   } = $props();
 
   const parsed = $derived(parseSettingsSource(source).value);
+  const moduleStates = $derived(toolsSuiteModuleStates(parsed, PI_TOOLS_SUITE_MODULE_CATALOG));
+  const unknownModuleNames = $derived(toolsSuiteUnknownModuleNames(parsed, PI_TOOLS_SUITE_MODULE_CATALOG));
 
   function has(path: readonly string[]): boolean {
     return settingsHasValue(parsed, path);
@@ -136,6 +147,10 @@
     }
     set(["telegramConnector", "chatId"], /^-?\d+$/u.test(trimmed) ? Number(trimmed) : raw);
   }
+
+  function updateModule(name: string, enabled: boolean): void {
+    onChange(updateToolsSuiteModuleSource(source, parsed, name, enabled));
+  }
 </script>
 
 {#if section === "general"}
@@ -147,14 +162,15 @@
     <SettingsFieldRow label="Tools Suite" description="Enable or disable the complete pi-tools-suite extension." explicit={has(["enabled"])} defaultLabel={defaultLabel(["enabled"])} onReset={() => reset(["enabled"])}>
       <SettingsSwitch value={bool(["enabled"])} onChange={(value) => set(["enabled"], value)} />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Enabled modules" description="Modules explicitly enabled even when their normal default is off." explicit={has(["enabledModules"])} defaultLabel={defaultLabel(["enabledModules"])} onReset={() => reset(["enabledModules"])}>
-      <SettingsStringList value={list(["enabledModules"])} placeholder="module-name" addLabel="Add module" onChange={(value) => set(["enabledModules"], value)} />
+    <SettingsFieldRow label="Modules" description="Choose which built-in pi-tools-suite modules are enabled for this user profile. Existing list/map config is reflected here and remains editable in Advanced JSONC." explicit={has(["enabledModules"]) || has(["disabledModules"]) || has(["modules"]) || has(["enabledExtensions"]) || has(["disabledExtensions"]) || has(["extensions"])} defaultLabel="Defaults applied when omitted" onReset={() => resetMany([["enabledModules"], ["disabledModules"], ["modules"], ["enabledExtensions"], ["disabledExtensions"], ["extensions"]])}>
+      <SettingsModuleVisibility modules={moduleStates} unknownNames={unknownModuleNames} onChange={updateModule} />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Disabled modules" description="Modules explicitly disabled for this user profile." explicit={has(["disabledModules"])} defaultLabel={defaultLabel(["disabledModules"])} onReset={() => reset(["disabledModules"])}>
-      <SettingsStringList value={list(["disabledModules"])} placeholder="module-name" addLabel="Add module" onChange={(value) => set(["disabledModules"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Module overrides" description="Per-module enable/disable map for modules with explicit local policy." explicit={has(["modules"])} defaultLabel={defaultLabel(["modules"])} onReset={() => reset(["modules"])}>
-      <SettingsJsonValue value={json(["modules"])} rows={5} placeholder={'{\n  "credential-firewall": true\n}'} onChange={(value) => updateJson(["modules"], value)} />
+    <SettingsFieldRow label="Built-in agents" description="Choose which bundled async-subagent roles are available to the parent catalog and router. Project-local agents with the same name remain available." explicit={has(["disabledBuiltinAgents"])} defaultLabel={defaultLabel(["disabledBuiltinAgents"])} onReset={() => reset(["disabledBuiltinAgents"])}>
+      <SettingsBuiltinAgentVisibility
+        value={list(["disabledBuiltinAgents"])}
+        agents={BUILTIN_AGENT_CATALOG}
+        onChange={(value) => value.length === 0 ? reset(["disabledBuiltinAgents"]) : set(["disabledBuiltinAgents"], value)}
+      />
     </SettingsFieldRow>
     <SettingsFieldRow label="Comment checker" description="Warn when newly added comments look like low-value generated commentary." explicit={has(["commentChecker", "enabled"])} defaultLabel={defaultLabel(["commentChecker", "enabled"])} onReset={() => reset(["commentChecker", "enabled"])}>
       <SettingsSwitch value={bool(["commentChecker", "enabled"])} onChange={(value) => set(["commentChecker", "enabled"], value)} />

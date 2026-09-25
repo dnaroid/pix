@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseJsonc } from "jsonc-parser";
+import { loadPiToolsSuiteConfig } from "../../config.js";
 import { projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./browser-qa.js";
 import type { AgentTask, RetryConfig } from "./types.js";
@@ -216,15 +217,24 @@ const BUILTIN_CONFIG: SubagentConfig = {
 	types: normalizeAgentDefinitions(readAgentDefinitionsFromDir(BUILTIN_AGENTS_DIR)),
 };
 
-export function loadSubagentConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): SubagentConfig {
+export function loadSubagentConfig(cwd: string, env?: NodeJS.ProcessEnv): SubagentConfig {
+	const runtimeEnv = env ?? process.env;
+	const suiteConfig = loadPiToolsSuiteConfig([], {
+		cwd,
+		env: runtimeEnv,
+		ensureUserConfig: false,
+		...(env !== undefined && !runtimeEnv.HOME ? { includeUserConfig: false } : {}),
+		...(runtimeEnv.HOME ? { homeDir: runtimeEnv.HOME } : {}),
+	});
 	const config = cloneConfig(BUILTIN_CONFIG);
+	for (const name of suiteConfig.disabledBuiltinAgents) delete config.types[name];
 	mergeConfig(config, projectPresetConfig(cwd));
 	// Project-local agent definitions (.pi/agents/*.md) are the only project
 	// source of role/profile configuration and are loaded fresh on every call.
 	mergeConfig(config, projectAgentTypes(cwd));
-	applyEnvModelOverrides(config, env);
-	applyEnvRoutingOverrides(config, env);
-	applyEnvRuntimeOverrides(config, env);
+	applyEnvModelOverrides(config, runtimeEnv);
+	applyEnvRoutingOverrides(config, runtimeEnv);
+	applyEnvRuntimeOverrides(config, runtimeEnv);
 	return config;
 }
 

@@ -81,6 +81,11 @@ describe("settings JSONC helpers", () => {
       type: "object",
       properties: { enabled: { type: "boolean" } },
     }, ["enabled"])).toEqual({ exists: true, value: true });
+
+    expect(settingsDefaultValue("pi-tools-suite", {
+      type: "object",
+      properties: { disabledBuiltinAgents: { type: "array", items: { type: "string" } } },
+    }, ["disabledBuiltinAgents"])).toEqual({ exists: true, value: [] });
   });
 
   it("uses TUI runtime DCP omission defaults instead of the starter config template", () => {

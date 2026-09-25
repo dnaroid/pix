@@ -546,6 +546,24 @@ callers relying on an implicit default must now choose a type explicitly.
 
 ### Project-local agents (`.pi/agents/*.md`)
 
+Bundled roles can be selectively hidden without disabling the whole
+`async-subagents` module. Use the top-level suite config key
+`disabledBuiltinAgents`; a later config layer can undo an inherited disable with
+`enabledBuiltinAgents`:
+
+```jsonc
+{
+  "disabledBuiltinAgents": ["oracle-openai", "ui-qa"],
+  // "enabledBuiltinAgents": ["ui-qa"]
+}
+```
+
+This filter applies only to bundled definitions. A project-local
+`.pi/agents/<name>.md` file with the same name is still loaded and becomes the
+effective role, so disabling a bundled role does not reserve or blacklist that
+name. Disabled bundled roles disappear from the parent catalog, explicit spawn
+validation, and automatic routing.
+
 A project can ship sub-agent roles as individual Markdown files in
 `<project>/.pi/agents/`. The first such directory found walking up from the
 session cwd is used; each top-level `*.md` file becomes a `subagentType` named
@@ -796,7 +814,9 @@ clears inherited legacy model/fallback/parent routing. New built-ins use ordered
 The removed `asyncSubagents` section is not part of the public schema or generated
 user config and is no longer read at runtime. Existing files can remain on disk
 without being rewritten, but they have no effect: migrate role definitions to
-`.pi/agents/*.md` and custom model pools to `.pi/agents/presets.jsonc`. Runtime
+`.pi/agents/*.md`, custom model pools to `.pi/agents/presets.jsonc`, and bundled
+role visibility to the top-level `disabledBuiltinAgents` / `enabledBuiltinAgents`
+lists. Runtime
 retry structures and the separate role router continue to use the term
 `fallbackModels` for actual fallback-only lists, not agent candidates.
 

@@ -166,6 +166,15 @@ Disable individual modules with `disabledModules` or
 `PI_TOOLS_SUITE_DISABLED_MODULES`; disable the entire suite with
 `PI_TOOLS_SUITE_DISABLED=1`.
 
+To hide selected bundled async-subagent roles without disabling the sub-agent
+module, use `disabledBuiltinAgents`. A later config layer can re-enable inherited
+names with `enabledBuiltinAgents`. These keys affect bundled roles only;
+same-named project roles in `.pi/agents/*.md` remain available.
+Desktop exposes the user-level `disabledBuiltinAgents` list under
+**Settings → Tools Suite → General → Built-in agents**.
+The same General section exposes built-in suite modules as an enabled/disabled
+checklist instead of raw `enabledModules` / `disabledModules` / `modules` JSON.
+
 ## Model providers
 
 Pix uses credentials supported by Pi. The common paths are:
