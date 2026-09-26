@@ -234,7 +234,16 @@ export type RenderedLine = {
 	links?: readonly RenderedLink[];
 	imageTargets?: readonly ImageClickTarget[];
 	syntaxHighlight?: SyntaxLineHighlight | undefined;
-	target?: { kind: "tool"; id: string } | { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } | { kind: "model-visibility-clear" } | { kind: "model-default-set" } | { kind: "todo-panel" } | { kind: "subagents-panel" } | { kind: "user-message"; id: string } | { kind: "queue-message"; id: string } | ToastLineTarget;
+	target?: { kind: "tool"; id: string } | { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } | { kind: "model-visibility-clear" } | { kind: "model-default-set" } | { kind: "todo-panel" } | { kind: "subagents-panel" } | { kind: "user-message"; id: string } | { kind: "queue-message"; id: string } | WorkspaceToolModalTarget | ToastLineTarget;
+};
+
+export type WorkspaceToolId = "tasks" | "registry" | "idx" | "settings";
+
+export type WorkspaceToolModalTarget = {
+	kind: "workspace-tool";
+	action: string;
+	startColumn?: number;
+	endColumn?: number;
 };
 
 export type ToastLineTarget = {
@@ -287,6 +296,17 @@ export type StatusLineLayout = {
 	promptEnhancerWidget?: StatusPromptEnhancerWidgetLayout;
 	agentPauseWidget?: StatusAgentPauseWidgetLayout;
 	voiceWidget?: StatusVoiceWidgetLayout;
+	workspaceToolWidgets?: Partial<Record<WorkspaceToolId, StatusWorkspaceToolWidgetLayout>>;
+};
+
+export type StatusWorkspaceToolWidgetLayout = {
+	startColumn: number;
+	endColumn: number;
+};
+
+export type StatusWorkspaceToolTarget = StatusWorkspaceToolWidgetLayout & {
+	row: number;
+	tool: WorkspaceToolId;
 };
 
 export type StatusQuickScrollWidgetLayout = {

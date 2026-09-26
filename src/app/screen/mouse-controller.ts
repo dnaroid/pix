@@ -39,6 +39,9 @@ import type {
 	StatusUserJumpTarget,
 	StatusVoiceLanguageTarget,
 	StatusVoiceMicTarget,
+	StatusWorkspaceToolTarget,
+	WorkspaceToolModalTarget,
+	WorkspaceToolId,
 } from "../types.js";
 import { loadDcpStatsDialog } from "../rendering/dcp-stats.js";
 import { formatSessionUsageText, loadSessionUsageReport } from "../session/session-usage.js";
@@ -116,6 +119,10 @@ export type AppMouseControllerHost = {
 	toggleAgentPause?(): void | Promise<void>;
 	copyTextToClipboard?(text: string): void | Promise<void>;
 	handleExtensionInputMouse(event: MouseEvent & { localRow: number; localColumn: number; width: number }): boolean;
+	workspaceToolModalActive?(): boolean;
+	toggleWorkspaceTool?(tool: WorkspaceToolId): void;
+	activateWorkspaceToolTarget?(action: string): void;
+	scrollWorkspaceTool?(delta: number): void;
 	render(): void;
 };
 
@@ -143,6 +150,7 @@ export class AppMouseController {
 	statusAgentPauseTarget: StatusAgentPauseTarget | undefined;
 	statusVoiceMicTarget: StatusVoiceMicTarget | undefined;
 	statusVoiceLanguageTarget: StatusVoiceLanguageTarget | undefined;
+	readonly statusWorkspaceToolTargets: StatusWorkspaceToolTarget[] = [];
 	readonly tabLineTargets: TabLineMouseTarget[] = [];
 	mouseSelection: MouseSelection | undefined;
 	private inputScrollBarDragActive = false;
@@ -173,9 +181,28 @@ export class AppMouseController {
 	) {}
 
 	handleMouse(event: MouseEvent): void {
-		if (this.handleInputScrollBar(event)) return;
+		const workspaceToolModalActive = this.host.workspaceToolModalActive?.() === true;
+		if (!workspaceToolModalActive && this.handleInputScrollBar(event)) return;
 		this.showClickFlashOnPress(event);
 		if (event.button === 0 && !event.released && this.handleInputBorderStatusClick(event)) return;
+		if (workspaceToolModalActive) {
+			const target = this.renderedTargets.get(event.y);
+			if (event.button === 64) {
+				this.host.scrollWorkspaceTool?.(-3);
+				return;
+			}
+			if (event.button === 65) {
+				this.host.scrollWorkspaceTool?.(3);
+				return;
+			}
+			if (event.button === 0 && !event.released && target?.kind === "workspace-tool") {
+				if (target.startColumn !== undefined && event.x < target.startColumn) return;
+				if (target.endColumn !== undefined && event.x >= target.endColumn) return;
+				this.host.activateWorkspaceToolTarget?.(target.action);
+				return;
+			}
+			return;
+		}
 		if (event.button === 0 && !event.released && this.fileLinkAt(event)) return;
 		if (this.handleMouseSelection(event)) return;
 		if (this.withClickFlash(event, () => this.handleImageClick(event))) return;
@@ -382,6 +409,14 @@ export class AppMouseController {
 
 		const target = this.renderedTargets.get(event.y);
 		if (target?.kind === "tool") return this.toolClickFlashRegionForEvent(event);
+		if (target?.kind === "workspace-tool"
+			&& workspaceToolTargetContainsEvent(target, event)) {
+			return {
+				y: event.y,
+				startColumn: target.startColumn ?? event.x,
+				endColumn: target.endColumn ?? event.x + 1,
+			};
+		}
 
 		const toastTarget = target;
 		if (toastTarget?.kind === "toast" && toastTargetContainsEvent(toastTarget, event)) {
@@ -700,7 +735,8 @@ export class AppMouseController {
 	}
 
 	private handleInputBorderStatusClick(event: MouseEvent): boolean {
-		return this.handleStatusDraftQueueClick(event)
+		return this.handleStatusWorkspaceToolClick(event)
+			|| this.handleStatusDraftQueueClick(event)
 			|| this.handleStatusInternalClipboardClick(event)
 			|| this.handleStatusUserJumpClick(event)
 			|| this.handleStatusThinkingExpandClick(event)
@@ -710,6 +746,13 @@ export class AppMouseController {
 			|| this.handleStatusAgentPauseClick(event)
 			|| this.handleStatusVoiceMicClick(event)
 			|| this.handleStatusVoiceLanguageClick(event);
+	}
+
+	private handleStatusWorkspaceToolClick(event: MouseEvent): boolean {
+		const target = this.statusWorkspaceToolTargets.find((candidate) => this.statusTargetContains(candidate, event));
+		if (!target) return false;
+		this.host.toggleWorkspaceTool?.(target.tool);
+		return true;
 	}
 
 	private async openStatusUserJumpMenu(): Promise<void> {
@@ -1208,6 +1251,12 @@ export class AppMouseController {
 		};
 		selection.moved = true;
 	}
+}
+
+function workspaceToolTargetContainsEvent(target: WorkspaceToolModalTarget, event: MouseEvent): boolean {
+	if (target.startColumn !== undefined && event.x < target.startColumn) return false;
+	if (target.endColumn !== undefined && event.x >= target.endColumn) return false;
+	return true;
 }
 
 function selectedConversationLineText(

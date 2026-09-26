@@ -20,6 +20,30 @@ import { APP_ICONS } from "../src/app/icons.js";
 import { THEMES } from "../src/theme.js";
 
 describe("AppMouseController", () => {
+	it("activates a workspace modal target from a real mouse press", () => {
+		const actions: string[] = [];
+		const controller = new AppMouseController(
+			fakeHost({
+				workspaceToolModalActive: () => true,
+				activateWorkspaceToolTarget: (action) => { actions.push(action); },
+			}),
+			fakePopupMenus(), fakePopupActions(), fakeScrollController(), fakeCommandController(),
+		);
+		controller.renderedTargets.set(3, {
+			kind: "workspace-tool",
+			action: "run-selected",
+			startColumn: 5,
+			endColumn: 17,
+		});
+		controller.renderedRowTexts.set(3, "    [ Run task ]");
+
+		controller.handleMouse({ button: 0, x: 8, y: 3, released: false });
+		controller.handleMouse({ button: 0, x: 8, y: 3, released: true });
+		controller.handleMouse({ button: 0, x: 3, y: 3, released: false });
+
+		assert.deepEqual(actions, ["run-selected"]);
+	});
+
 	it("shows detailed DCP stats as a dialog toast when context status is clicked", async () => {
 		let toast: { message: string; kind: string; variant?: string; durationMs?: number; action?: { label: string; onSelect: () => void } } | undefined;
 		const commands: Array<[string, string]> = [];

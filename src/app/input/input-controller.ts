@@ -27,6 +27,7 @@ export type InputControllerHost = {
 	readonly cwd: string;
 	inputScopeKey?(): string | undefined;
 	handleExtensionTerminalInput(data: string): ExtensionTerminalInputResult;
+	handleWorkspaceToolTerminalInput?(data: string): ExtensionTerminalInputResult;
 	extensionInputUsesEditor?(): boolean;
 	isShiftPressed?(): boolean;
 	isCommandPressed?(): boolean;
@@ -66,15 +67,23 @@ export class AppInputController {
 	handleChunk(chunk: Buffer): void {
 		let data = this.inputDecoder.write(chunk);
 		if (!data) return;
-		const bufferedSharedEditorInput = this.consumeBufferedSharedEditorInput(data);
-		if (bufferedSharedEditorInput.kind === "consumed" || bufferedSharedEditorInput.kind === "pending") return;
-		if (bufferedSharedEditorInput.kind === "passthrough") data = bufferedSharedEditorInput.data;
-
+		// SGR mouse packets must reach the mouse parser before modal keyboard
+		// routing. Workspace-tool input intentionally consumes unknown keyboard
+		// input while a modal is open, which would otherwise swallow clicks.
 		if (this.inputBuffer.startsWith("\x1b[<") || data.startsWith("\x1b[<")) {
 			this.inputBuffer += data;
 			this.drainInputBuffer();
 			return;
 		}
+
+		const workspaceToolInput = this.host.handleWorkspaceToolTerminalInput?.(data);
+		if (workspaceToolInput?.consume) return;
+		if (workspaceToolInput?.data !== undefined) data = workspaceToolInput.data;
+
+		const bufferedSharedEditorInput = this.consumeBufferedSharedEditorInput(data);
+		if (bufferedSharedEditorInput.kind === "consumed" || bufferedSharedEditorInput.kind === "pending") return;
+		if (bufferedSharedEditorInput.kind === "passthrough") data = bufferedSharedEditorInput.data;
+
 		const sharedEditorInput = this.consumeSharedEditorInput(data);
 		if (sharedEditorInput === "consumed") return;
 		if (sharedEditorInput === "pending") {

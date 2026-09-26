@@ -14,6 +14,8 @@ import { TerminalOutputBuffer, type TerminalOutputFrameRow } from "../terminal/t
 import { ANSI_RESET, colorLine, colorize, type Theme } from "../../theme.js";
 import { stringDisplayWidth } from "../../terminal-width.js";
 import { padOrTrimPlain } from "./render-text.js";
+import { renderWorkspaceToolModal } from "../workspace-tools/workspace-tool-renderer.js";
+import type { WorkspaceToolController } from "../workspace-tools/workspace-tool-controller.js";
 
 const INPUT_FRAME = {
 	horizontal: "─",
@@ -38,6 +40,7 @@ export type AppRenderControllerDeps = {
 	outputBuffer?: TerminalOutputBuffer;
 	loadingConversationOverlayText?: () => string | undefined;
 	voiceProgressOverlayText(): string | undefined;
+	workspaceTools?: WorkspaceToolController;
 };
 
 export class AppRenderController {
@@ -284,6 +287,19 @@ export class AppRenderController {
 			}
 		}
 
+		for (const overlay of renderWorkspaceToolModal(
+			this.deps.workspaceTools?.snapshot(),
+			columns,
+			topReservedRows + 1,
+			statusRow - 1,
+			this.deps.theme,
+		)) {
+			if (overlay.target) this.deps.mouseController.renderedTargets.set(overlay.row, overlay.target);
+			this.deps.mouseController.renderedRowTexts.set(overlay.row, overlay.text);
+			this.deps.mouseController.renderedRowBackgrounds.set(overlay.row, overlay.background);
+			appendFrameOutput(overlay.row, `\x1b[${overlay.row};${overlay.column}H${overlay.output}`);
+		}
+
 		for (const toastOverlay of renderToastOverlays(visibleToastStates(this.deps.toastController), columns, Math.max(0, statusRow - topReservedRows - 1), this.deps.theme)) {
 			const row = topReservedRows + toastOverlay.row;
 			const rowText = this.deps.mouseController.renderedRowTexts.get(row) ?? "";
@@ -305,7 +321,9 @@ export class AppRenderController {
 		}
 
 		const cursorRow = toScreenRow(inputStartRow + renderedInput.cursorRowOffset);
-		const cursor = renderedInput.cursorVisible ? `\x1b[${cursorRow};${renderedInput.cursorColumn}H${SHOW_CURSOR}` : "";
+		const cursor = renderedInput.cursorVisible && !this.deps.workspaceTools?.isOpen
+			? `\x1b[${cursorRow};${renderedInput.cursorColumn}H${SHOW_CURSOR}`
+			: "";
 		if (this.deps.mouseController.consumeClickFlashDirty?.()) this.outputBuffer.reset();
 		const frame: TerminalOutputFrameRow[] = [...frameRows.entries()].map(([row, output]) => ({ row, output }));
 		const output = this.outputBuffer.diffFrame(frame);
@@ -348,6 +366,14 @@ export class AppRenderController {
 		this.deps.mouseController.statusAgentPauseTarget = this.deps.statusLineRenderer.agentPauseTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusVoiceMicTarget = this.deps.statusLineRenderer.voiceMicTarget(statusLayout, statusRow);
 		this.deps.mouseController.statusVoiceLanguageTarget = this.deps.statusLineRenderer.voiceLanguageTarget(statusLayout, statusRow);
+		const workspaceToolTargets = this.deps.mouseController.statusWorkspaceToolTargets;
+		if (workspaceToolTargets) {
+			workspaceToolTargets.splice(
+				0,
+				workspaceToolTargets.length,
+				...(this.deps.statusLineRenderer.workspaceToolTargets?.(statusLayout, statusRow) ?? []),
+			);
+		}
 		this.deps.mouseController.renderedRowTexts.set(statusRow, statusLayout.text);
 	}
 

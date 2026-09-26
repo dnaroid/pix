@@ -103,6 +103,25 @@ describe("AppInputController terminal input", () => {
 		assert.deepEqual(calls.mouseEvents, [{ button: 0, x: -1, y: 2, released: true }]);
 	});
 
+	it("routes SGR mouse packets before an open workspace tool can consume keyboard input", () => {
+		const { controller, calls } = createController({
+			extensionInputUsesEditor: false,
+			shiftPressed: false,
+			consumeExtensionInput: false,
+			consumeWorkspaceToolInput: true,
+		});
+
+		controller.handleChunk(Buffer.from("\x1b[<0;8"));
+		controller.handleChunk(Buffer.from(";4M"));
+
+		assert.deepEqual(calls.mouseEvents, [{ button: 0, x: 8, y: 4, released: false }]);
+		assert.equal(calls.workspaceToolInput, 0, "mouse packets bypass modal keyboard routing");
+
+		controller.handleChunk(Buffer.from("a"));
+		assert.equal(calls.workspaceToolInput, 1, "ordinary keyboard input still belongs to the modal");
+		assert.equal(calls.extensionInput, 0);
+	});
+
 	it("preserves UTF-8 characters split across Buffer chunks", () => {
 		const { controller, editor } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 		const input = Buffer.from("A🙂界B", "utf8");
@@ -367,12 +386,13 @@ function createController(options: {
 	shiftPressed: boolean;
 	commandPressed?: boolean;
 	consumeExtensionInput?: boolean;
+	consumeWorkspaceToolInput?: boolean;
 	setDefaultResult?: boolean;
 }): {
 	controller: AppInputController;
 	editor: InputEditor;
 	calls: {
-		extensionInput: number; enter: number; interrupt: number; escape: number; mouseEvents: unknown[]; render: number;
+		extensionInput: number; workspaceToolInput: number; enter: number; interrupt: number; escape: number; mouseEvents: unknown[]; render: number;
 		autocompleteSlash: number; voice: number; stop: number; scrollLines: number[]; scrollPages: number[];
 		menuDeltas: number[]; thinkingDeltas: number[]; historyDeltas: number[];
 		moveMenuResult: boolean; moveThinkingResult: boolean; visibilityModeToggles: number; navigateHistoryResult: boolean; setDefault: number;
@@ -380,7 +400,7 @@ function createController(options: {
 } {
 	const editor = new InputEditor();
 	const calls = {
-		extensionInput: 0, enter: 0, interrupt: 0, escape: 0, mouseEvents: [] as unknown[], render: 0,
+		extensionInput: 0, workspaceToolInput: 0, enter: 0, interrupt: 0, escape: 0, mouseEvents: [] as unknown[], render: 0,
 		autocompleteSlash: 0, voice: 0, stop: 0, scrollLines: [] as number[], scrollPages: [] as number[],
 		menuDeltas: [] as number[], thinkingDeltas: [] as number[], historyDeltas: [] as number[],
 		moveMenuResult: false, moveThinkingResult: false, visibilityModeToggles: 0, navigateHistoryResult: false, setDefault: 0,
@@ -388,6 +408,10 @@ function createController(options: {
 	const host: InputControllerHost = {
 		inputEditor: editor,
 		cwd: process.cwd(),
+		handleWorkspaceToolTerminalInput: (data) => {
+			calls.workspaceToolInput += 1;
+			return { consume: options.consumeWorkspaceToolInput ?? false, data };
+		},
 		handleExtensionTerminalInput: () => {
 			calls.extensionInput += 1;
 			return { consume: options.consumeExtensionInput ?? true };

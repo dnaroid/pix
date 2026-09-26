@@ -60,6 +60,12 @@ import { AppStatusController } from "./screen/status-controller.js";
 import { StatusLineRenderer } from "./rendering/status-line-renderer.js";
 import { AppModelUsageController } from "./model/model-usage-controller.js";
 import { AppWorkspaceActionsController } from "./workspace/workspace-actions-controller.js";
+import { WorkspaceToolController } from "./workspace-tools/workspace-tool-controller.js";
+import { buildWorkspaceTaskPrompt, TasksWorkspaceToolSurface } from "./workspace-tools/tasks-surface.js";
+import { IdxWorkspaceToolSurface } from "./workspace-tools/idx-surface.js";
+import { runRegistryCommandForeground } from "./workspace-tools/registry-command-runner.js";
+import { RegistryWorkspaceToolSurface } from "./workspace-tools/registry-surface.js";
+import { SettingsWorkspaceToolSurface } from "./workspace-tools/settings-surface.js";
 import { AppSubagentsWidgetController } from "./subagents/subagents-widget-controller.js";
 import { AppTodoWidgetController } from "./todo/todo-widget-controller.js";
 import { AppTabsController } from "./session/tabs-controller.js";
@@ -144,6 +150,7 @@ export class PiUiExtendApp {
 	private readonly shellController: AppShellController;
 	private readonly queuedMessages: AppQueuedMessageController;
 	private readonly workspaceActions: AppWorkspaceActionsController;
+	private readonly workspaceTools: WorkspaceToolController;
 	private readonly slashCommands: readonly SlashCommand[];
 	private readonly toastNotifier: ToastNotifier = {
 		show: (message, kind = "info") => {
@@ -218,6 +225,31 @@ export class PiUiExtendApp {
 			activeScope: () => this.activeExtensionUiScope(),
 			render: () => this.render(),
 		});
+		this.workspaceTools = new WorkspaceToolController({ render: () => this.render() });
+		this.workspaceTools.register(new TasksWorkspaceToolSurface({
+			cwd: this.options.cwd,
+			render: () => this.render(),
+			runTask: (task) => {
+				this.workspaceTools.close();
+				this.setInput(buildWorkspaceTaskPrompt(task));
+				void this.inputActions.handleEnter();
+			},
+		}));
+		this.workspaceTools.register(new IdxWorkspaceToolSurface({
+			cwd: this.options.cwd,
+			render: () => this.render(),
+		}));
+		this.workspaceTools.register(new RegistryWorkspaceToolSurface({
+			cwd: this.options.cwd,
+			render: () => this.render(),
+			runRegistryCommand: (args) => runRegistryCommandForeground(this.options, this.pixConfig, args),
+		}));
+		this.workspaceTools.register(new SettingsWorkspaceToolSurface({
+			cwd: this.options.cwd,
+			config: () => this.pixConfig,
+			onConfigChanged: () => this.applyPixConfig(loadPixConfig(this.options.cwd)),
+			render: () => this.render(),
+		}));
 		this.nerdFontController = new NerdFontController({
 			showToast: (message, kind) => this.showToast(message, kind),
 			render: () => this.render(),
@@ -409,6 +441,8 @@ export class PiUiExtendApp {
 			userMessageJumpMenuActive: () => this.popupMenus.directMenu === "user-message-jump",
 			allThinkingExpandedActive: () => this.allThinkingExpanded,
 			superCompactToolsActive: () => this.superCompactTools,
+			workspaceToolsVisible: () => true,
+			workspaceToolActive: (tool) => this.workspaceTools.isActive(tool),
 		});
 		this.tabLineRenderer = new TabLineRenderer({
 			theme: this.theme,
@@ -784,6 +818,10 @@ export class PiUiExtendApp {
 				},
 				toggleTerminalBellSound: () => this.toggleTerminalBellSound(),
 				toggleAgentPause: () => this.agentPauseController.toggle(this.runtime?.session),
+				workspaceToolModalActive: () => this.workspaceTools.isOpen,
+				toggleWorkspaceTool: (tool) => this.workspaceTools.toggle(tool),
+				activateWorkspaceToolTarget: (action) => this.workspaceTools.activate(action),
+				scrollWorkspaceTool: (delta) => this.workspaceTools.scroll(delta),
 				handleExtensionInputMouse: (event) => this.extensionUiController.handleCustomUiMouse(event),
 				render: () => this.render(),
 			},
@@ -810,6 +848,7 @@ export class PiUiExtendApp {
 				toastController: this.toastController,
 				loadingConversationOverlayText: () => this.tabsController.isSwitching() ? "Loading…" : undefined,
 				voiceProgressOverlayText: () => this.voiceController.progressOverlayText(),
+				workspaceTools: this.workspaceTools,
 			},
 		);
 		this.requestHistory = new AppRequestHistory({
@@ -875,6 +914,7 @@ export class PiUiExtendApp {
 			cwd: this.options.cwd,
 			inputScopeKey: () => this.tabsController.activeInputTabId(),
 			handleExtensionTerminalInput: (data) => this.extensionUiController.handleTerminalInput(data),
+			handleWorkspaceToolTerminalInput: (data) => this.workspaceTools.handleTerminalInput(data),
 			extensionInputUsesEditor: () => this.extensionUiController.activeCustomUiUsesEditor(),
 			getInput: () => this.input,
 			getDirectPopupMenu: () => this.popupMenus.directMenu,

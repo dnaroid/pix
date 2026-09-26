@@ -21,7 +21,9 @@ import type {
 	StatusUserJumpTarget,
 	StatusVoiceLanguageTarget,
 	StatusVoiceMicTarget,
+	StatusWorkspaceToolTarget,
 	StyledSegment,
+	WorkspaceToolId,
 } from "../types.js";
 import type { ScreenStyler } from "../screen/screen-styler.js";
 import { displayIndexForColumn, stringDisplayWidth } from "../../terminal-width.js";
@@ -65,7 +67,18 @@ export type StatusLineRendererHost = {
 	userMessageJumpMenuActive?(): boolean;
 	allThinkingExpandedActive?(): boolean;
 	superCompactToolsActive?(): boolean;
+	workspaceToolsVisible?(): boolean;
+	workspaceToolActive?(tool: WorkspaceToolId): boolean;
 };
+
+const WORKSPACE_TOOL_ICONS: Record<WorkspaceToolId, string> = {
+	tasks: APP_ICONS.checkCircle,
+	registry: APP_ICONS.book,
+	idx: APP_ICONS.search,
+	settings: APP_ICONS.wrench,
+};
+
+const WORKSPACE_TOOLS: readonly WorkspaceToolId[] = ["tasks", "registry", "idx", "settings"];
 
 export class StatusLineRenderer {
 	constructor(private readonly host: StatusLineRendererHost) {}
@@ -122,6 +135,14 @@ export class StatusLineRenderer {
 		};
 
 		const quickScrollDirections = this.host.conversationQuickScrollDirections?.() ?? { up: false, down: false };
+		if (this.host.workspaceToolsVisible?.()) {
+			for (const tool of WORKSPACE_TOOLS) {
+				appendWidget(this.iconButtonText(WORKSPACE_TOOL_ICONS[tool]), (column, text) => {
+					layout.workspaceToolWidgets ??= {};
+					layout.workspaceToolWidgets[tool] = this.widgetLayout(column, text);
+				});
+			}
+		}
 
 		const draftQueueButton = this.draftQueueWidgetText();
 		appendWidget(draftQueueButton ? this.iconButtonText(draftQueueButton) : "", (column, text) => {
@@ -228,6 +249,9 @@ export class StatusLineRenderer {
 		pushWidgetSegment(layout.thinkingExpandWidget, this.host.allThinkingExpandedActive?.() ? colors.info : colors.muted);
 		pushWidgetSegment(layout.compactToolsWidget, this.host.superCompactToolsActive?.() ? colors.info : colors.muted);
 		pushWidgetSegment(layout.agentPauseWidget, this.host.agentPauseStatusWidgetActive?.() ? colors.info : colors.muted);
+		for (const tool of WORKSPACE_TOOLS) {
+			pushWidgetSegment(layout.workspaceToolWidgets?.[tool], this.host.workspaceToolActive?.(tool) ? colors.info : colors.muted);
+		}
 
 		const voiceWidget = layout.voiceWidget;
 		if (voiceWidget) {
@@ -390,6 +414,13 @@ export class StatusLineRenderer {
 		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
 	}
 
+	workspaceToolTargets(layout: StatusLineLayout, row: number): StatusWorkspaceToolTarget[] {
+		return WORKSPACE_TOOLS.flatMap((tool) => {
+			const widget = layout.workspaceToolWidgets?.[tool];
+			return widget ? [{ row, tool, startColumn: widget.startColumn, endColumn: widget.endColumn }] : [];
+		});
+	}
+
 	sessionTarget(statusText: string, row: number, label: string, workspaceLabel: string): StatusSessionTarget | undefined {
 		if (!this.host.session || !label) return undefined;
 
@@ -479,6 +510,11 @@ export class StatusLineRenderer {
 			{ widget: layout.compactToolsWidget, foreground: this.host.superCompactToolsActive?.() ? colors.info : colors.muted },
 			{ widget: layout.agentPauseWidget, foreground: this.host.agentPauseStatusWidgetActive?.() ? colors.info : colors.muted },
 		].filter((entry): entry is { widget: { startColumn: number; endColumn: number }; foreground: string } => Boolean(entry.widget));
+		for (const tool of WORKSPACE_TOOLS) {
+			const widget = layout.workspaceToolWidgets?.[tool];
+			if (!widget) continue;
+			widgets.push({ widget, foreground: this.host.workspaceToolActive?.(tool) ? colors.info : colors.muted });
+		}
 
 		for (const { widget, foreground } of widgets) {
 			segments.push({

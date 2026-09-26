@@ -179,6 +179,23 @@ describe("StatusLineRenderer", () => {
 		assert.equal(rendered.includes(THEMES.dark.colors.inputBorderWidgetBackground), false);
 	});
 
+	it("renders and targets the four workspace tool buttons in the status bar", () => {
+		const renderer = statusLineRenderer({
+			widgetText: "",
+			voiceActive: false,
+			workspaceToolsVisible: true,
+			activeWorkspaceTool: "idx",
+		});
+		const layout = renderer.layout(80);
+		const targets = renderer.workspaceToolTargets(layout, 4);
+
+		assert.deepEqual(targets.map((target) => target.tool), ["tasks", "registry", "idx", "settings"]);
+		assert.equal(targets.every((target) => target.row === 4 && target.endColumn > target.startColumn), true);
+		assert.ok(renderer.render(4, layout, 80).includes(colorize(APP_ICONS.search, {
+			foreground: THEMES.dark.colors.info,
+		})));
+	});
+
 	it("renders the internal clipboard button muted until Pix has copied text", () => {
 		const inactiveRenderer = statusLineRenderer({ widgetText: "", voiceActive: false });
 		const inactiveLayout = inactiveRenderer.layout(40);
@@ -811,7 +828,7 @@ function widgetsText(...parts: string[]): string {
 	return parts.filter((part) => part.length > 0).join(" ");
 }
 
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; agentPauseWidgetText?: string; agentPauseActive?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; draftModelStatus?: { modelLabel: string; thinkingLabel?: string }; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; agentPauseWidgetText?: string; agentPauseActive?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; draftModelStatus?: { modelLabel: string; thinkingLabel?: string }; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean }; workspaceToolsVisible?: boolean; activeWorkspaceTool?: "tasks" | "registry" | "idx" | "settings" }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
@@ -844,6 +861,8 @@ function statusLineRenderer(options: { widgetText: string; voiceActive: boolean;
 		userMessageJumpMenuActive: () => Boolean(options.userMessageJumpMenuActive),
 		allThinkingExpandedActive: () => Boolean(options.allThinkingExpandedActive),
 		superCompactToolsActive: () => Boolean(options.superCompactToolsActive),
+		workspaceToolsVisible: () => Boolean(options.workspaceToolsVisible),
+		workspaceToolActive: (tool) => options.activeWorkspaceTool === tool,
 	});
 }
 
