@@ -2959,7 +2959,7 @@ dependencies = [
 
 [[package]]
 name = "pix-desktop"
-version = "2.0.14"
+version = "2.0.15"
 dependencies = [
  "base64 0.22.1",
  "chrono",
