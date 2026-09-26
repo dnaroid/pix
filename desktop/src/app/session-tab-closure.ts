@@ -70,6 +70,7 @@ export function createSessionTabClosure(
     if (sessionId !== options.state.sessionId) {
       options.setOperationRunning(true);
       options.setErrorMessage(null);
+      options.tabs.markClosed(sessionId);
       try {
         await requestClient?.closeSession(sessionId);
         options.forgetRuntime(sessionId);
@@ -77,8 +78,8 @@ export function createSessionTabClosure(
         options.state.deleteSessionTranscript(sessionId);
         options.forgetComposerDraft(sessionId);
         options.retargetWorkbenchAnchors(sessionId, options.state.sessionId ?? undefined);
-        options.tabs.markClosed(sessionId);
       } catch (error) {
+        options.tabs.show(sessionId);
         options.reportError(error);
         return false;
       } finally {
@@ -93,6 +94,7 @@ export function createSessionTabClosure(
     let closed = false;
     options.setOperationRunning(true);
     options.setErrorMessage(null);
+    options.tabs.markClosed(sessionId);
     try {
       await requestClient?.closeSession(sessionId);
       options.forgetRuntime(sessionId);
@@ -102,9 +104,9 @@ export function createSessionTabClosure(
       options.history.cancel();
       options.state.clearActiveSession();
       options.retargetWorkbenchAnchors(sessionId, nextSessionId);
-      options.tabs.markClosed(sessionId);
       closed = true;
     } catch (error) {
+      options.tabs.show(sessionId);
       options.reportError(error);
     } finally {
       options.setOperationRunning(false);
