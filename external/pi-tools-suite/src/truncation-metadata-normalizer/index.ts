@@ -6,8 +6,8 @@ import { normalizeRedundantTruncationMetadata } from "../context-gateway/metadat
  * Optional non-store optimization for SDK tool results.
  *
  * The module removes only truncation metadata text that is proven to duplicate
- * the already-delivered visible text. It is disabled by default so existing
- * sessions, including Context Gateway off/observe, remain byte-equivalent.
+ * the already-delivered visible text. It is enabled by default because the
+ * transformation preserves visible content and only removes redundant metadata.
  */
 export default function truncationMetadataNormalizer(pi: ExtensionAPI): void {
 	pi.on("tool_result", async (event) => {

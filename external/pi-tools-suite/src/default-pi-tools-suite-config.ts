@@ -15,10 +15,9 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // high-confidence outbound redaction plus session-history hygiene.
   "modules": {
     "credential-firewall": false,
-    // Optional non-store cleanup: removes only SDK truncation metadata text
-    // proven to duplicate the already-visible result. Context Gateway observe
-    // remains passive because this module is separate and disabled by default.
-    "truncation-metadata-normalizer": false
+    // Safe non-store cleanup: removes only SDK truncation metadata text proven
+    // to duplicate the already-visible result. Set false to disable it.
+    "truncation-metadata-normalizer": true
   },
   "secretFirewall": {
     "sessionHygiene": true,

@@ -123,7 +123,7 @@ async function captureProviderPayload(details: unknown): Promise<unknown> {
 }
 
 describe("context gateway non-store experiment: truncation metadata normalization", () => {
-	test("opt-in module returns only a details patch for a proven duplicate", async () => {
+	test("module returns only a details patch for a proven duplicate", async () => {
 		const handlers = new Map<string, any[]>();
 		truncationMetadataNormalizer({
 			on(name: string, handler: any) {

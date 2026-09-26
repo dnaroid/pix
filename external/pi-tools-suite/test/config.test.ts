@@ -23,7 +23,7 @@ describe("pi-tools-suite config", () => {
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.every((module) => existsSync(new URL(`../src/${module.name}/index.ts`, import.meta.url)))).toBe(true);
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.find((module) => module.name === "question")?.cleanPiOnly).toBe(true);
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name).sort())
-			.toEqual(["credential-firewall", "truncation-metadata-normalizer"]);
+			.toEqual(["credential-firewall"]);
 	});
 	test("resolves the user config path from a supplied home directory", () => {
 		const homeDir = tempDir();
@@ -206,7 +206,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"summarizerModel": ["zai/glm-5-turbo"]');
 		expect(content).toContain('"summarizerFallbackModels": ["openai-codex/gpt-6-luna"]');
 		expect(content).toContain('"credential-firewall": false');
-		expect(content).toContain('"truncation-metadata-normalizer": false');
+		expect(content).toContain('"truncation-metadata-normalizer": true');
 		expect(content).toContain('"secretFirewall"');
 		expect(content).toContain('"contextGateway"');
 		expect(content).toContain('"repoDiscovery"');
@@ -292,20 +292,20 @@ describe("pi-tools-suite config", () => {
 		expect(config.disabledModules).toEqual([]);
 	});
 
-	test("truncation metadata normalizer is disabled by default and requires explicit opt-in", () => {
+	test("truncation metadata normalizer is enabled by default and can be disabled explicitly", () => {
 		const homeDir = tempDir();
 		const cwd = tempDir();
 		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
 
 		let config = loadPiToolsSuiteConfig(["truncation-metadata-normalizer", "usage"], { cwd, homeDir, env: {} });
-		expect(config.disabledModules).toEqual(["truncation-metadata-normalizer"]);
+		expect(config.disabledModules).toEqual([]);
 
 		writeFileSync(
 			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
-			`{ "modules": { "truncation-metadata-normalizer": true } }`,
+			`{ "modules": { "truncation-metadata-normalizer": false } }`,
 		);
 		config = loadPiToolsSuiteConfig(["truncation-metadata-normalizer", "usage"], { cwd, homeDir, env: {} });
-		expect(config.disabledModules).toEqual([]);
+		expect(config.disabledModules).toEqual(["truncation-metadata-normalizer"]);
 	});
 
 });

@@ -30,11 +30,11 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	// keeps this independent result chain; a coordinator is conditional future
 	// enforce work only if a concrete ordering conflict is proven.
 	{ name: "context-gateway", defaultEnabled: true, description: "Observes or enforces bounded result shaping and records privacy-safe context-efficiency telemetry." },
-	// Explicit opt-in, non-store cleanup. Keep after Gateway observe so passive
+	// Default-on, non-store cleanup. Keep after Gateway observe so passive
 	// telemetry measures the original boundary, and before downstream result
 	// observers. This ordering does not depend on any particular DCP persistence
 	// design; DCP is scheduled for a separate redesign.
-	{ name: "truncation-metadata-normalizer", defaultEnabled: false, description: "Removes redundant truncation metadata text when it duplicates content already visible in the tool result." },
+	{ name: "truncation-metadata-normalizer", defaultEnabled: true, description: "Removes redundant truncation metadata text when it duplicates content already visible in the tool result." },
 	{ name: "dcp", defaultEnabled: true, description: "Provides Dynamic Context Pruning, manual/automatic compression, context statistics, and recoverable summaries." },
 	{ name: "prompt-commands", defaultEnabled: true, description: "Lets users create and manage saved prompt-backed slash commands from pi-tools-suite config." },
 	{ name: "resource-registry", defaultEnabled: true, description: "Synchronizes reusable skills, agents, tasks, plans, and TODO state through a private Git registry." },
