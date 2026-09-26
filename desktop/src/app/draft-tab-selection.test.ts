@@ -20,6 +20,8 @@ describe("selecting an existing tab during draft materialization", () => {
     const invalidateAttachmentDraft = vi.fn();
     const switchComposerDraft = vi.fn();
     const forgetComposerDraft = vi.fn();
+    const setPromptText = vi.fn();
+    const replacePromptAttachments = vi.fn();
     let draft!: ReturnType<typeof createDraftSession>;
     draft = createDraftSession({
       client: () => client as never, workspace: () => "/work", statusReady: () => true,
@@ -30,8 +32,9 @@ describe("selecting an existing tab during draft materialization", () => {
       draftConfigAvailable: () => true, refreshDraftConfig: vi.fn(), draftModelOverride: () => null,
       routeDraftModel: vi.fn(async () => null),
       switchComposerDraft, forgetComposerDraft,
+      setPromptText, replacePromptAttachments,
       focusComposer: vi.fn(), forgetRuntime: vi.fn(), ensureProvisionalSession: vi.fn(), showSessionTab: vi.fn(),
-      retargetWorkbenchAnchors: vi.fn(), retargetAttachmentDraftKey: vi.fn(), setMaterializedTranscript: vi.fn(),
+      retargetWorkbenchAnchors: vi.fn(), retargetAttachmentDraftKey: vi.fn(), adoptMaterializedTranscript: vi.fn(),
       setConfigOptions: vi.fn(), markRuntimeReady: vi.fn(), rememberActiveSession: vi.fn(),
       setErrorMessage: vi.fn(), reportError: vi.fn(),
     });
@@ -41,6 +44,7 @@ describe("selecting an existing tab during draft materialization", () => {
       closeSession: vi.fn(async (id: string) => { closed.push(id); }),
     };
     draft.activate();
+    expect(draft.beginOptimisticSubmit(prompt, [])).toBe(true);
     const submission = draft.materialize(prompt, 1);
     await Promise.resolve();
     expect(draft.materializing).toBe(true);
@@ -78,6 +82,8 @@ describe("selecting an existing tab during draft materialization", () => {
     expect(draft.open).toBe(true);
     expect(clearPrompt).not.toHaveBeenCalled();
     expect(invalidateAttachmentDraft).not.toHaveBeenCalled();
+    expect(setPromptText).toHaveBeenCalledWith(prompt);
+    expect(setPromptText.mock.invocationCallOrder[0]).toBeLessThan(switchComposerDraft.mock.invocationCallOrder.at(-1)!);
     expect(switchComposerDraft).toHaveBeenCalledWith(DRAFT_SESSION_TAB_ID, "existing");
     created.resolve({ sessionId: "late" });
     await expect(submission).resolves.toBeNull();

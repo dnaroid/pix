@@ -351,7 +351,7 @@ Copy the entries you need into `lsp.servers` of the shared config. Values mirror
         "bin": "svelteserver",
         "args": ["--stdio"],
         "startupTimeoutMs": 30000,
-        "diagnosticsWaitMs": 8000,
+        "diagnosticsWaitMs": 30000,
         "languageIdByExtension": { ".svelte": "svelte" }
       },
       // Vue (Volar)

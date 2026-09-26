@@ -288,7 +288,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       //     "--stdio"
       //   ],
       //   "startupTimeoutMs": 30000,
-      //   "diagnosticsWaitMs": 8000,
+      //   "diagnosticsWaitMs": 30000,
       //   "languageIdByExtension": {
       //     ".svelte": "svelte"
       //   }

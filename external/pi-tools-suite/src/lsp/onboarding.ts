@@ -64,7 +64,7 @@ export const LSP_ONBOARDING_DEFINITIONS: readonly LspOnboardingDefinition[] = [
       bin: "svelteserver",
       args: ["--stdio"],
       startupTimeoutMs: 30_000,
-      diagnosticsWaitMs: 8_000,
+      diagnosticsWaitMs: 30_000,
       languageIdByExtension: { ".svelte": "svelte" },
     },
   },
