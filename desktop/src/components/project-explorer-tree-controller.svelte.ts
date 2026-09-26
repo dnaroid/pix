@@ -14,6 +14,8 @@ interface ProjectExplorerTreeControllerOptions {
   readonly onOpenFile: (path: string) => void;
   readonly onOpenExternal: (path: string) => void;
   readonly onHealthChange: (error: string | null) => void;
+  readonly onLoadExpandedDirectories: (workspace: string) => Promise<string[]>;
+  readonly onPersistExpandedDirectories: (workspace: string, paths: readonly string[]) => Promise<void>;
   readonly clearDrag: () => void;
 }
 
@@ -31,6 +33,10 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   let observedRefreshKey: number | undefined;
   let typeaheadQuery = "";
   let typeaheadTimer: number | null = null;
+  let expansionRevision = 0;
+  let expansionPersistTimer: number | null = null;
+  let pendingExpansionPersist: { workspace: string; paths: string[] } | null = null;
+  let expansionPersistTail: Promise<void> = Promise.resolve();
   const directoryRequestVersions = new Map<string, number>();
 
   $effect(() => {
@@ -43,10 +49,13 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     if (!workspaceChanged && !refreshChanged) return;
 
     const nextGeneration = ++generation;
+    let restoreRevision: number | undefined;
     const refreshPaths = untrack(() => {
       if (workspaceChanged) {
+        flushExpandedDirectoriesPersist();
         state.entriesByDirectory = {};
         state.expandedDirectories = [];
+        restoreRevision = ++expansionRevision;
         state.selectedPath = null;
         state.focusedPath = null;
         directoryRequestVersions.clear();
@@ -54,7 +63,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
       state.loadingDirectories = [];
       state.errorByDirectory = {};
       options.clearDrag();
-      return workspaceChanged ? [""] : ["", ...new Set(state.expandedDirectories)];
+      return workspaceChanged ? [""] : ["", ...visibleExpandedDirectories()];
     });
     queueMicrotask(() => {
       if (nextGeneration === generation) options.onHealthChange(null);
@@ -64,6 +73,9 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     if (currentWorkspace) {
       queueMicrotask(() => {
         if (nextGeneration !== generation) return;
+        if (workspaceChanged && restoreRevision !== undefined) {
+          void restoreExpandedDirectories(currentWorkspace, nextGeneration, restoreRevision);
+        }
         for (const path of refreshPaths) void loadDirectory(path, nextGeneration);
       });
     }
@@ -92,6 +104,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
       const entries = await options.onListDirectory(path);
       if (requestGeneration !== generation || directoryRequestVersions.get(path) !== requestVersion) return;
       state.entriesByDirectory = { ...state.entriesByDirectory, [path]: entries };
+      pruneMissingExpandedChildren(path, entries);
+      loadExpandedChildren(entries, requestGeneration);
       reportHealth();
     } catch (error) {
       if (requestGeneration !== generation || directoryRequestVersions.get(path) !== requestVersion) return;
@@ -118,9 +132,13 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   function toggleDirectory(path: string): void {
     if (state.expandedDirectories.includes(path)) {
       state.expandedDirectories = state.expandedDirectories.filter((candidate) => candidate !== path);
+      expansionRevision += 1;
+      schedulePersistExpandedDirectories();
       return;
     }
     state.expandedDirectories = [...state.expandedDirectories, path];
+    expansionRevision += 1;
+    schedulePersistExpandedDirectories();
     if (!state.entriesByDirectory[path]) void loadDirectory(path);
   }
 
@@ -132,6 +150,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   function ensureDirectoryExpanded(path: string): void {
     if (!path || state.expandedDirectories.includes(path)) return;
     state.expandedDirectories = [...state.expandedDirectories, path];
+    expansionRevision += 1;
+    schedulePersistExpandedDirectories();
   }
 
   async function focusRow(index: number): Promise<void> {
@@ -174,7 +194,9 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     for (const [directory, error] of Object.entries(state.errorByDirectory)) nextErrors[remap(directory)] = error;
     state.entriesByDirectory = nextEntries;
     state.errorByDirectory = nextErrors;
-    state.expandedDirectories = state.expandedDirectories.map(remap);
+    state.expandedDirectories = [...new Set(state.expandedDirectories.map(remap))];
+    expansionRevision += 1;
+    schedulePersistExpandedDirectories();
     if (state.selectedPath) state.selectedPath = remap(state.selectedPath);
     if (state.focusedPath) state.focusedPath = remap(state.focusedPath);
   }
@@ -208,6 +230,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     state.entriesByDirectory = nextEntries;
     state.errorByDirectory = nextErrors;
     state.expandedDirectories = state.expandedDirectories.filter((candidate) => !sameOrDescendantPath(candidate, path));
+    expansionRevision += 1;
+    schedulePersistExpandedDirectories();
     if (state.selectedPath && sameOrDescendantPath(state.selectedPath, path)) state.selectedPath = null;
     if (state.focusedPath && sameOrDescendantPath(state.focusedPath, path)) state.focusedPath = null;
   }
@@ -276,10 +300,88 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function dispose(): void {
+    flushExpandedDirectoriesPersist();
     generation += 1;
     options.onHealthChange(null);
     if (typeaheadTimer !== null) window.clearTimeout(typeaheadTimer);
     typeaheadTimer = null;
+  }
+
+  async function restoreExpandedDirectories(
+    workspace: string,
+    requestGeneration: number,
+    requestRevision: number,
+  ): Promise<void> {
+    try {
+      const restored = await options.onLoadExpandedDirectories(workspace);
+      if (
+        requestGeneration !== generation
+        || requestRevision !== expansionRevision
+        || options.workspace() !== workspace
+      ) return;
+      state.expandedDirectories = restored;
+      const rootEntries = state.entriesByDirectory[""];
+      if (rootEntries) {
+        pruneMissingExpandedChildren("", rootEntries);
+        loadExpandedChildren(rootEntries, requestGeneration);
+      }
+    } catch (error) {
+      console.warn("Could not restore Project Explorer expansion state", error);
+    }
+  }
+
+  function schedulePersistExpandedDirectories(): void {
+    const workspace = options.workspace();
+    if (!workspace) return;
+    pendingExpansionPersist = { workspace, paths: [...state.expandedDirectories] };
+    if (expansionPersistTimer !== null) window.clearTimeout(expansionPersistTimer);
+    expansionPersistTimer = window.setTimeout(flushExpandedDirectoriesPersist, 300);
+  }
+
+  function flushExpandedDirectoriesPersist(): void {
+    if (expansionPersistTimer !== null) window.clearTimeout(expansionPersistTimer);
+    expansionPersistTimer = null;
+    const pending = pendingExpansionPersist;
+    pendingExpansionPersist = null;
+    if (!pending) return;
+    expansionPersistTail = expansionPersistTail
+      .catch(() => undefined)
+      .then(() => options.onPersistExpandedDirectories(pending.workspace, pending.paths))
+      .catch((error) => {
+        console.warn("Could not persist Project Explorer expansion state", error);
+      });
+  }
+
+  function visibleExpandedDirectories(): string[] {
+    return rows()
+      .filter((row) => row.entry.kind === "directory" && state.expandedDirectories.includes(row.entry.path))
+      .map((row) => row.entry.path);
+  }
+
+  function pruneMissingExpandedChildren(path: string, entries: readonly ProjectTreeEntry[]): void {
+    const availableDirectories = new Set(
+      entries.filter((entry) => entry.kind === "directory").map((entry) => entry.path),
+    );
+    const next = state.expandedDirectories.filter((candidate) => {
+      const child = immediateChildPath(candidate, path);
+      return child === null || availableDirectories.has(child);
+    });
+    if (next.length === state.expandedDirectories.length) return;
+    state.expandedDirectories = next;
+    expansionRevision += 1;
+    schedulePersistExpandedDirectories();
+  }
+
+  function loadExpandedChildren(entries: readonly ProjectTreeEntry[], requestGeneration: number): void {
+    for (const entry of entries) {
+      if (
+        entry.kind === "directory"
+        && state.expandedDirectories.includes(entry.path)
+        && !state.entriesByDirectory[entry.path]
+      ) {
+        void loadDirectory(entry.path, requestGeneration);
+      }
+    }
   }
 
   return {
@@ -315,4 +417,15 @@ function sameOrDescendantPath(path: string, prefix: string): boolean {
 function remapProjectPath(path: string, oldPrefix: string, newPrefix: string): string {
   if (path === oldPrefix) return newPrefix;
   return path.startsWith(`${oldPrefix}/`) ? `${newPrefix}${path.slice(oldPrefix.length)}` : path;
+}
+
+function immediateChildPath(path: string, parent: string): string | null {
+  if (parent) {
+    if (!path.startsWith(`${parent}/`)) return null;
+    const remainder = path.slice(parent.length + 1);
+    const separator = remainder.indexOf("/");
+    return separator < 0 ? path : `${parent}/${remainder.slice(0, separator)}`;
+  }
+  const separator = path.indexOf("/");
+  return separator < 0 ? path : path.slice(0, separator);
 }

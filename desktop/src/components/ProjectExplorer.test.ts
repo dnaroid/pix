@@ -51,12 +51,19 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100");
   });
 
-  it("refreshes in place without collapsing expanded directories", () => {
+  it("restores sparse project expansion state from workspace.jsonc and refreshes only visible expanded branches", () => {
     expect(treeControllerSource).toContain("const workspaceChanged = currentWorkspace !== observedWorkspace");
     expect(treeControllerSource).toContain("if (!workspaceChanged && !refreshChanged) return");
-    expect(treeControllerSource).toContain('return workspaceChanged ? [""] : ["", ...new Set(state.expandedDirectories)]');
+    expect(treeControllerSource).toContain("void restoreExpandedDirectories(currentWorkspace, nextGeneration, restoreRevision)");
+    expect(treeControllerSource).toContain('return workspaceChanged ? [""] : ["", ...visibleExpandedDirectories()]');
+    expect(treeControllerSource).toContain("schedulePersistExpandedDirectories();");
+    expect(treeControllerSource).toContain("window.setTimeout(flushExpandedDirectoriesPersist, 300)");
+    expect(treeControllerSource).toContain("pruneMissingExpandedChildren(path, entries)");
     expect(treeControllerSource).toContain("if (workspaceChanged) {");
-    expect(treeControllerSource).toContain("state.expandedDirectories = []");
+    expect(explorerSource).toContain("WORKSPACE_CONFIG_PATH");
+    expect(explorerSource).toContain('invoke<ProjectFilePreview>("read_project_file"');
+    expect(explorerSource).toContain('"write_project_workspace_config_if_unchanged"');
+    expect(explorerSource).toContain("workspaceConfigWithProjectExplorerExpandedDirectories");
   });
 
   it("invalidates stale directory requests and preserves tree state across rename/delete", () => {

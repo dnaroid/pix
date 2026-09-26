@@ -34,10 +34,18 @@ while project selection/open state remains separate from transient focus.
   short accumulated query and wraps to the next visible matching entry name.
 - Opening a file updates persistent selected-file styling; moving focus alone
   never changes that selection.
-- Refreshing project files updates the root and currently expanded directories
-  in place. It preserves expanded directories, the selected file, focus state,
-  and existing rows while refresh requests are in flight. A full tree-state
-  reset happens only when the workspace itself changes.
+- Refreshing project files updates the root and currently visible expanded
+  directories in place. It preserves expanded directories, the selected file,
+  focus state, and existing rows while refresh requests are in flight. When the
+  workspace changes, selection/focus and loaded directory contents reset, but
+  that project's folder expansion state is restored from
+  `.pi/workspace.jsonc` under `projectExplorer.expandedDirectories`. Only
+  relative expanded-directory paths are stored; directory contents are never
+  persisted. The list is bounded to 256 paths, writes are debounced and
+  serialized, and conditional workspace-config writes retry concurrent edits
+  while preserving comments and unrelated settings. Stale branches are pruned
+  as their nearest loaded parent is enumerated, so restoring state does not
+  trigger an unbounded filesystem walk.
 - `Shift+Enter` opens the focused file or directory in the configured external
   editor. Gram is a supported built-in choice. When no external editor is
   configured, Desktop reports that the user must choose one in Desktop Settings
@@ -63,8 +71,10 @@ while project selection/open state remains separate from transient focus.
   overwriting an existing file or directory.
 - Rename, copy/paste, duplicate, create, and delete refresh only the affected
   directory state. Rename preserves focus/selection and expanded descendants
-  under the new path when possible; deletion moves focus to a logical surviving
-  row and clears stale selected/expanded state beneath the removed path.
+  under the new path when possible and updates the workspace-config expansion paths;
+  deletion moves focus to a logical surviving row and clears stale
+  selected/expanded state beneath the removed path from both memory and the
+  sparse persisted preference.
 - Delete is destructive and requires confirmation before the filesystem mutation.
 - Existing pointer drag/drop behavior and lazy directory loading remain unchanged.
 - Project Explorer keeps dotfiles and dotfolders in the normal tree. Entries whose basename starts with `.` use muted opacity by default so ordinary source files retain visual priority; hover, keyboard focus, and selected/open state restore normal readability.
@@ -96,6 +106,7 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/lib/project-tree.ts`
+- `desktop/src/lib/project-explorer-expansion.ts`
 - `desktop/src/lib/sidebar-indicators.ts`
 - `desktop/src-tauri/src/lib.rs`
 
@@ -104,6 +115,8 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/lib/keyboard-navigation.test.ts` covers composite and type-ahead
   navigation primitives.
 - `desktop/src/lib/project-tree.test.ts` covers visible parent lookup.
+- `desktop/src/lib/project-explorer-expansion.test.ts` covers compact per-project
+  expansion persistence, malformed state rejection, and storage bounds.
 - `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the
   keyboard external-editor route.
 - `desktop/src/components/WorkspaceSidebar.test.ts` covers Activity Bar composite

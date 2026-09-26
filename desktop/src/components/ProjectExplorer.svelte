@@ -20,7 +20,12 @@
   import X from "@lucide/svelte/icons/x";
   import { onDestroy, tick } from "svelte";
   import type { MenuNavigationItem } from "../lib/keyboard-navigation";
-  import type { ProjectFileLineRange } from "../lib/project-files";
+  import {
+    projectExplorerExpandedDirectoriesFromWorkspaceConfig,
+    workspaceConfigWithProjectExplorerExpandedDirectories,
+  } from "../lib/project-explorer-expansion";
+  import { WORKSPACE_CONFIG_PATH } from "../lib/project-colors";
+  import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
   import type { ProjectSearchMatch, ProjectTreeEntry } from "../lib/project-tree";
   import { createProjectExplorerDragController } from "./project-explorer-drag-controller.svelte";
   import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
@@ -57,6 +62,7 @@
   let entryClipboard = $state<{ workspace: string; entry: ProjectTreeEntry } | null>(null);
   let operationGeneration = 0;
   let searchGeneration = 0;
+  let expansionSaveTail: Promise<void> = Promise.resolve();
   let observedOperationWorkspace: string | undefined;
   let nameDialog = $state<{
     mode: "rename" | "new-file" | "new-directory";
@@ -73,6 +79,8 @@
     onOpenFile: (path) => onOpenFile(path),
     onOpenExternal: (path) => onOpenExternal(path),
     onHealthChange: (error) => onHealthChange?.(error),
+    onLoadExpandedDirectories: loadExpandedDirectories,
+    onPersistExpandedDirectories: persistExpandedDirectories,
     clearDrag: dragController.clear,
   });
   const treeState = treeController.state;
@@ -114,6 +122,62 @@
     nameDialog = null;
     menuController.close();
   });
+
+  async function loadExpandedDirectories(requestWorkspace: string): Promise<string[]> {
+    if (!requestWorkspace) return [];
+    try {
+      const exists = await invoke<boolean>("project_file_exists", {
+        workspace: requestWorkspace,
+        path: WORKSPACE_CONFIG_PATH,
+      });
+      if (!exists) return [];
+      const document = await invoke<ProjectFilePreview>("read_project_file", {
+        workspace: requestWorkspace,
+        path: WORKSPACE_CONFIG_PATH,
+      });
+      return projectExplorerExpandedDirectoriesFromWorkspaceConfig(document.content);
+    } catch (error) {
+      console.warn("Could not restore Project Explorer expansion state", error);
+      return [];
+    }
+  }
+
+  async function persistExpandedDirectories(requestWorkspace: string, paths: readonly string[]): Promise<void> {
+    const previous = expansionSaveTail;
+    let release!: () => void;
+    expansionSaveTail = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      await previous.catch(() => undefined);
+      const exists = await invoke<boolean>("project_file_exists", {
+        workspace: requestWorkspace,
+        path: WORKSPACE_CONFIG_PATH,
+      });
+      let current = exists
+        ? await invoke<ProjectFilePreview>("read_project_file", {
+            workspace: requestWorkspace,
+            path: WORKSPACE_CONFIG_PATH,
+          })
+        : undefined;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const content = workspaceConfigWithProjectExplorerExpandedDirectories(current?.content, paths);
+        const result = await invoke<{ written: boolean; document: ProjectFilePreview | null }>(
+          "write_project_workspace_config_if_unchanged",
+          {
+            workspace: requestWorkspace,
+            expectedContent: current?.content ?? null,
+            content,
+          },
+        );
+        if (result.written) return;
+        current = result.document ?? undefined;
+      }
+      throw new Error(".pi/workspace.jsonc changed repeatedly while Project Explorer state was being saved.");
+    } catch (error) {
+      console.warn("Could not persist Project Explorer expansion state", error);
+    } finally {
+      release();
+    }
+  }
 
   $effect(() => {
     const query = searchQuery.trim();

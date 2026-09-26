@@ -119,7 +119,7 @@ function quotedPromptPath(path: string): string {
   return JSON.stringify(path);
 }
 
-function isProjectRelativePath(path: string): boolean {
+export function isProjectRelativePath(path: string): boolean {
   if (!path || path.startsWith("/") || path.startsWith("\\") || /^[A-Za-z]:[/\\]/u.test(path)) return false;
   return !path.split(/[\\/]/u).some((part) => part === ".." || part === "");
 }
