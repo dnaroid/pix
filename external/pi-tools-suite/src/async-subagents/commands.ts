@@ -5,20 +5,12 @@ import { ignoreStaleExtensionContextError } from "../context-usage.js";
 import {
 	ensureSessionFileLink,
 	findSubagentSessionByFile,
-	getActiveSubagentPresetName,
-	getBuiltinSubagentPresetsPath,
-	getProjectSubagentPresetsPath,
-	getSessionSubagentPresetOverride,
-	getSubagentPresetSelectionPath,
 	getRunState,
 	listRunDirs,
 	listSubagentSessionRecords,
-	loadSubagentConfig,
 	readParentSessionLink,
 	readReturnSessionLink,
 	resolveRunDir,
-	setActiveSubagentPreset,
-	setSessionSubagentPresetOverride,
 	shouldPersistSubagentSessions,
 	stopAgents,
 	validateBasename,
@@ -26,7 +18,6 @@ import {
 	writeReturnSessionLink,
 } from "./lib.js";
 import { formatAgentStatus } from "./format.js";
-import type { SubagentPreset } from "./lib.js";
 
 interface CommandContext {
 	cwd: string;
@@ -44,8 +35,6 @@ type MessageSender = ExtensionAPI & {
 	sendUserMessage?: (message: string) => void;
 	sendMessage?: unknown;
 };
-
-const CLEAR_ACTIVE_PRESET_LABEL = "Use no active preset";
 
 export const ULTRAWORK_PROMPT = `Run ultrawork mode for the current objective.
 
@@ -71,7 +60,6 @@ export function isUltraworkEnvEnabled(env: NodeJS.ProcessEnv = process.env): boo
 
 export function registerCommands(pi: ExtensionAPI): void {
 	const persistSessions = shouldPersistSubagentSessions();
-	registerPresetCommands(pi);
 	registerOrchestrationCommands(pi);
 
 	pi.registerCommand("sub-status", {
@@ -184,144 +172,6 @@ async function triggerOrchestrationPrompt(
 	}
 
 	ctx.ui.notify(`Triggered /${modeName}.`, "info");
-}
-
-function registerPresetCommands(pi: ExtensionAPI): void {
-	pi.registerCommand("subagent-preset", {
-		description: "Select a sub-agent model-pool preset, or run session <name> for a process-only override",
-		getArgumentCompletions: (prefix: string) => {
-			const names = sortedPresetNames(loadSubagentConfig(process.cwd()).presets ?? {}, getActiveSubagentPresetName());
-			return [...names, ...names.map((name) => `session ${name}`), "list", "path", "clear", "session", "session-clear"]
-				.filter((name) => name.startsWith(prefix))
-				.map((name) => ({ value: name, label: name }));
-		},
-			handler: async (args: string, ctx: CommandContext) => {
-			const name = args.trim();
-			if (!name) return showSubagentPresetSelector(ctx);
-			if (name === "session") return ctx.ui.notify("Usage: /subagent-preset session <name>", "warning");
-			if (name.startsWith("session ")) return setSessionActiveSubagentPreset(ctx, name.slice("session ".length).trim());
-			if (name === "session-clear") return clearSessionActiveSubagentPreset(ctx);
-			if (name === "list") return listSubagentPresets(ctx);
-			if (name === "path") return showSubagentPresetPaths(ctx);
-			if (name === "clear") return clearActiveSubagentPreset(ctx);
-
-			const config = loadSubagentConfig(ctx.cwd);
-			const preset = config.presets?.[name];
-			if (!preset) return ctx.ui.notify(`Unknown sub-agent preset "${name}". Run /subagent-preset list to see available pools.`, "error");
-			setActiveSubagentPreset(name);
-			notifyActiveSubagentPreset(ctx, name, preset);
-		},
-	});
-}
-
-async function showSubagentPresetSelector(ctx: CommandContext): Promise<void> {
-	if (!ctx.hasUI) return ctx.ui.notify("Sub-agent preset selector requires interactive UI. Use /subagent-preset <name>.", "warning");
-
-	const config = loadSubagentConfig(ctx.cwd);
-	const activePreset = getActiveSubagentPresetName();
-	const presets = config.presets ?? {};
-	const names = sortedPresetNames(presets, activePreset);
-	const presetLabels = names.map((name) => subagentPresetLabel(name, presets[name], activePreset));
-	const labels = [...presetLabels];
-	if (activePreset) labels.push(CLEAR_ACTIVE_PRESET_LABEL);
-	if (labels.length === 0) {
-		ctx.ui.notify("No sub-agent model-pool presets are available.", "warning");
-		showSubagentPresetPaths(ctx);
-		return;
-	}
-	const labelToName = new Map(presetLabels.map((label, index) => [label, names[index]]));
-	const selected = await ctx.ui.select("Select active sub-agent preset", labels);
-	if (!selected) return;
-	if (selected === CLEAR_ACTIVE_PRESET_LABEL) return clearActiveSubagentPreset(ctx);
-
-	const name = labelToName.get(selected);
-	if (!name) return;
-	setActiveSubagentPreset(name);
-	notifyActiveSubagentPreset(ctx, name, presets[name]);
-}
-function listSubagentPresets(ctx: CommandContext): void {
-	const config = loadSubagentConfig(ctx.cwd);
-	const activePreset = getActiveSubagentPresetName();
-	const presets = config.presets ?? {};
-	const names = sortedPresetNames(presets, activePreset);
-	if (names.length === 0) return ctx.ui.notify("No sub-agent model-pool presets are available.", "warning");
-	ctx.ui.notify([
-		"Sub-agent model-pool presets:",
-		...names.map((name) => `- ${subagentPresetLabel(name, presets[name], activePreset)}`),
-	].join("\n"), "info");
-}
-
-function showSubagentPresetPaths(ctx: CommandContext): void {
-	ctx.ui.notify([
-		`Bundled presets: ${getBuiltinSubagentPresetsPath()}`,
-		`Project preset override: ${getProjectSubagentPresetsPath(ctx.cwd)}`,
-		"Project presets are defined as model pools in .pi/agents/presets.jsonc; agent behavior stays in .pi/agents/*.md.",
-		`Active selection state: ${getSubagentPresetSelectionPath()}`,
-		`Session override: ${formatSessionPresetOverride()}`,
-		"Use /subagent-preset session <name> to override only the current Pi process; use /subagent-preset session-clear to clear that runtime override.",
-	].join("\n"), "info");
-}
-
-function clearActiveSubagentPreset(ctx: CommandContext): void {
-	setActiveSubagentPreset(undefined);
-	const override = getSessionSubagentPresetOverride();
-	ctx.ui.notify(override
-		? `Saved sub-agent preset selection cleared, but ${formatSessionPresetOverride()} still overrides this session.`
-		: "Sub-agent presets disabled. Future sub-agents use task/profile/env defaults until another preset is selected.", "info");
-}
-
-function setSessionActiveSubagentPreset(ctx: CommandContext, name: string): void {
-	if (!name) return ctx.ui.notify("Usage: /subagent-preset session <name>", "warning");
-	const config = loadSubagentConfig(ctx.cwd);
-	const preset = config.presets?.[name];
-	if (!preset) return ctx.ui.notify(`Unknown sub-agent preset "${name}". Run /subagent-preset list to see available pools.`, "error");
-	setSessionSubagentPresetOverride(name);
-	ctx.ui.notify(`Session-only sub-agent preset "${name}": ${subagentPresetDescription(preset)}\nApplies to future sub-agent spawns only until this Pi process exits or /subagent-preset session-clear is run. Saved preset selection is unchanged.`, "info");
-}
-
-function clearSessionActiveSubagentPreset(ctx: CommandContext): void {
-	setSessionSubagentPresetOverride(undefined);
-	const envOverride = typeof process.env.AGENTS_PRESET === "string" && process.env.AGENTS_PRESET.trim() ? process.env.AGENTS_PRESET.trim() : undefined;
-	ctx.ui.notify(envOverride
-		? `Runtime session override cleared, but AGENTS_PRESET=${envOverride} still overrides this process.`
-		: "Runtime session sub-agent preset override cleared. Future sub-agents use AGENTS_PRESET, saved preset, or task/profile/env defaults.", "info");
-}
-
-function formatSessionPresetOverride(): string {
-	const override = getSessionSubagentPresetOverride();
-	if (!override) return "not set";
-	const envOverride = typeof process.env.AGENTS_PRESET === "string" && process.env.AGENTS_PRESET.trim() ? process.env.AGENTS_PRESET.trim() : undefined;
-	return envOverride === override ? `AGENTS_PRESET=${override}` : `runtime=${override}`;
-}
-
-function notifyActiveSubagentPreset(ctx: CommandContext, name: string, preset: SubagentPreset): void {
-	ctx.ui.notify(`Active sub-agent preset "${name}": ${subagentPresetDescription(preset)}\nApplies to future sub-agent spawns in all sessions until changed.`, "info");
-}
-
-function subagentPresetLabel(name: string, preset: SubagentPreset, activePreset?: string): string {
-	return `${name} — ${subagentPresetDescription(preset)}${activePreset === name ? " ✓ active" : ""}`;
-}
-
-function sortedPresetNames(presets: Record<string, SubagentPreset>, activePreset?: string): string[] {
-	const names = Object.keys(presets).sort();
-	return activePreset && presets[activePreset]
-		? [activePreset, ...names.filter((name) => name !== activePreset)]
-		: names;
-}
-
-function subagentPresetDescription(preset: SubagentPreset): string {
-	const parts: string[] = [];
-	if (preset.description) parts.push(preset.description);
-	if (preset.models !== undefined) {
-		parts.push(`models:${preset.models.join(",") || "(none)"}`);
-		return parts.join(", ");
-	}
-	if (preset.model) parts.push(`model:${preset.model}`);
-	if (preset.fallbackModels && preset.fallbackModels.length > 0) parts.push(`fallbacks:${preset.fallbackModels.join(",")}`);
-	if (preset.thinking) parts.push(`thinking:${preset.thinking}`);
-	if (preset.extraArgs && preset.extraArgs.length > 0) parts.push(`args:${preset.extraArgs.join(" ")}`);
-	if (preset.types && Object.keys(preset.types).length > 0) parts.push(`types:${Object.keys(preset.types).sort().join(",")}`);
-	return parts.length > 0 ? parts.join(", ") : "empty";
 }
 
 function registerSessionCommands(pi: ExtensionAPI): void {

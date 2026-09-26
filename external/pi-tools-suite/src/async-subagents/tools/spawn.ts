@@ -13,10 +13,8 @@ import {
 	createSemaphore,
 	currentModelRef,
 	DEFAULT_MAX_CONCURRENT,
-	getActiveSubagentPresetName,
 	getAgentState,
 	getRunState,
-	getSessionSubagentPresetOverride,
 	loadSubagentConfig,
 	recordSubagentRun,
 	resolveAgentTaskConfig,
@@ -226,15 +224,6 @@ export function registerSpawnTool(
 				};
 			}
 			const config = loadSubagentConfig(ctx.cwd);
-			const activePresetName = getActiveSubagentPresetName();
-			const activePreset = activePresetName ? config.presets?.[activePresetName] : undefined;
-			if (getSessionSubagentPresetOverride() && !activePreset) {
-				return {
-					content: [{ type: "text", text: `AGENTS_PRESET=${activePresetName} does not match any available sub-agent preset.` }],
-					details: {},
-					isError: true,
-				};
-			}
 			const forceCurrentModel = shouldForceCurrentSubagentModel();
 			const forcedModel = forceCurrentModel ? currentModelRef((ctx as { model?: unknown }).model) : undefined;
 			if (forceCurrentModel && !forcedModel) {
@@ -261,7 +250,6 @@ export function registerSpawnTool(
 			try {
 				resolvedTasks = await Promise.all(routed.tasks.map(async (task) => applySessionModelFallback(await selectAvailableAgentModels(
 					resolveAgentTaskConfig(task, config, {
-						preset: activePreset,
 						thinking: params.thinking,
 						extraArgs: Array.isArray(params.extraArgs) ? params.extraArgs : [],
 						forcedModel,

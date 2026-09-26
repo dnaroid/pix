@@ -100,8 +100,7 @@ function normalizeFallbackChain(model: string, fallbackModels: string[]): string
 function firstAvailableFallback(failedModel: string, fallbackModels: string[]): string | undefined {
 	const failedIndex = fallbackModels.indexOf(failedModel);
 	const candidates = failedIndex >= 0 ? fallbackModels.slice(failedIndex + 1) : fallbackModels;
-	const failedProvider = modelProvider(failedModel);
-	return candidates.find((candidate) => modelProvider(candidate) !== failedProvider && !isSessionModelUnavailable(candidate));
+	return candidates.find((candidate) => !isSessionModelUnavailable(candidate));
 }
 
 export function isSessionModelUnavailable(model: string): boolean {

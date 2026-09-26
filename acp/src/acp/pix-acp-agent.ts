@@ -335,6 +335,8 @@ interface AgentSessionState {
 	contextInventory: ContextInventoryState | undefined;
 	contextInventoryNoticeReason: "reload" | "model_select" | undefined;
 	contextUsagePushGeneration: number;
+	/** Guards config-option pushes against session replacement and bursts. */
+	configOptionsPushGeneration: number;
 }
 
 interface PendingDesktopNewSession {
@@ -1685,6 +1687,7 @@ export class PixAcpAgent {
 			contextInventory: undefined,
 			contextInventoryNoticeReason: undefined,
 			contextUsagePushGeneration: 0,
+			configOptionsPushGeneration: 0,
 		};
 		// Register routing before start so session_start extension state emitted
 		// during RPC startup is delivered instead of being dropped.
@@ -1875,6 +1878,13 @@ export class PixAcpAgent {
 		) {
 			this.scheduleContextUsagePush(session);
 		}
+		if (event.type === "thinking_level_changed") {
+			// Server-side thinking changes (todo-thinking overrides, builtin
+			// /thinking and /model commands) are not visible through the event
+			// translator; re-push the config options so clients can refresh
+			// their model/thought-level indicators like pi's TUI footer does.
+			this.scheduleConfigOptionsPush(session);
+		}
 		this.dispatchSessionEvent(session, event);
 	}
 
@@ -1915,6 +1925,35 @@ export class PixAcpAgent {
 		} catch (error) {
 			if (this.sessions.get(session.acpSessionId) !== session) return;
 			this.options.logger.warn(`context usage push failed: ${stringifyUnknown(error)}`);
+		}
+	}
+
+	private scheduleConfigOptionsPush(session: AgentSessionState): void {
+		const generation = ++session.configOptionsPushGeneration;
+		queueMicrotask(() => void this.pushConfigOptions(session, generation));
+	}
+
+	private async pushConfigOptions(session: AgentSessionState, generation: number): Promise<void> {
+		if (
+			this.sessions.get(session.acpSessionId) !== session
+			|| session.configOptionsPushGeneration !== generation
+		) return;
+
+		try {
+			const configOptions = await this.safeConfigOptions(session.pi);
+			if (
+				!configOptions
+				|| this.sessions.get(session.acpSessionId) !== session
+				|| session.configOptionsPushGeneration !== generation
+			) return;
+			const notification: SessionNotification = {
+				sessionId: session.acpSessionId,
+				update: { sessionUpdate: "config_option_update", configOptions },
+			};
+			await session.client.notify("session/update", notification);
+		} catch (error) {
+			if (this.sessions.get(session.acpSessionId) !== session) return;
+			this.options.logger.warn(`config options push failed: ${stringifyUnknown(error)}`);
 		}
 	}
 

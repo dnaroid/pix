@@ -24,7 +24,6 @@ mock.module("@earendil-works/pi-tui", () => ({
 
 const tempDirs: string[] = [];
 const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-const originalAsyncSubagentsActivePresetFile = process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
 
 function tempDir(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "async-subagents-ui-test-"));
@@ -52,8 +51,6 @@ function theme() {
 afterEach(() => {
 	if (originalAsyncSubagentsEnableSessions === undefined) delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
-	if (originalAsyncSubagentsActivePresetFile === undefined) delete process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
-	else process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = originalAsyncSubagentsActivePresetFile;
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -357,50 +354,13 @@ describe.serial("polling", () => {
 });
 
 describe.serial("slash command registration", () => {
-	test.serial("selects project model-pool presets without editing them", async () => {
-		const { loadSubagentPresetSelection } = await import("../../src/async-subagents/core/presets.js");
-		const { registerCommands } = await import("../../src/async-subagents/commands.js");
-		const registered = new Map<string, any>();
-		const pi = { registerCommand: (name: string, command: any) => { registered.set(name, command); } };
-		registerCommands(pi as any);
-
-		const cwd = tempDir();
-		process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = path.join(cwd, "active-preset.json");
-		writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), `{
-			"fast": { "description": "cheap", "models": ["zai/fast"] },
-			"deep": { "description": "deep pool", "models": ["openai/deep"] }
-		}`);
-
-		const notifications: any[] = [];
-		const selections: string[][] = [];
-		const ctx = {
-			cwd,
-			hasUI: true,
-			ui: {
-				notify: (...args: any[]) => notifications.push(args),
-				select: async (_title: string, options: string[]) => {
-					selections.push(options);
-					return options.find((option) => option.startsWith("fast —"));
-				},
-			},
-		};
-
-		await registered.get("subagent-preset").handler("", ctx);
-		expect(selections[0]).toEqual(expect.arrayContaining([expect.stringContaining("fast — cheap"), expect.stringContaining("deep — deep pool")]));
-		expect(loadSubagentPresetSelection().activePreset).toBe("fast");
-		expect(notifications.pop()[0]).toContain('Active sub-agent preset "fast"');
-
-		await registered.get("subagent-preset").handler("clear", ctx);
-		expect(loadSubagentPresetSelection().activePreset).toBeUndefined();
-	});
-
 	test.serial("registers /sub-status and reports usage, empty runs, and agent status", async () => {
 		const { registerCommands } = await import("../../src/async-subagents/commands.js");
 		delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 		const registered = new Map<string, any>();
 		const pi = { registerCommand: (name: string, command: any) => { registered.set(name, command); } };
 		registerCommands(pi as any);
-		expect([...registered.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
+		expect([...registered.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
 		const command = registered.get("sub-status");
 
 		const cwd = tempDir();
@@ -427,7 +387,7 @@ describe.serial("slash command registration", () => {
 		const registered = new Map<string, any>();
 		const pi = { registerCommand: (name: string, command: any) => { registered.set(name, command); } };
 		registerCommands(pi as any);
-		expect([...registered.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
+		expect([...registered.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 
 		const cwd = tempDir();
 		const parentSession = path.join(cwd, "parent.jsonl");

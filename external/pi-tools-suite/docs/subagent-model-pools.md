@@ -1,10 +1,10 @@
-# Sub-agent model pools
+# Sub-agent model candidates and provider policy
 
 Sub-agents primarily reduce the cost of bounded work and keep intermediate
 source, searches and logs out of the parent context. The parent owns planning,
 integration, decisions and the final answer. Actual savings depend on worker
-quality, retries and how much work the parent repeats; the configuration is
-not a price oracle.
+quality, retries and how much work the parent repeats; model order is a role
+policy, not a price oracle.
 
 ## Execution modes
 
@@ -18,12 +18,9 @@ not a price oracle.
   gate.
 - `delivery-review`: explicitly requested, read-only delivery readiness and
   evidence review, available to any parent; does not perform real UI QA or
-  assume release authority. Available in each bundled pool where a declared
-  candidate intersects: GLM-5.3 in `cheap`/`deep`, GPT-6-Sol in `gpt`/`deep`.
-- `oracle`: a deliberate strong second opinion, not automatic worker escalation.
-- `oracle-openai` / `oracle-zai`: explicitly cross-provider, read-only strong
-  second opinions, offered only to Z.ai / OpenAI Codex parents respectively.
-  These are not substitutes for routine review or the compatible `oracle` role.
+  assume release authority.
+- `oracle`: a deliberate cross-provider strong second opinion, not automatic
+  worker escalation.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
 agent is warranted when it adds a durable contract, capabilities or resources,
@@ -36,8 +33,8 @@ shell access is not a read-only filesystem sandbox.
 verification to assess residual delivery risk. Its bundled profile is
 self-contained: it does not require project skills or their discovery in the
 child. It uses GPT-6-Sol followed by GLM-5.3, `high` thinking, and the inspection
-tools `read`, `grep`, and `bash`, subject to normal pool/runtime availability.
-It remains available even when the parent is a frontier model.
+tools `read`, `grep`, and `bash`, subject to runtime availability. It remains
+available even when the parent is a frontier model.
 
 The role must not edit files, execute tests, perform UI QA, or spawn children.
 Missing test/UI evidence is requested through the parent. This is a behavioral
@@ -46,14 +43,15 @@ checks apply only when relevant to the changed paths. Reports distinguish
 inspection from execution, classify material risks as `covered`, `acceptable`,
 or `needs attention`, and end with `High`, `Medium`, or `Low` confidence plus
 what would raise lower confidence. The role must not recommend readiness with
-unresolved material blockers (which require `Low` readiness confidence),
-unresolved high-impact risks or missing essential verification, assume release
-authority, or waive a required independent `frontier-review` gate.
+unresolved material blockers, unresolved high-impact risks, or missing essential
+verification, assume release authority, or waive a required independent
+`frontier-review` gate.
 
-## Agent priority, preset availability
+## Role-owned model candidates
 
-Each Markdown profile owns its ordered `models` list. This is one candidate
-chain for initial selection and subsequent quota fallbacks:
+Each Markdown profile owns its ordered `models` list. There is no global
+sub-agent preset or model-pool layer. The list is the complete candidate chain
+for initial selection and subsequent quota fallbacks:
 
 ```yaml
 ---
@@ -65,103 +63,88 @@ thinking: high
 ---
 ```
 
-A preset contains a set of available models, not a per-agent matrix. Project
-pools live in `<project>/.pi/agents/presets.jsonc`:
-
-```jsonc
-{
-  "gpt": {
-    "description": "Models available for this project",
-    "models": [
-      "openai-codex/gpt-6-luna",
-      "openai-codex/gpt-6-sol",
-      "openai-codex/gpt-6-astra"
-    ]
-  }
-}
-```
-
-Workers select candidates in their own declared order. For example,
-`implement` has GLM-5.3-Flash followed by GPT-6-Sol, while `research` and
-`ui-qa` retain GPT-6-Luna as fallback. The frontier-review can declare Sol in
-its chain while oracle can declare Astra. Model references in `models` must be
-exact `provider/model` values, not wildcards.
-
-The resolver intersects the agent chain with the selected pool. Runtime
-selection then skips unregistered, unauthenticated or session-exhausted models.
-Tasks with images and UI QA require confirmed image support. The first
-eligible candidate runs; only the remaining eligible candidates are passed to
-quota fallback. An empty intersection or unavailable chain rejects the batch
-before any children or run state are created. Model selection makes no LLM
-completion request; the optional role router is a separate operation.
-
-Oracle prefers another provider when possible, but still respects the pool.
-It never substitutes an ordinary cheap candidate merely to avoid a selection
-error. A single-provider pool cannot promise cross-provider independence.
-
-For a guaranteed different provider, use `oracle-openai` from a Z.ai parent or
-`oracle-zai` from an OpenAI Codex parent. They declare only Astra and GLM-5.3
-respectively. Their `requireDifferentProvider: true` profile contract rejects
-unknown/unsupported parent gates and same-provider explicit task/CLI/forced
-overrides; it removes same-provider candidates from the initial and fallback
-chain (including legacy candidates). If the pool intersection is empty or no
-candidate is available/authenticated, selection errors before launch. The
-read-only tool list and prompt are behavioral restrictions, not a filesystem
-sandbox. The original `oracle` remains best-effort for saved callers.
+Model references in `models` are exact `provider/model` values, not wildcards.
+The resolver preserves that configured order unless the role declares a parent
+provider policy. Runtime selection then removes candidates that are unregistered,
+unauthenticated, session-exhausted, or incompatible with required capabilities.
+Tasks with images and `ui-qa` require confirmed image support. The first usable
+candidate runs; remaining usable candidates form the quota fallback chain. An
+empty or unavailable chain rejects the batch before any child is launched.
+Model selection itself makes no LLM completion request; the optional role router
+is a separate operation.
 
 Explicit task `model`, CLI `--model`, and `FORCE_CURRENT_MODEL` remain deliberate
-overrides: they bypass the pool and do not add automatic fallback candidates,
-but cannot bypass `requireDifferentProvider` on strict profiles.
-The parent should not use these to evade the configured budget. The pool is
-a selection policy, not a security boundary against explicit overrides.
+overrides and do not add automatic fallback candidates. Capability checks and a
+strict parent-provider boundary still apply to those overrides.
 
-## Selection and compatibility
+## Parent-provider policy
 
-Use `/subagent-preset <name>`, `AGENTS_PRESET=<name>` or
-`/subagent-preset session <name>`. Clearing the preset uses agent priorities
-without a pool filter. The shipped names remain compatible with saved choices:
-`cheap` is the GLM pool, `gpt` has GPT workers plus GLM-5.3 for the strict
-`oracle-zai` role, and `deep` is the mixed pool. All bundled pools contain
-GLM-5.3, so an Astra parent can select `oracle-zai` in any of them. The last
-name no longer means that ordinary workers should escalate to flagship models.
-Bundled definitions live beside the built-in agents in
-`src/async-subagents/agents/presets.jsonc`; a project file with the same preset
-name overrides that pool.
+`parentProviderPolicy` controls the relationship between a role's candidate
+providers and the known parent provider:
+
+- `any` (default): preserve the role's candidate order unchanged.
+- `prefer-other`: stable-partition other-provider candidates before same-provider
+  candidates, preserving relative order inside both groups.
+- `require-other`: remove every candidate from the parent provider. A known parent
+  provider is required; same-provider explicit overrides are rejected; an empty
+  remaining chain is a selection error rather than a fallback to the parent.
+
+The bundled `oracle` uses `require-other`. Its strong-model list can contain
+OpenAI, Z.ai, Anthropic, or any future provider without adding provider-specific
+oracle roles. For example, a chain
+
+```yaml
+models: [openai/frontier, anthropic/frontier, zai/frontier]
+parentProviderPolicy: require-other
+```
+
+automatically excludes OpenAI for an OpenAI parent, Anthropic for an Anthropic
+parent, and Z.ai for a Z.ai parent. Runtime availability then chooses the first
+usable candidate among the remaining providers. Adding another provider is just
+another candidate in the role profile; it does not require a new routing matrix.
+
+Quota fallback follows the already-resolved candidate chain. The fallback layer
+tracks exhausted models/providers but does not independently encode a
+different-provider rule; provider diversity belongs to the role policy.
+
+`requireDifferentProvider: true` remains accepted as a compatibility alias for
+`parentProviderPolicy: require-other`. New profiles should use the enum directly.
+
+## Parent-model visibility gates
+
+Agent frontmatter can independently gate whether a role exists for the current
+parent model. `forParentModels` is an optional allow-list and
+`notForParentModels` is an optional deny-list; deny wins when both match. These
+fields accept model patterns such as `zai/*` and affect the parent catalog,
+explicit role validation, and automatic routing. They do not choose the child
+model; `models` and the provider policy do that.
+
+## Project-local customization and compatibility
+
+Projects customize role behavior by adding or replacing
+`<project>/.pi/agents/<role>.md`. There is no `.pi/agents/presets.jsonc`, saved
+sub-agent preset selection, `AGENTS_PRESET`, or `/subagent-preset` runtime
+surface. A project that wants different worker economics changes the ordered
+candidate list of the relevant role instead of selecting a global model pool.
 
 Old role names are not implicit aliases. `quick`, `scan`, `review`, `deep`,
 `docs`, `frontend`, and `tests` work only when explicitly defined as ordinary
-custom/project types. This keeps the effective catalog and accepted names exact.
+project types. This keeps the effective catalog and accepted names exact.
 
-Agent frontmatter can gate whether a role exists for the current parent model:
-`forParentModels` is an optional allow-list and `notForParentModels` is an
-optional deny-list; deny wins when both match. These fields accept model
-patterns such as `zai/*` and affect the parent catalog, explicit role
-validation, and automatic routing. They do not change which model the child
-runs on; `models` / legacy model selectors still own child model selection.
-`requireDifferentProvider` is a separate opt-in runtime invariant: a known
-parent `provider/model` is mandatory, and every selectable child must have a
-different provider, even under explicit model overrides.
-
-Legacy `model` plus `fallbackModels` and `modelByParent` still load when they are
-declared in an agent Markdown file. New profile `models` replaces inherited
-legacy selection fields. Empty `models` means no candidates, not permission to
-inherit the parent model. Model-less project specialists must declare candidates
-or receive an explicit model override.
-
-Legacy singular selectors are normalized with an explicit fallback array:
-`model` without `fallbackModels` resolves to `fallbackModels: []`, and every
-normalized `modelByParent` entry carries its own `fallbackModels` array. Modern
-`models` profiles already encode the complete ordered candidate/fallback chain
-in one array and are not wrapped in an additional fallback field.
+Legacy `model` plus `fallbackModels` and `modelByParent` still load when declared
+in an agent Markdown file. A modern `models` profile is the complete ordered
+candidate chain. Empty `models` means no candidates, not permission to inherit
+the parent model. Legacy singular selectors normalize with an explicit fallback
+array, including `[]`.
 
 The removed `asyncSubagents` section is no longer part of the public config
 schema and is not read at runtime. Existing legacy files are left untouched but
-have no effect. Migrate role definitions to `<project>/.pi/agents/*.md` and
-custom pools to `<project>/.pi/agents/presets.jsonc`. To hide only selected
-bundled roles, use top-level `disabledBuiltinAgents` in `pi-tools-suite.jsonc`;
-later config layers may re-enable names with `enabledBuiltinAgents`. The filter
-runs before project-local Markdown is merged, so a same-named project role can
-intentionally replace a disabled built-in.
+have no effect. Migrate role definitions and model candidate choices to
+`<project>/.pi/agents/*.md`. To hide only selected bundled roles, use top-level
+`disabledBuiltinAgents` in `pi-tools-suite.jsonc`; later config layers may
+re-enable names with `enabledBuiltinAgents`. The filter runs before project-local
+Markdown is merged, so a same-named project role can intentionally replace a
+disabled built-in.
 
 ## Compact handoff
 

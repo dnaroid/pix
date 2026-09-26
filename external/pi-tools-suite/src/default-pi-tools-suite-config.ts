@@ -8,7 +8,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Hide selected bundled async-subagent roles. Project-local .pi/agents/*.md
   // files with the same names remain available and can intentionally replace them.
   "disabledBuiltinAgents": [
-    // "oracle-openai",
+    // "oracle",
     // "ui-qa"
   ],
   // Secret firewall is deliberately opt-in for now. Flip this to true to enable

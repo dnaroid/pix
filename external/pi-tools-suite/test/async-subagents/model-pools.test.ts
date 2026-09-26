@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import {
 	loadSubagentConfig,
 	resolveAgentTaskConfig,
@@ -10,15 +9,15 @@ import {
 } from "../../src/async-subagents/core/config.js";
 import { buildSubagentCatalogPrompt } from "../../src/async-subagents/core/agent-catalog.js";
 import { routeSubagentTasks } from "../../src/async-subagents/core/routing.js";
-import { selectAvailableAgentModels } from "../../src/async-subagents/core/model-selection.js";
-import { rememberSessionModelFallback, resetSessionModelFallbacks, selectSessionModelWithFallback } from "../../src/async-subagents/core/model-fallback.js";
 
 const dirs: string[] = [];
+
 function temp(): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-model-pools-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-model-policy-"));
 	dirs.push(dir);
 	return dir;
 }
+
 function agentConfig(name: string, frontmatter: string, body = "Agent body."): SubagentConfig {
 	const cwd = temp();
 	const file = path.join(cwd, ".pi", "agents", `${name}.md`);
@@ -26,359 +25,144 @@ function agentConfig(name: string, frontmatter: string, body = "Agent body."): S
 	fs.writeFileSync(file, `---\n${frontmatter}\n---\n${body}\n`);
 	return loadSubagentConfig(cwd, {});
 }
+
 function task(subagentType = "research") {
 	return { id: "worker", task: "Perform the bounded task", subagentType };
 }
-function poolConfig(): SubagentConfig {
-	return {
-		types: {
-			research: { models: ["cheap/text", "fast/vision", "backup/vision"] },
-			oracle: { models: ["strong/a", "independent/b"] },
-			"ui-qa": { models: ["cheap/text", "fast/vision", "backup/vision"] },
-		},
-	};
-}
-function registry() {
-	const find = mock((provider: string, id: string) => ({
-		provider, id, input: id === "text" ? ["text"] : ["text", "image"],
-	}) as unknown as Model<Api>);
-	const auth = mock(async (_model: Model<Api>) => ({ ok: true }));
-	return { find, getApiKeyAndHeaders: auth, complete: mock(() => { throw new Error("No LLM model selection"); }) };
-}
 
 afterEach(() => {
-	resetSessionModelFallbacks();
 	for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe("ordered agent models and preset pools", () => {
-	test("cross-provider oracle roles are gated by known opposite parent providers", async () => {
-		const cfg = loadSubagentConfig(temp(), {});
-		for (const [parent, offered, hidden] of [
-			["zai/glm-5-turbo", "oracle-openai", "oracle-zai"],
-			["openai-codex/gpt-6-luna", "oracle-zai", "oracle-openai"],
-		] as const) {
-			const catalog = buildSubagentCatalogPrompt(cfg, parent)!;
-			expect(catalog).toContain(`- ${offered}:`);
-			expect(catalog).not.toContain(`- ${hidden}:`);
-			await expect(routeSubagentTasks([task(hidden)], cfg, { model: { provider: parent.split("/")[0], id: parent.split("/")[1] } } as any))
-				.rejects.toThrow();
-		}
-		for (const parent of [undefined, "anthropic/opus"]) {
-			const catalog = buildSubagentCatalogPrompt(cfg, parent);
-			expect(catalog).not.toContain("- oracle-openai:");
-			expect(catalog).not.toContain("- oracle-zai:");
-		}
+describe("role-owned model candidates", () => {
+	test("ships one oracle role with a strict cross-provider policy", () => {
+		const config = loadSubagentConfig(temp(), {});
+		expect(Object.keys(config.types).sort()).toEqual([
+			"delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify",
+		]);
+		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
+		expect(config.types.oracle.parentProviderPolicy).toBe("require-other");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- oracle:");
+
+		const fromOpenAi = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "openai-codex/gpt-6-luna" });
+		expect(fromOpenAi.task.model).toBe("zai/glm-5.3");
+		expect(fromOpenAi.fallbackModels).toEqual([]);
+
+		const fromZai = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "zai/glm-5-turbo" });
+		expect(fromZai.task.model).toBe("openai-codex/gpt-6-astra");
+		expect(fromZai.fallbackModels).toEqual([]);
+		expect(() => resolveAgentTaskConfig(task("oracle"), config)).toThrow(/parent provider/i);
 	});
 
-	test("strict roles enforce provider independence across normal, pool, overrides and every fallback", async () => {
-		const cfg = loadSubagentConfig(temp(), {});
-		const work = task("oracle-openai");
-		const options = { parentModel: "zai/glm-5-turbo" };
-		const normal = resolveAgentTaskConfig(work, cfg, options);
-		expect(normal.task.model).toBe("openai-codex/gpt-6-astra");
-		expect(normal.fallbackModels).toEqual([]);
-		expect(normal.task.tools).toEqual(["read", "grep", "bash"]);
-		expect(resolveAgentTaskConfig(work, cfg, { ...options, preset: cfg.presets!.deep }).task.model).toBe(normal.task.model);
-		for (const preset of [cfg.presets!.cheap, { models: [] }]) {
-			expect(() => resolveAgentTaskConfig(work, cfg, { ...options, preset })).toThrow(/models pool/);
-		}
-		for (const parentModel of [undefined, "zai", "openai-codex/gpt-6-luna", "anthropic/opus"]) {
-			expect(() => resolveAgentTaskConfig(work, cfg, { parentModel })).toThrow(/parent provider/);
-		}
-		for (const override of [
-			{ work: { ...work, model: "zai/glm-5.3" }, options },
-			{ work, options: { ...options, extraArgs: ["--model=zai/glm-5.3"] } },
-			{ work, options: { ...options, forcedModel: "zai/glm-5-turbo" } },
-		]) {
-			expect(() => resolveAgentTaskConfig(override.work, cfg, override.options)).toThrow(/cross-provider/);
-		}
-		const explicit = resolveAgentTaskConfig({ ...work, model: "openai-codex/gpt-6-astra" }, cfg,
-			{ ...options, preset: { models: [] } });
+	test("require-other is N-provider and preserves configured order after filtering", () => {
+		const config = agentConfig("independent", [
+			"models: [openai/frontier, anthropic/frontier, zai/frontier]",
+			"parentProviderPolicy: require-other",
+		].join("\n"));
+
+		const openaiParent = resolveAgentTaskConfig(task("independent"), config, { parentModel: "openai/parent" });
+		expect(openaiParent.task.model).toBe("anthropic/frontier");
+		expect(openaiParent.fallbackModels).toEqual(["zai/frontier"]);
+
+		const anthropicParent = resolveAgentTaskConfig(task("independent"), config, { parentModel: "anthropic/parent" });
+		expect(anthropicParent.task.model).toBe("openai/frontier");
+		expect(anthropicParent.fallbackModels).toEqual(["zai/frontier"]);
+
+		const zaiParent = resolveAgentTaskConfig(task("independent"), config, { parentModel: "zai/parent" });
+		expect(zaiParent.task.model).toBe("openai/frontier");
+		expect(zaiParent.fallbackModels).toEqual(["anthropic/frontier"]);
+
+		expect(() => resolveAgentTaskConfig(
+			{ ...task("independent"), model: "anthropic/forced" },
+			config,
+			{ parentModel: "anthropic/parent" },
+		)).toThrow(/cross-provider/i);
+		expect(resolveAgentTaskConfig(
+			{ ...task("independent"), model: "zai/forced" },
+			config,
+			{ parentModel: "anthropic/parent" },
+		).task.model).toBe("zai/forced");
+	});
+
+	test("prefer-other stable-partitions candidates without overriding an explicit model", () => {
+		const config: SubagentConfig = { types: { reviewer: {
+			models: ["openai/a", "anthropic/a", "openai/b", "zai/a"],
+			parentProviderPolicy: "prefer-other",
+		} } };
+		const selected = resolveAgentTaskConfig(task("reviewer"), config, { parentModel: "openai/parent" });
+		expect(selected.task.model).toBe("anthropic/a");
+		expect(selected.fallbackModels).toEqual(["zai/a", "openai/a", "openai/b"]);
+		const explicit = resolveAgentTaskConfig({ ...task("reviewer"), model: "openai/forced" }, config, { parentModel: "openai/parent" });
+		expect(explicit.task.model).toBe("openai/forced");
 		expect(explicit.fallbackModels).toEqual([]);
-		const unavailable = registry();
-		await expect(selectAvailableAgentModels(normal, cfg, { ...unavailable, getAvailable: () => [] })).rejects.toThrow(/No configured candidate/);
-		const custom = agentConfig("independent", `models: [zai/same, openai-codex/first, zai/fallback, other/last]
-requireDifferentProvider: true`);
-		const filtered = resolveAgentTaskConfig(task("independent"), custom, options);
-		expect(filtered.task.model).toBe("openai-codex/first");
-		expect(filtered.fallbackModels).toEqual(["other/last"]);
-		expect(() => resolveAgentTaskConfig(task("independent"), custom,
-			{ ...options, preset: { models: ["zai/same", "zai/fallback"] } })).toThrow(/cross-provider/);
-		expect(() => agentConfig("bad", "models: [other/last]\nrequireDifferentProvider: yes")).toThrow(/boolean/);
 	});
 
-	test("every bundled pool offers GLM-5.3 to an Astra parent's strict oracle", () => {
-		const cfg = loadSubagentConfig(temp(), {});
-		for (const preset of Object.values(cfg.presets ?? {})) {
-			expect(preset.models).toContain("zai/glm-5.3");
-			const selected = resolveAgentTaskConfig(task("oracle-zai"), cfg, {
-				parentModel: "openai-codex/gpt-6-astra", preset,
-			});
-			expect(selected.task.model).toBe("zai/glm-5.3");
-			expect(selected.fallbackModels).toEqual([]);
+	test("any preserves the role's configured candidate order", () => {
+		const config: SubagentConfig = { types: { research: {
+			models: ["openai/a", "anthropic/a", "zai/a"],
+			parentProviderPolicy: "any",
+		} } };
+		const selected = resolveAgentTaskConfig(task(), config, { parentModel: "openai/parent" });
+		expect(selected.task.model).toBe("openai/a");
+		expect(selected.fallbackModels).toEqual(["anthropic/a", "zai/a"]);
+	});
+
+	test("legacy requireDifferentProvider remains a compatibility alias", () => {
+		const config = agentConfig("legacy", "models: [openai/a, anthropic/a]\nrequireDifferentProvider: true");
+		expect(config.types.legacy.parentProviderPolicy).toBe("require-other");
+		expect(resolveAgentTaskConfig(task("legacy"), config, { parentModel: "openai/parent" }).task.model).toBe("anthropic/a");
+		expect(() => agentConfig("bad", "models: [other/a]\nrequireDifferentProvider: yes")).toThrow(/boolean/);
+	});
+
+	test("validates provider policy and rejects conflicting legacy input", () => {
+		expect(() => agentConfig("bad", "models: [a/one]\nparentProviderPolicy: sometimes")).toThrow(/parentProviderPolicy/);
+		expect(() => agentConfig("bad", [
+			"models: [a/one]",
+			"parentProviderPolicy: prefer-other",
+			"requireDifferentProvider: true",
+		].join("\n"))).toThrow(/conflicts/);
+	});
+
+	test("models are normalized and empty candidates never inherit the parent", () => {
+		const normalized = agentConfig("custom", 'models: [" a/first ", b/second, a/first]');
+		expect(normalized.types.custom.models).toEqual(["a/first", "b/second"]);
+		const empty = agentConfig("research", "models: []");
+		expect(empty.types.research.models).toEqual([]);
+		expect(() => resolveAgentTaskConfig(task(), empty, { parentModel: "expensive/parent" })).toThrow(/No model candidates/);
+		for (const modelsSource of ["[unqualified]", "[a/]", "[a/*]", "[null]", "[1]"]) {
+			expect(() => agentConfig("custom", `models: ${modelsSource}`)).toThrow(/models must be an array/);
 		}
 	});
 
-	test("ships Markdown modes and pool-only presets from a single defaults source", () => {
-		const cfg = loadSubagentConfig(temp(), {});
-		expect(Object.keys(cfg.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "oracle-openai", "oracle-zai", "research", "ui-qa", "verify"]);
-		for (const [name, profile] of Object.entries(cfg.types)) {
-			expect(profile.models?.length).toBeGreaterThan(0);
-			expect(profile.model).toBeUndefined();
-			expect(profile.fallbackModels).toBeUndefined();
-			expect(profile.modelByParent).toBeUndefined();
-			if (name !== "oracle" && name !== "frontier-review" && name !== "delivery-review" && name !== "implement") expect(profile.models?.join(",")).not.toContain("gpt-6-sol");
-		}
-		for (const preset of Object.values(cfg.presets ?? {})) {
-			expect(preset.models?.length).toBeGreaterThan(0);
-			expect(preset.types).toBeUndefined();
-			for (const role of Object.keys(cfg.types)) {
-				const parentModel = role === "oracle-openai" ? "zai/glm-5-turbo" : "openai-codex/gpt-6-luna";
-				if (!preset.models?.some((model) => cfg.types[role].models?.includes(model))) {
-					expect(() => resolveAgentTaskConfig(task(role), cfg, { preset, parentModel })).toThrow(/models pool/);
-					continue;
-				}
-				const resolved = resolveAgentTaskConfig(task(role), cfg, { preset, parentModel });
-				expect(preset.models).toContain(resolved.task.model);
-				expect(resolved.fallbackModels.every((model) => preset.models!.includes(model))).toBe(true);
-			}
-		}
-	});
-
-	test("intersects without reordering or appending pool-only models", () => {
-		const result = resolveAgentTaskConfig(task(), poolConfig(), {
-			preset: { models: ["unused/expensive", "backup/vision", "fast/vision"] },
-		});
-		expect(result.task.model).toBe("fast/vision");
-		expect(result.fallbackModels).toEqual(["backup/vision"]);
-	});
-
-	test("no preset keeps the complete agent order", () => {
-		const result = resolveAgentTaskConfig(task(), poolConfig());
-		expect(result.task.model).toBe("cheap/text");
-		expect(result.fallbackModels).toEqual(["fast/vision", "backup/vision"]);
-	});
-
-	for (const models of [[], ["outside/only"]]) {
-		test(`fails on an empty intersection with ${JSON.stringify(models)}`, () => {
-			expect(() => resolveAgentTaskConfig(task(), poolConfig(), { preset: { models } })).toThrow(/models pool/);
-		});
-	}
-
-	test("empty candidate lists do not inherit the parent, even without a preset", () => {
-		const cfg = agentConfig("research", "models: []");
-		expect(cfg.types.research.models).toEqual([]);
-		expect(() => resolveAgentTaskConfig(task(), cfg, { parentModel: "expensive/parent" })).toThrow(/No model candidates/);
-	});
-
-	test("preserves explicit task, CLI and forced model overrides with no implicit fallbacks", () => {
-		const cfg = poolConfig();
-		const options = { preset: { models: [] } };
-		const explicit = resolveAgentTaskConfig({ ...task(), model: "manual/model" }, cfg, options);
+	test("explicit task, CLI and forced model overrides have no implicit fallbacks", () => {
+		const config: SubagentConfig = { types: { research: { models: ["a/one", "b/two"] } } };
+		const explicit = resolveAgentTaskConfig({ ...task(), model: "manual/model" }, config);
 		expect(explicit.task.model).toBe("manual/model");
 		expect(explicit.fallbackModels).toEqual([]);
-		const cli = resolveAgentTaskConfig(task(), cfg, { ...options, extraArgs: ["--model=cli/model"] });
+		const cli = resolveAgentTaskConfig(task(), config, { extraArgs: ["--model=cli/model"] });
 		expect(cli.task.model).toBe("cli/model");
 		expect(cli.fallbackModels).toEqual([]);
-		const forced = resolveAgentTaskConfig({ ...task(), model: "manual/model", extraArgs: ["-m", "cli/model"] }, cfg,
-			{ ...options, forcedModel: "parent/forced" });
-		expect(forced.task.model).toBe("parent/forced");
+		const forced = resolveAgentTaskConfig({ ...task(), model: "manual/model", extraArgs: ["-m", "cli/model"] }, config, { forcedModel: "forced/model" });
+		expect(forced.task.model).toBe("forced/model");
 		expect(forced.extraArgs).toEqual([]);
 		expect(forced.fallbackModels).toEqual([]);
 	});
 
-	test("pool presets do not execute stale legacy role or thinking overrides", () => {
-		const result = resolveAgentTaskConfig(task(), poolConfig(), { preset: {
-			models: ["cheap/text"], model: "expensive/default", thinking: "max",
-			types: { research: { model: "expensive/role", extraArgs: ["--model", "expensive/cli"] } },
-		} });
-		expect(result.task.model).toBe("cheap/text");
-		expect(result.task.thinking).toBeUndefined();
-		expect(result.extraArgs).toEqual([]);
-	});
+	test("legacy model/fallbackModels and project-local custom role names still work", async () => {
+		const legacy = agentConfig("research", "model: legacy/main\nfallbackModels: [legacy/backup]");
+		const selected = resolveAgentTaskConfig(task(), legacy);
+		expect(selected.task.model).toBe("legacy/main");
+		expect(selected.fallbackModels).toEqual(["legacy/backup"]);
 
-	test("oracle prefers a different provider without escaping the pool", () => {
-		const cfg = poolConfig();
-		const independent = resolveAgentTaskConfig(task("oracle"), cfg, { parentModel: "strong/parent" });
-		expect(independent.task.model).toBe("independent/b");
-		expect(independent.fallbackModels).toEqual(["strong/a"]);
-		const restricted = resolveAgentTaskConfig(task("oracle"), cfg,
-			{ parentModel: "strong/parent", preset: { models: ["strong/a"] } });
-		expect(restricted.task.model).toBe("strong/a");
-		expect(restricted.fallbackModels).toEqual([]);
-		expect(() => resolveAgentTaskConfig(task("oracle"), cfg, { preset: { models: ["cheap/text"] } })).toThrow(/models pool/);
-	});
-
-	test("validates models and deduplicates candidates in stable order", () => {
-		const cfg = agentConfig("custom", 'models: [" a/first ", b/second, a/first]');
-		expect(cfg.types.custom.models).toEqual(["a/first", "b/second"]);
-		expect(agentConfig("custom", "models: a/first").types.custom.models).toEqual(["a/first"]);
-		for (const modelsSource of ["[unqualified]", "[a/]", "[a/*]", "[null]", "[1]"]) {
-			expect(() => agentConfig("custom", `models: ${modelsSource}`)).toThrow(/models must be an array/);
-		}
-		for (const models of ["a/first", ["unqualified"], ["a/"], ["a/*"], [null], [1]]) {
-			const cwd = temp();
-			const file = path.join(cwd, ".pi", "agents", "presets.jsonc");
-			fs.mkdirSync(path.dirname(file), { recursive: true });
-			fs.writeFileSync(file, JSON.stringify({ custom: { models } }));
-			expect(() => loadSubagentConfig(cwd, {})).toThrow(/models must be an array/);
-		}
-	});
-
-	test("Markdown models ignore old JSONC type fields and retain bundled unrelated fields", () => {
-		const cwd = temp();
-		const dir = path.join(cwd, ".pi", "agents");
-		fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({ asyncSubagents: {
-			types: { research: { model: "old/main", fallbackModels: ["old/backup"], thinking: "high",
-				modelByParent: { "parent/*": "old/escalation" } } },
-		} }));
-		fs.writeFileSync(path.join(dir, "research.md"), "---\nmodels:\n  - new/first\n  - new/second\n---\nRead only.\n");
-		const cfg = loadSubagentConfig(cwd, {});
-		expect(cfg.types.research.models).toEqual(["new/first", "new/second"]);
-		expect(cfg.types.research.thinking).toBe("medium");
-		expect(cfg.types.research.model).toBeUndefined();
-		expect(cfg.types.research.modelByParent).toBeUndefined();
-		expect(resolveAgentTaskConfig(task(), cfg, { parentModel: "parent/model" }).task.model).toBe("new/first");
-		fs.writeFileSync(path.join(dir, "research.md"), "---\nmodels: new/third, new/second\n---\nRead only.\n");
-		expect(loadSubagentConfig(cwd, {}).types.research.models).toEqual(["new/third", "new/second"]);
-	});
-
-	test("new models wins over legacy fields in one Markdown profile", () => {
-		const cfg = agentConfig("research", `models: [new/only]
-model: old/main
-fallbackModels: [old/backup]
-modelByParent:
-  parent/*: old/escalation`);
-		const result = resolveAgentTaskConfig(task(), cfg, { parentModel: "parent/model" });
-		expect(result.task.model).toBe("new/only");
-		expect(result.fallbackModels).toEqual([]);
-	});
-
-	test("legacy model and fallbackModels fields still work inside an agent file", () => {
-		const cfg = agentConfig("research", "model: legacy/main\nfallbackModels: [legacy/backup]");
-		const result = resolveAgentTaskConfig(task(), cfg);
-		expect(result.task.model).toBe("legacy/main");
-		expect(result.fallbackModels).toEqual(["legacy/backup"]);
-		const noFallback = agentConfig("research", "model: legacy/main\nfallbackModels: []");
-		expect(resolveAgentTaskConfig(task(), noFallback).fallbackModels).toEqual([]);
-	});
-
-	test("old builtin role names are rejected unless explicitly configured", async () => {
-		const cfg = loadSubagentConfig(temp(), {});
-		for (const oldName of ["quick", "scan", "review", "deep", "docs", "frontend", "tests"]) {
-			await expect(routeSubagentTasks([task(oldName)], cfg, {})).rejects.toThrow(/Unknown subagentType/);
-		}
-	});
-
-	test("explicit custom Markdown types keep their own names and settings", () => {
 		const cwd = temp();
 		const dir = path.join(cwd, ".pi", "agents");
 		fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(path.join(dir, "scan.md"), "---\nmodel: custom/scan\nthinking: off\n---\nScan.\n");
-		fs.writeFileSync(path.join(dir, "review.md"), "---\nmodel: custom/review\n---\nA private checklist.\n");
-		const cfg = loadSubagentConfig(cwd, {});
-		expect(resolveAgentTaskConfig(task("scan"), cfg).task).toMatchObject({ subagentType: "scan", model: "custom/scan" });
-		expect(resolveAgentTaskConfig(task("review"), cfg).task).toMatchObject({ subagentType: "review", model: "custom/review" });
-		expect(resolveAgentTaskConfig(task(), cfg).task.model).toBe("zai/glm-5-turbo");
-		expect(buildSubagentCatalogPrompt(cfg)).toContain("- review:");
-	});
-
-	test("legacy preset role overrides apply only to explicitly configured matching types", async () => {
-		const cwd = temp();
-		const dir = path.join(cwd, ".pi", "agents");
-		fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(path.join(dir, "scan.md"), "---\nmodel: custom/scan\n---\nScan.\n");
-		fs.writeFileSync(path.join(dir, "review.md"), "---\nmodel: custom/review\n---\nReview.\n");
-		const cfg = loadSubagentConfig(cwd, {});
-		const preset = { types: { scan: { model: "old/scanner" }, review: { model: "old/reviewer" } } };
-		const routed = await routeSubagentTasks([task("scan")], cfg, {});
-		expect(resolveAgentTaskConfig(routed.tasks[0], cfg, { preset }).task.model).toBe("old/scanner");
-		expect(resolveAgentTaskConfig(task("review"), cfg, { preset }).task.model).toBe("old/reviewer");
-		expect(resolveAgentTaskConfig(task(), cfg, { preset }).task.model).toBe("zai/glm-5-turbo");
-	});
-});
-
-describe("model availability and capabilities", () => {
-	test("an unconfigured provider cannot pass selection just because auth resolution returns ok", async () => {
-		const cfg = poolConfig();
-		const runtime = registry();
-		const result = await selectAvailableAgentModels(resolveAgentTaskConfig(task(), cfg), cfg, {
-			...runtime, getAvailable: () => [runtime.find("fast", "vision")],
-		});
-		expect(result.task.model).toBe("fast/vision");
-		expect(result.fallbackModels).toEqual([]);
-		await expect(selectAvailableAgentModels(resolveAgentTaskConfig(task(), cfg), cfg, {
-			...runtime, getAvailable: () => [],
-		})).rejects.toThrow(/No configured candidate/);
-	});
-
-	test("filters missing and unauthenticated candidates without calling an LLM", async () => {
-		const cfg = poolConfig();
-		const runtime = registry();
-		runtime.getApiKeyAndHeaders.mockImplementation(async (model: Model<Api>) => ({ ok: model.provider !== "cheap" }));
-		const result = await selectAvailableAgentModels(resolveAgentTaskConfig(task(), cfg), cfg, runtime);
-		expect(result.task.model).toBe("fast/vision");
-		expect(result.fallbackModels).toEqual(["backup/vision"]);
-		expect(runtime.complete).not.toHaveBeenCalled();
-	});
-
-	test("image tasks and UI QA keep only confirmed image-capable candidates", async () => {
-		const cfg = poolConfig();
-		for (const work of [{ ...task(), imagePaths: ["screen.png"] }, task("ui-qa")]) {
-			const result = await selectAvailableAgentModels(resolveAgentTaskConfig(work, cfg), cfg, registry());
-			expect(result.task.model).toBe("fast/vision");
-			expect(result.fallbackModels).toEqual(["backup/vision"]);
+		const config = loadSubagentConfig(cwd, {});
+		expect(resolveAgentTaskConfig(task("scan"), config).task).toMatchObject({ subagentType: "scan", model: "custom/scan" });
+		expect(buildSubagentCatalogPrompt(config)).toContain("- scan:");
+		for (const oldName of ["quick", "review", "deep", "docs", "frontend", "tests"]) {
+			await expect(routeSubagentTasks([task(oldName)], config, {})).rejects.toThrow(/Unknown subagentType/);
 		}
-	});
-
-	test("image checks and explicit models never escape an incompatible choice", async () => {
-		const cfg = poolConfig();
-		const work = { ...task(), imagePaths: ["screen.png"] };
-		const textOnly = resolveAgentTaskConfig(work, cfg, { preset: { models: ["cheap/text"] } });
-		await expect(selectAvailableAgentModels(textOnly, cfg, registry())).rejects.toThrow(/image support/);
-		await expect(selectAvailableAgentModels(textOnly, cfg)).rejects.toThrow(/image support/);
-		const explicit = resolveAgentTaskConfig({ ...work, model: "cheap/text" }, cfg);
-		await expect(selectAvailableAgentModels(explicit, cfg, registry())).rejects.toThrow(/image support/);
-	});
-
-	test("configured blind-model overrides take priority over runtime image metadata", async () => {
-		const cfg = { ...poolConfig(), vision: { blindModelPatterns: ["fast/*"] } };
-		const result = await selectAvailableAgentModels(resolveAgentTaskConfig(task("ui-qa"), cfg), cfg, registry());
-		expect(result.task.model).toBe("backup/vision");
-		expect(result.fallbackModels).toEqual([]);
-	});
-
-	test("auth errors remain redacted and cannot silently select the parent", async () => {
-		const cfg = poolConfig();
-		const runtime = registry();
-		runtime.getApiKeyAndHeaders.mockImplementation(async () => { throw new Error("secret-value-must-not-leak"); });
-		let message = "";
-		try { await selectAvailableAgentModels(resolveAgentTaskConfig(task(), cfg), cfg, runtime); }
-		catch (error) { message = (error as Error).message; }
-		expect(message).toContain("No configured candidate");
-		expect(message).not.toContain("secret-value");
-	});
-
-	test("quota history cannot introduce candidates outside the selected pool", async () => {
-		const cfg = poolConfig();
-		rememberSessionModelFallback("cheap/text", "outside/expensive");
-		const scoped = resolveAgentTaskConfig(task(), cfg, { preset: { models: ["cheap/text", "fast/vision"] } });
-		expect(selectSessionModelWithFallback(scoped.task.model, scoped.fallbackModels)?.model).toBe("fast/vision");
-		const result = await selectAvailableAgentModels(scoped, cfg, registry());
-		expect(result.task.model).toBe("fast/vision");
-		expect(result.fallbackModels).toEqual([]);
-		rememberSessionModelFallback("fast/vision", "outside/expensive");
-		await expect(selectAvailableAgentModels(scoped, cfg, registry())).rejects.toThrow(/No configured candidate/);
-	});
-
-	test("cancellation during model auth does not produce a spawn plan", async () => {
-		const cfg = poolConfig();
-		const runtime = registry();
-		const controller = new AbortController();
-		runtime.getApiKeyAndHeaders.mockImplementation(async () => { controller.abort(); return { ok: true }; });
-		await expect(selectAvailableAgentModels(resolveAgentTaskConfig(task(), cfg), cfg, runtime, controller.signal))
-			.rejects.toThrow("Aborted");
 	});
 });

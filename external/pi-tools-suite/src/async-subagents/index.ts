@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
 	deleteRunDirs,
-	getActiveSubagentPresetName,
 	getRunState,
 	getRunRoot,
 	getSubagentRegistryPath,
@@ -35,7 +34,6 @@ import { SubagentOverlay } from "./subagent-overlay.js";
 import { registerSubagentsTool } from "./tools/subagents.js";
 import type { LiveAgent, SubagentsLiveStateEvent } from "./types.js";
 import type { AgentState } from "./core/types.js";
-import { publishStartupSection } from "../startup-section.js";
 import { publishRpcSessionState } from "../lib/rpc-session-state.js";
 import { clearSubagentsNativeWidget, updateSubagentsNativeWidget } from "./native-tui.js";
 
@@ -142,7 +140,6 @@ export default function (pi: ExtensionAPI) {
 	let currentSessionFile: string | undefined;
 	let currentSessionStateContext: ExtensionContext | undefined;
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
-	publishSubagentPresetsStartupSection();
 
 	function publishSubagentCatalogState(ctx: unknown): void {
 		const state = createSubagentCatalogState(ctx);
@@ -356,43 +353,6 @@ function safeLoadSubagentConfig(cwd: string) {
 function subagentCatalogPrompt(cwd: string, parentModelRef?: string): string | undefined {
 	const config = safeLoadSubagentConfig(cwd);
 	return config ? buildSubagentCatalogPrompt(config, parentModelRef) : undefined;
-}
-
-function startupSubagentPresetList(cwd = process.cwd()): string {
-	try {
-		const config = loadSubagentConfig(cwd);
-		const presets = config.presets ?? {};
-		const activePreset = getActiveSubagentPresetName();
-		const names = sortedStartupPresetNames(Object.keys(presets), activePreset);
-		if (names.length === 0) return "no presets";
-		return names.map((name) => formatStartupPresetName(name, activePreset)).join(", ");
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return `error loading presets: ${message}`;
-	}
-}
-
-function sortedStartupPresetNames(names: string[], activePreset?: string): string[] {
-	const sorted = names.sort();
-	return activePreset && sorted.includes(activePreset)
-		? [activePreset, ...sorted.filter((name) => name !== activePreset)]
-		: sorted;
-}
-
-function formatStartupPresetName(name: string, activePreset?: string): string {
-	return activePreset === name ? underlineText(name) : name;
-}
-
-function underlineText(text: string): string {
-	return `\x1b[4m${text}\x1b[24m`;
-}
-
-function publishSubagentPresetsStartupSection(): void {
-	publishStartupSection({
-		id: "async-subagents-presets",
-		title: "sub-agent presets (/subagent-preset)",
-		body: startupSubagentPresetList(),
-	});
 }
 
 function modelRefFromContext(ctx: unknown): string | undefined {

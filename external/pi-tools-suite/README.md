@@ -7,7 +7,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
-- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, while `/subagent-preset` selects model-pool presets from the bundled/project `agents/presets.jsonc`; includes the `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
+- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, and each role owns its ordered model candidate list and optional parent-provider policy; includes a strict cross-provider `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
@@ -492,8 +492,8 @@ Notes:
 ## Async sub-agents
 
 Model selection uses the ordered candidates from each agent's Markdown file,
-filtered by the selected preset's available models and runtime capabilities.
-Explicit task/CLI model overrides bypass the pool. Setting
+then applies the role's parent-provider policy and runtime capabilities.
+Explicit task/CLI model overrides suppress automatic fallbacks. Setting
 `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` (or
 `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) deliberately selects the parent model and
 strips conflicting model arguments; this is not the economical default.
@@ -520,15 +520,15 @@ plan, or set `ULTRAWORK=1` to apply the orchestration prompt to normal inputs.
 `ULTRAWORK_AUTO=1` classifies only the first normal input on non-GPT parents;
 GPT-like parents skip that automatic transform, not ordinary delegation.
 
-See [Model pools and migration](docs/subagent-model-pools.md) for the selection
-contract, configuration examples, override rules and legacy compatibility.
+See [Model candidates and provider policy](docs/subagent-model-pools.md) for the
+selection contract, configuration examples, override rules and compatibility.
 
 ### Parent-first role selection
 
 The parent normally selects an explicit `subagentType` from the effective
 system-prompt catalog, preferring a matching project-local specialist. Valid
-explicit types bypass the LLM router entirely; presets, model selection, tools,
-and role instructions are still applied by the normal config resolver.
+explicit types bypass the LLM router entirely; model selection, tools, and role
+instructions are still applied by the normal config resolver.
 Model/thinking overrides are not substitutes for selecting a role.
 
 The router remains enabled as a fallback for omitted types: use it when the role
@@ -558,7 +558,7 @@ Bundled roles can be selectively hidden without disabling the whole
 
 ```jsonc
 {
-  "disabledBuiltinAgents": ["oracle-openai", "ui-qa"],
+  "disabledBuiltinAgents": ["oracle", "ui-qa"],
   // "enabledBuiltinAgents": ["ui-qa"]
 }
 ```
@@ -573,8 +573,8 @@ A project can ship sub-agent roles as individual Markdown files in
 `<project>/.pi/agents/`. The first such directory found walking up from the
 session cwd is used; each top-level `*.md` file becomes a `subagentType` named
 after the file. Parent and router see the short `description`; only the child
-receives the Markdown body. A project's ordered `models` are filtered through
-the same active preset pool as built-in agents.
+receives the Markdown body. A project's ordered `models` are the role's complete
+candidate chain and are filtered only by provider policy and runtime availability.
 
 ```markdown
 ---
@@ -754,57 +754,34 @@ using the descriptions. Explicit types bypass it. Unknown types or failed
 routing reject the batch, never substitute `defaultType`. Choosing a worker
 model from its candidate list does not involve an LLM call.
 
-### Presets are available-model pools
+### Role-owned candidates and parent-provider policy
 
-Each agent declares an ordered `models` list in Markdown. A preset declares
-which model references may be used, not another role/model/thinking matrix.
-Selection preserves agent order, intersects it with `preset.models`, checks
-runtime registration/auth availability, and takes the first usable candidate.
-Pool order does not change preference and pool-only models are never appended.
-Without a preset, the full agent list is eligible. Candidate order expresses
-the configured budget preference; runtime does not infer current API prices.
+Each agent declares an ordered `models` list in Markdown. There is no global
+sub-agent preset or model-pool layer. Selection preserves role order, applies
+`parentProviderPolicy`, checks runtime registration/auth/capability availability,
+and takes the first usable candidate. Remaining usable candidates form the quota
+fallback chain. No usable model, or an explicitly empty list, rejects the whole
+batch before child processes are created. A custom agent must declare candidates
+instead of silently inheriting the parent model.
+
+`parentProviderPolicy` supports `any` (default), `prefer-other`, and
+`require-other`. The bundled `oracle` uses `require-other`: the parent provider
+must be known, all same-provider candidates are removed from the initial and
+fallback chain, and a same-provider explicit override is rejected. This works
+with any number of providers; adding Anthropic or another provider only requires
+adding its model to the role's candidate list rather than defining a new oracle
+role or routing matrix.
 
 Image-bearing tasks and `ui-qa` require confirmed image support; configured
-blind-model masks override runtime image metadata. Remaining eligible models
-form the quota fallback chain, so neither quota history nor image fallback can
-escape the pool. Antigravity account rotation still happens before provider
-fallback. No match, no usable model, or an explicitly empty list rejects the
-whole batch before run directories or child processes are created. A new custom
-agent must supply candidates instead of silently inheriting the parent model.
+blind-model masks override runtime image metadata. Session quota state removes
+exhausted models/providers from the already-resolved chain. The fallback layer
+itself does not impose provider diversity; that constraint belongs to the role.
+Explicit task/CLI model overrides and `FORCE_CURRENT_MODEL` suppress automatic
+fallback candidates, but do not bypass image checks or `require-other`.
 
-Oracle uses its separate strong-model list and prefers another provider when
-available, but also respects the pool. A same-provider choice is allowed when
-the pool offers no alternative; cross-provider independence is not guaranteed.
-Explicit task/CLI model overrides and `FORCE_CURRENT_MODEL` remain deliberate
-escape hatches and disable automatic model fallback for that task. They do not
-bypass the image-capability check.
-
-Bundled pools live in `src/async-subagents/agents/presets.jsonc`. Add or override
-project pools in the nearest `.pi/agents/presets.jsonc`. Select a saved pool
-with `/subagent-preset`; use `AGENTS_PRESET=<name>` or
-`/subagent-preset session <name>` for a process-only override and
-`/subagent-preset session-clear` to remove it. The saved selection lives in
-`~/.pi/agent/subagent-preset-selection.json`. `/subagent-preset path` shows the
-bundled and project preset paths. The shipped pools are `cheap` (GLM), `gpt`,
-and `deep` (the retained legacy name for the mixed pool, not worker escalation).
-The `gpt` pool also includes GLM-5.3 so `oracle-zai` can run for an Astra parent.
-Agent descriptions, instructions, model order, thinking, tools, retry, and
-timeouts remain in agent Markdown; selecting a pool never changes them.
-
-Example project `.pi/agents/presets.jsonc`:
-
-```jsonc
-{
-  "cheap": {
-    "description": "GLM workers with a strong oracle candidate.",
-    "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]
-  },
-  "project-gpt": {
-    "description": "GPT models approved for this project.",
-    "models": ["openai-codex/gpt-6-luna"]
-  }
-}
-```
+Projects customize model economics by replacing the relevant
+`.pi/agents/<role>.md` candidate list. There is no `.pi/agents/presets.jsonc`,
+saved sub-agent preset selection, `AGENTS_PRESET`, or `/subagent-preset` command.
 
 ### Legacy configuration compatibility
 
@@ -819,10 +796,9 @@ clears inherited legacy model/fallback/parent routing. New built-ins use ordered
 
 The removed `asyncSubagents` section is not part of the public schema or generated
 user config and is no longer read at runtime. Existing files can remain on disk
-without being rewritten, but they have no effect: migrate role definitions to
-`.pi/agents/*.md`, custom model pools to `.pi/agents/presets.jsonc`, and bundled
-role visibility to the top-level `disabledBuiltinAgents` / `enabledBuiltinAgents`
-lists. Runtime
+without being rewritten, but they have no effect: migrate role definitions and
+model candidate ordering to `.pi/agents/*.md`, and bundled role visibility to
+the top-level `disabledBuiltinAgents` / `enabledBuiltinAgents` lists. Runtime
 retry structures and the separate role router continue to use the term
 `fallbackModels` for actual fallback-only lists, not agent candidates.
 

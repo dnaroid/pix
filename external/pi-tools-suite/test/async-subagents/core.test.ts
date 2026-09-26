@@ -18,16 +18,13 @@ import {
 	filterSubagentConfigForParentModel,
 	generatePrompt,
 	getAgentState,
-	getActiveSubagentPresetName,
 	getBuiltinSubagentDefinitionsDir,
-	getBuiltinSubagentPresetsPath,
 	getBrowserQaRunnerPath,
 	getUiQaRunnerPath,
 	getSubagentRegistryPath,
 	getPiInvocation,
 	getRunRoot,
 	getRunState,
-	getSubagentPresetSelectionPath,
 	hasAgentPrompt,
 	hasLaunchedAgentPrompt,
 	hasQueuedAgentPrompt,
@@ -35,7 +32,6 @@ import {
 	isQuotaLimitCompletion,
 	isSubagentTypeAvailableForParent,
 	loadSubagentConfig,
-	loadSubagentPresetSelection,
 	loadSubagentRegistry,
 	projectAgentDefinitionFiles,
 	readAgentDefinitionsFromDir,
@@ -52,11 +48,8 @@ import {
 	resolveSubagentRunDir,
 	resolveRunDir,
 	resolveSubagentLogLimits,
-	saveSubagentPresetSelection,
 	selectSessionModelWithFallback,
 	selectSubagentType,
-	setActiveSubagentPreset,
-	setSessionSubagentPresetOverride,
 	shouldForceCurrentSubagentModel,
 	shouldPersistSubagentSessions,
 	spawnAgent,
@@ -81,9 +74,6 @@ const originalPiSubagentsModel = process.env.PI_SUBAGENTS_MODEL;
 const originalAsyncSubagentsForceCurrentModel = process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalPiSubagentsForceCurrentModel = process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-const originalAsyncSubagentsActivePresetFile = process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
-const originalPiSubagentsActivePresetFile = process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
-const originalAgentsPreset = process.env.AGENTS_PRESET;
 const originalAsyncSubagentsMaxEventsBytes = process.env.ASYNC_SUBAGENTS_MAX_EVENTS_BYTES;
 const originalPiSubagentsMaxEventsBytes = process.env.PI_SUBAGENTS_MAX_EVENTS_BYTES;
 const originalAsyncSubagentsMaxStderrBytes = process.env.ASYNC_SUBAGENTS_MAX_STDERR_BYTES;
@@ -168,12 +158,6 @@ afterEach(() => {
 	else process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL = originalPiSubagentsForceCurrentModel;
 	if (originalAsyncSubagentsEnableSessions === undefined) delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
-	if (originalAsyncSubagentsActivePresetFile === undefined) delete process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
-	else process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = originalAsyncSubagentsActivePresetFile;
-	if (originalPiSubagentsActivePresetFile === undefined) delete process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
-	else process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE = originalPiSubagentsActivePresetFile;
-	if (originalAgentsPreset === undefined) delete process.env.AGENTS_PRESET;
-	else process.env.AGENTS_PRESET = originalAgentsPreset;
 	if (originalAsyncSubagentsMaxEventsBytes === undefined) delete process.env.ASYNC_SUBAGENTS_MAX_EVENTS_BYTES;
 	else process.env.ASYNC_SUBAGENTS_MAX_EVENTS_BYTES = originalAsyncSubagentsMaxEventsBytes;
 	if (originalPiSubagentsMaxEventsBytes === undefined) delete process.env.PI_SUBAGENTS_MAX_EVENTS_BYTES;
@@ -190,7 +174,6 @@ afterEach(() => {
 	else process.env.ASYNC_SUBAGENTS_DEBUG_LOGS = originalAsyncSubagentsDebugLogs;
 	if (originalPiSubagentsDebugLogs === undefined) delete process.env.PI_SUBAGENTS_DEBUG_LOGS;
 	else process.env.PI_SUBAGENTS_DEBUG_LOGS = originalPiSubagentsDebugLogs;
-	setSessionSubagentPresetOverride(undefined);
 	resetSessionModelFallbacks();
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -533,22 +516,19 @@ describe.serial("subagent type config", () => {
 		expect(hasAgentPrompt(runDir, "missing")).toBe(false);
 	});
 
-	test.serial("loads bundled presets and runtime defaults without public sub-agent config", () => {
+	test.serial("loads bundled roles and runtime defaults without public sub-agent config", () => {
 		const cwd = tempDir();
-		expect(fs.existsSync(getBuiltinSubagentPresetsPath())).toBe(true);
 		const config = loadSubagentConfig(cwd, {});
-		expect(Object.keys(config.presets ?? {}).sort()).toEqual(["cheap", "deep", "gpt"]);
-		expect(config.presets?.cheap?.models).toEqual(["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]);
-		expect(config.presets?.cheap?.types).toBeUndefined();
 		expect(config.maxConcurrent).toBe(5);
 		expect(config.maxResultBytes).toBe(100_000);
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "oracle-openai", "oracle-zai", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
 		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
+		expect(config.types.oracle.parentProviderPolicy).toBe("require-other");
 		expect(config.types["frontier-review"].notForParentModels).toEqual(["openai-codex/gpt-6-sol*", "zai/glm-5.3"]);
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-sol")).not.toContain("- frontier-review:");
@@ -619,7 +599,11 @@ Research only this project.
 			expect(role.task.model).toBe(model);
 			expect(role.fallbackModels).toEqual([...fallbackModels]);
 		}
-		const oracle = resolveAgentTaskConfig({ id: "oracle", task: "oracle", subagentType: "oracle" }, config);
+		const oracle = resolveAgentTaskConfig(
+			{ id: "oracle", task: "oracle", subagentType: "oracle" },
+			config,
+			{ parentModel: "openai-codex/gpt-6-luna" },
+		);
 		expect(oracle.task.thinking).toBe("max");
 		expect(resolved.task.model).toBe("zai/glm-5.3-flash");
 		expect(resolved.task.subagentType).toBe("ui-qa");
@@ -681,8 +665,6 @@ Research only this project.
 			"frontier-review",
 			"implement",
 			"oracle",
-			"oracle-openai",
-			"oracle-zai",
 			"research",
 			"ui-qa",
 			"verify",
@@ -759,14 +741,8 @@ model: custom/qa
 		expect(selectSubagentType({ id: "e", task: "security review", subagentType: "manual" }, config)).toBe("manual");
 	});
 
-	test.serial("loads project preset pools, persists active selection, and resolves agent-file defaults", () => {
+	test.serial("loads project agent candidates and resolves role-owned defaults", () => {
 		const cwd = tempDir();
-		const selectionPath = path.join(cwd, "subagent-preset-selection.json");
-		process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = selectionPath;
-		writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
-			fast: { description: "fast pool", models: ["zai/fast", "zai/backup", "openai/backup", "openai/review-fast", "openai/review-backup"] },
-			deep: { description: "careful", models: ["openai/deep"] },
-		}));
 		writeFile(path.join(cwd, ".pi", "agents", "research.md"), `---
 models: zai/fast, zai/backup, openai/backup
 thinking: off
@@ -782,46 +758,23 @@ extraArgs: --review-fast
 Review carefully.
 `);
 
-		expect(getSubagentPresetSelectionPath()).toBe(selectionPath);
-		expect(loadSubagentPresetSelection()).toEqual({});
-		saveSubagentPresetSelection({ activePreset: "fast" });
-
 		const config = loadSubagentConfig(cwd, {});
-		expect(config.presets?.deep.description).toBe("careful");
-		const activePresetName = loadSubagentPresetSelection().activePreset;
-		expect(activePresetName).toBe("fast");
-		const activePreset = activePresetName ? config.presets?.[activePresetName] : undefined;
-		const resolved = resolveAgentTaskConfig({ id: "a", task: "Read quickly" }, config, {
-			preset: activePreset,
-		});
+		const resolved = resolveAgentTaskConfig({ id: "a", task: "Read quickly" }, config);
 		expect(resolved.task.model).toBe("zai/fast");
 		expect(resolved.fallbackModels).toEqual(["zai/backup", "openai/backup"]);
 		expect(resolved.task.thinking).toBe("off");
 		expect(resolved.extraArgs).toEqual(["--temperature", "0"]);
 
-		const perType = resolveAgentTaskConfig({ id: "r", task: "Review", subagentType: "review" }, config, { preset: activePreset });
+		const perType = resolveAgentTaskConfig({ id: "r", task: "Review", subagentType: "review" }, config);
 		expect(perType.task.model).toBe("openai/review-fast");
 		expect(perType.fallbackModels).toEqual(["openai/review-backup"]);
 		expect(perType.task.thinking).toBe("medium");
 		expect(perType.extraArgs).toEqual(["--review-fast"]);
 
-		const explicit = resolveAgentTaskConfig({ id: "b", task: "Review", model: "manual/model", thinking: "minimal" }, config, { preset: activePreset });
+		const explicit = resolveAgentTaskConfig({ id: "b", task: "Review", model: "manual/model", thinking: "minimal" }, config);
 		expect(explicit.task.model).toBe("manual/model");
 		expect(explicit.fallbackModels).toEqual([]);
 		expect(explicit.task.thinking).toBe("minimal");
-
-		setActiveSubagentPreset("deep");
-		expect(loadSubagentPresetSelection().activePreset).toBe("deep");
-		process.env.AGENTS_PRESET = "fast";
-		expect(getActiveSubagentPresetName()).toBe("fast");
-		setSessionSubagentPresetOverride("deep");
-		expect(getActiveSubagentPresetName()).toBe("deep");
-		setSessionSubagentPresetOverride(undefined);
-		expect(getActiveSubagentPresetName()).toBe("fast");
-		expect(loadSubagentPresetSelection().activePreset).toBe("deep");
-		setActiveSubagentPreset(undefined);
-		expect(loadSubagentPresetSelection().activePreset).toBeUndefined();
-		expect(getActiveSubagentPresetName()).toBe("fast");
 	});
 
 	test.serial("uses internal runtime defaults plus per-agent retry and max result config", () => {
@@ -1088,6 +1041,7 @@ Quick work.
 description: Cross-provider second opinion.
 model: openai-codex/gpt-5.5
 fallbackModels: zai/glm-5.2, openai-codex/gpt-5.5
+parentProviderPolicy: any
 thinking: xhigh
 modelByParent:
   zai/*:
@@ -1153,44 +1107,6 @@ Give a second opinion.
 			{ parentModel: "zai/glm-5.2" },
 		);
 		expect(quick.task.model).toBe("zai/glm-4.5-air");
-	});
-
-	test.serial("honors an explicitly passed legacy preset object rather than overriding it by parent tier", () => {
-		const cwd = tempDir();
-		const config = loadSubagentConfig(cwd, {});
-		const solPreset = {
-			types: {
-				implement: {
-					model: "openai-codex/gpt-5.6-sol",
-					fallbackModels: ["zai/glm-5.3"],
-					thinking: "high",
-				},
-			},
-		};
-
-		const fromSol = resolveAgentTaskConfig(
-			{ id: "impl-sol", task: "implement the change", subagentType: "implement" },
-			config,
-			{ parentModel: "openai-codex/gpt-5.6-sol", preset: solPreset },
-		);
-		expect(fromSol.task.model).toBe("openai-codex/gpt-5.6-sol");
-		expect(fromSol.fallbackModels).toEqual(["zai/glm-5.3"]);
-		expect(fromSol.task.thinking).toBe("high");
-
-		const fromLuna = resolveAgentTaskConfig(
-			{ id: "impl-luna", task: "implement the change", subagentType: "implement" },
-			config,
-			{ parentModel: "openai-codex/gpt-5.6-luna", preset: solPreset },
-		);
-		expect(fromLuna.task.model).toBe("openai-codex/gpt-5.6-sol");
-		expect(fromLuna.fallbackModels).toEqual(["zai/glm-5.3"]);
-
-		const fromGenericOpenAi = resolveAgentTaskConfig(
-			{ id: "impl-openai", task: "implement the change", subagentType: "implement" },
-			config,
-			{ parentModel: "openai/gpt-5.5", preset: solPreset },
-		);
-		expect(fromGenericOpenAi.task.model).toBe("openai-codex/gpt-5.6-sol");
 	});
 
 	test.serial("does not map removed builtin role names onto canonical roles", async () => {

@@ -3910,6 +3910,90 @@ test("normal prompts are refused while a built-in mutates the session", async ()
 	});
 });
 
+test("thinking_level_changed pushes a config_option_update to the client", async () => {
+	const notifications: SessionNotification[] = [];
+	const harness = createTestAdapter();
+	let sessionId = "";
+
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp", mcpServers: [] }) as { sessionId: string };
+			sessionId = created.sessionId;
+			const pi = harness.clients[0]!;
+			// Simulate a server-side thinking change (todo-thinking override,
+			// builtin /thinking, ...) that pi reports as a session event.
+			await pi.setThinkingLevel("high");
+			pi.emit({ type: "thinking_level_changed", level: "high" });
+			await waitFor(() => notifications.some((item) => item.update.sessionUpdate === "config_option_update"));
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+		},
+	);
+
+	const notification = notifications.find((item) => item.update.sessionUpdate === "config_option_update")!;
+	assert.equal(notification.sessionId, sessionId);
+	const configOptions = (notification.update as {
+		configOptions: Array<{ id: string; currentValue: string }>;
+	}).configOptions;
+	const thoughtLevel = configOptions.find((option) => option.id === "thought_level");
+	assert.equal(thoughtLevel?.currentValue, "high");
+});
+
+test("rapid thinking_level_changed events coalesce into one config_option_update push", async () => {
+	const notifications: SessionNotification[] = [];
+	const harness = createTestAdapter();
+
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			await cx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+			const pi = harness.clients[0]!;
+			await pi.setThinkingLevel("low");
+			pi.emit({ type: "thinking_level_changed", level: "low" });
+			await pi.setThinkingLevel("high");
+			pi.emit({ type: "thinking_level_changed", level: "high" });
+			await waitFor(() => notifications.some((item) => item.update.sessionUpdate === "config_option_update"));
+			// Any superseded push that raced past its generation guard would
+			// land here.
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+		},
+	);
+
+	const pushes = notifications.filter((item) => item.update.sessionUpdate === "config_option_update");
+	assert.equal(pushes.length, 1);
+	const configOptions = (pushes[0]!.update as {
+		configOptions: Array<{ id: string; currentValue: string }>;
+	}).configOptions;
+	const thoughtLevel = configOptions.find((option) => option.id === "thought_level");
+	assert.equal(thoughtLevel?.currentValue, "high");
+});
+
+test("thinking_level_changed with unavailable pi state logs and skips the push", async () => {
+	const notifications: SessionNotification[] = [];
+	const harness = createTestAdapter();
+
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			await cx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+			const pi = harness.clients[0]!;
+			pi.stateError = new Error("state unavailable");
+			pi.emit({ type: "thinking_level_changed", level: "high" });
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+		},
+	);
+
+	assert.equal(notifications.some((item) => item.update.sessionUpdate === "config_option_update"), false);
+});
+
 async function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!condition()) {

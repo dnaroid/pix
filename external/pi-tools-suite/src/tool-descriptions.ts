@@ -73,7 +73,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"If ui-qa browser testing reports that credentials are required, it must identify the generated project-local template and explicitly ask the user to fill it; the parent relays that request without reading or editing the credential file.",
 				"After UI testing, ui-qa must return clickable links for every available screenshot, terminal capture, video, trace, or other retained evidence; the parent must preserve those links in its user-facing report.",
 				SUBAGENT_DELEGATION_GUIDANCE,
-				"Presets declare available models; each agent's ordered models selects the first usable model in that pool. AGENTS_PRESET or /subagent-preset session <name> selects the current session pool. Bundled pools live with agent files, and projects can override/add pools in .pi/agents/presets.jsonc. Do not override the model merely to choose a role.",
+				"Each agent role owns an ordered model candidate list. Parent-provider policy and runtime availability select the first usable candidate; project-local .pi/agents/*.md files may replace role profiles. Do not override the model merely to choose a role.",
 				SUBAGENT_TYPE_SELECTION_GUIDANCE,
 				repoDiscovery
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."

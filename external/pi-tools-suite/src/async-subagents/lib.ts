@@ -13,7 +13,7 @@ export type {
 } from "./core/types.js";
 
 export { createRunDir, getRunRoot, hasAgentPrompt, hasLaunchedAgentPrompt, hasQueuedAgentPrompt, resolveRunDir, validateBasename } from "./core/paths.js";
-export type { ModelByParentEntry, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentPreset, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
+export type { ModelByParentEntry, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
 export {
 	currentModelRef,
 	defaultSubagentType,
@@ -22,8 +22,6 @@ export {
 	DEFAULT_ROUTING_CONFIG,
 	filterSubagentConfigForParentModel,
 	getBuiltinSubagentDefinitionsDir,
-	getBuiltinSubagentPresetsPath,
-	getProjectSubagentPresetsPath,
 	isBlindModelRef,
 	isSubagentTypeAvailableForParent,
 	loadSubagentConfig,
@@ -47,8 +45,6 @@ export type { RoutedSubagentTasks, SubagentRoutingContext } from "./core/routing
 export { agentDefinitionFiles, agentNameFromFilename, parseAgentMarkdown, projectAgentDefinitionFiles, projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions } from "./core/agents-dir.js";
 export type { AgentDefinition, ProjectAgentDefinition } from "./core/agents-dir.js";
 export { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
-export type { SubagentPresetSelectionState } from "./core/presets.js";
-export { getActiveSubagentPresetName, getSessionSubagentPresetOverride, getSubagentPresetSelectionPath, loadSubagentPresetSelection, saveSubagentPresetSelection, setActiveSubagentPreset, setSessionSubagentPresetOverride } from "./core/presets.js";
 export { isQuotaLimitCompletion, nextFallbackModel, rememberSessionModelFallback, resetSessionModelFallbacks, selectSessionModelWithFallback } from "./core/model-fallback.js";
 export type { SessionModelFallbackSelection } from "./core/model-fallback.js";
 export { generatePrompt, writePromptFile } from "./core/prompt.js";

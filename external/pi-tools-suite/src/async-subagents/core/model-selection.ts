@@ -10,7 +10,7 @@ export interface SubagentModelRegistry {
 	getApiKeyAndHeaders?(model: Model<Api>): Promise<{ ok?: boolean }>;
 }
 
-/** Rank was already determined by the profile/preset intersection. No LLM call. */
+/** Rank was already determined by the role profile and parent-provider policy. No LLM call. */
 export async function selectAvailableAgentModels(
 	resolved: ResolvedAgentTaskConfig,
 	config: SubagentConfig,

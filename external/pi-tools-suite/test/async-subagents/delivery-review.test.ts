@@ -41,33 +41,22 @@ describe("built-in delivery-review role", () => {
 		expect(role.promptAppend).not.toContain(".pi/skills/delivery-review");
 	});
 
-	test("survives filtering/catalog for strong parent models and resolves exact model/preset order", () => {
+	test("survives filtering/catalog for strong parent models and preserves role-owned model order", () => {
 		const config = loadSubagentConfig(tempDir(), {});
 		for (const parentModel of ["openai-codex/gpt-6-sol", "zai/glm-5.3", "zai/glm-5-turbo"]) {
 			const effective = filterSubagentConfigForParentModel(config, parentModel);
 			expect(effective.types["delivery-review"]).toBeDefined();
 			expect(buildSubagentCatalogPrompt(config, parentModel)).toContain("- delivery-review:");
 		}
-		for (const models of [undefined, ["zai/glm-5.3", "openai-codex/gpt-6-sol"]]) {
-			const resolved = resolveAgentTaskConfig(
-				{ id: "review", task: "Assess residual delivery risk", subagentType: "delivery-review" },
-				config,
-				{ parentModel: "openai-codex/gpt-6-sol", ...(models ? { preset: { models } } : {}) },
-			);
-			expect(resolved.task.model).toBe("openai-codex/gpt-6-sol");
-			expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
-			expect(resolved.task.thinking).toBe("high");
-			expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
-		}
-		for (const [preset, model] of [["cheap", "zai/glm-5.3"], ["gpt", "openai-codex/gpt-6-sol"], ["deep", "openai-codex/gpt-6-sol"]] as const) {
-			const resolved = resolveAgentTaskConfig(
-				{ id: "review", task: "Assess residual delivery risk", subagentType: "delivery-review" },
-				config,
-				{ preset: config.presets![preset] },
-			);
-			expect(resolved.task.model).toBe(model);
-			expect(resolved.task.thinking).toBe("high");
-		}
+		const resolved = resolveAgentTaskConfig(
+			{ id: "review", task: "Assess residual delivery risk", subagentType: "delivery-review" },
+			config,
+			{ parentModel: "openai-codex/gpt-6-sol" },
+		);
+		expect(resolved.task.model).toBe("openai-codex/gpt-6-sol");
+		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
+		expect(resolved.task.thinking).toBe("high");
+		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 	});
 
 	test("transports the packaged review rules into the generated child prompt", () => {

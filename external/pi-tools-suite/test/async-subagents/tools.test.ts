@@ -42,7 +42,6 @@ mock.module("@earendil-works/pi-ai", () => piAiMock);
 mock.module("@earendil-works/pi-ai/compat", () => piAiMock);
 
 const tempDirs: string[] = [];
-const defaultActivePreset = path.join(os.tmpdir(), `async-subagents-tools-preset-${process.pid}.json`);
 let originalArgv1 = process.argv[1];
 const originalAsyncSubagentsModel = process.env.ASYNC_SUBAGENTS_MODEL;
 const originalPiSubagentsModel = process.env.PI_SUBAGENTS_MODEL;
@@ -55,9 +54,6 @@ const originalAsyncSubagentsMaxConcurrent = process.env.ASYNC_SUBAGENTS_MAX_CONC
 const originalPiSubagentsMaxConcurrent = process.env.PI_SUBAGENTS_MAX_CONCURRENT;
 const originalAsyncSubagentsMaxResultBytes = process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES;
 const originalPiSubagentsMaxResultBytes = process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
-const originalAsyncSubagentsActivePresetFile = process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
-const originalPiSubagentsActivePresetFile = process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
-const originalAgentsPreset = process.env.AGENTS_PRESET;
 const originalUltrawork = process.env.ULTRAWORK;
 const originalUltraworkAuto = process.env.ULTRAWORK_AUTO;
 const originalPixAcpSessionStateBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
@@ -74,14 +70,12 @@ function writeFile(filePath: string, content = ""): void {
 }
 
 beforeEach(() => {
-	process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = defaultActivePreset;
 	delete process.env.ASYNC_SUBAGENTS_ROUTING;
 	delete process.env.PI_SUBAGENTS_ROUTING;
 	delete process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT;
 	delete process.env.PI_SUBAGENTS_MAX_CONCURRENT;
 	delete process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES;
 	delete process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
-	fs.rmSync(defaultActivePreset, { force: true });
 });
 
 function createAgent(runDir: string, id: string, files: Record<string, string> = {}): string {
@@ -101,17 +95,6 @@ function isolateSubagentConfig(cwd: string): void {
 	delete process.env.PI_SUBAGENTS_MAX_CONCURRENT;
 	delete process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES;
 	delete process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
-}
-
-function isolateSubagentConfigWithPresets(cwd: string): void {
-	delete process.env.ASYNC_SUBAGENTS_MODEL;
-	delete process.env.PI_SUBAGENTS_MODEL;
-	process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = path.join(cwd, "active-subagent-preset.json");
-	writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
-		fast: { description: "fast pool", models: ["preset/fast"] },
-		deep: { description: "deep pool", models: ["preset/deep"] },
-	}));
-	writeFile(path.join(cwd, ".pi", "agents", "research.md"), "---\nmodels: preset/fast, preset/deep\n---\nResearch the task.\n");
 }
 
 class FakePi {
@@ -162,8 +145,7 @@ async function waitForChildExit(child: ReturnType<typeof spawnChild>, timeoutMs 
 }
 
 afterEach(async () => {
-	const { resetSessionModelFallbacks, setSessionSubagentPresetOverride } = await import("../../src/async-subagents/lib.js");
-	setSessionSubagentPresetOverride(undefined);
+	const { resetSessionModelFallbacks } = await import("../../src/async-subagents/lib.js");
 	resetSessionModelFallbacks();
 	process.argv[1] = originalArgv1;
 	if (originalAsyncSubagentsModel === undefined) delete process.env.ASYNC_SUBAGENTS_MODEL;
@@ -188,12 +170,6 @@ afterEach(async () => {
 	else process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES = originalAsyncSubagentsMaxResultBytes;
 	if (originalPiSubagentsMaxResultBytes === undefined) delete process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
 	else process.env.PI_SUBAGENTS_MAX_RESULT_BYTES = originalPiSubagentsMaxResultBytes;
-	if (originalAsyncSubagentsActivePresetFile === undefined) delete process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
-	else process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = originalAsyncSubagentsActivePresetFile;
-	if (originalPiSubagentsActivePresetFile === undefined) delete process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
-	else process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE = originalPiSubagentsActivePresetFile;
-	if (originalAgentsPreset === undefined) delete process.env.AGENTS_PRESET;
-	else process.env.AGENTS_PRESET = originalAgentsPreset;
 	if (originalUltrawork === undefined) delete process.env.ULTRAWORK;
 	else process.env.ULTRAWORK = originalUltrawork;
 	if (originalUltraworkAuto === undefined) delete process.env.ULTRAWORK_AUTO;
@@ -213,7 +189,7 @@ describe.serial("extension entrypoint", () => {
 		registerExtension(pi as any);
 
 		expect([...pi.tools.keys()].sort()).toEqual(["subagents"]);
-		expect([...pi.commands.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
+		expect([...pi.commands.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
 		expect([...pi.renderers.keys()]).toEqual([]);
 	});
 
@@ -320,7 +296,7 @@ Check the project conventions before approving changes.
 		const pi = new FakePi();
 		registerExtension(pi as any);
 
-		expect([...pi.commands.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
+		expect([...pi.commands.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 	});
 
 	test.serial("session shutdown kills running sub-agent processes before deleting run state", async () => {
@@ -510,109 +486,6 @@ Check the project conventions before approving changes.
 		expect(transformed.text).toContain("fix this bug");
 		expect(transformed.text).toContain("Auto-ultrawork hint");
 		expect(transformed.text).not.toContain("Run ultrawork mode");
-	});
-
-	test.serial("sub-agent preset commands select persistent presets from the TUI", async () => {
-		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const cwd = tempDir();
-		isolateSubagentConfigWithPresets(cwd);
-		const pi = new FakePi();
-		registerExtension(pi as any);
-		const notifications: string[] = [];
-		const selects: any[] = [];
-		const ctx = {
-			cwd,
-			hasUI: true,
-			ui: {
-				async select(title: string, labels: string[]) {
-					selects.push({ title, labels });
-					return labels.find((label) => label.startsWith("deep"));
-				},
-				notify(message: string) { notifications.push(message); },
-			},
-			sessionManager: { getSessionFile: () => undefined },
-			switchSession: async () => ({ cancelled: false }),
-		};
-
-		await pi.commands.get("subagent-preset").handler("", ctx);
-		expect(selects[0].title).toBe("Select active sub-agent preset");
-		expect(selects[0].labels).toEqual(expect.arrayContaining([expect.stringContaining("deep — deep pool"), expect.stringContaining("fast — fast pool")]));
-		expect(notifications[0]).toContain('Active sub-agent preset "deep"');
-		expect(JSON.parse(fs.readFileSync(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, "utf-8")).activePreset).toBe("deep");
-	});
-
-	test.serial("sub-agent preset session command overrides public spawn only for current process", async () => {
-		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const cwd = tempDir();
-		isolateSubagentConfigWithPresets(cwd);
-		writeFile(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, JSON.stringify({ activePreset: "fast" }));
-		const piScript = path.join(tempDir(), "pi.js");
-		writeFile(piScript, `process.stdin.on("data", () => {}); setTimeout(() => process.exit(0), 50);`);
-		process.argv[1] = piScript;
-		const pi = new FakePi();
-		registerExtension(pi as any);
-		const notifications: string[] = [];
-		const ctx = {
-			cwd,
-			hasUI: true,
-			ui: { async select() { return undefined; }, notify(message: string) { notifications.push(message); } },
-			sessionManager: { getSessionFile: () => undefined },
-			switchSession: async () => ({ cancelled: false }),
-		};
-
-		await pi.commands.get("subagent-preset").handler("session deep", ctx);
-		expect(notifications[0]).toContain('Session-only sub-agent preset "deep"');
-		expect(JSON.parse(fs.readFileSync(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, "utf-8")).activePreset).toBe("fast");
-		let result = await pi.tools.get("subagents").execute("call", {
-			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run with session preset", subagentType: "research" }],
-			slug: "session-preset-spawn",
-			watchSeconds: 0,
-		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
-		let piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
-		expect(piArgs).toContain("--model\npreset/deep");
-		await waitUntil(() => fs.existsSync(path.join(result.details.runDir, "agent-1", "exit_code")));
-
-		await pi.commands.get("subagent-preset").handler("session-clear", ctx);
-		expect(notifications[1]).toContain("Runtime session sub-agent preset override cleared");
-		result = await pi.tools.get("subagents").execute("call", {
-			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run with saved preset", subagentType: "research" }],
-			slug: "saved-preset-spawn",
-			watchSeconds: 0,
-		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
-		piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
-		expect(piArgs).toContain("--model\npreset/fast");
-		await waitUntil(() => fs.existsSync(path.join(result.details.runDir, "agent-1", "exit_code")));
-	});
-
-	test.serial("sub-agent preset command exposes bundled model pools", async () => {
-		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const cwd = tempDir();
-		const pi = new FakePi();
-		registerExtension(pi as any);
-		const selects: any[] = [];
-		const ctx = {
-			cwd,
-			hasUI: true,
-			ui: {
-				async select(title: string, labels: string[]) {
-					selects.push({ title, labels });
-					return labels.find((label) => label.startsWith("cheap —"));
-				},
-				notify() {},
-			},
-			sessionManager: { getSessionFile: () => undefined },
-			switchSession: async () => ({ cancelled: false }),
-		};
-
-		await pi.commands.get("subagent-preset").handler("", ctx);
-		expect(selects[0].title).toBe("Select active sub-agent preset");
-		expect(selects[0].labels).toEqual(expect.arrayContaining([
-			expect.stringContaining("cheap —"),
-			expect.stringContaining("deep —"),
-			expect.stringContaining("gpt —"),
-		]));
 	});
 
 	test.serial("cleans entrypoint live tracking when a registered spawn completes", async () => {
@@ -902,17 +775,13 @@ describe.serial("cleanup tool", () => {
 
 describe.serial("spawn tool", () => {
 	for (const toolName of ["subagents", "async_subagents_spawn"]) {
-		test.serial(`${toolName} rejects model pool/capability failures before launching any task`, async () => {
+		test.serial(`${toolName} rejects model candidate/capability failures before launching any task`, async () => {
 			const { registerSubagentsTool } = await import("../../src/async-subagents/tools/subagents.js");
 			const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
-			for (const failure of ["pool", "auth", "image"]) {
+			for (const failure of ["candidate", "auth", "image"]) {
 				const cwd = tempDir();
 				isolateSubagentConfig(cwd);
-				process.env.AGENTS_PRESET = "limited";
-				writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
-					limited: { description: "test pool", models: ["test/allowed"] },
-				}));
-				writeFile(path.join(cwd, ".pi", "agents", "implement.md"), `---\nmodels: ${failure === "pool" ? "test/excluded" : "test/allowed"}\n---\nImplement the requested change.\n`);
+				writeFile(path.join(cwd, ".pi", "agents", "implement.md"), `---\nmodels: ${failure === "candidate" ? "[]" : "test/allowed"}\n---\nImplement the requested change.\n`);
 				const pi = new FakePi();
 				const liveAgents = new Map<string, Map<string, any>>();
 				const complete = mock(() => { throw new Error("Explicit roles must not call a router"); });
@@ -1297,45 +1166,7 @@ setInterval(() => {}, 1000);
 		expect(fs.existsSync(path.join(runDir, "agent-2", "pid"))).toBe(false);
 	});
 
-	test.serial("AGENTS_PRESET overrides active persistent sub-agent preset for future spawns", async () => {
-		const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
-		const pi = new FakePi();
-		const liveAgents = new Map<string, Map<string, any>>();
-		registerSpawnTool(pi as any, liveAgents, ({ runDir, agentId }: any) => {
-			const liveRun = liveAgents.get(runDir);
-			liveRun?.delete(agentId);
-			if (liveRun?.size === 0) liveAgents.delete(runDir);
-		});
-		const tool = pi.tools.get("async_subagents_spawn");
-		const cwd = tempDir();
-		isolateSubagentConfigWithPresets(cwd);
-		writeFile(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, JSON.stringify({ activePreset: "fast" }));
-		process.env.AGENTS_PRESET = "deep";
-
-		const piScript = path.join(tempDir(), "pi.js");
-		writeFile(piScript, `
-process.stdin.on("data", () => {
-  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "preset ok" }] }] }));
-  console.log(JSON.stringify({ type: "agent_settled" }));
-});
-setTimeout(() => {}, 1000);
-`);
-		process.argv[1] = piScript;
-
-		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "research" }],
-			slug: "preset-spawn",
-			watchSeconds: 1,
-		}, undefined, undefined, { cwd });
-
-		const piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
-		expect(piArgs).toContain("--model\npreset/deep");
-		expect(piArgs).not.toContain("--temperature\n0");
-		expect(JSON.parse(fs.readFileSync(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, "utf-8")).activePreset).toBe("fast");
-		await waitUntil(() => liveAgents.size === 0);
-	});
-
-	test.serial("spawn tool falls back from exhausted preset providers for the current process", async () => {
+	test.serial("spawn tool falls back through role-owned candidates for the current process", async () => {
 		const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
 		const pi = new FakePi();
 		const liveAgents = new Map<string, Map<string, any>>();
@@ -1347,12 +1178,7 @@ setTimeout(() => {}, 1000);
 		const tool = pi.tools.get("async_subagents_spawn");
 		const cwd = tempDir();
 		const attemptFile = path.join(cwd, "models.json");
-		process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = path.join(cwd, "active-subagent-preset.json");
-		writeFile(path.join(cwd, ".pi", "agents", "quick.md"), "---\nmodels: preset/primary, fallback/quick\nthinking: off\n---\nQuick work.\n");
-		writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
-			fast: { description: "fast pool", models: ["preset/primary", "fallback/quick"] },
-		}));
-		writeFile(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE, JSON.stringify({ activePreset: "fast" }));
+		writeFile(path.join(cwd, ".pi", "agents", "quick.md"), "---\nmodels: alpha/primary, beta/quick\nthinking: off\n---\nQuick work.\n");
 
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -1363,8 +1189,8 @@ process.stdin.on("data", () => {
   const models = fs.existsSync(attemptFile) ? JSON.parse(fs.readFileSync(attemptFile, "utf8")) : [];
   models.push(model);
   fs.writeFileSync(attemptFile, JSON.stringify(models));
-  if (model === "preset/primary") {
-    console.log(JSON.stringify({ type: "response", command: "prompt", success: false, error: "429 quota exceeded for preset/primary" }));
+  if (model === "alpha/primary") {
+    console.log(JSON.stringify({ type: "response", command: "prompt", success: false, error: "429 quota exceeded for alpha/primary" }));
   } else {
     console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "ok " + model }] }] }));
     console.log(JSON.stringify({ type: "agent_settled" }));
@@ -1376,42 +1202,22 @@ setTimeout(() => {}, 1000);
 
 		const first = await tool.execute("call", {
 			tasks: [{ id: "agent-1", task: "Quick fallback check", subagentType: "quick" }],
-			slug: "preset-fallback-first",
+			slug: "role-fallback-first",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
 		await waitUntil(() => liveAgents.size === 0);
-		expect(fs.readFileSync(path.join(first.details.runDir, "agent-1", "result.md"), "utf-8")).toBe("ok fallback/quick");
-		expect(fs.readFileSync(path.join(first.details.runDir, "agent-1", "model_fallback_to"), "utf-8")).toBe("fallback/quick");
+		expect(fs.readFileSync(path.join(first.details.runDir, "agent-1", "result.md"), "utf-8")).toBe("ok beta/quick");
+		expect(fs.readFileSync(path.join(first.details.runDir, "agent-1", "model_fallback_to"), "utf-8")).toBe("beta/quick");
 
 		const second = await tool.execute("call", {
 			tasks: [{ id: "agent-2", task: "Quick fallback check again", subagentType: "quick" }],
-			slug: "preset-fallback-second",
+			slug: "role-fallback-second",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
 		await waitUntil(() => liveAgents.size === 0);
 
-		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["preset/primary", "fallback/quick", "fallback/quick"]);
-		expect(fs.readFileSync(path.join(second.details.runDir, "agent-2", "model"), "utf-8")).toBe("fallback/quick");
-	});
-
-	test.serial("rejects unknown AGENTS_PRESET without falling back to saved preset", async () => {
-		const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
-		const pi = new FakePi();
-		registerSpawnTool(pi as any, new Map(), () => {});
-		const tool = pi.tools.get("async_subagents_spawn");
-		const cwd = tempDir();
-		isolateSubagentConfigWithPresets(cwd);
-		writeFile(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, JSON.stringify({ activePreset: "fast" }));
-		process.env.AGENTS_PRESET = "missing";
-
-		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "research" }],
-			slug: "missing-preset-spawn",
-			watchSeconds: 0,
-		}, undefined, undefined, { cwd });
-
-		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("AGENTS_PRESET=missing does not match any available sub-agent preset");
+		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["alpha/primary", "beta/quick", "beta/quick"]);
+		expect(fs.readFileSync(path.join(second.details.runDir, "agent-2", "model"), "utf-8")).toBe("beta/quick");
 	});
 
 	test.serial("does not terminate sub-agent auto-retries after an error agent_end", async () => {

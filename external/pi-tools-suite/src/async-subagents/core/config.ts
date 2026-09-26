@@ -1,9 +1,7 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseJsonc } from "jsonc-parser";
 import { loadPiToolsSuiteConfig } from "../../config.js";
-import { projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
+import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./browser-qa.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
@@ -22,7 +20,7 @@ export interface SubagentTypeConfig {
 	 * default agent icon.
 	 */
 	icon?: string;
-	/** Ranked candidates. The preset filters availability, never changes this order. */
+	/** Ranked candidates owned by this role. Runtime availability never changes this configured order. */
 	models?: string[];
 	/** Legacy primary candidate; new profiles use models. */
 	model?: string;
@@ -33,8 +31,7 @@ export interface SubagentTypeConfig {
 	 * matched against the current parent model; the first matching key wins.
 	 * Raw values may be a model ref string or { model, fallbackModels? };
 	 * normalized entries always carry an explicit fallbackModels array.
-	 * Ordinary roles: explicit task/forced model and preset models take priority.
-	 * Oracle alone keeps parent-aware selection ahead of presets.
+	 * Explicit task/forced/global model selection takes priority.
 	 */
 	modelByParent?: Record<string, ModelByParentEntry>;
 	/**
@@ -47,7 +44,9 @@ export interface SubagentTypeConfig {
 	 * forParentModels also matches.
 	 */
 	notForParentModels?: string[];
-	/** Opt-in hard boundary: every child candidate (including overrides and fallbacks) must use a different provider from the known parent. */
+	/** Relationship between child candidates and the known parent provider. */
+	parentProviderPolicy?: "any" | "prefer-other" | "require-other";
+	/** @deprecated Use parentProviderPolicy: require-other. Retained as an input compatibility alias. */
 	requireDifferentProvider?: boolean;
 	thinking?: string;
 	tools?: string[];
@@ -90,32 +89,6 @@ export interface SubagentVisionConfig {
 	blindModelPatterns?: string[];
 }
 
-export interface SubagentPreset {
-	description?: string;
-	/** Available model pool. Agent candidate order wins; [] allows no models. */
-	models?: string[];
-	/** Legacy default model; prefer models for new presets. */
-	model?: string;
-	/** Ordered global model fallbacks used when this preset's selected model hits quota/rate limits. */
-	fallbackModels?: string[];
-	thinking?: string;
-	extraArgs?: string[];
-	/** Per-agent wall-clock timeout in milliseconds. */
-	timeoutMs?: number;
-	/** Optional per-subagentType overrides applied by this preset. */
-	types?: Record<string, SubagentPresetTypeOverride>;
-}
-
-export interface SubagentPresetTypeOverride {
-	model?: string;
-	/** Ordered per-role fallbacks used before preset-level fallbackModels. */
-	fallbackModels?: string[];
-	thinking?: string;
-	extraArgs?: string[];
-	/** Per-agent wall-clock timeout in milliseconds. */
-	timeoutMs?: number;
-}
-
 export interface SubagentConfig {
 	/** Ambiguous-task router hint and legacy resolver default; never a spawn error fallback. */
 	defaultType?: string;
@@ -124,8 +97,6 @@ export interface SubagentConfig {
 	routing?: SubagentRoutingConfig;
 	/** Vision capability overrides for parent-model guidance. */
 	vision?: SubagentVisionConfig;
-	/** Named global spawn defaults selected with /subagent-preset. */
-	presets?: Record<string, SubagentPreset>;
 	/** Maximum concurrent agents per spawn batch (default 5, 0 = unlimited). */
 	maxConcurrent?: number;
 	/** Global retry defaults for all agent types. Per-type retry overrides these. */
@@ -152,7 +123,7 @@ export interface ResolvedAgentTaskConfig {
 
 export class SubagentModelSelectionError extends Error {
 	constructor(taskId: string, message: string) {
-		super(`Task ${taskId}: ${message} No agents were launched. Configure a compatible model pool/candidate list or provide an explicit model override.`);
+		super(`Task ${taskId}: ${message} No agents were launched. Configure compatible model candidates or provide an explicit model override.`);
 		this.name = "SubagentModelSelectionError";
 	}
 }
@@ -162,8 +133,6 @@ export interface ResolveAgentTaskOptions {
 	model?: string;
 	/** Default thinking level for spawned sub-agents when task/profile do not specify one. */
 	defaultThinking?: string;
-	/** Selected config preset. Supports global defaults plus per-subagentType overrides. */
-	preset?: SubagentPreset;
 	/** Forced thinking level, e.g. from the spawn action's global `thinking` parameter. */
 	thinking?: string;
 	extraArgs?: string[];
@@ -200,7 +169,6 @@ export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 };
 
 const BUILTIN_AGENTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "agents");
-const BUILTIN_PRESETS_FILE = path.join(BUILTIN_AGENTS_DIR, "presets.jsonc");
 const DEFAULT_BLIND_MODEL_PATTERNS = [
 	"zai/glm-4.5*", "glm-4.5*", "*/glm-4.5*",
 	"zai/glm-5-turbo*", "glm-5-turbo*", "*/glm-5-turbo*",
@@ -213,7 +181,6 @@ const BUILTIN_CONFIG: SubagentConfig = {
 	maxResultBytes: 100_000,
 	routing: { ...DEFAULT_ROUTING_CONFIG },
 	vision: { blindModelPatterns: DEFAULT_BLIND_MODEL_PATTERNS },
-	presets: readPresetConfigFile(BUILTIN_PRESETS_FILE).presets,
 	types: normalizeAgentDefinitions(readAgentDefinitionsFromDir(BUILTIN_AGENTS_DIR)),
 };
 
@@ -228,7 +195,6 @@ export function loadSubagentConfig(cwd: string, env?: NodeJS.ProcessEnv): Subage
 	});
 	const config = cloneConfig(BUILTIN_CONFIG);
 	for (const name of suiteConfig.disabledBuiltinAgents) delete config.types[name];
-	mergeConfig(config, projectPresetConfig(cwd));
 	// Project-local agent definitions (.pi/agents/*.md) are the only project
 	// source of role/profile configuration and are loaded fresh on every call.
 	mergeConfig(config, projectAgentTypes(cwd));
@@ -242,14 +208,6 @@ export function getBuiltinSubagentDefinitionsDir(): string {
 	return BUILTIN_AGENTS_DIR;
 }
 
-export function getBuiltinSubagentPresetsPath(): string {
-	return BUILTIN_PRESETS_FILE;
-}
-
-export function getProjectSubagentPresetsPath(cwd: string): string {
-	return path.join(projectAgentsDir(cwd) ?? path.join(path.resolve(cwd), ".pi", "agents"), "presets.jsonc");
-}
-
 /** Normalize `.pi/agents/*.md` definitions through the shared type-profile path. */
 function projectAgentTypes(cwd: string): Partial<SubagentConfig> {
 	const definitions = readProjectAgentDefinitions(cwd);
@@ -261,13 +219,6 @@ function projectAgentTypes(cwd: string): Partial<SubagentConfig> {
 	const types = normalizeAgentDefinitions(definitions);
 	if (Object.keys(types).length === 0) return {};
 	return { types };
-}
-
-function projectPresetConfig(cwd: string): Partial<SubagentConfig> {
-	const dir = projectAgentsDir(cwd);
-	if (!dir) return {};
-	const file = path.join(dir, "presets.jsonc");
-	return fs.existsSync(file) ? readPresetConfigFile(file) : {};
 }
 
 function normalizeAgentDefinitions(definitions: Record<string, AgentDefinition>): Record<string, SubagentTypeConfig> {
@@ -286,67 +237,43 @@ export function resolveAgentTaskConfig(
 	const selectedType = selectSubagentType(task, config);
 	const profile = selectedType ? config.types[selectedType] : undefined;
 	const parentProvider = providerFromModelRef(globalOptions.parentModel);
-	if (profile?.requireDifferentProvider && (!parentProvider || !isSubagentTypeAvailableForParent(profile, globalOptions.parentModel))) {
+	const parentProviderPolicy = effectiveParentProviderPolicy(profile);
+	if (parentProviderPolicy === "require-other" && (!parentProvider || !profile || !isSubagentTypeAvailableForParent(profile, globalOptions.parentModel))) {
 		throw new SubagentModelSelectionError(task.id, "A known, permitted parent provider is required for cross-provider selection.");
 	}
-	const preset = globalOptions.preset;
-	// A new pool preset has no per-role policy. Ignore any inherited legacy
-	// matrix/defaults so changing the pool cannot resurrect an expensive model.
-	const legacyPreset = preset?.models === undefined ? preset : undefined;
-	const explicitType = trimString(task.subagentType);
-	const requestedType = explicitType || trimString(config.defaultType);
-	// Legacy preset matrices still apply to an explicitly configured type with
-	// the same name. There are no implicit aliases between type names.
-	const presetType = (requestedType ? legacyPreset?.types?.[requestedType] : undefined)
-		?? (selectedType ? legacyPreset?.types?.[selectedType] : undefined);
 	const taskExtraArgs = arrayOfStrings(task.extraArgs) ?? [];
 	const profileExtraArgs = arrayOfStrings(profile?.extraArgs) ?? [];
-	const presetTypeExtraArgs = arrayOfStrings(presetType?.extraArgs) ?? [];
-	const presetExtraArgs = arrayOfStrings(legacyPreset?.extraArgs) ?? [];
 	const globalExtraArgs = arrayOfStrings(globalOptions.extraArgs) ?? [];
 	const promptAppend = joinTextBlocks(profile?.promptAppend, task.promptAppend);
 	const forcedModel = trimString(globalOptions.forcedModel);
 	const taskModel = trimString(task.model);
 	const parentMatch = resolveModelByParent(profile, trimString(globalOptions.parentModel));
 	const parentMatchModel = trimString(parentMatch?.model);
-	const presetTypeModel = trimString(presetType?.model);
 	const globalModel = trimString(globalOptions.model);
-	const presetModel = trimString(legacyPreset?.model);
 	const profileModels = profile?.models ?? modelList(profile?.model, profile?.fallbackModels) ?? [];
 	const profileModel = profileModels[0];
 	const usedParentMatch = Boolean(parentMatchModel) && !forcedModel && !taskModel
-		&& (selectedType === "oracle" || !(presetTypeModel || globalModel || presetModel));
+		&& !globalModel;
 	const primaryModel = forcedModel || taskModel || (usedParentMatch ? parentMatchModel : undefined)
-		|| presetTypeModel || globalModel || presetModel || profileModel;
+		|| globalModel || profileModel;
 	const configuredFallbacks = forcedModel || taskModel
 		? []
 		: usedParentMatch && parentMatch?.fallbackModels !== undefined
 			? parentMatch.fallbackModels
-			: resolveFallbackModels({ model: primaryModel, presetType, preset: legacyPreset, profileModels, profile });
+			: resolveFallbackModels({ model: primaryModel, profileModels, profile });
 	const extraArgs = forcedModel
-		? stripModelArgs([...profileExtraArgs, ...presetTypeExtraArgs, ...taskExtraArgs, ...presetExtraArgs, ...globalExtraArgs])
-		: [...profileExtraArgs, ...presetTypeExtraArgs, ...taskExtraArgs, ...presetExtraArgs, ...globalExtraArgs];
+		? stripModelArgs([...profileExtraArgs, ...taskExtraArgs, ...globalExtraArgs])
+		: [...profileExtraArgs, ...taskExtraArgs, ...globalExtraArgs];
 	const cliModel = modelFromArgs(extraArgs);
 	const explicitModel = forcedModel || cliModel || taskModel;
 	let candidates = modelList(explicitModel || primaryModel, explicitModel ? [] : configuredFallbacks) ?? [];
-	if (!explicitModel) {
-		if (selectedType === "oracle" && globalOptions.parentModel && !usedParentMatch
-			&& !presetTypeModel && !presetModel && !globalModel && !profile?.model) {
-			const parentProvider = globalOptions.parentModel.split("/")[0];
-			candidates = [
-				...candidates.filter((ref) => ref.split("/")[0] !== parentProvider),
-				...candidates.filter((ref) => ref.split("/")[0] === parentProvider),
-			];
-		}
-		if (preset?.models !== undefined) {
-			const available = new Set(preset.models);
-			candidates = candidates.filter((ref) => available.has(ref));
-			if (candidates.length === 0) {
-				throw new SubagentModelSelectionError(task.id, "No ranked candidate is in the active preset's models pool.");
-			}
-		}
+	if (parentProviderPolicy === "prefer-other" && !explicitModel && parentProvider) {
+		candidates = [
+			...candidates.filter((ref) => providerFromModelRef(ref) !== parentProvider),
+			...candidates.filter((ref) => providerFromModelRef(ref) === parentProvider),
+		];
 	}
-	if (profile?.requireDifferentProvider) {
+	if (parentProviderPolicy === "require-other") {
 		if (explicitModel && providerFromModelRef(explicitModel) === parentProvider) {
 			throw new SubagentModelSelectionError(task.id, "Explicit model override uses the parent provider; cross-provider selection is required.");
 		}
@@ -355,14 +282,14 @@ export function resolveAgentTaskConfig(
 			return provider !== undefined && provider !== parentProvider;
 		});
 		if (candidates.length === 0) {
-			throw new SubagentModelSelectionError(task.id, "No cross-provider model candidate is available in the selected pool/overrides.");
+			throw new SubagentModelSelectionError(task.id, "No cross-provider model candidate is available in the configured candidates/overrides.");
 		}
 	}
 	if (candidates.length === 0) {
 		throw new SubagentModelSelectionError(task.id, "No model candidates are configured; set models on the agent profile.");
 	}
 	const [model, ...fallbackModels] = candidates;
-	const timeoutMs = task.timeoutMs ?? globalOptions.timeoutMs ?? presetType?.timeoutMs ?? legacyPreset?.timeoutMs ?? profile?.timeoutMs ?? config.timeoutMs;
+	const timeoutMs = task.timeoutMs ?? globalOptions.timeoutMs ?? profile?.timeoutMs ?? config.timeoutMs;
 
 	return {
 		profile,
@@ -375,7 +302,7 @@ export function resolveAgentTaskConfig(
 			...task,
 			subagentType: selectedType,
 			model,
-			thinking: trimString(globalOptions.thinking) || trimString(task.thinking) || trimString(presetType?.thinking) || trimString(globalOptions.defaultThinking) || trimString(legacyPreset?.thinking) || trimString(profile?.thinking),
+			thinking: trimString(globalOptions.thinking) || trimString(task.thinking) || trimString(globalOptions.defaultThinking) || trimString(profile?.thinking),
 			promptAppend,
 			promptOverride: trimString(task.promptOverride) || trimString(profile?.promptOverride),
 			tools: task.tools && task.tools.length > 0 ? task.tools : arrayOfStrings(profile?.tools),
@@ -450,8 +377,8 @@ export function isSubagentTypeAvailableForParent(
 
 /**
  * Return the effective config visible to a particular parent model. Only the
- * role catalog is filtered; presets, routing policy, retry defaults, etc. are
- * preserved unchanged.
+ * role catalog is filtered; routing policy, retry defaults, and other global
+ * settings are preserved unchanged.
  */
 export function filterSubagentConfigForParentModel(
 	config: SubagentConfig,
@@ -478,28 +405,6 @@ export function normalizeSubagentType(value: string | undefined, config: Subagen
 	return requested;
 }
 
-function readPresetConfigFile(file: string): Partial<SubagentConfig> {
-	const raw = fs.readFileSync(file, "utf-8");
-	const parsed = parseJsonc(raw) as unknown;
-	if (!isRecord(parsed)) throw new Error(`Subagent presets file must contain an object: ${file}`);
-	return { presets: normalizePresetMap(parsed, file, "preset file") };
-}
-
-function normalizePresetMap(value: unknown, file: string, owner: string): Record<string, SubagentPreset> {
-	if (!isRecord(value)) throw new Error(`Subagent ${owner} must be an object: ${file}`);
-	const presets: Record<string, SubagentPreset> = {};
-	for (const [name, rawPreset] of Object.entries(value)) {
-		if (!isRecord(rawPreset)) throw new Error(`Subagent preset "${name}" must be an object: ${file}`);
-		const models = normalizeModels(rawPreset.models, `preset "${name}"`, file);
-		if (models === undefined) throw new Error(`Subagent preset "${name}" must define models: ${file}`);
-		presets[name] = {
-			description: trimString(rawPreset.description),
-			models,
-		};
-	}
-	return presets;
-}
-
 /**
  * Normalize one raw sub-agent type profile (`SubagentTypeConfig` shape) from
  * an agent Markdown definition. Bundled and project files share the same
@@ -513,9 +418,13 @@ export function normalizeSubagentTypeProfile(
 	const models = normalizeModels(rawProfile.models, `type "${name}"`, file);
 	const model = models === undefined ? trimString(rawProfile.model) : undefined;
 	const fallbackModels = models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined;
+	const parentProviderPolicy = normalizeParentProviderPolicy(rawProfile.parentProviderPolicy, name, file);
 	const requireDifferentProvider = rawProfile.requireDifferentProvider;
 	if (requireDifferentProvider !== undefined && typeof requireDifferentProvider !== "boolean") {
 		throw new Error(`Agent ${name}: requireDifferentProvider must be a boolean (${file})`);
+	}
+	if (parentProviderPolicy && requireDifferentProvider === true && parentProviderPolicy !== "require-other") {
+		throw new Error(`Agent ${name}: requireDifferentProvider conflicts with parentProviderPolicy (${file})`);
 	}
 	return {
 		description: trimString(rawProfile.description),
@@ -526,7 +435,7 @@ export function normalizeSubagentTypeProfile(
 		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file, fallbackModels ?? []) : undefined,
 		forParentModels: normalizeParentModelPatterns(rawProfile.forParentModels, "forParentModels", name, file),
 		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
-		requireDifferentProvider,
+		parentProviderPolicy: parentProviderPolicy ?? (requireDifferentProvider ? "require-other" : undefined),
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
 		extraArgs: arrayOfStrings(rawProfile.extraArgs),
@@ -541,18 +450,6 @@ export function normalizeSubagentTypeProfile(
 function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): void {
 	for (const [name, profile] of Object.entries(source.types ?? {})) {
 		target.types[name] = mergeTypeProfile(target.types[name] ?? {}, profile);
-	}
-	for (const [name, preset] of Object.entries(source.presets ?? {})) {
-		target.presets = target.presets ?? {};
-		const previous = target.presets[name] ?? {};
-		const merged = { ...previous, ...compactPreset(preset) };
-		delete merged.model;
-		delete merged.fallbackModels;
-		delete merged.types;
-		delete merged.thinking;
-		delete merged.extraArgs;
-		delete merged.timeoutMs;
-		target.presets[name] = merged;
 	}
 }
 
@@ -593,7 +490,7 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
 	if (profile.forParentModels !== undefined) compact.forParentModels = profile.forParentModels;
 	if (profile.notForParentModels !== undefined) compact.notForParentModels = profile.notForParentModels;
-	if (profile.requireDifferentProvider !== undefined) compact.requireDifferentProvider = profile.requireDifferentProvider;
+	if (profile.parentProviderPolicy !== undefined) compact.parentProviderPolicy = profile.parentProviderPolicy;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
 	if (profile.extraArgs && profile.extraArgs.length > 0) compact.extraArgs = profile.extraArgs;
@@ -602,19 +499,6 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.retry) compact.retry = profile.retry;
 	if (profile.maxResultBytes !== undefined) compact.maxResultBytes = profile.maxResultBytes;
 	if (profile.timeoutMs !== undefined) compact.timeoutMs = profile.timeoutMs;
-	return compact;
-}
-
-function compactPreset(preset: SubagentPreset): SubagentPreset {
-	const compact: SubagentPreset = {};
-	if (preset.description) compact.description = preset.description;
-	if (preset.models !== undefined) compact.models = preset.models;
-	if (preset.model) compact.model = preset.model;
-	if (preset.fallbackModels) compact.fallbackModels = preset.fallbackModels;
-	if (preset.thinking) compact.thinking = preset.thinking;
-	if (preset.extraArgs && preset.extraArgs.length > 0) compact.extraArgs = preset.extraArgs;
-	if (preset.timeoutMs !== undefined) compact.timeoutMs = preset.timeoutMs;
-	if (preset.types && Object.keys(preset.types).length > 0) compact.types = preset.types;
 	return compact;
 }
 
@@ -637,6 +521,12 @@ function normalizeParentModelPatterns(
 		throw new Error(`Subagent type "${typeName}" ${field} must be an array of non-empty model patterns: ${file}`);
 	}
 	return [...new Set(value.map((pattern: string) => pattern.trim()))];
+}
+
+function normalizeParentProviderPolicy(value: unknown, typeName: string, file: string): SubagentTypeConfig["parentProviderPolicy"] {
+	if (value === undefined) return undefined;
+	if (value === "any" || value === "prefer-other" || value === "require-other") return value;
+	throw new Error(`Subagent type "${typeName}" parentProviderPolicy must be one of any, prefer-other, require-other: ${file}`);
 }
 
 function normalizeModelByParent(
@@ -685,14 +575,10 @@ function resolveModelByParent(profile: SubagentTypeConfig | undefined, parentMod
 
 function resolveFallbackModels(options: {
 	model?: string;
-	presetType?: SubagentPresetTypeOverride;
-	preset?: SubagentPreset;
 	profileModels: string[];
 	profile?: SubagentTypeConfig;
 }): string[] {
-	// A selected budget's fallback list is authoritative, including [] (none).
-	const fallbacks = options.presetType?.fallbackModels
-		?? options.preset?.fallbackModels ?? options.profile?.fallbackModels ?? options.profileModels.slice(1);
+	const fallbacks = options.profile?.fallbackModels ?? options.profileModels.slice(1);
 	const seen = new Set<string>();
 	if (options.model) seen.add(options.model);
 	const result: string[] = [];
@@ -703,6 +589,10 @@ function resolveFallbackModels(options: {
 		result.push(model);
 	}
 	return result;
+}
+
+function effectiveParentProviderPolicy(profile: SubagentTypeConfig | undefined): NonNullable<SubagentTypeConfig["parentProviderPolicy"]> {
+	return profile?.parentProviderPolicy ?? (profile?.requireDifferentProvider ? "require-other" : "any");
 }
 
 function applyEnvModelOverrides(config: SubagentConfig, env: NodeJS.ProcessEnv): void {

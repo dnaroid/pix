@@ -44,7 +44,8 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
 
 ## Unchanged behavior
 
-Markdown definitions, config precedence, presets, model/thinking overrides,
+Markdown definitions, config precedence, role-owned model candidates,
+model/thinking overrides,
 spawn concurrency, and child model fallbacks remain unchanged. Every child is
 started with `--no-skills`; any `--skill <path>`, `--skill=<path>`, or
 caller-supplied `--no-skills` arguments are stripped before invocation, so no

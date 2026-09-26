@@ -34,19 +34,23 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
 6. **Environment**: child inherits parent env plus `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION=1`, `PI_TERMINAL_BELL_DISABLED=1`, and `PI_TOOLS_SUITE_DISABLED_MODULES` appended with `async-subagents,coding-discipline,question`. `[confirmed by code, spawn.ts ~230-240]`
 7. **Model selection**: explicit forced/task/CLI model wins. Otherwise the
-   resolved role profile, parent-model mapping, and active preset contribute a
-   ranked candidate list; pool presets filter that list to their allowed models,
-   runtime model selection removes unavailable/image-incompatible candidates,
+   resolved role profile and optional parent-model mapping produce the ranked
+   candidate list. `parentProviderPolicy` then applies `any`, `prefer-other`, or
+   strict `require-other` semantics relative to the known parent provider.
+   Runtime model selection removes unavailable/image-incompatible candidates,
    and session fallback skips models/providers already exhausted by quota
-   failures. Per-role environment model overrides are applied while loading the
-   effective role catalog. `[confirmed by code, config.ts/model-selection.ts]`
+   failures. The fallback layer follows the already-resolved chain; it does not
+   independently force a provider change. Per-role environment model overrides
+   are applied while loading the effective role catalog.
+   `[confirmed by code, config.ts/model-selection.ts/model-fallback.ts]`
    Legacy singular role selectors normalize with an explicit `fallbackModels`
    array (including `[]`), and every normalized `modelByParent` entry carries
    its own fallback array. Modern `models` profiles already encode the complete
    ordered candidate chain. `[confirmed by code, config.ts]`
-   All bundled preset pools contain `zai/glm-5.3`; for an Astra parent the
-   strict `oracle-zai` profile resolves to that model in every bundled pool.
-   `[confirmed by agents/presets.jsonc and model-pools.test.ts]`
+   The bundled `oracle` uses `parentProviderPolicy: require-other`, so its entire
+   initial/fallback chain excludes the parent provider. This policy is N-provider:
+   adding an Anthropic or future frontier candidate does not require another
+   provider-specific oracle role. `[confirmed by oracle.md and model-pools.test.ts]`
 8. **Role router / auto-ultrawork classifier**: the role router and the
    `ULTRAWORK_AUTO` classifier both try `routing.model`, then
    `routing.fallbackModels`, then the current parent model, de-duplicating refs
@@ -463,6 +467,51 @@ No saved descendant PID/PGID is signaled by test teardown. These passing
 characterization tests confirm limitations, not G1/T3 acceptance or a general
 macOS impossibility result.
 
+#### macOS launchd coalition / audit-token feasibility (test-only; no owner-loss proof)
+
+`test/async-subagents/audit-token-signal-feasibility.test.ts` compiles the
+standalone `fixtures/audit-token-signal-feasibility.c` with warnings as errors.
+The native parent forks **one direct waitable child** with an independent 8s
+alarm. The child obtains its own kernel-issued `TASK_AUDIT_TOKEN` and sends it
+over a pipe. Apple SDK `libproc.h` declares
+`proc_signal_with_audittoken(audit_token_t *, int)`; `mach/task_info.h` defines
+the token request; `mach/message.h` defines `val[8]`; `bsm/libbsm.h` exposes
+PID and PID-version accessors. The fixture mutates the token's version slot
+and verifies through Apple's accessors that the PID is unchanged and the
+version differs. On the macOS 14.6 host (`xnu-10063.141.1.712.16~1`) the
+wrong-version `SIGUSR1` returned **3** and set errno **3** (ESRCH), leaving the
+child waitable and running; the exact original token returned **0**, and
+`waitpid` confirmed death by SIGUSR1 (30). The fixture never enumerates or
+signals an unrelated PID; its failure backstop targets only its still-unreaped
+direct child. This observes host behavior, not guaranteed future SPI stability.
+
+`launchd-coalition-feasibility.test.ts` separately compiles
+`fixtures/launchd-coalition-feasibility.c`. The private
+`PROC_PIDCOALITIONINFO` flavor/struct and resource coalition index are copied
+from [Apple XNU `proc_info_private.h`](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/sys/proc_info_private.h#L65-L70)
+and [Apple XNU `coalition.h`](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/osfmk/mach/coalition.h#L78-L82),
+not a guessed SDK structure. They are private ABIs; this XNU commit is not
+the exact host build. A single UUID-labelled one-shot job is bootstrapped into
+the current `gui/<uid>` user session with an owned temporary plist, binary,
+and output file; no persistent LaunchAgent is installed. On this host the
+direct baseline resource coalition was **7207**, the job's was **7238**, and
+the job's fork, `setsid`, and exec stages all reported **7238**. The first
+attempt using `user/<uid>` returned bootstrap error 5 (no adoption claim for
+that domain); `gui/<uid>` succeeded. Each native actor has its own 5–7s
+expiry. The runner bootouts only its exact UUID service in `finally`, checks
+that `launchctl print` no longer finds it, and probes only the two recorded
+job PIDs with `ps` (never signals them). In the passing run bootout returned
+0, print returned 113, and the recorded PID scan returned 1 (no matches).
+Missing identities or ambiguous cleanup retain owned files and fail closed.
+Neither finite scan proves perpetual PID non-reuse or automatic descendant
+cleanup when both owner and helper disappear.
+
+This is **feasibility**, not a coalition kill implementation: no coalition
+member enumeration/signaling, no provider/Pi integration, no proof that
+launchd automatically cleans descendants on joint owner/helper death, no
+guarantee of a surviving enumerator, and no tested force/timeout/race matrix.
+G1/T3 remain blocked. Existing relays and runtime are unchanged.
+
 ### Structured results (`core/structured-result.ts`) / Log limits (`core/log-limits.ts`)
 - On completion writes `result.json` (summary, findings, file refs, risks, next actions, confidence); `resultText` truncated at `maxResultBytes` (default 100KB); `result.md` is always full. `[confirmed by code]`
 - `events.jsonl` default 0 bytes (32MB only if `ASYNC_SUBAGENTS_DEBUG_LOGS`); `stderr.log` default 8MB; RPC line max 8MB (oversized dropped with a marker). `[confirmed by code]`
@@ -562,7 +611,8 @@ macOS impossibility result.
   automatic role routing, parent-model gates, routing failures, and the legacy
   `browser-qa` → `ui-qa` alias.
 - `external/pi-tools-suite/test/async-subagents/model-pools.test.ts` and
-  `model-pool-contract.test.ts`: pool filtering and session fallback behavior.
+  `model-pool-contract.test.ts`: role candidate ordering, parent-provider policy,
+  runtime availability, and session fallback behavior.
 - `external/pi-tools-suite/test/async-subagents/ui.test.ts`: task normalization,
   live-state tracking/rendering, polling, and slash-command UI.
 - `external/pi-tools-suite/test/async-subagents/selection-e2e.test.ts`: opt-in LLM

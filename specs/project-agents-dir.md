@@ -20,9 +20,9 @@ Active implemented contract.
 Let a project ship its own sub-agent definitions as individual Markdown files
 (Claude Code `.claude/agents/*.md` style). Files live in `<project>/.pi/agents/`;
 each file becomes a `subagentType` available to the `subagents` tool, the LLM
-router, and the parent system-prompt role catalog. Project model-pool presets
-live beside them in `<project>/.pi/agents/presets.jsonc`. Bundled built-in roles
-use the same Markdown definition format and parser under
+router, and the parent system-prompt role catalog. Each role owns its ordered
+model candidate list; there is no separate project-wide model-pool layer.
+Bundled built-in roles use the same Markdown definition format and parser under
 `src/async-subagents/agents/*.md`.
 
 ## Behavior
@@ -58,7 +58,7 @@ modelByParent:
     fallbackModels: [zai/glm-5.3]
 forParentModels: [zai/*, openai-codex/*]
 notForParentModels: [openai-codex/gpt-6-sol*]
-requireDifferentProvider: true # optional strict runtime model boundary
+parentProviderPolicy: require-other # any | prefer-other | require-other
 ---
 
 You are a ... role prompt (markdown body).
@@ -67,21 +67,23 @@ You are a ... role prompt (markdown body).
 - Frontmatter keys: `name` (must match the filename if present; mismatch is an
   error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
   `models`, legacy `fallbackModels`/`modelByParent`, `forParentModels`,
-  `notForParentModels`, `requireDifferentProvider`, `thinking`, `tools`, `extraArgs`,
+  `notForParentModels`, `parentProviderPolicy`, deprecated
+  `requireDifferentProvider`, `thinking`, `tools`, `extraArgs`,
   `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`).
   Unknown keys are rejected (typo safety; the JSONC config path stays lenient).
 - `forParentModels` is an optional parent-model allow-list;
   `notForParentModels` is an optional deny-list and wins on overlap. These gates
   filter the role from the parent catalog and router/explicit-role validation;
   they do not select the child model.
-- `requireDifferentProvider` is an optional boolean (default absent/false).
-  Unlike catalog gates it enforces a runtime boundary: a known permitted parent
-  provider must exist and every candidate, including explicit task/CLI/forced
-  model overrides and quota fallbacks, must differ from that provider. Pool
-  intersections without an eligible candidate and unavailable candidates fail
-  before spawn, not by falling back to the parent. The shipped
-  `oracle-openai` (Z.ai parents only, Astra) and `oracle-zai` (OpenAI Codex
-  parents only, GLM-5.3) opt in. The original `oracle` remains best-effort.
+- `parentProviderPolicy` defaults to `any`. `prefer-other` stable-partitions
+  other-provider candidates ahead of candidates from the parent provider.
+  `require-other` is a hard runtime boundary: a known permitted parent provider
+  must exist and every candidate, including explicit task/CLI/forced overrides
+  and quota fallbacks, must differ from that provider. An unavailable or empty
+  cross-provider chain fails before spawn rather than falling back to the parent.
+  The bundled `oracle` uses `require-other`; one role works for any number of
+  providers. `requireDifferentProvider: true` remains a compatibility alias for
+  `parentProviderPolicy: require-other`.
 - Supported YAML subset (bounded, dependency-free parser): plain/quoted scalars,
   numbers, booleans, `#` comments (full-line and trailing), inline arrays
   `[a, b]`, block lists `- item`, and exactly one level of nested maps for
@@ -98,15 +100,13 @@ You are a ... role prompt (markdown body).
 
 Within `loadSubagentConfig` (no caching — re-read per spawn/command call):
 
-1. bundled built-in role definitions and preset defaults;
+1. bundled built-in role definitions;
 2. top-level pi-tools-suite `disabledBuiltinAgents` removes selected bundled
    roles; `enabledBuiltinAgents` in a later suite config layer can re-enable an
    inherited disable;
-3. project `<project>/.pi/agents/presets.jsonc` from the nearest discovered
-   agents dir;
-4. project `.pi/agents/*.md`, with agent-file fields overriding same-named
+3. project `.pi/agents/*.md`, with agent-file fields overriding same-named
    built-in role fields or recreating a name removed by the bundled-role filter;
-5. environment model, routing, concurrency, result-size, and timeout overrides.
+4. environment model, routing, concurrency, result-size, and timeout overrides.
 
 User/global `pi-tools-suite.jsonc`, `$PI_CONFIG_DIR`, project
 `<project>/.pi/pi-tools-suite.jsonc` affect only bundled-role visibility through
@@ -117,7 +117,7 @@ the current sub-agent profile merge pipeline.
 ### Reload semantics (original user requirement: "respect `/reload`")
 
 - Config load has **no cache**: `loadSubagentConfig(ctx.cwd)` runs on every
-  spawn, every `/subagent-*` command, and every ultrawork input-transform
+  spawn and every ultrawork input-transform
   decision. Adding/editing `.pi/agents/*.md` therefore takes effect on the next
   spawn **without** any reload.
 - `before_agent_start` also rebuilds an `<available_subagent_types>` system
