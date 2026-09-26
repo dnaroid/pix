@@ -25,6 +25,7 @@ import {
 	macOSOpenArguments,
 	npmInvocation,
 	parseProcessList,
+	processOwnsDesktopArtifact,
 	selectDesktopAppBundle,
 	updateWatchedPathStamp,
 	usesDesktopAppBundle,
@@ -328,6 +329,13 @@ describe("watch:all macOS launch identity", () => {
 		const entries = parseProcessList("  4711 /usr/bin/open -n -W /tmp/run\n  8112 /tmp/run/Pix Desktop.app/Contents/MacOS/pix-desktop\n");
 		assert.equal(hasProcessPid(entries, 8112), true);
 		assert.equal(hasProcessPid(entries, 9999), false);
+	});
+
+	it("keeps raw desktop artifacts owned by a live non-bundle process", () => {
+		const artifact = "C:\\tmp\\pix-desktop-3.exe";
+		const entries = [{ pid: 8112, command: `${artifact} --running` }];
+		assert.equal(processOwnsDesktopArtifact(entries, artifact, "win32"), true);
+		assert.equal(processOwnsDesktopArtifact(entries, "C:\\tmp\\pix-desktop-30.exe", "win32"), false);
 	});
 });
 

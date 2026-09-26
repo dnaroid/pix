@@ -300,6 +300,12 @@ export function findProcessByExecutablePath(entries, executablePath) {
 	return entries.find((entry) => entry.command === executablePath || entry.command.startsWith(argumentPrefix))?.pid;
 }
 
+/** Whether a process-list snapshot still owns a copied desktop artifact. */
+export function processOwnsDesktopArtifact(entries, artifact, platform = process.platform) {
+	if (!usesDesktopAppBundle(platform)) return findProcessByExecutablePath(entries, artifact) !== undefined;
+	return entries.some(({ command }) => command.includes(`${artifact}/`));
+}
+
 /** Whether a process-list snapshot still contains the launched application PID. */
 export function hasProcessPid(entries, pid) {
 	return entries.some((entry) => entry.pid === pid);
@@ -499,7 +505,7 @@ export class WatchAllSupervisor {
 			this.candidateExecutable,
 		].filter(Boolean).map((path) => usesDesktopAppBundle() ? dirname(desktopAppBundlePath(path)) : path));
 		for (const artifact of this.copiedArtifacts) {
-			if (protectedPaths.has(artifact) || entries.some(({ command }) => command.includes(`${artifact}/`))) continue;
+			if (protectedPaths.has(artifact) || processOwnsDesktopArtifact(entries, artifact)) continue;
 			await rm(artifact, { recursive: true, force: true });
 			this.copiedArtifacts.delete(artifact);
 		}
