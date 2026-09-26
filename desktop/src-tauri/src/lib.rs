@@ -6019,10 +6019,7 @@ fn start_idx_operation(
         return Err("this project is not indexed yet; initialize IDX first".to_owned());
     }
     let launcher = idx_launcher(&app)?;
-    let args = idx_operation_args(
-        request.kind,
-        request.openrouter_embeddings.unwrap_or(false),
-    );
+    let args = idx_operation_args(request.kind, request.openrouter_embeddings.unwrap_or(false));
     let command_label = format!("idx {}", args.join(" "));
     let mut command = idx_process_command(&launcher, &root, &args)?;
     let child = command
@@ -10361,13 +10358,28 @@ mod tests {
         command.env("NO_COLOR", "1");
         command.env("NODE_DISABLE_COLORS", "1");
         configure_package_terminal_environment(&mut command, Path::new("/tmp"));
-        assert_eq!(command.get_env("TERM"), Some(std::ffi::OsStr::new("xterm-256color")));
-        assert_eq!(command.get_env("COLORTERM"), Some(std::ffi::OsStr::new("truecolor")));
-        assert_eq!(command.get_env("FORCE_COLOR"), Some(std::ffi::OsStr::new("3")));
+        assert_eq!(
+            command.get_env("TERM"),
+            Some(std::ffi::OsStr::new("xterm-256color"))
+        );
+        assert_eq!(
+            command.get_env("COLORTERM"),
+            Some(std::ffi::OsStr::new("truecolor"))
+        );
+        assert_eq!(
+            command.get_env("FORCE_COLOR"),
+            Some(std::ffi::OsStr::new("3"))
+        );
         assert_eq!(command.get_env("NO_COLOR"), None);
         assert_eq!(command.get_env("NODE_DISABLE_COLORS"), None);
-        assert_eq!(command.get_env("PI_TRUE_COLOR"), Some(std::ffi::OsStr::new("1")));
-        assert_eq!(command.get_env("PI_HARDWARE_CURSOR"), Some(std::ffi::OsStr::new("1")));
+        assert_eq!(
+            command.get_env("PI_TRUE_COLOR"),
+            Some(std::ffi::OsStr::new("1"))
+        );
+        assert_eq!(
+            command.get_env("PI_HARDWARE_CURSOR"),
+            Some(std::ffi::OsStr::new("1"))
+        );
     }
 
     #[test]

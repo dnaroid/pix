@@ -108,7 +108,6 @@ describe("config helpers", () => {
 		});
 		assert.deepEqual(parsedCreated.autocomplete?.fallbackModels, []);
 		assert.deepEqual(parsedCreated.desktop, {
-			externalEditor: "zed",
 			git: {
 				reviewModelRef: "openai-codex/gpt-6-luna:medium",
 				reviewFallbackModels: [],
