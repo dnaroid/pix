@@ -108,6 +108,18 @@ requireDifferentProvider: true`);
 		expect(() => agentConfig("bad", "models: [other/last]\nrequireDifferentProvider: yes")).toThrow(/boolean/);
 	});
 
+	test("every bundled pool offers GLM-5.3 to an Astra parent's strict oracle", () => {
+		const cfg = loadSubagentConfig(temp(), {});
+		for (const preset of Object.values(cfg.presets ?? {})) {
+			expect(preset.models).toContain("zai/glm-5.3");
+			const selected = resolveAgentTaskConfig(task("oracle-zai"), cfg, {
+				parentModel: "openai-codex/gpt-6-astra", preset,
+			});
+			expect(selected.task.model).toBe("zai/glm-5.3");
+			expect(selected.fallbackModels).toEqual([]);
+		}
+	});
+
 	test("ships Markdown modes and pool-only presets from a single defaults source", () => {
 		const cfg = loadSubagentConfig(temp(), {});
 		expect(Object.keys(cfg.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "oracle-openai", "oracle-zai", "research", "ui-qa", "verify"]);

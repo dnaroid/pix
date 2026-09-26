@@ -44,6 +44,9 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    array (including `[]`), and every normalized `modelByParent` entry carries
    its own fallback array. Modern `models` profiles already encode the complete
    ordered candidate chain. `[confirmed by code, config.ts]`
+   All bundled preset pools contain `zai/glm-5.3`; for an Astra parent the
+   strict `oracle-zai` profile resolves to that model in every bundled pool.
+   `[confirmed by agents/presets.jsonc and model-pools.test.ts]`
 8. **Role router / auto-ultrawork classifier**: the role router and the
    `ULTRAWORK_AUTO` classifier both try `routing.model`, then
    `routing.fallbackModels`, then the current parent model, de-duplicating refs
@@ -125,7 +128,340 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Cleanup (`core/cleanup.ts`) / Stop (`core/stop.ts`, `core/process.ts`)
 - `findCleanupCandidates(runRoot, days=7, keep=20)`: only dirs where **all** agents have `exit_code` files, older than `days` by mtime, skipping the newest `keep`. `[confirmed by code]`
 - `deleteRunDirs` = `fs.rmSync(dir,{recursive:true,force:true})`. Cleanup tool refuses paths outside the canonical `.pi/subagents/` prefix and defaults to **dry-run** (needs `delete=true`). `[confirmed by code, tools/cleanup.ts]`
-- `stopAgents`: planned/retrying → writes `stop_requested`/`stop_signal`, removes retry files, writes result.md, `exit_code="stopped"`; running → `terminateProcess(pid, signal)`. POSIX `process.kill`; Windows `taskkill /pid <pid> /T /F`. `validateStopSignal` allows only SIGTERM/SIGINT/SIGKILL. ESRCH handled gracefully. `[confirmed by code]`
+- `stopAgents`: planned/retrying → writes `stop_requested`/`stop_signal`, removes retry files, writes result.md, `exit_code="stopped"`; running → signals the owned process group when `process_group` metadata exists, otherwise `terminateProcess(pid, signal)`. POSIX `process.kill`; Windows `taskkill /pid <pid> /T /F`. `validateStopSignal` allows only SIGTERM/SIGINT/SIGKILL. ESRCH handled gracefully. `[confirmed by code]`
+- With launcher-owned `process_group` metadata, `stopAgents` uses
+  `terminateProcessTree`: POSIX signals the negative Pi PID (its process group),
+  not every descendant. A descendant that starts a separate group/session is
+  outside this boundary and can survive force stop. Graceful child forwarding
+  is not evidence of cleanup after `SIGKILL`. On missing group (`ESRCH`), the
+  helper does not fall back to a potentially reused positive PID.
+  `[confirmed by process.ts/stop.ts and process-topology.test.ts]`
+- `test/async-subagents/process-topology.test.ts` and its
+  `fixtures/process-topology.mjs` characterize this POSIX boundary offline:
+  same-group cleanup, detached survival, graceful forwarding, and an unrelated
+  control process. These are OS-topology fixtures, not real Pi/provider tests
+  or an acceptance claim for Claude cleanup. Detached-provider rollout remains
+  gated on a separately proven lifecycle mechanism; the characterization must
+  not be used to weaken that requirement.
+
+#### Offline G1 ownership prototype (test-only; gate remains open)
+
+`test/async-subagents/ownership-prototype.test.ts`, its bounded cleanup harness,
+and the split
+`fixtures/ownership-{owner,wrapper,guardian,cli}.mjs` model a possible POSIX
+ownership topology, not the installed provider or Pi. A fake Pi owner hosts a
+private Unix socket and authorizes each connection with a per-owner credential.
+A detached-per-request wrapper must authenticate *before* spawning a non-detached
+guardian; that guardian independently authenticates and confirms its own PGID
+membership before declaring ready. Only then can the wrapper launch a fake CLI
+non-detached. The guardian holds a private IPC liveness channel from the wrapper
+and its own owner socket; either EOF/error triggers `SIGKILL` of the captured
+group while the guardian is still a member. Once guardian readiness is verified,
+the wrapper also anchors its own launch-time verified PGID and kills that group
+if the guardian unexpectedly exits or disconnects; this fallback covers guardian
+loss with the fake CLI active. It does not hold provider stdout or stderr handles.
+Wrapper exit follows actual fake CLI root exit, including exit codes 0 and 7
+after explicit completion with a surviving descendant. The socket credential
+and trusted detached-wrapper launch topology are fixture inputs, **not** an assertion that
+arbitrary wrappers or current provider launch/auth support this mechanism.
+
+Deterministic IPC barriers exercise owner death before authorization and with a
+resistant CLI active; wrong credentials fail closed *before spawning*. At an
+unreleased guardian-ready barrier owner death leaves no CLI, but this does not
+prove an atomic owner-death/no-launch guarantee. A separate release-versus-owner-
+SIGKILL race permits transient launch after previously granted authorization and
+checks eventual bounded teardown of any recorded actors. Tests also check direct
+guardian SIGKILL with active resistant CLI and leaf, explicit root completion
+survivor cleanup, concurrent owner/guardian loss, provider-style negative-PGID
+SIGTERM, and isolation between concurrent groups and an unrelated control.
+Assertions observe liveness before
+fixture finally/backstop cleanup. These offline tests do not close G1/T3: the current
+provider's auth preflight is non-detached, its request child is detached, and its
+environment allowlist removes arbitrary transport configuration; integrating
+owner transport and credentials with real Pi/provider, and testing the actual
+provider+Pi matrix, remain unresolved. No runtime behavior changes here.
+`joint-race.test.ts` characterizes a **rejected** terminal-ordering candidate:
+in the fixture's actual CLI `exit` callback, a test-only marker and self-`SIGSTOP`
+preempt the wrapper immediately before its synchronous `process.exit`. With the
+wrapper still live and owning its group, killing the guardian and verifying it
+nonlive before `SIGCONT` lets wrapper exit with the natural CLI code (0 or 7),
+while a resistant leaf is still live before fixture cleanup. An unrelated control
+survives. This demonstrates that separate guardian-loss and natural-completion
+cases do not prove their combined ordering; it is fixture topology evidence,
+not Pi/provider integration. The fixture does not model the provider's follow-up
+cleanup after child exit, so this is not an observed real-provider orphan.
+ACK *after* group `SIGKILL` is not a valid remedy:
+that signal kills wrapper and guardian too. G1/T3 remain blocked pending a
+proven production ownership and terminal-arbitration protocol.
+
+#### macOS native relay experiment (test-only; no production integration)
+
+`test/async-subagents/fixtures/native-ownership.c` and
+`native-ownership.test.ts` exercise a narrower candidate with real macOS
+`fork`/`setpgid`/`waitid`/`waitpid`/signals. Relay A stays outside B's group;
+its direct child B is the group's sentinel and launches fake CLI C and a
+SIGTERM-resistant same-group leaf D. A holds the sole writer of B's private
+liveness pipe. B kills its own group on A EOF; B reports **actual** C wait
+status to A (0 or 7). A never auto-reaps B: even if B dies after reporting,
+`waitid(P_PID, B, ..., WEXITED|WNOHANG|WNOWAIT)` can observe B as a waitable
+zombie before A kills `-B` and finally reaps B. A missing C report after
+readiness fails closed (90), not fabricated success. If B dies before startup
+topology verification, `getpgid(B)` may fail even though C/D already joined
+B's group.
+A checks the unreaped child's exit state, sends `SIGKILL` to **negative** B
+before reaping even on startup failure (never to positive B), then closes its
+private liveness writer so a still-running, pre-group B can create its group
+and self-clean on EOF; startup failure exits 98 after reaping B. A test-only
+pre-ready `SIGSTOP` checkpoint permits B
+to launch C/D before the test kills B into a zombie, then resumes A and
+checks nonzero failure and dead descendants *before* harness cleanup. A
+separate checkpoint after the real C report verifies kernel-stopped A, B's
+zombie, and A's subsequent WNOWAIT evidence before group cleanup; healthy
+completion, B loss before report, and A SIGKILL/pipe EOF remain separate
+cases. A (and C) explicitly restores waitable default SIGCHLD disposition without
+`SA_NOCLDWAIT`. Fixture-local generous watchdogs bound running actors, not a
+basis for passing assertions. They cannot release a SIGSTOP checkpoint if the
+test runner itself is killed; the harness's bounded waits and finally path
+resume checkpoints during ordinary failures. Harness best-effort
+cleanup aggregates errors and verifies recorded topology plus a live member
+before negative group signaling; that ps-to-signal check is non-atomic and is
+**not** production ownership proof. Only A holds the direct-child anchor; the
+harness is not a general process killer. An unrelated control stays isolated.
+
+This only demonstrates a native ownership/terminal-ordering primitive for
+this **single same-group topology**. No Pi binding, provider authentication
+preflight, private transport configuration, provider stdout ownership, or
+timeout/stop matrix exists. Simultaneous A+B SIGKILL and descendants calling
+`setsid`/escaping B's group are not contained. PID-reuse nonoccurrence is not
+proved by finite tests. Related public Apple XNU source supports the anchor:
+[`forkproc` reserves zombie IDs](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_fork.c#L975-L978),
+[`WNOWAIT` skips reaping](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_exit.c#L3244-L3249),
+and [reaping leaves the group and removes the PID hash entry](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_exit.c#L2806-L2823).
+Group signaling targets eligible live members, not the zombie leader itself.
+This public `xnu-10063.141.1` source is related to, but not an exact verified
+match for, the test host's `xnu-10063.141.1.712.16~1` build; it is not a blanket
+guarantee across macOS releases. A must stay alive and retain its waitable child.
+This does **not** close G1/T3 or change runtime code.
+
+#### Zombie-member PGID discriminator (test-only; macOS host observation)
+
+`test/async-subagents/zombie-member-pgid.test.ts` compiles the standalone
+`fixtures/zombie-member-pgid.c` with warnings as errors. The test binary Q
+forks detached/session-leader A. A forks K; K moves to its own group **in A's
+session** and forks Z. Z joins A's group, acknowledges its group/session, and
+exits; K proves Z is its direct waitable child with `waitid(WNOWAIT)` and holds
+it unreaped. A relays that private-pipe topology and exits; Q positively
+`waitpid`-reaps A **before** attempting negative-A **signal 0 only**. Q
+records its exact return/errno, K's liveness, and K's second WNOWAIT status
+7 before K reaps Z. Completion-pipe EOF confirms K closed that descriptor
+after its report; Q exit or owner-pipe closure alone would not prove K reaped
+Z. An early-stdin-EOF case retains Z through the probe. Native watchdogs
+limit K's lifetime independently of Q: this topology does **not** guarantee
+that the captured number still identifies A's group at probe time. No
+SIGTERM/SIGKILL probe is safe here. The JS runner observes stdin errors and
+write/end callbacks, bounds both the initial wait and independent final close,
+and retains the fixture directory if either Q close or K completion cannot be
+confirmed. It may signal
+only its owned direct Q child as a backstop, never a recorded PID/group. This
+remains an OS fixture, not a provider test.
+
+On the tested macOS host, the verified topology was A group/session A,
+K group K/session A, Z group A/session A; both Z wait observations reported
+exit status 7. An **earlier exploratory** run observed `-1`, `errno=1`
+(`EPERM`) for signal 0, SIGTERM, and SIGKILL after A's reap; those destructive
+observations are historical only and are **not** retained regression probes.
+The safe regression checks **only signal 0** returning `-1`, `errno=1` (Darwin
+EPERM), alongside the second WNOWAIT status 7 and K's completion EOF. The
+measured result is **EPERM**, not the hypothesized ESRCH. Separately, source
+inspection of the unchanged 0.5.0 snapshot's `src/process-utils.ts` shows that
+`waitForProcessGroupExit` treats signal-0 EPERM as possible continued existence,
+not successful disappearance; `terminateProcessGroup` rejects TERM/KILL EPERM
+as a cleanup error. The native test does not invoke that provider function.
+Thus the proposed zombie-only-group-as-ESRCH handshake is not supported on
+this host. This neither proves safe provider cleanup nor contains escaped
+descendants or arbitrary joint failures, and is not a proof that every
+integration-only design is impossible. G1/T3 remain blocked; runtime/provider
+behavior is unchanged.
+
+#### Session-only anchor discriminator (test-only; macOS host observation)
+
+`test/async-subagents/session-only-anchor.test.ts` compiles
+`fixtures/session-only-anchor.c` with warnings as errors. Unlike the rejected
+zombie-member experiment, **no member remains in A's process group**: A creates
+a session, forks K, and K moves to PGID K while retaining SID A. After K's
+private readiness acknowledgement, A exits and native Q positively reaps A.
+Q checks `getsid(K) == A` and probes **only** `kill(-A, 0)`. Both explicit
+release and early runner-input EOF cases observe `-1`, `errno=3` (Darwin
+`ESRCH`), followed by K's completion report with SID A and completion-pipe EOF.
+Runner EOF is forwarded only after the probe. No destructive signal targets a
+recorded PID/group. The runner reuses the bounded stdin/close/retention helper;
+its only termination backstop targets its owned direct Q child. Native
+watchdogs bound the experiment but can release K independently of Q, so this
+is a finite topology observation, not an indefinite identity guarantee.
+
+The related public XNU commit linked above supports the narrower identity
+argument while the session reference remains:
+[new groups retain their existing session](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_proc.c#L2505-L2568),
+[leader exit clears the leader pointer](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_exit.c#L2340-L2348),
+and [final session release removes its hash entry](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_proc.c#L2369-L2400).
+PID allocation excludes session-hash IDs. Additionally,
+[`setpgid` requires an existing group when the requested PGID differs from the target PID](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_prot.c#L614-L630).
+Thus a retained SID A can reserve the number without leaving a zombie-only
+PGID A that produces EPERM. This is not an exact host-source match or a proof
+across all macOS releases.
+
+**Remaining ownership gap:** in actual integration, Pi **P** spawns wrapper
+**A**, which forks **K**. An external Q that owns P does not thereby acquire
+wait/reap ownership of A or K. K is not Q's direct waitable child; after A
+exits, unexpected K loss and subsequent reap can release the
+session before P's delayed negative-A signal. A private registration socket,
+PID polling, or releasing K only after P exits does not itself prevent K's
+earlier death. The test does not bind K to actual Pi, prove safe keeper loss,
+or exercise provider force/timeout/concurrency. G1/T3 remain blocked; this
+positive discriminator is not lifecycle acceptance or a runtime change.
+
+**Read-only ptrace follow-up:** XNU's
+[`PT_ATTACH` path](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/mach_process.c#L241-L300)
+can reparent K to tracer P after authorization, but identifies the target by
+numeric PID. `PT_TRACE_ME` instead uses the caller's current parent: K cannot
+use it to select grandparent P. Registration followed by attach alone is
+unsafe if A and K both disappear and K is reaped before the attach. Neither
+socket registration nor checking identity immediately before attach makes
+that lookup atomic. No ptrace call or actual PID-reuse attack was executed.
+
+The inspected host Node v26.7.0 reports libuv 1.52.1 and links Homebrew libuv.
+Matching upstream libuv
+[`uv__wait_children`](https://github.com/libuv/libuv/blob/1cfa32ff59c076ffb6ed735bbc8c18361558661f/src/unix/process.c#L101-L148)
+iterates registered process handles and calls `waitpid(process->pid, ...)`,
+not `waitpid(-1, ...)`; the kqueue branch registers `NOTE_EXIT` per spawned
+child. This removes a source-level objection that this loop necessarily reaps
+an unknown attached K. It is not a binary-equivalence or actual-Pi retention
+test, nor proof of all signal dispositions, other reapers, attach permission,
+or safe native integration.
+
+A narrower, **unimplemented** single-loss protocol would keep A alive and K
+waitable until P acknowledges attachment, with no K watchdog/EOF exit while P
+may still attach. K loss alone then leaves A retaining its PID; A loss alone
+requires K to remain alive. Joint A+K loss before attachment remains outside
+that argument. Observing P exit without signaling a numeric PID is a separate
+unproved startup/cleanup requirement; registration failure cannot silently
+release K or turn a leaked keeper into success. This hypothesis does not
+authorize reducing G1/T3's required failure coverage.
+
+#### Actual Pi/provider offline contract (test-only; not native relay integration)
+
+`test/async-subagents/provider-offline.test.ts` launches the installed **Pi
+0.87.1 CLI** through Node in RPC mode, explicitly loading the unchanged local
+`pi-claude-code-provider` **0.5.0 snapshot** extension entrypoint. The test
+requires `PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT=/absolute/local/snapshot` (the
+investigated unpacked `/tmp/package` is a baseline, **not an approved pin**).
+Unset means these external-snapshot cases skip; a requested absent, malformed,
+or hash-mismatched snapshot fails. The private staging helper copies the
+package manifest, `src`, `extensions`, and `bridge`, verifies SHA-256 of every
+copied source against the source and records a private snapshot manifest. Two
+known source hashes gate the investigated process/cleanup implementation.
+Local Pi peer dependencies are symlinked without installing or fetching.
+
+Each run has a fresh private HOME, agent directory, cwd, settings and temp root.
+The Node executable is resolved locally from the runner executable or PATH,
+then probed with a bounded subprocess under a minimal environment (not inherited
+`NODE_OPTIONS`); PATH is used only for locating candidates. Pi gets only explicit
+whitelisted environment variables; no real auth, project
+config, inherited extension discovery, provider web search, tools, context
+files, skills, templates, themes, model defaults, telemetry or online catalog
+refresh. The provider's **existing** `PI_CLAUDE_CODE_PROVIDER_PATH` points to
+the executable test fake: its captures show `--version`, `auth status`, and
+`--help` all ran against that fake. The fixture advertises a synthetic eligible
+subscription and produces a synthetic initialized Claude stream; it never
+authenticates, calls Claude, starts a network connection or spawns descendants.
+Pi's correlated RPC state/model responses establish real registration and
+explicit model selection. The fake's captured argv and JSONL stdin establish
+provider launch flags, empty MCP catalog, disabled tools, and input framing.
+Pi's actual RPC final message completes successfully for fake exit 0 and
+**fails** (stopReason `error`, not success) for fake exit 7 even after a
+synthetic successful result; Pi RPC itself can still exit 0.
+Pi RPC uses observed stdin writes/errors and bounded response waits. Its close
+is confirmed before removing the private workdir even on failure; the fake
+records per-launch nonce/PID start and synchronous exit markers and has its own
+independent watchdog. Cleanup requires the four expected launch markers plus
+exit markers and signal-0 absence checks, not a fixed startup delay or an empty
+directory. An early Pi failure before all four launches conservatively retains
+the workdir. Missing exit evidence also retains it and reports an explicit
+cleanup failure. No recorded PID receives a termination signal; PID reuse can
+cause conservative retention, not termination of its new owner. The fixture
+starts no descendants. These safeguards depend on this fixed fake-only launch
+contract; they are not production ownership or a general arbitrary-launch proof.
+
+A separate spy-only call to this same snapshot's exported
+`terminateProcessGroup` confirms that it first attempts `SIGTERM` on a
+negative PGID even when the supplied ChildProcess already has `exitCode=0`.
+No real OS signal is sent. In the provider's success path,
+`supervisor.wait()` and stdout drain precede `running.terminate()` and only
+then does exit/result validation publish success (`src/provider.ts`). This
+creates a **new unresolved A post-exit PGID identity question**: with the
+actual unmodified provider and native relay A outside B's group, Pi observes
+A's exit before cleanup, so A may already have been reaped by Pi when provider
+cleanup signals `-A`. Retaining B anchors B's identity, not A's former PGID.
+A successful spy call is **not** an
+actual PID-reuse counterexample, and these tests do not show a real misdirected
+signal. Resolve ordering/identity against the actual relay boundary, not by
+claiming B's zombie anchor automatically protects A's former PGID. This baseline
+harness proves no A/B binding or owner-death/force/timeout/concurrency contract;
+the isolated patch experiments below are separate. G1/T3 remain blocked; no
+installed provider or production runtime has been changed.
+
+#### Isolated offline provider relay patch (test-only)
+
+`provider-native-patch.ts` copies the adapter into a hash-checked private
+provider snapshot; neither `/tmp/package` nor any installed extension is
+modified. macOS-only `provider-native-patched.test.ts` exercises actual Pi RPC
+fake exits 0/7 and a compiled `-Werror` A/B/C relay against the staged
+provider: C natural 0/7, a resistant leaf, private-control EOF, direct A loss,
+joint control/A loss, B loss, idle/total timeout and concurrent cancellation.
+P spawns non-detached A with a private control pipe, so ordinary provider stdin
+completion is not cancellation. A retains its direct child B unreaped through
+negative-B group cleanup; B monitors A-only liveness and self-kills its own group
+on EOF. C closes inherited private descriptors before exec. Provider termination
+closes control and validates receipt/close rather than signaling A's recorded PID
+or former group after Node reaps it. A receipt records successful group signaling
+and B reaping, not an atomic observation that every descendant has disappeared;
+the lifecycle cases additionally observe their known actors before teardown.
+The staged spawn preserves both `stdin: "pipe"` and `stdin: "ignore"`; the
+ignored-stdin regression also completes with validated cleanup.
+Checkpoints include abort before B readiness (which can fail without a relay
+receipt and must retain `livenessUnknown`) and a C status observed by A while
+its direct waitable B remains held before B is killed. A's test-only fault
+commands target only that direct waitable child; injected post-cleanup failure
+returns `FAILED:98`, never `CLEAN:98`, and an omitted receipt is also rejected.
+The adapter consumes receipt/errors immediately with a 64-byte buffer limit,
+checks stream/control/child close errors and requires an exact `CLEAN:<exit>`
+receipt. The separate staged adapter test covers early stream error, oversized
+input, control EPIPE and close without end. Harness waits and finalization are
+bounded by wall-clock deadlines; incomplete cleanup preserves its workdir.
+
+`provider-native-owner-loss.test.ts` separately starts installed Pi RPC with the
+isolated patch and `fixtures/provider-owner-loss-cli.mjs`, waits for an active
+request and resistant leaf in B's group, then SIGKILLs only its directly owned
+Pi child. Both actors must be observed dead before test cleanup and before their
+independent watchdog deadlines. Failed process observation is an error, not proof
+of absence. This proves that single-Pi-death case with A retained, not Pi-group
+force, simultaneous A/B loss, escaped groups or production ownership. G1/T3
+remain blocked. No runtime rollout, install, auth inspection or live Claude call
+follows from these results.
+
+`provider-native-boundaries.test.ts` characterizes two remaining counterexamples
+with `fixtures/provider-boundary-cli.mjs`. In a private compiled relay copy,
+the joint-loss checkpoint kills A's direct waitable B and holds A before its
+group cleanup; the harness then kills its directly owned A. Same-group C and
+its leaf remain alive and adapter termination rejects. Separately, a detached
+leaf in a different group remains alive after normal C exit and a validated
+`CLEAN` receipt. This is an ordered joint-loss counterexample, not a claim that
+two signals execute atomically. Neither case asserts that real Claude exhibits
+these fixture behaviors. Survivors are observed before watchdog expiry and
+before test-owned socket EOF cleanup; known actors must then be observed dead.
+No saved descendant PID/PGID is signaled by test teardown. These passing
+characterization tests confirm limitations, not G1/T3 acceptance or a general
+macOS impossibility result.
 
 ### Structured results (`core/structured-result.ts`) / Log limits (`core/log-limits.ts`)
 - On completion writes `result.json` (summary, findings, file refs, risks, next actions, confidence); `resultText` truncated at `maxResultBytes` (default 100KB); `result.md` is always full. `[confirmed by code]`

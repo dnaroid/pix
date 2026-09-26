@@ -120,7 +120,9 @@ a selection policy, not a security boundary against explicit overrides.
 Use `/subagent-preset <name>`, `AGENTS_PRESET=<name>` or
 `/subagent-preset session <name>`. Clearing the preset uses agent priorities
 without a pool filter. The shipped names remain compatible with saved choices:
-`cheap` is the GLM pool, `gpt` the GPT pool, and `deep` the mixed pool. The last
+`cheap` is the GLM pool, `gpt` has GPT workers plus GLM-5.3 for the strict
+`oracle-zai` role, and `deep` is the mixed pool. All bundled pools contain
+GLM-5.3, so an Astra parent can select `oracle-zai` in any of them. The last
 name no longer means that ordinary workers should escalate to flagship models.
 Bundled definitions live beside the built-in agents in
 `src/async-subagents/agents/presets.jsonc`; a project file with the same preset

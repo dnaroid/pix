@@ -14,8 +14,9 @@ export function terminateProcess(pid: number, signal: ProcessSignal): void {
 	process.kill(pid, signal);
 }
 
-/** Signal a launcher-owned process tree. POSIX callers must create the child as
- * a process-group leader before using this helper. */
+/** Signal a launcher-owned process group on POSIX (a process tree on Windows).
+ * POSIX callers must create the child as a process-group leader. Descendants
+ * that create their own group/session are NOT covered by this helper. */
 export function terminateProcessTree(pid: number, signal: ProcessSignal): void {
 	if (process.platform === "win32") {
 		terminateProcess(pid, signal);

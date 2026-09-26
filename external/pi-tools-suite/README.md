@@ -787,6 +787,7 @@ with `/subagent-preset`; use `AGENTS_PRESET=<name>` or
 `~/.pi/agent/subagent-preset-selection.json`. `/subagent-preset path` shows the
 bundled and project preset paths. The shipped pools are `cheap` (GLM), `gpt`,
 and `deep` (the retained legacy name for the mixed pool, not worker escalation).
+The `gpt` pool also includes GLM-5.3 so `oracle-zai` can run for an Astra parent.
 Agent descriptions, instructions, model order, thinking, tools, retry, and
 timeouts remain in agent Markdown; selecting a pool never changes them.
 
