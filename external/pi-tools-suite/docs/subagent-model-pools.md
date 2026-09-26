@@ -57,7 +57,7 @@ for initial selection and subsequent quota fallbacks:
 ---
 description: Make bounded implementation changes.
 models:
-  - zai/glm-5.3-flash
+  - zai/glm-5.3
   - openai-codex/gpt-6-sol
 thinking: high
 ---
