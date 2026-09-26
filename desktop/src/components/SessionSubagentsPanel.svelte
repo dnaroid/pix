@@ -89,6 +89,7 @@
               {#each run.agents as agent (`${run.runDir}\0${agent.id}`)}
                 {@const preview = sessionSubagentTaskPreview(run, agent.id)}
                 {@const task = preview?.task?.trim() || preview?.scope?.trim() || "Task unavailable"}
+                {@const role = preview?.subagentType?.trim()}
                 {@const AgentIcon = agentIcon(preview?.icon)}
                 <article
                   class={[
@@ -97,15 +98,17 @@
                       ? "border-l-primary bg-panel-selected"
                       : "border-l-transparent",
                   ]}
-                  aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}
+                  aria-label={`Subagent ${agent.id}${role ? ` (${role})` : ""}: ${statusLabel(agent.status)}`}
                 >
                   <div class="flex min-w-0 items-start gap-2">
-                    <span class={["mt-px shrink-0", statusTone(agent.status)]} title={`Agent type: ${preview?.icon?.trim() || "agent"} · ${statusLabel(agent.status)}`}>
+                    <span class={["mt-px shrink-0", statusTone(agent.status)]} title={`${role ? `Role: ${role}` : "Agent"} · ${statusLabel(agent.status)}`}>
                       <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
                     </span>
                     <div class="min-w-0 flex-1">
                       <div class="flex min-w-0 items-center gap-2">
-                        <h4 class="min-w-0 flex-1 truncate font-mono text-xs font-semibold leading-4 text-foreground" title={agent.id}>{agent.id}</h4>
+                        <h4 class="min-w-0 flex-1 truncate font-mono text-xs font-semibold leading-4 text-foreground" title={role ? `${agent.id} (${role})` : agent.id}>
+                          {agent.id}{role ? ` (${role})` : ""}
+                        </h4>
                         <span class={["shrink-0 text-xs font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
                         <span class="shrink-0 font-mono text-xs text-muted-foreground">{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                       </div>

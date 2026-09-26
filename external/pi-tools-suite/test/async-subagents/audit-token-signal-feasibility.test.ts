@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-test("macOS audit-token signal rejects stale generation and delivers to own waitable child", () => {
-  if (process.platform !== "darwin") return;
+test.skipIf(process.platform !== "darwin")("macOS audit-token signal rejects stale generation and delivers to own waitable child", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-audit-signal-"));
   try {
     const binary = join(dir, "probe");
@@ -19,4 +18,4 @@ test("macOS audit-token signal rejects stale generation and delivers to own wait
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}, 40_000);

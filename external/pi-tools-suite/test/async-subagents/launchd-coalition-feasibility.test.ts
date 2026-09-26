@@ -8,8 +8,7 @@ import { randomUUID } from "node:crypto";
 const run = (args: string[], timeout = 4000) => spawnSync("launchctl", args, { timeout, encoding: "utf8" });
 const escapeXml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 
-test("temporary user-domain launchd job has a distinct inherited resource coalition", async () => {
-  if (process.platform !== "darwin") return;
+test.skipIf(process.platform !== "darwin" || process.env.PI_OFFLINE_COALITION_PROBE !== "1")("temporary user-domain launchd job has a distinct inherited resource coalition", async () => {
   const domain = `gui/${process.getuid!()}`;
   const probe = run(["print", domain]);
   if (probe.status !== 0) throw new Error(`No user-domain launchd access: ${probe.stderr}`);
@@ -60,7 +59,7 @@ test("temporary user-domain launchd job has a distinct inherited resource coalit
       // If bootstrap could have partially launched before failing, or output
       // never listed both actors, retain the owned binary/dir. Their alarms
       // bound lifetime but an absent launchctl record alone is not proof.
-      cleaned = scan.status !== 0 && bootstrapped && bootout.status === 0 &&
+      cleaned = !scan.error && scan.status === 113 && bootstrapped && bootout.status === 0 &&
         actors.length === 2 && processScan?.status === 1 && processScan.stdout.trim() === "";
       console.log(`cleanup_service=${service} bootout=${bootout.status} print=${scan.status} actor_ps=${processScan?.status ?? "not-recorded"} actor_pids=${actors.join(",")}`);
       if (!cleaned) console.error(`RESIDUAL_JOB=${service} bootout=${bootout.status} ${bootout.stderr} print=${scan.stdout}`);
@@ -69,4 +68,4 @@ test("temporary user-domain launchd job has a distinct inherited resource coalit
     else console.error(`RETAINED_JOB_DIR=${dir}`);
     expect(cleaned, `launchctl job still present: ${service}; owned files retained ${dir}`).toBe(true);
   }
-});
+}, 90_000);

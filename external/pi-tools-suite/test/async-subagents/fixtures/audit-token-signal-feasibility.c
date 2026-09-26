@@ -67,16 +67,26 @@ int main(void) {
   errno = 0;
   int negative = proc_signal_with_audittoken(&wrong, SIGUSR1);
   int negative_errno = errno;
-  if (waitpid(child, &status, WNOHANG) != 0) { result = 15; goto cleanup; }
+  pid_t observed = waitpid(child, &status, WNOHANG);
+  if (observed != 0) {
+    // A completed wait releases identity; ECHILD likewise gives no ownership proof.
+    if (observed == child || (observed < 0 && errno == ECHILD)) child = -1;
+    result = 15;
+    goto cleanup;
+  }
   errno = 0;
   int positive = proc_signal_with_audittoken(&exact, SIGUSR1);
   int positive_errno = errno;
-  if (waitpid(child, &status, 0) != child) { result = 16; goto cleanup; }
+  if (waitpid(child, &status, 0) != child) {
+    if (errno == ECHILD) child = -1;
+    result = 16;
+    goto cleanup;
+  }
   child = -1; // positively reaped: never signal this numeric PID again
   printf("pid_version=%d mismatch_return=%d mismatch_errno=%d exact_return=%d exact_errno=%d exit_signal=%d\n",
          audit_token_to_pidversion(exact), negative, negative_errno, positive,
          positive_errno, WIFSIGNALED(status) ? WTERMSIG(status) : 0);
-  if (negative == 0 || positive != 0 || !WIFSIGNALED(status) || WTERMSIG(status) != SIGUSR1)
+  if (negative != ESRCH || positive != 0 || !WIFSIGNALED(status) || WTERMSIG(status) != SIGUSR1)
     result = 17;
 cleanup:
   close(pipefd[0]);

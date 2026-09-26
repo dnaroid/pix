@@ -70,6 +70,7 @@ export function isSubagentTaskPreview(value: unknown): value is SubagentTaskPrev
 	if (typeof value.id !== "string" || !value.id.trim()) return false;
 	if (value.task !== undefined && typeof value.task !== "string") return false;
 	if (value.scope !== undefined && typeof value.scope !== "string") return false;
+	if (value.subagentType !== undefined && typeof value.subagentType !== "string") return false;
 	if (value.model !== undefined && typeof value.model !== "string") return false;
 	if (value.thinking !== undefined && typeof value.thinking !== "string") return false;
 	if (value.thinkingLevel !== undefined && typeof value.thinkingLevel !== "string") return false;

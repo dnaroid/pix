@@ -28,6 +28,7 @@ export interface SessionSubagentTaskPreview {
   readonly id: string;
   readonly task?: string;
   readonly scope?: string;
+  readonly subagentType?: string;
   readonly model?: string;
   /** Agent icon name from the subagentType profile; resolved via agent-icons. */
   readonly icon?: string;
@@ -203,6 +204,7 @@ function isSessionSubagentTaskPreview(value: unknown): value is SessionSubagentT
   if (!isRecord(value) || typeof value.id !== "string" || !value.id.trim()) return false;
   if (value.task !== undefined && typeof value.task !== "string") return false;
   if (value.scope !== undefined && typeof value.scope !== "string") return false;
+  if (value.subagentType !== undefined && typeof value.subagentType !== "string") return false;
   if (value.model !== undefined && typeof value.model !== "string") return false;
   return value.icon === undefined || typeof value.icon === "string";
 }

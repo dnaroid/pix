@@ -32,9 +32,10 @@ describe("subagent model icons", () => {
 		assert.equal(subagentIcon({ id: "a", icon: "  " }), APP_ICONS.agent);
 	});
 
-	it("accepts the icon field in task previews", () => {
-		assert.equal(isSubagentTaskPreview({ id: "a", icon: "wrench" }), true);
+	it("accepts role and icon fields in task previews", () => {
+		assert.equal(isSubagentTaskPreview({ id: "a", subagentType: "implement", icon: "wrench" }), true);
 		assert.equal(isSubagentTaskPreview({ id: "a", icon: "" }), true);
+		assert.equal(isSubagentTaskPreview({ id: "a", subagentType: 3 }), false);
 		assert.equal(isSubagentTaskPreview({ id: "a", icon: 3 }), false);
 	});
 });

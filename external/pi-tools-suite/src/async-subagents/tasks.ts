@@ -115,6 +115,7 @@ export function toTaskPreviews(tasks: AgentTask[]): AgentTaskPreview[] {
 		id: task.id,
 		task: task.task,
 		scope: task.scope ? truncate(task.scope, 80) : undefined,
+		subagentType: task.subagentType,
 		model: task.model,
 	}));
 }

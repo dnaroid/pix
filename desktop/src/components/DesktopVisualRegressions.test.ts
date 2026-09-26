@@ -164,9 +164,16 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain('data-session-activity-summary');
     expect(sessionActivityStatusHudSource).toContain('data-session-subagent-tooltip');
     expect(sessionActivityStatusHudSource).toContain('data-session-todo-tooltip');
+    expect(sessionActivityStatusHudSource).toContain('data-session-subagent-tooltip-body');
+    expect(sessionActivityStatusHudSource).toContain('data-session-todo-tooltip-body');
+    expect(sessionActivityStatusHudSource.match(/max-h-\[min\(40vh,18rem\)\] overflow-y-auto overscroll-contain/g)).toHaveLength(2);
+    expect(sessionActivityStatusHudSource.match(/pointer-events-auto absolute right-0 bottom-full/g)).toHaveLength(2);
     expect(sessionActivityStatusHudSource).toContain("group-hover:block group-focus-within:block");
     expect(sessionActivityStatusHudSource).toContain("formatSessionSubagentElapsed");
     expect(sessionActivityStatusHudSource).toContain("sessionSubagentModelLabel");
+    expect(sessionActivityStatusHudSource).toContain("indicator.preview?.subagentType?.trim()");
+    expect(sessionActivityStatusHudSource).toContain('{indicator.agent.id}{role ? ` (${role})` : ""}');
+    expect(sessionSubagentsSource).toContain('{agent.id}{role ? ` (${role})` : ""}');
     expect(sessionActivityStatusHudSource).toContain("currentTodo.activeForm");
     expect(sessionActivityStatusHudSource).toContain("currentTodo.blockedBy");
     expect(sessionActivityStatusHudSource).toContain("{summary.completedTodos}/{summary.totalTodos}");

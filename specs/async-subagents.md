@@ -485,7 +485,8 @@ child waitable and running; the exact original token returned **0**, and
 signals an unrelated PID; its failure backstop targets only its still-unreaped
 direct child. This observes host behavior, not guaranteed future SPI stability.
 
-`launchd-coalition-feasibility.test.ts` separately compiles
+`launchd-coalition-feasibility.test.ts` requires explicit opt-in
+`PI_OFFLINE_COALITION_PROBE=1` on macOS and separately compiles
 `fixtures/launchd-coalition-feasibility.c`. The private
 `PROC_PIDCOALITIONINFO` flavor/struct and resource coalition index are copied
 from [Apple XNU `proc_info_private.h`](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/sys/proc_info_private.h#L65-L70)
@@ -503,6 +504,9 @@ that `launchctl print` no longer finds it, and probes only the two recorded
 job PIDs with `ps` (never signals them). In the passing run bootout returned
 0, print returned 113, and the recorded PID scan returned 1 (no matches).
 Missing identities or ambiguous cleanup retain owned files and fail closed.
+The test deadline exceeds the sum of command/poll deadlines, leaving margin
+for `finally` cleanup; registration ambiguity after a timed-out bootstrap is
+reported, not converted into a cleanup guarantee.
 Neither finite scan proves perpetual PID non-reuse or automatic descendant
 cleanup when both owner and helper disappear.
 
@@ -511,6 +515,80 @@ member enumeration/signaling, no provider/Pi integration, no proof that
 launchd automatically cleans descendants on joint owner/helper death, no
 guarantee of a surviving enumerator, and no tested force/timeout/race matrix.
 G1/T3 remain blocked. Existing relays and runtime are unchanged.
+
+#### Independent recovery after joint owner loss (offline, cooperating actors only)
+
+`external/pi-tools-suite/test/async-subagents/recovery-owner-loss-feasibility.test.ts`
+and `fixtures/recovery-actors.c` / `fixtures/recovery-supervisor.c` extend the
+feasibility family with opt-in `PI_OFFLINE_COALITION_PROBE=1` on macOS.
+The harness owns fake app A; A owns a direct waitable helper B; B forks C,
+which calls `setsid()` and execs. A separate UUID-labelled, one-shot launchd
+job R is started before owner loss, outside the A/B lineage. No persistent
+LaunchAgent or provider is installed.
+
+A kills and reaps B, then the harness explicitly SIGKILLs its directly owned
+A and confirms its signal exit. This is ordered joint loss, not an atomic
+simultaneous kill. Before opening the recovery gate, the harness observes C
+running (not a zombie), in a separate process group and reparented to PID 1.
+R loads the actors' pre-loss checkpoint files, probes authentic audit tokens
+for A/B absence and C liveness, then sends C an exact-generation SIGKILL.
+R's atomic receipt must report successful delivery and subsequent ESRCH;
+the harness separately observes C absent, before `finally` cleanup and with
+more than five seconds remaining before C's independent 25s watchdog.
+
+On the recovery experiment's macOS 14.8.7 host, signum 0 was rejected with
+EINVAL by `proc_signal_with_audittoken`. Thus these **cooperating fixtures
+ignore SIGUSR1**, which R uses for generation-bound liveness probes. This is
+not a harmless probe for arbitrary processes. R never fabricates a future
+generation for the orphan C: if C died unexpectedly, such a token might
+target a reused PID. The earlier direct-waitable-child test separately covers
+wrong-generation rejection while retaining the child's identity.
+
+Native actors have bounded alarms; R has a 15s backstop. Temporary job cleanup
+bootouts only the exact UUID service and checks its absence plus recorded
+R/C PID absence. Process-observation errors are not evidence of death;
+ambiguous cleanup retains the owned files and fails. Alarms are failure
+backstops, not evidence of successful recovery.
+
+This baseline case proves a **surviving independent recovery owner can clean one known,
+cooperating escaped descendant**. The baseline does not use coalition enumeration or
+demonstrate discovery of noncooperating descendants, concurrent-fork drain,
+restart/loss of R, durable recovery across reboot, private-API portability,
+or real Pi/provider integration. G1/T3 remain blocked; runtime is unchanged.
+
+##### Restart variant: fresh R2 rebuilds the target after R1 is killed pre-cleanup
+
+The same files add a second opt-in case covering restart/loss of the recovery
+owner itself. R1 is bootstrapped first and, after confirming A/B loss through
+its own stale-token probes, writes an `owner-loss-<gen>` marker and parks on a
+generation gate the harness never opens, so it structurally cannot reach
+cleanup code. The harness then SIGKILLs R1 through exact UUID job control
+(`launchctl kill SIGKILL` of R1's exact service; never a saved numeric PID),
+requires R1's recorded PID to be ps-absent (existence only), and checks
+launchd's recorded last terminating signal is 9. Only then does it boot out
+the service and require `launchctl print` to miss it. C must still be alive
+and `receipt-a.json` absent after R1's removal. Gate timeout still writes a
+failure receipt; neither timeout nor the alarm(15) can substitute for the
+asserted SIGKILL termination.
+
+A fresh R2 — a new UUID-labelled one-shot job with a distinct generation
+suffix on its supervisor artifacts — then rebuilds A/B/C identity solely from the
+persisted pre-loss checkpoint files (token/PID/PID-version still validated
+against each other by the libbsm accessors), reports ESRCH for A and B, and,
+after its own gate, performs the same exact-token liveness probe, SIGKILL, and
+ESRCH confirmation on C. Its receipt and an independent ps absence check must
+both land over five seconds before C's watchdog and before `finally`. Distinct generation file
+names prevent R1/R2 artifact collisions; R2 reads no R1 receipt or checkpoint
+and has no channel to R1's memory.
+
+Deliberately not exercised: the post-kill/pre-receipt idempotent restart (R1
+dying after killing C but before writing its receipt). This needs a separate
+checkpoint and acceptance contract; currently R2 rejects a dead target
+(liveness probe ESRCH → fail receipt, no SIGKILL), rather than treating an
+already-absent target as successful idempotent recovery. All earlier
+caveats still apply: cooperating SIGUSR1 probes only, no discovery of
+noncooperating descendants, no reboot or general containment claim, watchdogs
+are failure backstops rather than proof, and G1/T3 remain blocked.
 
 ### Structured results (`core/structured-result.ts`) / Log limits (`core/log-limits.ts`)
 - On completion writes `result.json` (summary, findings, file refs, risks, next actions, confidence); `resultText` truncated at `maxResultBytes` (default 100KB); `result.md` is always full. `[confirmed by code]`

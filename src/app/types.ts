@@ -160,6 +160,7 @@ export type SubagentTaskPreview = {
 	id: string;
 	task?: string;
 	scope?: string;
+	subagentType?: string;
 	model?: string;
 	thinking?: string;
 	thinkingLevel?: string;

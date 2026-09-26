@@ -39,7 +39,7 @@ describe("desktop session subagents", () => {
         pid: 42,
         lastActivity: { label: "Grep", at: "2026-01-01T00:01:02Z" },
       }],
-      tasks: [{ id: "review", task: "Review transport", model: "openai/gpt-5" }],
+      tasks: [{ id: "review", task: "Review transport", subagentType: "frontier-review", model: "openai/gpt-5" }],
     }]);
     expect(sessionSubagentSnapshot(notification(valid))).toEqual(valid);
     expect(sessionSubagentSnapshot(notification(valid, "other"))).toBeUndefined();
@@ -85,14 +85,14 @@ describe("desktop session subagents", () => {
     expect(sessionSubagentModelLabel(preview)).toBe("model-a");
   });
 
-  it("accepts the icon field on task previews and rejects non-string icons", () => {
+  it("accepts role and icon fields on task previews and rejects invalid metadata", () => {
     const valid = snapshot([{
       runDir: "/run",
       agents: [{ id: "agent-1", status: "running" }],
-      tasks: [{ id: "agent-1", task: "Inspect API", icon: "search" }],
+      tasks: [{ id: "agent-1", task: "Inspect API", subagentType: "research", icon: "search" }],
     }]);
     expect(sessionSubagentSnapshot(notification(valid))).toEqual(valid);
-    expect(sessionSubagentTaskPreview(visibleSessionSubagentRuns(valid)[0]!, "agent-1")?.icon).toBe("search");
+    expect(sessionSubagentTaskPreview(visibleSessionSubagentRuns(valid)[0]!, "agent-1")).toMatchObject({ subagentType: "research", icon: "search" });
 
     const invalid = snapshot([{
       runDir: "/run",
@@ -100,6 +100,13 @@ describe("desktop session subagents", () => {
       tasks: [{ id: "agent-1", icon: 7 } as unknown as { id: string; icon: string }],
     }]);
     expect(sessionSubagentSnapshot(notification(invalid))).toBeUndefined();
+
+    const invalidRole = snapshot([{
+      runDir: "/run",
+      agents: [{ id: "agent-1", status: "running" }],
+      tasks: [{ id: "agent-1", subagentType: 7 } as unknown as { id: string; subagentType: string }],
+    }]);
+    expect(sessionSubagentSnapshot(notification(invalidRole))).toBeUndefined();
   });
 
   it("collects one icon slot for every active agent", () => {
