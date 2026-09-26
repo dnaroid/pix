@@ -4,6 +4,7 @@ import DesktopSidebar from "../components/DesktopSidebar.svelte";
 import ProjectSwitcher from "../components/ProjectSwitcher.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createGitAssist } from "./git-assist";
+import type { createGitCiStore } from "./git-ci.svelte";
 import type { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { createPreviewStore } from "./preview.svelte";
 import type { createProjectActions } from "./project-actions.svelte";
@@ -32,6 +33,7 @@ export function createDesktopSidebarViewModel(options: {
   projectDocuments: ReturnType<typeof createProjectDocumentsStore>;
   registry: ReturnType<typeof createRegistryStore>;
   git: ReturnType<typeof createGitWorkspaceStore>;
+  gitCi: ReturnType<typeof createGitCiStore>;
   gitAssist: ReturnType<typeof createGitAssist>;
   preview: ReturnType<typeof createPreviewStore>;
   attachments: ReturnType<typeof createAttachmentDraftController>;
@@ -93,6 +95,18 @@ export function createDesktopSidebarViewModel(options: {
     gitError: options.git.error,
     gitActionId: options.git.actionId,
     gitLlmActionId: options.git.llmActionId,
+    gitCi: {
+      snapshot: options.gitCi.snapshot,
+      loading: options.gitCi.loading,
+      error: options.gitCi.error,
+      jobs: options.gitCi.jobs,
+      jobsLoading: options.gitCi.jobsLoading,
+      jobsErrors: options.gitCi.jobsErrors,
+      onActivate: options.gitCi.activate,
+      onDeactivate: options.gitCi.deactivate,
+      onRefresh: () => void options.gitCi.refresh(true),
+      onLoadJobs: options.gitCi.loadJobs,
+    },
     gitWorkflow: {
       review: options.git.reviewResult,
       resolveRunning: options.git.resolveRunning,
@@ -140,7 +154,10 @@ export function createDesktopSidebarViewModel(options: {
     onWorkspaceSettingsSave: (workspace) => {
       if (workspace === options.workspace()) options.registry.scheduleProjectSync("workspace");
     },
-    onGitRefresh: () => void options.git.refresh(),
+    onGitRefresh: () => void (async () => {
+      await options.git.refresh();
+      await options.gitCi.refresh();
+    })(),
     onGitInitialize: () => void options.git.initialize(),
     onGitOpenDiff: (path, scope) => void options.git.openDiff(path, scope),
     onGitStage: options.git.stage,

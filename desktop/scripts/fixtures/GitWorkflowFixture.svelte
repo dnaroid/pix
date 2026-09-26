@@ -3,6 +3,7 @@
   import GitPanel from "../../src/components/GitPanel.svelte";
   import GitDiffPane from "../../src/components/GitDiffPane.svelte";
   import { gitCommitDraftStorageKey, type GitDiff, type GitDiffScope, type GitSnapshot } from "../../src/lib/git";
+  import type { GitCiPanelState, GitCiSnapshot } from "../../src/lib/git-ci";
   import type { GitPanelWorkflow, GitReviewResult } from "../../src/lib/git-workflow";
 
   // Browser fixture only: real components, deterministic fake Git/ACP callbacks.
@@ -18,6 +19,7 @@
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let details = $state<GitPanelWorkflow["details"]>(null);
+  let ciSnapshot = $state<GitCiSnapshot | undefined>(initialCiSnapshot("partial"));
   let calls: string[] = [];
   let delayGeneration = false;
   let delayReview = false;
@@ -37,6 +39,17 @@
     }));
     return { branch: "feature/git-workflows", detached: false, head: "abc", upstream: "origin/feature/git-workflows", ahead: mode === "clean" ? 1 : 0, behind: 0,
       branches: [{ name: "feature/git-workflows", current: true }, { name: "main", current: false }], remotes: mode === "no-remote" ? [] : ["origin"], changes: mode === "clean" ? [] : changes };
+  }
+
+  function initialCiSnapshot(mode: string): GitCiSnapshot {
+    if (mode === "no-remote") {
+      return { availability: "noRemote", headSha: "abc", localOnly: true, runs: [], error: "No Git remote is configured" };
+    }
+    return {
+      provider: "github", availability: "ready", remoteName: "origin", host: "github.com", project: "pix/fixture",
+      headSha: "abc", localOnly: false,
+      runs: [{ id: "42", name: "Check", status: "success", rawStatus: "success", headSha: "abc", branch: "feature/git-workflows", url: "https://github.com/pix/fixture/actions/runs/42" }],
+    };
   }
 
   function openDiff(path: string | undefined, scope: GitDiffScope): void {
@@ -89,13 +102,19 @@
     },
     onRepositoryAction: async (action, target) => { calls.push(`${action}:${target ?? "all"}`); return true; },
   });
+  const ci = $derived<GitCiPanelState>({
+    snapshot: ciSnapshot, loading: false, error: null,
+    jobs: new Map([["42", [{ id: "420", name: "build", status: "success", rawStatus: "success", url: "https://github.com/pix/fixture/actions/jobs/420" }]]]),
+    jobsLoading: new Set(), jobsErrors: new Map(),
+    onActivate: () => {}, onDeactivate: () => {}, onRefresh: () => calls.push("ci-refresh"), onLoadJobs: (runId) => calls.push(`ci-jobs:${runId}`),
+  });
 
   onMount(() => {
     Object.assign(window, { gitWorkflowSmoke: {
       get calls() { return calls.slice(); },
       reset(mode = "partial") {
         localStorage.removeItem(gitCommitDraftStorageKey(workspace));
-        snapshot = initialSnapshot(mode); sessionReady = mode !== "no-session";
+        snapshot = initialSnapshot(mode); ciSnapshot = initialCiSnapshot(mode); sessionReady = mode !== "no-session";
         gitAssistantReady = mode !== "disconnected";
         review = null; diff = null; error = null; notice = null; details = null;
         llmActionId = null; delayGeneration = false; delayReview = false; stageFails = false; pushFails = false;
@@ -116,7 +135,7 @@
 <div class="flex h-screen min-h-0 min-w-0 overflow-hidden bg-background">
   <aside id="git-panel-fixture" class="flex min-h-0 shrink-0 border-r border-border" style:width={`${width}px`}>
     {#key version}
-      <GitPanel {workspace} {snapshot} loading={false} {error} actionId={null} {llmActionId} {gitAssistantReady} {workflow}
+      <GitPanel {workspace} {snapshot} loading={false} {error} actionId={null} {llmActionId} {gitAssistantReady} {workflow} {ci}
         onRefresh={() => {}} onOpenDiff={openDiff} onStage={stage}
         onUnstage={(path) => { calls.push(`unstage:${path ?? "all"}`); }} onCommit={commit}
         onPush={() => calls.push("push")}

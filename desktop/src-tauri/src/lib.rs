@@ -28,6 +28,7 @@ mod acp_queue;
 mod backend_runtime;
 mod desktop_bootstrap;
 mod desktop_context_menu;
+mod git_ci;
 mod git_operations;
 mod lsp_install;
 #[cfg(test)]
@@ -9475,6 +9476,7 @@ pub fn run() {
         .manage(WorkspaceConfigState::default())
         .manage(SidebarIndicatorState::default())
         .manage(IdxOperationState::default())
+        .manage(git_ci::GitCiProcessState::default())
         .setup(|app| {
             if let Some(main_window) = app.get_webview_window("main") {
                 startup_theme::apply_to(&main_window);
@@ -9546,6 +9548,9 @@ pub fn run() {
             git_unstage,
             git_commit,
             git_push,
+            git_ci::git_ci_status,
+            git_ci::git_ci_jobs,
+            git_ci::git_ci_cancel,
             git_operations::git_fetch,
             git_operations::git_pull,
             git_operations::git_history,
@@ -9603,6 +9608,9 @@ pub fn run() {
             ..
         } = &event
         {
+            handle
+                .state::<git_ci::GitCiProcessState>()
+                .cancel_window(label);
             // Record destruction on the event thread, before any queued
             // spawn_blocking task can resume and publish a child.
             let (slot, terminal_ids, idx_ids) = capture_destroyed_window(
@@ -9627,6 +9635,7 @@ pub fn run() {
             let state = handle.state::<AcpProcessState>();
             if !state.exiting.swap(true, Ordering::AcqRel) {
                 api.prevent_exit();
+                handle.state::<git_ci::GitCiProcessState>().cancel_all();
                 let handle = handle.clone();
                 thread::spawn(move || {
                     let state = handle.state::<AcpProcessState>();

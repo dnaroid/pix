@@ -58,6 +58,16 @@ slot. Workspace/session invalidation therefore suppresses stale registration/UI
 continuations but does not cancel a package-manager command that is already
 running. See [desktop-lsp-onboarding.md](./desktop-lsp-onboarding.md).
 
+Source Control CI queries are another transient class, but unlike installer
+commands they are explicitly cancellable. `gh`/`glab` commands run on the
+blocking pool with stdin disabled, fixed argument vectors, bounded output,
+isolated process ownership and a hard deadline. Each request is registered to
+its owning WebView. Frontend workspace/HEAD invalidation requests cancellation;
+native window destruction and application exit also synchronously remove and
+cancel the matching registrations so a lost JS teardown cannot strand a child.
+After the CLI leader exits, descendant cleanup happens before pipe readers are
+joined, preventing inherited output handles from keeping the command alive.
+
 ## Constraints and failure cases
 
 - A worker currently inside an OS pipe write cannot be interrupted by queue
@@ -81,6 +91,7 @@ running. See [desktop-lsp-onboarding.md](./desktop-lsp-onboarding.md).
 - `desktop/src-tauri/src/lib.rs::publish_idx_operation`
 - `desktop/src-tauri/src/lib.rs::capture_destroyed_window`
 - `desktop/src-tauri/src/lsp_install.rs::install_lsp_server`
+- `desktop/src-tauri/src/git_ci.rs` (`GitCiProcessState`, bounded CLI runner)
 - `desktop/src-tauri/src/acp_queue.rs::Queue`
 - `desktop/src-tauri/src/native_process.rs::force_stop`
 - `desktop/src-tauri/src/native_process/windows.rs` (suspended spawn, job ownership)

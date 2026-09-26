@@ -3,6 +3,7 @@ import type { Attachment } from "../lib/attachments";
 import { isEditableProjectMarkdown, PROJECT_TODO_PATH } from "../lib/project-documents";
 import type { TranscriptState } from "../lib/transcript";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
+import { createGitCiStore } from "./git-ci.svelte";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
 import { createPreviewStore } from "./preview.svelte";
 import { createProjectDocumentsStore } from "./project-documents.svelte";
@@ -80,8 +81,10 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     },
     reportError: options.reportError,
   });
+  const gitCi = createGitCiStore({ workspace: options.workspace });
   const git = createGitWorkspaceStore({
     workspace: options.workspace,
+    onSnapshotChange: gitCi.updateTarget,
     previewDirty: () => preview.dirty,
     reloadProject: async (workspace) => {
       preview.close();
@@ -104,6 +107,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     documents,
     registry,
     git,
+    gitCi,
   };
 }
 

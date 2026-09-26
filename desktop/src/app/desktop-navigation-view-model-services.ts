@@ -40,6 +40,7 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
     projectDocuments: options.project.documents,
     registry: options.project.registry,
     git: options.project.git,
+    gitCi: options.project.gitCi,
     gitAssist: options.workbenchGit.gitAssist,
     preview: options.project.preview,
     attachments: options.interactions.attachments,

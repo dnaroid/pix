@@ -25,6 +25,7 @@
   } from "../lib/project-tasks";
   import { fuzzySearch } from "../lib/fuzzy";
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
+  import type { GitCiPanelState } from "../lib/git-ci";
   import type { GitPanelWorkflow } from "../lib/git-workflow";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
@@ -110,6 +111,7 @@
     gitError,
     gitActionId,
     gitLlmActionId,
+    gitCi,
     gitWorkflow,
     projectDocuments,
     recentProjects,
@@ -184,6 +186,7 @@
     gitError: string | null;
     gitActionId: string | null;
     gitLlmActionId: string | null;
+    gitCi: GitCiPanelState;
     gitWorkflow: GitPanelWorkflow;
     projectDocuments: ProjectDocumentsSnapshot;
     recentProjects: string[];
@@ -682,6 +685,7 @@
             error={gitError}
             actionId={gitActionId}
             llmActionId={gitLlmActionId}
+            ci={gitCi}
             workflow={gitWorkflow}
             {gitAssistantReady}
             onRefresh={onGitRefresh}

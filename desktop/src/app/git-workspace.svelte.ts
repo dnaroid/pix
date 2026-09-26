@@ -5,6 +5,7 @@ import type { WorkbenchTabId } from "../lib/workbench-tabs";
 
 type GitWorkspaceStoreOptions = {
   workspace: () => string;
+  onSnapshotChange?: (snapshot: GitSnapshot | undefined) => void;
   previewDirty: () => boolean;
   reloadProject: (workspace: string) => Promise<void>;
   activeWorkbenchTabId: () => WorkbenchTabId | null;
@@ -45,6 +46,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     loadGeneration += 1;
     statusBranchGeneration += 1;
     snapshot = undefined;
+    options.onSnapshotChange?.(undefined);
     uninitialized = false;
     statusBranch = undefined;
     loading = false;
@@ -69,6 +71,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       const next = await invoke<GitSnapshot>("git_status", { workspace });
       if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
       snapshot = next;
+      options.onSnapshotChange?.(next);
       uninitialized = false;
       statusBranchGeneration += 1;
       statusBranch = next.detached || next.branch === "HEAD" ? undefined : next.branch;
@@ -85,6 +88,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       const repositoryState = await invoke<GitRepositoryState>("git_repository_state", { workspace }).catch(() => undefined);
       if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
       snapshot = undefined;
+      options.onSnapshotChange?.(undefined);
       uninitialized = repositoryState?.initialized === false && !repositoryState.repositoryRoot;
       error = uninitialized ? null : detail;
     } finally {

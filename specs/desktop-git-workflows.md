@@ -24,6 +24,14 @@ The commit composer remains outside the file-list scroller. It has visible Gener
 
 Staged and working-tree changes retain file status, per-scope additions/deletions, individual stage/unstage, stage/unstage-all and diff inspection. A path filter narrows visible rows. Bulk actions still affect their entire scope, including filtered-out files, and their tooltips state this. The filter resets when the workspace changes.
 
+### Remote CI for the current HEAD
+
+When HEAD exists, Source Control shows a compact CI state beside the upstream/ahead/behind summary. CI is bound to the exact full HEAD SHA, never merely the branch name, so a previous green run on the same branch cannot be presented as the result for unpublished local commits. The detail disclosure is collapsed by default and lists matching GitHub Actions workflow runs or GitLab pipelines. Jobs are fetched lazily only when an individual run is expanded; opening several runs cannot start job lookups in parallel.
+
+Provider access reuses the user's installed and authenticated `gh` or `glab` CLI. Desktop does not store provider tokens and does not fall back to browser credentials. The selected remote follows the current branch's configured remote when present, otherwise `origin`, otherwise the only configured remote. Multiple non-`origin` remotes without a configured branch remote are an explicit ambiguous setup state rather than an arbitrary choice. GitHub/GitLab and hostnames containing those provider names are supported; unsupported hosts, missing CLIs and missing authentication are explicit non-fatal setup states. Provider CLI prompts, update checks and telemetry are disabled for background queries.
+
+CI refresh is independent from local `git status`. A new workspace/HEAD/upstream/publication signature invalidates prior CI data and cancels its native request. Status requests are serialized and repeated refreshes coalesce; while Source Control is visible, active runs poll about every 8 seconds and settled runs about every minute. Leaving Source Control cancels transient CLI work and suspends polling until the panel is shown again. Provider/native failures retry on the idle cadence, while setup states do not busy-poll. Successful provider queries avoid a separate authentication probe; `auth status` is used only after a provider command fails so normal polling does not double network traffic. Every completion is generation/workspace/HEAD/request guarded. Window teardown and app exit cancel registered native CI requests, and each external CLI process has a hard deadline, isolated process ownership, bounded stdout/stderr capture and forced descendant cleanup before pipe-reader join.
+
 ## Preparation and commit semantics
 
 - Generate message describes only the staged diff. With no staged files its label becomes **Stage all & generate**, explicitly adding all changed/untracked files before generation. Failure to stage stops the sequence. Existing partial staging is never silently expanded by Generate message or Commit.
@@ -62,6 +70,7 @@ All new Git commands use the existing noninteractive argument-vector process hel
 ## Implementation ownership
 
 - `desktop/src/components/GitPanel.svelte`: branch/status, review checkpoint, panel composition.
+- `desktop/src/components/GitCiSection.svelte`, `desktop/src/app/git-ci.svelte.ts` and `desktop/src/lib/git-ci.ts`: current-HEAD CI presentation, polling/lazy jobs and normalized provider state.
 - `desktop/src/components/GitCommitComposer.svelte`: editable draft, preparation buttons and explicit commit choice.
 - `desktop/src/components/GitChangesSection.svelte` and `GitRepositoryTools.svelte`: file operations and secondary tools.
 - `desktop/src/components/GitDiffPane.svelte`: full-height Review/Diff editor and fix/copy actions.
@@ -70,11 +79,11 @@ All new Git commands use the existing noninteractive argument-vector process hel
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`, `desktop-navigation-view-model-services.ts`, `desktop-workbench-git-services.ts` and `desktop-workbench-prop-builders.ts`: workspace-assistant readiness for Source Control and Git Diff, independent of conversation-tab runtime readiness.
 - `desktop/src/lib/acp-client.ts`, `desktop/src/lib/acp-pix-extensions.ts`, `acp/src/acp/desktop-commands.ts` and `acp/src/acp/pix-acp-agent.ts`: cwd-bound Git-assistant request transport and standalone ACP execution without allocating a conversation session.
 - `desktop/src/lib/git-workflow.ts` and `git.ts`: shared policies, types and prompt/draft helpers.
-- `desktop/src-tauri/src/git_operations.rs`: secondary commands and temporary-repository tests; `desktop/src-tauri/src/lib.rs`: repository detection/initialization and command registration.
+- `desktop/src-tauri/src/git_operations.rs`: secondary commands and temporary-repository tests; `desktop/src-tauri/src/git_ci.rs`: bounded/cancellable `gh`/`glab` queries and provider normalization; `desktop/src-tauri/src/lib.rs`: repository detection/initialization, command registration and window/app teardown.
 
 ## Verification
 
-`npm --prefix desktop run check`, `npm --prefix desktop test`, and `npm --prefix desktop run build:web` cover static checking, the existing suite and production frontend compilation. Focused behavior tests are in `git-workspace.test.ts`, `git-assist-workflow.test.ts`, `git-assist.test.ts`, `desktop-workbench-prop-builders.test.ts`, `git-workflow.test.ts` and `DesktopEditorSurfaces.test.ts`; Rust tests cover exact-root Git initialization and nested-repository refusal. ACP request parsing and standalone dispatch are covered by `acp/test/desktop-commands.test.ts` and `acp/test/agent.test.ts`.
+`npm --prefix desktop run check`, `npm --prefix desktop test`, and `npm --prefix desktop run build:web` cover static checking, the existing suite and production frontend compilation. Focused behavior tests are in `git-ci.test.ts`, `git-workspace.test.ts`, `git-assist-workflow.test.ts`, `git-assist.test.ts`, `desktop-workbench-prop-builders.test.ts`, `git-workflow.test.ts` and `DesktopEditorSurfaces.test.ts`; the CI store tests cover stale workspace/HEAD completion, refresh coalescing, teardown cancellation and serialized job loading. Rust tests cover provider URL/status normalization in addition to exact-root Git initialization and nested-repository refusal. ACP request parsing and standalone dispatch are covered by `acp/test/desktop-commands.test.ts` and `acp/test/agent.test.ts`.
 
 `npm --prefix desktop run test:git-workflow` mounts the real Svelte components with deterministic fake Git/ACP callbacks in Chromium. It exercises all three flows, partial/explicit staging, draft races, push partial success, no-session/no-remote/conflict states, keyboard controls, stable review/diff selection, full-height review and 360px light/dark Source Control geometry/semantic colors. Screenshots are written to ignored `desktop/.artifacts/git-workflow/`.
 

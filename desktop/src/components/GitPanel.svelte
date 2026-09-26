@@ -6,17 +6,21 @@
   import Upload from "@lucide/svelte/icons/upload";
   import Wrench from "@lucide/svelte/icons/wrench";
   import Check from "@lucide/svelte/icons/check";
+  import Minus from "@lucide/svelte/icons/minus";
+  import X from "@lucide/svelte/icons/x";
   import { onMount } from "svelte";
   import { gitReviewHasFindings, stagedGitChanges, unstagedGitChanges, type GitDiffScope, type GitSnapshot } from "../lib/git";
+  import { gitCiAggregate, gitCiStatusLabel, type GitCiPanelState, type GitCiStatus } from "../lib/git-ci";
   import { gitPushBlockedReason, gitReviewStatus, type GitPanelWorkflow } from "../lib/git-workflow";
+  import GitCiSection from "./GitCiSection.svelte";
   import GitChangesSection from "./GitChangesSection.svelte";
   import GitCommitComposer from "./GitCommitComposer.svelte";
   import GitRepositoryTools from "./GitRepositoryTools.svelte";
 
-  let { workspace, snapshot, uninitialized, loading, error, actionId, llmActionId, gitAssistantReady, workflow,
+  let { workspace, snapshot, uninitialized, loading, error, actionId, llmActionId, gitAssistantReady, workflow, ci,
     onRefresh, onInitialize, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
     workspace: string; snapshot: GitSnapshot | undefined; uninitialized: boolean; loading: boolean; error: string | null;
-    actionId: string | null; llmActionId: string | null; gitAssistantReady: boolean; workflow: GitPanelWorkflow;
+    actionId: string | null; llmActionId: string | null; gitAssistantReady: boolean; workflow: GitPanelWorkflow; ci: GitCiPanelState;
     onRefresh: () => void; onInitialize: () => void; onOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onStage: (path?: string) => Promise<boolean>; onUnstage: (path?: string) => void;
     onCommit: (message: string, pushAfterCommit?: boolean) => Promise<boolean>; onPush: () => void;
@@ -41,7 +45,23 @@
   const findings = $derived(gitReviewHasFindings(workflow.review?.text));
   const reviewLoading = $derived(llmActionId?.startsWith("review:") === true);
   const conflicts = $derived(snapshot?.changes.filter((change) => change.conflicted).length ?? 0);
-  onMount(() => onRefresh());
+  const ciStatus = $derived(gitCiAggregate(ci.snapshot));
+  const ciLabel = $derived(ci.loading && !ci.snapshot ? "checking" : ci.snapshot?.availability === "ready"
+    ? (ci.snapshot.localOnly && ci.snapshot.runs.length === 0 ? "local" : gitCiStatusLabel(ciStatus))
+    : ci.snapshot ? "setup" : ci.error ? "error" : "—");
+  function ciStatusClass(status: GitCiStatus | undefined): string {
+    if (ci.error || ci.snapshot?.availability === "error") return "text-tool-error";
+    if (ci.snapshot && ci.snapshot.availability !== "ready") return "text-tool-warning";
+    if (status === "success") return "text-tool-success";
+    if (status === "failure") return "text-tool-error";
+    if (status === "queued" || status === "running") return "text-tool-warning";
+    return "text-muted-foreground";
+  }
+  onMount(() => {
+    ci.onActivate();
+    onRefresh();
+    return () => ci.onDeactivate();
+  });
 </script>
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-sidebar" aria-label="Git source control">
@@ -65,6 +85,17 @@
       <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         <span class="min-w-0 flex-1 truncate" title={snapshot.upstream ?? "No upstream configured"}>{snapshot.upstream ?? "Local branch"}</span>
         <span class="shrink-0 font-mono" title="Outgoing / incoming commits" aria-label={`${snapshot.ahead} outgoing, ${snapshot.behind} incoming commits`}>↑{snapshot.ahead} ↓{snapshot.behind}</span>
+        {#if snapshot.head}
+          <button class={["inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1 font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40", ciStatusClass(ciStatus)]}
+            type="button" disabled={ci.loading} title={ci.snapshot?.error ?? ci.error ?? `CI status for ${snapshot.head.slice(0, 8)}`} onclick={ci.onRefresh}>
+            {#if ci.loading}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />
+            {:else if ciStatus === "success"}<Check class="h-3 w-3" aria-hidden="true" />
+            {:else if ciStatus === "failure"}<X class="h-3 w-3" aria-hidden="true" />
+            {:else if ciStatus === "queued" || ciStatus === "running"}<RefreshCw class="h-3 w-3" aria-hidden="true" />
+            {:else}<Minus class="h-3 w-3" aria-hidden="true" />{/if}
+            CI {ciLabel}
+          </button>
+        {/if}
         <button class="inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button"
           disabled={busy || Boolean(pushBlocked) || !snapshot.head || Boolean(snapshot.upstream && snapshot.ahead === 0)}
           title={pushBlocked ?? (snapshot.upstream ? "Push outgoing commits" : "Publish branch and set upstream")} onclick={onPush}>
@@ -108,6 +139,7 @@
         <GitChangesSection changes={staged} scope="staged" {query} {busy} {onOpenDiff} onToggle={(path) => onUnstage(path)} onDiscard={() => {}} />
         <GitChangesSection changes={unstaged} scope="unstaged" {query} {busy} {onOpenDiff} onToggle={(path) => void onStage(path)} onDiscard={(path) => void workflow.onRepositoryAction("discard", path)} />
       {/if}
+      {#if snapshot.head}<GitCiSection {ci} />{/if}
       {#key workspace}<GitRepositoryTools {snapshot} {busy} {workflow} {onCreateBranch} />{/key}
     {:else if uninitialized}
       <div class="px-3 py-8 text-center">
