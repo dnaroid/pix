@@ -106,11 +106,17 @@ export interface PiSlashCommand {
 	readonly sourceInfo: unknown;
 }
 
-export interface PiSessionTreeNode {
-	readonly entry: Record<string, unknown> & { readonly id?: string; readonly type?: string };
-	readonly children: readonly PiSessionTreeNode[];
-	readonly label?: string | undefined;
-}
+/**
+ * Structural view of a persisted session entry.
+ *
+ * Kept loose on purpose: pi's entry union evolves between versions, and the
+ * ACP agent only reads well-known optional fields (`id`, `parentId`, `type`).
+ */
+export type PiSessionEntry = Record<string, unknown> & {
+	readonly id?: string | undefined;
+	readonly type?: string | undefined;
+	readonly parentId?: string | null | undefined;
+};
 
 /** Session statistics exposed by pi's public RPC client. */
 export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>> & {
@@ -207,8 +213,15 @@ export interface PiClient {
 	fork(entryId: string): Promise<{ text: string; cancelled: boolean }>;
 	/** User messages that may be used as fork points. */
 	getForkMessages(): Promise<Array<{ entryId: string; text: string }>>;
-	/** Current session entry tree and active leaf. */
-	getTree(): Promise<{ tree: PiSessionTreeNode[]; leafId: string | null }>;
+	/**
+	 * Persisted session entries in append order, plus the active leaf.
+	 *
+	 * Preferred over the SDK's nested `getTree()`: deeply chained sessions
+	 * (multi-thousand linear entries) make the tree response recurse past
+	 * V8's default stack during serialization and fail with `Maximum call
+	 * stack size exceeded`, while the flat entries response stays safe.
+	 */
+	getEntries(): Promise<{ entries: readonly PiSessionEntry[]; leafId: string | null }>;
 	/** Plain text of the latest assistant message, if one exists. */
 	getLastAssistantText(): Promise<string | null>;
 	/** Messages of the active branch, oldest first. */
@@ -410,8 +423,11 @@ export class PiRpcClient implements PiClient {
 		return this.requireClient().getForkMessages();
 	}
 
-	async getTree(): Promise<{ tree: PiSessionTreeNode[]; leafId: string | null }> {
-		return await this.requireClient().getTree() as unknown as { tree: PiSessionTreeNode[]; leafId: string | null };
+	async getEntries(): Promise<{ entries: readonly PiSessionEntry[]; leafId: string | null }> {
+		return await this.requireClient().getEntries() as unknown as {
+			entries: readonly PiSessionEntry[];
+			leafId: string | null;
+		};
 	}
 
 	getLastAssistantText(): Promise<string | null> {

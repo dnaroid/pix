@@ -90,7 +90,7 @@ import {
 	type PiImageContent,
 	type PiModel,
 	type PiRpcClientOptions,
-	type PiSessionTreeNode,
+	type PiSessionEntry,
 	type PiSessionState,
 	type PiSessionStats,
 } from "../pi/pi-rpc-client.js";
@@ -758,14 +758,14 @@ export class PixAcpAgent {
 
 	private async branchUserMessages(params: DesktopSessionRequest): Promise<ForkMessagesResponse> {
 		const session = this.requireDesktopSession(params.sessionId);
-		return { messages: currentBranchUserMessages(await session.pi.getTree()) };
+		return { messages: branchUserMessagesFromEntries(await session.pi.getEntries()) };
 	}
 
 	private async desktopUserMessageAction(
 		params: DesktopUserMessageActionRequest,
 	): Promise<DesktopUserMessageActionResponse> {
 		const session = this.requireDesktopSession(params.sessionId);
-		const messages = currentBranchUserMessages(await session.pi.getTree());
+		const messages = branchUserMessagesFromEntries(await session.pi.getEntries());
 		const selected = messages.find((message) => message.entryId === params.entryId);
 		if (!selected) {
 			throw new RequestError(ERROR_SERVER, `user message ${params.entryId} is not on the active session branch`);
@@ -2212,12 +2212,12 @@ export class PixAcpAgent {
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 
-		const [state, stats, treeState] = await Promise.all([
+		const [state, stats, entriesState] = await Promise.all([
 			session.pi.getState(),
 			session.pi.getSessionStats(),
-			session.pi.getTree(),
+			session.pi.getEntries(),
 		]);
-		const branch = activeTreeBranchEntries(treeState.tree, treeState.leafId);
+		const branch = activeBranchEntries(entriesState.entries, entriesState.leafId);
 		const dcpStats = await formatPixDcpStats(state, stats, branch);
 		return {
 			sessionId: session.acpSessionId,
@@ -2229,8 +2229,8 @@ export class PixAcpAgent {
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 
-		const treeState = await session.pi.getTree();
-		const usage = await aggregatePixSessionUsage(allTreeEntries(treeState.tree));
+		const entriesState = await session.pi.getEntries();
+		const usage = await aggregatePixSessionUsage(entriesState.entries);
 		return { sessionId: session.acpSessionId, usage };
 	}
 
@@ -2812,8 +2812,8 @@ export class PixAcpAgent {
 						"/tree navigation is not exposed by Pi RPC 0.85.1; run /tree without an entry id to inspect the tree",
 					);
 				}
-				const tree = await session.pi.getTree();
-				detail = formatSessionTree(tree.tree, tree.leafId);
+				const entriesState = await session.pi.getEntries();
+				detail = formatSessionTree(entriesState.entries, entriesState.leafId);
 				break;
 			}
 			case "clone": {
@@ -3306,31 +3306,34 @@ async function aggregatePixSessionUsage(entries: readonly unknown[]): Promise<De
 	return usage.aggregateSessionUsage(entries);
 }
 
-function allTreeEntries(tree: readonly PiSessionTreeNode[]): readonly Record<string, unknown>[] {
-	const entries: Record<string, unknown>[] = [];
-	const visit = (node: PiSessionTreeNode): void => {
-		entries.push(node.entry);
-		for (const child of node.children) visit(child);
-	};
-	for (const node of tree) visit(node);
-	return entries;
-}
-
-function activeTreeBranchEntries(tree: readonly PiSessionTreeNode[], leafId: string | null): readonly Record<string, unknown>[] {
+/**
+ * Walk the active branch root-first from flat session entries by following
+ * `parentId` links from the leaf. Flat entries (getEntries RPC) are used
+ * everywhere instead of the nested tree because deep linear sessions make the
+ * SDK tree response exceed the JSON serialization recursion limit.
+ */
+function activeBranchEntries(entries: readonly PiSessionEntry[], leafId: string | null): readonly Record<string, unknown>[] {
 	if (!leafId) return [];
-	const path: Record<string, unknown>[] = [];
-	const visit = (node: PiSessionTreeNode): boolean => {
-		path.push(node.entry);
-		if (node.entry.id === leafId) return true;
-		for (const child of node.children) if (visit(child)) return true;
-		path.pop();
-		return false;
-	};
-	for (const node of tree) {
-		if (visit(node)) return [...path];
-		path.length = 0;
+	const byId = new Map<string, PiSessionEntry>();
+	for (const entry of entries) {
+		if (typeof entry.id === "string") byId.set(entry.id, entry);
 	}
-	return [];
+	const leaf = byId.get(leafId);
+	if (!leaf) return [];
+	const branch: Record<string, unknown>[] = [];
+	const seen = new Set<string>();
+	let cursor: PiSessionEntry | undefined = leaf;
+	while (cursor) {
+		const id = cursor.id;
+		if (id !== undefined) {
+			if (seen.has(id)) break;
+			seen.add(id);
+		}
+		branch.push(cursor);
+		cursor = typeof cursor.parentId === "string" ? byId.get(cursor.parentId) : undefined;
+	}
+	branch.reverse();
+	return branch;
 }
 
 async function formatPixDcpStats(
@@ -3404,20 +3407,48 @@ function formatSettingsSummary(
 	].join("\n");
 }
 
-function formatSessionTree(tree: readonly PiSessionTreeNode[], leafId: string | null): string {
-	if (tree.length === 0) return "**Session tree**\n(empty)";
-	const lines = ["**Session tree**"];
-	const visit = (nodes: readonly PiSessionTreeNode[], depth: number): void => {
-		for (const node of nodes) {
-			const id = typeof node.entry.id === "string" ? node.entry.id : "?";
-			const type = typeof node.entry.type === "string" ? node.entry.type : "entry";
-			const active = id === leafId ? "→" : "•";
-			const label = node.label?.trim();
-			lines.push(`${"  ".repeat(depth)}${active} ${id} · ${label || treeEntrySummary(node.entry, type)}`);
-			visit(node.children, depth + 1);
+function formatSessionTree(entries: readonly PiSessionEntry[], leafId: string | null): string {
+	if (entries.length === 0) return "**Session tree**\n(empty)";
+	const labels = new Map<string, string>();
+	for (const entry of entries) {
+		if (entry.type !== "label" || typeof entry.targetId !== "string") continue;
+		const label = typeof entry.label === "string" ? entry.label : "";
+		if (label.trim()) labels.set(entry.targetId, label);
+		else labels.delete(entry.targetId);
+	}
+	type StackNode = { node: PiSessionEntry; depth: number };
+	const childrenByParent = new Map<string, PiSessionEntry[]>();
+	const roots: PiSessionEntry[] = [];
+	const nodes = new Map<string, PiSessionEntry>();
+	for (const entry of entries) {
+		if (typeof entry.id !== "string") continue;
+		nodes.set(entry.id, entry);
+	}
+	for (const entry of entries) {
+		if (typeof entry.id !== "string") continue;
+		const parentId = typeof entry.parentId === "string" ? entry.parentId : undefined;
+		if (parentId !== undefined && nodes.has(parentId)) {
+			const siblings = childrenByParent.get(parentId);
+			if (siblings) siblings.push(entry);
+			else childrenByParent.set(parentId, [entry]);
+		} else {
+			roots.push(entry);
 		}
-	};
-	visit(tree, 0);
+	}
+	if (roots.length === 0) return "**Session tree**\n(empty)";
+	const lines = ["**Session tree**"];
+	const stack: StackNode[] = [];
+	for (let i = roots.length - 1; i >= 0; i -= 1) stack.push({ node: roots[i]!, depth: 0 });
+	while (stack.length > 0) {
+		const { node, depth } = stack.pop()!;
+		const id = typeof node.id === "string" ? node.id : "?";
+		const type = typeof node.type === "string" ? node.type : "entry";
+		const active = id === leafId ? "→" : "•";
+		const label = labels.get(id)?.trim();
+		lines.push(`${"  ".repeat(depth)}${active} ${id} · ${label || treeEntrySummary(node, type)}`);
+		const children = childrenByParent.get(id) ?? [];
+		for (let i = children.length - 1; i >= 0; i -= 1) stack.push({ node: children[i]!, depth: depth + 1 });
+	}
 	return lines.join("\n");
 }
 
@@ -3673,31 +3704,17 @@ function runExternalCommand(command: string, args: readonly string[], maxBytes: 
 	});
 }
 
-function currentBranchUserMessages(
-	state: { tree: PiSessionTreeNode[]; leafId: string | null },
+function branchUserMessagesFromEntries(
+	state: { entries: readonly PiSessionEntry[]; leafId: string | null },
 ): Array<{ entryId: string; text: string }> {
-	if (!state.leafId) return [];
-	const path = treePathToEntry(state.tree, state.leafId);
-	if (!path) return [];
-
 	const messages: Array<{ entryId: string; text: string }> = [];
-	for (const node of path) {
-		const entry = node.entry;
+	for (const entry of activeBranchEntries(state.entries, state.leafId)) {
 		if (entry.type !== "message" || typeof entry.id !== "string") continue;
 		const message = isRecord(entry.message) ? entry.message : undefined;
 		if (message?.role !== "user") continue;
 		messages.push({ entryId: entry.id, text: sessionUserMessageText(message.content) });
 	}
 	return messages;
-}
-
-function treePathToEntry(nodes: readonly PiSessionTreeNode[], targetId: string): PiSessionTreeNode[] | undefined {
-	for (const node of nodes) {
-		if (node.entry.id === targetId) return [node];
-		const childPath = treePathToEntry(node.children, targetId);
-		if (childPath) return [node, ...childPath];
-	}
-	return undefined;
 }
 
 function sessionUserMessageText(content: unknown): string {

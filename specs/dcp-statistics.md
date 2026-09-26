@@ -86,8 +86,11 @@ After that read, dialog statistics replay cooperatively on the main thread in
 bounded chunks, yielding to a macrotask between chunks; this is not off-thread
 work and a large history is not rescanned. Owner identity is checked again
 after aggregation, so an owner change during a yield cannot publish a stale
-dialog. ACP continues to supply the complete active branch from its existing async tree
-request. The explicit synchronous formatter remains available for
+dialog. ACP continues to supply the complete active branch from its async
+flat-entries request: it derives the root-to-tip branch from `parentId` links
+because the nested `get_tree` response cannot be JSON-serialized on deeply
+chained sessions (V8 recursion limit). The explicit synchronous formatter
+remains available for
 already-loaded branches and diagnostics. A failed full reader never falls back
 to a truncated tail. Dialog loads cancel (`undefined`) on owner changes, and
 the mouse controller generations each click: only the newest completion for an

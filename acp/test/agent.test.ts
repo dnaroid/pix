@@ -81,7 +81,7 @@ import type {
 	PiImageContent,
 	PiModel,
 	PiRpcClientOptions,
-	PiSessionTreeNode,
+	PiSessionEntry,
 	PiSessionState,
 	PiSessionStats,
 	PiSlashCommand,
@@ -129,7 +129,7 @@ class FakePiClient implements PiClient {
 	commandsGate: Promise<void> | undefined;
 	readonly forkCalls: string[] = [];
 	readonly forkMessagesCalls: number[] = [];
-	getTreeCalls = 0;
+	getEntriesCalls = 0;
 	readonly lastAssistantTextCalls: number[] = [];
 	forkMessagesList: Array<{ entryId: string; text: string }> = [];
 	forkCancelled = false;
@@ -160,7 +160,7 @@ class FakePiClient implements PiClient {
 	};
 	pauseHook: (() => void | Promise<void>) | undefined;
 	continueHook: (() => void | Promise<void>) | undefined;
-	treeState: { tree: PiSessionTreeNode[]; leafId: string | null } = { tree: [], leafId: null };
+	entriesState: { entries: PiSessionEntry[]; leafId: string | null } = { entries: [], leafId: null };
 	state: PiSessionState;
 	private listeners: PiEventListener[] = [];
 	private exitListeners: ((error: Error) => void)[] = [];
@@ -323,9 +323,9 @@ class FakePiClient implements PiClient {
 		return this.forkMessagesList;
 	}
 
-	async getTree(): Promise<{ tree: PiSessionTreeNode[]; leafId: string | null }> {
-		this.getTreeCalls += 1;
-		return this.treeState;
+	async getEntries(): Promise<{ entries: PiSessionEntry[]; leafId: string | null }> {
+		this.getEntriesCalls += 1;
+		return this.entriesState;
 	}
 
 	async getLastAssistantText(): Promise<string | null> {
@@ -1437,7 +1437,7 @@ test("Pix Desktop runtime status exposes pi context usage without refreshing mod
 		assert.deepEqual(response.dcpContextMap, preparedDcpMapFixture);
 		assert.equal(response.modelUsageRefresh, "skipped");
 		assert.equal(response.modelUsage, undefined);
-		assert.equal(pi.getTreeCalls, 0, "periodic runtime status must not traverse the DCP session tree");
+		assert.equal(pi.getEntriesCalls, 0, "periodic runtime status must not read the full session entries");
 	});
 });
 
@@ -1586,7 +1586,7 @@ test("Pix Desktop loads DCP statistics only through the on-demand DCP request", 
 
 		assert.equal(response.sessionId, session.sessionId);
 		assert.match(response.dcpStats ?? "", /DCP Session Statistics:/u);
-		assert.equal(pi.getTreeCalls, 1);
+		assert.equal(pi.getEntriesCalls, 1);
 	});
 });
 
@@ -1601,34 +1601,27 @@ test("Pix Desktop loads whole-session spend on demand without provider quota I/O
 	await connect(adapter, async (cx) => {
 		const session = await cx.buildSession("/tmp/runtime-session-usage").start();
 		const pi = clients[0]!;
-		pi.treeState = {
+		pi.entriesState = {
 			leafId: "agent-usage",
-			tree: [
+			entries: [
 				{
-					entry: {
-						type: "message", id: "assistant", parentId: null, timestamp: new Date().toISOString(),
-						message: {
-							role: "assistant", provider: "openai-codex", model: "gpt-5.6-sol",
-							content: [], stopReason: "stop", timestamp: Date.now(),
-							usage: {
-								input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150,
-								cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0, total: 0.033 },
-							},
+					type: "message", id: "assistant", parentId: null, timestamp: new Date().toISOString(),
+					message: {
+						role: "assistant", provider: "openai-codex", model: "gpt-5.6-sol",
+						content: [], stopReason: "stop", timestamp: Date.now(),
+						usage: {
+							input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150,
+							cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0, total: 0.033 },
 						},
 					},
-					children: [
-						{
-							entry: {
-								type: "usage", id: "agent-usage", parentId: "assistant", timestamp: new Date().toISOString(),
-								kind: "async-subagent", provider: "anthropic", model: "claude-sonnet",
-								usage: {
-									input: 200, output: 40, cacheRead: 10, cacheWrite: 0, totalTokens: 250,
-									cost: { input: 0.02, output: 0.04, cacheRead: 0.005, cacheWrite: 0, total: 0.065 },
-								},
-							},
-							children: [],
-						},
-					],
+				},
+				{
+					type: "usage", id: "agent-usage", parentId: "assistant", timestamp: new Date().toISOString(),
+					kind: "async-subagent", provider: "anthropic", model: "claude-sonnet",
+					usage: {
+						input: 200, output: 40, cacheRead: 10, cacheWrite: 0, totalTokens: 250,
+						cost: { input: 0.02, output: 0.04, cacheRead: 0.005, cacheWrite: 0, total: 0.065 },
+					},
 				},
 			],
 		};
@@ -1646,8 +1639,63 @@ test("Pix Desktop loads whole-session spend on demand without provider quota I/O
 		assert.equal(response.usage.providers[1]?.provider, "openai-codex");
 		assert.equal(response.usage.providers[1]?.models[0]?.model, "gpt-5.6-sol");
 		assert.equal(response.usage.providers[1]?.models[0]?.totals.totalTokens, 150);
-		assert.equal(pi.getTreeCalls, 1);
+		assert.equal(pi.getEntriesCalls, 1);
 		assert.equal(quotaQueries, 0);
+	});
+});
+
+test("Pix Desktop requests survive deeply chained sessions without nested tree reads", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-deep-chain").start();
+		const pi = clients[0]!;
+
+		// Mirrors a real long-lived linear session (~5.6k entries) where the
+		// SDK's nested get_tree response blows V8's stack during serialization.
+		// The flat entries path must keep serving desktop statistics requests.
+		const depth = 6_000;
+		const entries: PiSessionEntry[] = [];
+		for (let i = 0; i < depth; i += 1) {
+			entries.push({
+				type: "message",
+				id: `entry-${i}`,
+				parentId: i === 0 ? null : `entry-${i - 1}`,
+				timestamp: new Date().toISOString(),
+				message: {
+					role: i % 2 === 0 ? "user" : "assistant",
+					content: i % 2 === 0 ? `message ${i}` : [],
+					...(i % 2 === 1
+						? {
+							usage: {
+								input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+							},
+						}
+						: {}),
+				},
+			} as PiSessionEntry);
+		}
+		pi.entriesState = { entries, leafId: `entry-${depth - 1}` };
+
+		const usageResponse = await cx.request(PIX_SESSION_USAGE_METHOD, {
+			sessionId: session.sessionId,
+		}) as DesktopSessionUsageResponse;
+		assert.equal(usageResponse.sessionId, session.sessionId);
+		// Half of the depth entries carry usage records of 2 tokens each.
+		assert.equal(usageResponse.usage.totals.totalTokens, depth);
+
+		const dcpResponse = await cx.request(PIX_DCP_STATS_METHOD, {
+			sessionId: session.sessionId,
+		}) as DesktopDcpStatsResponse;
+		assert.equal(dcpResponse.sessionId, session.sessionId);
+
+		const branchResponse = await cx.request("pix/session/branch_user_messages", {
+			sessionId: session.sessionId,
+		}) as { messages: Array<{ entryId: string }> };
+		assert.equal(branchResponse.messages.length, depth / 2);
+		assert.equal(branchResponse.messages.at(-1)?.entryId, `entry-${depth - 2}`);
+
+		assert.equal(pi.getEntriesCalls, 3);
 	});
 });
 
@@ -2841,27 +2889,15 @@ test("pix/session/branch_user_messages returns only user entries on the active t
 		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
 		const sessionId = (created as { sessionId: string }).sessionId;
 		const pi = harness.clients[0]!;
-		pi.treeState = {
+		pi.entriesState = {
 			leafId: "assistant-2",
-			tree: [{
-				entry: { id: "user-1", type: "message", message: { role: "user", content: "same prompt" } },
-				children: [{
-					entry: { id: "assistant-1", type: "message", message: { role: "assistant", content: [] } },
-					children: [
-						{
-							entry: { id: "user-2", type: "message", message: { role: "user", content: [{ type: "text", text: "same prompt" }] } },
-							children: [{
-								entry: { id: "assistant-2", type: "message", message: { role: "assistant", content: [] } },
-								children: [],
-							}],
-						},
-						{
-							entry: { id: "abandoned-user", type: "message", message: { role: "user", content: "old branch" } },
-							children: [],
-						},
-					],
-				}],
-			}],
+			entries: [
+				{ id: "user-1", parentId: null, type: "message", message: { role: "user", content: "same prompt" } },
+				{ id: "assistant-1", parentId: "user-1", type: "message", message: { role: "assistant", content: [] } },
+				{ id: "user-2", parentId: "assistant-1", type: "message", message: { role: "user", content: [{ type: "text", text: "same prompt" }] } },
+				{ id: "assistant-2", parentId: "user-2", type: "message", message: { role: "assistant", content: [] } },
+				{ id: "abandoned-user", parentId: "user-2", type: "message", message: { role: "user", content: "old branch" } },
+			],
 		};
 
 		const response = await cx.request<{ messages: Array<{ entryId: string; text: string }> }>(
@@ -2882,15 +2918,12 @@ test("Desktop user-message copy and undo use the selected Pi entry id without mo
 		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
 		const sessionId = (created as { sessionId: string }).sessionId;
 		const pi = harness.clients[0]!;
-		pi.treeState = {
+		pi.entriesState = {
 			leafId: "user-2",
-			tree: [{
-				entry: { id: "user-1", type: "message", message: { role: "user", content: "first" } },
-				children: [{
-					entry: { id: "user-2", type: "message", message: { role: "user", content: "second" } },
-					children: [],
-				}],
-			}],
+			entries: [
+				{ id: "user-1", parentId: null, type: "message", message: { role: "user", content: "first" } },
+				{ id: "user-2", parentId: "user-1", type: "message", message: { role: "user", content: "second" } },
+			],
 		};
 
 		const copiedResponse = await cx.request<{ status: string }>("pix/session/user_message_action", {

@@ -40,7 +40,7 @@ function fakePi(overrides: {
 		clone: async () => ({ cancelled: false }),
 		fork: async () => ({ text: "", cancelled: false }),
 		getForkMessages: async () => [],
-		getTree: async () => ({ tree: [], leafId: null }),
+		getEntries: async () => ({ entries: [], leafId: null }),
 		getLastAssistantText: async () => null,
 		getMessages: async () => [],
 		getSessionStats: async () => ({}) as never,

@@ -101,9 +101,11 @@ percentages with spend attributable to one conversation.
 ## Protocol
 
 - `pix/session/usage` accepts `{ sessionId }` and returns `{ sessionId, usage }`.
-- ACP reads Pi's in-memory session tree with `getTree()`, traverses all persisted
-  entries, and runs the shared Pix session-usage aggregator. It does not ask a
-  quota provider or synchronously traverse the JSONL file.
+- ACP reads Pi's persisted entries with the flat append-order `getEntries()` RPC
+  and runs the shared Pix session-usage aggregator over all of them. It does not
+  ask a quota provider or synchronously traverse the JSONL file, and it avoids
+  the nested `get_tree` response, which cannot be JSON-serialized once a linear
+  session chain grows past the RPC process stack limit.
 
 ## Related files
 
