@@ -736,6 +736,11 @@ describe("DCP pruning effectiveness", () => {
     expect(text).toContain("b7 \"Block 7\"");
     expect(text).toContain("</dcp-system-reminder>");
     expect(text.indexOf("CONCRETE NEXT ACTION")).toBeLessThan(text.indexOf("</dcp-system-reminder>"));
+
+    // Roll-up guidance must match the compress contract: placeholders are optional
+    // and re-insert the full old summary, so reminders must not demand them.
+    expect(text).not.toMatch(/required `\(bN\)`|placeholder exactly once/);
+    expect(text).toContain("refer to them in prose as `compressed bN`");
   });
 
   test("detects actionable compression candidates outside the active recent turns", () => {

@@ -533,7 +533,7 @@ export function formatCompressionCandidateHint(candidate: CompressionCandidate):
   const blockHint = candidate.includedBlockIds.length > 0
     ? `\nThis candidate includes compressed block(s): ${candidate.includedBlockIds
         .map((id) => `b${id}`)
-        .join(", ")}. If you compress this range, include each required \`(bN)\` placeholder exactly once in the summary.`
+        .join(", ")}. If you compress this range, summarize their continuation-relevant meaning and refer to them in prose as \`compressed bN\`; avoid \`(bN)\` placeholders (each one re-inserts that full old summary).`
     : "";
 
   return `\n\nSuggested compression candidate: ${candidate.startId}..${candidate.endId} (${candidate.messageCount} messages, ~${candidate.estimatedTokens} tokens, ${candidate.reason}).${blockHint}`;

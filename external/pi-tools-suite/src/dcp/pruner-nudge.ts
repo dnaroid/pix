@@ -121,7 +121,7 @@ function formatActiveBlocks(state: DcpState): string {
       return `b${block.id}${label ? ` "${label.replace(/"/g, "'")}"` : ""}`;
     });
   if (blocks.length === 0) return "";
-  return `Active compressed blocks: ${blocks.join(", ")}. If your selected range includes one, include the required \`(bN)\` placeholder exactly once.`;
+  return `Active compressed blocks: ${blocks.join(", ")}. If your selected range includes one, summarize its continuation-relevant meaning and refer to it in prose as \`compressed bN\`; avoid a \`(bN)\` placeholder (it re-inserts the full old summary).`;
 }
 
 function formatCandidateActions(
@@ -137,7 +137,7 @@ function formatCandidateActions(
     );
     if (candidate.includedBlockIds.length > 0) {
       parts.push(
-        `This range includes existing block(s): ${candidate.includedBlockIds.map((id) => `b${id}`).join(", ")}. Preserve each required \`(bN)\` placeholder exactly once in the summary.`,
+        `This range includes existing block(s): ${candidate.includedBlockIds.map((id) => `b${id}`).join(", ")}. Summarize their continuation-relevant meaning and refer to them in prose as \`compressed bN\`; avoid \`(bN)\` placeholders (each one re-inserts that full old summary).`,
       );
     }
   }
