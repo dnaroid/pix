@@ -61,8 +61,10 @@ describe("settings model fuzzy search", () => {
     ));
     expect(searchSettingsModelOptions(options, "gpt high")[0]?.value).toBe("openai-codex/gpt-5.6-sol:high");
   });
-  it("does not repeat a model id that the provider reports as the name", () => {
-    expect(settingsModelLabel({ name: "GPT-5.6 Sol", modelId: "gpt-5.6-sol" })).toBe("GPT-5.6 Sol · gpt-5.6-sol");
+  it("labels models by display name without repeating the id", () => {
+    expect(settingsModelLabel({ name: "GPT-5.6 Sol", modelId: "gpt-5.6-sol" })).toBe("GPT-5.6 Sol");
+    expect(settingsModelSearchOptions(models)[0]).toMatchObject({ label: "GPT-5.6 Sol", description: "openai-codex/gpt-5.6-sol" });
+    expect(searchSettingsModelOptions(settingsModelSearchOptions(models), "gpt-5.6-sol")[0]?.value).toBe("openai-codex/gpt-5.6-sol");
     expect(settingsModelLabel({ name: "glm-5.3", modelId: "glm-5.3" })).toBe("glm-5.3");
     expect(settingsModelLabel({ name: "GLM-5.3", modelId: "glm-5.3" })).toBe("GLM-5.3");
     expect(settingsModelLabel({ name: " ", modelId: "glm-5.3" })).toBe("glm-5.3");

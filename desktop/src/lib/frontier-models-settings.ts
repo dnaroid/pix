@@ -65,7 +65,14 @@ export function updateFrontierModelRow(
   index: number,
   patch: Partial<Pick<FrontierModelRow, "model" | "expensive" | "enabled">>,
 ): FrontierModelRow[] {
-  return rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row);
+  return rows.map((row, rowIndex) => {
+    if (rowIndex !== index) return row;
+    if (patch.model === undefined || patch.model === row.model) return { ...row, ...patch };
+    // Vendor and aliases identify the replaced model and would misclassify the
+    // new one (e.g. Sol aliases on an Opus row). Roles describe the list slot.
+    const { vendor: _vendor, aliases: _aliases, ...extra } = row.extra;
+    return { ...row, ...patch, extra };
+  });
 }
 
 export function removeFrontierModelRow(rows: readonly FrontierModelRow[], index: number): FrontierModelRow[] {

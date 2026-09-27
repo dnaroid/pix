@@ -57,6 +57,23 @@ describe("frontier model settings rows", () => {
     expect(removeFrontierModelRow(defaults, 0).map((row) => row.model)).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
   });
 
+  it("drops the replaced model's vendor and aliases but keeps role limits", () => {
+    const rows = frontierModelRows([
+      { model: "openai-codex/gpt-6-sol", expensive: true, vendor: "openai", aliases: ["*gpt-6-sol*"], roles: ["oracle"], future: 1 },
+    ]);
+    const replaced = updateFrontierModelRow(rows, 0, { model: "anthropic/claude-opus-5-5" });
+    expect(serializeFrontierModelRows(replaced)).toEqual([
+      { model: "anthropic/claude-opus-5-5", roles: ["oracle"], future: 1, expensive: true },
+    ]);
+    expect(frontierModelRowDetails(replaced[0]!)).toBe("anthropic · only oracle");
+    expect(updateFrontierModelRow(rows, 0, { model: "openai-codex/gpt-6-sol", enabled: false })[0]!.extra).toEqual(rows[0]!.extra);
+    // With the Sol alias gone, Opus is an ordinary anthropic oracle candidate.
+    expect(frontierOraclePreview([...replaced, ...frontierModelRows(["zai/glm-5.3"])], false)).toEqual([
+      { parent: "claude-opus-5-5", vendor: "anthropic", candidates: ["glm-5.3"] },
+      { parent: "glm-5.3", vendor: "zai", candidates: ["claude-opus-5-5"] },
+    ]);
+  });
+
   it("writes the list back into JSONC while keeping other settings", () => {
     const source = '{\n  // keep me\n  "economy": true\n}\n';
     const next = updateSettingsSource(source, ["frontierModels"], serializeFrontierModelRows(removeFrontierModelRow(defaults, 1)));

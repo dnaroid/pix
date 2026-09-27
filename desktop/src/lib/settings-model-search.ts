@@ -21,11 +21,13 @@ export function settingsModelSearchOptions(
   }));
 }
 
-/** "Name · id", or just the name when the provider reports the id as its name. */
+/**
+ * Display name only. The id restates the name ("GPT-6 Astra" / "gpt-6-astra"),
+ * so it stays out of the label; the full provider/model ref is the option
+ * description and remains searchable.
+ */
 export function settingsModelLabel(model: Pick<ModelThinkingModel, "name" | "modelId">): string {
-  const name = model.name.trim();
-  if (!name) return model.modelId;
-  return name.toLowerCase() === model.modelId.trim().toLowerCase() ? name : `${name} · ${model.modelId}`;
+  return model.name.trim() || model.modelId;
 }
 
 export function searchSettingsModelOptions(
