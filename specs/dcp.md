@@ -321,6 +321,19 @@ fragment metadata (`sourceHash`). The default per-block tool-continuity budget
 is 16 KiB. Unrecognised test/build output above 4 KiB gets a bounded
 failure/tail receipt instead of verbatim retention.
 
+Repeated side-effect-free observations are superseded, not accumulated. A
+shell result classified as read-only inspection or a single test/build command
+has a repeatable-observation key (its input fingerprint); within one block's
+ledger only the newest fragment per key survives, so older runs (typically
+fixed failures, which the budget otherwise ranks highest) stay in the raw
+session only. Mutations, unknown commands and protected-path results have no
+key and every receipt is kept. For routine message-mode suggestions, a file
+read or keyed observation that a later identical call re-observed, or a read of
+a file a later successful write/edit changed, is marked stale, ranked high and
+reported with its reason. Staleness is derived from projection order, never
+timestamps, and only raises suggestion priority; it does not prune anything by
+itself.
+
 Exact v2 source/mutation membership hashes are canonicalized with JSONL-stable
 value semantics before publication. In-memory-only `undefined` fields (notably
 inside tool-result details), non-finite numbers, unsupported array/object values,
@@ -402,6 +415,7 @@ undo configuration.
 - `external/pi-tools-suite/src/dcp/journal.ts`
 - `external/pi-tools-suite/src/dcp/pruner-emergency.ts`
 - `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
+- `external/pi-tools-suite/src/dcp/stale-observations.ts`
 - `external/pi-tools-suite/src/dcp/pruner-tools.ts`
 - `external/pi-tools-suite/src/dcp/auto-compress.ts`
 - `external/pi-tools-suite/test/auto-compress.test.ts`

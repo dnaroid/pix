@@ -10,6 +10,7 @@ import { previewCompressionContinuityRepack } from "./compression-blocks.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { closeConversationRange, detectToolGroupSpans, findConversationIndexEntry } from "./conversation-index.js";
 import { protocolClosedBoundaryRuns } from "./protocol-closed-ranges.js";
+import { staleObservationReasons } from "./stale-observations.js";
 
 interface CandidateBoundary {
   id: string;
@@ -572,6 +573,11 @@ export function detectMessageCompressionCandidates(
   // recent window. Do not reinterpret the live head as stale history.
   if (recentUserTurns < keepRecentTurns || cutoffIndex < 0) return [];
 
+  const stale = staleObservationReasons(messages, state, config);
+  const staleReason = (candidate: CandidateBoundary): string | undefined => {
+    const toolCallId = state.messageMetaSnapshot.get(candidate.id)?.toolCallId;
+    return toolCallId ? stale.get(toolCallId) : undefined;
+  };
   const mediumTokens = Math.max(1, settings.mediumTokens ?? 500);
   const highTokens = Math.max(mediumTokens, settings.highTokens ?? 5000);
   const maxSuggestions = Math.max(1, settings.maxSuggestions ?? 5);
@@ -598,13 +604,19 @@ export function detectMessageCompressionCandidates(
       return true;
     })
     .filter((candidate) => candidate.tokenEstimate >= mediumTokens)
-    .map((candidate): MessageCompressionCandidate => ({
-      messageId: candidate.id,
-      role: candidate.role,
-      estimatedTokens: candidate.tokenEstimate,
-      priority: candidate.tokenEstimate >= highTokens ? "high" : "medium",
-      reason: `older than the most recent ${keepRecentTurns} user turn(s)`,
-    }))
+    .map((candidate): MessageCompressionCandidate => {
+      // A provably stale observation is the safest possible compression
+      // target, so it ranks as high priority regardless of its size tier.
+      const superseded = staleReason(candidate);
+      return {
+        messageId: candidate.id,
+        role: candidate.role,
+        estimatedTokens: candidate.tokenEstimate,
+        priority: superseded || candidate.tokenEstimate >= highTokens ? "high" : "medium",
+        reason: superseded ?? `older than the most recent ${keepRecentTurns} user turn(s)`,
+        ...(superseded ? { stale: superseded } : {}),
+      };
+    })
     .sort((a, b) => {
       const priorityDiff = (b.priority === "high" ? 1 : 0) - (a.priority === "high" ? 1 : 0);
       if (priorityDiff !== 0) return priorityDiff;

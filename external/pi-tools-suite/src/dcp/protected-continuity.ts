@@ -274,3 +274,20 @@ export function toolRecordContinuity(record: ToolRecord, config: DcpConfig): Too
 		shellReceipt(record),
 	);
 }
+
+/**
+ * Key for a repeatable, side-effect-free shell observation (read-only
+ * inspection or a single test/build command). Re-running the identical
+ * invocation makes earlier results history: only the newest one describes the
+ * current state. Mutations, unknown commands and protected-path results have
+ * no key, so each of their receipts is kept.
+ */
+export function repeatableObservationKey(record: ToolRecord, config: DcpConfig): string | undefined {
+	if (!SHELL_TOOLS.has(normalizeToolName(record.toolName))) return undefined;
+	if (!shellCommandText(record.inputArgs)) return undefined;
+	if (isToolRecordProtectedByFilePattern(record, config)) return undefined;
+	const { kind } = classifyShellCommand(record.inputArgs);
+	if (kind !== "inspection" && kind !== "test-build") return undefined;
+	return record.inputFingerprint;
+}
+

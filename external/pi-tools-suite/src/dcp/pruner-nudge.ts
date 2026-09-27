@@ -147,7 +147,7 @@ function formatCandidateActions(
   if (listedMessages.length > 0) {
     parts.push(
       `Recommended message candidates: ${listedMessages
-        .map((item) => `${item.messageId} (${item.priority}, ${item.role}, ~${item.estimatedTokens} tokens)`)
+        .map((item) => `${item.messageId} (${item.priority}, ${item.role}, ~${item.estimatedTokens} tokens${item.stale ? `, ${item.stale}` : ""})`)
         .join(", ")}. High-priority stale messages MUST be compressed once their full text is no longer needed; passing logs should become command + pass/fail + follow-up status only. Batch multiple messages in one compress call when possible.`,
     );
   }

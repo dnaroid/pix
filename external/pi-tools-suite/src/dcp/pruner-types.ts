@@ -21,6 +21,8 @@ export interface MessageCompressionCandidate {
   estimatedTokens: number;
   priority: MessagePriority;
   reason: string;
+  /** Set when a later call provably superseded this observation. */
+  stale?: string;
 }
 
 export interface EmergencyCurrentTurnStats {

@@ -8,7 +8,7 @@ import type {
 import type { DcpConfig } from "./config.js"
 import { estimateTokens } from "./pruner-metadata.js"
 import { isToolRecordProtected } from "./pruner-tools.js"
-import { toolRecordContinuity } from "./protected-continuity.js"
+import { repeatableObservationKey, toolRecordContinuity } from "./protected-continuity.js"
 import { DEFAULT_DCP_CONFIG } from "./defaults.js"
 import { compareConversationStableIds, buildExactRangeMembership } from "./conversation-index.js"
 import { createHash } from "node:crypto"
@@ -667,11 +667,44 @@ function aggregateToolContinuity(
  * mutation evidence and recency; overflow is replaced by one deterministic
  * recoverable aggregate whose exact source remains in the raw session.
  */
-export function budgetProtectedToolFragments(
+function toolFragmentRecord(fragment: CompressionProtectedFragment, state: DcpState) {
+	const match = /^tool:(.+)$/.exec(fragment.origin)
+	return match ? state.toolCalls.get(match[1]!) : undefined
+}
+
+/**
+ * Keep only the newest receipt of each repeated side-effect-free observation
+ * (same inspection/test command and arguments). Ten `bun test` runs describe
+ * one current state; the nine older receipts — typically fixed failures, which
+ * the budget would otherwise rank highest — are history in the raw session.
+ */
+function supersedeRepeatedObservations(
 	fragments: CompressionProtectedFragment[],
 	state: DcpState,
 	config: DcpConfig,
 ): CompressionProtectedFragment[] {
+	const newest = new Map<string, { timestamp: number; index: number }>()
+	const keys = fragments.map((fragment, index) => {
+		if (fragment.kind !== "tool") return undefined
+		const record = toolFragmentRecord(fragment, state)
+		const key = record ? repeatableObservationKey(record, config) : undefined
+		if (!key || !record) return undefined
+		const current = newest.get(key)
+		if (!current || record.timestamp >= current.timestamp) newest.set(key, { timestamp: record.timestamp, index })
+		return key
+	})
+	return fragments.filter((_fragment, index) => {
+		const key = keys[index]
+		return key === undefined || newest.get(key)?.index === index
+	})
+}
+
+export function budgetProtectedToolFragments(
+	inputFragments: CompressionProtectedFragment[],
+	state: DcpState,
+	config: DcpConfig,
+): CompressionProtectedFragment[] {
+	const fragments = supersedeRepeatedObservations(inputFragments, state, config)
 	const configuredBudget = config.compress.maxProtectedToolContinuityBytes
 	const maxBytes = typeof configuredBudget === "number" && Number.isFinite(configuredBudget) && configuredBudget > 0
 		? Math.max(1_024, Math.floor(configuredBudget))
