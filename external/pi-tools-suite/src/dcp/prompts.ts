@@ -81,7 +81,8 @@ BOUNDARIES: use only injected IDs currently visible on stable user/tool-result
 carriers. \`mNNN\` is raw, \`bN\` is an active compressed block; IDs may be sparse
 and order is the conversation order, not the number. Carrier metadata labels the
 carrier plus immediately preceding assistant message(s): \`a\`=assistant,
-\`u\`=user, \`t\`=tool result, \`x\`=bash result, \`b\`=block alias. Do not invent IDs. For
+\`u\`=user, \`t\`=tool result, \`x\`=bash result, \`b\`=block alias; a \`~Nk\` suffix
+is an approximate size in thousands of tokens (shown from ~1k). Do not invent IDs. For
 \`ranges\`, never split a tool group: include the calling assistant and all its
 tool results, including parallel calls. On \`Unknown message ID\`, retry at most
 once using the current IDs reported by the tool.

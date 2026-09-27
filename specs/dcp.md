@@ -147,6 +147,9 @@ DCP treats prefix stability as a correctness constraint:
 - `mNNN` assignments are monotonic and never renumbered after rollup/restart;
 - ID metadata is distributed over deterministic user/tool-result carriers and
   is not rebuilt as a moving payload-tail map;
+- an ID assignment for a message of at least ~1k estimated tokens carries a
+  coarse `~Nk` size hint (for example `m013=t~4k`), derived only from that raw
+  message so it is as stable as the ID; block aliases carry none;
 - a reminder is introduced on a fresh trailing user carrier or a positively
   fresh trailing tool result produced by a new local call in this epoch. A tool
   result loses freshness at the first provider **attempt**, even on failure;
