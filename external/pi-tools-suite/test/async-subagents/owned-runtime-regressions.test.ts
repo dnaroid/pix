@@ -27,6 +27,7 @@ import { getAgentState } from "../../src/async-subagents/core/state.js";
 import { stopAgents } from "../../src/async-subagents/core/stop.js";
 import { deleteRunDirs, findCleanupCandidates } from "../../src/async-subagents/core/cleanup.js";
 import type { OwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
+const describeOwnedRuntime = process.platform === "win32" ? describe.skip : describe;
 const CLAUDE_PROVIDER_STUB = fileURLToPath(new URL("./fixtures/claude-provider-stub", import.meta.url));
 
 const LABEL_SUPERVISOR = "org.pix.owned-launch.22222222-2222-4222-8222-222222222222";
@@ -76,7 +77,7 @@ function ownedFixture(options: { pointer?: "valid" | "garbage" | "none" } = { po
 	return { root, runDir, agentDir, owner, receipt, retire };
 }
 
-describe("blocker 1: public stop with pointerless owned artifacts", () => {
+describeOwnedRuntime("blocker 1: public stop with pointerless owned artifacts", () => {
 	test("never signals the saved PID nor writes terminal state; durable cancel only", () => {
 		const f = ownedFixture({ pointer: "none" });
 		const canary = Bun.spawn(["/bin/sleep", "60"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
@@ -124,7 +125,7 @@ describe("blocker 1: public stop with pointerless owned artifacts", () => {
 	});
 });
 
-describe("blocker 2: synchronous pre-spawn failure releases the concurrency slot", () => {
+describeOwnedRuntime("blocker 2: synchronous pre-spawn failure releases the concurrency slot", () => {
 	test("spec write failure rolls the fresh UUID directory back completely", () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "owned-regress-"));
@@ -179,7 +180,7 @@ describe("blocker 2: synchronous pre-spawn failure releases the concurrency slot
 	});
 });
 
-describe("blocker 3: receipt before service retirement never relaunches into the reuse guard", () => {
+describeOwnedRuntime("blocker 3: receipt before service retirement never relaunches into the reuse guard", () => {
 	class FakeProcess extends EventEmitter {
 		pid = 12345;
 		stdin = new PassThrough();
@@ -303,7 +304,7 @@ describe("blocker 3: receipt before service retirement never relaunches into the
 	}, 30_000);
 });
 
-describe("blocker 4: unproven failure plus service absence is not kernel-zero", () => {
+describeOwnedRuntime("blocker 4: unproven failure plus service absence is not kernel-zero", () => {
 	test("retired unproven-fail never authorizes deletion; slot release needs never-released proof", async () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		const f = ownedFixture();

@@ -101,7 +101,7 @@
           <CloudDownload class={["h-3.5 w-3.5", actionId === "fetch" && "animate-pulse"]} aria-hidden="true" />
         </button>
       {:else}<span class="flex-1 text-xs font-medium">Source Control</span>{/if}
-      <button class={tool} type="button" title="Refresh Git status" aria-label="Refresh Git status" disabled={loading || busy} onclick={onRefresh}><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
+      <button class={tool} type="button" title="Refresh Git status and check remotes" aria-label="Refresh Git status and check remotes" disabled={loading || busy} onclick={onRefresh}><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
     </div>
     {#if snapshot}
       <div class="flex h-7 min-w-0 items-center gap-2 border-t border-sidebar-border/60 px-2 text-xs text-muted-foreground">

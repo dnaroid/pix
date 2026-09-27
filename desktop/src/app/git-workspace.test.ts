@@ -143,6 +143,35 @@ describe("Git commit transaction and lifecycle", () => {
 });
 
 describe("Git review checkpoints and secondary operations", () => {
+  it("fetches remotes before reporting current incoming commits", async () => {
+    const { store, snapshot } = fixture();
+    let fetched = false;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "git_fetch") {
+        fetched = true;
+        return undefined;
+      }
+      if (command === "git_status") return { ...snapshot, behind: fetched ? 2 : 0 };
+      if (command === "git_diff") return { scope: "staged", content: "+new", truncated: false };
+      if (command === "git_history" || command === "git_stash_list") return [];
+    });
+
+    await store.refreshRemoteStatus();
+
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status", "git_fetch", "git_status"]);
+    expect(store.snapshot?.behind).toBe(2);
+    expect(store.notice).toBeNull();
+  });
+
+  it("skips remote fetch when no Git remote is configured", async () => {
+    const { store, snapshot } = fixture();
+    snapshot.remotes.length = 0;
+
+    await store.refreshRemoteStatus();
+
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status"]);
+  });
+
   it("retains a review when inspecting another file or closing the editor", async () => {
     const { store } = fixture();
     const reviewed = { scope: "staged" as const, content: "+new", truncated: false };

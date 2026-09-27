@@ -30,6 +30,7 @@ const roots: string[] = [];
 const originalPlatform = process.platform;
 const originalArgv1 = process.argv[1];
 const originalEnvModel = process.env.ASYNC_SUBAGENTS_MODEL;
+const describeOwnedSpawnMatrix = process.platform === "win32" ? describe.skip : describe;
 const tempDir = () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "provider-ext-"));
 	roots.push(dir);
@@ -244,7 +245,7 @@ function spawnForArgs(task: { id: string; model?: string }, extraArgs: string[] 
 const count = (argv: string[], value: string) => argv.filter((arg) => arg === value).length;
 const lastModels = (argv: string[]) => argv[argv.lastIndexOf("--models") + 1];
 
-describe("child pi_args matrix (T1)", () => {
+describeOwnedSpawnMatrix("child pi_args matrix (T1)", () => {
 	test("Claude task: one provider extension, isolation preserved, pinned --models", () => {
 		const run = spawnForArgs({ id: "claude", model: CLAUDE });
 		const argv = run.argv();

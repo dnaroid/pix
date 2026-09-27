@@ -42,6 +42,7 @@ import { getAgentState, waitForAgents } from "../../src/async-subagents/core/sta
 import { pollRunWithUpdates } from "../../src/async-subagents/polling.js";
 import { deleteRunDirs } from "../../src/async-subagents/core/cleanup.js";
 import type { OwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
+const describeOwnedRuntime = process.platform === "win32" ? describe.skip : describe;
 
 const WORKER_TOKEN = "ab".repeat(32);
 const JOURNAL = `role=owned boot=1.000001 cid=abc worker_pid=1 worker_pidversion=1 worker_token=${WORKER_TOKEN} journaled_at=1\n`;
@@ -142,7 +143,7 @@ function restartFixture() {
 	return { root, runDir, agentDir, makeRunDir, pointer, drainedOk };
 }
 
-describe("blocker 1: receipt before bootout after a parent restart", () => {
+describeOwnedRuntime("blocker 1: receipt before bootout after a parent restart", () => {
 	test("exit_code exists, jobs present: nonterminal state and continuous reconciliation retry", async () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		const f = restartFixture();
@@ -209,7 +210,7 @@ describe("blocker 1: receipt before bootout after a parent restart", () => {
 	}, 25_000);
 });
 
-describe("blocker 2: pre-exec crash staging and publish", () => {
+describeOwnedRuntime("blocker 2: pre-exec crash staging and publish", () => {
 	test("staging stays hidden, publish is atomic with the claim protocol, and leftovers are retained", () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "owned-restart-"));
@@ -265,7 +266,7 @@ describe("blocker 2: pre-exec crash staging and publish", () => {
 	});
 });
 
-describe("exclusive launch claim", () => {
+describeOwnedRuntime("exclusive launch claim", () => {
 	test("fence wins an unclaimed run exactly once and is idempotent under concurrent recovery", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "owned-claim-"));
 		roots.push(root);
@@ -299,7 +300,7 @@ describe("exclusive launch claim", () => {
 	});
 });
 
-describe("blocker 2: unclaimed runs after a parent crash are fenced", () => {
+describeOwnedRuntime("blocker 2: unclaimed runs after a parent crash are fenced", () => {
 	test("pointerless complete UUID dir: fenced, terminal only after both jobs retire, then deletable", async () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		const f = restartFixture();
@@ -420,7 +421,7 @@ describe("blocker 2: unclaimed runs after a parent crash are fenced", () => {
 	}, 25_000);
 });
 
-describe("blocker 2: older generations are never hidden by the metadata pointer", () => {
+describeOwnedRuntime("blocker 2: older generations are never hidden by the metadata pointer", () => {
 	test("retry crash: two pointerless generations resolve to the newest, fenced, and terminate", async () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		const f = restartFixture();
@@ -490,7 +491,7 @@ describe("blocker 2: older generations are never hidden by the metadata pointer"
 	}, 10_000);
 });
 
-describe("in-process live launch is never fenced", () => {
+describeOwnedRuntime("in-process live launch is never fenced", () => {
 	test("an active handle blocks fencing even past the grace; a reaped bridge lifts it", async () => {
 		if (originalPlatform !== "darwin") return;
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "owned-live-"));
@@ -557,7 +558,7 @@ describe("in-process live launch is never fenced", () => {
 	}, 15_000);
 });
 
-describe("bridge prelaunch abort after winning the claim", () => {
+describeOwnedRuntime("bridge prelaunch abort after winning the claim", () => {
 	const prelaunch = (code: string, options: { protocol?: boolean; journal?: boolean; claim?: string } = {}) => {
 		const f = restartFixture();
 		const owner = f.makeRunDir(UUID_A, LABELS_A, { protocol: options.protocol });
@@ -587,7 +588,7 @@ describe("bridge prelaunch abort after winning the claim", () => {
 	});
 });
 
-describe("owned retry backoff", () => {
+describeOwnedRuntime("owned retry backoff", () => {
 	test("a terminal, retired owned attempt with a pending retry reports retrying", async () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		const f = restartFixture();

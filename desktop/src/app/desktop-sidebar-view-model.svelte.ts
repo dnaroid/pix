@@ -156,7 +156,7 @@ export function createDesktopSidebarViewModel(options: {
       if (workspace === options.workspace()) options.registry.scheduleProjectSync("workspace");
     },
     onGitRefresh: () => void (async () => {
-      await options.git.refresh();
+      await options.git.refreshRemoteStatus();
       await options.gitCi.refresh();
     })(),
     onGitInitialize: () => void options.git.initialize(),

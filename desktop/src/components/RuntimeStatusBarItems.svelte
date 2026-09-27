@@ -211,6 +211,38 @@
   }
 </script>
 
+{#snippet contextScale(size: "compact" | "expanded")}
+  <span
+    class={size === "compact"
+      ? "flex h-1.5 w-16 overflow-hidden rounded-sm bg-border"
+      : "flex h-4 w-full overflow-hidden rounded-sm bg-border"}
+    data-context-scale={size}
+    aria-hidden="true"
+  >
+    {#each contextMap.cells as cell}
+      <span class="flex h-full min-w-0 flex-1">
+        {#each cell.segments as segment}
+          <span
+            class={["h-full min-w-0", contextCellClass(segment.kind)]}
+            style:flex-grow={segment.share}
+          ></span>
+        {/each}
+      </span>
+    {/each}
+  </span>
+{/snippet}
+
+{#snippet contextScaleLegend()}
+  <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Context color legend">
+    {#each contextLegend as item}
+      <span class="inline-flex items-center gap-1">
+        <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
+        <span>{item.label}{item.value ? ` ${item.value}` : ""}</span>
+      </span>
+    {/each}
+  </div>
+{/snippet}
+
 <svelte:window onpointerdown={closeOutside} onkeydown={handleKeydown} />
 
 {#if status || showSkeletons}
@@ -232,18 +264,7 @@
         >
           <span class="font-sans text-xs text-muted-foreground max-[860px]:hidden">Context</span>
           <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
-          <span class="flex h-1.5 w-16 overflow-hidden rounded-sm bg-border" aria-hidden="true">
-            {#each contextMap.cells as cell}
-              <span class="flex h-full min-w-0 flex-1">
-                {#each cell.segments as segment}
-                  <span
-                    class={["h-full min-w-0", contextCellClass(segment.kind)]}
-                    style:flex-grow={segment.share}
-                  ></span>
-                {/each}
-              </span>
-            {/each}
-          </span>
+          {@render contextScale("compact")}
           {#if status?.dcpTokensSaved !== undefined}
             <span class="text-muted-foreground">saved ~{formatCompactTokens(status.dcpTokensSaved)}</span>
           {/if}
@@ -255,14 +276,8 @@
             role="tooltip"
           >
             <div class="font-mono text-xs text-muted-foreground">{contextTitle()}</div>
-            <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Context color legend">
-              {#each contextLegend as item}
-                <span class="inline-flex items-center gap-1">
-                  <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
-                  <span>{item.label}{item.value ? ` ${item.value}` : ""}</span>
-                </span>
-              {/each}
-            </div>
+            <div class="mt-2">{@render contextScale("expanded")}</div>
+            {@render contextScaleLegend()}
           </div>
         {/if}
 
@@ -303,6 +318,10 @@
                 {/if}
               </button>
             </header>
+            <div class="border-b border-border px-3 py-2.5">
+              {@render contextScale("expanded")}
+              {@render contextScaleLegend()}
+            </div>
             <div class="max-h-[min(420px,55vh)] overflow-y-auto px-3 py-2.5">
               {#if dcpBody}
                 <pre class="select-text whitespace-pre-wrap font-mono text-xs leading-[1.55] text-muted-foreground">{dcpBody}</pre>

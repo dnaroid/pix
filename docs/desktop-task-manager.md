@@ -68,7 +68,10 @@ agent's session-local todo list.
    files are ignored; Pix does not import, migrate, delete, or interpret them.
 8. Starting an unlinked task creates/selects a new ACP session, persists its
    session id, changes any non-`done` task to `in-progress`, preserves `done`,
-   appends the generated task prompt, and sends it immediately.
+   appends the generated task prompt, and sends it immediately. If the UI-only
+   New Conversation draft was active, Pix foregrounds the created real session
+   and deactivates rather than discards the draft, preserving that draft's
+   unsent composer text/attachments for later restoration.
 9. Starting a linked task opens that session. A stale/missing linked session is
    a recoverable error and does not silently create another session.
 10. Task completion remains manual.
@@ -126,6 +129,9 @@ agent's session-local todo list.
   the same save method, so they share the same background Registry scheduling
   semantics.
 - A task is linked to at most one session.
+- Starting an unlinked task never leaves the UI-only draft selected after the
+  real task session has been created; composer ownership moves to the task
+  session while any draft composer snapshot remains isolated under the draft.
 - Running/reordering/editing is disabled while conflicting task/session work is
   active.
 - Dragging between groups changes only ordering/type; other task fields survive.
@@ -162,6 +168,9 @@ agent's session-local todo list.
   parsing, prompt generation, and drag/reorder semantics.
 - `desktop/src/lib/attachments.test.ts` covers data-URL decoding used when a
   pathless composer image is persisted into project task storage.
+- `desktop/src/app/desktop-project-action-services.test.ts` covers project-task
+  launch from the active UI-only draft and verifies that the created real
+  session becomes active without discarding the draft composer snapshot.
 - Rust tests in `desktop/src-tauri/src/lib.rs` cover missing/read/write/malformed
   JSONC, validation, workspace confinement, and ignoring unsupported task files.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and

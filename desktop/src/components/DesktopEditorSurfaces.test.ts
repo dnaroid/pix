@@ -47,8 +47,9 @@ describe("desktop editor work surfaces", () => {
     expect(previewSource).not.toContain("Resize preview");
   });
 
-  it("keeps any editable project text file in edit mode, including line-range previews", () => {
-    expect(workbenchBuilderSource).toContain('editable: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)');
+  it("keeps editable project and user-config text files in edit mode, including line-range previews", () => {
+    expect(workbenchBuilderSource).toContain('const userConfigKind = activePreview?.kind === "file" ? activePreview.userConfigKind : undefined');
+    expect(workbenchBuilderSource).toContain('&& (userConfigKind !== undefined || isWorkspaceProjectFilePath(activePreview.file.path))');
     expect(previewEditorControllerSource).not.toContain("markdown: () => boolean");
     expect(previewSource).toContain("{#if editing}");
     expect(previewSource).not.toContain("{#if renderAsMarkdown && editing}");

@@ -16,7 +16,7 @@ Optimize Source Control for message generation → commit → push, code review 
 
 ## Primary workspace UI
 
-The sidebar header shows the local branch, upstream, outgoing/incoming counts, status refresh and a standalone Push/Publish action. The branch selector also allows leaving detached HEAD. Incoming commits, conflicts, errors and completed operations have explicit feedback.
+The sidebar header shows the local branch, upstream, outgoing/incoming counts, status refresh and a standalone Push/Publish action. Opening Source Control and its Refresh action first read local status, fetch configured remotes when present, then refresh status so incoming counts reflect the fetched refs; this check never pulls or changes working-tree files. The branch selector also allows leaving detached HEAD. Incoming commits, conflicts, errors and completed operations have explicit feedback.
 
 When the selected workspace is not a Git repository, Source Control shows an explicit **Initialize Git** empty state instead of treating the expected missing-repository condition as an error. Initialization runs `git init -b main` for the exact selected workspace and is idempotent. If the selected workspace is already inside a different repository, Desktop preserves the repository-root error and does not offer or create a nested repository; the parent repository root must be opened as the Pix project instead.
 

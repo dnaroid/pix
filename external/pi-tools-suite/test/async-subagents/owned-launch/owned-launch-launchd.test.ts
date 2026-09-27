@@ -43,7 +43,7 @@ import { launchOwnedAgent, launchOwnedAgentSync, type OwnedLaunchHandle } from "
 import { fenceOwnedLaunchRunAsync, readOwnedLaunchClaimSync, writeOwnedLaunchCancelMarker } from "../../../src/async-subagents/core/owned-launch/marker.js";
 import { readOwnedLaunchReceipt } from "../../../src/async-subagents/core/owned-launch/receipt.js";
 
-const domain = `gui/${process.getuid!()}`;
+const domain = process.getuid ? `gui/${process.getuid()}` : "gui/unsupported";
 const launchctl = (args: string[], timeout = 10_000) => spawnSync("launchctl", args, { timeout, encoding: "utf8" });
 function servicePresence(result: { status: number | null; error?: Error; signal?: string | null }): "present" | "absent" | "unknown" {
 	if (result.error || result.signal) return "unknown";

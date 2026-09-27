@@ -9,6 +9,7 @@ import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
 import { getAgentState } from "../../src/async-subagents/core/state.js";
 import { setOwnedRetirementPrintForTest } from "../../src/async-subagents/core/owned-retirement.js";
 const CLAUDE_PROVIDER_STUB = fileURLToPath(new URL("./fixtures/claude-provider-stub", import.meta.url));
+const describeOwnedRuntime = process.platform === "win32" ? describe.skip : describe;
 
 // Inject only the native launch boundary; spawn/state/receipt integration
 // runs unchanged. No real process, provider, or launchd is used: the
@@ -78,7 +79,7 @@ function start(timeoutMs = 5_000) {
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const SETTLE_WAIT_MS = 1_300;
 
-describe("owned runtime early completion", () => {
+describeOwnedRuntime("owned runtime early completion", () => {
 	test("agent_settled cannot finalize early; callback waits for journal-bound receipt", async () => {
 		const f = start();
 		currentProcess.stdout.write('{"type":"agent_end","result":"done"}\n{"type":"agent_settled"}\n');

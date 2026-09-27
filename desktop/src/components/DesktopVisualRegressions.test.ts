@@ -317,6 +317,17 @@ describe("desktop visual regressions", () => {
     expect(sessionInspectorSource).not.toContain("DcpContextPanel");
   });
 
+  it("renders the same context capacity cells enlarged in the hover and statistics popovers", () => {
+    expect(runtimeStatusSource).toContain('{#snippet contextScale(size: "compact" | "expanded")}');
+    expect(runtimeStatusSource).toContain('data-context-scale={size}');
+    expect(runtimeStatusSource).toContain('class={["h-full min-w-0", contextCellClass(segment.kind)]}');
+    expect(runtimeStatusSource).toContain('style:flex-grow={segment.share}');
+    expect(runtimeStatusSource).toContain('"flex h-4 w-full overflow-hidden rounded-sm bg-border"');
+    expect(runtimeStatusSource).toContain('{@render contextScale("compact")}');
+    expect(runtimeStatusSource.match(/\{@render contextScale\("expanded"\)\}/g)).toHaveLength(2);
+    expect(runtimeStatusSource.match(/\{@render contextScaleLegend\(\)\}/g)).toHaveLength(2);
+  });
+
   it("keeps Session inspector activity sections as independently persistent native accordions", () => {
     for (const source of [sessionSubagentsSource, sessionTodosSource]) {
       expect(source).toContain('<details');

@@ -1,8 +1,6 @@
-// Unit tests for the owned-launch TypeScript primitives. These run
-// everywhere (no launchd, no native binaries, no signals): label shape,
-// strict spec transport round-trips including hostile payload bytes,
-// secure-directory creation, sockets-dir budget, and the fail-closed
-// toolchain bootstrap contract.
+// Unit tests for the owned-launch TypeScript primitives. Portable label/spec
+// tests run everywhere. POSIX permission and macOS toolchain contracts are not
+// meaningful on Windows and are skipped there.
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -26,6 +24,7 @@ import {
 	type OwnedLaunchWorkerSpec,
 } from "../../../src/async-subagents/core/owned-launch/spec.js";
 import { ensureOwnedLaunchBinaries, ownedLaunchNativeDir } from "../../../src/async-subagents/core/owned-launch/bootstrap.js";
+const describePosixOwnedLaunch = process.platform === "win32" ? describe.skip : describe;
 
 function baseSpec(overrides: Partial<OwnedLaunchWorkerSpec> = {}): OwnedLaunchWorkerSpec {
 	return {
@@ -147,7 +146,7 @@ describe("owned-launch spec transport", () => {
 	});
 });
 
-describe("owned-launch secure directories", () => {
+describePosixOwnedLaunch("owned-launch secure directories", () => {
 	test("creates a fresh 0700 directory and refuses reuse", () => {
 		const base = join(tmpdir(), `ol-unit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(base, { recursive: true });
@@ -174,7 +173,7 @@ describe("owned-launch secure directories", () => {
 	});
 });
 
-describe("owned-launch durable cancel marker", () => {
+describePosixOwnedLaunch("owned-launch durable cancel marker", () => {
 	test("writes a 0600 single-line marker atomically and idempotently", () => {
 		const base = mkdtempSync(join(tmpdir(), "ol-marker-"));
 		try {
@@ -196,7 +195,7 @@ describe("owned-launch durable cancel marker", () => {
 	});
 });
 
-describe("owned-launch bootstrap fail-closed", () => {
+describePosixOwnedLaunch("owned-launch bootstrap fail-closed", () => {
 	test("missing toolchain rejects instead of degrading", async () => {
 		const cacheRoot = join(tmpdir(), `ol-nocache-${Date.now()}`);
 		try {

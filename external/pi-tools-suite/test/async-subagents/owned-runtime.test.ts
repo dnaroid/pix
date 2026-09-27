@@ -8,6 +8,7 @@ import { stopAgents } from "../../src/async-subagents/core/stop.js";
 import { deleteRunDirs, findCleanupCandidates } from "../../src/async-subagents/core/cleanup.js";
 import { maySelectOwnedProvider, selectsOwnedProvider, verifiedOwnedDrain, verifiedOwnedDrainSync, waitForOwnedDrain } from "../../src/async-subagents/core/owned-launch-integration.js";
 import { ownedDeletableSync, ownedRetiredSync, ownedSlotReleasedSync, verifyOwnedRetirementAsync } from "../../src/async-subagents/core/owned-retirement.js";
+const describeOwnedRuntime = process.platform === "win32" ? describe.skip : describe;
 
 const LABEL_SUPERVISOR = "org.pix.owned-launch.22222222-2222-4222-8222-222222222222";
 const LABEL_WORKER = "org.pix.owned-launch.33333333-3333-4333-8333-333333333333";
@@ -43,7 +44,7 @@ function fixture() {
 	return { root, runDir, agentDir, owner, receipt, retire };
 }
 
-describe("owned runtime boundary", () => {
+describeOwnedRuntime("owned runtime boundary", () => {
 	test("model flags, provider flag and fallback are eligible; direct unprepared launch fails before spawn", () => {
 		const task = { id: "agent", task: "test", model: "other/model" };
 		expect(selectsOwnedProvider(task, ["--model=pi-claude-code-provider/sonnet"])).toBe(true);
