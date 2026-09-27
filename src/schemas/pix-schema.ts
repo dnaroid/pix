@@ -193,6 +193,17 @@ export const PixConfigSchema = Type.Object(
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
 		ignoreContextFiles: Type.Optional(Type.Boolean({ description: "Disable AGENTS.md / CLAUDE.md discovery for sessions started in this project, equivalent to pi --no-context-files." })),
 		maxProjectSessions: Type.Optional(Type.Number({ description: "Maximum number of pi session JSONL files to retain per project. Set to 0 to disable automatic session deletion.", minimum: 0 })),
+		memoryWatchdog: Type.Optional(Type.Union([
+			Type.Boolean({ description: "Shorthand for memoryWatchdog.enabled." }),
+			Type.Object(
+				{
+					enabled: Type.Optional(Type.Boolean({ description: "Sample TUI memory every 15s and write a leak report when RSS crosses thresholdMb. Default: true." })),
+					thresholdMb: Type.Optional(Type.Number({ description: "RSS in MiB that triggers the first leak report; further reports fire each time RSS doubles. Default: 3072.", minimum: 256 })),
+					heapSnapshot: Type.Optional(Type.Boolean({ description: "Also write a V8 heap snapshot next to the first report. The write briefly pauses the UI and is skipped for heaps above 4 GiB. Default: true." })),
+				},
+				{ additionalProperties: false },
+			),
+		], { description: "TUI memory-leak watchdog. Reports go to ~/.config/pi/memory-reports; samples and report events are also logged to ~/.config/pi/pix.log." })),
 		defaultModel: Type.Optional(DefaultModelConfig),
 		modelRouting: Type.Optional(ModelRoutingConfig),
 		visibleModels: Type.Optional(Type.Array(Type.String({

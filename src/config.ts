@@ -109,6 +109,24 @@ export type DictationConfig = {
 	apiKey?: string;
 };
 
+export type MemoryWatchdogConfig = {
+	/** Sample TUI memory and write a leak report when RSS crosses the threshold. */
+	enabled: boolean;
+	/** RSS in MiB that triggers the first report; later reports fire each time RSS doubles. */
+	thresholdMb: number;
+	/** Also write a V8 heap snapshot with the first report (skipped for heaps above 4 GiB). */
+	heapSnapshot: boolean;
+};
+
+export const DEFAULT_MEMORY_WATCHDOG: MemoryWatchdogConfig = {
+	enabled: true,
+	thresholdMb: 3072,
+	heapSnapshot: true,
+};
+
+const MEMORY_WATCHDOG_MIN_THRESHOLD_MB = 256;
+const MEMORY_WATCHDOG_MAX_THRESHOLD_MB = 1024 * 1024;
+
 export type PixConfig = {
 	toolRenderer: ToolRendererConfig;
 	outputFilters: OutputFiltersConfig;
@@ -125,6 +143,7 @@ export type PixConfig = {
 	dictation: DictationConfig;
 	ignoreContextFiles: boolean;
 	maxProjectSessions: number;
+	memoryWatchdog: MemoryWatchdogConfig;
 };
 
 const PIX_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/pix.json";
@@ -513,6 +532,18 @@ function extractMaxProjectSessions(raw: unknown): number | undefined {
 	return Math.max(0, Math.floor(raw.maxProjectSessions));
 }
 
+function extractMemoryWatchdogConfig(raw: unknown, fallback: MemoryWatchdogConfig): MemoryWatchdogConfig | undefined {
+	if (!isPlainObject(raw)) return undefined;
+	const watchdog = raw.memoryWatchdog;
+	if (typeof watchdog === "boolean") return { ...fallback, enabled: watchdog };
+	if (!isPlainObject(watchdog)) return undefined;
+	return {
+		enabled: typeof watchdog.enabled === "boolean" ? watchdog.enabled : fallback.enabled,
+		thresholdMb: numberInRange(watchdog.thresholdMb, fallback.thresholdMb, MEMORY_WATCHDOG_MIN_THRESHOLD_MB, MEMORY_WATCHDOG_MAX_THRESHOLD_MB),
+		heapSnapshot: typeof watchdog.heapSnapshot === "boolean" ? watchdog.heapSnapshot : fallback.heapSnapshot,
+	};
+}
+
 function normalizeDictationLanguage(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const normalized = value.trim().toLowerCase();
@@ -561,6 +592,7 @@ export function defaultPixConfig(): PixConfig {
 		dictation: cloneDictationConfig(DEFAULT_DICTATION),
 		ignoreContextFiles: false,
 		maxProjectSessions: 0,
+		memoryWatchdog: { ...DEFAULT_MEMORY_WATCHDOG },
 	};
 }
 
@@ -617,6 +649,7 @@ function pixConfigFromParsed(
 	}) ?? fallback.dictation;
 	const ignoreContextFiles = extractIgnoreContextFiles(parsed) ?? fallback.ignoreContextFiles;
 	const maxProjectSessions = extractMaxProjectSessions(parsed) ?? fallback.maxProjectSessions;
+	const memoryWatchdog = extractMemoryWatchdogConfig(parsed, fallback.memoryWatchdog) ?? { ...fallback.memoryWatchdog };
 	return {
 		toolRenderer,
 		outputFilters,
@@ -631,6 +664,7 @@ function pixConfigFromParsed(
 		dictation,
 		ignoreContextFiles,
 		maxProjectSessions,
+		memoryWatchdog,
 	};
 }
 

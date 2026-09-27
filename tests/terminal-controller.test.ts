@@ -151,7 +151,7 @@ describe("AppTerminalController", () => {
 			restore.emitResize();
 
 			assert.deepEqual(inputChunks, []);
-			assert.deepEqual(events, ["cancelTabs"]);
+			assert.deepEqual(events, ["cancelTabs", "stopMemoryWatchdog"]);
 			assert.equal(host.isRunning(), false);
 			assert.equal(cleanupSawDeadline, true);
 
@@ -186,6 +186,9 @@ function fakeHost(inputChunks: string[] = [], events: string[] = []) {
 		stopBlinking: () => {},
 		stopSubagentsPolling: () => {},
 		stopModelUsagePolling: () => {},
+		stopMemoryWatchdog: () => {
+			events.push("stopMemoryWatchdog");
+		},
 		stopVoiceInput: async () => {},
 		stopAutocomplete: () => {},
 		stopShellCommand: () => {},

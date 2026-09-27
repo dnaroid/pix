@@ -71,6 +71,7 @@ import { checkPiUpdate, checkPixUpdate, formatPixStartupUpdateDialog, formatPiSt
 import { checkAndUpdateIdxOnStartup, formatIdxStartupUpdateNotice } from "./cli/startup-checks.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
+import { MemoryWatchdog } from "./diagnostics/memory-watchdog.js";
 import {
 	MODEL_USAGE_RESPONSE_HEADERS_EVENT,
 	parseModelUsageResponseHeadersPayload,
@@ -116,6 +117,7 @@ export class PiUiExtendApp {
 	private readonly statusController: AppStatusController;
 	private readonly statusLineRenderer: StatusLineRenderer;
 	private readonly modelUsageController: AppModelUsageController;
+	private readonly memoryWatchdog: MemoryWatchdog;
 	private readonly tabsController: AppTabsController;
 	private readonly tabLineRenderer: TabLineRenderer;
 	private readonly editorLayoutRenderer: EditorLayoutRenderer;
@@ -244,6 +246,17 @@ export class PiUiExtendApp {
 			draftSelection: () => this.draftModelUsageSelection(),
 			render: () => this.render(),
 		});
+		this.memoryWatchdog = new MemoryWatchdog({
+			appContext: () => ({
+				tabs: this.tabsController.tabs().length,
+				loadedRuntimes: this.tabsController.loadedRuntimeCount(),
+				visibleEntries: this.entries.length,
+				activeSessionId: this.runtime?.session.sessionId,
+				activeModel: this.runtime?.session.model ? `${this.runtime.session.model.provider}/${this.runtime.session.model.id}` : undefined,
+				sessionStreaming: this.runtime?.session.isStreaming,
+			}),
+			showToast: (message, kind) => this.showToast(message, kind),
+		}, this.pixConfig.memoryWatchdog);
 		this.tabsController = new AppTabsController({
 			options: this.options,
 			maxProjectSessions: () => this.pixConfig.maxProjectSessions,
@@ -931,6 +944,7 @@ export class PiUiExtendApp {
 			stopBlinking: () => this.stopBlinking(),
 			stopSubagentsPolling: () => this.subagentsWidgetController.stopPolling(),
 			stopModelUsagePolling: () => this.modelUsageController.stopPolling(),
+			stopMemoryWatchdog: () => this.memoryWatchdog.stop(),
 			stopVoiceInput: () => this.voiceController.dispose(),
 			stopAutocomplete: () => this.autocompleteController.dispose(),
 			stopShellCommand: () => this.shellController.dispose(),
@@ -1228,6 +1242,8 @@ export class PiUiExtendApp {
 		else this.pixConfig.thinkingByModel = { ...config.thinkingByModel };
 		this.pixConfig.ignoreContextFiles = config.ignoreContextFiles;
 		this.pixConfig.maxProjectSessions = config.maxProjectSessions;
+		this.pixConfig.memoryWatchdog = { ...config.memoryWatchdog };
+		this.memoryWatchdog.updateConfig(this.pixConfig.memoryWatchdog);
 		this.updateOutputFilters();
 		this.voiceController.updateDictationConfig(this.pixConfig.dictation);
 		setAppIconTheme(this.pixConfig.iconTheme.name);
@@ -1241,6 +1257,7 @@ export class PiUiExtendApp {
 	async start(): Promise<void> {
 		await this.sessionLifecycle.start();
 		this.modelUsageController.startPolling();
+		this.memoryWatchdog.start();
 		this.nerdFontController.ensureInstalledOnStartup();
 		this.checkUpdatesOnStartup();
 	}

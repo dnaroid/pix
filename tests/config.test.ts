@@ -155,6 +155,7 @@ describe("config helpers", () => {
 		assert.equal(config.dictation.model, "nova-3");
 		assert.equal(config.ignoreContextFiles, false);
 		assert.equal(config.maxProjectSessions, 0);
+		assert.deepEqual(config.memoryWatchdog, { enabled: true, thresholdMb: 3072, heapSnapshot: true });
 		assert.equal(config.dictation.languages.en?.label, "English");
 		assert.equal(config.dictation.languages.ru?.label, "Russian");
 	});
@@ -192,6 +193,7 @@ describe("config helpers", () => {
 			"iconTheme": "fallback",
 			"promptEnhancer": { "modelRef": "zai/custom-enhancer" },
 			"maxProjectSessions": 50,
+			"memoryWatchdog": { "thresholdMb": 8, "heapSnapshot": false },
 			"autocomplete": { "modelRef": "zai/custom-autocomplete", "debounceMs": 125, "timeoutMs": 2600, "maxTokens": 64, "maxPromptTokens": 1800, "includeRecentMessages": 9 },
 			"dictation": {
 				"apiKey": "dg-user-config-key",
@@ -229,14 +231,18 @@ describe("config helpers", () => {
 		assert.equal(loaded.dictation.apiKey, "dg-user-config-key");
 		assert.equal(loaded.ignoreContextFiles, false);
 		assert.equal(loaded.maxProjectSessions, 50);
+		// Partial watchdog settings keep the other defaults; tiny thresholds clamp to the 256 MiB floor.
+		assert.deepEqual(loaded.memoryWatchdog, { enabled: true, thresholdMb: 256, heapSnapshot: false });
 		assert.deepEqual(Object.keys(loaded.dictation.languages), ["en", "ru"]);
 		assert.equal(loaded.dictation.languages.ru?.deepgramLanguage, "ru");
 
 		writeFileSync(testConfigPath, `{
 			"toolRenderer": { "tools": { "empty": {}, "valid": { "direction": "tail" } } },
-			"outputFilters": { "patterns": ["x"] }
+			"outputFilters": { "patterns": ["x"] },
+			"memoryWatchdog": false
 		}`);
 		const partial = loadPixConfig();
+		assert.deepEqual(partial.memoryWatchdog, { enabled: false, thresholdMb: 3072, heapSnapshot: true });
 		assert.deepEqual(resolveToolRule("valid", partial.toolRenderer), { previewLines: 0, direction: "tail", color: "toolTitle" });
 		assert.deepEqual(resolveToolRule("empty", partial.toolRenderer), { previewLines: 0, direction: "head", color: "toolTitle" });
 		assert.deepEqual(partial.outputFilters.patterns, ["x"]);

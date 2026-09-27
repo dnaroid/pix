@@ -1414,6 +1414,11 @@ export class AppTabsController {
 		this.historyLoadGeneration += 1;
 	}
 
+	/** Distinct runtimes currently held for open tabs (diagnostics only). */
+	loadedRuntimeCount(): number {
+		return new Set(this.runtimesByTabId.values()).size;
+	}
+
 	private tabsAvailable(runtime: AgentSessionRuntime): boolean {
 		if (this.host.options.noSession) {
 			this.host.showToast("/new_tab is unavailable with --no-session", "warning");

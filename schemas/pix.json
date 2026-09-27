@@ -14,6 +14,34 @@
       "description": "Maximum number of pi session JSONL files to retain per project. Set to 0 to disable automatic session deletion.",
       "minimum": 0
     },
+    "memoryWatchdog": {
+      "anyOf": [
+        {
+          "type": "boolean",
+          "description": "Shorthand for memoryWatchdog.enabled."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Sample TUI memory every 15s and write a leak report when RSS crosses thresholdMb. Default: true."
+            },
+            "thresholdMb": {
+              "type": "number",
+              "description": "RSS in MiB that triggers the first leak report; further reports fire each time RSS doubles. Default: 3072.",
+              "minimum": 256
+            },
+            "heapSnapshot": {
+              "type": "boolean",
+              "description": "Also write a V8 heap snapshot next to the first report. The write briefly pauses the UI and is skipped for heaps above 4 GiB. Default: true."
+            }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "description": "TUI memory-leak watchdog. Reports go to ~/.config/pi/memory-reports; samples and report events are also logged to ~/.config/pi/pix.log."
+    },
     "defaultModel": {
       "type": "object",
       "properties": {

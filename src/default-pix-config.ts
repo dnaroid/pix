@@ -23,6 +23,9 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "ignoreContextFiles": false,
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.
   "maxProjectSessions": 0,
+  // TUI memory-leak watchdog: writes a report (and a heap snapshot) to ~/.config/pi/memory-reports
+  // when RSS crosses thresholdMb. Set "enabled": false to turn it off.
+  "memoryWatchdog": { "enabled": true, "thresholdMb": 3072, "heapSnapshot": true },
 	"desktop": {
 		"git": {
 			// TUI LLM used by /code-review. Desktop keeps an independent Source Control preference.

@@ -85,6 +85,7 @@ Example:
   "dictation": { "language": "en" },
   "ignoreContextFiles": false,
   "maxProjectSessions": 0,
+  "memoryWatchdog": { "enabled": true, "thresholdMb": 3072, "heapSnapshot": true },
   "toolRenderer": {
     "default": { "previewLines": 0 },
     "tools": {
@@ -98,6 +99,26 @@ Example:
 
 Project settings override the user profile. Use `/settings` to inspect the
 effective settings summary and `/reload` after changing resources.
+
+### Memory watchdog
+
+The TUI samples its own memory every 15 seconds. When RSS crosses
+`memoryWatchdog.thresholdMb` (default `3072`), Pix shows a warning toast and
+writes a leak report to `~/.config/pi/memory-reports/pix-memory-<time>-<pid>.json`:
+the memory timeline for the last hour (RSS, JS heap, external and ArrayBuffer
+memory), V8 heap-space statistics, active handles, and app counters such as
+open tabs and loaded runtimes. Another report is written each time RSS doubles
+again, and only the five newest reports are kept.
+
+With `heapSnapshot: true` (default) the first report also gets a
+`.heapsnapshot` next to it, which you can open in Chrome DevTools → Memory. The
+snapshot write briefly pauses the UI, and it is skipped when the JS heap is
+above 4 GiB. A growing `rssMb` with a flat `heapUsedMb` in the timeline points
+at memory outside the JS heap (buffers, native modules). Every 20th sample (about
+every five minutes) and every report are also logged to `~/.config/pi/pix.log`.
+
+Turn the watchdog off with `"memoryWatchdog": { "enabled": false }` (or
+`"memoryWatchdog": false`) and restart Pix.
 
 ### Automatic first-prompt model routing
 

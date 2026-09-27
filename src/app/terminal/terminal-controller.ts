@@ -30,6 +30,7 @@ export type AppTerminalControllerHost = {
 	stopBlinking(): void;
 	stopSubagentsPolling(): void;
 	stopModelUsagePolling(): void;
+	stopMemoryWatchdog(): void;
 	stopVoiceInput(): Promise<void>;
 	stopAutocomplete(): void;
 	stopShellCommand(): void;
@@ -166,6 +167,7 @@ export class AppTerminalController {
 		this.host.stopBlinking();
 		this.host.stopSubagentsPolling();
 		this.host.stopModelUsagePolling();
+		this.host.stopMemoryWatchdog();
 		this.host.stopAutocomplete();
 		this.host.stopShellCommand();
 		this.host.unsubscribeSession();
