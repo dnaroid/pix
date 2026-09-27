@@ -603,7 +603,7 @@
       {:else}
         {#each searchResults as result, index (`${result.path}:${result.line ?? ""}:${result.column ?? ""}:${index}`)}
           <button
-            class="block w-full cursor-pointer px-2.5 py-1.5 text-left hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            class="block w-full px-2.5 py-1.5 text-left hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             type="button"
             onclick={() => openSearchResult(result)}
             title={result.line === undefined ? result.path : `${result.path}:${result.line}:${result.column ?? 1}`}
@@ -657,7 +657,7 @@
         >
           <button
             class={[
-              "flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left text-xs text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-xs text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               hiddenEntry && treeState.selectedPath !== entry.path
                 ? "opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100"
                 : "",

@@ -60,7 +60,7 @@
 </script>
 
 <details class="border-t border-sidebar-border bg-panel">
-  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+  <summary class="flex h-8 list-none items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
     <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
     <span class="min-w-0 flex-1 truncate">{providerLabel}</span>
     {#if ci.loading}
@@ -121,7 +121,7 @@
 
     {#each ci.snapshot?.runs ?? [] as run (run.id)}
       <details class="rounded-md border border-border bg-panel-strong" ontoggle={(event) => { if (event.currentTarget.open) ci.onLoadJobs(run.id); }}>
-        <summary class="flex min-h-8 cursor-pointer list-none items-center gap-1.5 px-2 py-1 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+        <summary class="flex min-h-8 list-none items-center gap-1.5 px-2 py-1 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
           {#if run.status === "success"}<Check class="h-3.5 w-3.5 shrink-0 text-tool-success" aria-hidden="true" />
           {:else if run.status === "failure"}<X class="h-3.5 w-3.5 shrink-0 text-tool-error" aria-hidden="true" />
           {:else if run.status === "queued" || run.status === "running"}<RefreshCw class="h-3.5 w-3.5 shrink-0 text-tool-warning" aria-hidden="true" />

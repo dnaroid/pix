@@ -40,7 +40,7 @@
         <SettingsModelSelect value={modelRef} {models} ariaLabel={`Model ${index + 1}`} onChange={(next) => updateAt(index, next)} />
       </div>
       <button
-        class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
         type="button"
         aria-label={`Remove model ${index + 1}`}
         title="Remove"

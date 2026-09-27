@@ -52,7 +52,7 @@
 
   {#if explicit}
     <details class="group rounded-md border border-border bg-panel-strong">
-      <summary class="flex h-7 cursor-pointer list-none items-center justify-between px-2 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 [&::-webkit-details-marker]:hidden">
+      <summary class="flex h-7 list-none items-center justify-between px-2 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 [&::-webkit-details-marker]:hidden">
         <span>Choose visible models</span>
         <span class="text-muted-foreground">{value.length} selected</span>
       </summary>
@@ -73,7 +73,7 @@
           <p class="py-1 text-xs leading-4 text-muted-foreground">Model catalog unavailable. Existing configured refs are preserved.</p>
         {:else}
           {#each filteredModels as model (model.ref)}
-            <label class="flex min-h-7 cursor-pointer items-center gap-2 py-1 text-xs text-foreground">
+            <label class="flex min-h-7 items-center gap-2 py-1 text-xs text-foreground">
               <input
                 class="h-3.5 w-3.5 accent-primary"
                 type="checkbox"
@@ -86,7 +86,7 @@
           {/each}
         {/if}
         {#each filteredConfiguredUnknown as ref (ref)}
-          <label class="flex min-h-7 cursor-pointer items-center gap-2 py-1 text-xs text-foreground">
+          <label class="flex min-h-7 items-center gap-2 py-1 text-xs text-foreground">
             <input class="h-3.5 w-3.5 accent-primary" type="checkbox" checked onchange={() => toggle(ref)} />
             <span class="min-w-0 flex-1 truncate font-mono">{ref}</span>
             <span class="text-muted-foreground">configured</span>

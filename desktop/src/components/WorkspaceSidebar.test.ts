@@ -63,7 +63,7 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain("selectTab(activeTab);");
     expect(sidebarSource).toContain('title={`Close ${activeTabTitle}`}');
     expect(sidebarSource).toContain('aria-label={`Close ${activeTabTitle}`}');
-    expect(sidebarSource).toContain("bg-chrome pl-3 pr-1");
+    expect(sidebarSource).toContain("bg-sidebar pl-3 pr-1");
   });
 
   it("uses the shared menu navigation contract for task status", () => {

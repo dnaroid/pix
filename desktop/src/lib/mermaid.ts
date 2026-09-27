@@ -51,7 +51,7 @@ function configureMermaid(themeRoot: HTMLElement): void {
     maxTextSize: 50_000,
     htmlLabels: false,
     theme: "base",
-    fontFamily: '"Outfit", ui-sans-serif, system-ui, sans-serif',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif',
     themeVariables: {
       background: theme.background,
       primaryColor: theme.muted,

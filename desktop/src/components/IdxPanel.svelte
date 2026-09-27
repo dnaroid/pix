@@ -159,7 +159,7 @@
       <div class="truncate font-mono text-xs text-muted-foreground/70">{workspace || "No workspace"}</div>
     </div>
     <button
-      class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+      class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       type="button"
       title="Refresh IDX state"
       aria-label="Refresh IDX state"
@@ -177,7 +177,7 @@
       {@const tab = item[0] as PanelTab}
       <button
         class={[
-          "h-8 cursor-pointer border-b-2 px-2.5 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring",
+          "h-8 border-b-2 px-2.5 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring",
           activeTab === tab ? "border-b-primary bg-panel text-foreground" : "border-b-transparent text-muted-foreground hover:bg-chrome-hover hover:text-foreground",
         ]}
         type="button"
@@ -211,13 +211,13 @@
         <ScanSearch class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Project is not indexed</p>
         <p class="mx-auto mt-1 max-w-80 text-xs leading-4 text-muted-foreground">Initialize project-local IDX storage before using code and knowledge search.</p>
-        <label class="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+        <label class="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <input type="checkbox" bind:checked={openrouterEmbeddings} disabled={Boolean(runningOperation)} />
           <span>Use <span class="font-mono">--embedding openrouter</span></span>
         </label>
         <div>
           <button
-            class="mt-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            class="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
             disabled={Boolean(runningOperation)}
             onclick={() => void startOperation("init", { openrouterEmbeddings })}
@@ -243,12 +243,12 @@
             {#if idxField(overview?.indexStatus, "languages")}<div class="break-words"><span class="text-muted-foreground/65">languages</span> {idxField(overview?.indexStatus, "languages")}</div>{/if}
           </div>
           <div class="grid grid-cols-2 gap-1 border-t border-sidebar-border/70 px-2 py-2">
-            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("index")}>Update index</button>
-            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("full-index")}>Full reindex</button>
-            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("dry-run")}>Dry run</button>
-            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("doctor", { openrouterEmbeddings })}><span class="inline-flex items-center gap-1"><Wrench class="h-3 w-3" aria-hidden="true" />Doctor</span></button>
+            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("index")}>Update index</button>
+            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("full-index")}>Full reindex</button>
+            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("dry-run")}>Dry run</button>
+            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("doctor", { openrouterEmbeddings })}><span class="inline-flex items-center gap-1"><Wrench class="h-3 w-3" aria-hidden="true" />Doctor</span></button>
           </div>
-          <label class="flex cursor-pointer items-center gap-1.5 border-t border-sidebar-border/70 px-2.5 py-2 text-xs text-muted-foreground">
+          <label class="flex items-center gap-1.5 border-t border-sidebar-border/70 px-2.5 py-2 text-xs text-muted-foreground">
             <input type="checkbox" bind:checked={openrouterEmbeddings} disabled={Boolean(runningOperation)} />
             <span>Use <span class="font-mono">--embedding openrouter</span> when reinitializing</span>
           </label>
@@ -266,8 +266,8 @@
           <label for="idx-audit-paths" class="block text-xs font-medium text-foreground">Changed paths</label>
           <textarea id="idx-audit-paths" class="h-24 w-full resize-none rounded-md border border-input bg-panel-strong p-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70" placeholder="src/feature.ts, specs/feature.md" value={auditState.pathsInput} oninput={(event) => auditController.setPathsInput(event.currentTarget.value)} spellcheck="false"></textarea>
           <div class="flex flex-wrap items-center gap-1.5">
-            <button class="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!indexReady || !auditController.pathsValid || auditState.running || Boolean(runningOperation)} onclick={() => void runAudit()}>{#if auditState.running}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Audit paths</button>
-            <button class="h-7 cursor-pointer rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>Update in new session</button>
+            <button class="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!indexReady || !auditController.pathsValid || auditState.running || Boolean(runningOperation)} onclick={() => void runAudit()}>{#if auditState.running}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Audit paths</button>
+            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>Update in new session</button>
           </div>
         </div>
         {#if auditState.running && !auditOutput}
@@ -285,19 +285,19 @@
           <div class="flex h-7 items-stretch border-b border-sidebar-border/70" role="tablist" aria-label="Query source">
             {#each [["code", "Code"], ["knowledge", "Documents"], ["context", "Context"]] as item}
               {@const kind = item[0] as IdxQueryKind}
-              <button class={["cursor-pointer border-b-2 px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring", queryState.queryKind === kind ? "border-b-primary text-foreground" : "border-b-transparent text-muted-foreground hover:text-foreground"]} type="button" role="tab" aria-selected={queryState.queryKind === kind} onclick={() => queryState.queryKind = kind}>{item[1]}</button>
+              <button class={["border-b-2 px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring", queryState.queryKind === kind ? "border-b-primary text-foreground" : "border-b-transparent text-muted-foreground hover:text-foreground"]} type="button" role="tab" aria-selected={queryState.queryKind === kind} onclick={() => queryState.queryKind = kind}>{item[1]}</button>
             {/each}
           </div>
           <div class="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
             <input class="h-8 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/70" aria-label="IDX semantic query" placeholder={queryState.queryKind === "context" ? "Describe the behavior or change…" : "Search repository…"} bind:value={queryState.queryText} onkeydown={(event) => { if (event.key === "Enter") void runQuery(); }} />
-            <button class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!queryState.queryText.trim() || queryState.queryRunning || !indexReady || Boolean(runningOperation)} onclick={() => void runQuery()}>{#if queryState.queryRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Run</button>
+            <button class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!queryState.queryText.trim() || queryState.queryRunning || !indexReady || Boolean(runningOperation)} onclick={() => void runQuery()}>{#if queryState.queryRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Run</button>
           </div>
           <div class="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
             <input class="h-7 min-w-40 basis-56 flex-1 rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX path prefix" placeholder="path prefix (optional)" bind:value={queryState.queryPathPrefix} spellcheck="false" />
             {#if queryState.queryKind === "code"}
-              <label class="relative w-24 shrink-0"><span class="sr-only">Search mode</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.codeMode}><option value="hybrid">hybrid</option><option value="semantic">semantic</option><option value="lexical">lexical</option><option value="symbol">symbol</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <label class="relative w-24 shrink-0"><span class="sr-only">Search mode</span><select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pr-6 pl-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.codeMode}><option value="hybrid">hybrid</option><option value="semantic">semantic</option><option value="lexical">lexical</option><option value="symbol">symbol</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
               <input class="h-7 w-14 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="50" aria-label="Maximum code results" bind:value={queryState.codeMaxFiles} />
-              <label class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 px-1 text-xs text-muted-foreground"><input type="checkbox" bind:checked={queryState.codeIncludeContent} />content</label>
+              <label class="inline-flex h-7 shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground"><input type="checkbox" bind:checked={queryState.codeIncludeContent} />content</label>
             {:else if queryState.queryKind === "knowledge"}
               <input class="h-7 w-14 shrink-0 rounded-md border border-input bg-panel-strong px-1.5 font-mono text-xs text-foreground outline-none" type="number" min="1" max="20" aria-label="Maximum document results" bind:value={queryState.knowledgeLimit} />
             {:else}
@@ -312,17 +312,17 @@
             </div>
           {/if}
           <details class="mt-2 border-t border-sidebar-border/70 pt-1.5">
-            <summary class="cursor-pointer select-none text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Advanced index tools</summary>
+            <summary class="select-none text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Advanced index tools</summary>
             <div class="mt-1.5 grid grid-cols-2 gap-1">
-              <label class="relative"><span class="sr-only">IDX inspect command</span><select class="h-7 w-full cursor-pointer appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.inspectCommand}><option value="architecture">architecture</option><option value="structure">structure</option><option value="ast">ast</option><option value="explain">explain</option><option value="deps">deps</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
+              <label class="relative"><span class="sr-only">IDX inspect command</span><select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.inspectCommand}><option value="architecture">architecture</option><option value="structure">structure</option><option value="ast">ast</option><option value="explain">explain</option><option value="deps">deps</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
               <input class="h-7 min-w-0 rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX inspect target" placeholder={queryState.inspectCommand === "explain" ? "symbol" : queryState.inspectCommand === "ast" || queryState.inspectCommand === "deps" ? "path / module" : "target not required"} bind:value={queryState.inspectTarget} disabled={queryState.inspectCommand === "architecture" || queryState.inspectCommand === "structure"} spellcheck="false" />
               <label class="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-panel-strong px-2 text-xs text-muted-foreground"><span>Depth</span><input class="h-5 min-w-0 flex-1 bg-transparent text-right font-mono text-xs text-foreground outline-none" type="number" min="1" max="8" aria-label="IDX inspect depth" bind:value={queryState.inspectDepth} /></label>
               <label class="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-panel-strong px-2 text-xs text-muted-foreground"><span>Limit</span><input class="h-5 min-w-0 flex-1 bg-transparent text-right font-mono text-xs text-foreground outline-none" type="number" min="1" max="300" aria-label="IDX inspect result limit" bind:value={queryState.inspectMaxFiles} /></label>
-              <button class="col-span-2 inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Run indexed inspection" aria-label="Run indexed inspection" disabled={queryState.inspectRunning || queryState.queryRunning || Boolean(runningOperation)} onclick={() => void runInspect()}>{#if queryState.inspectRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}{queryState.inspectRunning ? "Inspecting…" : "Run inspection"}</button>
+              <button class="col-span-2 inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Run indexed inspection" aria-label="Run indexed inspection" disabled={queryState.inspectRunning || queryState.queryRunning || Boolean(runningOperation)} onclick={() => void runInspect()}>{#if queryState.inspectRunning}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}{queryState.inspectRunning ? "Inspecting…" : "Run inspection"}</button>
             </div>
             <div class="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-              {#if queryState.inspectCommand === "explain"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectIncludeBody} />include body</label>{/if}
-              {#if queryState.inspectCommand === "deps"}<label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectShowEdges} />show edges</label><label class="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectTests} />tests</label>{/if}
+              {#if queryState.inspectCommand === "explain"}<label class="inline-flex items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectIncludeBody} />include body</label>{/if}
+              {#if queryState.inspectCommand === "deps"}<label class="inline-flex items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectShowEdges} />show edges</label><label class="inline-flex items-center gap-1.5"><input type="checkbox" bind:checked={queryState.inspectTests} />tests</label>{/if}
             </div>
           </details>
         </section>
@@ -353,7 +353,7 @@
         <span class="truncate font-mono text-xs text-muted-foreground">{visibleOperation.command}</span>
         <span class={`ml-auto shrink-0 font-mono text-xs ${operationTone(visibleOperation)}`}>{idxOperationStatusLabel(visibleOperation)}</span>
         {#if visibleOperation.status === "running"}
-          <button class="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring" type="button" title="Stop IDX operation" aria-label="Stop IDX operation" onclick={() => void stopOperation(visibleOperation)}><Square class="h-3 w-3 fill-current" aria-hidden="true" /></button>
+          <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring" type="button" title="Stop IDX operation" aria-label="Stop IDX operation" onclick={() => void stopOperation(visibleOperation)}><Square class="h-3 w-3 fill-current" aria-hidden="true" /></button>
         {/if}
       </div>
       <div class={[

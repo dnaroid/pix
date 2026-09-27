@@ -34,7 +34,7 @@
     </div>
     {#if explicit && onReset}
       <button
-        class="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100"
+        class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100"
         type="button"
         title="Reset to inherited/default value"
         aria-label={`Reset ${label}`}

@@ -67,7 +67,7 @@
           onChange={(next) => update(index, "description", next)}
         />
         <button
-          class="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-default disabled:opacity-30"
+          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-default disabled:opacity-30"
           type="button"
           title="Remove routing tier"
           aria-label={`Remove ${tier.id || "routing"} tier`}
@@ -93,7 +93,7 @@
   {/each}
 
   <button
-    class="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+    class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
     type="button"
     onclick={add}
   ><Plus class="h-3.5 w-3.5" aria-hidden="true" />Add tier</button>

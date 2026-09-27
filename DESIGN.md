@@ -176,7 +176,9 @@ surface while Pix is starting.
 
 ## 5. Typography
 
-Primary UI font: **Outfit**.
+Primary UI font: the **native system UI font** (`-apple-system` /
+SF Pro on macOS). Pix Desktop is a native IDE window, not a branded web page:
+do not bundle a display/brand typeface for chrome or prose.
 
 Technical font: **Geist Mono**.
 
@@ -196,18 +198,26 @@ Build hierarchy with weight, spacing, and muted foreground before introducing ma
 
 UI copy SHOULD remain compact and direct.
 
-Desktop application chrome MUST NOT render text below 12 px. Keep the routine
-IDE scale intentionally small: use 12 px for compact controls, metadata, paths,
-status text, diffs, terminals, and other dense technical chrome; 14 px for
-ordinary readable UI text; 16 px for larger content; and 18 px for prominent
-empty-state or section headings. Prefer those four steps over one-off 10, 11,
-or 13 px sizes. Rich document content such as Markdown may use its own heading
+Desktop application chrome MUST NOT render text below 12 px. The theme maps
+Tailwind's size utilities onto the native macOS scale: `text-xs` = 12 px for
+compact controls, metadata, paths, status text, diffs, terminals, and other
+dense technical chrome; the 13 px body default and `text-sm` for ordinary UI
+text; `text-base` = 14 px for longer readable content; `text-lg` = 16 px and
+`text-xl` = 18 px for prominent empty-state or section headings. Keep `rem` at
+16 px so spacing utilities are unaffected. Prefer those steps over one-off
+arbitrary pixel sizes.
+
+Global element defaults (`font: inherit`, `white-space`, `cursor`) MUST live in
+`@layer base`. Unlayered element rules silently beat every Tailwind utility, so
+a component's `text-xs` or `cursor-*` would otherwise be ignored. Rich document content such as Markdown may use its own heading
 hierarchy, but supporting inline text and captions still keep a 12 px floor.
 
 ## 6. Radius, borders, and elevation
 
-The semantic theme uses a compact editor-oriented base radius. Persistent panes
-and ordinary controls should feel precise rather than soft.
+The semantic theme uses a compact editor-oriented base radius (6 px) with a
+fixed small scale: `rounded-sm` 3 px, `rounded-md` 4 px, `rounded-lg` 6 px,
+`rounded-xl` 8 px. Persistent panes and ordinary controls should feel precise
+rather than soft; attached workbench regions use no radius at all.
 
 Use smaller semantic radii for controls and larger semantic radii for composed surfaces.
 
@@ -222,6 +232,14 @@ Guidance:
 Prefer a subtle border before adding a shadow.
 
 Use shadows only to communicate elevation. Do not stack strong borders and strong shadows together.
+
+### 6.1 Native pointer behavior
+
+Buttons, tabs, menu rows, tree rows, and other controls keep the default arrow
+cursor, as in native macOS applications. The pointing-hand cursor is a web
+hyperlink affordance and is reserved for real links (`a[href]`). Do not add
+`cursor-pointer` to controls. Images and links are not draggable by default,
+and the window does not rubber-band/overscroll.
 
 ## 7. Spacing and density
 
@@ -314,6 +332,10 @@ or repeatedly switch away from and back to the content. Current examples are:
 - Source Control diff/review.
 
 Pix uses **one top workbench tab strip** for all long-lived work surfaces.
+Tabs are flat, full titlebar height, and separated by hairline borders like an
+editor tab bar. The active tab merges into the workspace background and carries
+a 1 px primary indicator on its top edge; inactive tabs stay on the chrome
+surface. Do not round tab tops or float tabs as pills.
 Conversation sessions, Preview, and Git Diff appear as sibling tabs in that one
 strip; do not add a second editor-tab row inside the workspace.
 
@@ -353,6 +375,14 @@ Use a card/panel only when it provides one of these functions:
 - creates a distinct detail/inspector region.
 
 Otherwise use spacing, typography, and separators.
+
+Pane headers follow the IDE section-header convention: a 36 px row on the pane
+surface with an uppercase, letter-spaced, 12 px semibold muted title and quiet
+24 px icon actions. Do not put filled primary buttons in pane headers.
+
+Inline notifications that belong to a workspace (errors, reconnect prompts)
+attach as full-width strips under the tab strip with a bottom border, not as
+inset floating cards.
 
 Default **attached workbench pane** recipe:
 

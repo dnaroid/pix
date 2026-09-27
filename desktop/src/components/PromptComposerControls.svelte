@@ -43,7 +43,7 @@
 <div class="relative shrink-0" data-composer-menu>
   <button
     bind:this={menuTrigger}
-    class="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     type="button"
     aria-label="More composer actions"
     title="More actions"

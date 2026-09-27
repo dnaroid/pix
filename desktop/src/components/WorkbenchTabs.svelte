@@ -85,11 +85,11 @@
   }
 </script>
 
-<nav class="flex min-w-0 flex-1 items-end overflow-hidden" aria-label="Workbench tabs">
-  <div class="flex min-w-0 w-fit flex-[0_1_auto] items-end">
+<nav class="flex min-w-0 flex-1 items-stretch overflow-hidden" aria-label="Workbench tabs">
+  <div class="flex min-w-0 w-fit flex-[0_1_auto] items-stretch">
     <div
       bind:this={tablist}
-      class="flex min-w-0 w-max flex-[0_1_auto] items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      class="flex min-w-0 w-max flex-[0_1_auto] items-stretch border-l border-border overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label="Open workbench tabs"
       aria-orientation="horizontal"
@@ -98,19 +98,22 @@
         {@const active = tab.id === activeId}
         <div
           class={[
-            "group relative -mb-px h-8 min-w-[120px] w-[220px] flex-[0_1_220px] overflow-hidden rounded-t-sm border transition-colors max-[760px]:w-[200px] max-[760px]:basis-[200px]",
+            "group relative -mb-px min-w-[120px] w-[200px] flex-[0_1_200px] overflow-hidden border-r border-border transition-colors max-[760px]:w-[180px] max-[760px]:basis-[180px]",
             active
-              ? "border-border border-b-background bg-background"
-              : "border-transparent hover:bg-chrome-hover",
+              ? "bg-background"
+              : "border-b border-b-border hover:bg-chrome-hover",
           ]}
           role="presentation"
           onmousedown={(event) => handleTabMouseDown(event, tab)}
         >
+          {#if active}
+            <span class="pointer-events-none absolute inset-x-0 top-0 h-px bg-primary" aria-hidden="true"></span>
+          {/if}
           <button
             use:titlebarDrag
             class={[
-              "flex h-full w-full items-center gap-2 bg-transparent pt-0 pb-1.5 pl-3.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-              tab.closable ? "pr-9" : "pr-3.5",
+              "flex h-full w-full items-center gap-2 bg-transparent pl-3 text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+              tab.closable ? "pr-8" : "pr-3",
               active && "font-medium text-foreground",
             ]}
             type="button"
@@ -154,7 +157,7 @@
             <button
               use:titlebarDrag
               class={[
-                "absolute top-1/2 right-1.5 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md bg-transparent text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 group-hover:opacity-100 group-focus-within:opacity-100",
+                "absolute top-1/2 right-1.5 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-sm bg-transparent text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 group-hover:opacity-100 group-focus-within:opacity-100",
                 active && "opacity-100",
               ]}
               type="button"
@@ -171,7 +174,7 @@
 
     <button
       use:titlebarDrag
-      class="mb-0.5 grid h-7 w-6 shrink-0 place-items-center rounded-md bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+      class="mx-1 grid h-6 w-6 shrink-0 self-center place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       title={newSessionShortcut ? `New conversation · ${newSessionShortcut}` : "New conversation"}
       aria-label="New conversation"
       data-session-new

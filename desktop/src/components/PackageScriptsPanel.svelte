@@ -49,7 +49,7 @@
         <div class="mt-0.5 truncate font-mono text-xs text-muted-foreground/70" title={snapshot?.packagePath}>{snapshot?.packagePath ?? "Reading package.json…"}</div>
       </div>
       <button
-        class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         type="button"
         title="Refresh package scripts"
         aria-label="Refresh package scripts"
@@ -75,7 +75,7 @@
       <div class="max-h-44 space-y-0.5 overflow-y-auto border-t border-sidebar-border/70 p-1">
         {#each visibleScripts as script (script.name)}
           <button
-            class="group flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            class="group flex h-7 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
             title={`Run ${script.name}`}
             disabled={startingScript !== null || terminalActionId !== null}

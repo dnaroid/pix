@@ -285,7 +285,7 @@
           {#if item.role === "thought"}
             {@const thoughtDuration = durationLabel(item.startedAtMs, item.endedAtMs)}
             <details class={["transcript-entry group w-full min-w-0 text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
-              <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 leading-tight text-muted-foreground/80 transition-colors select-none hover:text-foreground group-open:mb-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+              <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 leading-tight text-muted-foreground/80 transition-colors select-none hover:text-foreground group-open:mb-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                 <Brain class="h-3 w-3 shrink-0 text-primary/65" aria-hidden="true" />
                 <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden">
@@ -303,7 +303,7 @@
               data-transcript-entry-id={item.id}
             >
               <article
-                class="w-full rounded-md border border-chat-user-border bg-chat-user px-3.5 pt-3 pb-2 text-foreground"
+                class="w-full rounded-r-sm border-l-2 border-chat-user-border bg-chat-user py-2 pr-10 pl-3 text-foreground"
                 oncontextmenu={(event) => openUserMessageContextMenu(event, item.id)}
               >
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
@@ -311,7 +311,7 @@
               </article>
               <button
                 type="button"
-                class="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-md border border-border/70 bg-panel-strong/95 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-panel-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/user-message:opacity-100"
+                class="absolute top-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-sm bg-transparent text-muted-foreground opacity-0 transition-opacity hover:bg-panel-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/user-message:opacity-100"
                 aria-label="Message actions"
                 aria-haspopup="menu"
                 aria-expanded={activeUserMessageMenu === item.id}
@@ -438,7 +438,7 @@
     display: flex;
     width: 100%;
     height: 2rem;
-    cursor: pointer;
+    cursor: default;
     align-items: center;
     gap: 0.5rem;
     border-radius: 0.125rem;

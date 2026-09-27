@@ -55,7 +55,7 @@
   data-transcript-entry-id={item.id}
   class={["transcript-entry group/activity w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80", gapClass]}
 >
-  <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+  <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/activity:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
     <ToolStatusIcon status={item.status} lifecycleOnly class="h-3 w-3 opacity-75" />
     <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
@@ -78,7 +78,7 @@
       {#each item.entries as entry (entry.id)}
         {#if entry.type === "message"}
           <details class="group/thought" data-activity-entry-id={entry.id} open={expandedEntries.has(entry.id)} ontoggle={(event) => toggleEntry(event, entry)}>
-            <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/thought:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
               <Brain class="h-3 w-3 shrink-0 text-muted-foreground/65" aria-hidden="true" />
               <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
@@ -101,7 +101,7 @@
           <section data-activity-entry-id={tool.id}>
             {#if tool.deferredResult || tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
               <details class="group/result" open={expandedEntries.has(tool.id)} ontoggle={(event) => toggleEntry(event, tool)}>
-                <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                   <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                   <ToolStatusIcon status={tool.status} attention={toolAttention} class="h-3 w-3 opacity-80" />
                   <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">

@@ -15,14 +15,14 @@
 </script>
 
 <details class="group rounded-md border border-border bg-panel-strong">
-  <summary class="flex min-h-7 cursor-pointer list-none items-center justify-between gap-3 px-2 py-1 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 [&::-webkit-details-marker]:hidden">
+  <summary class="flex min-h-7 list-none items-center justify-between gap-3 px-2 py-1 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 [&::-webkit-details-marker]:hidden">
     <span>Choose enabled modules</span>
     <span class="shrink-0 text-muted-foreground">{enabledCount}/{modules.length} enabled</span>
   </summary>
   <div class="border-t border-border px-2 py-1.5">
     {#each modules as module (module.name)}
       <label
-        class="flex min-h-7 cursor-pointer items-center gap-2 py-1 text-xs text-foreground"
+        class="flex min-h-7 items-center gap-2 py-1 text-xs text-foreground"
         title={module.description}
       >
         <input

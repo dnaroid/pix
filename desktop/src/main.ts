@@ -1,8 +1,5 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
-import "@fontsource/outfit/400.css";
-import "@fontsource/outfit/500.css";
-import "@fontsource/outfit/600.css";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "./styles.css";
