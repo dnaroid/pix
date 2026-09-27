@@ -7,15 +7,24 @@ type RecordLine = Record<string, any>;
 export function localNode(): string {
 	// Bun runs the tests; PATH is used only to locate an executable, never to run a shell.
 	// Resolve links before probing; the probe has no inherited NODE_OPTIONS/preloads.
-	const candidates = [process.execPath, ...(process.env.PATH ?? "").split(delimiter).filter(Boolean).map((dir) => join(dir, "node"))];
+	const nodeNames = process.platform === "win32" ? ["node.exe", "node"] : ["node"];
+	const candidates = [
+		process.execPath,
+		...(process.env.PATH ?? "").split(delimiter).filter(Boolean).flatMap((dir) => nodeNames.map((name) => join(dir, name))),
+	];
 	for (const candidate of candidates) {
-		if (basename(candidate) !== "node" || !existsSync(candidate)) continue;
+		if (!nodeNames.includes(basename(candidate).toLowerCase()) || !existsSync(candidate)) continue;
 		const node = realpathSync(candidate);
 		if (!statSync(node).isFile()) continue;
 		try {
-			if (execFileSync(node, ["-p", "process.execPath"], {
+			const reported = execFileSync(node, ["-p", "process.execPath"], {
 				env: { PATH: dirname(node), LANG: "C" }, timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
-			}).toString().trim() === node) return node;
+			}).toString().trim();
+			if (!existsSync(reported)) continue;
+			const resolvedReported = realpathSync(reported);
+			if (process.platform === "win32"
+				? resolvedReported.toLowerCase() === node.toLowerCase()
+				: resolvedReported === node) return node;
 		} catch { /* try the next local candidate */ }
 	}
 	throw new Error("No local Node executable found for the offline Pi fixture");
