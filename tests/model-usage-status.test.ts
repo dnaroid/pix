@@ -23,6 +23,7 @@ import {
 } from "../src/app/model/model-usage-status.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import type { SessionModel } from "../src/app/types.js";
+import { claudeCodeKeychainService, tokenFromClaudeCredential } from "../src/app/model/claude-code-usage-auth.js";
 
 describe("model usage status", () => {
 	it("builds descriptors for OpenAI quota-backed models only", () => {
@@ -38,6 +39,58 @@ describe("model usage status", () => {
 			kind: "anthropic",
 			modelKey: "anthropic/claude-opus-4-7",
 		});
+	});
+
+	it("recognizes the Claude Code adapter separately from Pi Anthropic auth", () => {
+		assert.deepEqual(modelUsageDescriptor({ provider: "pi-claude-code-provider", id: "opus" } as SessionModel), {
+			kind: "claude-code", modelKey: "pi-claude-code-provider/opus",
+		});
+		const now = Date.UTC(2026, 0, 1);
+		const credential = (expiresAt: number, accessToken = "sk-ant-oat-fixture") => JSON.stringify({
+			claudeAiOauth: { accessToken, expiresAt },
+		});
+		assert.equal(tokenFromClaudeCredential(credential(now + 1000), now), "sk-ant-oat-fixture");
+		assert.equal(tokenFromClaudeCredential(credential(now), now), undefined);
+		assert.equal(tokenFromClaudeCredential(credential(now + 1000, "sk-ant-api-fixture"), now), undefined);
+		assert.equal(tokenFromClaudeCredential("not JSON", now), undefined);
+		assert.equal(claudeCodeKeychainService(), "Claude Code-credentials");
+		assert.equal(claudeCodeKeychainService("/tmp/claude-profile/"), claudeCodeKeychainService("/tmp/claude-profile"));
+		assert.match(claudeCodeKeychainService("/tmp/claude-profile"), /^Claude Code-credentials-[a-f0-9]{8}$/u);
+	});
+
+	it("queries Claude Code subscription usage from isolated local credentials, not Pi auth", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "pix-claude-usage-"));
+		const path = join(dir, ".credentials.json");
+		const previousPath = process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH;
+		const previousNodeEnv = process.env.NODE_ENV;
+		const oldFetch = globalThis.fetch;
+		let requests = 0;
+		process.env.NODE_ENV = "test";
+		process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH = path;
+		globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+			requests++;
+			assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer sk-ant-oat-claude-fixture");
+			return Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 60 } });
+		}) as typeof fetch;
+		try {
+			const descriptor = modelUsageDescriptor({ provider: "pi-claude-code-provider", id: "opus" } as SessionModel)!;
+			writeFileSync(path, JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat-claude-fixture", expiresAt: Date.now() + 60_000 } }));
+			await withPiAuthAsync({ anthropic: { type: "api_key", key: "sk-ant-api-fixture" } }, async () => {
+				assert.equal((await queryModelUsageStatus(descriptor))?.hourly?.remainingPercent, 80);
+				assert.equal((await queryModelUsageStatus(descriptor))?.weekly?.remainingPercent, 40);
+			});
+			assert.equal(requests, 2);
+			writeFileSync(path, JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat-claude-fixture", expiresAt: Date.now() - 1000 } }));
+			assert.equal(await queryModelUsageStatus(descriptor), undefined);
+			assert.equal(requests, 2);
+		} finally {
+			globalThis.fetch = oldFetch;
+			if (previousPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH;
+			else process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH = previousPath;
+			if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+			else process.env.NODE_ENV = previousNodeEnv;
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("extracts Anthropic 5-hour and the most constrained weekly window", () => {

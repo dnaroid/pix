@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getAgentDir, ModelRuntime, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { formatCompactProgressBar } from "../../context-progress-bar.js";
 import { APP_ICONS } from "../icons.js";
+import { readClaudeCodeUsageToken } from "./claude-code-usage-auth.js";
 import type { SessionModel } from "../types.js";
 
 const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
@@ -49,13 +50,14 @@ const OPENAI_QUOTA_PROVIDERS = new Set(["openai", "openai-codex"]);
 const ZHIPU_QUOTA_PROVIDERS = new Set(["zai", "zhipuai-coding-plan"]);
 const ANTIGRAVITY_QUOTA_PROVIDERS = new Set(["antigravity", "google-antigravity"]);
 const ANTHROPIC_QUOTA_PROVIDERS = new Set(["anthropic"]);
+const CLAUDE_CODE_PROVIDER = "pi-claude-code-provider";
 
 type BaseModelUsageDescriptor = {
 	readonly modelKey: string;
 };
 
 export type ModelUsageDescriptor = BaseModelUsageDescriptor & ({
-	readonly kind: "openai" | "zhipu" | "anthropic";
+	readonly kind: "openai" | "zhipu" | "anthropic" | "claude-code";
 } | {
 	readonly kind: "google-antigravity";
 	readonly quotaModelKey: string;
@@ -291,6 +293,9 @@ export function modelUsageDescriptor(model: SessionModel | undefined, thinkingLe
 	if (ANTHROPIC_QUOTA_PROVIDERS.has(provider)) {
 		return { kind: "anthropic", modelKey: `${model.provider}/${model.id}` };
 	}
+	if (provider === CLAUDE_CODE_PROVIDER) {
+		return { kind: "claude-code", modelKey: `${model.provider}/${model.id}` };
+	}
 
 	if (ANTIGRAVITY_QUOTA_PROVIDERS.has(provider)) {
 		const quotaModelKey = resolveAntigravityQuotaModelKey(model);
@@ -316,6 +321,11 @@ export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor): P
 			return await queryZhipuModelUsage(descriptor.modelKey);
 		case "anthropic":
 			return await queryAnthropicModelUsage(descriptor.modelKey);
+		case "claude-code": {
+			const accessToken = await readClaudeCodeUsageToken();
+			if (!accessToken) return undefined;
+			return anthropicUsageStatusFromResponse(await fetchAnthropicUsage(accessToken), descriptor.modelKey);
+		}
 		case "google-antigravity":
 			return await queryGoogleAntigravityModelUsage(descriptor);
 	}

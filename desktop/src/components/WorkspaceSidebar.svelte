@@ -29,6 +29,7 @@
   import type { GitPanelWorkflow } from "../lib/git-workflow";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
+  import type { SettingsConfigKind } from "../lib/settings";
   import {
     PROJECT_TODO_PATH,
     projectDocumentLabel,
@@ -132,6 +133,7 @@
     onListProjectDirectory,
     onValidateProjectFile,
     onOpenProjectFile,
+    onOpenUserConfig,
     onOpenExternalEditor,
     onProjectSwitcherOpen,
     onSelectProject,
@@ -212,6 +214,7 @@
     onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
     onValidateProjectFile: (path: string) => Promise<boolean>;
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
+    onOpenUserConfig: (kind: SettingsConfigKind) => void;
     onOpenExternalEditor: (path?: string) => void;
     onProjectSwitcherOpen: () => void;
     onSelectProject: (path: string) => void;
@@ -744,7 +747,7 @@
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">
-          <SettingsPanel configOptions={settingsConfigOptions} onIndicatorChange={(error) => settingsPanelError = error} />
+          <SettingsPanel configOptions={settingsConfigOptions} {onOpenUserConfig} onIndicatorChange={(error) => settingsPanelError = error} />
         </div>
       {/if}
     </div>

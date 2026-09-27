@@ -249,36 +249,31 @@ describe("desktop visual regressions", () => {
     expect(transcriptSource).not.toContain("bg-panel-strong/70");
   });
 
-  it("keeps project and Git branch between context and usage status chrome", () => {
+  it("keeps project identity and Git branch out of Desktop status chrome", () => {
     const context = runtimeStatusSource.indexOf("data-runtime-context");
-    const workspace = runtimeStatusSource.indexOf("data-runtime-workspace");
     const usage = runtimeStatusSource.indexOf('title="Session usage and cost"');
     expect(context).toBeGreaterThanOrEqual(0);
-    expect(workspace).toBeGreaterThan(context);
-    expect(usage).toBeGreaterThan(workspace);
-    expect(runtimeStatusSource).toContain("({workspaceBranch})");
-    expect(runtimeStatusSource).toContain('class="min-w-0 truncate text-muted-foreground">{workspaceName}</span>');
-    expect(runtimeStatusSource).toContain('text-muted-foreground/55">({workspaceBranch})');
-    expect(runtimeStatusSource).not.toContain("--runtime-workspace-color");
-    expect(runtimeStatusSource).toContain("title={workspacePath ?? workspaceName}");
-    expect(runtimeStatusSource).toContain("{#if status || workspaceName || showSkeletons}");
+    expect(usage).toBeGreaterThan(context);
+    expect(runtimeStatusSource).not.toContain("data-runtime-workspace");
+    expect(runtimeStatusSource).not.toContain("workspaceName");
+    expect(runtimeStatusSource).not.toContain("workspaceBranch");
+    expect(runtimeStatusSource).not.toContain("workspacePath");
+    expect(runtimeStatusSource).toContain("{#if status || showSkeletons}");
   });
 
-  it("sacrifices workspace identity before session activity on narrow windows", () => {
-    expect(runtimeStatusSource).toContain("data-runtime-workspace");
-    expect(runtimeStatusSource).toContain("font-mono text-xs max-[1120px]:hidden");
-    expect(runtimeStatusSource).toContain("data-runtime-workspace-skeleton");
-    expect(runtimeStatusSource).toContain("px-1.5 max-[1120px]:hidden");
+  it("keeps session activity independent from removed workspace status identity", () => {
+    expect(runtimeStatusSource).not.toContain("data-runtime-workspace-skeleton");
+    expect(runtimeStatusSource).not.toContain("data-runtime-workspace-branch-skeleton");
     expect(sessionActivityStatusHudSource).toContain("indicators.slice(0, 6)");
     expect(sessionActivityStatusHudSource).toContain('class="flex shrink-0 items-center gap-0.5"');
   });
 
-  it("keeps status-bar slots present as skeletons while draft/start/session state resolves", () => {
+  it("keeps the remaining status-bar slots present as skeletons while draft/start/session state resolves", () => {
     expect(statusSource).toContain('data-status-bar-skeleton="model"');
     expect(statusSource).toContain("{showSkeletons}");
     expect(runtimeStatusSource).toContain("data-runtime-context-skeleton");
-    expect(runtimeStatusSource).toContain("data-runtime-workspace-skeleton");
-    expect(runtimeStatusSource).toContain("data-runtime-workspace-branch-skeleton");
+    expect(runtimeStatusSource).not.toContain("data-runtime-workspace-skeleton");
+    expect(runtimeStatusSource).not.toContain("data-runtime-workspace-branch-skeleton");
     expect(runtimeStatusSource).toContain("data-runtime-usage-skeleton");
     expect(statusBarViewModelSource).toContain("shouldShowStatusBarSkeletons");
     expect(statusBarViewModelSource).toContain("runtimeStatusAvailable: runtimeStatus !== undefined");
@@ -412,7 +407,10 @@ describe("desktop visual regressions", () => {
   it("uses curated settings editors and keeps native number chrome suppressed", () => {
     expect(settingsSource).toContain('import DesktopSettingsEditor from "./settings/DesktopSettingsEditor.svelte"');
     expect(settingsSource).toContain('import ToolsSuiteSettingsEditor from "./settings/ToolsSuiteSettingsEditor.svelte"');
-    expect(settingsSource).toContain("Advanced JSONC");
+    expect(settingsSource).toContain("Open in editor");
+    expect(settingsSource).toContain("onOpenUserConfig(activeKind)");
+    expect(settingsSource).not.toContain('aria-label={`${activeKind} advanced JSONC`}');
+    expect(settingsSource).not.toContain("min-h-[28rem]");
     expect(settingsSource).not.toContain("settingsSections");
     expect(settingsNumberInputSource).toContain("[&::-webkit-inner-spin-button]:appearance-none");
     expect(settingsNumberInputSource).toContain("[appearance:textfield]");

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FileCode from "@lucide/svelte/icons/file-code";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Save from "@lucide/svelte/icons/save";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -45,9 +46,11 @@
 
   let {
     configOptions,
+    onOpenUserConfig,
     onIndicatorChange,
   }: {
     configOptions: readonly SessionConfigOption[];
+    onOpenUserConfig: (kind: SettingsConfigKind) => void;
     onIndicatorChange?: (error: string | null) => void;
   } = $props();
 
@@ -129,9 +132,9 @@
     setDrafts({ ...drafts, [activeKind]: { ...current, source } });
   }
 
-  function openAdvanced(): void {
-    if (activeKind === "desktop") desktopSection = "advanced";
-    else toolsSection = "advanced";
+  function openInEditor(): void {
+    if (!active || dirty) return;
+    onOpenUserConfig(activeKind);
   }
 
   function reload(): void {
@@ -233,24 +236,26 @@
             <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-tool-error" aria-hidden="true" />
             <div class="min-w-0">
               <h2 class="text-xs font-semibold text-foreground">JSONC needs repair</h2>
-              <p class="mt-1 text-xs leading-4 text-muted-foreground">The structured editor is disabled until the config parses. Open Advanced to repair the source without losing comments.</p>
-              <button class="mt-2 h-7 rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={openAdvanced}>Open Advanced JSONC</button>
+              <p class="mt-1 text-xs leading-4 text-muted-foreground">The structured editor is disabled until the config parses. Open the config in the editor tab to repair the source without losing comments.</p>
+              <button
+                class="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+                type="button"
+                onclick={openInEditor}
+                disabled={dirty}
+                title={dirty ? "Save settings before opening the config file" : "Open config in editor tab"}
+              ><FileCode class="h-3.5 w-3.5" aria-hidden="true" />Open in editor</button>
             </div>
           </div>
         </div>
       {:else if advanced}
-        <div class="px-2.5 py-2.5">
-          <h2 class="text-sm font-semibold text-foreground">Advanced JSONC</h2>
-          <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Edit the complete source directly. This is the escape hatch for comments, free-form maps, and values not exposed by the curated controls.</p>
-        </div>
-        <div class="p-2 pt-0">
-          <textarea
-            class="min-h-[28rem] w-full resize-none rounded-md border border-code-border bg-code p-2.5 font-mono text-xs leading-4 text-foreground outline-none focus-visible:border-ring"
-            value={active.source}
-            aria-label={`${activeKind} advanced JSONC`}
-            spellcheck="false"
-            oninput={(event) => updateSource((event.currentTarget as HTMLTextAreaElement).value)}
-          ></textarea>
+        <div class="p-2.5">
+          <button
+            class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-3 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            type="button"
+            onclick={openInEditor}
+            disabled={dirty}
+            title={dirty ? "Save settings before opening the config file" : "Open config in editor tab"}
+          ><FileCode class="h-3.5 w-3.5" aria-hidden="true" />Open in editor</button>
         </div>
       {:else if activeKind === "desktop"}
         <DesktopSettingsEditor source={active.source} schema={active.schemaObject} models={settingsModels} section={desktopSection as Exclude<DesktopSection, "advanced">} onChange={updateSource} />

@@ -10,6 +10,29 @@ import type { SessionModel } from "../src/app/types.js";
 const FIXED_NOW = Date.parse("2025-07-01T12:00:00.000Z");
 
 describe("model usage controller", () => {
+	it("polls Claude Code quota independently of Pi Anthropic API-key classification", async () => {
+		const activeSession = sessionWithModel("pi-claude-code-provider", "claude-opus-5-5");
+		let queries = 0;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: async () => { throw new Error("Pi Anthropic auth is unrelated"); },
+			render: () => {},
+		}, async (descriptor) => {
+			assert.equal(descriptor.kind, "claude-code");
+			queries++;
+			return usageStatus(descriptor, 72);
+		});
+
+		controller.observeSession(activeSession);
+		await settlePromises();
+		assert.match(controller.statusLabel(), /^72%/u);
+		assert.equal(queries, 1);
+		const refresh = controller.refreshNow();
+		assert.equal(refresh.kind, "started");
+		if (refresh.kind === "started") assert.equal(await refresh.promise, "refreshed");
+		assert.equal(queries, 2);
+	});
+
 	it("keeps cached usage per provider/model when switching sessions", async () => {
 		let activeSession = sessionWithModel("openai-codex", "gpt-5.5");
 		let renderCount = 0;

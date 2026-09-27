@@ -227,6 +227,7 @@ export function buildWorkbenchEditorProps(
   "preview" | "previewVisible" | "gitDiff" | "gitDiffVisible" | "lspInstall" | "lspInstallVisible" | "terminal" | "terminalVisible"
 > {
   const activePreview = options.preview.active;
+  const userConfigKind = activePreview?.kind === "file" ? activePreview.userConfigKind : undefined;
   const gitDiffPreview = options.git.diffPreview;
   const lspInstaller = options.lspOnboarding.installer;
 
@@ -240,7 +241,8 @@ export function buildWorkbenchEditorProps(
       attachment: activePreview.kind === "attachment" ? activePreview.attachment : undefined,
       canGoBack: options.preview.canGoBack,
       canGoForward: options.preview.canGoForward,
-      editable: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path),
+      editable: activePreview.kind === "file"
+        && (userConfigKind !== undefined || isWorkspaceProjectFilePath(activePreview.file.path)),
       externalEditorLabel: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)
         ? options.externalEditorLabel()
         : undefined,
@@ -252,7 +254,9 @@ export function buildWorkbenchEditorProps(
       onResolveProjectMedia: options.preview.resolveProjectMedia,
       onOpenLocalFile: (path) => options.preview.openLocalFile(path, "push"),
       onResolveLocalMedia: options.preview.resolveLocalMedia,
-      onSaveProjectFile: options.projectDocuments.save,
+      onSaveProjectFile: userConfigKind
+        ? (path, content) => options.preview.saveUserConfig(userConfigKind, path, content)
+        : options.projectDocuments.save,
       onOpenExternalEditor: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)
         ? (path) => void options.projectWorkspace.openInEditor(path)
         : undefined,

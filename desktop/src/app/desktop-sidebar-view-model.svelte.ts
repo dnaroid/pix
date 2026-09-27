@@ -138,6 +138,7 @@ export function createDesktopSidebarViewModel(options: {
     onListProjectDirectory: options.projectWorkspace.listDirectory,
     onValidateProjectFile: options.preview.validateProjectFile,
     onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),
+    onOpenUserConfig: (kind) => void options.preview.openUserConfig(kind, "replace"),
     onOpenExternalEditor: (path) => void options.projectWorkspace.openInEditor(path),
     onProjectSwitcherOpen,
     onSelectProject,

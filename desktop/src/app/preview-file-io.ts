@@ -7,6 +7,7 @@ import {
   type AttachmentFile,
 } from "../lib/attachments";
 import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
+import type { SettingsConfigDocument, SettingsConfigKind } from "../lib/settings";
 import type { PreviewStoreOptions } from "./preview-options";
 import type { PreviewNavigation, PreviewState } from "./preview-state.svelte";
 
@@ -148,6 +149,46 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     }
   }
 
+  async function openUserConfig(
+    kind: SettingsConfigKind,
+    navigation: PreviewNavigation = "replace",
+  ): Promise<void> {
+    const generation = state.beginFileLoad();
+    try {
+      const document = await invoke<SettingsConfigDocument>("read_user_config", { kind });
+      if (!state.fileLoadIsCurrent(generation)) return;
+      state.show({
+        kind: "file",
+        file: { path: document.path, content: document.content },
+        userConfigKind: kind,
+      }, navigation);
+    } catch (error) {
+      if (state.fileLoadIsCurrent(generation)) options.reportError(error);
+    }
+  }
+
+  async function saveUserConfig(kind: SettingsConfigKind, path: string, content: string): Promise<boolean> {
+    const active = state.active;
+    if (active?.kind !== "file" || active.userConfigKind !== kind || active.file.path !== path) return false;
+    try {
+      const result = await invoke<{ written: boolean; document: SettingsConfigDocument }>(
+        "write_user_config_if_unchanged",
+        { kind, expectedContent: active.file.content, content },
+      );
+      if (!result.written) {
+        options.setErrorMessage("This config changed on disk. Reopen it before saving to avoid overwriting newer changes.");
+        return false;
+      }
+      const current = state.active;
+      if (current?.kind !== "file" || current.userConfigKind !== kind || current.file.path !== path) return false;
+      state.replaceCurrentFile({ path: result.document.path, content: result.document.content });
+      return true;
+    } catch (error) {
+      options.reportError(error);
+      return false;
+    }
+  }
+
   async function resolveHomeMedia(path: string): Promise<Attachment | undefined> {
     if (attachmentKind(mimeTypeForName(path)) === "file") return undefined;
     const file = await invoke<AttachmentFile>("resolve_home_media", { path });
@@ -167,6 +208,8 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     openProjectFile,
     resolveProjectMedia,
     openLocalFile,
+    openUserConfig,
+    saveUserConfig,
     resolveHomeMedia,
     resolveLocalMedia,
   };

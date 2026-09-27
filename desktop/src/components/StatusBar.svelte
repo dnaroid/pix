@@ -15,11 +15,6 @@
 
   let {
     showSkeletons = false,
-    workspacePath,
-    workspaceName,
-    workspaceBranch,
-    workspaceHue,
-    workspaceColor,
     configOptions,
     changingConfig,
     promptRunning,
@@ -47,11 +42,6 @@
     onOpenSessionActivity,
   }: {
     showSkeletons?: boolean;
-    workspacePath?: string;
-    workspaceName?: string;
-    workspaceBranch?: string;
-    workspaceHue?: number;
-    workspaceColor?: string;
     configOptions: SessionConfigOption[];
     changingConfig: string | null;
     promptRunning: boolean;
@@ -142,9 +132,6 @@
     <RuntimeStatusBarItems
       status={runtimeStatus}
       {showSkeletons}
-      {workspacePath}
-      {workspaceName}
-      {workspaceBranch}
       {sessionUsage}
       loadingSessionUsage={sessionUsageRefreshing}
       {sessionUsageFailed}

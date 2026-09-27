@@ -66,7 +66,6 @@ export function createDesktopWorkspaceServices(options: DesktopWorkspaceServices
         options.project.tasks.load(selected),
         options.project.documents.load(selected),
         options.project.workspace.loadPreferences(selected),
-        options.project.git.refreshStatusBranch(),
         options.project.registry.refreshProjectInitialization(),
       ]);
     },

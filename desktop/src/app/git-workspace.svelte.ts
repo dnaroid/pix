@@ -22,7 +22,6 @@ type GitRepositoryState = {
 export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let snapshot = $state<GitSnapshot | undefined>(undefined);
   let uninitialized = $state(false);
-  let statusBranch = $state<string | undefined>(undefined);
   let loading = $state(false);
   let error = $state<string | null>(null);
   let actionId = $state<string | null>(null);
@@ -38,17 +37,14 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let workbenchAnchorId = $state<WorkbenchTabId | null>(null);
   let workbenchOpenedOrder = $state(0);
   let loadGeneration = 0;
-  let statusBranchGeneration = 0;
 
   function reset(): void {
     generation += 1;
     detailsGeneration += 1;
     loadGeneration += 1;
-    statusBranchGeneration += 1;
     snapshot = undefined;
     options.onSnapshotChange?.(undefined);
     uninitialized = false;
-    statusBranch = undefined;
     loading = false;
     error = null;
     actionId = null;
@@ -73,8 +69,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       snapshot = next;
       options.onSnapshotChange?.(next);
       uninitialized = false;
-      statusBranchGeneration += 1;
-      statusBranch = next.detached || next.branch === "HEAD" ? undefined : next.branch;
       const review = reviewResult;
       if (review && !review.stale && llmActionId === null) {
         const current = await requestDiff(review.diff.path, review.diff.scope);
@@ -93,24 +87,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       error = uninitialized ? null : detail;
     } finally {
       if (requestGeneration === loadGeneration && options.workspace() === workspace) loading = false;
-    }
-  }
-
-  async function refreshStatusBranch(): Promise<void> {
-    const workspace = options.workspace();
-    if (!workspace) {
-      statusBranchGeneration += 1;
-      statusBranch = undefined;
-      return;
-    }
-    const generation = ++statusBranchGeneration;
-    try {
-      const branch = await invoke<string | null>("git_current_branch", { workspace });
-      if (generation !== statusBranchGeneration || options.workspace() !== workspace) return;
-      statusBranch = branch?.trim() || undefined;
-    } catch {
-      if (generation !== statusBranchGeneration || options.workspace() !== workspace) return;
-      statusBranch = undefined;
     }
   }
 
@@ -355,7 +331,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   return {
     get snapshot() { return snapshot; },
     get uninitialized() { return uninitialized; },
-    get statusBranch() { return statusBranch; },
     get loading() { return loading; },
     get error() { return error; },
     get actionId() { return actionId; },
@@ -372,7 +347,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     get workbenchOpenedOrder() { return workbenchOpenedOrder; },
     reset,
     refresh,
-    refreshStatusBranch,
     runMutation,
     stage,
     unstage,

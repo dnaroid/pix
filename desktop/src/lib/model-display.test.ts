@@ -10,6 +10,9 @@ describe("model/thinking display tones", () => {
 
   it("normalizes provider aliases used by desktop model pickers", () => {
     expect(modelProviderBrand("anthropic")).toBe("anthropic");
+    expect(modelProviderBrand("pi-claude-code-provider")).toBe("anthropic");
+    expect(modelProviderBrand("pi-claude-code-provider/opus")).toBe("anthropic");
+    expect(modelRefTone("pi-claude-code-provider/opus")).toBe("model-anthropic");
     expect(modelProviderBrand("antigravity/antigravity-gemini-3.8-flash")).toBe("google");
     expect(modelProviderBrand("google/gemini-3-pro")).toBe("google");
     expect(modelProviderBrand("openai-codex/gpt-5.6-sol")).toBe("openai");

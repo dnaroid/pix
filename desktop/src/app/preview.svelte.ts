@@ -34,6 +34,8 @@ export function createPreviewStore(options: PreviewStoreOptions) {
     openProjectFile: files.openProjectFile,
     resolveProjectMedia: files.resolveProjectMedia,
     openLocalFile: files.openLocalFile,
+    openUserConfig: files.openUserConfig,
+    saveUserConfig: files.saveUserConfig,
     resolveHomeMedia: files.resolveHomeMedia,
     resolveLocalMedia: files.resolveLocalMedia,
   };

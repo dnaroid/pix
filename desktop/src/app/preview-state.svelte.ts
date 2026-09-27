@@ -1,5 +1,6 @@
 import type { Attachment } from "../lib/attachments";
 import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
+import type { SettingsConfigKind } from "../lib/settings";
 import {
   canMovePreviewHistory,
   currentPreview,
@@ -15,7 +16,12 @@ import type { WorkbenchTabId } from "../lib/workbench-tabs";
 import type { PreviewStoreOptions } from "./preview-options";
 
 export type PreviewTarget =
-  | { kind: "file"; file: ProjectFilePreview; lineRange?: ProjectFileLineRange }
+  | {
+      kind: "file";
+      file: ProjectFilePreview;
+      lineRange?: ProjectFileLineRange;
+      userConfigKind?: SettingsConfigKind;
+    }
   | { kind: "attachment"; attachment: Attachment };
 
 export type PreviewEntry = PreviewTarget & {

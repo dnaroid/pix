@@ -68,11 +68,10 @@ without blocking desktop interactions.
   menu closes the conversation selector, and top-level session/workspace actions
   can close it through the sidebar component handle.
 - The Project activity-rail icon is neutral and follows the same active/muted
-  foreground treatment as the other Activity Bar icons. The active project name
-  in the bottom status bar and the two-letter titlebar badge use the project
-  identity color instead, while its Git branch suffix remains muted. The Project
-  switcher's active row is text-only before its chevron (no leading folder icon)
-  and stays neutral;
+  foreground treatment as the other Activity Bar icons. The two-letter titlebar
+  badge uses the project identity color. Desktop does not repeat the project name
+  or Git branch in the bottom status bar. The Project switcher's active row is
+  text-only before its chevron (no leading folder icon) and stays neutral;
   recent-project badges show two-letter project abbreviations and remain
   identity-colored so different projects stay easy to distinguish.
 - The window titlebar background also receives a restrained tint from that same
@@ -80,9 +79,7 @@ without blocking desktop interactions.
   `window-titlebar` surface rather than replacing it, uses the configured
   workspace color when present, and otherwise follows the same deterministic
   full-path fallback hue as the titlebar badge.
-- Hovering the compact project/branch identity in the bottom status bar shows
-  the full active workspace path.
-- The titlebar badge, status-bar project name, and recent-project badges use a stable fallback hue
+- The titlebar badge and recent-project badges use a stable fallback hue
   derived from the normalized full project path rather than only its basename.
   Windows drive and UNC identities are compared case-insensitively.
 - A project may override the fallback identity color in `.pi/workspace.jsonc`:

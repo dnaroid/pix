@@ -1,6 +1,5 @@
 import type { ComponentProps } from "svelte";
 import DesktopStatusBar from "../components/DesktopStatusBar.svelte";
-import { projectFolderHue, projectName } from "../lib/recent-projects";
 import type { createDcpCompression } from "./dcp-compression.svelte";
 import type { createModelConfig } from "./model-config.svelte";
 import type { createSessionCoordinator } from "./session-coordinator";
@@ -11,9 +10,6 @@ import { shouldShowStatusBarSkeletons, type StatusBarConnectionStatus } from "./
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
 
 export function createDesktopStatusBarViewModel(options: {
-  workspace: () => string;
-  workspaceBranch: () => string | undefined;
-  workspaceColor: () => string | undefined;
   status: () => StatusBarConnectionStatus;
   displayedConfigOptions: () => StatusBarProps["configOptions"];
   changingConfig: () => string | null;
@@ -64,11 +60,6 @@ export function createDesktopStatusBarViewModel(options: {
 
     return {
       showSkeletons,
-      workspacePath: options.workspace() || undefined,
-      workspaceName: options.workspace() ? projectName(options.workspace()) : undefined,
-      workspaceBranch: options.workspaceBranch(),
-      workspaceHue: options.workspace() ? projectFolderHue(options.workspace()) : undefined,
-      workspaceColor: options.workspaceColor(),
       configOptions: options.displayedConfigOptions(),
       changingConfig,
       promptRunning,

@@ -60,7 +60,8 @@ describe("workbench Git diff props", () => {
     expect(props.gitDiff?.canReview).toBe(true);
   });
 
-  it("allows editing project text previews but keeps home and absolute local previews read-only", () => {
+  it("allows editing project and user-config previews but keeps other local previews read-only", async () => {
+    const saveUserConfig = vi.fn(async () => true);
     const options = {
       workspace: () => "/workspace",
       statusReady: () => true,
@@ -79,6 +80,7 @@ describe("workbench Git diff props", () => {
         resolveProjectMedia: vi.fn(),
         openProjectFile: vi.fn(),
         openLocalFile: vi.fn(),
+        saveUserConfig,
         resolveLocalMedia: vi.fn(),
         rememberScroll: vi.fn(),
         setDirty: vi.fn(),
@@ -94,7 +96,21 @@ describe("workbench Git diff props", () => {
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(true);
     options.preview.active = { ...options.preview.active, file: { path: "~/.config/pi/pix.jsonc", content: "{}" } };
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(false);
+    options.preview.active = {
+      ...options.preview.active,
+      userConfigKind: "pi-tools-suite",
+      file: { path: "~/.config/pi/pi-tools-suite.jsonc", content: "{}" },
+    };
+    const settings = buildWorkbenchEditorProps(options).preview;
+    expect(settings?.editable).toBe(true);
+    await settings?.onSaveProjectFile?.("~/.config/pi/pi-tools-suite.jsonc", "{\n}\n");
+    expect(saveUserConfig).toHaveBeenCalledWith(
+      "pi-tools-suite",
+      "~/.config/pi/pi-tools-suite.jsonc",
+      "{\n}\n",
+    );
     options.preview.active = { ...options.preview.active, file: { path: "/private/tmp/stdout.txt", content: "output" } };
+    delete options.preview.active.userConfigKind;
     const local = buildWorkbenchEditorProps(options).preview;
     expect(local?.editable).toBe(false);
     expect(local?.externalEditorLabel).toBeUndefined();

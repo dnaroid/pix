@@ -58,7 +58,7 @@ const THINKING_PALETTE: readonly ModelDisplayTone[] = [
 export function modelProviderBrand(providerOrRef: string): ModelProviderBrand | undefined {
   const normalized = providerOrRef.trim().toLowerCase();
   const provider = normalized.includes("/") ? normalized.slice(0, normalized.indexOf("/")) : normalized;
-  if (provider === "anthropic") return "anthropic";
+  if (provider === "anthropic" || provider === "pi-claude-code-provider") return "anthropic";
   if (provider === "antigravity" || provider === "google") return "google";
   if (provider === "openai" || provider === "openai-codex") return "openai";
   if (provider === "zai" || provider === "z.ai" || provider === "zhipu" || provider === "zhipuai") return "zai";

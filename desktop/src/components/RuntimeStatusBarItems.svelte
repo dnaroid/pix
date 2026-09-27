@@ -33,9 +33,6 @@
   let {
     status,
     showSkeletons = false,
-    workspacePath,
-    workspaceName,
-    workspaceBranch,
     loadingDcpStats = false,
     sessionUsage,
     loadingSessionUsage = false,
@@ -50,9 +47,6 @@
   }: {
     status?: RuntimeStatus;
     showSkeletons?: boolean;
-    workspacePath?: string;
-    workspaceName?: string;
-    workspaceBranch?: string;
     loadingDcpStats?: boolean;
     sessionUsage?: SessionUsageReport;
     loadingSessionUsage?: boolean;
@@ -219,10 +213,10 @@
 
 <svelte:window onpointerdown={closeOutside} onkeydown={handleKeydown} />
 
-{#if status || workspaceName || showSkeletons}
+{#if status || showSkeletons}
   <div
     bind:this={root}
-    class="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 max-[900px]:flex"
+    class="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-1 max-[900px]:flex"
     data-runtime-status
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
@@ -337,36 +331,8 @@
       </div>
     {/if}
 
-    {#if workspaceName}
-      <div
-        class="col-start-2 flex min-w-0 max-w-[260px] items-center gap-1 justify-self-center px-1.5 font-mono text-xs max-[1120px]:hidden"
-        title={workspacePath ?? workspaceName}
-        data-runtime-workspace
-      >
-        <span class="min-w-0 truncate text-muted-foreground">{workspaceName}</span>
-        {#if workspaceBranch}
-          <span class="max-w-36 shrink truncate text-muted-foreground/55">({workspaceBranch})</span>
-        {:else if showSkeletons}
-          <span
-            class="h-3 w-14 shrink-0 rounded-sm bg-muted-foreground/15"
-            data-runtime-workspace-branch-skeleton
-            aria-hidden="true"
-          ></span>
-        {/if}
-      </div>
-    {:else if showSkeletons}
-      <div
-        class="col-start-2 flex min-w-0 items-center gap-1 justify-self-center px-1.5 max-[1120px]:hidden"
-        data-runtime-workspace-skeleton
-        aria-hidden="true"
-      >
-        <span class="h-3 w-24 rounded-sm bg-muted-foreground/20"></span>
-        <span class="h-3 w-14 rounded-sm bg-muted-foreground/15"></span>
-      </div>
-    {/if}
-
     {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage}
-      <div class="relative col-start-3 shrink-0 justify-self-end">
+      <div class="relative col-start-2 shrink-0 justify-self-end">
         <button
           class="flex h-6 min-w-0 items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
@@ -489,7 +455,7 @@
       </div>
     {:else if showSkeletons}
       <div
-        class="col-start-3 flex h-6 shrink-0 items-center gap-1.5 justify-self-end px-1.5 font-mono text-xs"
+        class="col-start-2 flex h-6 shrink-0 items-center gap-1.5 justify-self-end px-1.5 font-mono text-xs"
         data-runtime-usage-skeleton
         aria-hidden="true"
       >
