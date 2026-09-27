@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { constants as fsConstants, existsSync, watch } from "node:fs";
-import { chmod, copyFile, cp, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,10 @@ const DESKTOP_WATCH_STATE_FILE = "desktop-watch-state.json";
 const DESKTOP_RESTART_REQUEST_FILE = "desktop-watch-state.restart";
 const DESKTOP_WATCH_STATE_MAX_BYTES = 4 * 1024;
 const DESKTOP_RESTART_POLL_MS = 100;
+const GIT_REFLOG_DEBOUNCE_MS = 150;
+const GIT_REFLOG_TAIL_BYTES = 16 * 1024;
+const GIT_DIFF_MAX_BYTES = 2 * 1024 * 1024;
+const GIT_DIFF_TIMEOUT_MS = 5_000;
 
 /** A deliberately small, atomically-published handoff from watch:all to a running debug Desktop. */
 export function desktopWatchState(target, stale) {
@@ -319,6 +323,25 @@ export function updateWatchedPathStamp(stamps, path, stamp) {
 	return previous === undefined || previous !== stamp;
 }
 
+/** Parse the newest bounded HEAD reflog line into its transition and action. */
+export function parseGitReflogTail(value) {
+	const lines = String(value).split("\n").filter(Boolean);
+	const line = lines.at(-1);
+	if (!line) return undefined;
+	const separator = line.indexOf("\t");
+	if (separator < 0) return undefined;
+	const metadata = line.slice(0, separator).trim().split(/\s+/u);
+	const oldHead = metadata[0];
+	const newHead = metadata[1];
+	if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/iu.test(oldHead ?? "") || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/iu.test(newHead ?? "")) return undefined;
+	return { oldHead, newHead, message: line.slice(separator + 1) };
+}
+
+/** Ignore ordinary commits/checkouts; integrations can replace many files too quickly for fs.watch. */
+export function isGitWorktreeIntegration(message) {
+	return /^(?:pull(?::|\s)|merge(?::|\s)|rebase(?::|\s)|reset:)/iu.test(String(message).trim());
+}
+
 /** Invoke the npm selected by PATH without relying on direct `.cmd` spawning on Windows. */
 export function npmInvocation(args, platform = process.platform, comSpec = process.env.ComSpec ?? "cmd.exe") {
 	if (platform !== "win32") return { command: "npm", args };
@@ -333,6 +356,81 @@ async function watchedPathStamp(path) {
 		if (error?.code === "ENOENT") return "missing";
 		throw error;
 	}
+}
+
+async function readFileTail(path, maxBytes) {
+	const handle = await open(path, "r");
+	try {
+		const { size } = await handle.stat();
+		const length = Math.min(size, maxBytes);
+		const buffer = Buffer.alloc(length);
+		if (length > 0) await handle.read(buffer, 0, length, Math.max(0, size - length));
+		return buffer.toString("utf8");
+	} finally {
+		await handle.close();
+	}
+}
+
+async function resolveGitDirectory(root = REPO_ROOT) {
+	const dotGit = join(root, ".git");
+	try {
+		const info = await stat(dotGit);
+		if (info.isDirectory()) return dotGit;
+		if (!info.isFile()) return undefined;
+		const match = /^gitdir:\s*(.+?)\s*$/imu.exec(await readFile(dotGit, "utf8"));
+		return match ? resolve(root, match[1]) : undefined;
+	} catch (error) {
+		if (error?.code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+async function gitChangedPathsBetweenHeads(oldHead, newHead, cwd = REPO_ROOT) {
+	return new Promise((resolvePaths, rejectPaths) => {
+		const child = spawn("git", ["-c", "core.fsmonitor=false", "diff", "--name-only", "-z", oldHead, newHead, "--"], {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const chunks = [];
+		let bytes = 0;
+		let stderr = "";
+		let settled = false;
+		const fail = (error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			rejectPaths(error);
+		};
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+			fail(new Error("git diff timed out while detecting pulled changes"));
+		}, GIT_DIFF_TIMEOUT_MS);
+		timer.unref?.();
+		child.once("error", fail);
+		child.stdout?.on("data", (chunk) => {
+			if (settled) return;
+			bytes += chunk.length;
+			if (bytes > GIT_DIFF_MAX_BYTES) {
+				child.kill("SIGKILL");
+				fail(new Error("git diff changed-path output exceeded its size limit"));
+				return;
+			}
+			chunks.push(chunk);
+		});
+		child.stderr?.on("data", (chunk) => {
+			stderr = appendCommandOutputTail(stderr, chunk, COMMAND_FAILURE_TAIL_BYTES);
+		});
+		child.once("close", (code, signal) => {
+			if (settled) return;
+			clearTimeout(timer);
+			if (code !== 0) {
+				fail(new Error(`git diff failed (${signal ?? `exit ${code}`}): ${stderr.trim() || "no diagnostics"}`));
+				return;
+			}
+			settled = true;
+			resolvePaths(Buffer.concat(chunks).toString("utf8").split("\0").filter(Boolean).map(normalizedPath));
+		});
+	});
 }
 
 function delay(milliseconds) {
@@ -468,6 +566,11 @@ export class WatchAllSupervisor {
 		this.desktopRestartRequestPath = undefined;
 		this.restartRequestTimer = undefined;
 		this.restartRequestPolling = false;
+		this.gitDirectory = undefined;
+		this.gitReflogTimer = undefined;
+		this.gitReflogRunning = false;
+		this.gitReflogQueued = false;
+		this.lastGitReflogTransition = undefined;
 	}
 
 	async start() {
@@ -485,6 +588,7 @@ export class WatchAllSupervisor {
 		this.desktopRestartRequestPath = join(this.tempDirectory, DESKTOP_RESTART_REQUEST_FILE);
 		this.restartRequestTimer = setInterval(() => void this.consumeDesktopRestartRequest(), DESKTOP_RESTART_POLL_MS);
 		await this.seedWatchedPathStamps(NATIVE_ICON_PATH);
+		await this.startGitIntegrationWatcher();
 		this.startWatchers();
 		this.queueParts(PART_ORDER, "initial build", { immediate: true });
 	}
@@ -528,6 +632,89 @@ export class WatchAllSupervisor {
 		}
 		const parts = classifyChange(relativePath);
 		if (parts.size > 0) this.queueParts(parts, relativePath);
+	}
+
+	async readLatestGitReflogEntry() {
+		if (!this.gitDirectory) return undefined;
+		try {
+			return parseGitReflogTail(await readFileTail(join(this.gitDirectory, "logs", "HEAD"), GIT_REFLOG_TAIL_BYTES));
+		} catch (error) {
+			if (error?.code === "ENOENT") return undefined;
+			throw error;
+		}
+	}
+
+	async changedPathsBetweenHeads(oldHead, newHead) {
+		return gitChangedPathsBetweenHeads(oldHead, newHead);
+	}
+
+	gitReflogSignature(entry) {
+		return entry ? `${entry.oldHead}:${entry.newHead}:${entry.message}` : undefined;
+	}
+
+	async startGitIntegrationWatcher() {
+		this.gitDirectory = await resolveGitDirectory();
+		if (!this.gitDirectory) return;
+		const logsDirectory = join(this.gitDirectory, "logs");
+		if (!existsSync(logsDirectory)) return;
+		this.lastGitReflogTransition = this.gitReflogSignature(await this.readLatestGitReflogEntry());
+		const watcher = watch(logsDirectory, { recursive: false }, (_eventType, filename) => {
+			if (!filename || normalizedPath(String(filename)) !== "HEAD") return;
+			this.scheduleGitReflogRefresh();
+		});
+		watcher.on("error", (error) => {
+			console.error(`[watch:all] Git integration watcher failed: ${error.message}`);
+		});
+		this.watchers.push(watcher);
+	}
+
+	scheduleGitReflogRefresh() {
+		if (this.stopping) return;
+		clearTimeout(this.gitReflogTimer);
+		this.gitReflogTimer = setTimeout(() => {
+			this.gitReflogTimer = undefined;
+			void this.refreshGitIntegration().catch((error) => {
+				console.error(`[watch:all] could not inspect Git HEAD transition: ${error.message}`);
+			});
+		}, GIT_REFLOG_DEBOUNCE_MS);
+	}
+
+	async refreshGitIntegration() {
+		if (this.stopping) return;
+		if (this.gitReflogRunning) {
+			this.gitReflogQueued = true;
+			return;
+		}
+		this.gitReflogRunning = true;
+		try {
+			const entry = await this.readLatestGitReflogEntry();
+			const signature = this.gitReflogSignature(entry);
+			if (!entry || signature === this.lastGitReflogTransition) return;
+			this.lastGitReflogTransition = signature;
+			if (entry.oldHead === entry.newHead || !isGitWorktreeIntegration(entry.message)) return;
+
+			let changedPaths;
+			try {
+				changedPaths = await this.changedPathsBetweenHeads(entry.oldHead, entry.newHead);
+			} catch (error) {
+				console.error(`[watch:all] could not classify pulled changes; rebuilding all parts: ${error.message}`);
+				this.queueParts(PART_ORDER, "Git worktree integration fallback");
+				return;
+			}
+			const parts = new Set();
+			for (const path of changedPaths) {
+				for (const part of classifyChange(path)) parts.add(part);
+			}
+			if (parts.size > 0) {
+				this.queueParts(parts, `Git worktree integration (${entry.message || "HEAD changed"})`);
+			}
+		} finally {
+			this.gitReflogRunning = false;
+			if (this.gitReflogQueued) {
+				this.gitReflogQueued = false;
+				void this.refreshGitIntegration();
+			}
+		}
 	}
 
 	startWatchers() {
@@ -972,6 +1159,7 @@ export class WatchAllSupervisor {
 		this.stopping = true;
 		clearTimeout(this.buildTimer);
 		clearTimeout(this.restartTimer);
+		clearTimeout(this.gitReflogTimer);
 		clearInterval(this.restartRequestTimer);
 		for (const watcher of this.watchers) watcher.close();
 		if (this.activeCommand) await stopProcessTree(this.activeCommand);

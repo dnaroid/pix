@@ -17,6 +17,7 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 ## Behavior
 
 - A Desktop web-source change schedules `web` followed by `native`. The first successful build launches Desktop; later successful builds leave the running Desktop in place and mark the newer build as ready instead of interrupting the active session.
+- `watch:all` also watches the repository HEAD reflog as a fallback for Git worktree integrations such as `pull`, fast-forward `merge` (including Desktop's **Update project**), rebase, and reset. When HEAD advances through one of those operations, it diffs the old/new commits, classifies the changed paths with the same build-part rules, and queues the affected parts even if the OS file watcher missed some or all of the bulk checkout events. Ordinary local commits and branch checkouts do not use this fallback. If the bounded Git diff probe fails, the watcher conservatively queues all parts.
 - A watch-launched debug Desktop polls the bounded watcher state artifact and, when a newer build is ready, exposes a `Restart` control at the right side of its titlebar. Activating it launches the new artifact and then exits the old process. Release builds and ordinary development launches have no watcher state and no control.
 - `watch:all` disables Tauri's `beforeBuildCommand` because it has already built the web bundle once in the ordered build plan.
 - `desktop/src-tauri/build.rs` explicitly tracks the generated `<repo>/desktop/dist/index.html` as a Cargo input. Vite's production entrypoint contains hashed references to the emitted JS/CSS assets, so a successful web rebuild invalidates the native crate even when no Rust source changed.
@@ -77,6 +78,9 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 - `tests/watch-all.test.ts` also covers bounded failed-command output retention
   and the repeated bottom-of-terminal failure report, plus exact app-PID
   liveness checks used by the macOS startup gate, artifact retention and stale
-  root reclamation with concurrent watcher and surviving app scenarios.
+  root reclamation with concurrent watcher and surviving app scenarios. It also
+  covers reflog parsing, Git integration filtering, changed-part recovery after
+  a missed bulk checkout event, duplicate suppression, and the conservative
+  full-rebuild fallback when the Git diff probe fails.
 - After changing/rebuilding Desktop web output, the subsequent native build must rerun the `pix-desktop` build script and produce a launchable bundle with `index.html` embedded.
 - Run `node --import tsx --test tests/watch-all.test.ts`, `npm --prefix desktop run check`, and a production Desktop web/native smoke build.

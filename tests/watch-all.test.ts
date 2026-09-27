@@ -13,6 +13,7 @@ import {
 	createBuildPlan,
 	desktopWatchState,
 	parseDesktopWatchState,
+	parseGitReflogTail,
 	desktopAppBundlePath,
 	desktopArtifactDestination,
 	desktopBundleDirectory,
@@ -26,6 +27,7 @@ import {
 	npmInvocation,
 	parseProcessList,
 	processOwnsDesktopArtifact,
+	isGitWorktreeIntegration,
 	selectDesktopAppBundle,
 	updateWatchedPathStamp,
 	usesDesktopAppBundle,
@@ -435,6 +437,49 @@ describe("watch:all filesystem event filtering", () => {
 		assert.equal(updateWatchedPathStamp(stamps, path, "file:101:20"), true);
 		assert.equal(updateWatchedPathStamp(stamps, path, "file:101:20"), false);
 		assert.equal(updateWatchedPathStamp(stamps, path, "missing"), true);
+	});
+
+	it("parses HEAD reflog transitions and recognizes pulls/merges without treating commits as pulls", () => {
+		const oldHead = "a".repeat(40);
+		const newHead = "b".repeat(40);
+		assert.deepEqual(
+			parseGitReflogTail(`${oldHead} ${newHead} Dev <dev@example.test> 1 +0000\tpull: Fast-forward\n`),
+			{ oldHead, newHead, message: "pull: Fast-forward" },
+		);
+		assert.equal(isGitWorktreeIntegration("pull: Fast-forward"), true);
+		assert.equal(isGitWorktreeIntegration("merge @{upstream}: Fast-forward"), true);
+		assert.equal(isGitWorktreeIntegration("commit: local change"), false);
+		assert.equal(isGitWorktreeIntegration("checkout: moving from main to feature"), false);
+	});
+
+	it("queues parts changed by a pulled HEAD transition even when fs.watch missed those files", async () => {
+		const supervisor = new WatchAllSupervisor();
+		const oldHead = "a".repeat(40);
+		const newHead = "b".repeat(40);
+		const queued: { parts: string[]; reason: string }[] = [];
+		supervisor.readLatestGitReflogEntry = async () => ({ oldHead, newHead, message: "pull: Fast-forward" });
+		supervisor.changedPathsBetweenHeads = async () => ["desktop/src/App.svelte", "src/main.ts", "README.md"];
+		supervisor.queueParts = (parts: Iterable<string>, reason: string) => queued.push({ parts: [...parts].sort(), reason });
+
+		await supervisor.refreshGitIntegration();
+
+		assert.deepEqual(queued, [{ parts: [PARTS.PIX, PARTS.WEB].sort(), reason: "Git worktree integration (pull: Fast-forward)" }]);
+		await supervisor.refreshGitIntegration();
+		assert.equal(queued.length, 1, "the same reflog transition must not queue a second build");
+	});
+
+	it("falls back to rebuilding every part when a pulled transition cannot be diffed", async () => {
+		const supervisor = new WatchAllSupervisor();
+		const oldHead = "a".repeat(40);
+		const newHead = "b".repeat(40);
+		let queued: string[] = [];
+		supervisor.readLatestGitReflogEntry = async () => ({ oldHead, newHead, message: "merge origin/main: Fast-forward" });
+		supervisor.changedPathsBetweenHeads = async () => { throw new Error("probe failed"); };
+		supervisor.queueParts = (parts: Iterable<string>) => { queued = [...parts]; };
+
+		await supervisor.refreshGitIntegration();
+
+		assert.deepEqual(queued, [PARTS.SUITE, PARTS.PIX, PARTS.ACP, PARTS.WEB, PARTS.NATIVE]);
 	});
 });
 
