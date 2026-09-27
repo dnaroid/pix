@@ -6,6 +6,7 @@ import type { DesktopProjectServices } from "./desktop-project-services";
 import type { DesktopPromptServices } from "./desktop-prompt-services";
 import type { DesktopSessionServices } from "./desktop-session-services";
 import type { DesktopSessionTransitionServices } from "./desktop-session-transition-services";
+import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
 import { createProjectActions } from "./project-actions.svelte";
 
 type DesktopProjectActionServicesOptions = {
@@ -64,7 +65,13 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     runtimeReady: options.sessions.runtime.isReady,
     forgetRuntime: options.forgetRuntime,
     activateSession: (sessionId, workspace, runtimeReady) => {
-      if (runtimeReady) options.state.saveActiveTranscript();
+      const sourceSessionId = options.state.sessionId;
+      const sourceOwnerId = options.transitions.draft.active
+        ? DRAFT_SESSION_TAB_ID
+        : sourceSessionId;
+      if (sourceSessionId) options.state.saveActiveTranscript(sourceSessionId);
+      options.transitions.draft.deactivate();
+      options.transitions.composerDrafts.switchTo(sourceOwnerId, sessionId);
       options.sessions.catalog.ensureProvisional(sessionId, workspace);
       options.sessions.tabs.show(sessionId);
       options.state.setSessionId(sessionId);
