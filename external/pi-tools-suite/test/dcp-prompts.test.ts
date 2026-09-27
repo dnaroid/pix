@@ -5,6 +5,8 @@ import {
 	CONTEXT_LIMIT_NUDGE_STRONG,
 	ITERATION_NUDGE,
 	MANUAL_MODE_SYSTEM_PROMPT,
+	SUMMARY_AUTHORING_DELEGATED,
+	SUMMARY_AUTHORING_SELF,
 	SYSTEM_PROMPT,
 	TURN_NUDGE,
 } from "../src/dcp/prompts.js";
@@ -72,5 +74,13 @@ describe("DCP prompt contracts", () => {
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("remainingRecoveryTokens");
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("An unsuccessful call");
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("does not satisfy a reminder");
+	});
+
+	test("summary authoring defaults to the agent unless a summarizer model is configured", () => {
+		expect(COMPRESS_RANGE_DESCRIPTION).not.toContain("Normally omit");
+		expect(COMPRESS_RANGE_DESCRIPTION).toMatch(/Write `summary` yourself/);
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("coarse extractive record");
+		expect(SUMMARY_AUTHORING_SELF).toContain("always write the `compress` `summary`");
+		expect(SUMMARY_AUTHORING_DELEGATED).toContain("may omit the `compress` `summary`");
 	});
 });

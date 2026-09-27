@@ -402,6 +402,24 @@ function selectEdgeItems<T>(items: T[], maxItems: number): T[] {
 	return [...items.slice(0, head), ...items.slice(items.length - tail)]
 }
 
+const EXTRACT_ARG_STRING_MAX_CHARS = 240
+const EXTRACT_ERROR_EXCERPT_MAX_CHARS = 1_500
+const EXTRACT_SMALL_RESULT_MAX_CHARS = 300
+
+function isToolOutputItem(item: SummarySourceItem): boolean {
+	return Boolean(item.toolCallId) || item.role === "toolResult" || item.role === "bashExecution"
+}
+
+/**
+ * Tool output (file reads, logs, search hits) is raw material, not authored
+ * continuity. Matching free-text keywords inside it copies source code and log
+ * noise into the record. Only label-anchored checkpoints (`Decision: ...`)
+ * are taken from tool output; user/assistant prose keeps free-text matching.
+ */
+function checkpointLabel(line: string): string | undefined {
+	return /^(?:[-*]\s*)?([^:\s][^:]{0,39}):\s*\S/.exec(line)?.[1]
+}
+
 function explicitSourceLines(
 	manifest: SummarySourceItem[],
 	pattern: RegExp,
@@ -409,10 +427,15 @@ function explicitSourceLines(
 	const matches: string[] = []
 	const seen = new Set<string>()
 	for (const item of manifest) {
+		const toolOutput = isToolOutputItem(item)
 		for (const rawLine of item.text?.split(/\r?\n/) ?? []) {
 			const line = rawLine.trim().replace(/^(?:-\s*)?(?:\[src-[^\]]+\]\s*)+/, "")
 			if (/^(?:\[Auto-compressed|Topic:|Range:|Source coverage:|The sections below|Tool calls in range:|Explicit constraints:|Explicit decisions:|Reported changes:|Verification \/ errors:|Pending \/ next steps:|Tool evidence:|User constraints \/ requests)/.test(line)) continue
-			if (!line || !pattern.test(line)) continue
+			if (!line) continue
+			if (toolOutput) {
+				const label = checkpointLabel(line)
+				if (!label || !pattern.test(label)) continue
+			} else if (!pattern.test(line)) continue
 			// All recognized checkpoints survive. Truncating a line or selecting
 			// the first/last six silently drops the very facts this fallback owns.
 			const rendered = `[${item.sourceId}; ${item.role}] ${line}`
@@ -424,25 +447,96 @@ function explicitSourceLines(
 	return matches
 }
 
+/** Bound large string arguments (file bodies, patches) to a size marker. */
+function compactToolArguments(value: unknown, depth = 0): unknown {
+	if (typeof value === "string") {
+		return value.length <= EXTRACT_ARG_STRING_MAX_CHARS ? value : `[${value.length} chars omitted]`
+	}
+	if (depth >= 8 || value === null || typeof value !== "object") return value
+	if (Array.isArray(value)) return value.map((item) => compactToolArguments(item, depth + 1))
+	const output: Record<string, unknown> = {}
+	for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+		output[key] = compactToolArguments(nested, depth + 1)
+	}
+	return output
+}
+
+function boundedErrorExcerpt(text: string): string {
+	if (text.length <= EXTRACT_ERROR_EXCERPT_MAX_CHARS) return text
+	const lines = text.replace(/\r\n/g, "\n").split("\n").filter((line) => line.trim().length > 0)
+	const selected: string[] = []
+	const seen = new Set<string>()
+	const add = (line: string) => {
+		if (seen.has(line)) return
+		seen.add(line)
+		selected.push(line)
+	}
+	for (const line of lines) {
+		if (/\b(?:error|failed?|failure|exception|denied|not found|cannot|unable|panic|assert)/i.test(line)) add(line)
+	}
+	for (const line of lines.slice(-6)) add(line)
+	let excerpt = selected.join("\n")
+	if (excerpt.length > EXTRACT_ERROR_EXCERPT_MAX_CHARS) excerpt = excerpt.slice(0, EXTRACT_ERROR_EXCERPT_MAX_CHARS)
+	return `${excerpt}\n[error excerpt bounded: ${text.length} source chars]`
+}
+
+function toolInvocationKey(name: string, args: unknown): string {
+	return `${name.trim().toLowerCase()}\u0000${JSON.stringify(args ?? null)}`
+}
+
+/**
+ * Map each errored tool result to a later successful result of the identical
+ * invocation (same tool + args) inside the range. A fixed failure is history,
+ * not an actionable error, and must not outrank the final outcome.
+ */
+function supersededErrorResults(manifest: SummarySourceItem[]): Map<string, string> {
+	const invocationByCallId = new Map<string, string>()
+	for (const item of manifest) {
+		for (const call of item.toolCalls ?? []) {
+			if (call.id) invocationByCallId.set(call.id, toolInvocationKey(call.name, call.arguments))
+		}
+	}
+	const superseded = new Map<string, string>()
+	const openErrors = new Map<string, string[]>()
+	for (const item of manifest) {
+		if (!isToolOutputItem(item) || !item.toolCallId) continue
+		const key = invocationByCallId.get(item.toolCallId)
+		if (!key) continue
+		if (item.outcome === "error") {
+			openErrors.set(key, [...(openErrors.get(key) ?? []), item.sourceId])
+		} else if (item.outcome === "success") {
+			for (const sourceId of openErrors.get(key) ?? []) superseded.set(sourceId, item.sourceId)
+			openErrors.delete(key)
+		}
+	}
+	return superseded
+}
+
 function toolEvidenceLines(manifest: SummarySourceItem[]): string[] {
 	const lines: string[] = []
+	const superseded = supersededErrorResults(manifest)
 	for (const item of manifest) {
 		for (const call of item.toolCalls ?? []) {
 			lines.push(
 				`[${item.sourceId}] call ${call.id ?? "unknown"} ${call.name}` +
-				(call.arguments === undefined ? "" : ` args=${JSON.stringify(call.arguments)}`),
+				(call.arguments === undefined ? "" : ` args=${JSON.stringify(compactToolArguments(call.arguments))}`),
 			)
 		}
-		if (item.toolCallId || item.role === "toolResult" || item.role === "bashExecution") {
+		if (isToolOutputItem(item)) {
 			// Large successful outputs are exactly the material DCP is trying to
 			// retire; repeating an arbitrary head/tail excerpt defeats compression
-			// and can resurrect incidental log noise. Keep exact excerpts for
-			// actionable errors and already-small results only.
-			const includeExcerpt = Boolean(item.text) && (item.outcome === "error" || item.text!.length <= 300)
-			const excerpt = includeExcerpt ? ` excerpt=${JSON.stringify(item.text)}` : ""
+			// and can resurrect incidental log noise. Keep bounded excerpts for
+			// still-actionable errors and already-small results only.
+			const supersededBy = superseded.get(item.sourceId)
+			let excerpt = ""
+			if (item.text && !supersededBy) {
+				if (item.outcome === "error") excerpt = ` excerpt=${JSON.stringify(boundedErrorExcerpt(item.text))}`
+				else if (item.text.length <= EXTRACT_SMALL_RESULT_MAX_CHARS) excerpt = ` excerpt=${JSON.stringify(item.text)}`
+			}
 			lines.push(
 				`[${item.sourceId}] result ${item.toolCallId ?? "unknown"} ${item.toolName ?? "unknown"} ` +
-				`outcome=${item.outcome ?? "unknown"}${item.exitCode === undefined ? "" : ` exit_code=${item.exitCode}`}${excerpt}`,
+				`outcome=${item.outcome ?? "unknown"}${item.exitCode === undefined ? "" : ` exit_code=${item.exitCode}`}` +
+				`${supersededBy ? ` superseded_by=${supersededBy}` : ""}${excerpt}`,
 			)
 		}
 	}
@@ -502,7 +596,7 @@ export function buildExtractiveSummary(
 	// explicitly represented by the usage digest. Critical excerpts were already
 	// extracted from the full source above, not from a head/tail approximation.
 	const evidence = toolEvidenceLines(manifest)
-	const criticalEvidence = evidence.filter((line) => /outcome=error|\b(?:write|edit|apply_patch|shell|bash)\b/i.test(line))
+	const criticalEvidence = evidence.filter((line) => /outcome=error(?!.*superseded_by)|\b(?:write|edit|apply_patch|shell|bash)\b/i.test(line))
 	const routineEvidence = evidence.filter((line) => !criticalEvidence.includes(line))
 	appendExtractiveSection(lines, "Tool evidence", [...criticalEvidence, ...selectEdgeItems(routineEvidence, SUMMARY_EXTRACT_TOOL_ITEMS)])
 	return lines.join("\n")

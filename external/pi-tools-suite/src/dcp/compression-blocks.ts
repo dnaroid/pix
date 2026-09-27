@@ -8,7 +8,8 @@ import type {
 import type { DcpConfig } from "./config.js"
 import { estimateTokens } from "./pruner-metadata.js"
 import { isToolRecordProtected } from "./pruner-tools.js"
-import { toolRecordContinuity } from "./protected-continuity.js"
+import { repeatableObservationKey, toolRecordContinuity } from "./protected-continuity.js"
+import { DEFAULT_DCP_CONFIG } from "./defaults.js"
 import { compareConversationStableIds, buildExactRangeMembership } from "./conversation-index.js"
 import { createHash } from "node:crypto"
 import { open, realpath } from "node:fs/promises"
@@ -639,7 +640,7 @@ function aggregateToolContinuity(
 		"### Historical tool continuity aggregate",
 		`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
 		`Tools: ${toolSummary || "unknown"}.`,
-		`Raw source represented: ${sourceBytes} bytes; manifest sha256:${manifestHash}.`,
+		`Raw source represented: ${sourceBytes} bytes.`,
 	]
 	if (changedFiles.size > 0) lines.push(`Changed files observed: ${[...changedFiles].join(", ")}.`)
 	lines.push("Exact historical outputs remain in session history; this aggregate is continuation-only evidence.")
@@ -648,7 +649,7 @@ function aggregateToolContinuity(
 		text = [
 			"### Historical tool continuity aggregate",
 			`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
-			`Raw source represented: ${sourceBytes} bytes; manifest sha256:${manifestHash}.`,
+			`Raw source represented: ${sourceBytes} bytes.`,
 		].join("\n")
 	}
 	return compressionProtectedFragment("tool", `tool-ledger:${manifestHash}`, text, {
@@ -666,15 +667,80 @@ function aggregateToolContinuity(
  * mutation evidence and recency; overflow is replaced by one deterministic
  * recoverable aggregate whose exact source remains in the raw session.
  */
-export function budgetProtectedToolFragments(
+/**
+ * Newest timestamp per repeatable-observation key among occurrences outside
+ * `exclude`: raw tool results visible in the latest projection and the
+ * ledgers of active blocks. Shell results are never pruned, so the newest
+ * occurrence of an observation always survives in one of these places.
+ */
+function externalObservationTimestamps(
+	exclude: ReadonlySet<string>,
+	state: DcpState,
+	config: DcpConfig,
+): Map<string, number> {
+	const newest = new Map<string, number>()
+	const note = (toolCallId: string | undefined) => {
+		if (!toolCallId || exclude.has(toolCallId)) return
+		const record = state.toolCalls.get(toolCallId)
+		const key = record ? repeatableObservationKey(record, config) : undefined
+		if (!key || !record) return
+		if (record.timestamp > (newest.get(key) ?? -Infinity)) newest.set(key, record.timestamp)
+	}
+	for (const meta of state.messageMetaSnapshot.values()) {
+		if (meta.blockId === undefined && (meta.role === "toolResult" || meta.role === "bashExecution")) note(meta.toolCallId)
+	}
+	for (const block of state.compressionBlocks) {
+		if (!block.active) continue
+		for (const fragment of block.protectedFragments ?? []) note(/^tool:(.+)$/.exec(fragment.origin)?.[1])
+	}
+	return newest
+}
+
+/**
+ * Keep only the newest receipt of each repeated side-effect-free observation
+ * (same inspection/test command and arguments), both within this ledger and
+ * against newer occurrences elsewhere in the projection. Ten `bun test` runs
+ * describe one current state; the older receipts — typically fixed failures,
+ * which the budget would otherwise rank highest — stay in the raw session.
+ */
+function supersedeRepeatedObservations(
 	fragments: CompressionProtectedFragment[],
 	state: DcpState,
 	config: DcpConfig,
 ): CompressionProtectedFragment[] {
+	const newest = new Map<string, { timestamp: number; index: number }>()
+	const ownIds = new Set<string>()
+	const keyed = fragments.map((fragment, index) => {
+		if (fragment.kind !== "tool") return undefined
+		const toolCallId = /^tool:(.+)$/.exec(fragment.origin)?.[1]
+		const record = toolCallId ? state.toolCalls.get(toolCallId) : undefined
+		const key = record ? repeatableObservationKey(record, config) : undefined
+		if (!key || !record || !toolCallId) return undefined
+		ownIds.add(toolCallId)
+		const current = newest.get(key)
+		if (!current || record.timestamp >= current.timestamp) newest.set(key, { timestamp: record.timestamp, index })
+		return { key, timestamp: record.timestamp }
+	})
+	if (newest.size === 0) return fragments
+	const external = externalObservationTimestamps(ownIds, state, config)
+	return fragments.filter((_fragment, index) => {
+		const entry = keyed[index]
+		if (!entry) return true
+		if (newest.get(entry.key)?.index !== index) return false
+		return !(entry.timestamp < (external.get(entry.key) ?? -Infinity))
+	})
+}
+
+export function budgetProtectedToolFragments(
+	inputFragments: CompressionProtectedFragment[],
+	state: DcpState,
+	config: DcpConfig,
+): CompressionProtectedFragment[] {
+	const fragments = supersedeRepeatedObservations(inputFragments, state, config)
 	const configuredBudget = config.compress.maxProtectedToolContinuityBytes
 	const maxBytes = typeof configuredBudget === "number" && Number.isFinite(configuredBudget) && configuredBudget > 0
 		? Math.max(1_024, Math.floor(configuredBudget))
-		: 64 * 1024
+		: DEFAULT_DCP_CONFIG.compress.maxProtectedToolContinuityBytes
 	const toolEntries = fragments
 		.map((fragment, index) => ({ fragment, index }))
 		.filter(({ fragment }) => fragment.kind === "tool")

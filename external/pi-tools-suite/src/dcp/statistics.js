@@ -23,8 +23,9 @@ function createState() {
   const publishedIds = new Set();
   const attemptIds = new Set(), completionIds = new Set(), manualFailures = new Set();
   const diagnostics = [];
+  const regretIds = new Set(), regret = { refetch: 0, recovery: 0 };
   return { blocks, pruned, operations, measured, journal, previous, anchors, manualMode, epoch, snapshot, lastReminder, ignored, evidenceEpoch, stopped: false,
-    projections, attempts, completed, rejected, publishedIds, attemptIds, completionIds, manualFailures, diagnostics };
+    projections, attempts, completed, rejected, publishedIds, attemptIds, completionIds, manualFailures, diagnostics, regretIds, regret };
 }
 
 /** @param {ReturnType<typeof createState>} state @param {any} entry */
@@ -94,6 +95,11 @@ function reduceDiagnostic(state, d) {
       state.completionIds.add(d.id); state.ignored = d.ignored;
     }
     if (d.event === "auto-rejected") state.rejected++;
+    // Regret signals are durable session observations, independent of epochs.
+    if (d.event === "regret" && (d.kind === "refetch" || d.kind === "recovery") &&
+        typeof d.toolCallId === "string" && !state.regretIds.has(d.toolCallId)) {
+      state.regretIds.add(d.toolCallId); state.regret[d.kind]++;
+    }
 }
 
 /** @param {ReturnType<typeof createState>} state @param {import('./statistics.js').DcpStatisticsInput} input */
@@ -123,7 +129,8 @@ function statisticsResult(state, input, valid, all, active, activity) {
     snapshot: snapshotMatchesModel ? state.snapshot : undefined, snapshotStale: Boolean(state.snapshot && !snapshotMatchesModel),
     published: state.publishedIds.size, projections: state.projections, attempts: state.evidenceEpoch ? state.attempts : undefined, completed: state.evidenceEpoch ? state.completed : undefined,
     ignored: snapshotMatchesModel ? state.ignored : undefined, anchors: valid ? state.anchors : [], lastReminder: state.lastReminder,
-    rejected: state.evidenceEpoch ? state.rejected : undefined, manualFailures: state.manualFailures.size };
+    rejected: state.evidenceEpoch ? state.rejected : undefined, manualFailures: state.manualFailures.size,
+    regret: { ...state.regret } };
 }
 
 /** Read-only diagnostic reducer. Never runs the pruner, a model, or a mutation.
@@ -214,6 +221,7 @@ export function formatDcpStatistics(input) {
   if (s.activity.unknownBlocks) lines.push(`  Provenance unknown: ${s.activity.unknownBlocks} blocks`);
   lines.push(`  Measured commit gain: ${num(s.measuredGain)} tokens (${num(s.measured)} measured commits)`,
     `  Rejections recorded: ${num(s.rejected)} auto; ${num(s.manualFailures)} failed compress results`,
+    `  Regret signals: ${num(s.regret.refetch)} re-runs of compressed/pruned observations; ${num(s.regret.recovery)} session-recovery calls after compression`,
     "Reminder delivery",
     `  Anchors journaled: ${s.published}; projection events: ${s.projections} (not sends)`,
     `  Recorded provider attempts with reminder: ${num(s.attempts)}`,

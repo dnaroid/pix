@@ -10,6 +10,7 @@ import { previewCompressionContinuityRepack } from "./compression-blocks.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { closeConversationRange, detectToolGroupSpans, findConversationIndexEntry } from "./conversation-index.js";
 import { protocolClosedBoundaryRuns } from "./protocol-closed-ranges.js";
+import { staleObservationReasons } from "./stale-observations.js";
 
 interface CandidateBoundary {
   id: string;
@@ -533,7 +534,7 @@ export function formatCompressionCandidateHint(candidate: CompressionCandidate):
   const blockHint = candidate.includedBlockIds.length > 0
     ? `\nThis candidate includes compressed block(s): ${candidate.includedBlockIds
         .map((id) => `b${id}`)
-        .join(", ")}. If you compress this range, include each required \`(bN)\` placeholder exactly once in the summary.`
+        .join(", ")}. If you compress this range, summarize their continuation-relevant meaning and refer to them in prose as \`compressed bN\`; avoid \`(bN)\` placeholders (each one re-inserts that full old summary).`
     : "";
 
   return `\n\nSuggested compression candidate: ${candidate.startId}..${candidate.endId} (${candidate.messageCount} messages, ~${candidate.estimatedTokens} tokens, ${candidate.reason}).${blockHint}`;
@@ -570,16 +571,34 @@ export function detectMessageCompressionCandidates(
   // If the transcript does not yet contain enough complete user turns to
   // satisfy the retention policy, every message belongs to the protected
   // recent window. Do not reinterpret the live head as stale history.
-  if (recentUserTurns < keepRecentTurns || cutoffIndex < 0) return [];
+  const hasHistory = recentUserTurns >= keepRecentTurns && cutoffIndex >= 0;
+  const history = hasHistory ? boundaries.slice(0, cutoffIndex + 1) : [];
+  const recentWindow = hasHistory ? boundaries.slice(cutoffIndex + 1) : boundaries;
 
+  const stale = staleObservationReasons(messages, state, config);
+  const staleReason = (candidate: CandidateBoundary): string | undefined => {
+    const toolCallId = state.messageMetaSnapshot.get(candidate.id)?.toolCallId;
+    return toolCallId ? stale.get(toolCallId) : undefined;
+  };
+  // Inside the protected recent window (typically one long autonomous turn)
+  // only provably stale observations are offered: a later identical call or a
+  // later edit already replaced them, and the provider has seen them, so the
+  // live head never loses anything it still depends on.
+  const recentStale = recentWindow.filter((candidate) => {
+    if (candidate.role !== "toolResult" && candidate.role !== "bashExecution") return false;
+    const toolCallId = state.messageMetaSnapshot.get(candidate.id)?.toolCallId;
+    return toolCallId !== undefined && stale.has(toolCallId) && state.providerSeenToolIds.has(toolCallId);
+  });
+  if (history.length === 0 && recentStale.length === 0) return [];
   const mediumTokens = Math.max(1, settings.mediumTokens ?? 500);
   const highTokens = Math.max(mediumTokens, settings.highTokens ?? 5000);
   const maxSuggestions = Math.max(1, settings.maxSuggestions ?? 5);
 
-  return boundaries
-    .slice(0, cutoffIndex + 1)
+  return [...history, ...recentStale]
     .filter((candidate) => !candidate.isSystemReminder)
-    .filter((candidate) => candidate.role !== "user" || !config.compress.protectUserMessages)
+    // User messages are small and carry the requirements; never suggest them.
+    // An explicit compress call may still select one unless protectUserMessages.
+    .filter((candidate) => candidate.role !== "user")
     // V2 message mode replaces only the selected body, so completed tool
     // results are safe surgical candidates. Signed assistants and assistants
     // carrying tool calls remain structurally immutable, and an incomplete
@@ -598,13 +617,19 @@ export function detectMessageCompressionCandidates(
       return true;
     })
     .filter((candidate) => candidate.tokenEstimate >= mediumTokens)
-    .map((candidate): MessageCompressionCandidate => ({
-      messageId: candidate.id,
-      role: candidate.role,
-      estimatedTokens: candidate.tokenEstimate,
-      priority: candidate.tokenEstimate >= highTokens ? "high" : "medium",
-      reason: `older than the most recent ${keepRecentTurns} user turn(s)`,
-    }))
+    .map((candidate): MessageCompressionCandidate => {
+      // A provably stale observation is the safest possible compression
+      // target, so it ranks as high priority regardless of its size tier.
+      const superseded = staleReason(candidate);
+      return {
+        messageId: candidate.id,
+        role: candidate.role,
+        estimatedTokens: candidate.tokenEstimate,
+        priority: superseded || candidate.tokenEstimate >= highTokens ? "high" : "medium",
+        reason: superseded ?? `older than the most recent ${keepRecentTurns} user turn(s)`,
+        ...(superseded ? { stale: superseded } : {}),
+      };
+    })
     .sort((a, b) => {
       const priorityDiff = (b.priority === "high" ? 1 : 0) - (a.priority === "high" ? 1 : 0);
       if (priorityDiff !== 0) return priorityDiff;

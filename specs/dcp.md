@@ -147,6 +147,9 @@ DCP treats prefix stability as a correctness constraint:
 - `mNNN` assignments are monotonic and never renumbered after rollup/restart;
 - ID metadata is distributed over deterministic user/tool-result carriers and
   is not rebuilt as a moving payload-tail map;
+- an ID assignment for a message of at least ~1k estimated tokens carries a
+  coarse `~Nk` size hint (for example `m013=t~4k`), derived only from that raw
+  message so it is as stable as the ID; block aliases carry none;
 - a reminder is introduced on a fresh trailing user carrier or a positively
   fresh trailing tool result produced by a new local call in this epoch. A tool
   result loses freshness at the first provider **attempt**, even on failure;
@@ -298,9 +301,52 @@ need a larger continuation record to preserve every explicit checkpoint. Its
 acceptance is governed by the same exact source/replacement and full-provider-
 projection gain checks as other automatic summaries, while source-manifest and
 operation deadlines remain bounded. A replacement with non-positive gain is
-rejected. Protected user/tag/tool fragments and bounded
+rejected.
+
+The extractive floor is a continuity index, not a copy of the source. Free-text
+checkpoint matching (decision/constraint/verification/next-step wording) applies
+to user and assistant prose only; tool output (file reads, logs, search hits)
+contributes only label-anchored checkpoints such as `Decision: ...`. Tool-call
+string arguments longer than 240 characters (file bodies, patches) are replaced
+by a size marker. Error excerpts are bounded to error-keyword lines plus the
+tail. An errored result whose identical invocation (same tool and arguments)
+later succeeds in the same range is recorded as `superseded_by=<src>` without
+an excerpt, so a fixed failure never outranks the final outcome.
+
+Because the extractive floor is much weaker than an agent-authored summary, the
+DCP system prompt states who writes summaries: without a configured summarizer
+model the agent is told to always write the `compress` `summary` itself; with
+one, it may omit it. Protected user/tag/tool fragments and bounded
 subagent artifacts are carried through a deduplicated ledger so repeated
-rollups do not recursively duplicate them.
+rollups do not recursively duplicate them. Provider-visible ledger text carries
+no content hashes: receipts report raw output size, and identity hashes live in
+fragment metadata (`sourceHash`). The default per-block tool-continuity budget
+is 16 KiB. Unrecognised test/build output above 4 KiB gets a bounded
+failure/tail receipt instead of verbatim retention.
+
+Repeated side-effect-free observations are superseded, not accumulated. A
+shell result classified as read-only inspection or a single test/build command
+has a repeatable-observation key (its input fingerprint). Whenever a ledger is
+built (new compression, roll-up/consolidation, deterministic continuity
+repack), only the newest fragment per key survives, and a fragment is also
+dropped when a newer identical observation exists elsewhere in the latest
+projection (a visible raw result or another active block's ledger). Shell
+results are never pruned, so the newest occurrence always survives somewhere.
+Older runs (typically fixed failures, which the budget otherwise ranks highest)
+stay in the raw session only. Journaled blocks are never edited in place; an
+existing block sheds superseded fragments only through a new ledger build. Mutations, unknown commands and protected-path results have no
+key and every receipt is kept. For routine message-mode suggestions, a file
+read or keyed observation that a later identical call re-observed, or a read of
+a file a later successful write/edit changed, is marked stale, ranked high and
+reported with its reason. Staleness is derived from projection order, never
+timestamps, and only raises suggestion priority; it does not prune anything by
+itself. Inside the protected recent window (typically one long
+autonomous turn, where ordinary message-mode history is empty) a stale
+observation is still suggested, but only when the provider has completed-send
+evidence for it; the protected window is otherwise unchanged. Message-mode
+suggestions never include user messages: they are small and carry the
+requirements. An explicit `compress` call may still select one unless
+`compress.protectUserMessages` is set.
 
 Exact v2 source/mutation membership hashes are canonicalized with JSONL-stable
 value semantics before publication. In-memory-only `undefined` fields (notably
@@ -383,6 +429,8 @@ undo configuration.
 - `external/pi-tools-suite/src/dcp/journal.ts`
 - `external/pi-tools-suite/src/dcp/pruner-emergency.ts`
 - `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
+- `external/pi-tools-suite/src/dcp/stale-observations.ts`
+- `external/pi-tools-suite/src/dcp/regret-signals.ts`
 - `external/pi-tools-suite/src/dcp/pruner-tools.ts`
 - `external/pi-tools-suite/src/dcp/auto-compress.ts`
 - `external/pi-tools-suite/test/auto-compress.test.ts`

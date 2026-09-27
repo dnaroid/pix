@@ -178,9 +178,11 @@ checklist instead of raw `enabledModules` / `disabledModules` / `modules` JSON.
 DCP is intentionally narrower than the general suite layering above: its
 `dcp` section is read only from the user-level
 `~/.config/pi/pi-tools-suite.jsonc`. Protected tool continuity is bounded by
-`dcp.compress.maxProtectedToolContinuityBytes` (default `65536`). The budget
+`dcp.compress.maxProtectedToolContinuityBytes` (default `16384`). The budget
 applies to shaped tool receipts/digests in one compression block; exact
-protected fragments are never silently truncated to satisfy it.
+protected fragments are never silently truncated to satisfy it. Receipts show
+raw output size only; content hashes stay in fragment metadata and are not
+sent to the model.
 
 ## Model providers
 

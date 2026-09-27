@@ -118,15 +118,26 @@ function carrierSelfLabel(role: string): string {
   return "u";
 }
 
+/**
+ * Coarse size hint for messages worth compressing (>= 1k estimated tokens),
+ * so the model can pick high-yield ranges without waiting for a reminder.
+ * Derived only from the raw message, it is as stable as the ID itself.
+ */
+function sizeHint(tokenEstimate: number | undefined): string {
+  if (!tokenEstimate || tokenEstimate < 1_000) return "";
+  return `~${Math.round(tokenEstimate / 1_000)}k`;
+}
+
 function buildCarrierControlText(
-  precedingAssistantIds: string[],
+  precedingAssistants: Array<{ id: string; tokenEstimate?: number }>,
   ownId: string,
   ownRole: string,
+  ownTokenEstimate: number | undefined,
   blockId: number | undefined,
 ): string {
   const assignments = [
-    ...precedingAssistantIds.map((id) => `${id}=a`),
-    `${ownId}=${carrierSelfLabel(ownRole)}`,
+    ...precedingAssistants.map(({ id, tokenEstimate }) => `${id}=a${sizeHint(tokenEstimate)}`),
+    `${ownId}=${carrierSelfLabel(ownRole)}${blockId === undefined ? sizeHint(ownTokenEstimate) : ""}`,
   ];
   if (blockId !== undefined) assignments.push(`b${blockId}=b`);
   return `<dcp-message-ids>${assignments.join(";")}</dcp-message-ids>`;
@@ -217,13 +228,16 @@ export function injectMessageIds(
 
     for (const pendingIndex of pendingAssistantIndexes) publish(pendingIndex);
     publish(messageIndex);
-    const pendingAssistantIds = pendingAssistantIndexes
-      .map((pendingIndex) => assignedIds.get(pendingIndex))
-      .filter((pendingId): pendingId is string => pendingId !== undefined);
-    const blockId = assignedMeta.get(messageIndex)?.blockId;
+    const pendingAssistants = pendingAssistantIndexes.flatMap((pendingIndex) => {
+      const pendingId = assignedIds.get(pendingIndex);
+      return pendingId === undefined
+        ? []
+        : [{ id: pendingId, tokenEstimate: assignedMeta.get(pendingIndex)?.tokenEstimate }];
+    });
+    const ownMeta = assignedMeta.get(messageIndex);
     appendControlToCarrier(
       message,
-      buildCarrierControlText(pendingAssistantIds, id, role, blockId),
+      buildCarrierControlText(pendingAssistants, id, role, ownMeta?.tokenEstimate, ownMeta?.blockId),
     );
     pendingAssistantIndexes.length = 0;
   }

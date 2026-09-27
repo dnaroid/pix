@@ -63,6 +63,25 @@ The report separates these quantities:
   completion. Repeated context callbacks do not invent provider opportunities.
   The former `Sent` label and `Compliance proxy` ratio are removed.
 
+## Compression regret signals
+
+`/dcp stats` reports two scalar regret counts derived from `dcp-diagnostic`
+`regret` events (deduplicated by tool-call ID, durable across epochs):
+
+- `refetch`: a new tool call repeats a side-effect-free observation (file read
+  or repeatable shell inspection/test run, by exact arguments) whose earlier
+  result the latest DCP projection hides (compressed into a block, including a
+  message-mode body replacement, or pruned) while no result with the same key
+  is still visible;
+- `recovery`: a session-recovery tool (`session_search`, `session_read_section`,
+  `session_overview`, `session_recovery_context`) is called after DCP has
+  compressed or pruned something in the current state.
+
+The detector (`regret-signals.ts`) is runtime-only: it is reset with the other
+per-epoch trackers and only observes; it never changes projection, pruning,
+journal or recovery. The counts are tuning evidence for thresholds, candidate
+selection and summary quality, not correctness signals.
+
 ## Diagnostic records are not recovery authority
 
 Version-1 `dcp-diagnostic` custom entries contain only scalar epoch, request,

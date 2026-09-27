@@ -27,6 +27,21 @@ routine reminders may be skipped when no safe useful slice exists.
 `.trim()
 
 /**
+ * Appended to the DCP system prompt: tells the agent whether an omitted
+ * \`summary\` is written by a configured summarizer model or falls back to the
+ * deterministic extractive record (which is far weaker than an agent summary).
+ */
+export const SUMMARY_AUTHORING_SELF = `
+No DCP summarizer model is configured: always write the \`compress\` \`summary\`
+yourself. An omitted summary becomes a coarse extractive record.
+`.trim()
+
+export const SUMMARY_AUTHORING_DELEGATED = `
+A DCP summarizer model is configured: you may omit the \`compress\` \`summary\`
+unless parent-authored continuation wording is genuinely required.
+`.trim()
+
+/**
  * Used as the \`description\` field when registering the \`compress\` tool.
  *
  * Tool signature:
@@ -52,8 +67,8 @@ errors that are still actionable, verification state, unresolved blockers, and
 next steps. If work remains unfinished include \`Active objective\` and \`Next
 step\`. Do not infer, invent, or add facts. Preserve uncertainty. Do not copy long
 raw code, JSON, diffs, logs, or tool output; use short literals only when needed.
-Normally omit \`summary\`: DCP generates it. An explicit \`summary\` overrides
-generation when parent-authored continuation wording is genuinely required.
+Write \`summary\` yourself unless the system prompt says a DCP summarizer is
+set; omitted, it becomes a coarse extractive record.
 
 MODES:
 - \`ranges\`: contiguous \`startId..endId\` spans.
@@ -65,7 +80,8 @@ BOUNDARIES: use only injected IDs currently visible on stable user/tool-result
 carriers. \`mNNN\` is raw, \`bN\` is an active compressed block; IDs may be sparse
 and order is the conversation order, not the number. Carrier metadata labels the
 carrier plus immediately preceding assistant message(s): \`a\`=assistant,
-\`u\`=user, \`t\`=tool result, \`x\`=bash result, \`b\`=block alias. Do not invent IDs. For
+\`u\`=user, \`t\`=tool result, \`x\`=bash result, \`b\`=block alias, \`~Nk\`=~N
+thousand tokens. Do not invent IDs. For
 \`ranges\`, never split a tool group: include the calling assistant and all its
 tool results, including parallel calls. On \`Unknown message ID\`, retry at most
 once using the current IDs reported by the tool.

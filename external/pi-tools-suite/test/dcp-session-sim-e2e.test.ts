@@ -3,6 +3,7 @@ import { prepareDcpReminderScenario } from "./support/dcp-reminder-scenario.js";
 import { closeConversationRange } from "../src/dcp/conversation-index.js";
 
 import { DcpSessionSimulator } from "./support/dcp-session-simulator.js";
+import { formatDcpStatistics } from "../src/dcp/statistics.js";
 
 function configureEfficiencyScenario(config: any): void {
   config.debug = false;
@@ -154,6 +155,143 @@ describe("DCP deterministic session-simulation E2E", () => {
       expect(report.aborts).toBe(0);
     } finally { sim.dispose(); }
   });
+  test("single long turn: stale re-reads are suggested in-turn and compress surgically", async () => {
+    const sim = await DcpSessionSimulator.create({
+      contextWindow: 16_000,
+      sessionId: "in-turn-stale-observations",
+      configure(config) {
+        config.debug = false;
+        for (const strategy of Object.values(config.strategies)) strategy.enabled = false;
+        config.compress.minContextPercent = 0.20;
+        config.compress.maxContextPercent = 0.90;
+        config.compress.summaryBuffer = false;
+        config.compress.nudgeFrequency = 1;
+        config.compress.autoCandidates.enabled = false;
+        Object.assign(config.compress.messageMode, {
+          enabled: true, minContextPercent: 0.20, keepRecentTurns: 1, mediumTokens: 300, highTokens: 100_000, maxSuggestions: 5,
+        });
+        config.compress.autoCompress.enabled = false;
+        config.compress.autoCompress.summarizerModel = [];
+        config.compress.autoCompress.summarizerFallbackModels = [];
+      },
+    });
+    try {
+      sim.appendUser("Refactor src/parser.ts. This is one long task.");
+      const oldBody = `OLD_PARSER_BODY\n${"function oldParse() { return legacy(); }\n".repeat(160)}`;
+      const lexer = `LEXER\n${"token();\n".repeat(400)}`;
+      await sim.toolTurn({ toolName: "read", input: { path: "src/parser.ts" }, output: oldBody, label: "read-parser" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/lexer.ts" }, output: lexer, label: "read-lexer" });
+      await sim.toolTurn({ toolName: "edit", input: { path: "src/parser.ts", oldText: "legacy", newText: "modern" }, output: "Edited src/parser.ts", label: "edit" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/lexer.ts" }, output: lexer, label: "read-lexer-again" });
+      // Routine pressure is first crossed here; the reminder rides this fresh tool result.
+      await sim.toolTurn({ toolName: "read", input: { path: "src/parser.ts", offset: 1 }, output: `NEW_PARSER_BODY\n${"function parse() { return modern(); }\n".repeat(160)}`, label: "read-parser-again" });
+      const projected = await sim.project("stale-recommendation");
+      const reminder = sim.state.nudgeAnchors[0]?.renderedReminder ?? "";
+      expect(reminder).toContain("file changed later by a write/edit");
+      expect(reminder).toContain("superseded by a later identical call");
+      const suggested = [...reminder.matchAll(/(m\d+) \(high, toolResult, ~\d+ tokens, (?:file changed|superseded)/g)].map((match) => match[1]!);
+      expect(suggested).toHaveLength(2);
+
+      const { result } = await sim.compressTurn({
+        topic: "Stale reads",
+        messages: suggested.map((messageId) => ({ messageId, summary: "Superseded read; current content is in a later read." })),
+      });
+      expect(result.isError).not.toBe(true);
+      expect(result.details).toMatchObject({ committed: true });
+      expect(result.details.netGain).toBeGreaterThan(0);
+
+      const after = await sim.project("after-stale-compress");
+      const text = JSON.stringify(after.messages);
+      expect(after.sample.projectedTokens).toBeLessThan(projected.sample.projectedTokens);
+      expect(text).not.toContain("OLD_PARSER_BODY");
+      expect(text).toContain("NEW_PARSER_BODY");
+      expect(text).toContain("Refactor src/parser.ts");
+      expect(sim.report()).toMatchObject({ aborts: 0, providerCapacityViolations: 0 });
+    } finally { sim.dispose(); }
+  });
+
+  test("regret signals: re-running a compressed observation and recovery after compression are recorded", async () => {
+    const sim = await DcpSessionSimulator.create({
+      contextWindow: 64_000,
+      sessionId: "compression-regret",
+      configure(config) {
+        config.debug = false;
+        for (const strategy of Object.values(config.strategies)) strategy.enabled = false;
+        config.compress.autoCompress.enabled = false;
+      },
+    });
+    try {
+      sim.appendUser("Inspect the config loader.");
+      const body = (name: string) => `${name}\n${"const setting = load();\n".repeat(200)}`;
+      await sim.toolTurn({ toolName: "read", input: { path: "src/config.ts" }, output: body("CONFIG_BODY"), label: "read-config" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/loader.ts" }, output: body("LOADER_BODY"), label: "read-loader" });
+      const configId = [...sim.state.messageMetaSnapshot].find(([, meta]) => meta.text?.includes("CONFIG_BODY"))![0];
+      const { result } = await sim.compressTurn({ topic: "Config read", messages: [{ messageId: configId, summary: "config.ts loads settings via load()." }] });
+      expect(result.details).toMatchObject({ committed: true });
+      expect(sim.report()).toMatchObject({ regretRefetches: 0, regretRecoveryCalls: 0 });
+
+      await sim.toolTurn({ toolName: "read", input: { path: "src/loader.ts" }, output: body("LOADER_BODY"), label: "visible-reread" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/other.ts" }, output: "other", label: "fresh-read" });
+      expect(sim.report()).toMatchObject({ regretRefetches: 0 });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/config.ts" }, output: body("CONFIG_BODY"), label: "regret-reread" });
+      await sim.toolTurn({ toolName: "session_search", input: { query: "CONFIG_BODY" }, output: "match", label: "recovery" });
+      expect(sim.report()).toMatchObject({ regretRefetches: 1, regretRecoveryCalls: 1 });
+      expect(formatDcpStatistics({ branch: sim.branch() })).toContain(
+        "Regret signals: 1 re-runs of compressed/pruned observations; 1 session-recovery calls after compression",
+      );
+    } finally { sim.dispose(); }
+  });
+
+  test("coding marathon: repeated failing test runs, reads and edits stay compact with extractive auto-compression", async () => {
+    const sim = await DcpSessionSimulator.create({
+      contextWindow: 24_000, maxOutputTokens: 1_000, sessionId: "coding-marathon",
+      configure(config: any) {
+        config.debug = false;
+        config.compress.minContextPercent = 0.30;
+        config.compress.maxContextPercent = 0.60;
+        config.compress.summaryBuffer = false;
+        config.compress.nudgeFrequency = 1;
+        Object.assign(config.compress.autoCandidates, { enabled: true, minContextPercent: 0.30, keepRecentTurns: 1, minMessages: 2, minTokens: 100 });
+        Object.assign(config.compress.messageMode, { enabled: true, minContextPercent: 0.30, keepRecentTurns: 1 });
+        config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], summarizerFallbackModels: [], timeoutMs: 5_000 };
+        Object.assign(config.strategies.emergencyCurrentTurnPruning, { enabled: true, hardContextPercent: 0.82, targetContextPercent: 0.65, patience: 1, keepRecentToolPairs: 4, minOutputTokens: 100 });
+      },
+    });
+    const source = (file: string, round: number) => `// ${file} r${round}\n` + Array.from({ length: 120 }, (_, i) => `  test("case ${i} error status", () => expect(run${i}()).toBe("ok"))`).join("\n");
+    const failing = (round: number) => `bun test v1\n` + Array.from({ length: 80 }, (_, i) => i % 4 === 0 ? `(fail) parser.test.ts > case ${i} ROUND_${round}_FAIL\n  error: expected ok` : `  at frame${i} (src/parser.ts:${i})`).join("\n") + `\n 40 pass\n 20 fail\n`;
+    try {
+      for (let turn = 0; turn < 4; turn++) {
+        sim.appendUser(`Task ${turn}: fix parser area ${turn}. Constraint: TURN_${turn}_CONSTRAINT must hold.`);
+        for (let round = 0; round < 4; round++) {
+          await sim.toolTurn({ toolName: "read", input: { path: `src/area${turn}.ts` }, output: `Decision: AREA_${turn}_DECISION\n${source(`area${turn}`, round)}` });
+          await sim.toolTurn({ toolName: "bash", input: { command: "bun test test/parser.test.ts" }, output: failing(turn * 10 + round), isError: true });
+          await sim.toolTurn({ toolName: "edit", input: { path: `src/area${turn}.ts`, oldText: "a".repeat(400), newText: "b".repeat(400) }, output: `Edited src/area${turn}.ts` });
+        }
+        await sim.toolTurn({ toolName: "bash", input: { command: "bun test test/parser.test.ts" }, output: " 60 pass\n 0 fail\n" });
+        await sim.assistantTurn(`Area ${turn} done.`);
+      }
+      const final = await sim.project("final");
+      const text = JSON.stringify(final.messages);
+      const report = sim.report();
+      expect(report).toMatchObject({ aborts: 0, providerCapacityViolations: 0 });
+      expect(report.compressionCommits).toBeGreaterThan(5);
+      expect(report.peakProjectedContextPercent).toBeLessThan(0.6);
+      expect(report.activeSummaryTokens).toBeLessThan(8_000);
+      expect(report.maxBlockSummaryTokens).toBeLessThan(1_500);
+      expect(report.tokenOccurrenceReductionPercent).toBeGreaterThan(60);
+      expect(report.nonRewritePrefixRetentionMean).toBeGreaterThan(0.95);
+      expect(text).not.toContain("sha256:");
+      // Failures fixed in completed turns survive only in the raw session; the live
+      // last turn (rounds 30-33) is still protected and stays raw.
+      const failRounds = [...text.matchAll(/ROUND_(\d+)_FAIL/g)].map((match) => Number(match[1]));
+      expect(failRounds.every((round) => round >= 30)).toBe(true);
+      for (const turn of [0, 1, 2, 3]) {
+        expect(text).toContain(`TURN_${turn}_CONSTRAINT`);
+        expect(text).toContain(`AREA_${turn}_DECISION`);
+      }
+    } finally { sim.dispose(); }
+  }, 120_000);
+
   test("keeps a long tool-heavy session bounded while materially reducing provider-token occurrences", async () => {
     const sim = await DcpSessionSimulator.create({
       contextWindow: 20_000,
