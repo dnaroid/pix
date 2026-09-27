@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPiToolsSuiteConfig } from "../../config.js";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
-import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./browser-qa.js";
+import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./ui-qa.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
 export interface ModelByParentEntry {

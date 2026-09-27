@@ -110,6 +110,17 @@ performance-trace, or heap-summary actions select Chrome DevTools. Explicit
 `target.devtools` startup/attach options also select Chrome DevTools in `auto`
 mode. The selection never depends on repository or application identity.
 
+Playwright-backed runs launch Playwright's pinned Chromium build first. When
+that build is missing (for example after a project Playwright upgrade without
+`playwright install`), the trusted runner falls back only to Chromium
+executables already present on the host: the newest builds in the Playwright
+browser cache (`PLAYWRIGHT_BROWSERS_PATH` or the platform default), then system
+Google Chrome/Chromium. It never downloads or installs a browser. If nothing
+launches, or Playwright itself cannot be loaded, it reports
+`QA_BROWSER_UNAVAILABLE` (exit 43) with remediation and `missingCapabilities`;
+the browser adapter normalizes that to `BLOCKED`, and the unified runner merges
+those capabilities into `blockedHandoff`.
+
 The Chrome DevTools provider requires `chrome-devtools-mcp >= 1.9.0`, creates a
 random per-run daemon session, and stops only that session. It starts an
 isolated Chrome/profile by default; an existing Chrome may be attached only by
@@ -213,7 +224,7 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
 - `external/pi-tools-suite/src/async-subagents/core/config.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
-- `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
+- `external/pi-tools-suite/src/async-subagents/core/ui-qa.ts`
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`

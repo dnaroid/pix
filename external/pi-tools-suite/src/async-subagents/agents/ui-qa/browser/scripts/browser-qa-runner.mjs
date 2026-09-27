@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
@@ -40,6 +41,8 @@ const VISIBLE_BUSY_SELECTOR = [
 ].join(", ");
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
 const EXIT_RUNNER_TIMEOUT = 124;
+const EXIT_BROWSER_UNAVAILABLE = 43;
+const BROWSER_UNAVAILABLE_REMEDIATION = "install a Chromium build for the project Playwright version (for example `npx playwright install chromium`) or install Google Chrome/Chromium, then rerun UI QA";
 const DEFAULT_RUNNER_TIMEOUT_MS = 90_000;
 const MAX_RUNNER_TIMEOUT_MS = 100_000;
 const CLEANUP_TIMEOUT_MS = 5_000;
@@ -190,7 +193,10 @@ async function main() {
 		}, runnerTimeoutMs + HARD_EXIT_GRACE_MS);
 		await runQa({ cwd, agentDir, args, profileId, profile, deadline, progress });
 	} catch (error) {
-		if (error instanceof QaStatusError) throw error;
+		if (error instanceof QaStatusError) {
+			error.profileId ??= profileId;
+			throw error;
+		}
 		throw new QaStatusError("QA_RUN_FAILED", redact(safeReason(error), secrets), 1, profileId);
 	} finally {
 		if (hardExitTimer) clearTimeout(hardExitTimer);
@@ -216,7 +222,7 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 	const playwright = loadPlaywright(cwd);
 	progress("playwright_load_finished");
 	runnerMayHaveBrowserChildren = true;
-	const browser = await runStage(progress, "browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
+	const browser = await runStage(progress, "browser_launch", deadline, () => launchChromium(playwright), profileId);
 	let context;
 	let page;
 	const videos = [];
@@ -643,7 +649,7 @@ async function runAuthScaffold(cwd, args) {
 		progress("auth_scaffold_started", { timeoutMs: timeout });
 		const playwright = loadPlaywright(cwd);
 		runnerMayHaveBrowserChildren = true;
-		browser = await runStage(progress, "auth_scaffold_browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
+		browser = await runStage(progress, "auth_scaffold_browser_launch", deadline, () => launchChromium(playwright), profileId);
 		context = await runStage(progress, "auth_scaffold_context_create", deadline, () => browser.newContext({
 			...DEFAULT_ENVIRONMENT,
 			serviceWorkers: "block",
@@ -680,6 +686,7 @@ async function runAuthScaffold(cwd, args) {
 		});
 	} catch (error) {
 		if (error instanceof QaStatusError) {
+			error.profileId ??= profileId;
 			if (error.details?.timedOut) terminateRunnerDescendants();
 			throw error;
 		}
@@ -2072,7 +2079,108 @@ function loadPlaywright(cwd) {
 			}
 		}
 	}
-	throw new Error("Playwright is unavailable; install project playwright or @playwright/cli");
+	throw new QaStatusError("QA_BROWSER_UNAVAILABLE", "Playwright is unavailable; install project playwright or @playwright/cli", EXIT_BROWSER_UNAVAILABLE, undefined, {
+		remediation: "add `playwright` to the project (or install @playwright/cli) and install its Chromium build, then rerun UI QA",
+		missingCapabilities: ["playwright"],
+	});
+}
+
+/**
+ * Launch headless Chromium with Playwright's pinned build first. A project
+ * whose Playwright version was bumped without `playwright install` (or a host
+ * whose browser cache was provisioned for another version) otherwise fails
+ * every QA run before any assertion executes. Fall back only to Chromium
+ * executables already installed on this host — never download or install —
+ * and report an actionable BLOCKED handoff when none can be launched.
+ */
+async function launchChromium(playwright) {
+	let pinnedError;
+	try {
+		return await playwright.chromium.launch({ headless: true });
+	} catch (error) {
+		if (!isMissingBrowserExecutableError(error)) throw error;
+		pinnedError = error;
+	}
+	for (const executablePath of installedChromiumCandidates()) {
+		try {
+			return await playwright.chromium.launch({ headless: true, executablePath });
+		} catch {
+			// Try the next installed build; an incompatible or broken candidate
+			// must not mask a later working one.
+		}
+	}
+	throw new QaStatusError(
+		"QA_BROWSER_UNAVAILABLE",
+		`no launchable Chromium found: ${safeReason(pinnedError).split("\n")[0].slice(0, 300)}`,
+		EXIT_BROWSER_UNAVAILABLE,
+		undefined,
+		{ remediation: BROWSER_UNAVAILABLE_REMEDIATION, missingCapabilities: ["chromiumExecutable"] },
+	);
+}
+
+function isMissingBrowserExecutableError(error) {
+	const message = String(error?.message ?? error ?? "");
+	return /Executable doesn't exist|browserType\.launch: .*(?:not found|ENOENT)|Looks like Playwright was just installed/i.test(message);
+}
+
+/** Existing Chromium executables, newest Playwright builds first, then system browsers. */
+function installedChromiumCandidates() {
+	const candidates = [];
+	const home = os.homedir();
+	const cacheRoots = [];
+	const configured = process.env.PLAYWRIGHT_BROWSERS_PATH;
+	if (configured && configured !== "0") cacheRoots.push(configured);
+	if (process.platform === "darwin") cacheRoots.push(path.join(home, "Library", "Caches", "ms-playwright"));
+	else if (process.platform === "win32") cacheRoots.push(path.join(process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "ms-playwright"));
+	else cacheRoots.push(path.join(process.env.XDG_CACHE_HOME ?? path.join(home, ".cache"), "ms-playwright"));
+	const relativeExecutables = {
+		chromium: process.platform === "darwin"
+			? [
+				["chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
+				["chrome-mac-x64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
+				["chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"],
+			]
+			: process.platform === "win32"
+				? [["chrome-win64", "chrome.exe"], ["chrome-win", "chrome.exe"]]
+				: [["chrome-linux64", "chrome"], ["chrome-linux", "chrome"]],
+		chromium_headless_shell: process.platform === "darwin"
+			? [["chrome-headless-shell-mac-arm64", "chrome-headless-shell"], ["chrome-headless-shell-mac-x64", "chrome-headless-shell"], ["chrome-mac", "headless_shell"]]
+			: process.platform === "win32"
+				? [["chrome-headless-shell-win64", "chrome-headless-shell.exe"], ["chrome-win", "headless_shell.exe"]]
+				: [["chrome-headless-shell-linux64", "chrome-headless-shell"], ["chrome-linux", "headless_shell"]],
+	};
+	for (const root of [...new Set(cacheRoots)]) {
+		let entries;
+		try { entries = fs.readdirSync(root); } catch { continue; }
+		const builds = entries
+			.map((name) => /^(chromium|chromium_headless_shell)-(\d+)$/.exec(name))
+			.filter(Boolean)
+			// Newest revision first; prefer full Chromium over the headless shell
+			// at the same revision because it supports every Playwright feature.
+			.sort((left, right) => Number(right[2]) - Number(left[2]) || (left[1] === "chromium" ? -1 : 1));
+		for (const [name, kind] of builds) {
+			for (const parts of relativeExecutables[kind]) candidates.push(path.join(root, name, ...parts));
+		}
+	}
+	if (process.platform === "darwin") {
+		candidates.push(
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			path.join(home, "Applications", "Google Chrome.app", "Contents", "MacOS", "Google Chrome"),
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+		);
+	} else if (process.platform === "win32") {
+		for (const base of [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]) {
+			if (base) candidates.push(path.join(base, "Google", "Chrome", "Application", "chrome.exe"));
+		}
+	} else {
+		for (const name of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
+			const found = findExecutable(name);
+			if (found) candidates.push(found);
+		}
+	}
+	return [...new Set(candidates)].filter((file) => {
+		try { return fs.statSync(file).isFile(); } catch { return false; }
+	});
 }
 
 function isTransientFsError(error) {
