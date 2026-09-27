@@ -3,6 +3,7 @@ import type { ModelThinkingModel } from "./model-thinking";
 import {
   searchSettingsModelOptions,
   searchSettingsModels,
+  settingsModelLabel,
   settingsModelSearchOptions,
 } from "./settings-model-search";
 
@@ -59,5 +60,11 @@ describe("settings model fuzzy search", () => {
         : option
     ));
     expect(searchSettingsModelOptions(options, "gpt high")[0]?.value).toBe("openai-codex/gpt-5.6-sol:high");
+  });
+  it("does not repeat a model id that the provider reports as the name", () => {
+    expect(settingsModelLabel({ name: "GPT-5.6 Sol", modelId: "gpt-5.6-sol" })).toBe("GPT-5.6 Sol · gpt-5.6-sol");
+    expect(settingsModelLabel({ name: "glm-5.3", modelId: "glm-5.3" })).toBe("glm-5.3");
+    expect(settingsModelLabel({ name: "GLM-5.3", modelId: "glm-5.3" })).toBe("GLM-5.3");
+    expect(settingsModelLabel({ name: " ", modelId: "glm-5.3" })).toBe("glm-5.3");
   });
 });
