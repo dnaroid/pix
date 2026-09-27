@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
-  import Minimize2 from "@lucide/svelte/icons/minimize-2";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { ModelUsageLimitWindow, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { parseDcpContextMap } from "../lib/dcp-context-map";
@@ -12,7 +11,6 @@
   import {
     clampUsagePercent,
     contextUsageTone,
-    dcpStatsBody,
     displayModelUsage,
     formatCompactTokens,
     formatResetDuration,
@@ -33,35 +31,23 @@
   let {
     status,
     showSkeletons = false,
-    loadingDcpStats = false,
     sessionUsage,
     loadingSessionUsage = false,
     sessionUsageFailed = false,
     sessionUsageAvailable = false,
-    compressingContext = false,
-    compressionAvailable = true,
-    canCompressContext = true,
     onOpenSessionUsage,
-    onOpenDcpStats,
-    onCompressContext,
   }: {
     status?: RuntimeStatus;
     showSkeletons?: boolean;
-    loadingDcpStats?: boolean;
     sessionUsage?: SessionUsageReport;
     loadingSessionUsage?: boolean;
     sessionUsageFailed?: boolean;
     sessionUsageAvailable?: boolean;
-    compressingContext?: boolean;
-    compressionAvailable?: boolean;
-    canCompressContext?: boolean;
     onOpenSessionUsage: () => void;
-    onOpenDcpStats: () => void;
-    onCompressContext: () => void;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
-  let dcpOpen = $state(false);
+  let contextOpen = $state(false);
   let usageOpen = $state(false);
   let now = $state(Date.now());
   const WEEKLY_DAY_SEGMENTS = 7;
@@ -69,7 +55,6 @@
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
   const contextMap = $derived(dcpContextMap(status?.context, parseDcpContextMap(status?.dcpContextMap)));
   const contextLegend = $derived(contextLegendItems());
-  const dcpBody = $derived(dcpStatsBody(status?.dcpStats));
   // Quota usage wins while the provider quota is the freshest observation;
   // an API-key header snapshot pushed after a mid-session auth switch (or a
   // quota left over from a previous model) must not stay hidden behind it.
@@ -83,31 +68,30 @@
   });
 
   function closeOutside(event: PointerEvent): void {
-    if ((!dcpOpen && !usageOpen) || root?.contains(event.target as Node)) return;
-    dcpOpen = false;
+    if ((!contextOpen && !usageOpen) || root?.contains(event.target as Node)) return;
+    contextOpen = false;
     usageOpen = false;
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && (dcpOpen || usageOpen)) {
-      dcpOpen = false;
+    if (event.key === "Escape" && (contextOpen || usageOpen)) {
+      contextOpen = false;
       usageOpen = false;
       event.stopPropagation();
     }
   }
 
-  function toggleDcp(): void {
-    const opening = !dcpOpen;
-    dcpOpen = opening;
+  function toggleContext(): void {
+    const opening = !contextOpen;
+    contextOpen = opening;
     if (opening) usageOpen = false;
-    if (opening) onOpenDcpStats();
   }
 
   function toggleUsage(): void {
     const opening = !usageOpen;
     usageOpen = opening;
     if (opening) {
-      dcpOpen = false;
+      contextOpen = false;
       onOpenSessionUsage();
     }
   }
@@ -128,7 +112,7 @@
       : ` · DCP saved ~${Math.round(saved).toLocaleString("en-US")} tokens`;
     if (!context) return `Context usage unavailable${savings}`;
     if (context.tokens === null || context.percent === null) return `Context usage unknown · window ${formatCompactTokens(context.contextWindow)}${savings}`;
-    return `Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens${savings} · click for DCP statistics`;
+    return `Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens${savings}`;
   }
 
   function toneTextClass(tone: UsageTone): string {
@@ -204,11 +188,6 @@
     return windows;
   }
 
-  function compressionTitle(): string {
-    if (!compressionAvailable) return "DCP compression is unavailable for this session";
-    if (!canCompressContext) return "DCP compression is available when the session is idle";
-    return "Compress stale context with DCP";
-  }
 </script>
 
 {#snippet contextScale(size: "compact" | "expanded")}
@@ -252,15 +231,15 @@
     data-runtime-status
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
-      <div class="group relative col-start-1 shrink-0 justify-self-start" data-runtime-context>
+      <div class="relative col-start-1 shrink-0 justify-self-start" data-runtime-context>
         <button
           class="flex h-6 items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
           aria-label={contextTitle()}
           aria-haspopup="dialog"
-          aria-expanded={dcpOpen}
-          aria-controls="runtime-dcp-popover"
-          onclick={toggleDcp}
+          aria-expanded={contextOpen}
+          aria-controls="runtime-context-popover"
+          onclick={toggleContext}
         >
           <span class="font-sans text-xs text-muted-foreground max-[860px]:hidden">Context</span>
           <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
@@ -270,70 +249,16 @@
           {/if}
         </button>
 
-        {#if !dcpOpen}
+        {#if contextOpen}
           <div
-            class="pointer-events-none absolute bottom-[calc(100%+0.375rem)] left-0 z-40 hidden w-max max-w-[min(360px,calc(100vw-16px))] rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
-            role="tooltip"
+            id="runtime-context-popover"
+            class="absolute bottom-[calc(100%+0.375rem)] left-0 z-50 w-max max-w-[min(360px,calc(100vw-16px))] rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md"
+            role="dialog"
+            aria-label="Context usage details"
           >
             <div class="font-mono text-xs text-muted-foreground">{contextTitle()}</div>
             <div class="mt-2">{@render contextScale("expanded")}</div>
             {@render contextScaleLegend()}
-          </div>
-        {/if}
-
-        {#if dcpOpen}
-          <div
-            id="runtime-dcp-popover"
-            class="absolute bottom-[calc(100%+0.375rem)] left-0 z-50 w-[min(390px,calc(100vw-16px))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
-            role="dialog"
-            aria-label="DCP session statistics"
-          >
-            <header class="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-              <div class="min-w-0">
-                <div class="text-xs font-medium text-foreground">DCP session statistics</div>
-                {#if status?.context}
-                  <div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-                    Context {status.context.percent === null ? "unknown" : `${Math.round(status.context.percent)}%`}
-                    {#if status.context.tokens !== null}
-                      · {formatCompactTokens(status.context.tokens)} / {formatCompactTokens(status.context.contextWindow)}
-                    {/if}
-                  </div>
-                  {/if}
-              </div>
-              <button
-                class="flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-border bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
-                type="button"
-                title={compressionTitle()}
-                aria-label="Compress stale context with DCP"
-                aria-busy={compressingContext}
-                disabled={!canCompressContext || compressingContext}
-                onclick={onCompressContext}
-              >
-                {#if compressingContext}
-                  <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
-                  <span>Compressing…</span>
-                {:else}
-                  <Minimize2 class="h-3 w-3" aria-hidden="true" />
-                  <span>Compress</span>
-                {/if}
-              </button>
-            </header>
-            <div class="border-b border-border px-3 py-2.5">
-              {@render contextScale("expanded")}
-              {@render contextScaleLegend()}
-            </div>
-            <div class="max-h-[min(420px,55vh)] overflow-y-auto px-3 py-2.5">
-              {#if dcpBody}
-                <pre class="select-text whitespace-pre-wrap font-mono text-xs leading-[1.55] text-muted-foreground">{dcpBody}</pre>
-              {:else if loadingDcpStats}
-                <div class="flex items-center gap-1.5 text-xs leading-4 text-muted-foreground" aria-live="polite">
-                  <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
-                  <span>Loading DCP telemetry…</span>
-                </div>
-              {:else}
-                <p class="text-xs leading-4 text-muted-foreground">DCP telemetry is not available for this session yet.</p>
-              {/if}
-            </div>
           </div>
         {/if}
       </div>

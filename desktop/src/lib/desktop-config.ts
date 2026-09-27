@@ -3,6 +3,7 @@ import { parse } from "jsonc-parser";
 export interface DesktopPreferences {
   readonly externalEditor: string | undefined;
   readonly notificationsEnabled: boolean;
+  readonly gitCiFixModelRef: string | undefined;
 }
 
 export const EXTERNAL_EDITOR_OPTIONS = [
@@ -23,9 +24,12 @@ export function resolveDesktopPreferences(
   const projectEditor = externalEditorFromSource(projectSource);
   const globalNotificationsEnabled = notificationsEnabledFromSource(globalSource);
   const projectNotificationsEnabled = notificationsEnabledFromSource(projectSource);
+  const globalGitCiFixModelRef = gitCiFixModelRefFromSource(globalSource);
+  const projectGitCiFixModelRef = gitCiFixModelRefFromSource(projectSource);
   return {
     externalEditor: projectEditor ?? globalEditor,
     notificationsEnabled: projectNotificationsEnabled ?? globalNotificationsEnabled ?? true,
+    gitCiFixModelRef: projectGitCiFixModelRef ?? globalGitCiFixModelRef,
   };
 }
 
@@ -68,6 +72,18 @@ function notificationsEnabledFromSource(source: string | undefined): boolean | u
     if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.notifications)) return undefined;
     const enabled = parsed.desktop.notifications.enabled;
     return typeof enabled === "boolean" ? enabled : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function gitCiFixModelRefFromSource(source: string | undefined): string | undefined {
+  if (!source?.trim()) return undefined;
+  try {
+    const parsed = parse(source, undefined, { allowTrailingComma: true }) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.git)) return undefined;
+    const modelRef = parsed.desktop.git.ciFixModelRef;
+    return typeof modelRef === "string" && modelRef.trim() ? modelRef.trim() : undefined;
   } catch {
     return undefined;
   }

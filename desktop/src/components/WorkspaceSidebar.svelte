@@ -75,12 +75,13 @@
   };
 
   type SidebarTab = SidebarIndicatorTab;
+  type PackageScriptsPanelHandle = { refresh: () => void };
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
     tasks: "Tasks",
     project: "Project",
     git: "Source Control",
     registry: "Registry",
-    scripts: "Package Scripts",
+    scripts: "Launch Commands",
     idx: "IDX",
     settings: "Settings",
   };
@@ -246,6 +247,7 @@
   const ACTIVE_TAB_KEY = "pix.desktop.workspaceSidebarTab";
 
   let sidebarElement = $state<HTMLElement | null>(null);
+  let packageScriptsPanel = $state<PackageScriptsPanelHandle | null>(null);
   let projectSwitcher = $state<{ close: () => void } | null>(null);
   let activeTab = $state<SidebarTab>("tasks");
   const layoutController = createWorkspaceSidebarLayoutController({ activeTab: () => activeTab });
@@ -612,6 +614,15 @@
               disabled={!registryReady || registryActionId !== null}
             ><RefreshCw class={["h-3.5 w-3.5", registryLoading || registryActionId === "refresh" ? "animate-spin" : ""]} aria-hidden="true" /></button>
           </div>
+        {:else if activeTab === "scripts"}
+          <button
+            class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+            type="button"
+            title="Refresh launch commands"
+            aria-label="Refresh launch commands"
+            onclick={() => packageScriptsPanel?.refresh()}
+            disabled={!workspace}
+          ><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
         {/if}
         <button
           class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
@@ -729,8 +740,8 @@
           />
         </div>
       {:else if activeTab === "scripts"}
-        <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Package Scripts">
-          <PackageScriptsPanel {workspace} afterWorkspaceSave={onWorkspaceSettingsSave} />
+        <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Launch Commands">
+          <PackageScriptsPanel bind:this={packageScriptsPanel} {workspace} afterWorkspaceSave={onWorkspaceSettingsSave} />
         </div>
       {:else if activeTab === "idx"}
         <div id="workspace-idx-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="IDX">

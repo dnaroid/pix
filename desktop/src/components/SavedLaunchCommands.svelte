@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Play from "@lucide/svelte/icons/play";
   import { tick } from "svelte";
 
   type LaunchCommand = { id: string; name: string; command: string };
@@ -75,7 +76,10 @@
   <div class="max-h-44 overflow-y-auto">
     {#each commands as item (item.id)}
       <div class="group mx-1 flex min-h-7 items-center gap-1 rounded-md px-1.5 hover:bg-panel-hover">
-        <button class="min-w-0 flex-1 truncate text-left font-mono text-xs hover:text-primary disabled:opacity-40" type="button" title={`Run ${item.name}`} disabled={busy || disabled || editing !== null} onclick={() => void onRun(item.id)}>{item.name}</button>
+        <button class="group/run flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-0.5 text-left font-mono text-xs hover:text-primary focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" title={`Run ${item.name}`} disabled={busy || disabled || editing !== null} onclick={() => void onRun(item.id)}>
+          <span class="grid h-5 w-5 shrink-0 place-items-center text-muted-foreground group-hover/run:text-primary"><Play class="h-3 w-3" aria-hidden="true" /></span>
+          <span class="min-w-0 flex-1 truncate">{item.name}</span>
+        </button>
         <button class="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" aria-label={`Edit ${item.name}`} disabled={busy || editing !== null} onclick={() => void beginEdit(item)}>Edit</button>
         <button class="rounded px-1.5 py-1 text-xs text-tool-error hover:bg-tool-error/10 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" aria-label={`Delete ${item.name}`} disabled={busy || editing !== null} onclick={() => void remove(item)}>Delete</button>
       </div>

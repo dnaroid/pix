@@ -17,6 +17,7 @@ describe("desktop config", () => {
     const defaults = resolveDesktopPreferences(undefined, undefined);
     expect(defaults.externalEditor).toBeUndefined();
     expect(defaults.notificationsEnabled).toBe(true);
+    expect(defaults.gitCiFixModelRef).toBeUndefined();
     expect(EXTERNAL_EDITOR_OPTIONS).toContainEqual({ value: "gram", label: "Gram" });
     expect(externalEditorLabel("gram")).toBe("Gram");
     expect(externalEditorLabel("vscode")).toBe("VS Code");
@@ -34,5 +35,16 @@ describe("desktop config", () => {
       `{ "desktop": { "notifications": { "enabled": true } } }`,
     ).notificationsEnabled).toBe(true);
     expect(resolveDesktopPreferences(`{ "desktop": {} }`, undefined).notificationsEnabled).toBe(true);
+  });
+
+  it("uses the project CI fix model over the global model and leaves it unset by default", () => {
+    expect(resolveDesktopPreferences(
+      `{ "desktop": { "git": { "ciFixModelRef": "openai-codex/gpt-5.3:high" } } }`,
+      undefined,
+    ).gitCiFixModelRef).toBe("openai-codex/gpt-5.3:high");
+    expect(resolveDesktopPreferences(
+      `{ "desktop": { "git": { "ciFixModelRef": "openai-codex/gpt-5.3:high" } } }`,
+      `{ "desktop": { "git": { "ciFixModelRef": "anthropic/claude-sonnet-4-5" } } }`,
+    ).gitCiFixModelRef).toBe("anthropic/claude-sonnet-4-5");
   });
 });

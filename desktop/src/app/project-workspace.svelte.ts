@@ -68,6 +68,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
   let recentProjects = $state<string[]>([]);
   let projectColors = $state<Map<string, string>>(new Map());
   let externalEditor = $state<string | undefined>(undefined);
+  let gitCiFixModelRef = $state<string | undefined>(undefined);
   let colorLoadGeneration = 0;
   let colorSaveGeneration = 0;
 
@@ -172,7 +173,9 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
       }).catch(() => undefined),
     ]);
     if (options.workspace() !== projectPath) return;
-    externalEditor = resolveDesktopPreferences(globalConfig?.content, projectConfig?.content).externalEditor;
+    const preferences = resolveDesktopPreferences(globalConfig?.content, projectConfig?.content);
+    externalEditor = preferences.externalEditor;
+    gitCiFixModelRef = preferences.gitCiFixModelRef;
   }
 
   async function listDirectory(path: string): Promise<ProjectTreeEntry[]> {
@@ -209,6 +212,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     get recentProjects() { return recentProjects; },
     get projectColors() { return projectColors; },
     get externalEditor() { return externalEditor; },
+    get gitCiFixModelRef() { return gitCiFixModelRef; },
     remember,
     restore,
     refreshColors,

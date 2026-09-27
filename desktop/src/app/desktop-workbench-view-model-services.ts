@@ -1,18 +1,12 @@
 import { externalEditorLabel } from "../lib/desktop-config";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import { createDesktopWorkbenchViewModel } from "./desktop-workbench-view-model.svelte";
-import { createSessionTodoActions } from "./session-todo-actions";
+import type { createSessionTodoActions } from "./session-todo-actions";
 
-export function createDesktopWorkbenchViewModelServices(options: DesktopViewModelServicesOptions) {
-  const todoActions = createSessionTodoActions({
-    client: options.client,
-    ready: (sessionId) => sessionId === options.state.sessionId
-      && options.state.runtimeReady
-      && !options.presentation.promptRunning
-      && !options.presentation.sessionMutationRunning
-      && !options.sessions.history.loading,
-    reportError: (error) => options.errors.report(error),
-  });
+export function createDesktopWorkbenchViewModelServices(
+  options: DesktopViewModelServicesOptions,
+  todoActions: ReturnType<typeof createSessionTodoActions>,
+) {
   return createDesktopWorkbenchViewModel({
     layout: {
       conversationVisible: () => options.presentation.activeWorkbenchTab?.kind === "session",

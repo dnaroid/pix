@@ -134,8 +134,8 @@
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "scripts" ? 0 : -1}
-    title={activityTitle("scripts", activeTab === "scripts" && !collapsed ? "Hide Package Scripts" : "Package Scripts")}
-    aria-label={activityLabel("scripts", "Package scripts and terminals")}
+    title={activityTitle("scripts", activeTab === "scripts" && !collapsed ? "Hide Launch Commands" : "Launch Commands")}
+    aria-label={activityLabel("scripts", "Launch commands and terminals")}
     aria-controls="workspace-scripts-panel"
     aria-pressed={activeTab === "scripts" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "scripts")}

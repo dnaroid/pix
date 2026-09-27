@@ -124,7 +124,7 @@ export class AcpClient {
           ...(owner ? { "pix.activityOwner": owner } : {}),
           ...(draftConfig ? {
             "pix.draftModel": draftConfig.modelRef,
-            "pix.draftThinking": draftConfig.thinkingLevel,
+            ...(draftConfig.thinkingLevel ? { "pix.draftThinking": draftConfig.thinkingLevel } : {}),
           } : {}),
         },
       });

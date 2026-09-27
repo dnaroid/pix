@@ -280,6 +280,7 @@ struct PackageTerminalSession {
     kind: PackageTerminalKind,
     script: String,
     command: String,
+    launch_command_id: Option<String>,
     started_at_ms: u64,
     status: PackageTerminalStatus,
     exit_code: Option<u32>,
@@ -874,6 +875,8 @@ struct PackageTerminalSnapshot {
     kind: PackageTerminalKind,
     script: String,
     command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    launch_command_id: Option<String>,
     status: PackageTerminalStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit_code: Option<u32>,
@@ -1978,11 +1981,19 @@ async fn package_terminal_start_shell(
     app: AppHandle,
     window_label: String,
     workspace: String,
+    launch_command_id: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<PackageTerminalSnapshot, String> {
     run_blocking(move || {
-        start_shell_terminal(app, window_label, PathBuf::from(workspace), cols, rows)
+        start_shell_terminal(
+            app,
+            window_label,
+            PathBuf::from(workspace),
+            launch_command_id,
+            cols,
+            rows,
+        )
     })
     .await
 }
@@ -6525,6 +6536,7 @@ fn package_terminal_snapshot(
         kind: session.kind,
         script: session.script.clone(),
         command: session.command.clone(),
+        launch_command_id: session.launch_command_id.clone(),
         status: session.status,
         exit_code: session.exit_code,
         signal: session.signal.clone(),
@@ -6561,6 +6573,7 @@ fn start_package_terminal(
         PackageTerminalKind::Script,
         script,
         command_label,
+        None,
         command,
         cols,
         rows,
@@ -6571,6 +6584,7 @@ fn start_shell_terminal(
     app: AppHandle,
     window_label: String,
     workspace: PathBuf,
+    launch_command_id: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<PackageTerminalSnapshot, String> {
@@ -6586,6 +6600,7 @@ fn start_shell_terminal(
         PackageTerminalKind::Shell,
         label,
         command_label,
+        launch_command_id,
         command,
         cols,
         rows,
@@ -6599,6 +6614,7 @@ fn spawn_package_terminal(
     kind: PackageTerminalKind,
     label: String,
     command_label: String,
+    launch_command_id: Option<String>,
     mut command: CommandBuilder,
     cols: u16,
     rows: u16,
@@ -6682,6 +6698,7 @@ fn spawn_package_terminal(
                     kind,
                     script: label,
                     command: command_label.clone(),
+                    launch_command_id,
                     started_at_ms,
                     status: PackageTerminalStatus::Running,
                     exit_code: None,

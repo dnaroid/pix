@@ -352,7 +352,7 @@
 <div class="relative h-full min-h-0 min-w-0 w-full max-w-full bg-code">
   <div
     bind:this={container}
-    class="terminal-host absolute inset-y-0 left-0 right-2 overflow-hidden bg-code font-mono text-foreground [&_.xterm]:h-full [&_.xterm]:max-w-full"
+    class="terminal-host absolute inset-y-0 left-2 right-2 overflow-hidden bg-code font-mono text-foreground [&_.xterm]:h-full [&_.xterm]:max-w-full"
     role="application"
     aria-label={ariaLabel}
     data-terminal-readonly={!running}

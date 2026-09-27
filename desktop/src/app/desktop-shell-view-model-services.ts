@@ -1,8 +1,12 @@
 import { createDesktopOverlaysViewModel } from "./desktop-overlays-view-model.svelte";
 import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model.svelte";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
+import type { createSessionTodoActions } from "./session-todo-actions";
 
-export function createDesktopShellViewModelServices(options: DesktopViewModelServicesOptions) {
+export function createDesktopShellViewModelServices(
+  options: DesktopViewModelServicesOptions,
+  todoActions: ReturnType<typeof createSessionTodoActions>,
+) {
   const overlays = createDesktopOverlaysViewModel({
     pendingElicitation: () => options.presentation.activePendingElicitation,
     displayedConfigOptions: options.displayedConfigOptions,
@@ -28,14 +32,15 @@ export function createDesktopShellViewModelServices(options: DesktopViewModelSer
     draftConfigAvailable: () => options.model.config.draftConfigOptions.length > 0,
     activeSessionRuntimeReady: () => options.state.runtimeReady,
     activeSessionId: () => options.state.sessionId,
-    activeAgentControlState: () => options.presentation.activeAgentControlState,
-    dcpCompressionAvailable: () => options.presentation.dcpCompressionAvailable,
     sessionActivity: () => options.presentation.activeSessionActivity,
     sessionSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
     sessionTodoSnapshot: () => options.presentation.activeTodoSnapshot,
     sessionNeedsInput: () => options.presentation.activePendingElicitation !== null,
+    canClearTodos: () => Boolean(
+      options.state.sessionId && todoActions.canClear(options.state.sessionId),
+    ),
+    clearSessionTodos: todoActions.clear,
     runtime: options.sessions.runtime,
-    dcp: options.orchestration.dcp,
     modelConfig: options.model.config,
     sessionCoordinator: options.orchestration.coordinator,
     inspectorPreference: options.sessions.inspectorPreference,

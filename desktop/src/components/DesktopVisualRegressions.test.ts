@@ -186,6 +186,11 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain("task.description");
     expect(sessionActivityStatusHudSource).toContain("task.blockedBy");
     expect(sessionActivityStatusHudSource).toContain("{summary.completedTodos}/{summary.totalTodos}");
+    expect(sessionActivityStatusHudSource).toContain('import Trash2 from "@lucide/svelte/icons/trash-2"');
+    expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session plan"');
+    expect(sessionActivityStatusHudSource).toContain("disabled={!canClearTodos || clearingTodos || todoRows.length === 0}");
+    expect(statusBarViewModelSource).toContain("canClearTodos: options.canClearTodos()");
+    expect(statusBarViewModelSource).toContain("options.clearSessionTodos(sessionId)");
     expect(statusSource).not.toContain('disabled={!canOpenSessionActivity}');
     expect(statusSource).not.toContain('title={`Session activity · ${activityLabel}`}');
     expect(statusBarViewModelSource).toContain("onOpenSessionActivity: () => options.inspectorPreference.setOpen(true)");
@@ -317,15 +322,23 @@ describe("desktop visual regressions", () => {
     expect(sessionInspectorSource).not.toContain("DcpContextPanel");
   });
 
-  it("renders the same context capacity cells enlarged in the hover and statistics popovers", () => {
+  it("opens the compact context details on click instead of hover or the DCP statistics popover", () => {
     expect(runtimeStatusSource).toContain('{#snippet contextScale(size: "compact" | "expanded")}');
     expect(runtimeStatusSource).toContain('data-context-scale={size}');
     expect(runtimeStatusSource).toContain('class={["h-full min-w-0", contextCellClass(segment.kind)]}');
     expect(runtimeStatusSource).toContain('style:flex-grow={segment.share}');
     expect(runtimeStatusSource).toContain('"flex h-4 w-full overflow-hidden rounded-sm bg-border"');
     expect(runtimeStatusSource).toContain('{@render contextScale("compact")}');
-    expect(runtimeStatusSource.match(/\{@render contextScale\("expanded"\)\}/g)).toHaveLength(2);
-    expect(runtimeStatusSource.match(/\{@render contextScaleLegend\(\)\}/g)).toHaveLength(2);
+    expect(runtimeStatusSource.match(/\{@render contextScale\("expanded"\)\}/g)).toHaveLength(1);
+    expect(runtimeStatusSource.match(/\{@render contextScaleLegend\(\)\}/g)).toHaveLength(1);
+    expect(runtimeStatusSource).toContain('id="runtime-context-popover"');
+    expect(runtimeStatusSource).toContain('aria-label="Context usage details"');
+    expect(runtimeStatusSource).not.toContain("group-hover:block");
+    expect(runtimeStatusSource).not.toContain('role="tooltip"');
+    expect(runtimeStatusSource).not.toContain("DCP session statistics");
+    expect(runtimeStatusSource).not.toContain("onOpenDcpStats");
+    expect(runtimeStatusSource).not.toContain("onCompressContext");
+    expect(statusBarViewModelSource).not.toContain("refreshActiveDcpStats");
   });
 
   it("keeps Session inspector activity sections as independently persistent native accordions", () => {
@@ -451,6 +464,8 @@ describe("desktop visual regressions", () => {
     expect(settingsModelListSource).not.toContain("<select");
     expect(settingsModelVisibilitySource).toContain("Choose visible models");
     expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
+    expect(desktopSettingsEditorSource).toContain('ariaLabel="CI fix model"');
+    expect(desktopSettingsEditorSource).toContain('emptyLabel="Default model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');
   });
@@ -563,6 +578,7 @@ describe("desktop visual regressions", () => {
     expect(terminalSessionsPaneSource).toContain("<TerminalView");
     expect(terminalSessionsPaneSource).toContain('aria-label={ariaLabel}');
     expect(terminalSessionsPaneSource).toContain("grid h-full min-h-0");
+    expect(terminalSource).toContain("terminal-host absolute inset-y-0 left-2 right-2");
     expect(tauriLibSource).not.toContain('command.arg("-f")');
     expect(tauriLibSource).not.toContain('command.args(["--noprofile", "--norc"])');
     expect(tauriLibSource).not.toContain('command.env("PROMPT", "pix:%1~ $ ")');

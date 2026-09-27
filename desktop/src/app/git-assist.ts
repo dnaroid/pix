@@ -1,4 +1,5 @@
 import type { AcpClient } from "../lib/acp-client";
+import { gitCiAggregate, gitCiFixPrompt, type GitCiSnapshot } from "../lib/git-ci";
 import {
   gitDiffForLlm,
   gitReviewHasFindings,
@@ -9,6 +10,7 @@ import type { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 import { sameGitDiff } from "../lib/git-workflow";
+import { parseDesktopModelRef } from "./desktop-helpers";
 
 type GitWorkspaceStore = ReturnType<typeof createGitWorkspaceStore>;
 type SessionRuntimeStore = ReturnType<typeof createSessionRuntimeStore>;
@@ -23,6 +25,8 @@ type GitAssistOptions = {
   git: GitWorkspaceStore;
   runtime: SessionRuntimeStore;
   prompts: PromptRuntime;
+  ciSnapshot: () => GitCiSnapshot | undefined;
+  ciFixModelRef: () => Promise<string | undefined>;
   forgetRuntime: (sessionId: string) => void;
   activateResolutionSession: (sessionId: string, workspace: string, prompt: string) => string;
   onResolutionRunStarted: (sessionId: string) => void;
@@ -37,6 +41,31 @@ export function createGitAssist(options: GitAssistOptions) {
     const review = result?.text;
     if (!diff || !review || result?.stale || !gitReviewHasFindings(review)) return undefined;
     return gitReviewResolutionPrompt(diff, review);
+  }
+
+  function canFixCi(snapshot: GitCiSnapshot | undefined): boolean {
+    if (
+      !snapshot
+      || snapshot.availability !== "ready"
+      || gitCiAggregate(snapshot) !== "failure"
+      || !options.gitAssistantReady()
+      || options.git.actionId !== null
+      || options.git.llmActionId !== null
+      || options.git.resolveRunning
+      || options.operationRunning()
+      || !options.statusReady()
+    ) return false;
+    const localHead = options.git.snapshot?.head;
+    return !localHead || localHead === snapshot.headSha;
+  }
+
+  function sameFailedCi(snapshot: GitCiSnapshot): boolean {
+    const current = options.ciSnapshot();
+    return current?.headSha === snapshot.headSha
+      && current.provider === snapshot.provider
+      && current.project === snapshot.project
+      && current.availability === "ready"
+      && gitCiAggregate(current) === "failure";
   }
 
   async function reviewDiff(path: string | undefined, scope: GitDiffScope): Promise<void> {
@@ -215,6 +244,100 @@ export function createGitAssist(options: GitAssistOptions) {
     }
   }
 
+  async function fixCiInNewSession(snapshot: GitCiSnapshot | undefined): Promise<void> {
+    const requestClient = options.client();
+    const requestWorkspace = options.workspace();
+    const requestGeneration = options.git.generation;
+    if (!requestClient || !requestWorkspace || !snapshot || !canFixCi(snapshot)) return;
+
+    const prompt = gitCiFixPrompt(snapshot);
+    options.git.setResolveRunning(true);
+    options.git.setError(null);
+    let createdSessionId: string | undefined;
+    try {
+      const configuredModel = (await options.ciFixModelRef())?.trim();
+      if (
+        requestClient !== options.client()
+        || requestWorkspace !== options.workspace()
+        || requestGeneration !== options.git.generation
+        || !sameFailedCi(snapshot)
+      ) return;
+
+      let draftConfig: { modelRef: string; thinkingLevel?: string } | undefined;
+      if (configuredModel) {
+        const parsed = parseDesktopModelRef(configuredModel);
+        if (!parsed) throw new Error("CI fix model must use provider/model[:thinking] format.");
+        draftConfig = {
+          modelRef: parsed.modelRef,
+          ...(parsed.thinking ? { thinkingLevel: parsed.thinking } : {}),
+        };
+      }
+
+      const created = draftConfig
+        ? await requestClient.newSession(requestWorkspace, draftConfig)
+        : await requestClient.newSession(requestWorkspace);
+      createdSessionId = created.sessionId;
+      if (
+        requestClient !== options.client()
+        || requestWorkspace !== options.workspace()
+        || requestGeneration !== options.git.generation
+        || !sameFailedCi(snapshot)
+      ) {
+        options.forgetRuntime(created.sessionId);
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
+        return;
+      }
+
+      await options.runtime.ensure(requestClient, created.sessionId, requestWorkspace);
+      if (
+        requestClient !== options.client()
+        || requestWorkspace !== options.workspace()
+        || requestGeneration !== options.git.generation
+        || !sameFailedCi(snapshot)
+      ) {
+        options.forgetRuntime(created.sessionId);
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
+        return;
+      }
+      if (!options.runtime.isReady(created.sessionId)) {
+        options.forgetRuntime(created.sessionId);
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
+        options.git.setError("Could not start a new session for fixing CI.");
+        return;
+      }
+
+      const transcriptMessageId = options.activateResolutionSession(created.sessionId, requestWorkspace, prompt);
+      const run = options.prompts.runPromptRequest(
+        requestClient,
+        created.sessionId,
+        [{ type: "text", text: prompt }],
+        [],
+        transcriptMessageId,
+      );
+      options.onResolutionRunStarted(created.sessionId);
+      void options.refreshSessions();
+      void run
+        .then(() => {
+          if (requestClient === options.client() && requestWorkspace === options.workspace()) return options.refreshSessions();
+        })
+        .catch((error) => {
+          if (requestClient === options.client() && requestWorkspace === options.workspace()) options.reportError(error);
+        });
+    } catch (error) {
+      if (createdSessionId) {
+        options.forgetRuntime(createdSessionId);
+        await requestClient.closeSession(createdSessionId).catch(() => undefined);
+      }
+      if (requestClient === options.client() && requestWorkspace === options.workspace() && requestGeneration === options.git.generation) {
+        options.git.setError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (requestClient === options.client() && requestWorkspace === options.workspace() && requestGeneration === options.git.generation) {
+        options.git.setResolveRunning(false);
+      }
+    }
+  }
+
   async function copyReviewResolutionPrompt(): Promise<boolean> {
     const prompt = currentResolutionPrompt();
     if (
@@ -234,5 +357,5 @@ export function createGitAssist(options: GitAssistOptions) {
     }
   }
 
-  return { reviewDiff, generateCommitMessage, resolveReviewInNewSession, copyReviewResolutionPrompt };
+  return { reviewDiff, generateCommitMessage, resolveReviewInNewSession, copyReviewResolutionPrompt, canFixCi, fixCiInNewSession };
 }

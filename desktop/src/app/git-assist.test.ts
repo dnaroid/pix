@@ -29,6 +29,8 @@ function createCopyFixture(gitOverrides: Record<string, unknown> = {}) {
     git: git as any,
     runtime: {} as any,
     prompts: {} as any,
+    ciSnapshot: () => undefined,
+    ciFixModelRef: async () => undefined,
     forgetRuntime: () => undefined,
     activateResolutionSession: () => "message",
     onResolutionRunStarted: () => undefined,

@@ -5,6 +5,7 @@
   import CirclePause from "@lucide/svelte/icons/circle-pause";
   import Clock3 from "@lucide/svelte/icons/clock-3";
   import ListTodo from "@lucide/svelte/icons/list-todo";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import UserRound from "@lucide/svelte/icons/user-round";
   import { agentIcon } from "../lib/agent-icons";
   import {
@@ -34,6 +35,8 @@
     promptRunning,
     sessionNeedsInput,
     sessionActivityOpen,
+    canClearTodos = false,
+    onClearTodos,
     onOpenSessionActivity,
   }: {
     summary: SessionActivitySummary;
@@ -42,6 +45,8 @@
     promptRunning: boolean;
     sessionNeedsInput: boolean;
     sessionActivityOpen: boolean;
+    canClearTodos?: boolean;
+    onClearTodos?: () => Promise<boolean>;
     onOpenSessionActivity: () => void;
   } = $props();
 
@@ -57,6 +62,17 @@
     !sessionActivityOpen && (summary.activeSubagents > 0 || hasTodoProgress),
   );
   let todoTooltipBody = $state<HTMLDivElement>();
+  let clearingTodos = $state(false);
+
+  async function clearTodos(): Promise<void> {
+    if (!onClearTodos || !canClearTodos || clearingTodos || todoRows.length === 0) return;
+    clearingTodos = true;
+    try {
+      await onClearTodos();
+    } finally {
+      clearingTodos = false;
+    }
+  }
 
   function scrollTodoTooltipToCurrent(): void {
     if (!currentTodo || !todoTooltipBody) return;
@@ -205,7 +221,8 @@
           ]}
           type="button"
           aria-label={"Open session activity. Plan " + summary.completedTodos + "/" + summary.totalTodos + (currentTodo ? ". Current item " + currentTodo.subject : "")}
-          aria-describedby={currentTodo ? "session-todo-status-tooltip" : undefined}
+          aria-haspopup={currentTodo ? "dialog" : undefined}
+          aria-controls={currentTodo ? "session-todo-status-tooltip" : undefined}
           onmouseenter={scrollTodoTooltipToCurrent}
           onfocus={scrollTodoTooltipToCurrent}
           onclick={onOpenSessionActivity}
@@ -218,12 +235,21 @@
           <div
             id="session-todo-status-tooltip"
             class="pointer-events-auto absolute right-0 bottom-full z-40 hidden w-80 max-w-[calc(100vw-16px)] rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
-            role="tooltip"
+            role="dialog"
+            aria-label="Session plan"
             data-session-todo-tooltip
           >
             <div class="flex items-center gap-2">
               <span class="font-semibold text-foreground">Plan</span>
-              <span class="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
+              <button
+                class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-panel-hover hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+                type="button"
+                title="Clear session plan"
+                aria-label="Clear session plan"
+                disabled={!canClearTodos || clearingTodos || todoRows.length === 0}
+                onclick={() => { void clearTodos(); }}
+              ><Trash2 class="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <span class="font-mono text-xs tabular-nums text-muted-foreground">
                 {summary.completedTodos}/{summary.totalTodos}
               </span>
             </div>

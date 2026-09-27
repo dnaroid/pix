@@ -22,6 +22,7 @@
   const providerLabel = $derived(ci.snapshot?.provider === "github" ? "GitHub Actions" : ci.snapshot?.provider === "gitlab" ? "GitLab CI" : "CI");
   const setupGuide = $derived(gitCiSetupGuide(ci.snapshot));
   let copiedCommand = $state<string | null>(null);
+  let fixingWithAi = $state(false);
 
   function statusClass(status: GitCiStatus | undefined): string {
     if (status === "success") return "text-tool-success";
@@ -57,6 +58,16 @@
       copiedCommand = null;
     }
   }
+
+  async function fixWithAi(): Promise<void> {
+    if (!ci.canFixWithAi || fixingWithAi) return;
+    fixingWithAi = true;
+    try {
+      await ci.onFixWithAi();
+    } finally {
+      fixingWithAi = false;
+    }
+  }
 </script>
 
 <details class="group/ci border-t border-sidebar-border bg-panel">
@@ -82,7 +93,17 @@
   <div class="space-y-2 px-2 pb-3">
     <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
       <span class="min-w-0 truncate" title={ci.snapshot?.project}>{ci.snapshot?.project ?? "Current HEAD"}</span>
-      <button class="shrink-0 rounded-sm px-1 hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={ci.loading} onclick={ci.onRefresh}>Refresh</button>
+      <div class="flex shrink-0 items-center gap-1">
+        {#if aggregate === "failure"}
+          <button
+            class="rounded-sm px-1.5 font-medium text-primary hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            type="button"
+            disabled={!ci.canFixWithAi || fixingWithAi}
+            onclick={() => void fixWithAi()}
+          >{fixingWithAi ? "Starting…" : "Fix with AI"}</button>
+        {/if}
+        <button class="rounded-sm px-1 hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={ci.loading} onclick={ci.onRefresh}>Refresh</button>
+      </div>
     </div>
 
     {#if setupGuide}

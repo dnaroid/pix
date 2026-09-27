@@ -1,6 +1,5 @@
 import type { ComponentProps } from "svelte";
 import DesktopStatusBar from "../components/DesktopStatusBar.svelte";
-import type { createDcpCompression } from "./dcp-compression.svelte";
 import type { createModelConfig } from "./model-config.svelte";
 import type { createSessionCoordinator } from "./session-coordinator";
 import type { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
@@ -20,14 +19,13 @@ export function createDesktopStatusBarViewModel(options: {
   draftConfigAvailable: () => boolean;
   activeSessionRuntimeReady: () => boolean;
   activeSessionId: () => string | null;
-  activeAgentControlState: () => string;
-  dcpCompressionAvailable: () => boolean;
   sessionActivity: () => StatusBarProps["sessionActivity"];
   sessionSubagentSnapshot: () => StatusBarProps["sessionSubagentSnapshot"];
   sessionTodoSnapshot: () => StatusBarProps["sessionTodoSnapshot"];
   sessionNeedsInput: () => boolean;
+  canClearTodos: () => boolean;
+  clearSessionTodos: (sessionId: string) => Promise<boolean>;
   runtime: ReturnType<typeof createSessionRuntimeStore>;
-  dcp: ReturnType<typeof createDcpCompression>;
   modelConfig: ReturnType<typeof createModelConfig>;
   sessionCoordinator: ReturnType<typeof createSessionCoordinator>;
   inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
@@ -35,7 +33,6 @@ export function createDesktopStatusBarViewModel(options: {
   const props = $derived.by<StatusBarProps>(() => {
     const sessionId = options.activeSessionId();
     const draft = options.draftSessionTabActive();
-    const compressionAvailable = options.dcpCompressionAvailable();
     const runtimeReady = options.activeSessionRuntimeReady();
     const historyLoading = options.sessionHistoryLoading();
     const changingConfig = options.changingConfig();
@@ -72,27 +69,16 @@ export function createDesktopStatusBarViewModel(options: {
       sessionUsageRefreshing: sessionId ? options.runtime.sessionUsageRefreshing.has(sessionId) : false,
       sessionUsageFailed: sessionId ? options.runtime.sessionUsageFailed.has(sessionId) : false,
       sessionUsageAvailable: !!sessionId && runtimeReady,
-      dcpStatsRefreshing: sessionId ? options.runtime.dcpStatsRefreshing.has(sessionId) : false,
-      dcpCompressionRunning: sessionId ? options.dcp.sessionIds.has(sessionId) : false,
-      dcpCompressionAvailable: compressionAvailable,
-      canCompressContext: compressionAvailable
-        && options.canUseSession()
-        && !!sessionId
-        && runtimeReady
-        && changingConfig === null
-        && !historyLoading
-        && !promptRunning
-        && options.activeAgentControlState() === "idle",
       sessionActivity,
       sessionSubagentSnapshot: options.sessionSubagentSnapshot(),
       sessionTodoSnapshot: options.sessionTodoSnapshot(),
       sessionActivityOpen: options.inspectorPreference.open,
       sessionNeedsInput: options.sessionNeedsInput(),
+      canClearTodos: options.canClearTodos(),
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),
       onOpenModelThinking: options.modelConfig.openPicker,
       onOpenSessionUsage: () => void options.sessionCoordinator.refreshActiveSessionUsage(),
-      onOpenDcpStats: () => void options.sessionCoordinator.refreshActiveDcpStats(),
-      onCompressDcpContext: () => void options.dcp.compress(),
+      onClearTodos: () => sessionId ? options.clearSessionTodos(sessionId) : Promise.resolve(false),
       onOpenSessionActivity: () => options.inspectorPreference.setOpen(true),
     };
   });

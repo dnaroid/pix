@@ -52,7 +52,10 @@ export class AcpPixExtensions {
   }> {
     const response = await this.request<unknown>("pix/session/draft_config", {
       cwd,
-      ...(selection ? { modelRef: selection.modelRef, thinkingLevel: selection.thinkingLevel } : {}),
+      ...(selection ? {
+        modelRef: selection.modelRef,
+        ...(selection.thinkingLevel ? { thinkingLevel: selection.thinkingLevel } : {}),
+      } : {}),
       ...(refreshModelUsage ? { refreshModelUsage: true } : {}),
     });
     if (!isRecord(response) || !Array.isArray(response.configOptions)) {

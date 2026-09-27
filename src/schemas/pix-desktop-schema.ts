@@ -108,6 +108,7 @@ const DesktopAppConfig = Type.Object(
 		)),
 		git: Type.Optional(Type.Object(
 			{
+				ciFixModelRef: Type.Optional(Type.String({ description: "Model used by Desktop Fix with AI CI-repair sessions, optionally with a :thinking suffix. Omit to use the normal default model." })),
 				reviewModelRef: Type.Optional(Type.String({ description: "Model used for Source Control LLM diff review, optionally with a :thinking suffix." })),
 				reviewFallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered fallback models for Git diff review." })),
 				commitMessageModelRef: Type.Optional(Type.String({ description: "Model used to generate Git commit messages, optionally with a :thinking suffix." })),

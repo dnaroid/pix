@@ -12,7 +12,7 @@ Active implemented contract.
 
 ## Goal
 
-Optimize Source Control for message generation → commit → push, code review → commit → push, and code review → a separate fix session. Keep ordinary Git operations available without giving them the same visual priority as the daily workflows.
+Optimize Source Control for message generation → commit → push, code review → commit → push, code review → a separate fix session, and failed CI → an autonomous repair session. Keep ordinary Git operations available without giving them the same visual priority as the daily workflows.
 
 ## Primary workspace UI
 
@@ -27,6 +27,10 @@ Staged and working-tree changes retain file status, per-scope additions/deletion
 ### Remote CI for the current HEAD
 
 When HEAD exists, Source Control shows a compact CI state beside the upstream/ahead/behind summary. CI is bound to the exact full HEAD SHA, never merely the branch name, so a previous green run on the same branch cannot be presented as the result for unpublished local commits. The detail disclosure is collapsed by default and lists matching GitHub Actions workflow runs or GitLab pipelines. Jobs are fetched lazily when an individual run is first expanded; runs the user has opened are refreshed again after later CI-status polls so queued/running jobs can settle without reopening the app. Opening several runs cannot start job lookups in parallel, and background job refresh keeps the previous rows visible instead of replacing them with a loading placeholder.
+
+When the aggregate state for the exact current HEAD is failed, the disclosure exposes a text-style **Fix with AI** action. The action captures that failed HEAD, creates a distinct conversation session in the same workspace, and submits a CI-repair prompt that instructs the agent to inspect provider logs, preserve unrelated user changes, reproduce failures locally where practical, fix the root cause, run relevant checks, commit and push only the repair, then monitor the next remote run and repeat until CI is green. The workflow explicitly forbids force-push/history rewriting and stops early only for credentials, permissions, external outages, or required human input. If the failed CI snapshot, workspace, client or Git lifecycle changes while the repair session is being allocated, Desktop does not activate stale work and closes any orphan session.
+
+`desktop.git.ciFixModelRef` controls the model for **Fix with AI** and accepts the same optional `:thinking` suffix as the other Source Control model preferences. When this field is omitted, Desktop passes no model override to `session/new`, so the new repair session uses the normal Desktop default model and its default thinking. The preference is reloaded when the action starts so a just-saved Settings change is honored without restarting Desktop; a project Desktop config may override the user value through the normal preference precedence.
 
 Provider access reuses the user's installed and authenticated `gh` or `glab` CLI. Desktop does not store provider tokens and does not fall back to browser credentials. The selected remote follows the current branch's configured remote when present, otherwise `origin`, otherwise the only configured remote. Multiple non-`origin` remotes without a configured branch remote are an explicit ambiguous setup state rather than an arbitrary choice. GitHub/GitLab and hostnames containing those provider names are supported; unsupported hosts, missing CLIs and missing authentication are explicit non-fatal setup states. For missing CLI/authentication, the CI disclosure shows the matching macOS Homebrew install command, a host-scoped `gh auth login` or `glab auth login` command, Copy actions, and links to the provider's official install/authentication documentation; after setup, Refresh retries detection. Provider CLI prompts, update checks and telemetry are disabled for background queries.
 
@@ -75,7 +79,7 @@ All new Git commands use the existing noninteractive argument-vector process hel
 - `desktop/src/components/GitChangesSection.svelte` and `GitRepositoryTools.svelte`: file operations and secondary tools.
 - `desktop/src/components/GitDiffPane.svelte`: full-height Review/Diff editor and fix/copy actions.
 - `desktop/src/app/git-workspace.svelte.ts`: Git transaction, workspace state, review retention, IPC and lifecycle guards.
-- `desktop/src/app/git-assist.ts`: model preparation and verified fix-session handoff.
+- `desktop/src/app/git-assist.ts`: model preparation, verified review fix-session handoff, and failed-CI repair-session handoff.
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`, `desktop-navigation-view-model-services.ts`, `desktop-workbench-git-services.ts` and `desktop-workbench-prop-builders.ts`: workspace-assistant readiness for Source Control and Git Diff, independent of conversation-tab runtime readiness.
 - `desktop/src/lib/acp-client.ts`, `desktop/src/lib/acp-pix-extensions.ts`, `acp/src/acp/desktop-commands.ts` and `acp/src/acp/pix-acp-agent.ts`: cwd-bound Git-assistant request transport and standalone ACP execution without allocating a conversation session.
 - `desktop/src/lib/git-workflow.ts` and `git.ts`: shared policies, types and prompt/draft helpers.
@@ -83,7 +87,7 @@ All new Git commands use the existing noninteractive argument-vector process hel
 
 ## Verification
 
-`npm --prefix desktop run check`, `npm --prefix desktop test`, and `npm --prefix desktop run build:web` cover static checking, the existing suite and production frontend compilation. Focused behavior tests are in `git-ci.test.ts`, `git-workspace.test.ts`, `git-assist-workflow.test.ts`, `git-assist.test.ts`, `desktop-workbench-prop-builders.test.ts`, `git-workflow.test.ts` and `DesktopEditorSurfaces.test.ts`; the CI store tests cover stale workspace/HEAD completion, refresh coalescing, teardown cancellation and serialized job loading. Rust tests cover provider URL/status normalization in addition to exact-root Git initialization and nested-repository refusal. ACP request parsing and standalone dispatch are covered by `acp/test/desktop-commands.test.ts` and `acp/test/agent.test.ts`.
+`npm --prefix desktop run check`, `npm --prefix desktop test`, and `npm --prefix desktop run build:web` cover static checking, the existing suite and production frontend compilation. Focused behavior tests are in `git-ci.test.ts`, `GitCiSection.test.ts`, `git-workspace.test.ts`, `git-assist-workflow.test.ts`, `git-assist.test.ts`, `desktop-workbench-prop-builders.test.ts`, `git-workflow.test.ts` and `DesktopEditorSurfaces.test.ts`; CI-repair tests cover default/configured model selection, prompt policy and stale failed-HEAD cleanup, while the CI store tests cover stale workspace/HEAD completion, refresh coalescing, teardown cancellation and serialized job loading. Rust tests cover provider URL/status normalization in addition to exact-root Git initialization and nested-repository refusal. ACP request parsing and standalone dispatch are covered by `acp/test/desktop-commands.test.ts` and `acp/test/agent.test.ts`.
 
 `npm --prefix desktop run test:git-workflow` mounts the real Svelte components with deterministic fake Git/ACP callbacks in Chromium. It exercises all three flows, partial/explicit staging, draft races, push partial success, no-session/no-remote/conflict states, keyboard controls, stable review/diff selection, full-height review and 360px light/dark Source Control geometry/semantic colors. Screenshots are written to ignored `desktop/.artifacts/git-workflow/`.
 

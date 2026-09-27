@@ -321,6 +321,10 @@
         "git": {
           "type": "object",
           "properties": {
+            "ciFixModelRef": {
+              "type": "string",
+              "description": "Model used by Desktop Fix with AI CI-repair sessions, optionally with a :thinking suffix. Omit to use the normal default model."
+            },
             "reviewModelRef": {
               "type": "string",
               "description": "Model used for Source Control LLM diff review, optionally with a :thinking suffix."

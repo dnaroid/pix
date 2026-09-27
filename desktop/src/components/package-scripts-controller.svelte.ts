@@ -35,7 +35,6 @@ interface PackageScriptsControllerOptions {
 export function createPackageScriptsController(options: PackageScriptsControllerOptions) {
   const windowLabel = getCurrentWindow().label;
   const terminalDecoders = new Map<string, TextDecoder>();
-  const launchCommandByTerminal = new Map<string, string>();
   let snapshot = $state<PackageScriptsSnapshot | undefined>();
   let terminals = $state<PackageTerminalView[]>([]);
   let activeTerminalId = $state<string | null>(null);
@@ -63,7 +62,6 @@ export function createPackageScriptsController(options: PackageScriptsController
       launchWorkspace = requestWorkspace;
       launchCommands = [];
       terminalDecoders.clear();
-      launchCommandByTerminal.clear();
     }
     workspaceGeneration += 1;
     startingScript = null;
@@ -192,7 +190,7 @@ export function createPackageScriptsController(options: PackageScriptsController
   }
 
   function refresh(): void {
-    if (disposed) return;
+    if (disposed || loading) return;
     const generation = ++loadGeneration;
     const pending = loadWorkspace(options.workspace(), generation);
     workspaceLoad = pending;
@@ -244,6 +242,7 @@ export function createPackageScriptsController(options: PackageScriptsController
       const started = await invoke<PackageTerminalSnapshot>("package_terminal_start_shell", {
         windowLabel,
         workspace,
+        launchCommandId: launchCommandId ?? null,
         cols: size.cols,
         rows: size.rows,
       });
@@ -251,8 +250,10 @@ export function createPackageScriptsController(options: PackageScriptsController
         await discardStartedTerminal(started.id);
         return;
       }
-      terminals = [...terminals, terminalSnapshotView(started)];
-      if (launchCommandId) launchCommandByTerminal.set(started.id, launchCommandId);
+      const associated = launchCommandId && !started.launchCommandId
+        ? { ...started, launchCommandId }
+        : started;
+      terminals = [...terminals, terminalSnapshotView(associated)];
       terminalDecoders.set(started.id, new TextDecoder());
       activeTerminalId = started.id;
       await tick();
@@ -305,7 +306,7 @@ export function createPackageScriptsController(options: PackageScriptsController
   async function restartTerminal(terminal: PackageTerminalView): Promise<void> {
     const { isCurrent } = captureWorkspace();
     if (!isCurrent() || terminalActionId || startingScript) return;
-    const launchCommandId = launchCommandByTerminal.get(terminal.id);
+    const launchCommandId = terminal.launchCommandId;
     const launchCommand = launchCommands.find((item) => item.id === launchCommandId);
     const script = terminal.kind === "script"
       ? snapshot?.scripts.find((candidate) => candidate.name === terminal.script)
@@ -324,7 +325,6 @@ export function createPackageScriptsController(options: PackageScriptsController
       if (!isCurrent()) return;
       terminals = terminals.filter((candidate) => candidate.id !== terminal.id);
       terminalDecoders.delete(terminal.id);
-      launchCommandByTerminal.delete(terminal.id);
       activeTerminalId = terminals.at(-1)?.id ?? null;
       terminalActionId = null;
       if (terminal.kind === "shell") await openShellTerminal(launchCommand?.command, launchCommand?.id);
@@ -350,7 +350,6 @@ export function createPackageScriptsController(options: PackageScriptsController
       const index = terminals.findIndex((candidate) => candidate.id === terminal.id);
       terminals = terminals.filter((candidate) => candidate.id !== terminal.id);
       terminalDecoders.delete(terminal.id);
-      launchCommandByTerminal.delete(terminal.id);
       if (activeTerminalId === terminal.id) {
         activeTerminalId = terminals[Math.min(index, terminals.length - 1)]?.id ?? terminals.at(-1)?.id ?? null;
       }

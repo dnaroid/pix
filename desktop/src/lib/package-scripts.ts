@@ -24,6 +24,7 @@ export interface PackageTerminalSnapshot {
   readonly kind: PackageTerminalKind;
   readonly script: string;
   readonly command: string;
+  readonly launchCommandId?: string;
   readonly status: PackageTerminalStatus;
   readonly exitCode?: number;
   readonly signal?: string;

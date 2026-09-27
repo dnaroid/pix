@@ -25,20 +25,16 @@
     sessionUsageRefreshing,
     sessionUsageFailed,
     sessionUsageAvailable,
-    dcpStatsRefreshing,
-    dcpCompressionRunning,
-    dcpCompressionAvailable,
-    canCompressContext,
     sessionActivity,
     sessionSubagentSnapshot,
     sessionTodoSnapshot,
     sessionActivityOpen,
     sessionNeedsInput,
+    canClearTodos,
     onSetConfig,
     onOpenModelThinking,
     onOpenSessionUsage,
-    onOpenDcpStats,
-    onCompressDcpContext,
+    onClearTodos,
     onOpenSessionActivity,
   }: {
     showSkeletons?: boolean;
@@ -52,20 +48,16 @@
     sessionUsageRefreshing: boolean;
     sessionUsageFailed: boolean;
     sessionUsageAvailable: boolean;
-    dcpStatsRefreshing: boolean;
-    dcpCompressionRunning: boolean;
-    dcpCompressionAvailable: boolean;
-    canCompressContext: boolean;
     sessionActivity: SessionActivitySummary;
     sessionSubagentSnapshot: SessionSubagentSnapshot | undefined;
     sessionTodoSnapshot: SessionTodoSnapshot | undefined;
     sessionActivityOpen: boolean;
     sessionNeedsInput: boolean;
+    canClearTodos: boolean;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
     onOpenSessionUsage: () => void;
-    onOpenDcpStats: () => void;
-    onCompressDcpContext: () => void;
+    onClearTodos: () => Promise<boolean>;
     onOpenSessionActivity: () => void;
   } = $props();
 
@@ -136,13 +128,7 @@
       loadingSessionUsage={sessionUsageRefreshing}
       {sessionUsageFailed}
       {sessionUsageAvailable}
-      loadingDcpStats={dcpStatsRefreshing}
-      compressingContext={dcpCompressionRunning}
-      compressionAvailable={dcpCompressionAvailable}
-      {canCompressContext}
       onOpenSessionUsage={onOpenSessionUsage}
-      {onOpenDcpStats}
-      onCompressContext={onCompressDcpContext}
     />
     {#each configOptions as option (option.id)}
       {#if option.id === "model" || option.id === "thought_level"}
@@ -187,6 +173,8 @@
     {promptRunning}
     {sessionNeedsInput}
     {sessionActivityOpen}
+    {canClearTodos}
+    {onClearTodos}
     {onOpenSessionActivity}
   />
 </footer>

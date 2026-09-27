@@ -100,6 +100,32 @@ describe("package terminal operation ownership", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("package_terminal_write", expect.objectContaining({ terminalId: terminal.id, data: "npm run dev\r" }));
   });
 
+  it("restarts a restored saved-command terminal with the latest command definition", async () => {
+    const { controller } = fixture();
+    const restored = { ...terminal, id: "restored", launchCommandId: "dev" };
+    const restarted = { ...terminal, id: "restarted", launchCommandId: "dev" };
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "package_scripts") return { exists: false, scripts: [] };
+      if (command === "package_terminal_list") return [restored];
+      if (command === "project_file_exists") return true;
+      if (command === "read_project_file") return { content: '{"launchCommands":[{"id":"dev","name":"Dev","command":"npm run dev:latest"}]}' };
+      if (command === "package_terminal_start_shell") return restarted;
+      return undefined;
+    });
+    controller.refresh();
+    await vi.waitFor(() => expect(controller.launchCommands).toHaveLength(1));
+    await vi.waitFor(() => expect(controller.terminals.some((item) => item.id === restored.id)).toBe(true));
+    await controller.restartTerminal(controller.terminals.find((item) => item.id === restored.id)!);
+    expect(tauri.invoke).toHaveBeenCalledWith("package_terminal_start_shell", expect.objectContaining({
+      workspace: "/one",
+      launchCommandId: "dev",
+    }));
+    expect(tauri.invoke).toHaveBeenCalledWith("package_terminal_write", expect.objectContaining({
+      terminalId: restarted.id,
+      data: "npm run dev:latest\r",
+    }));
+  });
+
   it("rebases concurrent launch saves after a compare-and-swap conflict", async () => {
     const { controller } = fixture();
     let content = '{"launchCommands":[]}';

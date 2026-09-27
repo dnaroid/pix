@@ -67,6 +67,13 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
     git: options.project.git,
     runtime: options.sessions.runtime,
     prompts: options.prompt.runtime,
+    ciSnapshot: () => options.project.gitCi.snapshot,
+    ciFixModelRef: async () => {
+      const workspace = options.workspace();
+      if (!workspace) return undefined;
+      await options.project.workspace.loadPreferences(workspace);
+      return options.workspace() === workspace ? options.project.workspace.gitCiFixModelRef : undefined;
+    },
     forgetRuntime: (sessionId) => options.sessionCoordinator().forgetRuntime(sessionId),
     activateResolutionSession: (sessionId, workspace, prompt) => {
       options.state.saveActiveTranscript();

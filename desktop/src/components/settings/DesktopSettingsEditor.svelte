@@ -474,9 +474,24 @@
 {:else if section === "source-control"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Source Control</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">LLM preferences used by Desktop Git review and commit-message actions.</p>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">LLM preferences used by Desktop Git review, commit-message, and CI repair actions.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
+    <SettingsFieldRow
+      label="CI fix model"
+      description="Model and optional thinking level used by Fix with AI when CI fails. When omitted, the repair session uses the normal default model."
+      explicit={has(["desktop", "git", "ciFixModelRef"])}
+      defaultLabel="Default model"
+      onReset={() => reset(["desktop", "git", "ciFixModelRef"])}
+    >
+      <SettingsModelSelect
+        value={text(["desktop", "git", "ciFixModelRef"])}
+        options={gitModelOptions}
+        ariaLabel="CI fix model"
+        emptyLabel="Default model"
+        onChange={(value) => value ? set(["desktop", "git", "ciFixModelRef"], value) : reset(["desktop", "git", "ciFixModelRef"])}
+      />
+    </SettingsFieldRow>
     <SettingsFieldRow
       label="Review model"
       description="Model and thinking level used for Source Control diff review."

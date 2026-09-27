@@ -18,6 +18,14 @@ describe("Git CI setup UI", () => {
   it("refreshes Git state when the native CI target reports a changed HEAD", () => {
     expect(projectServicesSource).toContain("onTargetStale: () => void git.refresh()");
   });
+
+  it("offers Fix with AI only for failed CI and guards repeated startup", () => {
+    expect(sectionSource).toContain('{#if aggregate === "failure"}');
+    expect(sectionSource).toContain('{fixingWithAi ? "Starting…" : "Fix with AI"}');
+    expect(sectionSource).toContain("disabled={!ci.canFixWithAi || fixingWithAi}");
+    expect(sectionSource).toContain("await ci.onFixWithAi()");
+  });
+
   it("draws one rotating chevron per disclosure and hides WebKit's native summary marker", () => {
     const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
     expect(stylesSource).toMatch(/@layer base \{[\s\S]*summary::-webkit-details-marker \{ display: none; \}/);

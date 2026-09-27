@@ -65,6 +65,8 @@ export interface GitCiPanelState {
   readonly onDeactivate: () => void;
   readonly onRefresh: () => void;
   readonly onLoadJobs: (runId: string) => void;
+  readonly canFixWithAi: boolean;
+  readonly onFixWithAi: () => Promise<void>;
 }
 
 export function gitCiIsActive(status: GitCiStatus): boolean {
@@ -90,6 +92,25 @@ export function gitCiStatusLabel(status: GitCiStatus | undefined): string {
   if (status === "cancelled") return "cancelled";
   if (status === "neutral") return "complete";
   return "no runs";
+}
+
+export function gitCiFixPrompt(snapshot: GitCiSnapshot): string {
+  const provider = snapshot.provider === "github" ? "GitHub Actions" : snapshot.provider === "gitlab" ? "GitLab CI" : "remote CI";
+  const failedRuns = snapshot.runs.filter((run) => run.status === "failure");
+  const runLines = failedRuns.length > 0
+    ? failedRuns.map((run) => `- ${run.name}${run.url ? ` — ${run.url}` : ""}`).join("\n")
+    : "- The current CI snapshot reports a failure; inspect the provider for the failing run(s).";
+  return `Fix the failing ${provider} checks for the current branch and keep iterating until CI is green.
+
+Repository CI context:
+- Project: ${snapshot.project ?? "current repository"}
+- HEAD: ${snapshot.headSha}
+- Provider: ${provider}
+- Failing runs:\n${runLines}
+
+Work autonomously toward a green CI result, not just an explanation. First inspect git status and preserve unrelated user changes. Use the provider CLI and repository files to inspect the actual failing jobs/logs. Reproduce failures locally when practical, identify and fix the root cause, and run the relevant local checks before pushing. Do not make CI green by disabling checks, skipping tests, or weakening assertions merely to hide the failure; change CI configuration only when it is genuinely the root cause and preserve the intended coverage.
+
+When a fix is ready, commit only the changes needed for the CI repair and push them to the current branch. Do not force-push or rewrite history. Monitor the new remote CI run; if it still fails, inspect the latest failure, make the next fix, commit, push, and monitor again. Continue this edit/test/commit/push/check loop until the current branch CI is green. Stop early only if you are blocked by credentials, permissions, an external outage, or information that requires human input; in that case state the blocker precisely.`;
 }
 
 export function gitCiSetupGuide(snapshot: GitCiSnapshot | undefined): GitCiSetupGuide | undefined {

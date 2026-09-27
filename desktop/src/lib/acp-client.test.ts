@@ -150,6 +150,31 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("allows a draft model override to use that model's default thinking", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const creating = client.newSession("/workspace", {
+      modelRef: "anthropic/claude-sonnet-4-5",
+    });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    const request = requestAt(transport, 1);
+    expect(request).toMatchObject({
+      method: "session/new",
+      params: {
+        cwd: "/workspace",
+        _meta: {
+          "pix.lazyRuntime": true,
+          "pix.draftModel": "anthropic/claude-sonnet-4-5",
+        },
+      },
+    });
+    expect((request.params as { _meta: Record<string, string> })._meta).not.toHaveProperty("pix.draftThinking");
+    transport.message({ jsonrpc: "2.0", id: request.id, result: { sessionId: "new-default-thinking" } });
+    await expect(creating).resolves.toEqual({ sessionId: "new-default-thinking" });
+    await client.dispose();
+  });
+
   it("requests sessionless config options for a Desktop draft", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

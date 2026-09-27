@@ -61,7 +61,7 @@ export interface ForkSessionResult {
 
 export interface DraftSessionConfig {
   readonly modelRef: string;
-  readonly thinkingLevel: string;
+  readonly thinkingLevel?: string;
 }
 
 export type UserMessageAction = "copy" | "undo";

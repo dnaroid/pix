@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
 import { createGitAssist } from "./git-assist";
 import { gitReviewResolutionPrompt, type GitDiff } from "../lib/git";
+import type { GitCiSnapshot } from "../lib/git-ci";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -16,6 +17,26 @@ function deferred<T>() {
 function fixture() {
   let workspace = "/one";
   let content = "+current changes";
+  let ciFixModelRef: string | undefined;
+  let ciFixModelResolver = async () => ciFixModelRef;
+  let ciSnapshot: GitCiSnapshot = {
+    provider: "github",
+    availability: "ready",
+    remoteName: "origin",
+    host: "github.com",
+    project: "example/repo",
+    headSha: "head-1",
+    localOnly: false,
+    runs: [{
+      id: "run-1",
+      name: "Check",
+      status: "failure",
+      rawStatus: "failure",
+      headSha: "head-1",
+      branch: "main",
+      url: "https://github.com/example/repo/actions/runs/1",
+    }],
+  };
   invoke.mockImplementation(async (command: string, payload: { scope: GitDiff["scope"]; path: string | null }) => {
     if (command === "git_diff") return { scope: payload.scope, path: payload.path ?? undefined, content, truncated: false };
   });
@@ -31,14 +52,17 @@ function fixture() {
   };
   const runtime = { ensure: vi.fn(async (_client: unknown, _sessionId: string) => {}), isReady: vi.fn(() => true) };
   const prompts = { runPromptRequest: vi.fn(async () => {}) };
-  const activate = vi.fn(() => "message-1");
+  const activate = vi.fn((_sessionId: string, _workspace: string, _prompt: string) => "message-1");
   const forget = vi.fn();
   const started = vi.fn();
   const refresh = vi.fn();
   const assist = createGitAssist({
     client: () => client as any, workspace: () => workspace,
     gitAssistantReady: () => true, operationRunning: () => false, statusReady: () => true,
-    git, runtime: runtime as any, prompts: prompts as any, forgetRuntime: forget,
+    git, runtime: runtime as any, prompts: prompts as any,
+    ciSnapshot: () => ciSnapshot,
+    ciFixModelRef: () => ciFixModelResolver(),
+    forgetRuntime: forget,
     activateResolutionSession: activate, onResolutionRunStarted: started, refreshSessions: refresh, reportError: vi.fn(),
   });
   function setReview() {
@@ -48,6 +72,10 @@ function fixture() {
     assist, git, client, runtime, prompts, activate, forget, started, refresh, setReview,
     changeContent(value: string) { content = value; },
     changeWorkspace(value: string) { workspace = value; git.reset(); },
+    setCiFixModelRef(value: string | undefined) { ciFixModelRef = value; },
+    setCiFixModelResolver(value: () => Promise<string | undefined>) { ciFixModelResolver = value; },
+    setCiSnapshot(value: GitCiSnapshot) { ciSnapshot = value; },
+    getCiSnapshot() { return ciSnapshot; },
   };
 }
 
@@ -189,6 +217,87 @@ describe("Git review → fix-session handoff", () => {
     await pending;
     expect(owners.get("fix-session")).toBe(reopened);
     expect(f.forget).toHaveBeenCalledTimes(1);
+    expect(f.activate).not.toHaveBeenCalled();
+  });
+});
+
+describe("failed CI → Fix with AI handoff", () => {
+  it("starts a new session with the normal default model when CI fix model is unset", async () => {
+    const f = fixture();
+    const snapshot = f.getCiSnapshot();
+    expect(f.assist.canFixCi(snapshot)).toBe(true);
+
+    await f.assist.fixCiInNewSession(snapshot);
+
+    expect(f.client.newSession).toHaveBeenCalledWith("/one");
+    const prompt = f.activate.mock.calls[0]?.[2] as string;
+    expect(prompt).toContain("keep iterating until CI is green");
+    expect(prompt).toContain("commit only the changes needed for the CI repair and push them");
+    expect(prompt).toContain("Do not force-push or rewrite history");
+    expect(prompt).toContain("Do not make CI green by disabling checks");
+    expect(prompt).toContain("https://github.com/example/repo/actions/runs/1");
+    expect(f.prompts.runPromptRequest).toHaveBeenCalledWith(f.client, "fix-session", [{ type: "text", text: prompt }], [], "message-1");
+    expect(f.started).toHaveBeenCalledWith("fix-session");
+  });
+
+  it("applies the configured CI repair model and thinking level to the new session", async () => {
+    const f = fixture();
+    f.setCiFixModelRef("anthropic/claude-sonnet-4-5:high");
+
+    await f.assist.fixCiInNewSession(f.getCiSnapshot());
+
+    expect(f.client.newSession).toHaveBeenCalledWith("/one", {
+      modelRef: "anthropic/claude-sonnet-4-5",
+      thinkingLevel: "high",
+    });
+  });
+
+  it("uses the configured model's own default thinking when no thinking suffix is set", async () => {
+    const f = fixture();
+    f.setCiFixModelRef("anthropic/claude-sonnet-4-5");
+
+    await f.assist.fixCiInNewSession(f.getCiSnapshot());
+
+    expect(f.client.newSession).toHaveBeenCalledWith("/one", {
+      modelRef: "anthropic/claude-sonnet-4-5",
+    });
+  });
+
+  it("does not allocate a session after the failing CI snapshot becomes stale while settings load", async () => {
+    const f = fixture();
+    const snapshot = f.getCiSnapshot();
+    const model = deferred<string | undefined>();
+    f.setCiFixModelResolver(() => model.promise);
+
+    const pending = f.assist.fixCiInNewSession(snapshot);
+    f.setCiSnapshot({
+      ...snapshot,
+      runs: snapshot.runs.map((run: GitCiSnapshot["runs"][number]) => ({ ...run, status: "success" as const, rawStatus: "success" })),
+    });
+    model.resolve(undefined);
+    await pending;
+
+    expect(f.client.newSession).not.toHaveBeenCalled();
+    expect(f.git.resolveRunning).toBe(false);
+  });
+
+  it("closes an orphan CI-fix session if the CI result changes during creation", async () => {
+    const f = fixture();
+    const snapshot = f.getCiSnapshot();
+    const created = deferred<{ sessionId: string }>();
+    f.client.newSession.mockReturnValueOnce(created.promise);
+
+    const pending = f.assist.fixCiInNewSession(snapshot);
+    await vi.waitFor(() => expect(f.client.newSession).toHaveBeenCalledOnce());
+    f.setCiSnapshot({
+      ...snapshot,
+      runs: snapshot.runs.map((run: GitCiSnapshot["runs"][number]) => ({ ...run, status: "success" as const, rawStatus: "success" })),
+    });
+    created.resolve({ sessionId: "ci-orphan" });
+    await pending;
+
+    expect(f.client.closeSession).toHaveBeenCalledWith("ci-orphan");
+    expect(f.forget).toHaveBeenCalledWith("ci-orphan");
     expect(f.activate).not.toHaveBeenCalled();
   });
 });

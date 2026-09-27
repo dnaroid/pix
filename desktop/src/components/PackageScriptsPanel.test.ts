@@ -10,8 +10,21 @@ describe("PackageScriptsPanel saved launch commands", () => {
     expect(source).toContain('onSave={controller.saveLaunchCommand}');
     expect(source).toContain('onDelete={controller.deleteLaunchCommand}');
     expect(source).toContain('onRun={controller.runLaunchCommand}');
+    expect(source).toContain('aria-label="Launch commands and terminals"');
+    expect(source).toContain("{#if snapshot?.exists}");
+    expect(source).not.toContain('snapshot?.packageName ?? "package.json"');
     expect(editorSource).toContain("Saved launch commands");
     expect(editorSource).toContain("No saved commands.");
+    expect(editorSource).toContain('<Play class="h-3 w-3"');
+  });
+
+  it("moves launch refresh into the shared sidebar header and uses launch-command naming", () => {
+    expect(source).toContain("export function refresh(): void");
+    expect(source).not.toContain('title="Refresh package scripts"');
+    expect(sidebarSource).toContain('scripts: "Launch Commands"');
+    expect(sidebarSource).toContain('title="Refresh launch commands"');
+    expect(sidebarSource).toContain("packageScriptsPanel?.refresh()");
+    expect(sidebarSource).toContain("bind:this={packageScriptsPanel}");
   });
 
   it("wires successful workspace settings saves to registry workspace sync", () => {

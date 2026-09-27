@@ -168,7 +168,9 @@ https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json
 
 Desktop settings cover Desktop/ACP behavior such as model defaults, model-picker
 visibility/preferences, prompt helpers, voice, external editor and Source
-Control review/commit-message models. TUI renderer/theme/tool-row settings remain
+Control review/commit-message/CI-repair models. Leaving the Source Control
+**CI fix model** unset makes **Fix with AI** use the normal default model for
+its new repair session. TUI renderer/theme/tool-row settings remain
 in `pix.jsonc`.
 
 See [Pix Desktop](desktop.md).
