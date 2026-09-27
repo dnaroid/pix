@@ -109,6 +109,68 @@
       },
       "description": "Ordered lookup model fallbacks tried after lookupModel."
     },
+    "frontierModels": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Exact provider/model reference."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "model"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Exact provider/model reference used when this entry is selected."
+                  },
+                  "vendor": {
+                    "type": "string",
+                    "description": "Model family owner (openai, zai, anthropic, ...). Inferred from the model id when omitted."
+                  },
+                  "expensive": {
+                    "type": "boolean",
+                    "description": "Excluded from every role's selection while economy mode is on."
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "false keeps the model recognized as frontier but never selects it."
+                  },
+                  "aliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Glob patterns recognizing the same model under other refs, e.g. OpenRouter aliases."
+                  },
+                  "roles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Limit this entry to the listed sub-agent roles."
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Ordered frontier models used by frontier-selecting sub-agent roles (oracle, frontier-review, delivery-review). A layer's list replaces inherited entries; null restores the built-in list."
+    },
+    "economy": {
+      "type": "boolean",
+      "description": "Economy mode: no sub-agent role selects a frontier model marked expensive. PI_TOOLS_SUITE_ECONOMY overrides it."
+    },
     "terminalBell": {
       "type": "object",
       "properties": {

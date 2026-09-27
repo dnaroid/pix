@@ -3,6 +3,15 @@ import { fileURLToPath } from "node:url";
 import { loadPiToolsSuiteConfig } from "../../config.js";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./browser-qa.js";
+import {
+	defaultFrontierConfig,
+	economyBlockReason,
+	frontierCandidatesForRole,
+	isFrontierModel,
+	isSameModel,
+	modelVendor,
+	type FrontierConfig,
+} from "./frontier-models.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
 export interface ModelByParentEntry {
@@ -22,6 +31,11 @@ export interface SubagentTypeConfig {
 	icon?: string;
 	/** Ranked candidates owned by this role. Runtime availability never changes this configured order. */
 	models?: string[];
+	/**
+	 * `frontier` takes candidates from the suite's `frontierModels` list instead
+	 * of `models`, so new frontier releases need only a config edit.
+	 */
+	modelSelection?: "frontier";
 	/** Legacy primary candidate; new profiles use models. */
 	model?: string;
 	/** Legacy candidates after model; new profiles use one ordered models list. */
@@ -44,8 +58,16 @@ export interface SubagentTypeConfig {
 	 * forParentModels also matches.
 	 */
 	notForParentModels?: string[];
-	/** Relationship between child candidates and the known parent provider. */
-	parentProviderPolicy?: "any" | "prefer-other" | "require-other";
+	/** Expose the role only to parents in this tier of the suite's frontier list. */
+	forParentTier?: "frontier" | "non-frontier";
+	/**
+	 * Relationship between child candidates and the parent model's vendor.
+	 * Vendors are model-family owners (openai, zai, anthropic, ...), so one
+	 * model served by several providers counts as the same vendor.
+	 * `require-other-if-frontier` requires another vendor for a frontier
+	 * parent and prefers another vendor otherwise.
+	 */
+	parentProviderPolicy?: ParentProviderPolicy;
 	/** @deprecated Use parentProviderPolicy: require-other. Retained as an input compatibility alias. */
 	requireDifferentProvider?: boolean;
 	thinking?: string;
@@ -62,6 +84,8 @@ export interface SubagentTypeConfig {
 	/** Per-agent wall-clock timeout in milliseconds. */
 	timeoutMs?: number;
 }
+
+export type ParentProviderPolicy = "any" | "prefer-other" | "require-other" | "require-other-if-frontier";
 
 export interface SubagentRoutingConfig {
 	/** Ask a lightweight model to choose subagentType when a task omits it. */
@@ -105,6 +129,8 @@ export interface SubagentConfig {
 	maxResultBytes?: number;
 	/** Global per-agent wall-clock timeout in milliseconds. Defaults to the built-in 30 minutes. */
 	timeoutMs?: number;
+	/** Suite-level frontier model list and economy switch. Defaults to the built-in list. */
+	frontier?: FrontierConfig;
 }
 
 export interface ResolvedAgentTaskConfig {
@@ -182,6 +208,7 @@ const BUILTIN_CONFIG: SubagentConfig = {
 	routing: { ...DEFAULT_ROUTING_CONFIG },
 	vision: { blindModelPatterns: DEFAULT_BLIND_MODEL_PATTERNS },
 	types: normalizeAgentDefinitions(readAgentDefinitionsFromDir(BUILTIN_AGENTS_DIR)),
+	frontier: defaultFrontierConfig(),
 };
 
 export function loadSubagentConfig(cwd: string, env?: NodeJS.ProcessEnv): SubagentConfig {
@@ -195,6 +222,7 @@ export function loadSubagentConfig(cwd: string, env?: NodeJS.ProcessEnv): Subage
 	});
 	const config = cloneConfig(BUILTIN_CONFIG);
 	for (const name of suiteConfig.disabledBuiltinAgents) delete config.types[name];
+	config.frontier = { models: suiteConfig.frontierModels, economy: suiteConfig.economy };
 	// Project-local agent definitions (.pi/agents/*.md) are the only project
 	// source of role/profile configuration and are loaded fresh on every call.
 	mergeConfig(config, projectAgentTypes(cwd));
@@ -236,10 +264,12 @@ export function resolveAgentTaskConfig(
 ): ResolvedAgentTaskConfig {
 	const selectedType = selectSubagentType(task, config);
 	const profile = selectedType ? config.types[selectedType] : undefined;
-	const parentProvider = providerFromModelRef(globalOptions.parentModel);
-	const parentProviderPolicy = effectiveParentProviderPolicy(profile);
-	if (parentProviderPolicy === "require-other" && (!parentProvider || !profile || !isSubagentTypeAvailableForParent(profile, globalOptions.parentModel))) {
-		throw new SubagentModelSelectionError(task.id, "A known, permitted parent provider is required for cross-provider selection.");
+	const frontier = frontierConfigOf(config);
+	const parentModelRef = trimString(globalOptions.parentModel);
+	const parentVendor = modelVendor(parentModelRef, frontier);
+	const parentProviderPolicy = effectiveParentProviderPolicy(profile, parentModelRef, frontier);
+	if (parentProviderPolicy === "require-other" && (!parentVendor || !profile || !isSubagentTypeAvailableForParent(profile, parentModelRef, frontier))) {
+		throw new SubagentModelSelectionError(task.id, "A known, permitted parent model is required for cross-vendor selection.");
 	}
 	const taskExtraArgs = arrayOfStrings(task.extraArgs) ?? [];
 	const profileExtraArgs = arrayOfStrings(profile?.extraArgs) ?? [];
@@ -247,10 +277,10 @@ export function resolveAgentTaskConfig(
 	const promptAppend = joinTextBlocks(profile?.promptAppend, task.promptAppend);
 	const forcedModel = trimString(globalOptions.forcedModel);
 	const taskModel = trimString(task.model);
-	const parentMatch = resolveModelByParent(profile, trimString(globalOptions.parentModel));
+	const parentMatch = resolveModelByParent(profile, parentModelRef);
 	const parentMatchModel = trimString(parentMatch?.model);
 	const globalModel = trimString(globalOptions.model);
-	const profileModels = profile?.models ?? modelList(profile?.model, profile?.fallbackModels) ?? [];
+	const profileModels = profileCandidateModels(profile, selectedType, frontier);
 	const profileModel = profileModels[0];
 	const usedParentMatch = Boolean(parentMatchModel) && !forcedModel && !taskModel
 		&& !globalModel;
@@ -267,26 +297,47 @@ export function resolveAgentTaskConfig(
 	const cliModel = modelFromArgs(extraArgs);
 	const explicitModel = forcedModel || cliModel || taskModel;
 	let candidates = modelList(explicitModel || primaryModel, explicitModel ? [] : configuredFallbacks) ?? [];
-	if (parentProviderPolicy === "prefer-other" && !explicitModel && parentProvider) {
-		candidates = [
-			...candidates.filter((ref) => providerFromModelRef(ref) !== parentProvider),
-			...candidates.filter((ref) => providerFromModelRef(ref) === parentProvider),
-		];
+
+	// Economy mode governs automatic and parent-requested choices; the forced
+	// current model is already running as the parent and stays exempt.
+	const economyBlocked: string[] = [];
+	if (!forcedModel) {
+		if (explicitModel) {
+			const reason = economyBlockReason(explicitModel, frontier);
+			if (reason) throw new SubagentModelSelectionError(task.id, `Explicit model override rejected: ${reason}.`);
+		} else {
+			candidates = candidates.filter((ref) => {
+				if (!economyBlockReason(ref, frontier)) return true;
+				economyBlocked.push(ref);
+				return false;
+			});
+		}
+	}
+
+	if (parentProviderPolicy === "prefer-other" && !explicitModel && parentVendor) {
+		const rank = (ref: string) => isSameModel(ref, parentModelRef, frontier) ? 2 : modelVendor(ref, frontier) === parentVendor ? 1 : 0;
+		candidates = [0, 1, 2].flatMap((level) => candidates.filter((ref) => rank(ref) === level));
 	}
 	if (parentProviderPolicy === "require-other") {
-		if (explicitModel && providerFromModelRef(explicitModel) === parentProvider) {
-			throw new SubagentModelSelectionError(task.id, "Explicit model override uses the parent provider; cross-provider selection is required.");
+		if (hasProviderArg(extraArgs)) {
+			throw new SubagentModelSelectionError(task.id, "--provider cannot be combined with cross-vendor selection; use a provider/model reference.");
 		}
-		candidates = candidates.filter((ref) => {
-			const provider = providerFromModelRef(ref);
-			return provider !== undefined && provider !== parentProvider;
-		});
+		const isOtherVendor = (ref: string) => {
+			const vendor = modelVendor(ref, frontier);
+			return vendor !== undefined && vendor !== parentVendor && !isSameModel(ref, parentModelRef, frontier);
+		};
+		if (explicitModel && !isOtherVendor(explicitModel)) {
+			throw new SubagentModelSelectionError(task.id, `Explicit model override ${explicitModel} shares the parent's vendor (${parentVendor}); cross-vendor selection is required.`);
+		}
+		candidates = candidates.filter(isOtherVendor);
 		if (candidates.length === 0) {
-			throw new SubagentModelSelectionError(task.id, "No cross-provider model candidate is available in the configured candidates/overrides.");
+			throw new SubagentModelSelectionError(task.id, `No model from a vendor other than the parent's (${parentVendor}) is available in the configured candidates/overrides${economyNote(economyBlocked)}.`);
 		}
 	}
 	if (candidates.length === 0) {
-		throw new SubagentModelSelectionError(task.id, "No model candidates are configured; set models on the agent profile.");
+		throw new SubagentModelSelectionError(task.id, economyBlocked.length > 0
+			? `No model candidates remain${economyNote(economyBlocked)}.`
+			: "No model candidates are configured; set models on the agent profile.");
 	}
 	const [model, ...fallbackModels] = candidates;
 	const timeoutMs = task.timeoutMs ?? globalOptions.timeoutMs ?? profile?.timeoutMs ?? config.timeoutMs;
@@ -348,12 +399,9 @@ export function currentModelRef(model: unknown): string | undefined {
 	const id = trimString(model.modelId) || trimString(model.id) || trimString(model.model) || trimString(model.name);
 	if (!id) return undefined;
 	const provider = trimString(model.provider) || trimString(model.providerId);
-	return provider && !id.includes("/") ? `${provider}/${id}` : id;
-}
-
-function providerFromModelRef(ref: string | undefined): string | undefined {
-	if (!ref || !/^[^/*\s]+\/[^/*\s]+$/.test(ref)) return undefined;
-	return ref.slice(0, ref.indexOf("/"));
+	// Ids may contain slashes themselves (OpenRouter "openai/gpt-..."); keep the
+	// serving provider unless the id is already qualified with it.
+	return provider && !id.toLowerCase().startsWith(`${provider.toLowerCase()}/`) ? `${provider}/${id}` : id;
 }
 
 export function isBlindModelRef(modelRef: string | undefined, config: SubagentConfig): boolean {
@@ -365,7 +413,13 @@ export function isBlindModelRef(modelRef: string | undefined, config: SubagentCo
 export function isSubagentTypeAvailableForParent(
 	profile: SubagentTypeConfig,
 	parentModelRef: string | undefined,
+	frontier: FrontierConfig = defaultFrontierConfig(),
 ): boolean {
+	// An unknown parent cannot be classified; keep the role visible as before.
+	if (profile.forParentTier && parentModelRef) {
+		const parentIsFrontier = isFrontierModel(parentModelRef, frontier);
+		if ((profile.forParentTier === "frontier") !== parentIsFrontier) return false;
+	}
 	const included = profile.forParentModels;
 	if (included !== undefined) {
 		if (!parentModelRef || !matchesAnyModelPattern(parentModelRef, included)) return false;
@@ -384,8 +438,10 @@ export function filterSubagentConfigForParentModel(
 	config: SubagentConfig,
 	parentModelRef: string | undefined,
 ): SubagentConfig {
+	const frontier = frontierConfigOf(config);
 	const types = Object.fromEntries(
-		Object.entries(config.types).filter(([, profile]) => isSubagentTypeAvailableForParent(profile, parentModelRef)),
+		Object.entries(config.types).filter(([name, profile]) => isSubagentTypeAvailableForParent(profile, parentModelRef, frontier)
+			&& crossVendorRoleCanResolve(name, config, parentModelRef)),
 	);
 	return Object.keys(types).length === Object.keys(config.types).length ? config : { ...config, types };
 }
@@ -406,6 +462,23 @@ export function normalizeSubagentType(value: string | undefined, config: Subagen
 }
 
 /**
+ * Roles that must run on another vendor are hidden when static configuration
+ * already proves no candidate can qualify (unknown parent, economy, or an
+ * all-same-vendor list). Runtime availability is still checked at spawn.
+ */
+function crossVendorRoleCanResolve(name: string, config: SubagentConfig, parentModelRef: string | undefined): boolean {
+	const policy = config.types[name]?.parentProviderPolicy;
+	if (policy !== "require-other" && policy !== "require-other-if-frontier") return true;
+	try {
+		resolveAgentTaskConfig({ id: "catalog", task: "", subagentType: name }, config, { parentModel: parentModelRef });
+		return true;
+	} catch (error) {
+		if (error instanceof SubagentModelSelectionError) return false;
+		throw error;
+	}
+}
+
+/**
  * Normalize one raw sub-agent type profile (`SubagentTypeConfig` shape) from
  * an agent Markdown definition. Bundled and project files share the same
  * validation and trimming path.
@@ -416,6 +489,10 @@ export function normalizeSubagentTypeProfile(
 	file: string,
 ): SubagentTypeConfig {
 	const models = normalizeModels(rawProfile.models, `type "${name}"`, file);
+	const modelSelection = normalizeModelSelection(rawProfile.modelSelection, name, file);
+	if (modelSelection && (models !== undefined || rawProfile.model !== undefined || rawProfile.fallbackModels !== undefined || rawProfile.modelByParent !== undefined)) {
+		throw new Error(`Agent ${name}: modelSelection: ${modelSelection} conflicts with models/model/fallbackModels/modelByParent (${file})`);
+	}
 	const model = models === undefined ? trimString(rawProfile.model) : undefined;
 	const fallbackModels = models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined;
 	const parentProviderPolicy = normalizeParentProviderPolicy(rawProfile.parentProviderPolicy, name, file);
@@ -430,11 +507,13 @@ export function normalizeSubagentTypeProfile(
 		description: trimString(rawProfile.description),
 		icon: trimString(rawProfile.icon),
 		models,
+		modelSelection,
 		model,
 		fallbackModels: models === undefined && (model || fallbackModels !== undefined) ? fallbackModels ?? [] : undefined,
 		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file, fallbackModels ?? []) : undefined,
 		forParentModels: normalizeParentModelPatterns(rawProfile.forParentModels, "forParentModels", name, file),
 		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
+		forParentTier: normalizeParentTier(rawProfile.forParentTier, name, file),
 		parentProviderPolicy: parentProviderPolicy ?? (requireDifferentProvider ? "require-other" : undefined),
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
@@ -457,7 +536,16 @@ function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): v
  * to win over a newly supplied candidate list (or the reverse). */
 function mergeTypeProfile(base: SubagentTypeConfig, source: SubagentTypeConfig): SubagentTypeConfig {
 	const merged = { ...compactProfile(base), ...compactProfile(source) };
-	if (source.models !== undefined) {
+	// An explicit candidate list replaces frontier-list selection (and vice versa).
+	if (source.modelSelection === undefined && (source.models !== undefined || source.model || source.fallbackModels !== undefined || source.modelByParent)) {
+		delete merged.modelSelection;
+	}
+	if (source.modelSelection !== undefined) {
+		delete merged.models;
+		delete merged.model;
+		delete merged.fallbackModels;
+		delete merged.modelByParent;
+	} else if (source.models !== undefined) {
 		merged.models = [...source.models];
 		delete merged.model;
 		delete merged.fallbackModels;
@@ -485,11 +573,13 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.description) compact.description = profile.description;
 	if (profile.icon) compact.icon = profile.icon;
 	if (profile.models !== undefined) compact.models = profile.models;
+	if (profile.modelSelection !== undefined) compact.modelSelection = profile.modelSelection;
 	if (profile.model) compact.model = profile.model;
 	if (profile.fallbackModels) compact.fallbackModels = profile.fallbackModels;
 	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
 	if (profile.forParentModels !== undefined) compact.forParentModels = profile.forParentModels;
 	if (profile.notForParentModels !== undefined) compact.notForParentModels = profile.notForParentModels;
+	if (profile.forParentTier !== undefined) compact.forParentTier = profile.forParentTier;
 	if (profile.parentProviderPolicy !== undefined) compact.parentProviderPolicy = profile.parentProviderPolicy;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
@@ -525,8 +615,20 @@ function normalizeParentModelPatterns(
 
 function normalizeParentProviderPolicy(value: unknown, typeName: string, file: string): SubagentTypeConfig["parentProviderPolicy"] {
 	if (value === undefined) return undefined;
-	if (value === "any" || value === "prefer-other" || value === "require-other") return value;
-	throw new Error(`Subagent type "${typeName}" parentProviderPolicy must be one of any, prefer-other, require-other: ${file}`);
+	if (value === "any" || value === "prefer-other" || value === "require-other" || value === "require-other-if-frontier") return value;
+	throw new Error(`Subagent type "${typeName}" parentProviderPolicy must be one of any, prefer-other, require-other, require-other-if-frontier: ${file}`);
+}
+
+function normalizeModelSelection(value: unknown, typeName: string, file: string): SubagentTypeConfig["modelSelection"] {
+	if (value === undefined) return undefined;
+	if (value === "frontier") return value;
+	throw new Error(`Subagent type "${typeName}" modelSelection must be frontier: ${file}`);
+}
+
+function normalizeParentTier(value: unknown, typeName: string, file: string): SubagentTypeConfig["forParentTier"] {
+	if (value === undefined) return undefined;
+	if (value === "frontier" || value === "non-frontier") return value;
+	throw new Error(`Subagent type "${typeName}" forParentTier must be frontier or non-frontier: ${file}`);
 }
 
 function normalizeModelByParent(
@@ -591,8 +693,34 @@ function resolveFallbackModels(options: {
 	return result;
 }
 
-function effectiveParentProviderPolicy(profile: SubagentTypeConfig | undefined): NonNullable<SubagentTypeConfig["parentProviderPolicy"]> {
-	return profile?.parentProviderPolicy ?? (profile?.requireDifferentProvider ? "require-other" : "any");
+/** Collapse `require-other-if-frontier` to a concrete policy for this parent. */
+function effectiveParentProviderPolicy(
+	profile: SubagentTypeConfig | undefined,
+	parentModelRef: string | undefined,
+	frontier: FrontierConfig,
+): Exclude<ParentProviderPolicy, "require-other-if-frontier"> {
+	const policy = profile?.parentProviderPolicy ?? (profile?.requireDifferentProvider ? "require-other" : "any");
+	if (policy !== "require-other-if-frontier") return policy;
+	// Unknown parents cannot be classified, so the strict branch fails closed.
+	return !parentModelRef || isFrontierModel(parentModelRef, frontier) ? "require-other" : "prefer-other";
+}
+
+function profileCandidateModels(profile: SubagentTypeConfig | undefined, role: string | undefined, frontier: FrontierConfig): string[] {
+	if (profile?.models) return profile.models;
+	if (profile?.modelSelection === "frontier") return frontierCandidatesForRole(role, frontier);
+	return modelList(profile?.model, profile?.fallbackModels) ?? [];
+}
+
+function frontierConfigOf(config: SubagentConfig): FrontierConfig {
+	return config.frontier ?? defaultFrontierConfig();
+}
+
+function hasProviderArg(args: string[]): boolean {
+	return args.some((arg) => arg === "--provider" || arg.startsWith("--provider="));
+}
+
+function economyNote(blocked: string[]): string {
+	return blocked.length > 0 ? ` (economy mode excluded ${blocked.join(", ")})` : "";
 }
 
 function applyEnvModelOverrides(config: SubagentConfig, env: NodeJS.ProcessEnv): void {

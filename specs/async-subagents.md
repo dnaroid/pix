@@ -39,8 +39,11 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 6. **Environment**: child inherits parent env plus `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION=1`, `PI_TERMINAL_BELL_DISABLED=1`, and `PI_TOOLS_SUITE_DISABLED_MODULES` appended with `async-subagents,coding-discipline,question`. `[confirmed by code, spawn.ts ~230-240]`
 7. **Model selection**: explicit forced/task/CLI model wins. Otherwise the
    resolved role profile and optional parent-model mapping produce the ranked
-   candidate list. `parentProviderPolicy` then applies `any`, `prefer-other`, or
-   strict `require-other` semantics relative to the known parent provider.
+   candidate list (roles with `modelSelection: frontier` use the suite config's
+   `frontierModels` list). Economy mode removes `expensive` frontier models.
+   `parentProviderPolicy` then applies `any`, `prefer-other`, strict
+   `require-other`, or `require-other-if-frontier` semantics relative to the
+   known parent model's vendor (model family, not provider string).
    Runtime model selection removes unavailable/image-incompatible candidates,
    and session fallback skips models/providers already exhausted by quota
    failures. The fallback layer follows the already-resolved chain; it does not
@@ -51,10 +54,11 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    array (including `[]`), and every normalized `modelByParent` entry carries
    its own fallback array. Modern `models` profiles already encode the complete
    ordered candidate chain. `[confirmed by code, config.ts]`
-   The bundled `oracle` uses `parentProviderPolicy: require-other`, so its entire
-   initial/fallback chain excludes the parent provider. This policy is N-provider:
-   adding an Anthropic or future frontier candidate does not require another
-   provider-specific oracle role. `[confirmed by oracle.md and model-pools.test.ts]`
+   The bundled `oracle` uses `modelSelection: frontier` with
+   `parentProviderPolicy: require-other-if-frontier`: for a frontier parent its
+   entire initial/fallback chain excludes the parent's vendor; for other parents
+   other vendors are preferred. A new frontier model is a `frontierModels` config
+   entry, not an oracle edit. `[confirmed by oracle.md and frontier-models.test.ts]`
 8. **Role router / auto-ultrawork classifier**: the role router and the
    `ULTRAWORK_AUTO` classifier both try `routing.model`, then
    `routing.fallbackModels`, then the current parent model, de-duplicating refs

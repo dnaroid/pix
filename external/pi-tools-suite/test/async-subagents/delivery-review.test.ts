@@ -26,7 +26,11 @@ describe("built-in delivery-review role", () => {
 		const config = loadSubagentConfig(tempDir(), {});
 		const role = config.types["delivery-review"];
 		expect(role).toBeDefined();
-		expect(role.models).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
+		expect(role.models).toBeUndefined();
+		expect(role.modelSelection).toBe("frontier");
+		const resolved = resolveAgentTaskConfig({ id: "d", task: "review", subagentType: "delivery-review" }, config);
+		expect(resolved.task.model).toBe("openai-codex/gpt-6-sol");
+		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
 		expect(role.thinking).toBe("high");
 		expect(role.tools).toEqual(["read", "grep", "bash"]);
 		expect(role.forParentModels).toBeUndefined();

@@ -11,6 +11,25 @@ import { Type, Static } from "typebox";
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// Frontier models (sub-agent oracle/review selection)
+// ---------------------------------------------------------------------------
+
+const FrontierModelEntry = Type.Union([
+	Type.String({ description: "Exact provider/model reference." }),
+	Type.Object(
+		{
+			model: Type.String({ description: "Exact provider/model reference used when this entry is selected." }),
+			vendor: Type.Optional(Type.String({ description: "Model family owner (openai, zai, anthropic, ...). Inferred from the model id when omitted." })),
+			expensive: Type.Optional(Type.Boolean({ description: "Excluded from every role's selection while economy mode is on." })),
+			enabled: Type.Optional(Type.Boolean({ description: "false keeps the model recognized as frontier but never selects it." })),
+			aliases: Type.Optional(Type.Array(Type.String(), { description: "Glob patterns recognizing the same model under other refs, e.g. OpenRouter aliases." })),
+			roles: Type.Optional(Type.Array(Type.String(), { description: "Limit this entry to the listed sub-agent roles." })),
+		},
+		{ additionalProperties: false },
+	),
+]);
+
+// ---------------------------------------------------------------------------
 // Tool renderer (same shape as pix)
 // ---------------------------------------------------------------------------
 
@@ -333,6 +352,8 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		)),
 		lookupModel: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup." })),
 		lookupFallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered lookup model fallbacks tried after lookupModel." })),
+		frontierModels: Type.Optional(Type.Union([Type.Array(FrontierModelEntry), Type.Null()], { description: "Ordered frontier models used by frontier-selecting sub-agent roles (oracle, frontier-review, delivery-review). A layer's list replaces inherited entries; null restores the built-in list." })),
+		economy: Type.Optional(Type.Boolean({ description: "Economy mode: no sub-agent role selects a frontier model marked expensive. PI_TOOLS_SUITE_ECONOMY overrides it." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
 		telegramConnector: Type.Optional(TelegramConnectorConfig),
 		commentChecker: Type.Optional(CommentCheckerConfig),

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 
+import { defaultFrontierConfig, normalizeFrontierModels, type FrontierModelEntry } from "./async-subagents/core/frontier-models.js";
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "./default-pi-tools-suite-config.js";
 import { PI_TOOLS_SUITE_MODULE_CATALOG } from "./module-catalog.js";
 
@@ -16,6 +17,10 @@ export interface PiToolsSuiteConfig {
 	lookupModel?: string;
 	/** Ordered lookup fallbacks tried after lookupModel. Always present, even when empty. */
 	lookupFallbackModels: string[];
+	/** Ordered frontier models used by frontier-selecting sub-agent roles (oracle, reviews). */
+	frontierModels: FrontierModelEntry[];
+	/** Economy mode: expensive frontier models are excluded from automatic sub-agent selection. */
+	economy: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 }
 
@@ -36,6 +41,8 @@ type MutableConfig = {
 	todoThinkingOverrides: Map<string, TodoThinkingLevel>;
 	lookupModel: string | undefined;
 	lookupFallbackModels: string[];
+	frontierModels: FrontierModelEntry[];
+	economy: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 };
 
@@ -218,6 +225,13 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 	mergeTodoThinkingOverrides(config, raw.todoThinkingOverrides);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupFallbackModels")) config.lookupFallbackModels = normalizeModelList(raw.lookupFallbackModels);
+	if (Object.prototype.hasOwnProperty.call(raw, "frontierModels")) {
+		// A layer's list replaces the inherited one; null restores the built-in list.
+		config.frontierModels = raw.frontierModels === null
+			? defaultFrontierConfig().models
+			: normalizeFrontierModels(raw.frontierModels) ?? config.frontierModels;
+	}
+	if (typeof raw.economy === "boolean") config.economy = raw.economy;
 	mergeResourceRegistry(config, raw.resourceRegistry);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
@@ -264,6 +278,9 @@ function applyEnv(config: MutableConfig, env: Env, knownModules: ReadonlySet<str
 	addDisabled(config, env.PI_TOOLS_SUITE_DISABLED_MODULES, knownModules);
 	addDisabled(config, env.PI_TOOLS_SUITE_DISABLED_EXTENSIONS, knownModules);
 
+	const economy = boolFromEnv(env.PI_TOOLS_SUITE_ECONOMY);
+	if (economy !== undefined) config.economy = economy;
+
 	const todoThinking = boolFromEnv(env.PI_TOOLS_SUITE_TODO_THINKING);
 	if (todoThinking !== undefined) config.todoThinking = todoThinking;
 
@@ -288,6 +305,8 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinkingOverrides: new Map(DEFAULT_TODO_THINKING_OVERRIDES),
 		lookupModel: undefined,
 		lookupFallbackModels: [],
+		frontierModels: defaultFrontierConfig().models,
+		economy: false,
 		resourceRegistry: { branch: DEFAULT_RESOURCE_REGISTRY_BRANCH },
 	};
 	if (options.includeUserConfig !== false) {
@@ -312,6 +331,8 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinkingOverrides: Object.fromEntries(config.todoThinkingOverrides),
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
 		lookupFallbackModels: [...config.lookupFallbackModels],
+		frontierModels: config.frontierModels.map((entry) => ({ ...entry })),
+		economy: config.economy,
 		resourceRegistry: { ...config.resourceRegistry },
 	};
 }

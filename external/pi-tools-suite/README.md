@@ -7,7 +7,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
-- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, and each role owns its ordered model candidate list and optional parent-provider policy; includes a strict cross-provider `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
+- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, and each role owns its ordered model candidate list (or selects from the suite-level `frontierModels` list) and optional parent-vendor policy; includes a cross-vendor `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
@@ -757,28 +757,68 @@ model from its candidate list does not involve an LLM call.
 
 ### Role-owned candidates and parent-provider policy
 
-Each agent declares an ordered `models` list in Markdown. There is no global
-sub-agent preset or model-pool layer. Selection preserves role order, applies
+Each agent declares an ordered `models` list in Markdown, or `modelSelection:
+frontier` to take its candidates from the suite-level frontier list (see
+[Frontier models and economy mode](#frontier-models-and-economy-mode)). There is
+no other global sub-agent preset or model-pool layer. Selection preserves role order, applies
 `parentProviderPolicy`, checks runtime registration/auth/capability availability,
 and takes the first usable candidate. Remaining usable candidates form the quota
 fallback chain. No usable model, or an explicitly empty list, rejects the whole
 batch before child processes are created. A custom agent must declare candidates
 instead of silently inheriting the parent model.
 
-`parentProviderPolicy` supports `any` (default), `prefer-other`, and
-`require-other`. The bundled `oracle` uses `require-other`: the parent provider
-must be known, all same-provider candidates are removed from the initial and
-fallback chain, and a same-provider explicit override is rejected. This works
-with any number of providers; adding Anthropic or another provider only requires
-adding its model to the role's candidate list rather than defining a new oracle
-role or routing matrix.
+`parentProviderPolicy` supports `any` (default), `prefer-other`,
+`require-other`, and `require-other-if-frontier`. Despite the historical name,
+the policy compares model *vendors* (family owners inferred from the model id:
+`gpt-*` → openai, `glm-*` → zai, `claude-*` → anthropic, `gemini-*` → google,
+...; the provider id is the fallback), so `openai/gpt-6-astra`,
+`openai-codex/gpt-6-astra`, `github-copilot/gpt-6-astra` and OpenRouter refs are
+one vendor, and the parent's own model is never an "other" candidate.
+`require-other` needs a known parent, removes every same-vendor candidate from the
+initial and fallback chain, and rejects same-vendor explicit overrides and
+`--provider` extra args. `require-other-if-frontier` applies `require-other` for
+a frontier parent and `prefer-other` otherwise.
+
+### Frontier models and economy mode
+
+Frontier models are named once in `pi-tools-suite.jsonc`; roles with
+`modelSelection: frontier` (bundled `oracle`, `frontier-review`,
+`delivery-review`) take candidates from this ordered list, so a new frontier
+release is a config edit:
+
+```jsonc
+{
+  "frontierModels": [
+    { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
+    { "model": "openai-codex/gpt-6-sol", "expensive": true, "aliases": ["*gpt-6-sol*"] },
+    { "model": "zai/glm-5.3" }
+  ],
+  "economy": false
+}
+```
+
+- `oracle` (`require-other-if-frontier`): a frontier GLM parent gets frontier GPT,
+  a frontier non-GLM parent gets frontier GLM (or the first other-vendor entry),
+  and a non-frontier parent gets any frontier model, other vendors first.
+- `frontier-review` (`forParentTier: non-frontier`) is hidden for frontier
+  parents; `delivery-review` stays available to all parents.
+- Entry fields: `vendor` (override inference), `expensive`, `enabled: false`
+  (still recognized as frontier, never selected), `aliases` (globs recognizing
+  the same model under other refs, e.g. OpenRouter), `roles` (limit an entry to
+  listed roles). A later config layer's list replaces the inherited one; `null`
+  restores the built-in list.
+- `economy: true` (or `PI_TOOLS_SUITE_ECONOMY=1`) excludes `expensive` frontier
+  models from every role's automatic selection and rejects explicit overrides to
+  them; only the forced current parent model is exempt. Config is re-read on each
+  spawn, so toggling needs no restart. When nothing qualifies, spawn fails with
+  the excluded models named, and a cross-vendor role is hidden from the catalog.
 
 Image-bearing tasks and `ui-qa` require confirmed image support; configured
 blind-model masks override runtime image metadata. Session quota state removes
 exhausted models/providers from the already-resolved chain. The fallback layer
 itself does not impose provider diversity; that constraint belongs to the role.
 Explicit task/CLI model overrides and `FORCE_CURRENT_MODEL` suppress automatic
-fallback candidates, but do not bypass image checks or `require-other`.
+fallback candidates, but do not bypass image checks, economy mode, or `require-other`.
 
 Projects customize model economics by replacing the relevant
 `.pi/agents/<role>.md` candidate list. There is no `.pi/agents/presets.jsonc`,

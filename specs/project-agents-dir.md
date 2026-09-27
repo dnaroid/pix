@@ -1,7 +1,7 @@
 # Project-local sub-agents from `.pi/agents/*.md` (delta spec)
 
 > Risk classes: **config loading / sub-agent spawn surface**. Extends the
-> async-subagents config pipeline, with an opt-in cross-provider runtime
+> async-subagents config pipeline, with an opt-in cross-vendor runtime
 > model-selection invariant for strict roles.
 >
 > Status: implemented and current. Re-verify against code before relying on
@@ -58,7 +58,8 @@ modelByParent:
     fallbackModels: [zai/glm-5.3]
 forParentModels: [zai/*, openai-codex/*]
 notForParentModels: [openai-codex/gpt-6-sol*]
-parentProviderPolicy: require-other # any | prefer-other | require-other
+forParentTier: non-frontier # frontier | non-frontier
+parentProviderPolicy: require-other # any | prefer-other | require-other | require-other-if-frontier
 ---
 
 You are a ... role prompt (markdown body).
@@ -66,8 +67,9 @@ You are a ... role prompt (markdown body).
 
 - Frontmatter keys: `name` (must match the filename if present; mismatch is an
   error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
-  `models`, legacy `fallbackModels`/`modelByParent`, `forParentModels`,
-  `notForParentModels`, `parentProviderPolicy`, deprecated
+  `models`, `modelSelection`, legacy `fallbackModels`/`modelByParent`,
+  `forParentModels`, `notForParentModels`, `forParentTier`,
+  `parentProviderPolicy`, deprecated
   `requireDifferentProvider`, `thinking`, `tools`, `extraArgs`,
   `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`).
   Unknown keys are rejected (typo safety; the JSONC config path stays lenient).
@@ -75,14 +77,22 @@ You are a ... role prompt (markdown body).
   `notForParentModels` is an optional deny-list and wins on overlap. These gates
   filter the role from the parent catalog and router/explicit-role validation;
   they do not select the child model.
-- `parentProviderPolicy` defaults to `any`. `prefer-other` stable-partitions
-  other-provider candidates ahead of candidates from the parent provider.
-  `require-other` is a hard runtime boundary: a known permitted parent provider
-  must exist and every candidate, including explicit task/CLI/forced overrides
-  and quota fallbacks, must differ from that provider. An unavailable or empty
-  cross-provider chain fails before spawn rather than falling back to the parent.
-  The bundled `oracle` uses `require-other`; one role works for any number of
-  providers. `requireDifferentProvider: true` remains a compatibility alias for
+- `modelSelection: frontier` takes candidates from the suite config's
+  `frontierModels` list instead of `models` (they are mutually exclusive in one
+  file; a project file with `models` replaces an inherited `modelSelection`).
+  `forParentTier` exposes a role only to frontier or non-frontier parents.
+- `parentProviderPolicy` defaults to `any` and compares model vendors
+  (family owners inferred from the model id, provider id as fallback), not
+  provider strings. `prefer-other` stable-partitions other-vendor candidates
+  ahead of same-vendor ones and the parent's own model. `require-other` is a
+  hard runtime boundary: a known permitted parent must exist and every
+  candidate, including explicit task/CLI/forced overrides and quota fallbacks,
+  must be another vendor and not the parent's model; `--provider` extra args are
+  rejected. An unavailable or empty cross-vendor chain fails before spawn rather
+  than falling back to the parent. `require-other-if-frontier` is
+  `require-other` for frontier (or unknown) parents and `prefer-other`
+  otherwise; the bundled `oracle` uses it with `modelSelection: frontier`.
+  `requireDifferentProvider: true` remains a compatibility alias for
   `parentProviderPolicy: require-other`.
 - Supported YAML subset (bounded, dependency-free parser): plain/quoted scalars,
   numbers, booleans, `#` comments (full-line and trailing), inline arrays

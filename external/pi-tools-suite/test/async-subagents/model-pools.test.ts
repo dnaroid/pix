@@ -35,23 +35,25 @@ afterEach(() => {
 });
 
 describe("role-owned model candidates", () => {
-	test("ships one oracle role with a strict cross-provider policy", () => {
+	test("ships one oracle role selecting from the frontier list with a cross-vendor policy", () => {
 		const config = loadSubagentConfig(temp(), {});
 		expect(Object.keys(config.types).sort()).toEqual([
 			"delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify",
 		]);
-		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
-		expect(config.types.oracle.parentProviderPolicy).toBe("require-other");
+		expect(config.types.oracle.models).toBeUndefined();
+		expect(config.types.oracle.modelSelection).toBe("frontier");
+		expect(config.types.oracle.parentProviderPolicy).toBe("require-other-if-frontier");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- oracle:");
 
-		const fromOpenAi = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "openai-codex/gpt-6-luna" });
-		expect(fromOpenAi.task.model).toBe("zai/glm-5.3");
-		expect(fromOpenAi.fallbackModels).toEqual([]);
+		// Non-frontier parent: other-vendor frontier first, same-vendor frontier after.
+		const fromLuna = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "openai-codex/gpt-6-luna" });
+		expect(fromLuna.task.model).toBe("zai/glm-5.3");
+		expect(fromLuna.fallbackModels).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol"]);
 
-		const fromZai = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "zai/glm-5-turbo" });
-		expect(fromZai.task.model).toBe("openai-codex/gpt-6-astra");
-		expect(fromZai.fallbackModels).toEqual([]);
-		expect(() => resolveAgentTaskConfig(task("oracle"), config)).toThrow(/parent provider/i);
+		const fromTurbo = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "zai/glm-5-turbo" });
+		expect(fromTurbo.task.model).toBe("openai-codex/gpt-6-astra");
+		expect(fromTurbo.fallbackModels).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
+		expect(() => resolveAgentTaskConfig(task("oracle"), config)).toThrow(/parent model/i);
 	});
 
 	test("require-other is N-provider and preserves configured order after filtering", () => {
@@ -76,7 +78,7 @@ describe("role-owned model candidates", () => {
 			{ ...task("independent"), model: "anthropic/forced" },
 			config,
 			{ parentModel: "anthropic/parent" },
-		)).toThrow(/cross-provider/i);
+		)).toThrow(/cross-vendor/i);
 		expect(resolveAgentTaskConfig(
 			{ ...task("independent"), model: "zai/forced" },
 			config,

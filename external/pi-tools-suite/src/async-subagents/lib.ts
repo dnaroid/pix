@@ -13,7 +13,9 @@ export type {
 } from "./core/types.js";
 
 export { createRunDir, getRunRoot, hasAgentPrompt, hasLaunchedAgentPrompt, hasQueuedAgentPrompt, resolveRunDir, validateBasename } from "./core/paths.js";
-export type { ModelByParentEntry, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
+export type { ModelByParentEntry, ParentProviderPolicy, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
+export type { FrontierConfig, FrontierModelEntry } from "./core/frontier-models.js";
+export { DEFAULT_FRONTIER_MODELS, isFrontierModel, isSameModel, modelVendor } from "./core/frontier-models.js";
 export {
 	currentModelRef,
 	defaultSubagentType,
