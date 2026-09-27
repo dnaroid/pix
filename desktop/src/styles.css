@@ -1,8 +1,20 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Native desktop type scale: 12px chrome, 13px body, 14px prose, 16/18 headings. */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-xl: 18px;
+  --text-xl--line-height: 24px;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -65,10 +77,12 @@
   --color-thinking-xhigh: var(--thinking-xhigh);
   --color-thinking-max: var(--thinking-max);
 
-  --radius-sm: calc(var(--radius) - 6px);
-  --radius-md: calc(var(--radius) - 4px);
-  --radius-lg: calc(var(--radius) - 2px);
-  --radius-xl: var(--radius);
+  /* Editor geometry: controls stay nearly square, floating surfaces barely soften. */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
   --radius-2xl: calc(var(--radius) + 4px);
 
   --shadow-xs: var(--theme-shadow-xs);
@@ -76,11 +90,14 @@
 }
 
 :root {
-  font-family: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   color: var(--foreground);
   background: var(--background);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 
   /* Claude+ — https://tweakcn.com/themes/cmdght103000n04lh3e2ae93r */
   --background: #faf9f5;
@@ -110,9 +127,9 @@
   --sidebar-accent: #e9e6dc;
   --sidebar-accent-foreground: #343434;
   --sidebar-border: #ebebeb;
-  --radius: 0.625rem;
+  --radius: 6px;
   --theme-shadow-xs: 0 1px 2px rgb(0 0 0 / 0.08);
-  --theme-shadow-md: 0 10px 28px rgb(61 57 41 / 0.10);
+  --theme-shadow-md: 0 6px 16px rgb(61 57 41 / 0.12), 0 0 0 1px rgb(61 57 41 / 0.04);
 
   /* Desktop workbench roles: connected chrome, panes, chat and code surfaces. */
   --window-titlebar: #ececec;
@@ -203,7 +220,7 @@
     --sidebar-accent-foreground: #f0f2f5;
     --sidebar-border: #303640;
     --theme-shadow-xs: 0 1px 2px rgb(0 0 0 / 0.30);
-    --theme-shadow-md: 0 12px 28px rgb(0 0 0 / 0.34);
+    --theme-shadow-md: 0 6px 18px rgb(0 0 0 / 0.42);
     --window-titlebar: #1b1b1b;
     --chrome: #11141a;
     --chrome-foreground: #cbd1da;
@@ -251,7 +268,7 @@
   min-width: 32px;
   min-height: 32px;
   border: 3px solid transparent;
-  border-radius: var(--radius);
+  border-radius: 999px;
   background-color: color-mix(in srgb, var(--muted-foreground) 38%, transparent);
   background-clip: padding-box;
 }
@@ -261,11 +278,17 @@
 *::-webkit-scrollbar-thumb:active {
   background-color: color-mix(in srgb, var(--muted-foreground) 72%, transparent);
 }
+/* Keep rem at 16px so spacing utilities are unchanged; only the text default is native. */
+body {
+  font-size: 13px;
+  line-height: 1.4;
+}
 html, body, #app {
   width: 100%;
   height: 100%;
   margin: 0;
   overflow: hidden;
+  overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
@@ -310,18 +333,24 @@ html, body, #app {
   -webkit-user-select: none;
   user-select: none;
 }
-button, textarea, select, input { font: inherit; }
-button { white-space: nowrap; }
-button, select, textarea, input { letter-spacing: inherit; }
-textarea { resize: none; }
-:where(
-  button:not(:disabled),
-  select:not(:disabled),
-  input:is([type="checkbox"], [type="radio"]):not(:disabled),
-  a[href],
-  summary
-) {
-  cursor: pointer;
+/*
+ * Element defaults live in the base layer so component utilities (text-xs,
+ * whitespace-*, cursor-*) always win; unlayered rules would silently override
+ * every Tailwind utility on buttons and inputs.
+ *
+ * Native desktop controls keep the arrow cursor: the pointing hand is a web
+ * hyperlink affordance and is reserved for real links.
+ */
+@layer base {
+  button, textarea, select, input { font: inherit; color: inherit; }
+  button { white-space: nowrap; }
+  button, select, textarea, input { letter-spacing: inherit; }
+  textarea { resize: none; }
+  :where(button, select, summary, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"]) {
+    cursor: default;
+  }
+  :where(a[href]) { cursor: pointer; }
+  :where(img, svg, a) { -webkit-user-drag: none; }
 }
 /*
  * Desktop keyboard focus should stay discoverable without looking like a

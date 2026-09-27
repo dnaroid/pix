@@ -120,7 +120,7 @@
         {#if custom}
           <div class="flex items-center gap-2 rounded-md border border-border bg-background p-2">
             <input
-              class="h-8 w-10 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0.5"
+              class="h-8 w-10 shrink-0 rounded border border-border bg-transparent p-0.5"
               type="color"
               value={pickerColor(draftColor)}
               aria-label="Choose project color"

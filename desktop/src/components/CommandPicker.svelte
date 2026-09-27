@@ -102,7 +102,7 @@
         <h2 id="command-picker-title" class="mt-1 text-sm font-medium text-foreground">{picker.title}</h2>
       </div>
       <button
-        class="grid h-7 w-7 cursor-pointer place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        class="grid h-7 w-7 place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
         type="button"
         aria-label="Close command picker"
         onclick={onClose}
@@ -129,7 +129,7 @@
       {#each filteredItems as item, index (item.id ?? `${index}:${item.value}`)}
         <button
           class={[
-            "grid w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+            "grid w-full grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
             index === selectedIndex && "bg-accent text-accent-foreground",
           ]}
           type="button"

@@ -29,7 +29,7 @@
 </script>
 
 <details class="border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
-  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+  <summary class="flex h-8 list-none items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
     <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />Repository tools
   </summary>
   <div class="space-y-3 px-2 pb-3">

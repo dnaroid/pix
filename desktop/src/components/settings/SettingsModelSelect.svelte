@@ -120,7 +120,7 @@
 <div bind:this={root} class="relative" onfocusout={handleFocusOut}>
   <button
     bind:this={trigger}
-    class="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md border border-input bg-panel-strong py-0 pr-2 pl-2 text-left text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-55"
+    class="flex h-7 w-full items-center gap-1.5 rounded-md border border-input bg-panel-strong py-0 pr-2 pl-2 text-left text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-55"
     type="button"
     aria-label={ariaLabel}
     aria-haspopup="listbox"
@@ -161,7 +161,7 @@
         {#each filteredOptions as option, index (option.value)}
           <button
             class={[
-              "grid min-h-8 w-full cursor-pointer grid-cols-[16px_16px_minmax(0,1fr)] items-center gap-1.5 rounded-md px-1.5 py-1 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              "grid min-h-8 w-full grid-cols-[16px_16px_minmax(0,1fr)] items-center gap-1.5 rounded-md px-1.5 py-1 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               index === selectedIndex && "bg-accent text-accent-foreground",
             ]}
             type="button"

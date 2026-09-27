@@ -76,7 +76,7 @@
           selected ? "bg-code text-foreground" : "text-muted-foreground hover:bg-chrome-hover hover:text-foreground",
         ]}>
           <button
-            class="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 px-2 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            class="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             type="button"
             role="tab"
             aria-selected={selected}
@@ -87,7 +87,7 @@
             <span class="min-w-0 flex-1 truncate font-mono text-xs">{terminal.script}</span>
           </button>
           <button
-            class="mr-0.5 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100"
+            class="mr-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100"
             type="button"
             title="Close terminal"
             aria-label={`Close ${terminal.script} terminal`}
@@ -104,7 +104,7 @@
           title={packageTerminalStatusLabel(activeTerminal)}
         >{packageTerminalStatusLabel(activeTerminal)}</span>
         <button
-          class="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
+          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
           type="button"
           title="Restart terminal"
           aria-label="Restart terminal"
@@ -112,7 +112,7 @@
           onclick={() => void onRestartTerminal(activeTerminal)}
         ><RotateCw class={["h-3.5 w-3.5", terminalActionId === activeTerminal.id ? "animate-spin" : ""]} aria-hidden="true" /></button>
         <button
-          class="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-30"
+          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-30"
           type="button"
           title="Stop terminal"
           aria-label="Stop terminal"
@@ -123,7 +123,7 @@
     {/if}
 
     <button
-      class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
+      class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
       type="button"
       title="New terminal"
       aria-label="Open new terminal"

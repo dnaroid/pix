@@ -101,7 +101,7 @@
     {#if modelThinking.currentModel}
       <button
         class={[
-          "flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm bg-transparent px-1 transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+          "flex h-6 min-w-0 items-center gap-1.5 rounded-sm bg-transparent px-1 transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
           modelThinkingOpen && "bg-chrome-hover",
         ]}
         type="button"

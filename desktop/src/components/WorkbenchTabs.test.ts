@@ -79,8 +79,8 @@ describe("WorkbenchTabs desktop interaction", () => {
   });
 
   it("matches every tab's intrinsic preferred width to its flex basis", () => {
-    expect(source).toContain("min-w-[120px] w-[220px] flex-[0_1_220px]");
-    expect(source).toContain("max-[760px]:w-[200px] max-[760px]:basis-[200px]");
+    expect(source).toContain("min-w-[120px] w-[200px] flex-[0_1_200px]");
+    expect(source).toContain("max-[760px]:w-[180px] max-[760px]:basis-[180px]");
     expect(source).not.toContain("max-w-[240px]");
   });
 

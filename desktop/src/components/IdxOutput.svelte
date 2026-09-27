@@ -88,7 +88,7 @@
         {segment.text}
       {:else if validationStates[segment.path] === "valid"}
         <button
-          class="inline cursor-pointer rounded-sm p-0 font-mono text-tool-search underline decoration-tool-search/40 underline-offset-2 hover:bg-panel-hover hover:decoration-tool-search focus-visible:outline-2 focus-visible:outline-ring"
+          class="inline rounded-sm p-0 font-mono text-tool-search underline decoration-tool-search/40 underline-offset-2 hover:bg-panel-hover hover:decoration-tool-search focus-visible:outline-2 focus-visible:outline-ring"
           type="button"
           title={linkTitle(segment.path, segment.range)}
           onclick={() => void onOpenProjectFile(segment.path, segment.range)}

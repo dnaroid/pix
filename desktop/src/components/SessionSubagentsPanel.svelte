@@ -68,7 +68,7 @@
 </script>
 
 <details bind:this={details} class="group border-b border-border" ontoggle={noteToggle}>
-  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2.5 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+  <summary class="flex h-8 list-none items-center gap-1.5 px-2.5 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <Workflow class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     <span class="font-semibold text-foreground">Agents</span>
     <span class="ml-auto font-mono tabular-nums text-muted-foreground">{activeCount} active</span>

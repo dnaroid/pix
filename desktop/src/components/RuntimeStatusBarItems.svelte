@@ -211,7 +211,7 @@
     {#if status?.context || status?.dcpTokensSaved !== undefined}
       <div class="group relative col-start-1 shrink-0 justify-self-start" data-runtime-context>
         <button
-          class="flex h-6 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          class="flex h-6 items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
           aria-label={contextTitle()}
           aria-haspopup="dialog"
@@ -275,7 +275,7 @@
                   {/if}
               </div>
               <button
-                class="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border border-border bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
+                class="flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-border bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
                 type="button"
                 title={compressionTitle()}
                 aria-label="Compress stale context with DCP"
@@ -351,7 +351,7 @@
     {#if sessionUsageAvailable || status?.modelUsage}
       <div class="relative col-start-3 shrink-0 justify-self-end">
         <button
-          class="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          class="flex h-6 min-w-0 items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
           title="Session usage and cost"
           aria-label="Session usage and cost"

@@ -78,7 +78,7 @@
 
 <div class="relative">
 <details bind:this={details} class="group border-b border-border" ontoggle={noteToggle}>
-  <summary class="flex h-8 cursor-pointer list-none items-center gap-1.5 px-2.5 pr-9 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+  <summary class="flex h-8 list-none items-center gap-1.5 px-2.5 pr-9 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ListChecks class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     <span class="font-semibold text-foreground">Plan</span>
     <span class="ml-auto font-mono tabular-nums text-muted-foreground">{summary.completedTodos}/{summary.totalTodos} tasks</span>

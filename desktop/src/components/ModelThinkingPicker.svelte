@@ -330,13 +330,13 @@
       </div>
       <div class="flex shrink-0 items-center gap-1">
         <button
-          class="h-7 cursor-pointer rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="h-7 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           disabled={applying || savingVisibility}
           onclick={toggleVisibilityMode}
         >{visibilityMode ? "Select" : "Manage"}</button>
         <button
-          class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           aria-label="Close model and thinking picker"
           onclick={onClose}
@@ -364,7 +364,7 @@
       {#each filteredModels as model, index (model.ref)}
         <button
           class={[
-            "grid w-full cursor-pointer grid-cols-[22px_16px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+            "grid w-full grid-cols-[22px_16px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
             (!visibilityMode && model.ref === selectedModelRef) || (visibilityMode && index === selectedIndex) ? "bg-panel-selected" : "",
           ]}
           type="button"
@@ -423,7 +423,7 @@
         {#each selectedModel?.thinkingLevels ?? ["off"] as level, index (level)}
           <button
             class={[
-              "h-7 cursor-pointer rounded-sm border px-2.5 text-xs font-medium transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              "h-7 rounded-sm border px-2.5 text-xs font-medium transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
               selectedThinking === level ? "border-input bg-panel-selected" : "border-transparent bg-transparent",
               modelDisplayToneClass(thinkingLevelTone(level, selectedModel?.thinkingLevels ?? ["off"])),
             ]}
@@ -456,24 +456,24 @@
       </p>
       <div class="flex shrink-0 items-center gap-1.5">
         {#if visibilityMode}<button
-          class="h-7 cursor-pointer rounded-md px-2.5 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="h-7 rounded-md px-2.5 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           disabled={disabled || applying || savingVisibility}
           onclick={() => void clearVisibleModels()}
         >Clear all</button>{/if}
         {#if !visibilityMode}<button
-          class="h-7 cursor-pointer rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="h-7 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           disabled={disabled || applying || savingDefault || !selectedModel || selectedIsDefault}
           onclick={() => void setDefaultSelection()}
         >{savingDefault ? "Saving…" : selectedIsDefault ? "Default ✓" : "Set default"}</button>{/if}
         <button
-          class="h-7 cursor-pointer rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="h-7 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           onclick={onClose}
         >{visibilityMode ? "Done" : "Cancel"}</button>
         {#if !visibilityMode}<button
-          class="h-7 cursor-pointer rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="h-7 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           disabled={!dirty || disabled || applying || !selectedModel}
           onclick={() => void applySelection()}

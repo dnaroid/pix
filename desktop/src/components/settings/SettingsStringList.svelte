@@ -38,7 +38,7 @@
         oninput={(event) => updateAt(index, (event.currentTarget as HTMLInputElement).value)}
       />
       <button
-        class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
         type="button"
         aria-label={`Remove item ${index + 1}`}
         title="Remove"
@@ -47,7 +47,7 @@
     </div>
   {/each}
   <button
-    class="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+    class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
     type="button"
     onclick={() => onChange([...value, ""])}
   ><Plus class="h-3.5 w-3.5" aria-hidden="true" />{addLabel}</button>

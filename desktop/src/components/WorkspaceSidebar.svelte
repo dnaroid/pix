@@ -551,20 +551,22 @@
 
   {#if !layoutController.collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
-      <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome pl-3 pr-1">
-        <strong class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold">{activeTabTitle}</strong>
+      <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-sidebar pl-3 pr-1">
+        <strong class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold tracking-wide text-muted-foreground uppercase">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
           <span class="shrink-0 text-xs text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
           <button
-            class="ml-auto flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
+            title="Add task"
+            aria-label="Add task"
             onclick={openCreate}
             disabled={!workspace || busy}
-          ><Plus class="h-3 w-3" aria-hidden="true" />Add</button>
+          ><Plus class="h-3.5 w-3.5" aria-hidden="true" /></button>
         {:else if activeTab === "project"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title="Project settings"
               aria-label="Project settings"
@@ -572,7 +574,7 @@
               disabled={!workspace}
             ><SlidersHorizontal class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title={`Open project in ${externalEditorLabel}`}
               aria-label={`Open project in ${externalEditorLabel}`}
@@ -580,7 +582,7 @@
               disabled={!workspace}
             ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title="Refresh project files"
               aria-label="Refresh project files"
@@ -591,7 +593,7 @@
         {:else if activeTab === "registry"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title="Configure registry"
               aria-label="Configure registry"
@@ -599,7 +601,7 @@
               disabled={!registryReady || registryActionId !== null}
             ><Settings class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title="Refresh registry"
               aria-label="Refresh registry"
@@ -609,7 +611,7 @@
           </div>
         {/if}
         <button
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
           type="button"
           title={`Close ${activeTabTitle}`}
           aria-label={`Close ${activeTabTitle}`}

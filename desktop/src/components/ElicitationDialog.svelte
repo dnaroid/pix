@@ -59,11 +59,11 @@
           <ChevronDown class="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         </div>
       {:else if field.type === "boolean"}
-        <span class="mt-0.5 inline-flex cursor-pointer items-center gap-2">
+        <span class="mt-0.5 inline-flex items-center gap-2">
           <span class="relative grid size-4 shrink-0 place-items-center">
             <input
               bind:this={fieldControl}
-              class="peer size-4 cursor-pointer appearance-none rounded-sm border border-input bg-panel-strong transition-colors hover:border-ring checked:border-primary checked:bg-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+              class="peer size-4 appearance-none rounded-sm border border-input bg-panel-strong transition-colors hover:border-ring checked:border-primary checked:bg-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
               type="checkbox"
               aria-label={field.label}
               checked={Boolean(field.value)}

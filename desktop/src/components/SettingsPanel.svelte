@@ -176,7 +176,7 @@
   <div class="flex h-9 items-end border-b border-sidebar-border bg-chrome px-1.5">
     <button
       class={[
-        "h-8 cursor-pointer border-b-2 px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+        "h-8 border-b-2 px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
         activeKind === "desktop" ? "border-b-primary bg-panel-selected text-foreground" : "border-b-transparent text-muted-foreground hover:bg-chrome-hover hover:text-foreground",
       ]}
       type="button"
@@ -184,7 +184,7 @@
     >Desktop</button>
     <button
       class={[
-        "h-8 cursor-pointer border-b-2 px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+        "h-8 border-b-2 px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
         activeKind === "pi-tools-suite" ? "border-b-primary bg-panel-selected text-foreground" : "border-b-transparent text-muted-foreground hover:bg-chrome-hover hover:text-foreground",
       ]}
       type="button"
@@ -192,7 +192,7 @@
     >Tools Suite</button>
     <div class="ml-auto flex h-8 items-center">
       <button
-        class="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         type="button"
         title="Reload settings from disk"
         aria-label="Reload settings from disk"
@@ -233,7 +233,7 @@
             <div class="min-w-0">
               <h2 class="text-xs font-semibold text-foreground">JSONC needs repair</h2>
               <p class="mt-1 text-xs leading-4 text-muted-foreground">The structured editor is disabled until the config parses. Open Advanced to repair the source without losing comments.</p>
-              <button class="mt-2 h-7 cursor-pointer rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={openAdvanced}>Open Advanced JSONC</button>
+              <button class="mt-2 h-7 rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={openAdvanced}>Open Advanced JSONC</button>
             </div>
           </div>
         </div>
@@ -269,7 +269,7 @@
     <div class="flex items-center gap-2">
       <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">Changes may require a new or reloaded session.</span>
       <button
-        class="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         type="button"
         onclick={() => void save()}
         disabled={!active || !dirty || issues.length > 0 || saving}

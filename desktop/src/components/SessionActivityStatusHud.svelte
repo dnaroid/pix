@@ -126,7 +126,7 @@
       <div class="group relative">
         <button
           class={[
-            "grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-transparent transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+            "grid h-6 w-6 place-items-center rounded-sm bg-transparent transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             subagentStatusTone(indicator.agent.status),
           ]}
           type="button"
@@ -187,7 +187,7 @@
 
     {#if hiddenAgentCount > 0}
       <button
-        class="h-6 cursor-pointer rounded-sm bg-transparent px-1 font-mono text-xs leading-none tabular-nums text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+        class="h-6 rounded-sm bg-transparent px-1 font-mono text-xs leading-none tabular-nums text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
         type="button"
         aria-label={"Open session activity. " + hiddenAgentCount + " more active " + (hiddenAgentCount === 1 ? "subagent" : "subagents")}
         onclick={onOpenSessionActivity}
@@ -200,7 +200,7 @@
       <div class="group relative">
         <button
           class={[
-            "flex h-6 cursor-pointer items-center gap-0.5 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+            "flex h-6 items-center gap-0.5 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             activityToneClass(),
           ]}
           type="button"
