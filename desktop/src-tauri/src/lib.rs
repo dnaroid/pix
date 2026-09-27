@@ -69,6 +69,7 @@ const MAX_USER_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_IDX_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_IDX_LOG_BYTES: usize = 256 * 1024;
 const IDX_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_IDX_CONFIG_BYTES: u64 = 64 * 1024;
 const IDX_QUERY_TIMEOUT: Duration = Duration::from_secs(180);
 const IDX_OPERATION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const IDX_STOP_GRACE: Duration = Duration::from_secs(2);
@@ -479,6 +480,12 @@ struct IdxParsedStatus {
     raw: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum IdxEmbeddingProvider {
+    OpenRouter,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct IdxOverview {
@@ -486,6 +493,7 @@ struct IdxOverview {
     executable: Option<String>,
     version: Option<String>,
     initialized: bool,
+    embedding_provider: Option<IdxEmbeddingProvider>,
     index_status: Option<IdxParsedStatus>,
     raw_status: String,
     errors: Vec<String>,
@@ -5546,12 +5554,28 @@ fn interrupt_idx_process(process_id: u32) {
     }
 }
 
+/// Expose only the OpenRouter embedding provider from the project-local IDX config.
+/// Missing, oversized, malformed and other-provider configurations report none so the
+/// panel never guesses an embedding flag.
+fn idx_embedding_provider_from(root: &Path) -> Option<IdxEmbeddingProvider> {
+    let path = root.join(".indexer-cli").join("config.json");
+    let metadata = fs::metadata(&path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_IDX_CONFIG_BYTES {
+        return None;
+    }
+    let bytes = fs::read(&path).ok()?;
+    let config: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let provider = config.get("embeddingProvider")?.as_str()?.trim();
+    (provider == "openrouter").then_some(IdxEmbeddingProvider::OpenRouter)
+}
+
 fn idx_overview_from(
     workspace: &Path,
     launcher: Result<IdxLauncher, String>,
 ) -> Result<IdxOverview, String> {
     let root = canonical_workspace(workspace)?;
     let initialized = root.join(".indexer-cli").is_dir();
+    let embedding_provider = idx_embedding_provider_from(&root);
     let launcher = match launcher {
         Ok(launcher) => launcher,
         Err(error) => {
@@ -5560,6 +5584,7 @@ fn idx_overview_from(
                 executable: None,
                 version: None,
                 initialized,
+                embedding_provider,
                 index_status: None,
                 raw_status: String::new(),
                 errors: vec![error],
@@ -5585,6 +5610,7 @@ fn idx_overview_from(
             executable: Some(launcher.display_path().to_string_lossy().into_owned()),
             version,
             initialized: false,
+            embedding_provider,
             index_status: None,
             raw_status: String::new(),
             errors,
@@ -5620,6 +5646,7 @@ fn idx_overview_from(
         executable: Some(launcher.display_path().to_string_lossy().into_owned()),
         version,
         initialized: true,
+        embedding_provider,
         raw_status: index_status
             .as_ref()
             .map_or(String::new(), |status| status.raw.clone()),
@@ -10124,6 +10151,57 @@ mod tests {
             Some("completed")
         );
         assert_eq!(overview.version.as_deref(), Some("2.0.7"));
+        assert_eq!(overview.embedding_provider, None);
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn idx_overview_reports_embedding_provider_from_project_config() {
+        let workspace = temporary_workspace("idx-embedding-provider");
+        let config_dir = workspace.join(".indexer-cli");
+        let config = config_dir.join("config.json");
+        let overview = || idx_overview_from(&workspace, Err("idx unavailable".to_owned()));
+
+        let unconfigured = overview().expect("unconfigured overview");
+        assert_eq!(unconfigured.embedding_provider, None);
+
+        fs::create_dir_all(&config_dir).expect("create indexer config directory");
+        fs::write(
+            &config,
+            r#"{"version":"2.0.10","embeddingProvider":"openrouter"}"#,
+        )
+        .expect("write openrouter config");
+        assert_eq!(
+            overview().expect("openrouter overview").embedding_provider,
+            Some(IdxEmbeddingProvider::OpenRouter)
+        );
+
+        for content in [
+            r#"{"version":"2.0.10"}"#,
+            r#"{"embeddingProvider":"ollama"}"#,
+            r#"{"embeddingProvider":7}"#,
+            "{ not json",
+        ] {
+            fs::write(&config, content).expect("write config");
+            assert_eq!(
+                overview()
+                    .unwrap_or_else(|error| panic!("overview for {content}: {error}"))
+                    .embedding_provider,
+                None,
+                "unexpected provider reported for config {content}"
+            );
+        }
+
+        fs::write(
+            &config,
+            format!(r#"{{"embeddingProvider":"{}"}}"#, "x".repeat(70_000)),
+        )
+        .expect("write oversized config");
+        assert_eq!(
+            overview().expect("oversized overview").embedding_provider,
+            None
+        );
+
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyIdxOverviewToOpenrouterEmbeddings,
   idxAuditPaths,
+  idxOpenrouterEmbeddingsDefault,
   idxValidAuditPaths,
   idxNumericField,
   idxOutputSegments,
   reconcileIdxOperationSnapshot,
+  resetIdxOpenrouterEmbeddings,
+  setIdxOpenrouterEmbeddings,
   type IdxOperationSnapshot,
+  type IdxOverview,
   type IdxParsedStatus,
 } from "./idx";
 
@@ -80,6 +85,69 @@ describe("idx helpers", () => {
     expect(reconcileIdxOperationSnapshot(completed, staleRefresh)).toEqual(completed);
   });
 });
+
+describe("idx OpenRouter embeddings checkbox", () => {
+  it("defaults checked only when the workspace overview reports the openrouter provider", () => {
+    expect(idxOpenrouterEmbeddingsDefault(overview("openrouter"))).toBe(true);
+    expect(idxOpenrouterEmbeddingsDefault(overview("ollama"))).toBe(false);
+    expect(idxOpenrouterEmbeddingsDefault(overview(undefined))).toBe(false);
+    expect(idxOpenrouterEmbeddingsDefault(undefined)).toBe(false);
+  });
+
+  it("applies the provider-derived default from workspace-scoped overview refreshes", () => {
+    let state = resetIdxOpenrouterEmbeddings();
+    expect(state.checked).toBe(false);
+
+    state = applyIdxOverviewToOpenrouterEmbeddings(state, undefined);
+    expect(state.checked).toBe(false);
+
+    state = applyIdxOverviewToOpenrouterEmbeddings(state, overview("openrouter"));
+    expect(state.checked).toBe(true);
+
+    state = applyIdxOverviewToOpenrouterEmbeddings(state, overview(undefined));
+    expect(state.checked).toBe(false);
+  });
+
+  it("preserves manual edits across overview refreshes in the same workspace", () => {
+    let state = applyIdxOverviewToOpenrouterEmbeddings(
+      resetIdxOpenrouterEmbeddings(),
+      overview("openrouter"),
+    );
+    expect(state.checked).toBe(true);
+
+    state = setIdxOpenrouterEmbeddings(state, false);
+    state = applyIdxOverviewToOpenrouterEmbeddings(state, overview("openrouter"));
+    expect(state).toEqual({ checked: false, manual: true });
+
+    state = setIdxOpenrouterEmbeddings(state, true);
+    state = applyIdxOverviewToOpenrouterEmbeddings(state, overview(undefined));
+    expect(state).toEqual({ checked: true, manual: true });
+  });
+
+  it("resets manual edits when the workspace changes and re-derives from the new overview", () => {
+    let state = setIdxOpenrouterEmbeddings(
+      applyIdxOverviewToOpenrouterEmbeddings(resetIdxOpenrouterEmbeddings(), overview("openrouter")),
+      false,
+    );
+
+    state = resetIdxOpenrouterEmbeddings();
+    expect(state).toEqual({ checked: false, manual: false });
+
+    state = applyIdxOverviewToOpenrouterEmbeddings(state, overview("ollama"));
+    expect(state.checked).toBe(false);
+  });
+});
+
+/** Wire-shaped overview; non-openrouter providers exercise the panel's defensive default. */
+function overview(embeddingProvider: string | undefined): IdxOverview {
+  return {
+    available: true,
+    initialized: true,
+    ...(embeddingProvider === undefined ? {} : { embeddingProvider }),
+    rawStatus: "",
+    errors: [],
+  } as IdxOverview;
+}
 
 function operationSnapshot(overrides: Partial<IdxOperationSnapshot>): IdxOperationSnapshot {
   return {

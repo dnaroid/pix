@@ -59,3 +59,27 @@ describe("IDX v2 panel contract", () => {
     expect(runtimeSource).toContain("openrouterEmbeddings: operationOptions.openrouterEmbeddings === true");
   });
 });
+
+describe("IDX OpenRouter checkbox initialization", () => {
+  it("derives the checkbox default from the workspace-scoped overview provider", () => {
+    expect(panelSource).toContain("applyIdxOverviewToOpenrouterEmbeddings,");
+    expect(panelSource).toContain("resetIdxOpenrouterEmbeddings,");
+    expect(panelSource).toContain("setIdxOpenrouterEmbeddings,");
+    expect(panelSource).toContain("let openrouterEmbeddingsState = $state<IdxOpenrouterEmbeddingsState>(resetIdxOpenrouterEmbeddings());");
+    expect(panelSource).toContain("const openrouterEmbeddings = $derived(openrouterEmbeddingsState.checked);");
+    expect(panelSource).toContain("applyIdxOverviewToOpenrouterEmbeddings(openrouterEmbeddingsState, requestOverview)");
+  });
+
+  it("resets the checkbox on workspace change and preserves manual edits across refreshes", () => {
+    expect(panelSource).toContain("openrouterEmbeddingsState = resetIdxOpenrouterEmbeddings();");
+    expect(panelSource).toContain("function toggleOpenrouterEmbeddings(checked: boolean): void {");
+    expect(panelSource).toContain("openrouterEmbeddingsState = setIdxOpenrouterEmbeddings(openrouterEmbeddingsState, checked);");
+    expect(panelSource).toContain("toggleOpenrouterEmbeddings(event.currentTarget.checked)");
+    expect(panelSource).not.toContain("bind:checked={openrouterEmbeddings}");
+    // The reset effect must observe workspace switches before overview defaults apply.
+    const resetEffectIndex = panelSource.indexOf("openrouterEmbeddingsState = resetIdxOpenrouterEmbeddings();");
+    const defaultEffectIndex = panelSource.indexOf("applyIdxOverviewToOpenrouterEmbeddings(openrouterEmbeddingsState, requestOverview)");
+    expect(resetEffectIndex).toBeGreaterThan(-1);
+    expect(defaultEffectIndex).toBeGreaterThan(resetEffectIndex);
+  });
+});

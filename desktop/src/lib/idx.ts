@@ -22,11 +22,14 @@ export interface IdxParsedStatus {
   readonly raw: string;
 }
 
+export type IdxEmbeddingProvider = "openrouter";
+
 export interface IdxOverview {
   readonly available: boolean;
   readonly executable?: string;
   readonly version?: string;
   readonly initialized: boolean;
+  readonly embeddingProvider?: IdxEmbeddingProvider;
   readonly indexStatus?: IdxParsedStatus;
   readonly rawStatus: string;
   readonly errors: readonly string[];
@@ -186,4 +189,37 @@ export function idxOperationTone(status: IdxOperationStatus): "success" | "error
   if (status === "failed" || status === "timed-out") return "error";
   if (status === "cancelled") return "warning";
   return "info";
+}
+
+/** State of the opt-in OpenRouter embeddings checkbox for `init` and doctor reinitialization. */
+export interface IdxOpenrouterEmbeddingsState {
+  readonly checked: boolean;
+  readonly manual: boolean;
+}
+
+/** The checkbox defaults checked only when the workspace IDX config names the openrouter embedding provider. */
+export function idxOpenrouterEmbeddingsDefault(overview: IdxOverview | undefined): boolean {
+  return overview?.embeddingProvider === "openrouter";
+}
+
+/** Workspace switches reset the checkbox until the new workspace's overview loads. */
+export function resetIdxOpenrouterEmbeddings(): IdxOpenrouterEmbeddingsState {
+  return { checked: false, manual: false };
+}
+
+/** Apply a workspace-scoped overview refresh without discarding manual checkbox edits. */
+export function applyIdxOverviewToOpenrouterEmbeddings(
+  state: IdxOpenrouterEmbeddingsState,
+  overview: IdxOverview | undefined,
+): IdxOpenrouterEmbeddingsState {
+  const checked = idxOpenrouterEmbeddingsDefault(overview);
+  return state.manual || state.checked === checked ? state : { checked, manual: false };
+}
+
+/** Manual checkbox edits win over later overview refreshes until the workspace changes. */
+export function setIdxOpenrouterEmbeddings(
+  state: IdxOpenrouterEmbeddingsState,
+  checked: boolean,
+): IdxOpenrouterEmbeddingsState {
+  return state.manual && state.checked === checked ? state : { checked, manual: true };
 }
