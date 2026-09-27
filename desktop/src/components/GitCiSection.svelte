@@ -1,7 +1,7 @@
 <script lang="ts">
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import Check from "@lucide/svelte/icons/check";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Minus from "@lucide/svelte/icons/minus";
@@ -59,9 +59,9 @@
   }
 </script>
 
-<details class="border-t border-sidebar-border bg-panel">
-  <summary class="flex h-8 list-none items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
-    <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
+<details class="group/ci border-t border-sidebar-border bg-panel">
+  <summary class="flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+    <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/ci:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
     <span class="min-w-0 flex-1 truncate">{providerLabel}</span>
     {#if ci.loading}
       <RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -120,15 +120,15 @@
     {/if}
 
     {#each ci.snapshot?.runs ?? [] as run (run.id)}
-      <details class="rounded-md border border-border bg-panel-strong" ontoggle={(event) => { if (event.currentTarget.open) ci.onLoadJobs(run.id); }}>
-        <summary class="flex min-h-8 list-none items-center gap-1.5 px-2 py-1 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+      <details class="group/run rounded-sm border border-border bg-panel-strong" ontoggle={(event) => { if (event.currentTarget.open) ci.onLoadJobs(run.id); }}>
+        <summary class="flex min-h-7 items-center gap-1.5 px-2 py-1 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
           {#if run.status === "success"}<Check class="h-3.5 w-3.5 shrink-0 text-tool-success" aria-hidden="true" />
           {:else if run.status === "failure"}<X class="h-3.5 w-3.5 shrink-0 text-tool-error" aria-hidden="true" />
           {:else if run.status === "queued" || run.status === "running"}<RefreshCw class="h-3.5 w-3.5 shrink-0 text-tool-warning" aria-hidden="true" />
           {:else}<Minus class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
           <span class="min-w-0 flex-1 truncate font-medium text-foreground" title={run.name}>{run.name}</span>
           <span class={["shrink-0", statusClass(run.status)]}>{gitCiStatusLabel(run.status)}</span>
-          <ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronRight class="h-3 w-3 shrink-0 text-muted-foreground transition-transform group-open/run:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
         </summary>
         <div class="space-y-2 border-t border-border px-2 py-2">
           <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">

@@ -154,14 +154,15 @@ try {
   }
   // Native disclosure and ordinary Git actions are keyboard reachable.
   await reset("clean");
-  const tools = panel.locator("summary").filter({ hasText: /^Repository tools$/ });
+  const toolbar = panel.getByRole("toolbar", { name: "Source Control actions" });
+  await toolbar.getByRole("button", { name: "Update project", exact: true }).click();
+  await toolbar.getByRole("button", { name: "Fetch", exact: true }).click();
+  const tools = panel.locator("summary").filter({ hasText: /^Branches & stashes$/ });
   await tools.focus(); await tools.press("Enter");
-  await panel.getByRole("button", { name: "Fetch", exact: true }).click();
-  await panel.getByRole("button", { name: "Pull (ff-only)", exact: true }).click();
   await panel.getByRole("button", { name: "Restore", exact: true }).click();
-  assert.deepEqual(await calls(), ["fetch:all", "pull:all", "stash-apply:stash@{0}"]);
+  assert.deepEqual(await calls(), ["update:all", "fetch:all", "stash-apply:stash@{0}"]);
   assert.deepEqual(pageErrors, []);
-  console.log("Git workflow browser smoke passed: 3 flows, staged scope, CI panel geometry, failures, draft race, keyboard, full-height review, 360px light/dark geometry and semantic colors.");
+  console.log("Git workflow browser smoke passed: 3 flows, staged scope, CI panel geometry, failures, draft race, keyboard, one-click Update, full-height review, 360px light/dark geometry and semantic colors.");
   console.log(`Screenshots: ${screenshots}`);
 } finally {
   await browser?.close();

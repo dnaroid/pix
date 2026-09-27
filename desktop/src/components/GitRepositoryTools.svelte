@@ -1,7 +1,6 @@
 <script lang="ts">
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import Download from "@lucide/svelte/icons/download";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import Archive from "@lucide/svelte/icons/archive";
   import { tick } from "svelte";
@@ -19,6 +18,7 @@
   const conflicted = $derived(snapshot.changes.some((change) => change.conflicted));
   const stashes = $derived(workflow.details?.stashes ?? []);
   const selectedStash = $derived(stashes.some((stash) => stash.reference === reference) ? reference : stashes[0]?.reference ?? "");
+  const section = "flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring";
   const button = "inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40";
   async function toggleBranch(): Promise<void> { creatingBranch = !creatingBranch; if (creatingBranch) { await tick(); branchInput?.focus(); } }
   async function closeBranch(): Promise<void> {
@@ -28,14 +28,12 @@
   }
 </script>
 
-<details class="border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
-  <summary class="flex h-8 list-none items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
-    <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />Repository tools
+<details class="group/branches border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
+  <summary class={section}>
+    <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/branches:rotate-90 motion-reduce:transition-none" aria-hidden="true" />Branches &amp; stashes
   </summary>
   <div class="space-y-3 px-2 pb-3">
     <div class="grid grid-cols-2 gap-1.5">
-      <button class={button} type="button" disabled={busy || !snapshot.remotes.length} title="Fetch all remotes without changing local files" onclick={() => void workflow.onRepositoryAction("fetch")}><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />Fetch</button>
-      <button class={button} type="button" disabled={busy || dirty || snapshot.detached || !snapshot.upstream} title={dirty ? "Commit or stash changes before pulling" : "Pull fast-forward only. Never creates a merge or rebase."} onclick={() => void workflow.onRepositoryAction("pull")}><Download class="h-3.5 w-3.5" aria-hidden="true" />Pull (ff-only)</button>
       <button bind:this={branchTrigger} class={button} type="button" disabled={busy} aria-expanded={creatingBranch} onclick={() => void toggleBranch()}><GitBranch class="h-3.5 w-3.5" aria-hidden="true" />New branch</button>
       <button class={button} type="button" disabled={busy || !dirty || conflicted || !snapshot.head} title="Save staged, unstaged and untracked files to stash" onclick={() => void workflow.onRepositoryAction("stash-save")}><Archive class="h-3.5 w-3.5" aria-hidden="true" />Stash all</button>
     </div>
@@ -61,16 +59,23 @@
         <p class="text-xs leading-4 text-muted-foreground">Restore keeps the saved copy. Requires a clean working tree.</p>
       {:else}<p class="text-xs text-muted-foreground">No saved stashes.</p>{/if}
     </section>
-    <section aria-label="Recent commits">
-      <h3 class="mb-1 text-xs font-medium text-muted-foreground">Recent commits <span class="font-normal">· latest 30</span></h3>
-      <ol class="space-y-1.5">
-        {#each workflow.details?.history ?? [] as entry (entry.hash)}
-          <li title={`${entry.hash}\n${entry.author} · ${entry.date}`}>
-            <p class="truncate text-xs text-foreground">{entry.subject}</p>
-            <p class="truncate text-xs text-muted-foreground"><span class="font-mono">{entry.shortHash}</span> · {entry.author} · {entry.date.slice(0, 10)}</p>
-          </li>
-        {:else}<li class="text-xs text-muted-foreground">{workflow.detailsLoading ? "Loading…" : "No commits yet."}</li>{/each}
-      </ol>
-    </section>
   </div>
+</details>
+
+<details class="group/log border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
+  <summary class={section}>
+    <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/log:rotate-90 motion-reduce:transition-none" aria-hidden="true" />Log
+    <span class="ml-auto font-normal">latest 30</span>
+  </summary>
+  <section class="px-2 pb-3" aria-label="Recent commits">
+    <ol>
+      {#each workflow.details?.history ?? [] as entry (entry.hash)}
+        <li class="flex h-6 min-w-0 items-center gap-2 text-xs" title={`${entry.hash}\n${entry.subject}\n${entry.author} · ${entry.date}`}>
+          <span class="shrink-0 font-mono text-muted-foreground">{entry.shortHash}</span>
+          <span class="min-w-0 flex-1 truncate text-foreground">{entry.subject}</span>
+          <span class="shrink-0 text-muted-foreground tabular-nums">{entry.date.slice(0, 10)}</span>
+        </li>
+      {:else}<li class="text-xs text-muted-foreground">{workflow.detailsLoading ? "Loading…" : "No commits yet."}</li>{/each}
+    </ol>
+  </section>
 </details>

@@ -9550,6 +9550,7 @@ pub fn run() {
             git_ci::git_ci_cancel,
             git_operations::git_fetch,
             git_operations::git_pull,
+            git_operations::git_update,
             git_operations::git_history,
             git_operations::git_stash_list,
             git_operations::git_stash_save,

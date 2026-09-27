@@ -143,7 +143,7 @@ export interface ModelUsageLimitWindow {
 
 export interface ModelUsageStatus {
   readonly modelKey: string;
-  readonly provider: "openai" | "zhipu" | "google-antigravity";
+  readonly provider: "openai" | "zhipu" | "google-antigravity" | "anthropic";
   readonly updatedAt: number;
   readonly accountEmail?: string;
   readonly hourly?: ModelUsageLimitWindow;

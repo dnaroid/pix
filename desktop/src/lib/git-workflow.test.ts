@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { gitReviewHasFindings, type GitSnapshot } from "./git";
-import { gitPushBlockedReason, gitReviewStatus, sameGitDiff } from "./git-workflow";
+import { gitPushBlockedReason, gitReviewStatus, gitUpdateBlockedReason, gitUpdateNotice, sameGitDiff } from "./git-workflow";
 
 const snapshot: GitSnapshot = { branch: "main", detached: false, head: "abc", upstream: "origin/main", ahead: 1, behind: 0, changes: [], branches: [], remotes: ["origin"] };
 
@@ -13,9 +13,23 @@ describe("Git workflow decisions", () => {
   });
   it("explains detached HEAD, incoming commits and missing remotes", () => {
     expect(gitPushBlockedReason({ ...snapshot, detached: true })).toMatch(/branch/);
-    expect(gitPushBlockedReason({ ...snapshot, behind: 1 })).toMatch(/Pull/);
+    expect(gitPushBlockedReason({ ...snapshot, behind: 1 })).toMatch(/Update the project/);
     expect(gitPushBlockedReason({ ...snapshot, remotes: [] })).toMatch(/remote/);
     expect(gitPushBlockedReason(undefined)).toMatch(/not available/);
+  });
+  it("gates one-click Update on a tracked branch without conflicts, but not on local changes", () => {
+    const change = { path: "a.ts", indexStatus: ".", worktreeStatus: "M", staged: false, unstaged: true, untracked: false, conflicted: false };
+    expect(gitUpdateBlockedReason(snapshot)).toBeNull();
+    expect(gitUpdateBlockedReason({ ...snapshot, changes: [change] })).toBeNull();
+    expect(gitUpdateBlockedReason({ ...snapshot, changes: [{ ...change, conflicted: true }] })).toMatch(/conflicts/);
+    expect(gitUpdateBlockedReason({ ...snapshot, upstream: undefined })).toMatch(/upstream/);
+    expect(gitUpdateBlockedReason({ ...snapshot, detached: true })).toMatch(/branch/);
+    expect(gitUpdateBlockedReason(undefined)).toMatch(/not available/);
+  });
+  it("describes the Update outcome, including restored local changes", () => {
+    expect(gitUpdateNotice({ incoming: 0, stashed: false })).toBe("Already up to date.");
+    expect(gitUpdateNotice({ incoming: 1, stashed: false })).toBe("Updated: 1 incoming commit.");
+    expect(gitUpdateNotice({ incoming: 3, stashed: true })).toBe("Updated: 3 incoming commits. Local changes were restored.");
   });
   it("compares content, scope, target and truncation, not only file names", () => {
     const diff = { scope: "staged" as const, content: "+first", truncated: false };

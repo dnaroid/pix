@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
+	anthropicUsageStatusFromResponse,
+	type AnthropicUsageResponse,
 	formatAccountUsageReport,
 	formatModelUsageStatusLabel,
 	googleAntigravityUsageStatusFromResponse,
@@ -28,7 +30,98 @@ describe("model usage status", () => {
 			kind: "openai",
 			modelKey: "openai-codex/gpt-5.5",
 		});
-		assert.equal(modelUsageDescriptor({ provider: "anthropic", id: "claude" } as SessionModel), undefined);
+		assert.equal(modelUsageDescriptor({ provider: "openrouter", id: "gpt-5.5" } as SessionModel), undefined);
+	});
+
+	it("builds descriptors for Anthropic subscription models", () => {
+		assert.deepEqual(modelUsageDescriptor({ provider: "anthropic", id: "claude-opus-4-7" } as SessionModel), {
+			kind: "anthropic",
+			modelKey: "anthropic/claude-opus-4-7",
+		});
+	});
+
+	it("extracts Anthropic 5-hour and the most constrained weekly window", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const data: AnthropicUsageResponse = {
+			five_hour: { utilization: 12.4, resets_at: new Date(now + 2 * 60 * 60 * 1000).toISOString() },
+			seven_day: { utilization: 30, resets_at: new Date(now + 3 * 24 * 60 * 60 * 1000).toISOString() },
+			seven_day_opus: { utilization: 55, resets_at: new Date(now + 4 * 24 * 60 * 60 * 1000).toISOString() },
+			seven_day_sonnet: null,
+		};
+
+		const opus = anthropicUsageStatusFromResponse(data, "anthropic/claude-opus-4-7", now);
+		assert.equal(opus?.provider, "anthropic");
+		assert.deepEqual(opus?.hourly, { remainingPercent: 88, resetAt: now + 2 * 60 * 60 * 1000, windowSeconds: 5 * 60 * 60, hasKnownWindowDuration: true });
+		assert.equal(opus?.weekly?.remainingPercent, 45);
+		assert.equal(opus?.weekly?.resetAt, now + 4 * 24 * 60 * 60 * 1000);
+
+		const sonnet = anthropicUsageStatusFromResponse(data, "anthropic/claude-sonnet-4-6", now);
+		assert.equal(sonnet?.weekly?.remainingPercent, 70);
+
+		const unused = anthropicUsageStatusFromResponse({ five_hour: { utilization: 0, resets_at: null } }, "anthropic/claude-haiku-4-5", now);
+		assert.deepEqual(unused?.hourly, { remainingPercent: 100, resetAt: now + 5 * 60 * 60 * 1000, windowSeconds: 5 * 60 * 60, hasKnownWindowDuration: true });
+		assert.equal(unused?.weekly, undefined);
+		assert.equal(anthropicUsageStatusFromResponse({}, "anthropic/claude-opus-4-7", now), undefined);
+	});
+
+	it("queries Anthropic usage with Claude OAuth tokens from auth.json or env and skips API keys", async () => {
+		const oldFetch = globalThis.fetch;
+		let usageRequests = 0;
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+			const url = String(input);
+			if (url !== "https://api.anthropic.com/api/oauth/usage") throw new Error(`Unexpected fetch: ${url}`);
+			usageRequests += 1;
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("Authorization"), "Bearer sk-ant-oat-test");
+			assert.equal(headers.get("anthropic-beta"), "oauth-2025-04-20");
+			return Response.json({ five_hour: { utilization: 40, resets_at: null }, seven_day: { utilization: 10, resets_at: null } });
+		}) as typeof fetch;
+
+		try {
+			const descriptor = modelUsageDescriptor({ provider: "anthropic", id: "claude-sonnet-4-6" } as SessionModel);
+			if (!descriptor) throw new Error("Expected Anthropic usage descriptor");
+
+			await withPiAuthAsync({
+				anthropic: { type: "oauth", access: "sk-ant-oat-test", refresh: "refresh", expires: Date.now() + 60_000 },
+			}, async () => {
+				const status = await queryModelUsageStatus(descriptor);
+				assert.equal(status?.hourly?.remainingPercent, 60);
+				assert.equal(status?.weekly?.remainingPercent, 90);
+
+				const report = await queryAccountUsageReport();
+				assert.deepEqual(report.anthropic?.windows.map((window) => [window.label, window.remainingPercent]), [
+					["5-hour limit", 60],
+					["7-day limit", 90],
+				]);
+				assert.match(formatAccountUsageReport(report), /Anthropic Account Quota/u);
+			});
+			assert.equal(usageRequests, 2);
+
+			await withPiAuthAsync({ anthropic: { type: "api_key", key: "sk-ant-api" } }, async () => {
+				assert.equal(await queryModelUsageStatus(descriptor), undefined);
+				assert.equal((await queryAccountUsageReport()).anthropic, undefined);
+			});
+			assert.equal(usageRequests, 2);
+
+			await withPiAuthAsync({ anthropic: { type: "api_key", key: "sk-ant-oat-test" } }, async () => {
+				assert.equal((await queryModelUsageStatus(descriptor))?.hourly?.remainingPercent, 60);
+			});
+			assert.equal(usageRequests, 3);
+
+			const previousOAuthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
+			process.env.ANTHROPIC_OAUTH_TOKEN = "sk-ant-oat-test";
+			try {
+				await withPiAuthAsync({}, async () => {
+					assert.equal((await queryModelUsageStatus(descriptor))?.weekly?.remainingPercent, 90);
+				});
+			} finally {
+				if (previousOAuthToken === undefined) delete process.env.ANTHROPIC_OAUTH_TOKEN;
+				else process.env.ANTHROPIC_OAUTH_TOKEN = previousOAuthToken;
+			}
+			assert.equal(usageRequests, 4);
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
 	});
 
 	it("builds descriptors for Zhipu/Z.ai quota-backed models", () => {

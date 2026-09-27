@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
-import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath, getUiQaRunnerPath, isUiQaType, UI_QA_RUNNER_ENV } from "./browser-qa.js";
+import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath, getUiQaRunnerPath, isUiQaType, UI_QA_RUNNER_ENV } from "./ui-qa.js";
 import { validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
 import { writePromptFile } from "./prompt.js";

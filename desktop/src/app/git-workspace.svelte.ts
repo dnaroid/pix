@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { GitDiff, GitDiffScope, GitSnapshot } from "../lib/git";
-import { sameGitDiff, gitPushBlockedReason, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
+import { sameGitDiff, gitPushBlockedReason, gitUpdateNotice, type GitUpdateResult, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 
 type GitWorkspaceStoreOptions = {
@@ -118,7 +118,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     nextActionId: string,
     command: string,
     payload: Record<string, unknown> = {},
-    mutationOptions: { reloadProject?: boolean; success?: string } = {},
+    mutationOptions: { reloadProject?: boolean; success?: string | ((result: unknown) => string) } = {},
   ): Promise<boolean> {
     const workspace = options.workspace();
     const requestGeneration = generation;
@@ -133,7 +133,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     error = null;
     notice = null;
     try {
-      await invoke(command, { workspace, ...payload });
+      const result = await invoke<unknown>(command, { workspace, ...payload });
       if (!current()) return false;
       if (command !== "git_fetch" && command !== "git_push") invalidateReview();
       if (mutationOptions.reloadProject) {
@@ -142,7 +142,9 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       }
       await refresh();
       if (!current()) return false;
-      notice = mutationOptions.success ?? null;
+      notice = typeof mutationOptions.success === "function"
+        ? mutationOptions.success(result)
+        : mutationOptions.success ?? null;
       if (details) void loadDetails();
       return true;
     } catch (reason) {
@@ -332,10 +334,11 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     if ((action === "discard" || action === "stash-apply") && !target) return Promise.resolve(false);
     if (action === "discard" && !window.confirm(`Discard unstaged changes in ${target}?\n\nStaged changes are kept. This cannot be undone.`)) return Promise.resolve(false);
     const commands = {
-      fetch: "git_fetch", pull: "git_pull", "stash-save": "git_stash_save",
+      update: "git_update", fetch: "git_fetch", pull: "git_pull", "stash-save": "git_stash_save",
       "stash-apply": "git_stash_apply", discard: "git_discard_file",
     } as const;
     const success = {
+      update: (result: unknown) => gitUpdateNotice(result as GitUpdateResult),
       fetch: "Remotes fetched.", pull: "Branch updated (fast-forward only).",
       "stash-save": "Changes saved to stash, including untracked files.",
       "stash-apply": "Stash restored. The saved stash is kept.", discard: "Unstaged changes discarded. Staged changes are kept.",

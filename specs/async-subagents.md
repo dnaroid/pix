@@ -983,7 +983,7 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/core/routing.ts`
 - `external/pi-tools-suite/src/async-subagents/core/ultrawork-auto.ts`
 - `external/pi-tools-suite/src/async-subagents/core/model-selection.ts`
-- `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
+- `external/pi-tools-suite/src/async-subagents/core/ui-qa.ts`
 - `external/pi-tools-suite/src/async-subagents/core/model-fallback.ts`
 - `external/pi-tools-suite/src/async-subagents/core/retry.ts`
 - `external/pi-tools-suite/src/async-subagents/core/concurrency.ts`

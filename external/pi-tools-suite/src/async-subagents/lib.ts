@@ -42,7 +42,7 @@ export {
 	getBrowserQaRunnerPath,
 	getUiQaRunnerPath,
 	isUiQaType,
-} from "./core/browser-qa.js";
+} from "./core/ui-qa.js";
 export type { RoutedSubagentTasks, SubagentRoutingContext } from "./core/routing.js";
 export { agentDefinitionFiles, agentNameFromFilename, parseAgentMarkdown, projectAgentDefinitionFiles, projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions } from "./core/agents-dir.js";
 export type { AgentDefinition, ProjectAgentDefinition } from "./core/agents-dir.js";

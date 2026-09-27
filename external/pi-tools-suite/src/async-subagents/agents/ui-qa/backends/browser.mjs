@@ -120,6 +120,7 @@ export async function runBrowserBackend(context) {
 		...(typeof payload?.templateCreated === "boolean" ? { templateCreated: payload.templateCreated } : {}),
 		...(Number.isInteger(payload?.placeholderCount) ? { placeholderCount: payload.placeholderCount } : {}),
 		...(payload?.remediation ? { remediation: payload.remediation } : {}),
+		...(Array.isArray(payload?.missingCapabilities) ? { missingCapabilities: payload.missingCapabilities.filter((entry) => typeof entry === "string") } : {}),
 		...(execution.timedOut || payload?.timedOut ? { timedOut: true } : {}),
 		assertions,
 		observations: Array.isArray(payload?.observations) ? payload.observations : [],
@@ -271,7 +272,7 @@ function parseRunnerPayload(stdout) {
 function normalizeStatus(status, exitCode, timedOut) {
 	if (timedOut || exitCode === 124) return "FAILED";
 	if (status === "QA_PASSED" || status === "passed" || status === "PASSED") return "PASSED";
-	if (status === "QA_AUTH_UPDATE_REQUIRED" || status === "BLOCKED") return "BLOCKED";
+	if (status === "QA_AUTH_UPDATE_REQUIRED" || status === "QA_BROWSER_UNAVAILABLE" || status === "BLOCKED") return "BLOCKED";
 	return "FAILED";
 }
 

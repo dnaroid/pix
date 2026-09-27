@@ -71,6 +71,30 @@ function run(project: string, args: string[], agentDir?: string, extraEnv: Recor
 	};
 }
 
+/**
+ * A SIGKILLed detached child is reparented to PID 1. Container init processes
+ * do not always reap orphans, so the killed child can linger as a zombie that
+ * still answers signal 0. Only a non-zombie process counts as surviving.
+ */
+function isProcessRunning(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+	} catch {
+		return false;
+	}
+	if (process.platform === "linux") {
+		try {
+			const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+			return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z";
+		} catch {
+			return false;
+		}
+	}
+	const ps = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" });
+	if (ps.status !== 0) return ps.status === null;
+	return !ps.stdout.trim().startsWith("Z");
+}
+
 function profile(secret: string, overrides: Record<string, unknown> = {}) {
 	return {
 		description: "Staging administrator",
@@ -96,7 +120,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 exports.chromium = {
-  async launch() {
+  async launch(options = {}) {
+    if (process.env.BROWSER_QA_TEST_PINNED_BROWSER_MISSING === "1") {
+      if (!options.executablePath || options.executablePath !== process.env.BROWSER_QA_TEST_LAUNCHABLE_EXECUTABLE) {
+        throw new Error("browserType.launch: Executable doesn't exist at /missing/chrome-headless-shell");
+      }
+      fs.writeFileSync(path.join(process.cwd(), "launched-executable"), options.executablePath);
+    }
     if (process.env.BROWSER_QA_TEST_HANG_STAGE === "browser_launch") {
       if (process.env.BROWSER_QA_TEST_CHILD_PID_FILE) {
         const fs = require("node:fs");
@@ -401,6 +431,54 @@ exports.chromium = {
 }
 
 describe("private browser QA runner", () => {
+	test("falls back to an installed Chromium build when the pinned Playwright browser is missing", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const browsers = path.join(project, "ms-playwright");
+		const executableParts = process.platform === "darwin"
+			? ["chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"]
+			: process.platform === "win32" ? ["chrome-win", "chrome.exe"] : ["chrome-linux", "chrome"];
+		const older = path.join(browsers, "chromium-1100", ...executableParts);
+		const newer = path.join(browsers, "chromium-1200", ...executableParts);
+		writeFile(older, "");
+		writeFile(newer, "");
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "goto", path: "/public" }] }));
+
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "fallback"], agentDir, {
+			PLAYWRIGHT_BROWSERS_PATH: browsers,
+			BROWSER_QA_TEST_PINNED_BROWSER_MISSING: "1",
+			BROWSER_QA_TEST_LAUNCHABLE_EXECUTABLE: newer,
+		});
+
+		expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED", profile: "public" } });
+		expect(fs.readFileSync(path.join(project, "launched-executable"), "utf8")).toBe(newer);
+	});
+
+	test("reports a BLOCKED-ready status when no Chromium can be launched", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "goto", path: "/public" }] }));
+
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "no-browser"], agentDir, {
+			PLAYWRIGHT_BROWSERS_PATH: path.join(project, "missing-browsers"),
+			BROWSER_QA_TEST_PINNED_BROWSER_MISSING: "1",
+		});
+
+		expect(result).toMatchObject({
+			code: 43,
+			json: {
+				status: "QA_BROWSER_UNAVAILABLE",
+				profile: "public",
+				missingCapabilities: ["chromiumExecutable"],
+			},
+		});
+		expect(result.json.reason).toContain("Executable doesn't exist");
+		expect(result.json.remediation).toContain("playwright install chromium");
+		expect(fs.existsSync(path.join(project, "launched-executable"))).toBe(false);
+	});
+
 	test("bounds a hung browser stage, kills its detached child, and leaves sanitized progress", async () => {
 		const project = tempProject();
 		const agentDir = createBrowserQaAgent(project);
@@ -438,12 +516,8 @@ describe("private browser QA runner", () => {
 			const childPid = Number(fs.readFileSync(childPidFile, "utf8"));
 			const deadline = Date.now() + 1000;
 			while (Date.now() < deadline) {
-				try {
-					process.kill(childPid, 0);
-					await new Promise((resolve) => setTimeout(resolve, 10));
-				} catch {
-					return;
-				}
+				if (!isProcessRunning(childPid)) return;
+				await new Promise((resolve) => setTimeout(resolve, 10));
 			}
 			throw new Error(`detached browser child ${childPid} survived runner timeout`);
 		}
@@ -480,12 +554,8 @@ describe("private browser QA runner", () => {
 			const childPid = Number(fs.readFileSync(childPidFile, "utf8"));
 			const deadline = Date.now() + 1000;
 			while (Date.now() < deadline) {
-				try {
-					process.kill(childPid, 0);
-					await new Promise((resolve) => setTimeout(resolve, 10));
-				} catch {
-					return;
-				}
+				if (!isProcessRunning(childPid)) return;
+				await new Promise((resolve) => setTimeout(resolve, 10));
 			}
 			throw new Error(`detached browser child ${childPid} survived auth scaffold timeout`);
 		}

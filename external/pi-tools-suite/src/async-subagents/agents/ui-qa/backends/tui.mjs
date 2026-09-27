@@ -256,7 +256,7 @@ async function executeStep(options) {
 		}
 		case "sendText": {
 			const text = boundedText(step.text, "sendText.text");
-			if (/[ -]/u.test(text)) throw new Error("sendText cannot contain control characters; use sendKeys");
+			if (/[\u0000-\u001f\u007f]/u.test(text)) throw new Error("sendText cannot contain control characters; use sendKeys");
 			if (state().exited) throw new Error("cannot send text after the PTY process exited");
 			processHandle.write(text);
 			observations.push({ action: step.action, characters: [...text].length });
