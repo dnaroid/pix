@@ -289,6 +289,8 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain('aria-label="Session usage and cost"');
     expect(runtimeStatusSource).toContain("onOpenSessionUsage()");
     expect(runtimeStatusSource).toContain("provider.models as model");
+    expect(runtimeStatusSource).toContain("modelProviderBrand(provider.provider)");
+    expect(runtimeStatusSource).toContain("<ModelProviderIcon provider={provider.provider} />");
     expect(runtimeStatusSource).toContain("modelDisplayToneClass(modelRefTone");
     expect(runtimeStatusSource).not.toContain("of session");
     expect(runtimeStatusSource).not.toContain("Account quota now");

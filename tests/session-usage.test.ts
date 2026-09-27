@@ -59,6 +59,24 @@ describe("session usage accounting", () => {
 		assert.doesNotMatch(text, /agents|of session|quota|remaining|used/i);
 	});
 
+	it("keeps Claude Code subscription usage visible when its recorded dollar cost is zero", () => {
+		const report = aggregateSessionUsage([
+			{
+				type: "usage", kind: "async-subagent", provider: "pi-claude-code-provider", model: "opus",
+				usage: {
+					input: 2, output: 23, cacheRead: 0, cacheWrite: 28_249, totalTokens: 28_274,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			},
+		]);
+
+		assert.equal(report.totals.totalTokens, 28_274);
+		assert.equal(report.totals.cost, 0);
+		assert.equal(report.providers[0]?.provider, "pi-claude-code-provider");
+		assert.equal(report.providers[0]?.models[0]?.model, "opus");
+		assert.equal(report.providers[0]?.models[0]?.totals.totalTokens, 28_274);
+	});
+
 	it("uses the lazy manager full-session reader instead of the loaded presentation tail", async () => {
 		let fullReads = 0;
 		const session = {

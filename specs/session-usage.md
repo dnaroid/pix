@@ -57,7 +57,8 @@ percentages with spend attributable to one conversation.
   render monetary prices.
 - Model labels use the same model-color conventions as the rest of Pix. TUI
   honors configured `modelColors` rules with the normal provider-palette
-  fallback; Desktop uses its matching model-ref tone mapping.
+  fallback; Desktop uses its matching model-ref tone mapping and shows the
+  shared provider glyph beside each recognized provider heading.
 - Desktop loads the spend report on demand through `pix/session/usage`; TUI reads
   the owning session's complete persisted entries on demand. Opening the popup
   does not start a model request and does not refresh provider quota.

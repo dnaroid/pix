@@ -26,7 +26,8 @@
     formatSessionUsageTokens,
     sessionUsageHasValue,
   } from "../lib/session-usage";
-  import { modelDisplayToneClass, modelRefTone } from "../lib/model-display";
+  import { modelDisplayToneClass, modelProviderBrand, modelRefTone } from "../lib/model-display";
+  import ModelProviderIcon from "./ModelProviderIcon.svelte";
 
   let {
     status,
@@ -370,7 +371,12 @@
                   {:else}
                     {#each sessionUsage.providers as provider (provider.provider)}
                       <div>
-                        <div class="mb-1 text-xs font-medium text-muted-foreground">{provider.provider}</div>
+                        <div class="mb-1 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                          {#if modelProviderBrand(provider.provider)}
+                            <ModelProviderIcon provider={provider.provider} />
+                          {/if}
+                          <span class="min-w-0 truncate">{provider.provider}</span>
+                        </div>
                         <div class="space-y-1">
                           {#each provider.models as model (`${provider.provider}/${model.model}`)}
                             <div class="flex min-w-0 items-center justify-between gap-3 font-mono tabular-nums">
