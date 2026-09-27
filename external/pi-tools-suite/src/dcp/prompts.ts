@@ -67,9 +67,8 @@ errors that are still actionable, verification state, unresolved blockers, and
 next steps. If work remains unfinished include \`Active objective\` and \`Next
 step\`. Do not infer, invent, or add facts. Preserve uncertainty. Do not copy long
 raw code, JSON, diffs, logs, or tool output; use short literals only when needed.
-Write \`summary\` yourself: you know which facts the task still needs. Omit it
-only when the DCP system prompt says a summarizer model is configured; without
-one, an omitted summary becomes a coarse deterministic extractive record.
+Write \`summary\` yourself unless the system prompt says a DCP summarizer is
+set; omitted, it becomes a coarse extractive record.
 
 MODES:
 - \`ranges\`: contiguous \`startId..endId\` spans.
@@ -81,8 +80,8 @@ BOUNDARIES: use only injected IDs currently visible on stable user/tool-result
 carriers. \`mNNN\` is raw, \`bN\` is an active compressed block; IDs may be sparse
 and order is the conversation order, not the number. Carrier metadata labels the
 carrier plus immediately preceding assistant message(s): \`a\`=assistant,
-\`u\`=user, \`t\`=tool result, \`x\`=bash result, \`b\`=block alias; a \`~Nk\` suffix
-is an approximate size in thousands of tokens (shown from ~1k). Do not invent IDs. For
+\`u\`=user, \`t\`=tool result, \`x\`=bash result, \`b\`=block alias, \`~Nk\`=~N
+thousand tokens. Do not invent IDs. For
 \`ranges\`, never split a tool group: include the calling assistant and all its
 tool results, including parallel calls. On \`Unknown message ID\`, retry at most
 once using the current IDs reported by the tool.

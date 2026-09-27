@@ -60,7 +60,7 @@ export const COMPRESS_TOOL_PARAMETERS = Type.Object({
           "Last ID (mNNN/bN); include all results of the final tool group, including parallel calls.",
       }),
       summary: Type.Optional(Type.String({
-        description: "Continuation summary. Write it unless the DCP system prompt says a summarizer model is configured.",
+        description: "Continuation summary; see DCP system prompt.",
       })),
     }),
     { description: "One or more ranges to compress" },
@@ -74,7 +74,7 @@ export const COMPRESS_TOOL_PARAMETERS = Type.Object({
         description: "Short label for this one-message summary; defaults to top-level topic",
       })),
       summary: Type.Optional(Type.String({
-        description: "Continuation summary. Write it unless the DCP system prompt says a summarizer model is configured.",
+        description: "Continuation summary; see DCP system prompt.",
       })),
     }),
     { description: "Individual raw messages to compress surgically" },

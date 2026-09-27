@@ -79,7 +79,7 @@ describe("DCP prompt contracts", () => {
 	test("summary authoring defaults to the agent unless a summarizer model is configured", () => {
 		expect(COMPRESS_RANGE_DESCRIPTION).not.toContain("Normally omit");
 		expect(COMPRESS_RANGE_DESCRIPTION).toMatch(/Write `summary` yourself/);
-		expect(COMPRESS_RANGE_DESCRIPTION).toContain("coarse deterministic extractive record");
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("coarse extractive record");
 		expect(SUMMARY_AUTHORING_SELF).toContain("always write the `compress` `summary`");
 		expect(SUMMARY_AUTHORING_DELEGATED).toContain("may omit the `compress` `summary`");
 	});
