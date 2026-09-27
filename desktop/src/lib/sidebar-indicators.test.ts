@@ -52,6 +52,22 @@ describe("sidebar indicators", () => {
     expect(conflicted.git?.tone).toBe("error");
   });
 
+  it("shows remote upstream updates even before local tracking refs are fetched", () => {
+    const result = sidebarIndicators(inputs({
+      poll: poll({
+        git: { available: true, dirty: false, conflicted: false, detached: false, ahead: 0, behind: 0 },
+      }),
+      gitRemote: { hasUpdates: true, checkedAtMs: 2 },
+      unseenScriptFailureIds: [],
+      unseenIdxFailureIds: [],
+    }));
+
+    expect(result.git).toEqual({
+      tone: "info",
+      reason: "Upstream has updates available",
+    });
+  });
+
   it("prefers unseen terminal failures over running activity", () => {
     const result = sidebarIndicators(inputs({
       poll: poll({ scripts: { runningIds: ["term-1"], failedIds: ["term-2"] } }),

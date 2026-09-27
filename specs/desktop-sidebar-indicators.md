@@ -17,7 +17,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 ## Scope
 
 - Centralize Activity Bar indicator policy for Project, Tasks, Source Control, Registry, Package Scripts, IDX, and Settings.
-- Use a cheap workspace poll for filesystem/config/Git/runtime state that exists outside the currently mounted panel.
+- Use a cheap workspace poll for filesystem/config/local-Git/runtime state that exists outside the currently mounted panel, plus a separate sparse remote-Git freshness probe that never turns the fast poll into network work.
 - Reuse already-pushed remote Registry state and backend terminal/IDX events; detect local Registry dirtiness inside the shared indicator service without running Registry Git/network work.
 - Distinguish persistent conditions from unseen failure events.
 - Keep indicator reasons available through the activity button title/accessibility label.
@@ -58,7 +58,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 - **Project** — error only when the workspace/project tree cannot be read. A populated project is not attention by itself.
 - **Tasks** — info while a project task is actively being run; error after project-task storage read/write failure. Merely having todo items does not light the Activity Bar.
-- **Source Control** — info for a dirty working tree, commits ahead of upstream, or a branch behind upstream; warning for detached HEAD; error for unresolved conflicts or Git status failure. Changed-file counts are never rendered in the rail.
+- **Source Control** — info for a dirty working tree, commits ahead of upstream, a locally-known branch behind upstream, or a remote upstream tip that differs from the local tracking ref even before a fetch; warning for detached HEAD; error for unresolved conflicts or local Git status failure. Remote-probe network/auth failures are best-effort and do not create an error dot. Changed-file counts are never rendered in the rail.
 - **Registry** — warning when the indicator service detects local reusable/project resources that differ from their recorded provenance or are local-only while Registry is configured. Remote-side attention (`update-available`, `missing-local`, `diverged`, `registry-changed`) and project-level review issues continue to come from the pushed ACP Registry snapshot. While Desktop background project-state sync is pending, the Registry dot is `info`; while a sync is actively running the same dot uses a motion-safe ping animation. A background sync failure uses error severity. Optional remote-only resources (`not-installed`) remain a normal catalog state and do not light the Activity Bar. Registry snapshot or local-indicator health failures use error severity.
 - **Package Scripts** — info while one or more package/shell terminals are running; error for a newly observed failed terminal or non-zero exit, or for package-script discovery errors. A failure event is acknowledged once the Scripts view is visible.
 - **IDX** — info while maintenance is running; error for failed/timed-out maintenance, IDX health/status errors, or IDX becoming unavailable for a project that is already initialized. Legacy knowledge counters do not establish semantic drift and never trigger an inferred warning. Failed-operation attention is acknowledged once the IDX view is visible.
@@ -69,9 +69,11 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - The frontend owns one `SidebarIndicatorService` per Desktop window/workspace sidebar.
 - The fast backend poll runs approximately every 5 seconds while the window is visible/focused and every 30 seconds in the background. It returns Project, lightweight Git, terminal runtime, IDX-operation runtime, and user-config health in one typed IPC snapshot.
 - Fast Git status uses a dedicated bounded porcelain-v2 branch/status probe only. It disables optional Git locks and fsmonitor, retains bounded output, and kills the probe after 5 seconds instead of allowing the Activity Bar service to hang behind a stuck filesystem hook. It does not calculate per-file numstat, local branch lists, or remotes.
+- Remote Git freshness has a separate approximately 60-second foreground / 5-minute background cadence. It resolves the current branch's configured upstream locally, then runs only `git ls-remote` for that one upstream ref and compares the returned SHA with the existing local tracking-ref SHA. It does **not** run `git fetch`, download the remote object graph, update refs, or touch the working tree. Refocus/visibility refreshes are rate-limited to at most one remote attempt per 30 seconds so repeatedly switching windows cannot create a network loop.
+- The remote probe coalesces concurrent invalidations to at most one in-flight request plus one queued retry and is guarded by workspace/generation checks. Network, authentication, timeout, or provider failures leave the last successful remote-freshness result in place and never block or fail the local fast poll. A branch/upstream change forces one fresh probe; otherwise a successful Pix-owned Git refresh immediately rechecks remote freshness only while an update dot is already active, so Fetch/Update project can clear the dot promptly without adding network work to ordinary local Git mutations.
 - Package-terminal and IDX-operation state are read from the existing in-memory backend registries; no subprocess is started for those checks.
 - Package-terminal and IDX **exit** events always invalidate the fast snapshot. Output events invalidate only until that runtime id is already known as running; ordinary terminal/log output does not turn a noisy process into a sub-second Git/config polling loop.
-- Existing full Git refreshes triggered by Pix mutations invalidate the fast indicator snapshot immediately. External Git changes are discovered by the next fast poll.
+- Existing full Git refreshes triggered by Pix mutations invalidate the fast indicator snapshot immediately. External local Git changes are discovered by the next fast poll; external remote-only branch advances are discovered by the sparse remote probe.
 - Pushed Registry refresh/action snapshots likewise invalidate the fast poll so a completed sync clears/recomputes the local Registry dot immediately; the pushed snapshot is only an invalidation signal for this local check, not the source of local dirtiness.
 - The fast Registry poll also returns the specific dirty project artifacts among
   `tasks`, `plans`, and `todo`. WorkspaceSidebar consumes each new fast-poll
@@ -112,6 +114,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 ## Backend safety and cost
 
 - `workspace_sidebar_indicator_poll` runs through the existing blocking-task boundary so filesystem, bounded Registry hashing, and Git work never blocks the WebView/UI thread.
+- `workspace_git_remote_update_probe` uses the same blocking-task boundary. Its single network command is non-interactive, limits stdout/stderr to 64 KiB each, has a 5-second hard deadline, and kills the isolated Git process group on timeout/error. The probe is read-only with respect to the repository: no fetch, ref update, index lock, or working-tree mutation is performed.
 - Workspace paths are canonicalized before inspection. Source Control retains the existing rule that the selected workspace must itself be the Git repository root.
 - User config paths resolve from the platform home to `.config/pi/pix-desktop.jsonc` and `.config/pi/pi-tools-suite.jsonc`, matching the config loader/editor contract. TUI `.config/pi/pix.jsonc` is intentionally excluded from Desktop settings health.
 - User config health checks preserve JSONC support and validate the schema subset used by the Desktop settings editor without modifying files. Config reads/polls share a read lock while saves take the write lock, preventing the poll from observing the editor's truncate/write window; the config lock is released before Git/runtime state is inspected.
@@ -134,8 +137,8 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 ## Verification
 
-- TypeScript tests cover severity precedence, Git dirty/conflict semantics, local Registry sync attention, unstable Registry-sample retention, runtime failure precedence, output-event throttling, and healthy/error Project/Settings states.
-- Rust tests cover the lightweight dirty-Git indicator, rename-record parsing, local Registry tracked/local-only detection and hash compatibility, and JSONC/schema-invalid user-config health.
+- TypeScript tests cover severity precedence, Git dirty/conflict semantics, remote-upstream attention before fetch, local Registry sync attention, unstable Registry-sample retention, runtime failure precedence, output-event throttling, and healthy/error Project/Settings states.
+- Rust tests cover the lightweight dirty-Git indicator, rename-record parsing, a real bare-remote advance detected by `ls-remote` without mutating local tracking refs, local Registry tracked/local-only detection and hash compatibility, and JSONC/schema-invalid user-config health.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, `npm --prefix desktop run build:web`, and the Desktop Tauri Rust unit tests.
 
 ## Evidence

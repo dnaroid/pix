@@ -287,6 +287,7 @@
   let projectPanelError = $state<string | null>(null);
   let settingsPanelError = $state<string | null>(null);
   let observedRegistryProjectPollAt = 0;
+  let observedGitRemoteTarget = "";
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
@@ -345,6 +346,7 @@
 
   $effect(() => {
     const requestWorkspace = workspace;
+    observedGitRemoteTarget = "";
     projectPanelError = null;
     projectSettingsController.reset();
     indicatorService?.setWorkspace(requestWorkspace);
@@ -358,10 +360,21 @@
   $effect(() => {
     // Full Git refreshes already happen after Pix-owned mutations. Use them as
     // an invalidation signal so the cheap Activity Bar snapshot does not wait
-    // for its next timer tick.
-    gitSnapshot;
+    // for its next timer tick. A branch/upstream switch forces one remote probe;
+    // ordinary local refreshes only recheck the network while an update hint is
+    // already active.
+    const nextRemoteTarget = gitSnapshot
+      ? `${gitSnapshot.branch}\0${gitSnapshot.upstream ?? ""}`
+      : "";
+    const remoteTargetChanged = observedGitRemoteTarget !== ""
+      && nextRemoteTarget !== ""
+      && nextRemoteTarget !== observedGitRemoteTarget;
+    observedGitRemoteTarget = nextRemoteTarget;
     gitError;
-    queueMicrotask(() => indicatorService?.invalidateFast());
+    queueMicrotask(() => {
+      indicatorService?.invalidateFast();
+      indicatorService?.invalidateGitRemote(remoteTargetChanged);
+    });
   });
 
   $effect(() => {

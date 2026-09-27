@@ -18,6 +18,7 @@ import {
   runtimeOutputNeedsRefresh,
 } from "./sidebar-indicator-policy";
 import type {
+  SidebarGitRemoteUpdateProbe,
   SidebarIndicatorServiceState,
   SidebarIndicatorTab,
   WorkspaceSidebarIndicatorPoll,
@@ -25,14 +26,19 @@ import type {
 
 const FAST_ACTIVE_MS = 5_000;
 const FAST_BACKGROUND_MS = 30_000;
+const GIT_REMOTE_ACTIVE_MS = 60_000;
+const GIT_REMOTE_BACKGROUND_MS = 5 * 60_000;
+const GIT_REMOTE_FOCUS_MIN_MS = 30_000;
 const IDX_ACTIVE_MS = 60_000;
 const IDX_BACKGROUND_MS = 180_000;
 const EVENT_REFRESH_DELAY_MS = 180;
 
 /**
  * Long-lived Activity Bar polling service. Fast polls use the lightweight
- * workspace status command; the more expensive IDX health snapshot has its own
- * slower cadence. Terminal/IDX events invalidate the fast snapshot immediately.
+ * local workspace status command. Remote Git freshness is a separate, sparse
+ * ls-remote probe that does not fetch objects or update refs; IDX health also
+ * has its own slower cadence. Terminal/IDX events invalidate the fast snapshot
+ * immediately.
  */
 export class SidebarIndicatorService {
   private state: SidebarIndicatorServiceState = {
@@ -44,12 +50,17 @@ export class SidebarIndicatorService {
   private acknowledgedScriptFailures = new Set<string>();
   private acknowledgedIdxFailures = new Set<string>();
   private fastTimer: number | undefined;
+  private gitRemoteTimer: number | undefined;
   private idxTimer: number | undefined;
   private eventRefreshTimer: number | undefined;
   private fastGeneration = 0;
+  private gitRemoteGeneration = 0;
   private idxGeneration = 0;
   private fastRunning = false;
   private fastQueued = false;
+  private gitRemoteRunning = false;
+  private gitRemoteQueued = false;
+  private gitRemoteLastAttemptMs = 0;
   private idxRunning = false;
   private idxQueued = false;
   private started = false;
@@ -80,7 +91,9 @@ export class SidebarIndicatorService {
     if (workspace === this.workspace) return;
     this.workspace = workspace;
     this.fastGeneration += 1;
+    this.gitRemoteGeneration += 1;
     this.idxGeneration += 1;
+    this.gitRemoteLastAttemptMs = 0;
     this.acknowledgedScriptFailures.clear();
     this.acknowledgedIdxFailures.clear();
     this.state = {
@@ -110,11 +123,17 @@ export class SidebarIndicatorService {
 
   refreshNow(): void {
     void this.refreshFast();
+    this.refreshGitRemoteIfDue();
     void this.refreshIdx();
   }
 
   invalidateFast(): void {
     void this.refreshFast();
+  }
+
+  invalidateGitRemote(force = false): void {
+    if (!force && !this.state.gitRemote?.hasUpdates) return;
+    void this.refreshGitRemote();
   }
 
   destroy(): void {
@@ -215,6 +234,45 @@ export class SidebarIndicatorService {
     }
   }
 
+  private refreshGitRemoteIfDue(): void {
+    if (Date.now() - this.gitRemoteLastAttemptMs < GIT_REMOTE_FOCUS_MIN_MS) return;
+    void this.refreshGitRemote();
+  }
+
+  private async refreshGitRemote(): Promise<void> {
+    if (this.destroyed || !this.workspace) {
+      this.scheduleGitRemote();
+      return;
+    }
+    if (this.gitRemoteRunning) {
+      this.gitRemoteQueued = true;
+      return;
+    }
+    this.gitRemoteRunning = true;
+    this.gitRemoteLastAttemptMs = Date.now();
+    const workspace = this.workspace;
+    const generation = ++this.gitRemoteGeneration;
+    try {
+      const gitRemote = await invoke<SidebarGitRemoteUpdateProbe>("workspace_git_remote_update_probe", {
+        workspace,
+      });
+      if (this.destroyed || workspace !== this.workspace || generation !== this.gitRemoteGeneration) return;
+      this.state = { ...this.state, gitRemote };
+      this.publish();
+    } catch {
+      // Remote freshness is best-effort. Offline/auth failures must never turn
+      // a background attention hint into an error or block other sidebar state.
+    } finally {
+      this.gitRemoteRunning = false;
+      if (this.gitRemoteQueued) {
+        this.gitRemoteQueued = false;
+        void this.refreshGitRemote();
+      } else {
+        this.scheduleGitRemote();
+      }
+    }
+  }
+
   private async refreshIdx(): Promise<void> {
     if (this.destroyed || !this.workspace) {
       this.scheduleIdx();
@@ -305,6 +363,15 @@ export class SidebarIndicatorService {
     }, this.foreground() ? FAST_ACTIVE_MS : FAST_BACKGROUND_MS);
   }
 
+  private scheduleGitRemote(): void {
+    if (this.destroyed) return;
+    if (this.gitRemoteTimer !== undefined) window.clearTimeout(this.gitRemoteTimer);
+    this.gitRemoteTimer = window.setTimeout(() => {
+      this.gitRemoteTimer = undefined;
+      void this.refreshGitRemote();
+    }, this.foreground() ? GIT_REMOTE_ACTIVE_MS : GIT_REMOTE_BACKGROUND_MS);
+  }
+
   private scheduleIdx(): void {
     if (this.destroyed) return;
     if (this.idxTimer !== undefined) window.clearTimeout(this.idxTimer);
@@ -320,9 +387,11 @@ export class SidebarIndicatorService {
 
   private clearTimers(): void {
     if (this.fastTimer !== undefined) window.clearTimeout(this.fastTimer);
+    if (this.gitRemoteTimer !== undefined) window.clearTimeout(this.gitRemoteTimer);
     if (this.idxTimer !== undefined) window.clearTimeout(this.idxTimer);
     if (this.eventRefreshTimer !== undefined) window.clearTimeout(this.eventRefreshTimer);
     this.fastTimer = undefined;
+    this.gitRemoteTimer = undefined;
     this.idxTimer = undefined;
     this.eventRefreshTimer = undefined;
   }

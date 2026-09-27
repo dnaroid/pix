@@ -36,6 +36,7 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
     errorIndicator(git?.error),
     git?.conflicted ? { tone: "error", reason: "Git has unresolved conflicts" } : undefined,
     git?.detached ? { tone: "warning", reason: "Git is on a detached HEAD" } : undefined,
+    service.gitRemote?.hasUpdates ? { tone: "info", reason: "Upstream has updates available" } : undefined,
     git?.dirty ? { tone: "info", reason: "Working tree has changes" } : undefined,
     (git?.ahead ?? 0) > 0 ? { tone: "info", reason: `Branch has ${git?.ahead} unpushed commit${git?.ahead === 1 ? "" : "s"}` } : undefined,
     (git?.behind ?? 0) > 0 ? { tone: "info", reason: `Branch is behind upstream by ${git?.behind}` } : undefined,

@@ -68,6 +68,18 @@ cancel the matching registrations so a lost JS teardown cannot strand a child.
 After the CLI leader exits, descendant cleanup happens before pipe readers are
 joined, preventing inherited output handles from keeping the command alive.
 
+The Activity Bar's remote-Git freshness probe is a smaller transient class.
+`workspace_git_remote_update_probe` runs `git ls-remote` on the blocking pool
+only for the configured upstream ref, with stdin/prompts disabled, 64 KiB
+stdout/stderr bounds and a 5-second hard deadline. It uses the shared native
+owned-child isolation (Unix process group / Windows kill-on-close Job Object)
+but is not registered as a long-lived per-window process: frontend
+workspace/generation guards discard stale completions, while the native
+deadline bounds any orphaned request. When the Git leader exits, descendants
+are terminated before the leader is reaped and pipe readers are joined, so an
+`ssh` or credential helper cannot keep the request alive. The probe never
+fetches objects or mutates Git refs, the index, or the working tree.
+
 ## Constraints and failure cases
 
 - A worker currently inside an OS pipe write cannot be interrupted by queue
@@ -92,6 +104,8 @@ joined, preventing inherited output handles from keeping the command alive.
 - `desktop/src-tauri/src/lib.rs::capture_destroyed_window`
 - `desktop/src-tauri/src/lsp_install.rs::install_lsp_server`
 - `desktop/src-tauri/src/git_ci.rs` (`GitCiProcessState`, bounded CLI runner)
+- `desktop/src-tauri/src/lib.rs::workspace_git_remote_update_probe`
+- `desktop/src-tauri/src/lib.rs::sidebar_git_remote_ls_remote_output`
 - `desktop/src-tauri/src/acp_queue.rs::Queue`
 - `desktop/src-tauri/src/native_process.rs::force_stop`
 - `desktop/src-tauri/src/native_process/windows.rs` (suspended spawn, job ownership)
@@ -104,7 +118,8 @@ joined, preventing inherited output handles from keeping the command alive.
   publication cancellation, same-label replacement resource isolation,
   natural exit with inherited pipe, PTY and IDX startup guards,
   pending IDX destruction/replacement publication)
-- `desktop/src-tauri/src/lib.rs` (destroyed reservation, isolated force-stop)
+- `desktop/src-tauri/src/lib.rs` (destroyed reservation, isolated force-stop,
+  bounded/read-only remote-Git update probe)
 - `desktop/src-tauri/src/native_process/windows.rs` (Windows job descendants
   after natural leader exit, injected suspended startup failure)
 

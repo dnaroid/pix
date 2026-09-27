@@ -62,6 +62,8 @@ const GIT_INDEX_LOCK_RETRY_ATTEMPTS: usize = 6;
 const GIT_INDEX_LOCK_RETRY_DELAY: Duration = Duration::from_millis(80);
 const MAX_SIDEBAR_GIT_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const SIDEBAR_GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES: usize = 64 * 1024;
+const SIDEBAR_GIT_REMOTE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_SIDEBAR_REGISTRY_PROVENANCE_BYTES: u64 = 512 * 1024;
 const MAX_SIDEBAR_REGISTRY_ENTRIES: usize = 4_096;
 const MAX_SIDEBAR_REGISTRY_HASH_BYTES: u64 = 16 * 1024 * 1024;
@@ -922,6 +924,13 @@ struct SidebarGitIndicatorState {
     behind: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SidebarGitRemoteUpdateProbe {
+    has_updates: bool,
+    checked_at_ms: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -1817,6 +1826,17 @@ async fn workspace_sidebar_indicator_poll(
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
     run_blocking(move || {
         workspace_sidebar_indicator_poll_from(&app, &window_label, Path::new(&workspace), &home)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn workspace_git_remote_update_probe(
+    workspace: String,
+) -> Result<SidebarGitRemoteUpdateProbe, String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&workspace))?;
+        sidebar_git_remote_update_probe_from(&root)
     })
     .await
 }
@@ -4984,6 +5004,176 @@ fn sidebar_git_indicator_state(root: &Path) -> SidebarGitIndicatorState {
         };
     }
     parse_sidebar_git_status(&output.stdout)
+}
+
+fn sidebar_git_remote_update_probe_from(
+    root: &Path,
+) -> Result<SidebarGitRemoteUpdateProbe, String> {
+    let checked_at_ms = idx_now_ms();
+    if !root.join(".git").exists() {
+        return Ok(SidebarGitRemoteUpdateProbe {
+            has_updates: false,
+            checked_at_ms,
+        });
+    }
+
+    let branch_output = git_output_raw(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    if !branch_output.status.success() {
+        return Ok(SidebarGitRemoteUpdateProbe {
+            has_updates: false,
+            checked_at_ms,
+        });
+    }
+    let branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_owned();
+    if branch.is_empty() {
+        return Ok(SidebarGitRemoteUpdateProbe {
+            has_updates: false,
+            checked_at_ms,
+        });
+    }
+
+    let remote_key = format!("branch.{branch}.remote");
+    let merge_key = format!("branch.{branch}.merge");
+    let remote_output = git_output_raw(root, &["config", "--get", &remote_key])?;
+    let merge_output = git_output_raw(root, &["config", "--get", &merge_key])?;
+    if !remote_output.status.success() || !merge_output.status.success() {
+        return Ok(SidebarGitRemoteUpdateProbe {
+            has_updates: false,
+            checked_at_ms,
+        });
+    }
+    let remote = String::from_utf8_lossy(&remote_output.stdout)
+        .trim()
+        .to_owned();
+    let merge_ref = String::from_utf8_lossy(&merge_output.stdout)
+        .trim()
+        .to_owned();
+    if remote.is_empty() || remote == "." || merge_ref.is_empty() {
+        return Ok(SidebarGitRemoteUpdateProbe {
+            has_updates: false,
+            checked_at_ms,
+        });
+    }
+
+    let local_output = git_output_raw(
+        root,
+        &["rev-parse", "--verify", "--quiet", "@{upstream}^{commit}"],
+    )?;
+    if !local_output.status.success() {
+        return Ok(SidebarGitRemoteUpdateProbe {
+            has_updates: false,
+            checked_at_ms,
+        });
+    }
+    let local_upstream = String::from_utf8_lossy(&local_output.stdout)
+        .trim()
+        .to_owned();
+    if local_upstream.is_empty() {
+        return Ok(SidebarGitRemoteUpdateProbe {
+            has_updates: false,
+            checked_at_ms,
+        });
+    }
+
+    let output = sidebar_git_remote_ls_remote_output(root, &remote, &merge_ref)?;
+    if !output.status.success() {
+        return Err(git_command_error("Git remote update probe", &output));
+    }
+    let remote_head = parse_sidebar_git_ls_remote(&output.stdout, &merge_ref)
+        .ok_or_else(|| "Git remote update probe returned no upstream ref".to_owned())?;
+
+    Ok(SidebarGitRemoteUpdateProbe {
+        has_updates: remote_head != local_upstream,
+        checked_at_ms,
+    })
+}
+
+fn parse_sidebar_git_ls_remote(stdout: &[u8], expected_ref: &str) -> Option<String> {
+    String::from_utf8_lossy(stdout).lines().find_map(|line| {
+        let (sha, reference) = line.split_once('\t')?;
+        (reference == expected_ref && !sha.is_empty()).then(|| sha.to_owned())
+    })
+}
+
+fn sidebar_git_remote_ls_remote_output(
+    root: &Path,
+    remote: &str,
+    merge_ref: &str,
+) -> Result<std::process::Output, String> {
+    let mut command = git_command(root, &["ls-remote", "--exit-code", remote, merge_ref]);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    native_process::isolate(&mut command);
+
+    let mut child = native_process::spawn(&mut command)
+        .map_err(|error| format!("failed to start Git remote update probe: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Git remote update probe stdout pipe is unavailable".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Git remote update probe stderr pipe is unavailable".to_owned())?;
+    let stdout_thread =
+        thread::spawn(move || read_bounded_idx_stream(stdout, MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES));
+    let stderr_thread =
+        thread::spawn(move || read_bounded_idx_stream(stderr, MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES));
+    let deadline = Instant::now() + SIDEBAR_GIT_REMOTE_TIMEOUT;
+    let status = loop {
+        match native_process::exited_before_reap(&child) {
+            Ok(true) => {
+                // Remote transports can spawn ssh/credential helpers that inherit
+                // stdout/stderr. Kill descendants before reaping the leader so a
+                // helper cannot retain a pipe after `git` itself exits.
+                let _ = native_process::force_stop(&mut child);
+                break child
+                    .wait()
+                    .map_err(|error| format!("failed to reap Git remote update probe: {error}"))?;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                let _ = native_process::force_stop(&mut child);
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(format!(
+                    "failed while observing Git remote update probe: {error}"
+                ));
+            }
+        }
+        #[cfg(not(unix))]
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("failed to observe Git remote update probe: {error}"))?
+        {
+            let _ = native_process::force_stop(&mut child);
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = native_process::force_stop(&mut child);
+            let _ = child.wait();
+            let _ = stdout_thread.join();
+            let _ = stderr_thread.join();
+            return Err("Git remote update probe timed out".to_owned());
+        }
+        thread::sleep(POLL_INTERVAL);
+    };
+    let (stdout, stdout_truncated) = stdout_thread
+        .join()
+        .map_err(|_| "Git remote update probe stdout reader panicked".to_owned())?;
+    let (stderr, stderr_truncated) = stderr_thread
+        .join()
+        .map_err(|_| "Git remote update probe stderr reader panicked".to_owned())?;
+    if stdout_truncated || stderr_truncated {
+        return Err("Git remote update probe output exceeded its safety limit".to_owned());
+    }
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn sidebar_git_status_output(root: &Path) -> Result<std::process::Output, String> {
@@ -9616,6 +9806,7 @@ pub fn run() {
             write_user_config_if_unchanged,
             lsp_install::install_lsp_server,
             workspace_sidebar_indicator_poll,
+            workspace_git_remote_update_probe,
             idx_overview,
             idx_query,
             idx_inspect,
@@ -10810,6 +11001,63 @@ mod tests {
         assert!(dirty.error.is_none());
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn sidebar_git_remote_probe_detects_unfetched_upstream_changes_without_fetching() {
+        let workspace = temporary_workspace("sidebar-git-remote-workspace");
+        let remote = temporary_workspace("sidebar-git-remote-bare");
+        let peer = temporary_workspace("sidebar-git-remote-peer");
+        initialize_git_repository(&workspace);
+        assert!(git_output_raw(&remote, &["init", "--bare"])
+            .expect("initialize bare remote")
+            .status
+            .success());
+        let remote_path = remote.to_string_lossy().into_owned();
+        git_output(&workspace, &["remote", "add", "origin", &remote_path]).expect("add origin");
+        git_output(&workspace, &["push", "-u", "origin", "main"]).expect("publish main");
+        git_output_raw(&remote, &["symbolic-ref", "HEAD", "refs/heads/main"])
+            .expect("point bare HEAD at main");
+
+        let initial =
+            sidebar_git_remote_update_probe_from(&workspace).expect("probe current remote state");
+        assert!(!initial.has_updates);
+
+        assert!(git_output_raw(&peer, &["clone", &remote_path, "."])
+            .expect("clone peer")
+            .status
+            .success());
+        git_output(
+            &peer,
+            &["config", "user.email", "pix-tests@example.invalid"],
+        )
+        .expect("configure peer email");
+        git_output(&peer, &["config", "user.name", "Pix Tests"]).expect("configure peer name");
+        fs::write(peer.join("tracked.txt"), "remote update\n").expect("modify peer file");
+        git_output(&peer, &["add", "tracked.txt"]).expect("stage peer change");
+        git_output(&peer, &["commit", "--no-gpg-sign", "-m", "remote update"])
+            .expect("commit peer change");
+        git_output(&peer, &["push", "origin", "main"]).expect("push peer change");
+
+        // The ordinary status poll still sees the stale local tracking ref, but
+        // ls-remote observes the new upstream tip without updating refs or
+        // downloading the remote object graph.
+        let local_status = sidebar_git_indicator_state(&workspace);
+        assert_eq!(local_status.behind, 0);
+        let changed = sidebar_git_remote_update_probe_from(&workspace)
+            .expect("probe unfetched remote change");
+        assert!(changed.has_updates);
+        assert_eq!(sidebar_git_indicator_state(&workspace).behind, 0);
+
+        git_output(&workspace, &["fetch", "origin"]).expect("fetch origin");
+        let fetched =
+            sidebar_git_remote_update_probe_from(&workspace).expect("probe after fetching");
+        assert!(!fetched.has_updates);
+        assert_eq!(sidebar_git_indicator_state(&workspace).behind, 1);
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(remote).expect("remove temporary remote");
+        fs::remove_dir_all(peer).expect("remove temporary peer");
     }
 
     #[test]

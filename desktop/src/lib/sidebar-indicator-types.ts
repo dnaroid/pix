@@ -52,8 +52,14 @@ export interface WorkspaceSidebarIndicatorPoll {
   readonly checkedAtMs: number;
 }
 
+export interface SidebarGitRemoteUpdateProbe {
+  readonly hasUpdates: boolean;
+  readonly checkedAtMs: number;
+}
+
 export interface SidebarIndicatorServiceState {
   readonly poll?: WorkspaceSidebarIndicatorPoll;
+  readonly gitRemote?: SidebarGitRemoteUpdateProbe;
   readonly idxOverview?: IdxOverview;
   readonly idxPollError?: string;
   readonly unseenScriptFailureIds: readonly string[];
