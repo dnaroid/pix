@@ -326,10 +326,15 @@ failure/tail receipt instead of verbatim retention.
 
 Repeated side-effect-free observations are superseded, not accumulated. A
 shell result classified as read-only inspection or a single test/build command
-has a repeatable-observation key (its input fingerprint); within one block's
-ledger only the newest fragment per key survives, so older runs (typically
-fixed failures, which the budget otherwise ranks highest) stay in the raw
-session only. Mutations, unknown commands and protected-path results have no
+has a repeatable-observation key (its input fingerprint). Whenever a ledger is
+built (new compression, roll-up/consolidation, deterministic continuity
+repack), only the newest fragment per key survives, and a fragment is also
+dropped when a newer identical observation exists elsewhere in the latest
+projection (a visible raw result or another active block's ledger). Shell
+results are never pruned, so the newest occurrence always survives somewhere.
+Older runs (typically fixed failures, which the budget otherwise ranks highest)
+stay in the raw session only. Journaled blocks are never edited in place; an
+existing block sheds superseded fragments only through a new ledger build. Mutations, unknown commands and protected-path results have no
 key and every receipt is kept. For routine message-mode suggestions, a file
 read or keyed observation that a later identical call re-observed, or a read of
 a file a later successful write/edit changed, is marked stale, ranked high and

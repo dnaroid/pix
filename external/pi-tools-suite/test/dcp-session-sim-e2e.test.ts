@@ -242,6 +242,56 @@ describe("DCP deterministic session-simulation E2E", () => {
     } finally { sim.dispose(); }
   });
 
+  test("coding marathon: repeated failing test runs, reads and edits stay compact with extractive auto-compression", async () => {
+    const sim = await DcpSessionSimulator.create({
+      contextWindow: 24_000, maxOutputTokens: 1_000, sessionId: "coding-marathon",
+      configure(config: any) {
+        config.debug = false;
+        config.compress.minContextPercent = 0.30;
+        config.compress.maxContextPercent = 0.60;
+        config.compress.summaryBuffer = false;
+        config.compress.nudgeFrequency = 1;
+        Object.assign(config.compress.autoCandidates, { enabled: true, minContextPercent: 0.30, keepRecentTurns: 1, minMessages: 2, minTokens: 100 });
+        Object.assign(config.compress.messageMode, { enabled: true, minContextPercent: 0.30, keepRecentTurns: 1 });
+        config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], summarizerFallbackModels: [], timeoutMs: 5_000 };
+        Object.assign(config.strategies.emergencyCurrentTurnPruning, { enabled: true, hardContextPercent: 0.82, targetContextPercent: 0.65, patience: 1, keepRecentToolPairs: 4, minOutputTokens: 100 });
+      },
+    });
+    const source = (file: string, round: number) => `// ${file} r${round}\n` + Array.from({ length: 120 }, (_, i) => `  test("case ${i} error status", () => expect(run${i}()).toBe("ok"))`).join("\n");
+    const failing = (round: number) => `bun test v1\n` + Array.from({ length: 80 }, (_, i) => i % 4 === 0 ? `(fail) parser.test.ts > case ${i} ROUND_${round}_FAIL\n  error: expected ok` : `  at frame${i} (src/parser.ts:${i})`).join("\n") + `\n 40 pass\n 20 fail\n`;
+    try {
+      for (let turn = 0; turn < 4; turn++) {
+        sim.appendUser(`Task ${turn}: fix parser area ${turn}. Constraint: TURN_${turn}_CONSTRAINT must hold.`);
+        for (let round = 0; round < 4; round++) {
+          await sim.toolTurn({ toolName: "read", input: { path: `src/area${turn}.ts` }, output: `Decision: AREA_${turn}_DECISION\n${source(`area${turn}`, round)}` });
+          await sim.toolTurn({ toolName: "bash", input: { command: "bun test test/parser.test.ts" }, output: failing(turn * 10 + round), isError: true });
+          await sim.toolTurn({ toolName: "edit", input: { path: `src/area${turn}.ts`, oldText: "a".repeat(400), newText: "b".repeat(400) }, output: `Edited src/area${turn}.ts` });
+        }
+        await sim.toolTurn({ toolName: "bash", input: { command: "bun test test/parser.test.ts" }, output: " 60 pass\n 0 fail\n" });
+        await sim.assistantTurn(`Area ${turn} done.`);
+      }
+      const final = await sim.project("final");
+      const text = JSON.stringify(final.messages);
+      const report = sim.report();
+      expect(report).toMatchObject({ aborts: 0, providerCapacityViolations: 0 });
+      expect(report.compressionCommits).toBeGreaterThan(5);
+      expect(report.peakProjectedContextPercent).toBeLessThan(0.6);
+      expect(report.activeSummaryTokens).toBeLessThan(8_000);
+      expect(report.maxBlockSummaryTokens).toBeLessThan(1_500);
+      expect(report.tokenOccurrenceReductionPercent).toBeGreaterThan(60);
+      expect(report.nonRewritePrefixRetentionMean).toBeGreaterThan(0.95);
+      expect(text).not.toContain("sha256:");
+      // Failures fixed in completed turns survive only in the raw session; the live
+      // last turn (rounds 30-33) is still protected and stays raw.
+      const failRounds = [...text.matchAll(/ROUND_(\d+)_FAIL/g)].map((match) => Number(match[1]));
+      expect(failRounds.every((round) => round >= 30)).toBe(true);
+      for (const turn of [0, 1, 2, 3]) {
+        expect(text).toContain(`TURN_${turn}_CONSTRAINT`);
+        expect(text).toContain(`AREA_${turn}_DECISION`);
+      }
+    } finally { sim.dispose(); }
+  }, 120_000);
+
   test("keeps a long tool-heavy session bounded while materially reducing provider-token occurrences", async () => {
     const sim = await DcpSessionSimulator.create({
       contextWindow: 20_000,

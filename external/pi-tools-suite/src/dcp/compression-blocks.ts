@@ -667,16 +667,41 @@ function aggregateToolContinuity(
  * mutation evidence and recency; overflow is replaced by one deterministic
  * recoverable aggregate whose exact source remains in the raw session.
  */
-function toolFragmentRecord(fragment: CompressionProtectedFragment, state: DcpState) {
-	const match = /^tool:(.+)$/.exec(fragment.origin)
-	return match ? state.toolCalls.get(match[1]!) : undefined
+/**
+ * Newest timestamp per repeatable-observation key among occurrences outside
+ * `exclude`: raw tool results visible in the latest projection and the
+ * ledgers of active blocks. Shell results are never pruned, so the newest
+ * occurrence of an observation always survives in one of these places.
+ */
+function externalObservationTimestamps(
+	exclude: ReadonlySet<string>,
+	state: DcpState,
+	config: DcpConfig,
+): Map<string, number> {
+	const newest = new Map<string, number>()
+	const note = (toolCallId: string | undefined) => {
+		if (!toolCallId || exclude.has(toolCallId)) return
+		const record = state.toolCalls.get(toolCallId)
+		const key = record ? repeatableObservationKey(record, config) : undefined
+		if (!key || !record) return
+		if (record.timestamp > (newest.get(key) ?? -Infinity)) newest.set(key, record.timestamp)
+	}
+	for (const meta of state.messageMetaSnapshot.values()) {
+		if (meta.blockId === undefined && (meta.role === "toolResult" || meta.role === "bashExecution")) note(meta.toolCallId)
+	}
+	for (const block of state.compressionBlocks) {
+		if (!block.active) continue
+		for (const fragment of block.protectedFragments ?? []) note(/^tool:(.+)$/.exec(fragment.origin)?.[1])
+	}
+	return newest
 }
 
 /**
  * Keep only the newest receipt of each repeated side-effect-free observation
- * (same inspection/test command and arguments). Ten `bun test` runs describe
- * one current state; the nine older receipts — typically fixed failures, which
- * the budget would otherwise rank highest — are history in the raw session.
+ * (same inspection/test command and arguments), both within this ledger and
+ * against newer occurrences elsewhere in the projection. Ten `bun test` runs
+ * describe one current state; the older receipts — typically fixed failures,
+ * which the budget would otherwise rank highest — stay in the raw session.
  */
 function supersedeRepeatedObservations(
 	fragments: CompressionProtectedFragment[],
@@ -684,18 +709,25 @@ function supersedeRepeatedObservations(
 	config: DcpConfig,
 ): CompressionProtectedFragment[] {
 	const newest = new Map<string, { timestamp: number; index: number }>()
-	const keys = fragments.map((fragment, index) => {
+	const ownIds = new Set<string>()
+	const keyed = fragments.map((fragment, index) => {
 		if (fragment.kind !== "tool") return undefined
-		const record = toolFragmentRecord(fragment, state)
+		const toolCallId = /^tool:(.+)$/.exec(fragment.origin)?.[1]
+		const record = toolCallId ? state.toolCalls.get(toolCallId) : undefined
 		const key = record ? repeatableObservationKey(record, config) : undefined
-		if (!key || !record) return undefined
+		if (!key || !record || !toolCallId) return undefined
+		ownIds.add(toolCallId)
 		const current = newest.get(key)
 		if (!current || record.timestamp >= current.timestamp) newest.set(key, { timestamp: record.timestamp, index })
-		return key
+		return { key, timestamp: record.timestamp }
 	})
+	if (newest.size === 0) return fragments
+	const external = externalObservationTimestamps(ownIds, state, config)
 	return fragments.filter((_fragment, index) => {
-		const key = keys[index]
-		return key === undefined || newest.get(key)?.index === index
+		const entry = keyed[index]
+		if (!entry) return true
+		if (newest.get(entry.key)?.index !== index) return false
+		return !(entry.timestamp < (external.get(entry.key) ?? -Infinity))
 	})
 }
 

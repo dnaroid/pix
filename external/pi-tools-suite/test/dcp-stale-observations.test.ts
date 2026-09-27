@@ -98,4 +98,22 @@ describe("DCP stale observations", () => {
     expect(roles.length).toBeGreaterThan(0);
     expect(roles).not.toContain("user");
   });
+
+  test("a ledger drops an observation that a newer identical run supersedes elsewhere in the projection", () => {
+    const { state } = scenario();
+    const fragment = (id: string) => ({
+      kind: "tool" as const, origin: `tool:${id}`, hash: id.padEnd(64, "0"), text: `receipt ${id}`,
+      representation: "receipt" as const, sourceHash: id.padEnd(64, "1"), sourceBytes: 100, policyVersion: 2 as const,
+    });
+    state.toolCalls.get("test-1")!.timestamp = 10;
+    state.toolCalls.get("test-3")!.timestamp = 30;
+    // test-3 is still raw and visible in the latest projection.
+    state.messageMetaSnapshot.set("m090", { timestamp: 30, role: "toolResult", toolCallId: "test-3", tokenEstimate: 10 } as any);
+    const kept = budgetProtectedToolFragments([fragment("test-1"), fragment("commit-1")], state, dcpConfig()).map((item) => item.origin);
+    expect(kept).toEqual(["tool:commit-1"]);
+
+    // Without a newer occurrence the older run is the current state and survives.
+    state.messageMetaSnapshot.clear();
+    expect(budgetProtectedToolFragments([fragment("test-1")], state, dcpConfig()).map((item) => item.origin)).toEqual(["tool:test-1"]);
+  });
 });
