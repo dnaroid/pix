@@ -1,6 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { isBlindModelRef, SubagentModelSelectionError, type ResolvedAgentTaskConfig, type SubagentConfig } from "./config.js";
-import { isUiQaType } from "./browser-qa.js";
+import { isUiQaType } from "./ui-qa.js";
 import { isSessionModelUnavailable } from "./model-fallback.js";
 
 export interface SubagentModelRegistry {

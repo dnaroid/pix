@@ -450,7 +450,7 @@ function buildBlockedHandoff(value) {
 	return {
 		...(nonEmptyString(selection.selectedBackend) ? { backend: selection.selectedBackend } : {}),
 		...(platformDriver ? { platformDriver } : {}),
-		missingCapabilities: stringArray(selection.missingCapabilities),
+		missingCapabilities: [...new Set([...stringArray(selection.missingCapabilities), ...stringArray(value.missingCapabilities)])],
 		reason,
 		remediation,
 		manualActionRequired: true,

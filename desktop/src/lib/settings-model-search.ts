@@ -14,11 +14,18 @@ export function settingsModelSearchOptions(
 ): SettingsModelSearchOption[] {
   return models.map((model) => ({
     value: model.ref,
-    label: `${model.name} · ${model.modelId}`,
+    label: settingsModelLabel(model),
     description: model.ref,
     aliases: [model.ref, model.modelId, model.name, model.provider],
     keywords: [model.name, `${model.provider} ${model.modelId}`],
   }));
+}
+
+/** "Name · id", or just the name when the provider reports the id as its name. */
+export function settingsModelLabel(model: Pick<ModelThinkingModel, "name" | "modelId">): string {
+  const name = model.name.trim();
+  if (!name) return model.modelId;
+  return name.toLowerCase() === model.modelId.trim().toLowerCase() ? name : `${name} · ${model.modelId}`;
 }
 
 export function searchSettingsModelOptions(

@@ -526,10 +526,11 @@ describe.serial("subagent type config", () => {
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
 		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
-		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
-		expect(config.types.oracle.models).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
-		expect(config.types.oracle.parentProviderPolicy).toBe("require-other");
-		expect(config.types["frontier-review"].notForParentModels).toEqual(["openai-codex/gpt-6-sol*", "zai/glm-5.3"]);
+		expect(config.types["frontier-review"].modelSelection).toBe("frontier");
+		expect(config.types.oracle.modelSelection).toBe("frontier");
+		expect(config.types.oracle.parentProviderPolicy).toBe("require-other-if-frontier");
+		expect(config.types["frontier-review"].forParentTier).toBe("non-frontier");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-astra")).not.toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-sol")).not.toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- frontier-review:");
@@ -670,7 +671,7 @@ Research only this project.
 			"verify",
 		]);
 		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
-		expect(definitions["frontier-review"]?.raw.notForParentModels).toEqual(["openai-codex/gpt-6-sol*", "zai/glm-5.3"]);
+		expect(definitions["frontier-review"]?.raw.forParentTier).toBe("non-frontier");
 		expect(definitions["delivery-review"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 		expect(definitions["delivery-review"]?.raw.promptAppend).toContain("End with confidence");
 		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");

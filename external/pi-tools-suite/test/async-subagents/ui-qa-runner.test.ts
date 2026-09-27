@@ -496,6 +496,36 @@ process.exitCode = 2;
 		expect(result.placeholderCount).toBe(2);
 	});
 
+	test("maps an unavailable browser executable to a BLOCKED handoff", async () => {
+		const { project, agentDir } = createProject();
+		const fakeRunner = writeProjectFile(project, "fake-missing-browser-runner.mjs", `
+console.log(JSON.stringify({
+  status: "QA_BROWSER_UNAVAILABLE",
+  profile: "public",
+  reason: "no launchable Chromium found",
+  remediation: "install a Chromium build",
+  missingCapabilities: ["chromiumExecutable"]
+}));
+process.exitCode = 43;
+`);
+		const result = await runBrowserBackend({
+			flow: {
+				target: { url: "https://example.test/" },
+				steps: [{ action: "assertVisible", locator: { testId: "ready" } }],
+			},
+			projectRoot: project,
+			agentDir,
+			runId: "missing-browser",
+			deadline: Date.now() + 10_000,
+			browserRunnerPath: fakeRunner,
+			progress() {},
+		});
+		expect(result.status).toBe("BLOCKED");
+		expect(result.reason).toBe("no launchable Chromium found");
+		expect(result.remediation).toBe("install a Chromium build");
+		expect(result.missingCapabilities).toEqual(["chromiumExecutable"]);
+	});
+
 	test("drives a real alternate-screen TUI through PTY input and screen assertions", () => {
 		const { project, agentDir, uiWorkspace } = createProject();
 		writeProjectFile(project, "fixture.mjs", `

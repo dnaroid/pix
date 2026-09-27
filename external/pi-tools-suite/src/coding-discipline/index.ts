@@ -98,7 +98,7 @@ const QUALITY_DISCIPLINE_LINES = [
 	"- never claim a test/check passed unless it actually ran and its result was observed.",
 	"",
 	"Escalation discipline:",
-	"- when async subagents are available, use an independent `oracle` (preferably Sol through the configured oracle role) when focused inspection still leaves conflicting evidence, multiple incompatible root causes, a subtle cross-module invariant you cannot verify locally, or a high-risk security/schema/public-API/concurrency/irreversible decision;",
+	"- when async subagents are available, use an independent `oracle` (a frontier model from another vendor, chosen by the configured oracle role) when focused inspection still leaves conflicting evidence, multiple incompatible root causes, a subtle cross-module invariant you cannot verify locally, or a high-risk security/schema/public-API/concurrency/irreversible decision;",
 	"- also escalate after two materially different fixes fail for the same unresolved cause;",
 	"- do not escalate routine implementation, mechanical edits, straightforward test failures, or facts that local tools can verify directly;",
 	"- treat oracle output as a second opinion, not authority: reconcile it with repository evidence before acting.",

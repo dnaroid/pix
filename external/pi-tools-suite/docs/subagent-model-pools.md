@@ -13,13 +13,12 @@ policy, not a price oracle.
 - `verify`: run checks and interpret logs, without fixing source or tests.
 - `ui-qa`: isolated real-UI workflow for browsers, terminal/TUI apps, and
   desktop GUIs with deterministic assertions and inspectable evidence.
-- `frontier-review`: independent post-implementation code review on a strong
-  model; hidden when the current parent model matches the role's availability
-  gate.
+- `frontier-review`: independent post-implementation code review on a frontier
+  model; hidden when the current parent model is itself a frontier model.
 - `delivery-review`: explicitly requested, read-only delivery readiness and
   evidence review, available to any parent; does not perform real UI QA or
   assume release authority.
-- `oracle`: a deliberate cross-provider strong second opinion, not automatic
+- `oracle`: a deliberate cross-vendor frontier second opinion, not automatic
   worker escalation.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
@@ -49,9 +48,11 @@ verification, assume release authority, or waive a required independent
 
 ## Role-owned model candidates
 
-Each Markdown profile owns its ordered `models` list. There is no global
-sub-agent preset or model-pool layer. The list is the complete candidate chain
-for initial selection and subsequent quota fallbacks:
+Each Markdown profile owns its ordered `models` list, or declares
+`modelSelection: frontier` to use the suite-level frontier list described
+below. There is no other global sub-agent preset or model-pool layer. The list
+is the complete candidate chain for initial selection and subsequent quota
+fallbacks:
 
 ```yaml
 ---
@@ -79,19 +80,27 @@ strict parent-provider boundary still apply to those overrides.
 
 ## Parent-provider policy
 
-`parentProviderPolicy` controls the relationship between a role's candidate
-providers and the known parent provider:
+`parentProviderPolicy` controls the relationship between a role's candidates
+and the known parent model. It compares *vendors* (model-family owners), not
+provider ids: the vendor is taken from a matching `frontierModels` entry's
+`vendor`, else inferred from the model id (`gpt-*`/`o<N>`/`codex` → openai,
+`glm-*` → zai, `claude-*` → anthropic, `gemini-*`/`gemma-*` → google, `grok-*`
+→ xai, ...), else the provider id. So `openai/gpt-6-astra`,
+`openai-codex/gpt-6-astra`, `github-copilot/gpt-6-astra` and
+`openrouter/~openai/gpt-astra-latest` are all the openai vendor, and the parent's
+own model (same normalized id or a shared frontier alias) never counts as "other".
 
 - `any` (default): preserve the role's candidate order unchanged.
-- `prefer-other`: stable-partition other-provider candidates before same-provider
-  candidates, preserving relative order inside both groups.
-- `require-other`: remove every candidate from the parent provider. A known parent
-  provider is required; same-provider explicit overrides are rejected; an empty
-  remaining chain is a selection error rather than a fallback to the parent.
+- `prefer-other`: stable-partition other-vendor candidates first, then
+  same-vendor candidates, then the parent's own model.
+- `require-other`: remove every candidate from the parent vendor. A known parent
+  is required; same-vendor explicit overrides and `--provider` extra args are
+  rejected; an empty remaining chain is a selection error rather than a fallback
+  to the parent.
+- `require-other-if-frontier`: `require-other` when the parent is a frontier
+  model (or unknown), `prefer-other` otherwise.
 
-The bundled `oracle` uses `require-other`. Its strong-model list can contain
-OpenAI, Z.ai, Anthropic, or any future provider without adding provider-specific
-oracle roles. For example, a chain
+For example, a chain
 
 ```yaml
 models: [openai/frontier, anthropic/frontier, zai/frontier]
@@ -100,8 +109,43 @@ parentProviderPolicy: require-other
 
 automatically excludes OpenAI for an OpenAI parent, Anthropic for an Anthropic
 parent, and Z.ai for a Z.ai parent. Runtime availability then chooses the first
-usable candidate among the remaining providers. Adding another provider is just
-another candidate in the role profile; it does not require a new routing matrix.
+usable candidate among the remaining vendors.
+
+## Frontier models and economy mode
+
+`pi-tools-suite.jsonc` names the frontier models once:
+
+```jsonc
+"frontierModels": [
+  { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
+  { "model": "openai-codex/gpt-6-sol", "expensive": true, "aliases": ["*gpt-6-sol*"] },
+  { "model": "zai/glm-5.3" }
+],
+"economy": false
+```
+
+The list serves two purposes: it classifies the parent (a parent matching an
+entry by exact ref, normalized id, or alias is a frontier parent) and it is the
+ordered candidate list of roles with `modelSelection: frontier`. Entries with
+`enabled: false` still classify parents but are never selected; `roles`
+restricts an entry to the listed roles. A config layer's list replaces the
+inherited list, and `null` restores the built-in one.
+
+The bundled roles use it as follows:
+
+| Role | Selection | Result with the default list |
+|---|---|---|
+| `oracle` | `require-other-if-frontier` | GLM-5.3 parent → Astra, Sol; GPT-6 Sol/Astra parent → GLM-5.3; non-frontier parent → every frontier, other vendors first |
+| `frontier-review` | `forParentTier: non-frontier` | Sol, GLM-5.3; hidden for frontier parents |
+| `delivery-review` | list order | Sol, GLM-5.3; available to all parents |
+
+`economy: true` (or `PI_TOOLS_SUITE_ECONOMY=1`) excludes `expensive` frontier
+models from every role's automatic chain (including roles with their own
+`models`, such as `implement`) and rejects explicit task/CLI overrides to them.
+Only the forced current parent model is exempt. The config is read on each spawn,
+so toggling takes effect without a restart. If nothing qualifies, spawn fails
+naming the excluded models, and a cross-vendor role that cannot resolve for the
+current parent is hidden from the catalog.
 
 Quota fallback follows the already-resolved candidate chain. The fallback layer
 tracks exhausted models/providers but does not independently encode a
@@ -111,6 +155,10 @@ different-provider rule; provider diversity belongs to the role policy.
 `parentProviderPolicy: require-other`. New profiles should use the enum directly.
 
 ## Parent-model visibility gates
+
+`forParentTier: frontier | non-frontier` exposes a role only to parents in that
+tier of the frontier list; an unknown parent keeps the role visible.
+
 
 Agent frontmatter can independently gate whether a role exists for the current
 parent model. `forParentModels` is an optional allow-list and

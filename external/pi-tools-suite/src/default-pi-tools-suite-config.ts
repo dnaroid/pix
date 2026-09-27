@@ -65,6 +65,22 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // screenshot/image questions. Remove or set to null to disable lookup.
   "lookupModel": "zai/glm-5.3-flash",
   "lookupFallbackModels": [],
+  // Frontier models used by frontier-selecting sub-agent roles, in preference
+  // order: oracle takes a frontier model from another vendor than a frontier
+  // parent (any frontier for other parents, other vendors first), and
+  // frontier-review/delivery-review take the first usable entry. A new
+  // frontier release is just a new entry here. Per entry: "vendor" (inferred
+  // from the model id when omitted), "expensive", "enabled": false to stop
+  // selecting it, "aliases" (globs recognizing the same model under other
+  // refs), and "roles" (limit the entry to listed roles).
+  "frontierModels": [
+    { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
+    { "model": "openai-codex/gpt-6-sol", "expensive": true, "aliases": ["*gpt-6-sol*"] },
+    { "model": "zai/glm-5.3" }
+  ],
+  // Economy mode: no sub-agent role selects an "expensive" frontier model.
+  // Also toggled by PI_TOOLS_SUITE_ECONOMY=1/0.
+  "economy": false,
   "terminalBell": { "sound": true },
   // comment-checker: nudges the agent to remove AI-slop code comments it just
   // added via write/edit/apply_patch. Net-new comments are classified and a

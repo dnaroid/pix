@@ -78,6 +78,17 @@ current-session model availability.
   the thin prompt's guide-routing requirement does not weaken them: every
   backend action still goes through the runner's fail-closed checks.
 
+## Browser launch contract
+
+- Playwright-backed runs launch Playwright's pinned Chromium first. If that
+  build is missing, the runner tries only already-installed executables: the
+  newest Playwright-cache builds (`PLAYWRIGHT_BROWSERS_PATH` or the platform
+  default), then system Google Chrome/Chromium. It never installs a browser.
+- When nothing launches, or Playwright cannot be loaded, the runner reports
+  `QA_BROWSER_UNAVAILABLE` (exit 43) with remediation and
+  `missingCapabilities`; the unified runner returns `BLOCKED` with a
+  `blockedHandoff` instead of a product `FAILED`.
+
 ## Browser authentication contract
 
 - Public browser QA requires no auth profile and does not create or require
@@ -358,7 +369,7 @@ current-session model availability.
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/windows/windows-uia.ps1`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/linux/linux-atspi.py`
-- `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
+- `external/pi-tools-suite/src/async-subagents/core/ui-qa.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`
