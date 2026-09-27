@@ -9,6 +9,7 @@ import type { DcpConfig } from "./config.js"
 import { estimateTokens } from "./pruner-metadata.js"
 import { isToolRecordProtected } from "./pruner-tools.js"
 import { toolRecordContinuity } from "./protected-continuity.js"
+import { DEFAULT_DCP_CONFIG } from "./defaults.js"
 import { compareConversationStableIds, buildExactRangeMembership } from "./conversation-index.js"
 import { createHash } from "node:crypto"
 import { open, realpath } from "node:fs/promises"
@@ -639,7 +640,7 @@ function aggregateToolContinuity(
 		"### Historical tool continuity aggregate",
 		`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
 		`Tools: ${toolSummary || "unknown"}.`,
-		`Raw source represented: ${sourceBytes} bytes; manifest sha256:${manifestHash}.`,
+		`Raw source represented: ${sourceBytes} bytes.`,
 	]
 	if (changedFiles.size > 0) lines.push(`Changed files observed: ${[...changedFiles].join(", ")}.`)
 	lines.push("Exact historical outputs remain in session history; this aggregate is continuation-only evidence.")
@@ -648,7 +649,7 @@ function aggregateToolContinuity(
 		text = [
 			"### Historical tool continuity aggregate",
 			`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
-			`Raw source represented: ${sourceBytes} bytes; manifest sha256:${manifestHash}.`,
+			`Raw source represented: ${sourceBytes} bytes.`,
 		].join("\n")
 	}
 	return compressionProtectedFragment("tool", `tool-ledger:${manifestHash}`, text, {
@@ -674,7 +675,7 @@ export function budgetProtectedToolFragments(
 	const configuredBudget = config.compress.maxProtectedToolContinuityBytes
 	const maxBytes = typeof configuredBudget === "number" && Number.isFinite(configuredBudget) && configuredBudget > 0
 		? Math.max(1_024, Math.floor(configuredBudget))
-		: 64 * 1024
+		: DEFAULT_DCP_CONFIG.compress.maxProtectedToolContinuityBytes
 	const toolEntries = fragments
 		.map((fragment, index) => ({ fragment, index }))
 		.filter(({ fragment }) => fragment.kind === "tool")

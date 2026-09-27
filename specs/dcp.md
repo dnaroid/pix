@@ -315,7 +315,11 @@ DCP system prompt states who writes summaries: without a configured summarizer
 model the agent is told to always write the `compress` `summary` itself; with
 one, it may omit it. Protected user/tag/tool fragments and bounded
 subagent artifacts are carried through a deduplicated ledger so repeated
-rollups do not recursively duplicate them.
+rollups do not recursively duplicate them. Provider-visible ledger text carries
+no content hashes: receipts report raw output size, and identity hashes live in
+fragment metadata (`sourceHash`). The default per-block tool-continuity budget
+is 16 KiB. Unrecognised test/build output above 4 KiB gets a bounded
+failure/tail receipt instead of verbatim retention.
 
 Exact v2 source/mutation membership hashes are canonicalized with JSONL-stable
 value semantics before publication. In-memory-only `undefined` fields (notably

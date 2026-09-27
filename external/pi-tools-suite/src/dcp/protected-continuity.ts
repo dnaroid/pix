@@ -28,6 +28,8 @@ const MAX_ERROR_EXCERPT_CHARS = 2_048;
 const MAX_MUTATION_SUMMARY_CHARS = 2_048;
 const MAX_CHANGED_FILES = 40;
 const TEST_DIGEST_MAX_BYTES = 8_192;
+/** Unrecognised test/build output above this size gets a bounded receipt. */
+const UNRECOGNISED_TEST_VERBATIM_MAX_BYTES = 4_096;
 
 function normalizeToolName(name: string): string {
 	return name.trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -41,11 +43,15 @@ function renderedCommand(record: ToolRecord): string {
 	const command = shellCommandText(record.inputArgs);
 	if (!command) return "unavailable";
 	if (command.length <= MAX_COMMAND_CHARS) return command;
-	return `[command omitted: ${command.length} chars, sha256:${stableDigest(command)}]`;
+	return `${command.slice(0, 240)}… [${command.length} chars total]`;
 }
 
-function outputIdentity(output: string): string {
-	return `${Buffer.byteLength(output, "utf8")} bytes, sha256:${stableDigest(output)}`;
+/**
+ * Provider-visible size only. The content hash is kept in fragment metadata
+ * (`sourceHash`) for identity; a 64-hex digest in the text is pure token noise.
+ */
+function outputSize(output: string): string {
+	return `${Buffer.byteLength(output, "utf8")} bytes`;
 }
 
 function sourceMetadata(record: ToolRecord): Pick<ToolContinuityDecision, "sourceHash" | "sourceBytes"> {
@@ -82,7 +88,7 @@ function shellDigest(record: ToolRecord, kind: "inspection" | "test-build", body
 		`Command: ${renderedCommand(record)}`,
 		`Classification: ${kind}`,
 		`Outcome: ${record.isError ? "error" : "success"}`,
-		`Raw output identity: ${outputIdentity(output)}`,
+		`Raw output size: ${outputSize(output)}`,
 	];
 	if (body) lines.push(body);
 	else if (record.isError) {
@@ -101,7 +107,7 @@ function shellReceipt(record: ToolRecord): string {
 		`Command: ${renderedCommand(record)}`,
 		`Classification: ${classification.kind}/${classification.scope}`,
 		`Outcome: ${record.isError ? "error" : "success"}`,
-		`Raw output identity: ${outputIdentity(output)}`,
+		`Raw output size: ${outputSize(output)}`,
 	];
 	const excerpt = boundedErrorExcerpt(output);
 	if (excerpt) lines.push(record.isError ? "Actionable error excerpt:" : "Bounded output evidence:", excerpt);
@@ -143,7 +149,7 @@ function mutationReceipt(record: ToolRecord): string {
 	if (summary) lines.push("Producer summary:", summary);
 	const excerpt = boundedErrorExcerpt(output);
 	if (record.isError && excerpt) lines.push("Actionable error excerpt:", excerpt);
-	lines.push(`Raw output identity: ${outputIdentity(output)}`);
+	lines.push(`Raw output size: ${outputSize(output)}`);
 	lines.push("Exact raw output remains in session history and is omitted from live protected continuity.");
 	return lines.join("\n");
 }
@@ -243,6 +249,12 @@ export function toolRecordContinuity(record: ToolRecord, config: DcpConfig): Too
 				"recognised-test-build",
 				shellDigest(record, "test-build", compact.text),
 			);
+		}
+		// Small unparsed output stays exact. Large unparsed output would otherwise
+		// ride every roll-up verbatim (and can exceed the block budget, failing
+		// compression closed); keep a bounded failure/tail receipt instead.
+		if (Buffer.byteLength(output, "utf8") > UNRECOGNISED_TEST_VERBATIM_MAX_BYTES) {
+			return preferSmallerReceipt(record, `test-build-${compact.reason}-receipt`, shellReceipt(record));
 		}
 		return {
 			mode: "verbatim",

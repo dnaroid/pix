@@ -18,7 +18,7 @@ export const DEFAULT_DCP_CONFIG = {
     protectedTools: ["compress", "write", "edit"],
     protectTags: false,
     protectUserMessages: false,
-    maxProtectedToolContinuityBytes: 64 * 1024,
+    maxProtectedToolContinuityBytes: 16 * 1024,
     autoCandidates: {
       enabled: true,
       minContextPercent: 0.40,

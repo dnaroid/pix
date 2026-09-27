@@ -31,7 +31,9 @@ describe("DCP protected continuity", () => {
 		expect(continuity.reason).toBe("read-only-inspection");
 		expect(continuity.text).toContain("Command: git status --short");
 		expect(continuity.text).toContain("Outcome: success");
-		expect(continuity.text).toContain("sha256:");
+		expect(continuity.text).toContain("Raw output size:");
+		expect(continuity.text).not.toMatch(/sha256|[0-9a-f]{64}/);
+		expect(continuity.sourceHash).toMatch(/^[0-9a-f]{64}$/);
 		expect(continuity.text!.length).toBeLessThan(800);
 		expect(continuity.text).not.toContain("M dist/a.js\nM dist/a.js\nM dist/a.js");
 	});
@@ -48,7 +50,7 @@ describe("DCP protected continuity", () => {
 		expect(continuity.mode).toBe("digest");
 		expect(continuity.reason).toBe("read-only-inspection");
 		expect(continuity.text).toContain("Classification: inspection");
-		expect(continuity.text).toContain("Raw output identity:");
+		expect(continuity.text).toContain("Raw output size:");
 		expect(continuity.text!.length).toBeLessThan(1_000);
 		expect(continuity.text).not.toContain("README match detail\nREADME match detail");
 	});
@@ -115,6 +117,12 @@ describe("DCP protected continuity", () => {
 			expect(continuity.text).toContain(outputText);
 		}
 
+		const largeUnparsed = `${"custom test runner progress line\n".repeat(400)}FAILED: UNPARSED_RUNNER_FAILURE`;
+		const bounded = toolRecordContinuity(record({ inputArgs: { command: "bun test test/a.test.ts" }, outputText: largeUnparsed, isError: true }), config);
+		expect(bounded.mode).toBe("receipt");
+		expect(bounded.text).toContain("UNPARSED_RUNNER_FAILURE");
+		expect(bounded.text!.length).toBeLessThan(largeUnparsed.length / 4);
+
 		config.protectedFilePatterns = ["secrets/**"];
 		const protectedPath = toolRecordContinuity(record({
 			inputArgs: { command: "git status --short", cwd: "secrets/project" },
@@ -160,7 +168,7 @@ describe("DCP protected continuity", () => {
 		expect(continuity.text).toContain("Mutation continuity receipt: apply_patch");
 		expect(continuity.text).toContain("src/a.ts");
 		expect(continuity.text).toContain("Updated two files and refreshed diagnostics.");
-		expect(continuity.text).toContain("Raw output identity:");
+		expect(continuity.text).toContain("Raw output size:");
 		expect(continuity.sourceHash).toMatch(/^[0-9a-f]{64}$/);
 		expect(continuity.text!.length).toBeLessThan(outputText.length / 4);
 	});
