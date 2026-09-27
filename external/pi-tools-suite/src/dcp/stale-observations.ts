@@ -37,6 +37,18 @@ function samePath(left: string, right: string): boolean {
 }
 
 /**
+ * Identity of a side-effect-free observation: a file read (by its exact
+ * arguments) or a repeatable shell inspection/test run. Undefined for
+ * mutations and anything whose re-run is not a pure re-observation.
+ */
+export function observationKey(record: ToolRecord, config: DcpConfig): string | undefined {
+  if (READ_TOOLS.has(normalizeToolName(record.toolName))) {
+    return argPath(record) ? record.inputFingerprint : undefined;
+  }
+  return repeatableObservationKey(record, config);
+}
+
+/**
  * Tool results in the current projection whose content is provably stale:
  * a side-effect-free observation (file read, read-only inspection, test/build
  * run) that a later identical call re-observed, or a file read whose file a
@@ -63,7 +75,7 @@ export function staleObservationReasons(
     const { toolCallId, record } = results[index]!;
     const name = normalizeToolName(record.toolName);
     const readPath = READ_TOOLS.has(name) ? argPath(record) : undefined;
-    const key = readPath ? record.inputFingerprint : repeatableObservationKey(record, config);
+    const key = observationKey(record, config);
     if (key && laterKeys.has(key)) {
       stale.set(toolCallId, "superseded by a later identical call");
     } else if (readPath && laterMutations.some((path) => samePath(path, readPath))) {

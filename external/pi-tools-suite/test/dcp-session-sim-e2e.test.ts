@@ -3,6 +3,7 @@ import { prepareDcpReminderScenario } from "./support/dcp-reminder-scenario.js";
 import { closeConversationRange } from "../src/dcp/conversation-index.js";
 
 import { DcpSessionSimulator } from "./support/dcp-session-simulator.js";
+import { formatDcpStatistics } from "../src/dcp/statistics.js";
 
 function configureEfficiencyScenario(config: any): void {
   config.debug = false;
@@ -206,6 +207,38 @@ describe("DCP deterministic session-simulation E2E", () => {
       expect(text).toContain("NEW_PARSER_BODY");
       expect(text).toContain("Refactor src/parser.ts");
       expect(sim.report()).toMatchObject({ aborts: 0, providerCapacityViolations: 0 });
+    } finally { sim.dispose(); }
+  });
+
+  test("regret signals: re-running a compressed observation and recovery after compression are recorded", async () => {
+    const sim = await DcpSessionSimulator.create({
+      contextWindow: 64_000,
+      sessionId: "compression-regret",
+      configure(config) {
+        config.debug = false;
+        for (const strategy of Object.values(config.strategies)) strategy.enabled = false;
+        config.compress.autoCompress.enabled = false;
+      },
+    });
+    try {
+      sim.appendUser("Inspect the config loader.");
+      const body = (name: string) => `${name}\n${"const setting = load();\n".repeat(200)}`;
+      await sim.toolTurn({ toolName: "read", input: { path: "src/config.ts" }, output: body("CONFIG_BODY"), label: "read-config" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/loader.ts" }, output: body("LOADER_BODY"), label: "read-loader" });
+      const configId = [...sim.state.messageMetaSnapshot].find(([, meta]) => meta.text?.includes("CONFIG_BODY"))![0];
+      const { result } = await sim.compressTurn({ topic: "Config read", messages: [{ messageId: configId, summary: "config.ts loads settings via load()." }] });
+      expect(result.details).toMatchObject({ committed: true });
+      expect(sim.report()).toMatchObject({ regretRefetches: 0, regretRecoveryCalls: 0 });
+
+      await sim.toolTurn({ toolName: "read", input: { path: "src/loader.ts" }, output: body("LOADER_BODY"), label: "visible-reread" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/other.ts" }, output: "other", label: "fresh-read" });
+      expect(sim.report()).toMatchObject({ regretRefetches: 0 });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/config.ts" }, output: body("CONFIG_BODY"), label: "regret-reread" });
+      await sim.toolTurn({ toolName: "session_search", input: { query: "CONFIG_BODY" }, output: "match", label: "recovery" });
+      expect(sim.report()).toMatchObject({ regretRefetches: 1, regretRecoveryCalls: 1 });
+      expect(formatDcpStatistics({ branch: sim.branch() })).toContain(
+        "Regret signals: 1 re-runs of compressed/pruned observations; 1 session-recovery calls after compression",
+      );
     } finally { sim.dispose(); }
   });
 

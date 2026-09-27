@@ -60,6 +60,10 @@ export interface DcpSessionSimulationReport {
   journalEntries: number;
   reminderProviderTurns: number;
   toolReminderProviderTurns: number;
+  /** Identical observations re-run while DCP hid their earlier result. */
+  regretRefetches: number;
+  /** Session-recovery tool calls made after DCP compressed something. */
+  regretRecoveryCalls: number;
 }
 
 export interface DcpSessionSimulatorOptions {
@@ -380,6 +384,9 @@ export class DcpSessionSimulator {
     const journalEntries = this.manager.getBranch().filter((entry: any) =>
       entry?.type === "custom" && entry?.customType === DCP_JOURNAL_CUSTOM_TYPE,
     ).length;
+    const regret = this.manager.getBranch()
+      .filter((entry: any) => entry?.type === "custom" && entry?.customType === "dcp-diagnostic" && entry.data?.event === "regret")
+      .map((entry: any) => entry.data.kind);
     return {
       turns: this.samples.length,
       rawTokenOccurrences,
@@ -410,7 +417,13 @@ export class DcpSessionSimulator {
       journalEntries,
       reminderProviderTurns: providerSamples.filter((sample) => sample.reminderCarriers.length > 0).length,
       toolReminderProviderTurns: providerSamples.filter((sample) => sample.reminderCarriers.includes("toolResult")).length,
+      regretRefetches: regret.filter((kind: string) => kind === "refetch").length,
+      regretRecoveryCalls: regret.filter((kind: string) => kind === "recovery").length,
     };
+  }
+
+  branch(): any[] {
+    return this.manager.getBranch();
   }
 
   dispose(): void {

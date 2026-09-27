@@ -425,6 +425,7 @@ undo configuration.
 - `external/pi-tools-suite/src/dcp/pruner-emergency.ts`
 - `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
 - `external/pi-tools-suite/src/dcp/stale-observations.ts`
+- `external/pi-tools-suite/src/dcp/regret-signals.ts`
 - `external/pi-tools-suite/src/dcp/pruner-tools.ts`
 - `external/pi-tools-suite/src/dcp/auto-compress.ts`
 - `external/pi-tools-suite/test/auto-compress.test.ts`

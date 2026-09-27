@@ -65,6 +65,7 @@ import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { safeGetContextUsage } from "../context-usage.js"
 import { FreshToolResultTracker } from "./fresh-tool-results.js"
+import { CompressionRegretTracker } from "./regret-signals.js"
 import { RoutinePressureTracker } from "./routine-pressure.js"
 import { canonicalMessageHash } from "./conversation-index.js"
 import { randomUUID } from "node:crypto"
@@ -196,6 +197,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	const providerEvidenceTracker = new ProviderEvidenceTracker()
 	const freshToolResults = new FreshToolResultTracker()
 	const routinePressureTracker = new RoutinePressureTracker()
+	const regretTracker = new CompressionRegretTracker()
 	let providerEvidenceCommitQueue = Promise.resolve()
 	let latestProviderOpportunityAvailable = false
 	let latestProviderOpportunityKind: "routine" | "emergency" | undefined
@@ -312,6 +314,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		contextMapPass++
 			invalidateDcpStateOwner(state)
 			routinePressureTracker.reset()
+			regretTracker.reset()
 			// Successful exposure belongs to the old provider/branch too, not only
 			// the pending attempt. The new owner must establish its own evidence.
 			state.providerSeenToolIds.clear()
@@ -392,6 +395,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		contextMapPass++
 		resetState(state)
 		routinePressureTracker.reset()
+		regretTracker.reset()
 		freshToolResults.reset()
 		lastProviderReadyProjectionEpoch = undefined
 		providerEvidenceTracker.reset()
@@ -430,6 +434,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		contextMap = undefined
 		contextMapPass++
 		routinePressureTracker.reset()
+		regretTracker.reset()
 		freshToolResults.reset()
 		journalMirror = undefined
 		journalSupported = false
@@ -459,8 +464,15 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 	// ── 8. tool_call: record input args for dedup / purge fingerprinting ───────
 	pi.on("tool_call", async (event, _ctx) => {
-		if (configForContext(_ctx).enabled && isJournalSessionSupported()) {
+		const toolCallConfig = configForContext(_ctx)
+		if (toolCallConfig.enabled && isJournalSessionSupported()) {
 			freshToolResults.toolCall(event.toolCallId, event.toolName, state.toolCalls.has(event.toolCallId))
+			if (!state.toolCalls.has(event.toolCallId)) {
+				const regret = regretTracker.classifyToolCall(
+					event.toolName, event.input as Record<string, unknown>, state, toolCallConfig,
+				)
+				if (regret) diagnostic("regret", { kind: regret, toolName: event.toolName, toolCallId: event.toolCallId })
+			}
 		}
 		if (!state.toolCalls.has(event.toolCallId)) {
 			state.toolCalls.set(event.toolCallId, {
@@ -548,6 +560,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}
 			if (providerReady) routinePressureTracker.prepare(pressureOwner, rawContextTokens,
 				diagnosticSnapshot.projectedTokens, state.compressionBlocks)
+			regretTracker.observeProjection(contextMessages, messages, state)
 			writeDcpDebugLog(effectiveConfig, "context.result", {
 				reason,
 				inputMessages: event.messages.length,
