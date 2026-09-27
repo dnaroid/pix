@@ -21,6 +21,7 @@ import type { CompressionCandidate } from "./pruner-types.js"
 import { estimateMessageTokens, estimateTokens, stripStaleDcpMetadataLines } from "./pruner-metadata.js"
 import {
 	createRangeCompressionBlock,
+	compressionBlockCoreSummary,
 	findCoveredAndPartialBlocks,
 	prepareCompressionProtectedFragments,
 	isCompressionBoundaryWithinRange,
@@ -998,15 +999,29 @@ export async function createAutoCompressionBlock(
 		}
 	}
 
-	const preparedSummary = await prepareCompressionSummary({
-		topic,
-		messages: messagesInRange,
-		candidate: effectiveCandidate,
-		modelRefs: summarizerModelRefs(settings),
-		timeoutMs: options.summaryTimeoutMs ?? settings.timeoutMs,
-		modelRegistry,
-		signal,
-	})
+	const repackSourceBlock = effectiveCandidate.kind === "continuity-repack" && effectiveCandidate.includedBlockIds.length === 1
+		? state.compressionBlocks.find((block) => block.id === effectiveCandidate.includedBlockIds[0] && block.active)
+		: undefined
+	const preparedSummary: PreparedCompressionSummary = repackSourceBlock
+		? (() => {
+			const sourceManifest = buildSummarySourceManifest(messagesInRange)
+			return {
+				text: compressionBlockCoreSummary(repackSourceBlock),
+				representation: "extractive" as const,
+				sourceManifest,
+				sourceHash: hashSummarySourceManifest(sourceManifest),
+				sourceCoverage: summarySourceCoverage(sourceManifest),
+			}
+		})()
+		: await prepareCompressionSummary({
+			topic,
+			messages: messagesInRange,
+			candidate: effectiveCandidate,
+			modelRefs: summarizerModelRefs(settings),
+			timeoutMs: options.summaryTimeoutMs ?? settings.timeoutMs,
+			modelRegistry,
+			signal,
+		})
 	assertCurrent()
 	const summary = preparedSummary.text
 	const sourceManifest = preparedSummary.sourceManifest
@@ -1118,7 +1133,10 @@ export async function createAutoCompressionBlock(
 		: true
 	created.block.commitMetrics = {
 		operationId: `auto:${created.block.id}`,
-		kind: effectiveCandidate.includedBlockIds.length >= 2 && sourceCoverage.itemCount === effectiveCandidate.includedBlockIds.length ? "consolidation" : "auto",
+		kind: effectiveCandidate.kind === "continuity-repack" ||
+			effectiveCandidate.includedBlockIds.length >= 2 && sourceCoverage.itemCount === effectiveCandidate.includedBlockIds.length
+			? "consolidation"
+			: "auto",
 		beforeTokens: fullProjectedAfterTokens + fullProjectionGain,
 		afterTokens: fullProjectedAfterTokens, netGainTokens: fullProjectionGain,
 	}

@@ -3,7 +3,13 @@ export interface CompressionCandidate {
   endId: string;
   messageCount: number;
   estimatedTokens: number;
+  /** Estimated provider-visible continuity that survives compression. */
+  estimatedRetentionTokens?: number;
+  /** Estimated source tokens actually recoverable after continuity retention. */
+  estimatedRecoverableTokens?: number;
   includedBlockIds: number[];
+  /** Optional planner hint for deterministic block maintenance. */
+  kind?: "range" | "block-consolidation" | "continuity-repack";
   reason: string;
 }
 

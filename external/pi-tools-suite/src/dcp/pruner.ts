@@ -32,6 +32,7 @@ export {
 } from "./pruner-tools.js";
 export {
   detectCompressionBlockConsolidationCandidate,
+  detectCompressionContinuityRepackCandidate,
   detectCompressionCandidate,
   detectEmergencyCompressionCandidate,
   detectMessageCompressionCandidates,

@@ -4,6 +4,7 @@ import { estimateMessageTokens } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { writeDcpDebugLog } from "./debug-log.js";
 import { canonicalMessageHash, rawMutationHashOf } from "./conversation-index.js";
+import { renderCompressionBlockSummary } from "./compression-blocks.js";
 
 function findBoundaryIndex(messages: any[], stableId: string | undefined, timestamp: number): number {
   if (stableId) {
@@ -158,7 +159,7 @@ function compressedBlockText(block: CompressionBlock, label: "section" | "messag
   return [
     `[Compressed ${label}: ${block.topic}]`,
     "",
-    block.summary,
+    renderCompressionBlockSummary(block),
     "",
     `[dcp-block-id]: # (b${block.id})`,
   ].join("\n");

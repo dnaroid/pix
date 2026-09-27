@@ -98,10 +98,18 @@ export interface CompressionProtectedFragment {
   kind: "user" | "prompt" | "tool"
   /** Stable provenance key; not rendered into provider-visible context. */
   origin: string
-  /** SHA-256 of the exact protected text. */
+  /** SHA-256 of this provider-visible continuity representation. */
   hash: string
-  /** Exact text that must survive rollups. */
+  /** Provider-visible continuity text carried into future projections. */
   text: string
+  /** Legacy fragments omit this and are treated as exact until safely re-normalized. */
+  representation?: "exact" | "digest" | "receipt" | "aggregate"
+  /** SHA-256 of the raw tool output represented by this fragment, when known. */
+  sourceHash?: string
+  /** Raw tool-output byte size represented by this fragment, when known. */
+  sourceBytes?: number
+  /** Continuity shaping policy that produced this fragment. */
+  policyVersion?: 2
 }
 
 /**
@@ -127,7 +135,11 @@ export interface CompressionBlock {
   id: number
   /** Short human-readable topic label */
   topic: string
-  /** LLM-generated summary text */
+  /**
+   * Continuation summary core. Older v2 blocks may also contain the rendered
+   * protected-fragment ledger inline; `continuityFormatVersion` distinguishes
+   * the new separated representation.
+   */
   summary: string
   /** Timestamp of the first message in the compressed range */
   startTimestamp: number
@@ -151,8 +163,10 @@ export interface CompressionBlock {
   operationRequestHash?: string
   /** Whether this block is still being applied (false = soft-deleted) */
   active: boolean
-  /** Token estimate for the summary text itself */
+  /** Token estimate for the provider-visible rendered summary + continuity. */
   summaryTokenEstimate: number
+  /** Token estimate for `summary` alone when continuity is rendered separately. */
+  summaryCoreTokenEstimate?: number
   /** One record per successful transaction (on its first block), never on retries.
    * Optional for older journal blocks; absence means unmeasured, not zero gain. */
   commitMetrics?: {
@@ -198,8 +212,10 @@ export interface CompressionBlock {
     toolCallCount: number
     toolResultCount: number
   }
-  /** Exact protected continuity fragments carried across rollups. */
+  /** Protected continuity fragments carried across rollups. */
   protectedFragments?: CompressionProtectedFragment[]
+  /** Version 2 renders `summary` and `protectedFragments` separately. */
+  continuityFormatVersion?: 2
   /** Internal reason for automatic soft-deactivation. */
   deactivatedReason?: string
 }

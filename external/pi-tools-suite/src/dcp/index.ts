@@ -32,6 +32,7 @@ import {
 	applyPruning,
 	getNudgeType,
 	detectCompressionBlockConsolidationCandidate,
+	detectCompressionContinuityRepackCandidate,
 	detectCompressionCandidate,
 	detectEmergencyCompressionCandidate,
 	detectMessageCompressionCandidates,
@@ -607,6 +608,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		await persistJournalState(ctx, state)
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
 		let blockConsolidationCandidate = null as ReturnType<typeof detectCompressionBlockConsolidationCandidate>
+		let continuityRepackCandidate = null as ReturnType<typeof detectCompressionContinuityRepackCandidate>
 		let emergencyCompressionCandidate = null as ReturnType<typeof detectEmergencyCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
 		let emergencySelection = null as ReturnType<typeof analyzeEmergencyCurrentTurn> | null
@@ -808,6 +810,12 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					contextPercent,
 				)
 				if (progressPressureReached) {
+					continuityRepackCandidate = detectCompressionContinuityRepackCandidate(
+						prunedMessages,
+						state,
+						effectiveConfig,
+						{ requiredSavingsTokens: planningRecoveryTokens, estimatorMarginTokens },
+					)
 					blockConsolidationCandidate = detectCompressionBlockConsolidationCandidate(
 						prunedMessages,
 						state,
@@ -824,14 +832,17 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					budget,
 					nudgeType,
 					candidate,
+					continuityRepackCandidate,
 					blockConsolidationCandidate,
 					messageCandidates,
 					state: summarizeDcpState(state, effectiveConfig),
 				}, ctx)
 			}
 
-			const hasNormalCompressionSuggestion =
-				candidate !== null || messageCandidates.length > 0
+			// Maintenance candidates are intentionally not model-visible suggestions:
+			// when auto-compress is disabled they must not suppress the independent
+			// emergency analysis/body-pruning safety path.
+			const hasNormalCompressionSuggestion = candidate !== null || messageCandidates.length > 0
 			if (
 				emergencySettings.enabled &&
 				sameTurnPlanningAllowed &&
@@ -890,9 +901,11 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				trackCompressionProgress(state, progressInput)
 				latestProviderOpportunityKind = emergencyPressureReached ? "emergency" : !state.manualMode ? "routine" : undefined
 			}
+			const autoMaintenanceAvailable = effectiveConfig.compress.autoCompress.enabled && !state.manualMode &&
+				(continuityRepackCandidate !== null || blockConsolidationCandidate !== null)
 			const blockedReason = inferDcpBlockedReason({
 				pressured: progressPressureReached,
-				candidateAvailable: candidate !== null || emergencyCompressionCandidate !== null,
+				candidateAvailable: candidate !== null || emergencyCompressionCandidate !== null || autoMaintenanceAvailable,
 				messageCandidateCount: messageCandidates.length,
 				requiredSavingsTokens: planningRecoveryTokens,
 				capacityExceeded: budget.capacityExceeded,
@@ -969,7 +982,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			let autoCompressionFailure: { blockedReason?: DcpBlockedReason; error: string } | undefined
 			let partialAutoProjectionTokens: number | undefined
 			if (!manualEmergencyOnly) {
-				const autoCandidate = blockConsolidationCandidate ?? candidate ?? emergencyCompressionCandidate
+				const autoCandidate = continuityRepackCandidate ?? blockConsolidationCandidate ?? candidate ?? emergencyCompressionCandidate
 				const cacheSafeReminderAvailable = hasCacheSafeNudgeCarrier(
 					prunedMessages, freshToolResults.eligibleIds, state.nudgeAnchors,
 				)
@@ -1004,7 +1017,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					try {
 						const autoOperationEpoch = state.sessionEpoch
 						const rawFallbackCandidate = candidate ?? emergencyCompressionCandidate
-						const largestSafeCandidate = blockConsolidationCandidate
+						const maintenanceCandidate = continuityRepackCandidate ?? blockConsolidationCandidate
+						const largestSafeCandidate = maintenanceCandidate
 							? rawFallbackCandidate
 							: candidate
 							? detectCompressionCandidate(

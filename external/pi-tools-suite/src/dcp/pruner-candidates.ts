@@ -2,8 +2,11 @@ import type { DcpConfig } from "./config.js";
 import type { DcpState } from "./state.js";
 import type { CompressionCandidate, MessageCompressionCandidate } from "./pruner-types.js";
 import {
+  estimateTokens,
   estimateMessageTokens,
 } from "./pruner-metadata.js";
+import { toolRecordContinuity } from "./protected-continuity.js";
+import { previewCompressionContinuityRepack } from "./compression-blocks.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { closeConversationRange, detectToolGroupSpans, findConversationIndexEntry } from "./conversation-index.js";
 import { protocolClosedBoundaryRuns } from "./protocol-closed-ranges.js";
@@ -14,8 +17,30 @@ interface CandidateBoundary {
   role: string;
   timestamp: number;
   tokenEstimate: number;
+  retentionTokenEstimate: number;
   blockId?: number;
   isSystemReminder: boolean;
+}
+
+function boundaryRetentionTokens(id: string, blockId: number | undefined, state: DcpState, config: DcpConfig): number {
+  if (blockId !== undefined) {
+    const block = state.compressionBlocks.find((candidate) => candidate.id === blockId && candidate.active);
+    if (!block) return 0;
+    try {
+      return Math.max(0, previewCompressionContinuityRepack(block, state, config).estimatedTokens);
+    } catch {
+      // If exact continuity cannot be safely reshaped, treat the whole current
+      // block as retained rather than promising recoverable capacity.
+      return Math.max(0, Math.round(block.summaryTokenEstimate ?? 0));
+    }
+  }
+  const meta = state.messageMetaSnapshot.get(id);
+  const toolCallId = meta?.toolCallId;
+  if (!toolCallId) return 0;
+  const record = state.toolCalls.get(toolCallId);
+  if (!record) return 0;
+  const continuity = toolRecordContinuity(record, config);
+  return continuity.text ? Math.max(0, estimateTokens(continuity.text)) : 0;
 }
 
 function assistantToolCallIds(message: any): string[] {
@@ -32,6 +57,7 @@ function isRealUserBoundary(boundary: CandidateBoundary): boolean {
 function buildCandidateBoundaries(
   messages: any[],
   state: DcpState,
+  config: DcpConfig,
   options: { allowBlocks: boolean },
 ): CandidateBoundary[] {
   const boundaries: CandidateBoundary[] = [];
@@ -41,12 +67,14 @@ function buildCandidateBoundaries(
     const boundary = resolveAddressableBoundaryId(msg, stableKeys[index]!, state, options);
     if (!boundary) continue;
     if (!Number.isFinite(msg.timestamp)) continue;
+    const tokenEstimate = state.messageMetaSnapshot.get(boundary.id)?.tokenEstimate ?? estimateMessageTokens(msg);
     boundaries.push({
       id: boundary.id,
       messageIndex: index,
       role: msg.role ?? "",
       timestamp: msg.timestamp,
-      tokenEstimate: state.messageMetaSnapshot.get(boundary.id)?.tokenEstimate ?? estimateMessageTokens(msg),
+      tokenEstimate,
+      retentionTokenEstimate: Math.min(tokenEstimate, boundaryRetentionTokens(boundary.id, boundary.blockId, state, config)),
       blockId: boundary.blockId,
       isSystemReminder: msg?._dcpOrigin === "dcp-control",
     });
@@ -135,10 +163,11 @@ function selectOldestSafePrefix(
     if (run.length === 0) continue;
     let selectedEnd = run.length - 1;
     if (options?.requiredSavingsTokens !== undefined) {
-      let selectedTokens = 0;
+      let selectedRecoverableTokens = 0;
       for (let index = 0; index < run.length; index++) {
-        selectedTokens += run[index]!.tokenEstimate;
-        if (index + 1 >= minMessages && selectedTokens >= targetSourceTokens) {
+        const boundary = run[index]!;
+        selectedRecoverableTokens += Math.max(0, boundary.tokenEstimate - boundary.retentionTokenEstimate);
+        if (index + 1 >= minMessages && selectedRecoverableTokens >= targetSourceTokens) {
           selectedEnd = index;
           break;
         }
@@ -167,7 +196,7 @@ export function detectCompressionCandidate(
   if (!settings.enabled) return null;
   if (contextPercent < settings.minContextPercent) return null;
 
-  const boundaries = buildCandidateBoundaries(messages, _state, {
+  const boundaries = buildCandidateBoundaries(messages, _state, config, {
     allowBlocks: options?.allowCompressionBlocks ?? true,
   });
 
@@ -200,6 +229,8 @@ export function detectCompressionCandidate(
   if (!candidate) return null;
 
   const estimatedTokens = candidate.reduce((sum, item) => sum + item.tokenEstimate, 0);
+  const estimatedRetentionTokens = candidate.reduce((sum, item) => sum + item.retentionTokenEstimate, 0);
+  const estimatedRecoverableTokens = Math.max(0, estimatedTokens - estimatedRetentionTokens);
 
   const includedBlockIds = Array.from(
     new Set(candidate.map((item) => item.blockId).filter((id): id is number => id !== undefined)),
@@ -210,7 +241,10 @@ export function detectCompressionCandidate(
     endId: candidate[candidate.length - 1]!.id,
     messageCount: candidate.length,
     estimatedTokens,
+    estimatedRetentionTokens,
+    estimatedRecoverableTokens,
     includedBlockIds,
+    kind: "range",
     reason: options?.requiredSavingsTokens
       ? `minimal oldest protocol-safe prefix restoring ~${Math.max(0, Math.floor(options.requiredSavingsTokens))} budget tokens; older than the most recent ${keepRecentTurns} user turn(s)`
       : `older than the most recent ${keepRecentTurns} user turn(s)`,
@@ -236,7 +270,7 @@ export function detectCompressionBlockConsolidationCandidate(
   options?: CompressionCandidateSelectionOptions,
 ): CompressionCandidate | null {
   const settings = config.compress.autoCandidates;
-  const boundaries = buildCandidateBoundaries(messages, state, { allowBlocks: true });
+  const boundaries = buildCandidateBoundaries(messages, state, config, { allowBlocks: true });
   const minimumBlocks = MIN_AUTOMATIC_BLOCK_CONSOLIDATION;
   const requiredSavings = Math.max(0, Math.floor(options?.requiredSavingsTokens ?? 0));
   const estimatorMargin = Math.max(0, Math.floor(options?.estimatorMarginTokens ?? 0));
@@ -269,12 +303,16 @@ export function detectCompressionBlockConsolidationCandidate(
     const selected = chooseRun(run);
     if (selected) {
       const estimatedTokens = selected.reduce((sum, item) => sum + item.tokenEstimate, 0);
+      const estimatedRetentionTokens = selected.reduce((sum, item) => sum + item.retentionTokenEstimate, 0);
       return {
         startId: selected[0]!.id,
         endId: selected[selected.length - 1]!.id,
         messageCount: selected.length,
         estimatedTokens,
+        estimatedRetentionTokens,
+        estimatedRecoverableTokens: Math.max(0, estimatedTokens - estimatedRetentionTokens),
         includedBlockIds: selected.map((item) => item.blockId!),
+        kind: "block-consolidation",
         reason: `automatic block-only consolidation of ${selected.length} adjacent summaries`,
       };
     }
@@ -284,14 +322,64 @@ export function detectCompressionBlockConsolidationCandidate(
   const selected = chooseRun(run);
   if (!selected) return null;
   const estimatedTokens = selected.reduce((sum, item) => sum + item.tokenEstimate, 0);
+  const estimatedRetentionTokens = selected.reduce((sum, item) => sum + item.retentionTokenEstimate, 0);
   return {
     startId: selected[0]!.id,
     endId: selected[selected.length - 1]!.id,
     messageCount: selected.length,
     estimatedTokens,
+    estimatedRetentionTokens,
+    estimatedRecoverableTokens: Math.max(0, estimatedTokens - estimatedRetentionTokens),
     includedBlockIds: selected.map((item) => item.blockId!),
+    kind: "block-consolidation",
     reason: `automatic block-only consolidation of ${selected.length} adjacent summaries`,
   };
+}
+
+/**
+ * Detect one oversized active block whose continuity ledger can be rewritten
+ * deterministically under the current policy. Unlike block consolidation this
+ * intentionally supports a single block, which is the failure mode produced
+ * by a long-lived legacy roll-up with a large inherited protected ledger.
+ */
+export function detectCompressionContinuityRepackCandidate(
+  messages: any[],
+  state: DcpState,
+  config: DcpConfig,
+  options?: CompressionCandidateSelectionOptions,
+): CompressionCandidate | null {
+  const boundaries = buildCandidateBoundaries(messages, state, config, { allowBlocks: true });
+  const requiredSavings = Math.max(0, Math.floor(options?.requiredSavingsTokens ?? 0));
+  const materialGain = Math.max(512, Math.min(2_048, requiredSavings || 512));
+  let best: CompressionCandidate | null = null;
+
+  for (const boundary of boundaries) {
+    if (boundary.blockId === undefined) continue;
+    const block = state.compressionBlocks.find((candidate) => candidate.id === boundary.blockId && candidate.active);
+    if (!block || !Array.isArray(block.protectedFragments) || block.protectedFragments.length === 0) continue;
+    let preview: ReturnType<typeof previewCompressionContinuityRepack>;
+    try {
+      preview = previewCompressionContinuityRepack(block, state, config);
+    } catch {
+      // Exact continuity above budget is intentionally fail-closed and cannot
+      // be advertised as a safe deterministic repack candidate.
+      continue;
+    }
+    if (preview.estimatedGainTokens < materialGain) continue;
+    const candidate: CompressionCandidate = {
+      startId: boundary.id,
+      endId: boundary.id,
+      messageCount: 1,
+      estimatedTokens: boundary.tokenEstimate,
+      estimatedRetentionTokens: preview.estimatedTokens,
+      estimatedRecoverableTokens: preview.estimatedGainTokens,
+      includedBlockIds: [block.id],
+      kind: "continuity-repack",
+      reason: `deterministic continuity repack of b${block.id}: ~${Math.max(0, Math.round(block.summaryTokenEstimate))} -> ~${preview.estimatedTokens} summary tokens`,
+    };
+    if (!best || (candidate.estimatedRecoverableTokens ?? 0) > (best.estimatedRecoverableTokens ?? 0)) best = candidate;
+  }
+  return best;
 }
 
 /**
@@ -327,7 +415,7 @@ export function detectEmergencyCompressionCandidate(
   if (!emergencySettings.enabled) return null;
   if (contextPercent <= maxContextPercent) return null;
 
-  const boundaries = buildCandidateBoundaries(messages, state, {
+  const boundaries = buildCandidateBoundaries(messages, state, config, {
     allowBlocks: options?.allowCompressionBlocks ?? true,
   });
   if (boundaries.length < settings.minMessages) return null;
@@ -419,6 +507,8 @@ export function detectEmergencyCompressionCandidate(
   }
 
   const estimatedTokens = candidate.reduce((sum, item) => sum + item.tokenEstimate, 0);
+  const estimatedRetentionTokens = candidate.reduce((sum, item) => sum + item.retentionTokenEstimate, 0);
+  const estimatedRecoverableTokens = Math.max(0, estimatedTokens - estimatedRetentionTokens);
 
   const includedBlockIds = Array.from(
     new Set(candidate.map((item) => item.blockId).filter((id): id is number => id !== undefined)),
@@ -429,7 +519,10 @@ export function detectEmergencyCompressionCandidate(
     endId: candidate[candidate.length - 1]!.id,
     messageCount: candidate.length,
     estimatedTokens,
+    estimatedRetentionTokens,
+    estimatedRecoverableTokens,
     includedBlockIds,
+    kind: "range",
     reason: options?.requiredSavingsTokens
       ? `minimal emergency same-turn provider-evidenced prefix restoring ~${Math.max(0, Math.floor(options.requiredSavingsTokens))} budget tokens; preserves newest ${keepRecentPairs} tool pair(s) plus the live assistant head`
       : `emergency same-turn provider-evidenced prefix; preserves newest ${keepRecentPairs} tool pair(s) plus the live assistant head`,
@@ -456,7 +549,7 @@ export function detectMessageCompressionCandidates(
   if (!settings?.enabled) return [];
   if (contextPercent < settings.minContextPercent) return [];
 
-  const boundaries = buildCandidateBoundaries(messages, state, { allowBlocks: false })
+  const boundaries = buildCandidateBoundaries(messages, state, config, { allowBlocks: false })
     .filter((boundary) => boundary.blockId === undefined);
 
   const keepRecentTurns = Math.max(1, settings.keepRecentTurns ?? 2);

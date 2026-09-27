@@ -69,16 +69,30 @@ describe("session token-efficiency analysis", () => {
 		const config = loadConfig({ homeDir: "/__efficiency_fixture__" });
 		const output = "large status output\n".repeat(1_000);
 		const protectedText = `### Tool: shell\n${output}`;
+		const legacySummary = `semantic core\n\nThe following protected continuity fragments were preserved verbatim:\n\n${protectedText}`;
 		const fixture = [
 			line({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "s1", name: "shell", arguments: { command: "git status --short" } }] } }),
 			line({ type: "message", message: { role: "toolResult", toolCallId: "s1", toolName: "shell", content: [{ type: "text", text: output }], isError: false } }),
-			line({ type: "custom", customType: "dcp-journal", data: { kind: "delta", blocks: [{ id: 1, active: true, summary: protectedText, summaryTokenEstimate: 1, protectedFragments: [{ kind: "tool", origin: "tool:s1", hash: "fixture", text: protectedText }] }] } }),
+			line({ type: "custom", customType: "dcp-journal", data: { kind: "delta", blocks: [{ id: 1, active: true, summary: legacySummary, summaryTokenEstimate: 1, protectedFragments: [{ kind: "tool", origin: "tool:s1", hash: "fixture", text: protectedText }] }] } }),
 		].join("\n");
 		const report = analyzeSessionJsonlText(fixture, { dcpConfig: config });
 		expect(report.dcp.continuityProjection?.toolFragments).toBe(1);
 		expect(report.dcp.continuityProjection?.byMode.digest).toBe(1);
 		expect(report.dcp.continuityProjection?.reductionPercent ?? 0).toBeGreaterThan(90);
 		expect(report.dcp.continuityProjection?.activeSummaryTokenReduction ?? 0).toBeGreaterThan(0);
+	});
+
+	test("replays journal blockStates before reporting active continuity savings", () => {
+		const summary = "old summary " + "x".repeat(2_000);
+		const fixture = [
+			line({ type: "custom", customType: "dcp-journal", data: { kind: "delta", blocks: [{ id: 1, active: true, summary, summaryTokenEstimate: 500, protectedFragments: [] }] } }),
+			line({ type: "custom", customType: "dcp-journal", data: { kind: "delta", blockStates: [{ id: 1, active: false, deactivatedReason: "covered" }] } }),
+		].join("\n");
+		const report = analyzeSessionJsonlText(fixture, { dcpConfig: loadConfig({ homeDir: "/__efficiency_fixture__" }) });
+
+		expect(report.dcp.blocks[0]?.active).toBe(false);
+		expect(report.dcp.continuityProjection?.activeSummaryBaselineTokens).toBe(0);
+		expect(report.dcp.continuityProjection?.activeSummaryProjectedTokens).toBe(0);
 	});
 
 	test("control-plane accounting exposes independently budgetable components", () => {

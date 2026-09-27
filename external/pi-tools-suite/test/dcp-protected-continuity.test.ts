@@ -136,6 +136,56 @@ describe("DCP protected continuity", () => {
 		expect(continuity.text).toContain("EXACT_READ_OUTPUT");
 	});
 
+	test("compacts large apply_patch results into mutation receipts with producer evidence", () => {
+		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
+		const outputText = [
+			"Success. Updated the following files:",
+			"M src/a.ts",
+			"M src/b.ts",
+			"LSP diagnostics:",
+			...Array.from({ length: 500 }, (_, index) => `diagnostic ${index}: detail detail detail detail`),
+		].join("\n");
+		const continuity = toolRecordContinuity(record({
+			toolName: "apply_patch",
+			inputArgs: { patch: "*** Begin Patch\n*** Update File: src/a.ts\n*** End Patch" },
+			outputText,
+			outputDetails: {
+				changedFiles: ["src/a.ts", "src/b.ts"],
+				summary: "Updated two files and refreshed diagnostics.",
+			},
+		}), config);
+
+		expect(continuity.mode).toBe("receipt");
+		expect(continuity.reason).toBe("mutation-receipt");
+		expect(continuity.text).toContain("Mutation continuity receipt: apply_patch");
+		expect(continuity.text).toContain("src/a.ts");
+		expect(continuity.text).toContain("Updated two files and refreshed diagnostics.");
+		expect(continuity.text).toContain("Raw output identity:");
+		expect(continuity.sourceHash).toMatch(/^[0-9a-f]{64}$/);
+		expect(continuity.text!.length).toBeLessThan(outputText.length / 4);
+	});
+
+	test("compacts large unknown shell output but keeps tiny shell evidence verbatim", () => {
+		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
+		const outputText = "custom runner detail\n".repeat(2_000) + "final status: success\n";
+		const compact = toolRecordContinuity(record({
+			inputArgs: { command: "node custom-runner.mjs" },
+			outputText,
+		}), config);
+		expect(compact.mode).toBe("receipt");
+		expect(compact.reason).toBe("shell-unknown-receipt");
+		expect(compact.text).toContain("Classification: unknown/simple");
+		expect(compact.text!.length).toBeLessThan(outputText.length / 4);
+
+		const tiny = toolRecordContinuity(record({
+			inputArgs: { command: "node custom-runner.mjs" },
+			outputText: "ok\n",
+		}), config);
+		expect(tiny.mode).toBe("verbatim");
+		expect(tiny.reason).toBe("shell-unknown-receipt-not-smaller");
+		expect(tiny.text).toBe("### Tool: shell\nok");
+	});
+
 	test("does not replace a tiny protected result with a larger continuity digest", () => {
 		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
 		const continuity = toolRecordContinuity(record({

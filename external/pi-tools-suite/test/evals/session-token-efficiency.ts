@@ -10,7 +10,8 @@ import { injectMessageIds } from "../../src/dcp/pruner-message-ids.js";
 import { estimateMessageTokens, estimateTokens, messageText } from "../../src/dcp/pruner-metadata.js";
 import { toolRecordContinuity } from "../../src/dcp/protected-continuity.js";
 import { createState } from "../../src/dcp/state.js";
-import type { ToolRecord } from "../../src/dcp/state.js";
+import type { CompressionBlock, ToolRecord } from "../../src/dcp/state.js";
+import { previewCompressionContinuityRepack, renderCompressionBlockSummary } from "../../src/dcp/compression-blocks.js";
 import {
 	CONTEXT_LIMIT_NUDGE_SOFT,
 	CONTEXT_LIMIT_NUDGE_STRONG,
@@ -95,7 +96,7 @@ export interface SessionTokenEfficiencyReport {
 			activeSummaryTokenReduction: number;
 			projectedLatestCompressionNetGain?: number;
 			toolFragments: number;
-			byMode: Record<"none" | "digest" | "verbatim", number>;
+			byMode: Record<"none" | "digest" | "receipt" | "verbatim", number>;
 			byReason: Record<string, { fragments: number; baselineChars: number; projectedChars: number }>;
 		};
 		carrierProjection?: DcpCarrierMeasurement;
@@ -367,6 +368,16 @@ export function analyzeSessionJsonlText(
 					blocksById.set(block.id as number, block);
 				}
 			}
+			const blockStates = entry.data.blockStates;
+			if (Array.isArray(blockStates)) {
+				for (const item of blockStates) {
+					if (!isRecord(item) || !Number.isSafeInteger(item.id) || typeof item.active !== "boolean") continue;
+					const block = blocksById.get(item.id as number);
+					if (!block) continue;
+					block.active = item.active;
+					if (typeof item.deactivatedReason === "string") block.deactivatedReason = item.deactivatedReason;
+				}
+			}
 			continue;
 		}
 
@@ -488,10 +499,13 @@ export function analyzeSessionJsonlText(
 	const blocks = [...blocksById.values()]
 		.map((block): SessionDcpBlockMetrics => {
 			const fragments = Array.isArray(block.protectedFragments) ? block.protectedFragments : [];
+			const renderedSummary = typeof block.summary === "string"
+				? renderCompressionBlockSummary(block as unknown as CompressionBlock)
+				: "";
 			return {
 				id: block.id as number,
 				active: block.active === true,
-				summaryChars: typeof block.summary === "string" ? block.summary.length : 0,
+				summaryChars: renderedSummary.length,
 				summaryTokenEstimate: finiteNumber(block.summaryTokenEstimate),
 				protectedFragmentCount: fragments.length,
 				protectedFragmentChars: fragments.reduce((sum, fragment) =>
@@ -508,40 +522,48 @@ export function analyzeSessionJsonlText(
 		let activeSummaryBaselineTokens = 0;
 		let activeSummaryProjectedTokens = 0;
 		let toolFragments = 0;
-		const byMode = { none: 0, digest: 0, verbatim: 0 };
+		const byMode = { none: 0, digest: 0, receipt: 0, verbatim: 0 };
 		const byReason: Record<string, { fragments: number; baselineChars: number; projectedChars: number }> = {};
+		const replayState = createState();
+		replayState.toolCalls = new Map(records);
+		replayState.compressionBlocks = [...blocksById.values()] as unknown as CompressionBlock[];
 		for (const rawBlock of blocksById.values()) {
-			const originalSummary = typeof rawBlock.summary === "string" ? rawBlock.summary : "";
+			if (typeof rawBlock.summary !== "string") continue;
+			const block = rawBlock as unknown as CompressionBlock;
+			const originalSummary = renderCompressionBlockSummary(block);
 			let projectedSummary = originalSummary;
 			const fragments = Array.isArray(rawBlock.protectedFragments) ? rawBlock.protectedFragments : [];
 			for (const fragment of fragments) {
 				if (!isRecord(fragment) || typeof fragment.text !== "string") continue;
 				baselineProtectedChars += fragment.text.length;
 				const match = typeof fragment.origin === "string" ? /^tool:(.+)$/.exec(fragment.origin) : null;
-				if (!match) {
-					projectedProtectedChars += fragment.text.length;
-					continue;
-				}
+				if (!match) continue;
 				toolFragments += 1;
 				const record = records.get(match[1]!);
 				if (!record) {
-					projectedProtectedChars += fragment.text.length;
 					byMode.verbatim += 1;
 					continue;
 				}
 				const decision = toolRecordContinuity(record, dcpConfig);
 				byMode[decision.mode] += 1;
 				const projectedChars = decision.text?.length ?? 0;
-				projectedProtectedChars += projectedChars;
-				if (originalSummary.includes(fragment.text)) {
-					projectedSummary = projectedSummary.replace(fragment.text, decision.text ?? "");
-				}
 				const reason = byReason[decision.reason] ?? { fragments: 0, baselineChars: 0, projectedChars: 0 };
 				reason.fragments += 1;
 				reason.baselineChars += fragment.text.length;
 				reason.projectedChars += projectedChars;
 				byReason[decision.reason] = reason;
 			}
+			let projectedFragments = fragments;
+			try {
+				const preview = previewCompressionContinuityRepack(block, replayState, dcpConfig);
+				projectedSummary = preview.renderedSummary;
+				projectedFragments = preview.protectedFragments;
+			} catch {
+				// Exact continuity that cannot fit the configured policy remains a
+				// fail-closed no-op in the projection, matching runtime behavior.
+			}
+			projectedProtectedChars += projectedFragments.reduce((sum, fragment) =>
+				sum + (isRecord(fragment) && typeof fragment.text === "string" ? fragment.text.length : 0), 0);
 			if (rawBlock.active === true) {
 				activeSummaryBaselineTokens += estimateTokens(originalSummary);
 				activeSummaryProjectedTokens += estimateTokens(projectedSummary);

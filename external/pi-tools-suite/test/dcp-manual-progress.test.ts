@@ -4,6 +4,7 @@ import { registerCompressTool, type CompressToolDependencies } from "../src/dcp/
 import { applyPruning, upsertNudgeAnchor } from "../src/dcp/pruner.js";
 import { estimateMessageTokens } from "../src/dcp/pruner-metadata.js";
 import { createState } from "../src/dcp/state.js";
+import { renderCompressionBlockSummary } from "../src/dcp/compression-blocks.js";
 
 function fixture(options: { text?: string; protectUser?: boolean; protectTags?: boolean; dependencies?: CompressToolDependencies } = {}) {
   const config = loadConfig({ homeDir: "/__dcp_manual_progress_fixture__" });
@@ -52,8 +53,10 @@ describe("DCP manual compression progress", () => {
     const rolled = f.state.compressionBlocks.find((block) => block.id === 2)!;
     expect(rolled.summary).toContain(requested);
     expect(rolled.summary).not.toContain("OLD_SUMMARY_DETAIL");
-    expect(rolled.summary.match(/MUST_KEEP_EXACT/g)).toHaveLength(1);
+    expect(rolled.summary).not.toContain("MUST_KEEP_EXACT");
+    expect(renderCompressionBlockSummary(rolled).match(/MUST_KEEP_EXACT/g)).toHaveLength(1);
     expect(rolled.protectedFragments).toHaveLength(1);
+    expect(rolled.continuityFormatVersion).toBe(2);
     expect(rolled.coveredBlockIds).toEqual([1]);
     expect(result.details.netGain).toBeGreaterThan(500);
     expect(result.details.projectedAfterTokens).toBeLessThan(result.details.projectedBeforeTokens);
