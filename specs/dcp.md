@@ -338,7 +338,10 @@ timestamps, and only raises suggestion priority; it does not prune anything by
 itself. Inside the protected recent window (typically one long
 autonomous turn, where ordinary message-mode history is empty) a stale
 observation is still suggested, but only when the provider has completed-send
-evidence for it; the protected window is otherwise unchanged.
+evidence for it; the protected window is otherwise unchanged. Message-mode
+suggestions never include user messages: they are small and carry the
+requirements. An explicit `compress` call may still select one unless
+`compress.protectUserMessages` is set.
 
 Exact v2 source/mutation membership hashes are canonicalized with JSONL-stable
 value semantics before publication. In-memory-only `undefined` fields (notably

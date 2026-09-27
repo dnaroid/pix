@@ -596,7 +596,9 @@ export function detectMessageCompressionCandidates(
 
   return [...history, ...recentStale]
     .filter((candidate) => !candidate.isSystemReminder)
-    .filter((candidate) => candidate.role !== "user" || !config.compress.protectUserMessages)
+    // User messages are small and carry the requirements; never suggest them.
+    // An explicit compress call may still select one unless protectUserMessages.
+    .filter((candidate) => candidate.role !== "user")
     // V2 message mode replaces only the selected body, so completed tool
     // results are safe surgical candidates. Signed assistants and assistants
     // carrying tool calls remain structurally immutable, and an incomplete

@@ -86,4 +86,16 @@ describe("DCP stale observations", () => {
     expect(candidates.map((candidate) => state.messageMetaSnapshot.get(candidate.messageId)?.toolCallId)).toEqual(["read-b-1"]);
     expect(candidates[0]).toMatchObject({ priority: "high", stale: "superseded by a later identical call" });
   });
+
+  test("message suggestions never include user messages, even large old ones", () => {
+    const { state, messages } = scenario();
+    // A large mid-history user message (e.g. pasted requirements) between tool calls.
+    messages.splice(5, 0, { role: "user", content: `REQUIREMENTS ${"must keep this constraint ".repeat(400)}END`, timestamp: 2.7 });
+    const config = dcpConfig();
+    config.compress.messageMode.maxSuggestions = 50;
+    const projected = applyPruning(messages, state, config);
+    const roles = detectMessageCompressionCandidates(projected, state, config, 0.5).map((candidate) => candidate.role);
+    expect(roles.length).toBeGreaterThan(0);
+    expect(roles).not.toContain("user");
+  });
 });
