@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -13,6 +14,16 @@ import type { MemoryWatchdogConfig } from "../src/config.js";
 
 const MB = 1024 ** 2;
 const GB = 1024 * MB;
+const REPORT_DIR = "/reports";
+
+/**
+ * The watchdog builds paths with `path.join`, so separators depend on the host
+ * platform. Strip the directory in a separator-agnostic way so the harness
+ * behaves identically for POSIX and Windows-style paths.
+ */
+function fileNameOf(path: string): string {
+	return path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+}
 
 type Harness = {
 	watchdog: MemoryWatchdog;
@@ -60,19 +71,19 @@ function createHarness(config: Partial<MemoryWatchdogConfig> = {}, overrides: Pa
 		clearTimeout: (handle) => {
 			(handle as { cleared: boolean }).cleared = true;
 		},
-		reportDir: () => "/reports",
+		reportDir: () => REPORT_DIR,
 		writeReport: async (path, contents) => {
 			reports.set(path, contents);
-			files.push(path.replace("/reports/", ""));
+			files.push(fileNameOf(path));
 		},
 		listReportFiles: async () => [...files],
 		removeFile: async (path) => {
-			const name = path.replace("/reports/", "");
+			const name = fileNameOf(path);
 			files.splice(files.indexOf(name), 1);
 		},
 		writeHeapSnapshot: (path) => {
 			snapshots.push(path);
-			files.push(path.replace("/reports/", ""));
+			files.push(fileNameOf(path));
 			return path;
 		},
 		runtimeDiagnostics: () => ({ heapStatistics: {} }),
@@ -154,9 +165,11 @@ describe("memory watchdog", () => {
 		assert.equal(report.current.rssMb, 1200);
 		assert.equal(harness.snapshots.length, 1);
 		assert.equal(result.heapSnapshotPath, harness.snapshots[0]);
-		assert.match(harness.snapshots[0]!, /^\/reports\/pix-memory-.*\.heapsnapshot$/u);
+		const snapshotName = fileNameOf(harness.snapshots[0]!);
+		assert.match(snapshotName, /^pix-memory-.*\.heapsnapshot$/u);
+		assert.equal(harness.snapshots[0], join(REPORT_DIR, snapshotName));
 		assert.ok(harness.toasts.some((toast) => toast.message.includes("UI may pause")));
-		assert.match(harness.toasts.at(-1)!.message, /Leak report: \/reports\/pix-memory-/u);
+		assert.ok(harness.toasts.at(-1)!.message.includes(`Leak report: ${join(REPORT_DIR, "pix-memory-")}`));
 		assert.ok(harness.logs.some((log) => log.event === "memory.threshold_exceeded" && log.level === "warn"));
 
 		// Staying at the same level does not re-report.
@@ -296,5 +309,12 @@ describe("memory watchdog", () => {
 		// The first report's snapshot was pruned together with its report.
 		assert.equal(harness.files.filter((name) => name.endsWith(".heapsnapshot")).length, 0);
 		assert.ok(harness.files.includes("unrelated.txt"));
+	});
+
+	it("extracts report names from both host and Windows-style paths", () => {
+		const name = "pix-memory-2026-09-27T10-00-45-000Z-4020.heapsnapshot";
+		assert.equal(fileNameOf(join(REPORT_DIR, name)), name);
+		assert.equal(fileNameOf(`\\reports\\${name}`), name);
+		assert.equal(fileNameOf(`C:\\Users\\pix\\memory-reports\\${name}`), name);
 	});
 });

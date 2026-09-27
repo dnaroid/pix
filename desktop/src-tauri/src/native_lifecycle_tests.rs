@@ -12,6 +12,7 @@ fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
         kind: PackageTerminalKind::Script,
         script: String::new(),
         command: String::new(),
+        launch_command_id: None,
         started_at_ms: 0,
         status: PackageTerminalStatus::Exited,
         exit_code: None,
