@@ -115,7 +115,7 @@ function parseModelUsageStatus(value: unknown): ModelUsageStatus {
   if (
     !isRecord(value)
     || typeof value.modelKey !== "string"
-    || !["openai", "zhipu", "google-antigravity"].includes(String(value.provider))
+    || !["openai", "zhipu", "google-antigravity", "anthropic"].includes(String(value.provider))
     || !isFiniteNumber(value.updatedAt)
   ) throw new Error("invalid Pix model usage");
   const hourly = value.hourly === undefined ? undefined : parseModelUsageLimitWindow(value.hourly);

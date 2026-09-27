@@ -117,7 +117,7 @@ export interface DesktopModelUsageLimitWindow {
 
 export interface DesktopModelUsageStatus {
 	readonly modelKey: string;
-	readonly provider: "openai" | "zhipu" | "google-antigravity";
+	readonly provider: "openai" | "zhipu" | "google-antigravity" | "anthropic";
 	readonly updatedAt: number;
 	readonly accountEmail?: string;
 	readonly weekly?: DesktopModelUsageLimitWindow;

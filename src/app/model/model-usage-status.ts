@@ -8,6 +8,8 @@ import { APP_ICONS } from "../icons.js";
 import type { SessionModel } from "../types.js";
 
 const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
 const ZAI_QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
 const ZHIPU_QUOTA_URL = "https://bigmodel.cn/api/monitor/usage/quota/limit";
 const GOOGLE_ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com";
@@ -46,13 +48,14 @@ function getPiAuthPath(): string {
 const OPENAI_QUOTA_PROVIDERS = new Set(["openai", "openai-codex"]);
 const ZHIPU_QUOTA_PROVIDERS = new Set(["zai", "zhipuai-coding-plan"]);
 const ANTIGRAVITY_QUOTA_PROVIDERS = new Set(["antigravity", "google-antigravity"]);
+const ANTHROPIC_QUOTA_PROVIDERS = new Set(["anthropic"]);
 
 type BaseModelUsageDescriptor = {
 	readonly modelKey: string;
 };
 
 export type ModelUsageDescriptor = BaseModelUsageDescriptor & ({
-	readonly kind: "openai" | "zhipu";
+	readonly kind: "openai" | "zhipu" | "anthropic";
 } | {
 	readonly kind: "google-antigravity";
 	readonly quotaModelKey: string;
@@ -70,7 +73,7 @@ export type ModelUsageLimitWindow = {
 
 export type ModelUsageStatus = {
 	readonly modelKey: string;
-	readonly provider: "openai" | "zhipu" | "google-antigravity";
+	readonly provider: "openai" | "zhipu" | "google-antigravity" | "anthropic";
 	readonly updatedAt: number;
 	readonly accountEmail?: string;
 	readonly weekly?: ModelUsageLimitWindow;
@@ -157,6 +160,12 @@ export type AccountUsageReport = {
 		readonly mcp?: AccountUsageLimitWindow;
 		readonly error?: string;
 	};
+	readonly anthropic?: {
+		readonly account: string;
+		readonly windows: readonly AccountUsageLimitWindow[];
+		readonly limitReached: boolean;
+		readonly error?: string;
+	};
 	readonly googleAccounts: readonly {
 		readonly account: string;
 		readonly windows: readonly AccountUsageLimitWindow[];
@@ -164,6 +173,18 @@ export type AccountUsageReport = {
 		readonly error?: string;
 	}[];
 	readonly generatedAt: number;
+};
+
+type AnthropicUsageWindow = {
+	utilization?: number | null;
+	resets_at?: string | null;
+};
+
+export type AnthropicUsageResponse = {
+	five_hour?: AnthropicUsageWindow | null;
+	seven_day?: AnthropicUsageWindow | null;
+	seven_day_opus?: AnthropicUsageWindow | null;
+	seven_day_sonnet?: AnthropicUsageWindow | null;
 };
 
 export type OpenAIUsageResponse = {
@@ -263,6 +284,10 @@ export function modelUsageDescriptor(model: SessionModel | undefined, thinkingLe
 		return { kind: "zhipu", modelKey: `${model.provider}/${model.id}` };
 	}
 
+	if (ANTHROPIC_QUOTA_PROVIDERS.has(provider)) {
+		return { kind: "anthropic", modelKey: `${model.provider}/${model.id}` };
+	}
+
 	if (ANTIGRAVITY_QUOTA_PROVIDERS.has(provider)) {
 		const quotaModelKey = resolveAntigravityQuotaModelKey(model);
 		if (!quotaModelKey) return undefined;
@@ -285,20 +310,24 @@ export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor): P
 			return await queryOpenAIModelUsage(descriptor.modelKey);
 		case "zhipu":
 			return await queryZhipuModelUsage(descriptor.modelKey);
+		case "anthropic":
+			return await queryAnthropicModelUsage(descriptor.modelKey);
 		case "google-antigravity":
 			return await queryGoogleAntigravityModelUsage(descriptor);
 	}
 }
 
 export async function queryAccountUsageReport(now = Date.now()): Promise<AccountUsageReport> {
-	const [openai, zai, googleAccounts] = await Promise.all([
+	const [openai, anthropic, zai, googleAccounts] = await Promise.all([
 		queryOpenAIAccountUsage(now),
+		queryAnthropicAccountUsage(now),
 		queryZaiAccountUsage(now),
 		queryGoogleAntigravityAccountUsage(now),
 	]);
 
 	return {
 		...(openai ? { openai } : {}),
+		...(anthropic ? { anthropic } : {}),
 		...(zai ? { zai } : {}),
 		googleAccounts,
 		generatedAt: now,
@@ -321,6 +350,16 @@ export function formatAccountUsageReport(report: AccountUsageReport, now = repor
 				for (const window of limit.windows) lines.push(...formatProviderWindow(window, now, 30));
 				if (limit.limitReached) lines.push("", "⚠️ Rate limit reached!");
 			}
+		}
+		lines.push("");
+	}
+
+	if (report.anthropic) {
+		lines.push("Anthropic Account Quota", "", `Account:        ${report.anthropic.account}`, "");
+		if (report.anthropic.error) lines.push(`Unavailable: ${report.anthropic.error}`);
+		else {
+			for (const window of report.anthropic.windows) lines.push(...formatProviderWindow(window, now, 30));
+			if (report.anthropic.limitReached) lines.push("", "⚠️ Rate limit reached!");
 		}
 		lines.push("");
 	}
@@ -450,6 +489,10 @@ async function queryOpenAIAccountUsage(now: number): Promise<AccountUsageReport[
 }
 
 async function refreshOpenAICodexAuth(): Promise<OpenAIAuthData> {
+	return await refreshPiOAuthCredential("openai-codex", "OpenAI Codex");
+}
+
+async function refreshPiOAuthCredential(provider: string, label: string): Promise<OpenAIAuthData> {
 	// Delegate to pi core so refresh-token rotation is persisted under the same
 	// cross-process auth.json lock used by model requests.
 	const modelRuntime = await ModelRuntime.create({
@@ -458,14 +501,14 @@ async function refreshOpenAICodexAuth(): Promise<OpenAIAuthData> {
 	});
 	let resolvedAuth: Awaited<ReturnType<ModelRuntime["getAuth"]>>;
 	try {
-		resolvedAuth = await modelRuntime.getAuth("openai-codex");
+		resolvedAuth = await modelRuntime.getAuth(provider);
 	} catch (error) {
-		throw new Error("OpenAI Codex OAuth token refresh failed", { cause: error });
+		throw new Error(`${label} OAuth token refresh failed`, { cause: error });
 	}
-	const credential = readStoredCredential("openai-codex", getPiAuthPath()) as PiAuthCredential | undefined;
+	const credential = readStoredCredential(provider, getPiAuthPath()) as PiAuthCredential | undefined;
 	const access = resolvedAuth?.auth.apiKey ?? credential?.access;
 	if (!access || credential?.type !== "oauth" || !credential.access || isExpired(credential)) {
-		throw new Error("OpenAI Codex OAuth token refresh failed");
+		throw new Error(`${label} OAuth token refresh failed`);
 	}
 
 	return {
@@ -473,6 +516,7 @@ async function refreshOpenAICodexAuth(): Promise<OpenAIAuthData> {
 		access: credential.access,
 		...(credential.refresh === undefined ? {} : { refresh: credential.refresh }),
 		...(credential.expires === undefined ? {} : { expires: credential.expires }),
+		...(credential.email === undefined ? {} : { email: credential.email }),
 	};
 }
 
@@ -519,6 +563,130 @@ async function readPiAuth(): Promise<PiAuthData> {
 
 function isExpired(credential: { expires?: number } | undefined): boolean {
 	return typeof credential?.expires === "number" && credential.expires < Date.now();
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic (Claude Pro/Max OAuth) quota
+// ---------------------------------------------------------------------------
+
+const ANTHROPIC_FIVE_HOUR_SECONDS = 5 * HOUR_SECONDS;
+const ANTHROPIC_SEVEN_DAY_SECONDS = 7 * DAY_SECONDS;
+
+export function anthropicUsageStatusFromResponse(
+	data: AnthropicUsageResponse,
+	modelKey: string,
+	now = Date.now(),
+): ModelUsageStatus | undefined {
+	const hourly = anthropicUsageWindow(data.five_hour, ANTHROPIC_FIVE_HOUR_SECONDS, now);
+	const modelWeekly = anthropicModelWeeklyWindow(data, modelKey);
+	const weekly = [anthropicUsageWindow(data.seven_day, ANTHROPIC_SEVEN_DAY_SECONDS, now), anthropicUsageWindow(modelWeekly, ANTHROPIC_SEVEN_DAY_SECONDS, now)]
+		.filter((window): window is ModelUsageLimitWindow => window !== undefined)
+		.sort((a, b) => a.remainingPercent - b.remainingPercent)[0];
+	if (!weekly && !hourly) return undefined;
+
+	return {
+		modelKey,
+		provider: "anthropic",
+		updatedAt: now,
+		...(weekly ? { weekly } : {}),
+		...(hourly ? { hourly } : {}),
+	};
+}
+
+function anthropicModelWeeklyWindow(data: AnthropicUsageResponse, modelKey: string): AnthropicUsageWindow | null | undefined {
+	const modelId = modelKey.toLowerCase();
+	if (modelId.includes("opus")) return data.seven_day_opus;
+	if (modelId.includes("sonnet")) return data.seven_day_sonnet;
+	return undefined;
+}
+
+function anthropicUsageWindow(
+	window: AnthropicUsageWindow | null | undefined,
+	windowSeconds: number,
+	now: number,
+): ModelUsageLimitWindow | undefined {
+	if (!window || typeof window.utilization !== "number" || !Number.isFinite(window.utilization)) return undefined;
+	// An unused window has no reset time yet; it starts on the next request.
+	const resetAt = window.resets_at ? parseResetTime(window.resets_at, now) : now + windowSeconds * 1000;
+	return {
+		remainingPercent: clampPercent(Math.round(100 - window.utilization)),
+		resetAt,
+		windowSeconds,
+		hasKnownWindowDuration: true,
+	};
+}
+
+async function queryAnthropicModelUsage(modelKey: string): Promise<ModelUsageStatus | undefined> {
+	const accessToken = await readAnthropicAccessToken();
+	if (!accessToken) return undefined;
+
+	const usage = await fetchAnthropicUsage(accessToken);
+	return anthropicUsageStatusFromResponse(usage, modelKey);
+}
+
+async function queryAnthropicAccountUsage(now: number): Promise<AccountUsageReport["anthropic"] | undefined> {
+	const stored = (await readPiAuth()).anthropic;
+	if (stored?.type !== "oauth" || !stored.access) return undefined;
+	const account = stored.email || "Claude subscription";
+
+	try {
+		const accessToken = await readAnthropicAccessToken();
+		if (!accessToken) return undefined;
+		const usage = await fetchAnthropicUsage(accessToken);
+		const windows = [
+			anthropicAccountWindow("5-hour limit", usage.five_hour, ANTHROPIC_FIVE_HOUR_SECONDS, now),
+			anthropicAccountWindow("7-day limit", usage.seven_day, ANTHROPIC_SEVEN_DAY_SECONDS, now),
+			anthropicAccountWindow("7-day Opus limit", usage.seven_day_opus, ANTHROPIC_SEVEN_DAY_SECONDS, now),
+			anthropicAccountWindow("7-day Sonnet limit", usage.seven_day_sonnet, ANTHROPIC_SEVEN_DAY_SECONDS, now),
+		].filter((window): window is AccountUsageLimitWindow => window !== undefined);
+
+		return {
+			account,
+			windows,
+			limitReached: windows.some((window) => window.remainingPercent <= 0),
+		};
+	} catch (error) {
+		return {
+			account,
+			windows: [],
+			limitReached: false,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+function anthropicAccountWindow(
+	label: string,
+	window: AnthropicUsageWindow | null | undefined,
+	windowSeconds: number,
+	now: number,
+): AccountUsageLimitWindow | undefined {
+	const usageWindow = anthropicUsageWindow(window, windowSeconds, now);
+	return usageWindow ? { label, remainingPercent: usageWindow.remainingPercent, resetAt: usageWindow.resetAt, windowSeconds } : undefined;
+}
+
+async function readAnthropicAccessToken(): Promise<string | undefined> {
+	const credential = (await readPiAuth()).anthropic;
+	// API-key auth has no subscription quota to report.
+	if (credential?.type !== "oauth" || !credential.access) return undefined;
+	if (!isExpired(credential)) return credential.access;
+	return (await refreshPiOAuthCredential("anthropic", "Anthropic")).access;
+}
+
+async function fetchAnthropicUsage(accessToken: string): Promise<AnthropicUsageResponse> {
+	const response = await fetchWithTimeout(ANTHROPIC_USAGE_URL, {
+		headers: {
+			Authorization: `Bearer ${accessToken}`,
+			"anthropic-beta": ANTHROPIC_OAUTH_BETA,
+			"User-Agent": "pi-ui-extend/0.1.0",
+		},
+	});
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Anthropic usage request failed (${response.status}): ${errorText}`);
+	}
+
+	return response.json() as Promise<AnthropicUsageResponse>;
 }
 
 // ---------------------------------------------------------------------------
