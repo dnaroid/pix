@@ -3,6 +3,7 @@
   import X from "@lucide/svelte/icons/x";
   import { onMount, tick, untrack } from "svelte";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+  import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import { fuzzySearch } from "../lib/fuzzy";
   import { activateModalDialog } from "../lib/modal-dialog";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
@@ -363,7 +364,7 @@
       {#each filteredModels as model, index (model.ref)}
         <button
           class={[
-            "grid w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+            "grid w-full cursor-pointer grid-cols-[22px_16px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
             (!visibilityMode && model.ref === selectedModelRef) || (visibilityMode && index === selectedIndex) ? "bg-panel-selected" : "",
           ]}
           type="button"
@@ -388,6 +389,7 @@
           {:else}
             <span aria-hidden="true"></span>
           {/if}
+          <ModelProviderIcon provider={model.provider} />
           <span class="min-w-0">
             <strong class={["block truncate font-mono text-xs font-medium", modelDisplayToneClass(model.tone)]}>{model.ref}</strong>
             <small class="mt-0.5 block truncate text-xs text-muted-foreground">{model.name}</small>

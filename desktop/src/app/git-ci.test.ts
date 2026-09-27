@@ -208,4 +208,98 @@ describe("Git CI lifecycle", () => {
     expect(store.snapshot?.headSha).toBe(head);
     store.dispose();
   });
+
+  it("refreshes jobs that were opened when the next active-run poll completes", async () => {
+    vi.useFakeTimers();
+    const head = "2".repeat(40);
+    let jobsCall = 0;
+    invoke.mockImplementation((command: string, payload: Record<string, unknown>) => {
+      if (command === "git_ci_status") {
+        return Promise.resolve(ciSnapshot(head, [
+          { id: "1", name: "Build", status: "running", rawStatus: "running", headSha: head },
+        ]));
+      }
+      if (command === "git_ci_jobs") {
+        jobsCall += 1;
+        return Promise.resolve({
+          runId: String(payload.runId),
+          jobs: [{
+            id: "job-1",
+            name: "test",
+            status: jobsCall === 1 ? "running" : "success",
+            rawStatus: jobsCall === 1 ? "running" : "success",
+          }],
+        });
+      }
+      if (command === "git_ci_cancel") return Promise.resolve(true);
+      return Promise.resolve(undefined);
+    });
+    const store = createGitCiStore({ workspace: () => "/one" });
+    store.activate();
+    store.updateTarget(gitSnapshot(head));
+    await flush();
+
+    store.loadJobs("1");
+    await flush();
+    expect(store.jobs.get("1")?.[0]?.status).toBe("running");
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    await flush();
+    expect(invoke.mock.calls.filter(([command]) => command === "git_ci_jobs")).toHaveLength(2);
+    expect(store.jobs.get("1")?.[0]?.status).toBe("success");
+    store.dispose();
+  });
+
+  it("treats a changed HEAD as target invalidation instead of a visible CI error", async () => {
+    const head = "3".repeat(40);
+    const onTargetStale = vi.fn();
+    invoke.mockImplementation((command: string) => {
+      if (command === "git_ci_status") {
+        return Promise.resolve({
+          availability: "headChanged",
+          headSha: head,
+          localOnly: false,
+          runs: [],
+        } satisfies GitCiSnapshot);
+      }
+      if (command === "git_ci_cancel") return Promise.resolve(true);
+      return Promise.resolve(undefined);
+    });
+    const store = createGitCiStore({ workspace: () => "/one", onTargetStale });
+    store.activate();
+    store.updateTarget(gitSnapshot(head));
+    await flush();
+
+    expect(store.error).toBeNull();
+    expect(store.snapshot).toBeUndefined();
+    expect(onTargetStale).toHaveBeenCalledOnce();
+    store.dispose();
+  });
+
+  it("treats a changed HEAD during jobs lookup as target invalidation", async () => {
+    const head = "4".repeat(40);
+    const onTargetStale = vi.fn();
+    invoke.mockImplementation((command: string, payload: Record<string, unknown>) => {
+      if (command === "git_ci_status") {
+        return Promise.resolve(ciSnapshot(head, [
+          { id: "1", name: "Build", status: "running", rawStatus: "running", headSha: head },
+        ]));
+      }
+      if (command === "git_ci_jobs") {
+        return Promise.resolve({ runId: String(payload.runId), jobs: [], headChanged: true });
+      }
+      if (command === "git_ci_cancel") return Promise.resolve(true);
+      return Promise.resolve(undefined);
+    });
+    const store = createGitCiStore({ workspace: () => "/one", onTargetStale });
+    store.activate();
+    store.updateTarget(gitSnapshot(head));
+    await flush();
+    store.loadJobs("1");
+    await flush();
+
+    expect(store.jobsErrors.has("1")).toBe(false);
+    expect(onTargetStale).toHaveBeenCalledOnce();
+    store.dispose();
+  });
 });

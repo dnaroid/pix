@@ -29,9 +29,13 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Spawn (`core/spawn.ts`)
 1. Each sub-agent is spawned via `node:child_process.spawn()` running the pi binary in RPC mode. `[confirmed by code, spawn.ts ~188]`
 2. **Pi invocation resolution** (`core/pi-invocation.ts`): detects how pi was launched (Bun virtual script, direct node script, or generic runtime). Direct pi entrypoint → `process.execPath + [currentScript, ...args]`; generic node/bun → `pi` from PATH; Windows → `process.execPath args`. `[confirmed by code]`
-3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, conditionally `--extension <antigravity-auth>`, `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
+3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, the allowlisted provider dependencies of the final model (`--extension <antigravity-auth>` or the installed `pi-claude-code-provider` entrypoint), `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. Before anything else, `-m value`, `--model=value` and `--provider=value` in extra args are normalized to `--model value` / `--provider value` (Pi 0.87.1 rejects `-m` and treats `--model=` as an unknown flag), so owned-launch selection, provider dependencies and the child all see the same final model. `[confirmed by code, spawn.ts, provider-extensions.ts; confirmed by tests, core.test.ts, provider-extensions.test.ts]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
-5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
+5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). Provider dependencies come from an explicit allowlist in `core/provider-extensions.ts`, recomputed on every attempt (retry and provider-changing fallback) from that attempt's final model:
+   - `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision.
+   - A final model on `pi-claude-code-provider` (the same predicate that selects the owned launch, including the environment model) injects exactly one entrypoint: the one declared by the installed package's `pi.extensions`, found through Pi's public package manager for the USER scope only: only an `npm:pi-claude-code-provider[@version]` source from the user settings is considered and resolved with `getInstalledPath(source, "user")`; project settings (`projectTrusted: false`), project npm storage and local/git sources are never consulted, so an untrusted repository cannot supply "the provider". The lookup is cached per agent dir until the user settings change, and lookup failures become `provider_metadata_invalid`. An explicit `--extension`/`-e` (resolved against the child cwd, realpath) must be exactly the declared entrypoint. The manifest must name the package, declare exactly one entrypoint inside the package, and have a supported version (exactly `0.5.0`, the characterized release). Such an explicit entrypoint is not duplicated. Owned launch, dependency injection and the child share one selection predicate (`selectsClaudeProvider` over the trimmed task model or environment model and the normalized final `--model`/`--provider`/`--models`).
+   - A missing package, invalid metadata or unsupported version raises `ProviderExtensionError` (`provider_not_installed` / `provider_metadata_invalid` / `provider_version_unsupported`, bounded message with model, package and an action hint) before any child artifact or process exists. The synchronous throw is permanent: no retry and no model fallback, the concurrency slot is released and the bounded launch-failure artifacts are written.
+   `[confirmed by code, spawn.ts, provider-extensions.ts; confirmed by tests, core.test.ts, provider-extensions.test.ts]`
 6. **Environment**: child inherits parent env plus `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION=1`, `PI_TERMINAL_BELL_DISABLED=1`, and `PI_TOOLS_SUITE_DISABLED_MODULES` appended with `async-subagents,coding-discipline,question`. `[confirmed by code, spawn.ts ~230-240]`
 7. **Model selection**: explicit forced/task/CLI model wins. Otherwise the
    resolved role profile and optional parent-model mapping produce the ranked
@@ -147,6 +151,110 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   or an acceptance claim for Claude cleanup. Detached-provider rollout remains
   gated on a separately proven lifecycle mechanism; the characterization must
   not be used to weaken that requirement.
+
+#### G1/T3 durable ownership candidate (not yet accepted)
+
+`core/owned-launch/` is an in-development macOS launcher, not an accepted
+replacement for the lifecycle contract above. Its intended boundary is a
+fresh launchd resource coalition for ordinary unprivileged fork/exec
+descendants, including detached process groups and sessions. A separate
+KeepAlive supervisor must durably record ownership before payload release,
+recover by cancelling, and retain responsibility while cleanup is uncertain.
+Signals must use authentic generation-bound audit tokens after membership
+validation. Empty PID enumeration, bridge exit, RPC completion and a stop
+request are not cleanup receipts.
+
+The failure model covers process crashes and ordinary descendant fork/exec,
+not external deletion, renaming or corruption of the private ownership
+directory, privileged coalition migration, or work delegated to unrelated
+system services. Pi/Pix itself must retain every ownership directory until
+both UUID launchd services are independently confirmed absent. Kernel-zero
+containment and service retirement are distinct facts: a drain receipt alone
+must not authorize deletion or reuse of recovery artifacts. A release racing
+bridge loss may transiently launch work; the guarantee is eventual verified
+drain, not an atomic promise that no payload instruction runs after loss.
+
+Acceptance requires receipt-gated spawn/state/stop/cleanup integration,
+preserved payload exit status, nonblocking stdio forwarding, and the complete
+offline lifecycle matrix using real Pi plus the unmodified provider. The first
+native draft failed independent review (startup parsing/bootstrap defects,
+false-success paths and ownership abandonment); those defects must be repaired
+and re-reviewed before G1/T3 can close. The repaired draft passed native
+fixture tests, but review additionally found receipt-before-retirement,
+one-shot completion polling, and post-spawn metadata publication gaps.
+Draft repairs now persist metadata before spawning, continuously reconcile
+receipts after bridge loss, recover terminal exit status from durable records,
+and require independently confirmed absence of both UUID jobs before artifact
+deletion or reuse. Ambiguous `launchctl print` results are not absence; only
+the exact missing-service result can retire a job. Retirement markers are
+atomically replaceable so an interrupted write can be repaired.
+
+Restart reconciliation must continue after recovering `exit_code` until every
+generation is retired; that exit record alone is not terminal authorization.
+Preparation publishes a complete spec and a `claim_protocol` declaration from
+a hidden staging directory before publishing the ownership pointer. Hidden
+staging leftovers are retained: age does not prove that a paused launcher
+cannot resume. Likewise, elapsed startup grace, an absent journal, and absent
+jobs do not prove a pending generation was never launched.
+
+Late launch is excluded by an exclusive per-generation launch claim. The
+bridge and restart recovery each write a complete record to a private temp
+file and publish it as `claim` with `link(2)`, which refuses an existing
+target. The bridge claims before binding any listener or running any
+`launchctl` action and exits (17) on a fence, so a fenced generation provably
+bootstrapped nothing and released nothing. Recovery fences only unclaimed
+generations that declared the protocol, are not held by a live in-process
+launch handle, and are older than a grace period; the grace protects a slow
+live launcher's liveness, never safety. A parent whose own reaped bridge
+never claimed may fence at once. A fenced generation without a journal or
+receipt is `never-launched`: exit 1, slot released, and deletable only after
+both UUID services are independently confirmed absent. A bridge that wins
+the claim but fails deterministically before any `launchctl` action (listener
+bind 13, plist 14, claim directory fsync 18) durably writes `prelaunch_abort`,
+which is also `never-launched`. Any other bridge-claimed generation stays
+pending until the supervisor's receipt; a bridge crash or bootstrap failure
+between claim and supervisor bootstrap remains pending (fail closed). Legacy
+generations without the declaration, and legacy `never_launched` markers,
+never resolve. Bridge exit cleanup unlinks only listeners it bound itself.
+
+Each generation also publishes a strictly increasing `generation` record with
+its spec. The agent's outcome is the newest generation's, so a stale pointer
+or a retry crash before the pointer write (older retired directories remain)
+cannot hide it; legacy ties fail closed. Reconciliation never persists a
+recovered exit for a run this process still holds a live launch handle for —
+the in-process settle loop owns that completion — and an owned attempt that
+is terminal and retired but has a pending retry reports `retrying`.
+
+Runtime completion and retry callbacks wait for service retirement as well
+as a verified drain. A terminal failure without kernel-zero proof remains
+non-deletable even after both services disappear. Pointerless or unreadable
+ownership metadata with surviving UUID directories selects durable cancellation
+of those directories, never a saved-PID signal or an immediate `stopped` record.
+Preparation failures before spawning roll back their fresh directories; bridge
+spawn failures retain an explicit `bridge_launch_failed` marker. An unproven
+failure releases its slot only when retired and journal-less (the supervisor
+journals before any release). These cases must not
+strand a concurrency slot. An intentional cancellation after RPC settlement
+preserves the RPC outcome (including failure); a fake CLI's exit code is not
+the exit code of its still-running Pi RPC payload.
+
+Native binaries are built once per source fingerprint: concurrent first launches in one process share a single build, and separate processes build under private temp names published by atomic rename, so parallel cold-cache spawns and crashed-build leftovers never fail a launch (found by the live T9 concurrency smoke). Live Claude smokes T4–T9 (`test/live/claude-provider-live.test.ts`, opt-in `PI_CLAUDE_LIVE=1`, isolated Pi state, provider paid-launch cap) cover parent tool round trip/abort, DCP projection/evidence/compression, DCP Claude summary and timeout fallback, todo persistence/compaction/resume, and owned Claude children (success, stop, timeout, `maxConcurrent`).
+
+The bridge treats owner-stdin EOF as cancellation, not ordinary payload EOF.
+Print-mode integration tests therefore give the real Pi payload `/dev/null`
+without closing the owner channel. Output sources are excluded from polling
+while their relay queue holds bytes: HUP must neither overwrite queued output
+nor cause a busy loop under backpressure. The real pipe/socket regression
+checks over 256 KiB on both stdout and stderr, final JSONL integrity, and owner
+EOF after the worker stops reading stdin.
+
+Opt-in tests from removable-volume checkouts must use an internal-volume
+snapshot with copied dependencies and fixtures, not symlinks back to the
+checkout. macOS permission-blocked timeouts are inconclusive. The corrected
+real Pi/unmodified-provider launcher matrix passes eight cases; runtime-path
+verification and fresh independent reviews still gate acceptance. Historical
+fixture successes below do not waive these gates. Provider installation,
+authentication, live inference and resolver rollout are outside this work.
 
 #### Offline G1 ownership prototype (test-only; gate remains open)
 
@@ -485,6 +593,41 @@ child waitable and running; the exact original token returned **0**, and
 signals an unrelated PID; its failure backstop targets only its still-unreaped
 direct child. This observes host behavior, not guaranteed future SPI stability.
 
+#### macOS external audit-token acquisition via `task_name_for_pid` (test-only)
+
+`test/async-subagents/audit-token-external-probe.test.ts` compiles the
+standalone `fixtures/audit-token-external-probe.c` with warnings as errors.
+Unlike the cooperating fixture above, the forked child immediately execs the
+unmodified `/bin/sleep 30` and never publishes a token or cooperates; a
+close-on-exec pipe write end observes only that the exec itself happened. The
+parent then obtains the kernel-issued token externally through the unprivileged
+route described in
+[Apple Developer Forums thread 652363](https://developer.apple.com/forums/thread/652363)
+and implemented by the public
+[endpoint-sec crate](https://docs.rs/endpoint-sec/latest/src/endpoint_sec/audit.rs.html#185)
+(`AuditToken::from_pid`): `task_name_for_pid(mach_task_self(), pid, &port)`,
+then `task_info(port, TASK_AUDIT_TOKEN, ...)`, releasing the port with
+`mach_port_deallocate`. XNU `kern_proc.c task_name_for_pid` permits this for
+same-euid-and-ruid callers on non-zombie targets, so this does **not** require
+the SIP-restricted `task_for_pid`; the earlier research assumption that only a
+privileged `task_for_pid` exposes `TASK_AUDIT_TOKEN` is wrong. XNU
+`proc_info.c psignal_by_audit_token` resolves through
+`proc_find_audit_token`, which validates only the embedded PID (`val[5]`) and
+PID version (`val[7]`; on this SDK `audit_token_t` is `unsigned int val[8]`).
+The private `PROC_PIDUNIQIDENTIFIERINFO` struct/flavor are copied from XNU
+`bsd/sys/proc_info_private.h` and its `p_idversion` (filled by XNU as
+`proc_pidversion(p)`) is asserted equal to the externally obtained token's
+`audit_token_to_pidversion`, grounding the token-synthesis alternative in
+exact XNU source. On the macOS 14.8.7 host the wrong-pidversion exact-PID
+`SIGKILL` returned **3** and set errno **3** (ESRCH) while the child stayed
+running with an unchanged pid version; the genuine token `SIGKILL` returned 0
+and `waitpid` observed death by SIGKILL (9); the task name port was released.
+Emergency backstop kills only the fixture's own still-unreaped direct child.
+This is a primitive offline proof of unprivileged external token acquisition
+and exact-generation rejection, not G1/T3 closure: it does not enumerate
+noncooperating descendants, prove PID non-reuse beyond the observed
+generation, or integrate any runtime kill path. Runtime is unchanged.
+
 `launchd-coalition-feasibility.test.ts` requires explicit opt-in
 `PI_OFFLINE_COALITION_PROBE=1` on macOS and separately compiles
 `fixtures/launchd-coalition-feasibility.c`. The private
@@ -515,6 +658,48 @@ member enumeration/signaling, no provider/Pi integration, no proof that
 launchd automatically cleans descendants on joint owner/helper death, no
 guarantee of a surviving enumerator, and no tested force/timeout/race matrix.
 G1/T3 remain blocked. Existing relays and runtime are unchanged.
+
+#### Coalition accounting after leader exit (offline primitive)
+
+`test/async-subagents/launchd-coalition-accounting.test.ts` and
+`fixtures/launchd-coalition-accounting.c` use the same explicit macOS opt-in.
+A one-shot UUID launchd leader forks a child which calls `setsid()` and
+execs unmodified `/bin/sleep`. A CLOEXEC pipe handshake replaces a guessed
+startup delay. An external probe observes the recorded leader generation
+gone while the resource counters still report one live member, obtains the
+child's authentic audit token, kills that exact generation, then requires a
+successful resource-usage read with `tasks_started == tasks_exited`.
+ESRCH from coalition lookup is not a passing zero observation in this test.
+Unexpected process-info/token errors are indeterminate, not proof of death.
+Cleanup rejects ambiguous command outcomes and retains artifacts on failure.
+
+This passed on macOS 14.8.7 / Darwin 23.6.0. It establishes the observed
+accounting primitive, not durable launcher ownership or G1/T3 acceptance.
+The initial source cache is XNU main, not the exact host build. Follow-up
+source verification uses the clean public `xnu-10063.141.1` checkout at commit
+`d8b80295118ef25ac3a784134bcf95cd8e88109f` (the host's private `.712.16`
+build is unavailable):
+
+- [`task.c:1871–1907`](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/osfmk/kern/task.c#L1871-L1907)
+  adopts a new/exec-copy task into the inherited resource coalition before
+  its thread can run; exec-copy adoption overlaps the old task's membership.
+- [`thread.c:557–566`](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/osfmk/kern/thread.c#L557-L566)
+  removes membership as the last active thread terminates.
+- [`coalition.c:851–852`](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/osfmk/kern/coalition.c#L851-L852)
+  reports the started/exited counters under the coalition lock; IDs are
+  allocated monotonically within the boot (`:1239`), and reap removes the
+  object only after termination and zero active references (`:2032–2075`).
+- [`kern_exec.c:3894–3908`](https://github.com/apple-oss-distributions/xnu/blob/d8b80295118ef25ac3a784134bcf95cd8e88109f/bsd/kern/kern_exec.c#L3894-L3908)
+  restricts explicit spawn into another coalition to privileged coalition
+  members or the private coalition-spawn entitlement.
+
+For a known-populated, boot-bound coalition with no new external privileged
+adoption, zero members therefore leaves no member able to fork a successor.
+Journal-bound ESRCH can separately mean that exact non-reused coalition was
+reaped; an arbitrary unknown CID's ESRCH proves nothing. This is not a sandbox
+against privileged actors or work delegated to independent launchd services.
+Private-ABI/host-build drift remains a platform-support limitation, not an
+inference from passing fixtures that every macOS release is supported.
 
 #### Independent recovery after joint owner loss (offline, cooperating actors only)
 
@@ -581,14 +766,141 @@ both land over five seconds before C's watchdog and before `finally`. Distinct g
 names prevent R1/R2 artifact collisions; R2 reads no R1 receipt or checkpoint
 and has no channel to R1's memory.
 
-Deliberately not exercised: the post-kill/pre-receipt idempotent restart (R1
-dying after killing C but before writing its receipt). This needs a separate
-checkpoint and acceptance contract; currently R2 rejects a dead target
-(liveness probe ESRCH → fail receipt, no SIGKILL), rather than treating an
-already-absent target as successful idempotent recovery. All earlier
-caveats still apply: cooperating SIGUSR1 probes only, no discovery of
-noncooperating descendants, no reboot or general containment claim, watchdogs
-are failure backstops rather than proof, and G1/T3 remain blocked.
+Deliberately not exercised by this variant's plain-generation R2: the
+post-kill/pre-receipt idempotent restart (R1 dying after killing C but before
+writing its receipt). Without an explicit checkpoint contract, R2 rejects a
+dead target (liveness probe ESRCH → fail receipt, no SIGKILL), rather than
+treating an already-absent target as successful idempotent recovery; the
+explicit contract is the separate experiment below. All earlier caveats still
+apply: cooperating SIGUSR1 probes only, no discovery of noncooperating
+descendants, no reboot or general containment claim, watchdogs are failure
+backstops rather than proof, and G1/T3 remain blocked.
+
+##### Post-kill/pre-receipt variant: R2 records already-absent recovery from a validated postkill checkpoint
+
+`recovery-postkill-restart.test.ts` (with `recovery-harness.ts`, split from
+the earlier files to avoid duplicating the launchd/ps harness) adds the
+bounded post-kill/pre-receipt case under two further explicit supervisor
+modes in `fixtures/recovery-supervisor.c`; the legacy and plain-generation
+contracts above are unchanged. `kill-then-park` R1 confirms owner loss,
+parks on its gate, performs the actual exact-token SIGKILL of C, confirms
+ESRCH, and only then writes an atomic `postkill-<gen>.json` naming the exact
+killed actor identity (token/PID/PID-version), its generation, and the
+observed kill result. It then parks on a `receipt-gate-<gen>` the harness
+never opens — structurally before any receipt. The harness independently
+observes C ps-absent with more than five seconds of watchdog margin, requires
+`receipt-<gen>` absent, then removes R1 through exact UUID job control only
+(`launchctl kill SIGKILL`, never a numeric PID), requiring launchd's last
+terminating signal 9 and R1's PID ps-absence before bootout 0 and print 113.
+
+A fresh R2 (new UUID job, distinct generation, no memory or IPC channel to
+R1) rebuilds A/B/C from the persisted pre-loss checkpoints, confirms A/B
+ESRCH, and strictly validates the postkill checkpoint: parse, internal
+token↔PID/PID-version consistency via the libbsm accessors, recorded
+successful kill and confirmed-gone result, kill before the leaf watchdog,
+generation match, and cross-check of token/PID/PID-version/deadline against
+`leaf.json`. Only then does it probe C's own token and require ESRCH,
+writing a distinct `already-absent` receipt recording `kill_attempted=0`
+and a NOT_ATTEMPTED `kill_return=-2` sentinel — this mode cannot send
+SIGKILL at all. Its receipt and an independent ps absence must land before
+`finally` with watchdog margin.
+
+Fail-closed contract, pinned by deterministic negative tests using only
+safe original authentic tokens (no future token is ever fabricated or
+signaled): a missing checkpoint, an identity-mismatched checkpoint (a really
+dead actor's authentic token substituted for the leaf's), and a contradicted
+checkpoint (the leaf's own identity claiming a confirmed kill while the leaf
+is observably alive) each produce a failure receipt with `kill_attempted=0`.
+Additional cases reject trailing fields, extra lines, inconsistent kill/gone
+errno values, and a wrong generation. Parsing consumes the complete bounded
+record and rejects embedded NULs, truncation, and any suffix beyond its single
+newline. C must remain alive after every negative case, dying only by its own watchdog. An
+arbitrary dead target therefore never becomes success.
+
+Claim boundary: this proves restart recovery only when the first owner
+crashed (process kill) after its confirmed kill checkpoint was published.
+It does not cover a crash in the kill-to-checkpoint window (an unrecorded
+kill still fails closed under these modes; that window is the separate
+opt-in experiment below), power loss, or reboot; watchdogs remain failure
+backstops, not proof. G1/T3 remain blocked; runtime is unchanged.
+
+##### Kill-to-checkpoint-window variant: R2 concludes cause-unknown absence from its own probe
+
+`recovery-kill-window-restart.test.ts` (reusing `recovery-harness.ts`; the
+pinned post-kill/pre-receipt file is untouched) adds two more explicit
+opt-in supervisor modes in `fixtures/recovery-supervisor.c`; every earlier
+mode — including the strict `already-absent` missing-record failure — is
+unchanged. The published postkill record format and its strict loader now live
+in `fixtures/recovery-postkill-record.h`, shared by all restart modes so the
+record contract has one owner.
+
+`kill-park-precheck <gen>` R1 is identical to `kill-then-park` through the
+real exact-token SIGKILL of C and its ESRCH confirmation, then writes a
+`precheck-<gen>` marker and parks on a new `checkpoint-gate-<gen>` the
+harness never opens — structurally before any postkill record or receipt
+exists. The harness independently observes C ps-absent with more than five
+seconds of watchdog margin, requires both `postkill-<gen>.json` and
+`receipt-<gen>.json` absent, then removes R1 through exact UUID job control
+only (`launchctl kill SIGKILL`, never a numeric PID), requiring launchd's
+last terminating signal 9 and R1's PID ps-absence before bootout 0 and
+print 113. The crashed owner therefore leaves no durable kill record at all.
+
+`already-absent-unknown <kill-gen>` R2 — a fresh UUID job, distinct
+generation, rebuilt solely from the persisted pre-loss actor records, with
+no R1 memory, IPC, marker, or receipt channel — confirms A/B exact-token
+ESRCH as always, then branches: a *present* `postkill-<kill-gen>.json`
+goes through exactly the strict validation above (every loader failure
+reason unchanged; a non-ENOENT lookup error fails closed as `unreadable`),
+so a present-but-invalid record fails closed **even when C is observably
+gone** (`postkill_record=present`); presence itself is classified without
+following symlinks — `lstat`, with any nonregular entry rejected
+explicitly as present with reason `not-regular` — so a dangling
+`postkill-<kill-gen>.json` symlink, which a following `access(F_OK)` probe
+would misread as ENOENT, can never enter the cause-unknown path. Only a
+genuinely ENOENT-absent record may take the cause-unknown path, where R2's
+own bounded (~3s) exact-token
+absence probe is the only evidence. ESRCH yields a distinct
+`status=ok stage=already-absent reason=cause-unknown postkill_record=absent`
+receipt recording `kill_attempted=0` and the NOT_ATTEMPTED
+`kill_return=-2` sentinel, still requiring `recovered_at < leaf_deadline`:
+the restart may honestly conclude "already absent, cause unknown" — never
+kill success or attribution. A live or timing-out target fails
+`target-alive/not-absent`; an unexpected probe return fails closed. Neither
+new mode can signal SIGKILL on the restart side, and no pre-kill intent
+record exists: intent would prove nothing R2 may consume.
+
+Deterministic negative cases pin the fail-closed contract with only safe,
+original authentic tokens (no future token is fabricated or signaled):
+an ENOENT record with the leaf still alive fails `target-alive/not-absent`
+with `kill_attempted=0` and no SIGKILL — both when no record exists at all
+and when a well-formed record exists under a *different* generation,
+proving there is no sibling-record scan or generation inference — and a
+present-but-corrupt record built from the dead leaf's own authentic
+identity fails with the strict loader reason although an absence probe
+would have succeeded, as does a dangling `postkill-<kill-gen>.json`
+symlink with the leaf already dead: a present nonregular entry that must
+fail closed with `not-regular` rather than be misclassified as missing by
+a following F_OK probe. In the live-target cases, the leaf survives every
+failure receipt and dies only by its own watchdog; the corrupt-record and
+dangling-symlink cases instead reuse the already-dead leaf from the
+positive experiment.
+
+Claim boundary: this proves bounded process-crash recovery inside the
+kill-to-checkpoint window, where absence is re-proven by R2's own probe.
+`cause-unknown` cannot attribute C's death (R1's kill, the watchdog, or an
+external actor). The bounded probe can wait for an in-flight termination,
+but this test parks R1 after ESRCH and does not separately prove that race.
+It does not prove power loss or reboot
+durability (per-file fsync only), PID reuse across reboot, or discovery of
+unknown descendants; `wait_gone` ESRCH-as-gone semantics are inherited from
+the pinned baseline path. If such a contract were ever ported to
+production, `cause-unknown` must remain a distinct class that never feeds
+kill-verified metrics, idempotency claims, or retry suppression; a
+kill-success claim still requires the durable per-kill record. Gate-park
+budgets (8s gate + 8s checkpoint-gate + 8s receipt-gate) can exceed the
+supervisor's `alarm(15)` if the harness is slow, same reliance on prompt
+harness action as the existing receipt-gate design. G1/T3 remain blocked;
+runtime is unchanged.
 
 ### Structured results (`core/structured-result.ts`) / Log limits (`core/log-limits.ts`)
 - On completion writes `result.json` (summary, findings, file refs, risks, next actions, confidence); `resultText` truncated at `maxResultBytes` (default 100KB); `result.md` is always full. `[confirmed by code]`
@@ -632,6 +944,7 @@ are failure backstops rather than proof, and G1/T3 remain blocked.
 - Concurrent `recordSubagentRun` and registry cleanup updates preserve unrelated
   run and agent mappings. `[confirmed by code and core.test.ts]`
 - Sub-agents never receive the `subagents` tool → recursive spawning is impossible. `[confirmed by code, tool-guard.ts]`
+- Sub-agents never keep the Claude provider's `pi_claude_code_provider_web_search` tool active (approved policy: no provider web search in any child). The provider registers it in its own `session_start`; the tool guard, loaded last, removes it from the active set, restricted `--tools` lists drop it, and a `tool_call` handler blocks every denied tool at execution as defense in depth. The opt-in real-Pi test checks the inventory actually handed to the provider for default, restricted and no-tools roles. `[confirmed by code, tool-guard.ts; confirmed by tests, provider-child-inventory.test.ts]`
 - Semaphore is project-wide (keyed by resolved cwd). `[confirmed by code]`
 - `ui-qa` tests the requested user-facing surface through the capability-first
   runner: browser delegates to the trusted backend, TUI uses a real PTY plus
@@ -657,6 +970,9 @@ are failure backstops rather than proof, and G1/T3 remain blocked.
 ## Related files
 
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/core/owned-launch/`
+- `external/pi-tools-suite/src/async-subagents/core/owned-launch-integration.ts`
+- `external/pi-tools-suite/src/async-subagents/core/owned-retirement.ts`
 - `external/pi-tools-suite/src/async-subagents/core/config.ts`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
 - `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
@@ -680,6 +996,16 @@ are failure backstops rather than proof, and G1/T3 remain blocked.
 
 ## Existing tests
 
+- `external/pi-tools-suite/test/async-subagents/owned-launch/`: launcher
+  transport/parser units, real pipe/socket backpressure regression, and opt-in
+  native launchd crash/recovery tests.
+- `external/pi-tools-suite/test/async-subagents/owned-runtime.test.ts` and
+  `external/pi-tools-suite/test/async-subagents/owned-runtime-early.test.ts`:
+  mocked receipt recovery, pending state, and fail-closed retirement/deletion.
+- `external/pi-tools-suite/test/async-subagents/provider-owned-launch.test.ts`
+  and `external/pi-tools-suite/test/async-subagents/provider-owned-runtime.test.ts`:
+  opt-in real Pi/unmodified-provider offline lifecycle matrices, using a local
+  protocol fixture rather than live inference.
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`: config/profile
   loading, semaphore behavior, process lifecycle, retry, model fallback, running
   stop behavior, structured results, and project-agent definitions.

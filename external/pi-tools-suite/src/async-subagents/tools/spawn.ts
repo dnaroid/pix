@@ -30,6 +30,8 @@ import {
 } from "../lib.js";
 import { spawnAgentWithRetry } from "../core/retry.js";
 import { recordSubagentUsage } from "../core/usage.js";
+import { ensureOwnedLaunchBinaries, maySelectOwnedProvider } from "../core/owned-launch-integration.js";
+import { ownedArtifactsPresentSync, ownedSlotReleasedSync } from "../core/owned-retirement.js";
 import { DEFAULT_SPAWN_WATCH_SECONDS, DEFAULT_UPDATE_INTERVAL_SECONDS, INLINE_RENDERING } from "../constants.js";
 import { formatAgentStatus } from "../format.js";
 import { getLiveRun } from "../live.js";
@@ -98,7 +100,10 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 			parentSession,
 			maxResultBytes: resolved.maxResultBytes,
 			timeoutMs: resolved.timeoutMs,
+			...(maySelectOwnedProvider(resolved.task, resolved.extraArgs, resolved.fallbackModels)
+				? { ownedBinaries: await ensureOwnedLaunchBinaries() } : {}),
 		};
+		if (signal?.aborted) throw new Error("Aborted");
 		if (resolved.retry.maxRetries > 0 || resolved.fallbackModels.length > 0) {
 			const retryResult = spawnAgentWithRetry(
 				runDir,
@@ -122,11 +127,22 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 		}
 		onUpdate();
 	} catch (error) {
-		if (slotAcquired) semaphore.release();
+		if (slotAcquired && !ownedLaunchHoldsSlot(runDir, resolved.task.id)) semaphore.release();
 		if (errorMessage(error) === "Aborted") onCancelled("launch aborted before a concurrency slot opened");
 		else onLaunchError(error);
 		onUpdate();
 	}
+}
+
+/**
+ * A synchronous launch failure keeps the concurrency slot only while the
+ * owned run could still own live artifacts: kernel-drained receipts and
+ * provably never-started bridges release it; unproven failures wait for the
+ * durable retirement marker (written by the bounded async verifier).
+ */
+function ownedLaunchHoldsSlot(runDir: string, agentId: string): boolean {
+	const agentDir = path.join(runDir, agentId);
+	return ownedArtifactsPresentSync(agentDir) && !ownedSlotReleasedSync(agentDir);
 }
 
 function launchSkipReason(runDir: string, agentId: string): string | undefined {
@@ -316,6 +332,13 @@ export function registerSpawnTool(
 					onLaunchError: (error) => {
 						const message = errorMessage(error);
 						launchErrors.push({ id: task.id, error: message });
+						if (ownedLaunchHoldsSlot(runDir, task.id)) {
+							// No terminal proof for the owned artifacts: preserve
+							// ownership and the concurrency slot rather than
+							// fabricating a terminal launch failure.
+							onLiveAgentsChange?.();
+							return;
+						}
 						writeLaunchFailure(runDir, task, message, resolved.maxResultBytes);
 						resolveCompleted();
 						const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "failed" as const, exitCode: 1 };

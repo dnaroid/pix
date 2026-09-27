@@ -43,9 +43,24 @@ if (args.length === 1 && args[0] === "--version") {
 	emit({ type: "system", subtype: "init", model: "offline-sonnet", tools: [], permissionMode: "dontAsk",
 		slash_commands: [], skills: [], plugins: [], apiKeySource: "none", mcp_servers: [] });
 	const event = (value) => emit({ type: "stream_event", event: value });
+	// Optional scenario (transport-evidence tests); absent file = success.
+	let mode = "success";
+	try { mode = readFileSync(join(process.env.HOME, "fake-mode"), "utf8").trim(); } catch { /* default */ }
 	event({ type: "message_start", message: { id: "offline-message", model: "offline-sonnet", usage: { input_tokens: 4 } } });
 	event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
 	event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "OFFLINE_PROVIDER_OK" } });
+	if (mode === "truncated") process.exit(0);
+	if (mode === "error") {
+		emit({ type: "result", subtype: "error_during_execution", is_error: true, result: "offline failure", usage: { input_tokens: 4, output_tokens: 1 } });
+		process.exit(1);
+	}
+	if (mode === "hang") {
+		// Wait for the provider's termination after a caller abort (the watchdog
+		// bounds it). A handled SIGTERM exits normally so the actor record is
+		// completed; SIGKILL would leave it unconfirmed and fail the test closed.
+		process.on("SIGTERM", () => process.exit(143));
+		await new Promise(() => setInterval(() => {}, 1000));
+	}
 	event({ type: "content_block_stop", index: 0 });
 	event({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } });
 	event({ type: "message_stop" });

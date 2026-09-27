@@ -2,11 +2,12 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
-  import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
+  import { modelDisplayToneClass, modelProviderBrand, thinkingLevelTone } from "../lib/model-display";
   import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
   import type { SessionActivitySummary } from "../lib/session-activity";
   import type { SessionSubagentSnapshot } from "../lib/session-subagents";
   import type { SessionTodoSnapshot } from "../lib/session-todos";
+  import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
 
@@ -110,6 +111,9 @@
         disabled={!canConfigure || changingConfig !== null}
         onclick={onOpenModelThinking}
       >
+        {#if modelProviderBrand(modelThinking.currentModel.provider)}
+          <ModelProviderIcon provider={modelThinking.currentModel.provider} />
+        {/if}
         <span class={[
           "max-w-[220px] truncate font-medium",
           modelDisplayToneClass(modelThinking.currentModel.tone),

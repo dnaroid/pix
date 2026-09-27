@@ -161,6 +161,7 @@ describe("desktop visual regressions", () => {
     expect(statusBarViewModelSource).toContain("sessionTodoSnapshot: options.sessionTodoSnapshot()");
     expect(sessionActivityStatusHudSource).toContain("sessionSubagentIndicators(subagentSnapshot)");
     expect(sessionActivityStatusHudSource).toContain("currentSessionTodoTask(todoSnapshot)");
+    expect(sessionActivityStatusHudSource).toContain("visibleSessionTodoRows(todoSnapshot)");
     expect(sessionActivityStatusHudSource).toContain('data-session-activity-summary');
     expect(sessionActivityStatusHudSource).toContain('data-session-subagent-tooltip');
     expect(sessionActivityStatusHudSource).toContain('data-session-todo-tooltip');
@@ -174,8 +175,14 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain("indicator.preview?.subagentType?.trim()");
     expect(sessionActivityStatusHudSource).toContain('{indicator.agent.id}{role ? ` (${role})` : ""}');
     expect(sessionSubagentsSource).toContain('{agent.id}{role ? ` (${role})` : ""}');
-    expect(sessionActivityStatusHudSource).toContain("currentTodo.activeForm");
-    expect(sessionActivityStatusHudSource).toContain("currentTodo.blockedBy");
+    expect(sessionActivityStatusHudSource).toContain("bind:this={todoTooltipBody}");
+    expect(sessionActivityStatusHudSource).toContain("onmouseenter={scrollTodoTooltipToCurrent}");
+    expect(sessionActivityStatusHudSource).toContain("onfocus={scrollTodoTooltipToCurrent}");
+    expect(sessionActivityStatusHudSource).toContain('data-session-todo-current={isCurrent ? "true" : undefined}');
+    expect(sessionActivityStatusHudSource).toContain("requestAnimationFrame");
+    expect(sessionActivityStatusHudSource).toContain("task.activeForm");
+    expect(sessionActivityStatusHudSource).toContain("task.description");
+    expect(sessionActivityStatusHudSource).toContain("task.blockedBy");
     expect(sessionActivityStatusHudSource).toContain("{summary.completedTodos}/{summary.totalTodos}");
     expect(statusSource).not.toContain('disabled={!canOpenSessionActivity}');
     expect(statusSource).not.toContain('title={`Session activity · ${activityLabel}`}');
@@ -183,6 +190,12 @@ describe("desktop visual regressions", () => {
     expect(statusBarViewModelSource).not.toContain("canNavigateMessages");
     expect(statusBarViewModelSource).not.toContain("commandPaletteShortcut");
     expect(statusBarViewModelSource).not.toContain("onToggleSessionActivity");
+  });
+
+  it("shows the current model provider icon in the status bar model control", () => {
+    expect(statusSource).toContain('import ModelProviderIcon from "./ModelProviderIcon.svelte"');
+    expect(statusSource).toContain("modelProviderBrand(modelThinking.currentModel.provider)");
+    expect(statusSource).toContain("<ModelProviderIcon provider={modelThinking.currentModel.provider} />");
   });
 
   it("keeps ACP status out of chrome and pulses the composer border for active-conversation work", () => {
@@ -247,6 +260,15 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).not.toContain("--runtime-workspace-color");
     expect(runtimeStatusSource).toContain("title={workspacePath ?? workspaceName}");
     expect(runtimeStatusSource).toContain("{#if status || workspaceName || showSkeletons}");
+  });
+
+  it("sacrifices workspace identity before session activity on narrow windows", () => {
+    expect(runtimeStatusSource).toContain("data-runtime-workspace");
+    expect(runtimeStatusSource).toContain("font-mono text-xs max-[1120px]:hidden");
+    expect(runtimeStatusSource).toContain("data-runtime-workspace-skeleton");
+    expect(runtimeStatusSource).toContain("px-1.5 max-[1120px]:hidden");
+    expect(sessionActivityStatusHudSource).toContain("indicators.slice(0, 6)");
+    expect(sessionActivityStatusHudSource).toContain('class="flex shrink-0 items-center gap-0.5"');
   });
 
   it("keeps status-bar slots present as skeletons while draft/start/session state resolves", () => {

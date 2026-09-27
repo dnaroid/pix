@@ -30,6 +30,7 @@ type DesktopProjectServicesOptions = {
 
 export function createDesktopProjectServices(options: DesktopProjectServicesOptions) {
   let registry!: ReturnType<typeof createRegistryStore>;
+  let git!: ReturnType<typeof createGitWorkspaceStore>;
   const tasks = createProjectTasksStore({
     workspace: options.workspace,
     afterSave: () => registry.scheduleProjectSync("tasks"),
@@ -81,8 +82,11 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     },
     reportError: options.reportError,
   });
-  const gitCi = createGitCiStore({ workspace: options.workspace });
-  const git = createGitWorkspaceStore({
+  const gitCi = createGitCiStore({
+    workspace: options.workspace,
+    onTargetStale: () => void git.refresh(),
+  });
+  git = createGitWorkspaceStore({
     workspace: options.workspace,
     onSnapshotChange: gitCi.updateTarget,
     previewDirty: () => preview.dirty,

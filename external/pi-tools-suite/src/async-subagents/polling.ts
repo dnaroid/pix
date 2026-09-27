@@ -1,5 +1,6 @@
 import type { AgentState, RunState } from "./lib.js";
 import { getRunState } from "./lib.js";
+import { reconcileOwnedRuns } from "./core/owned-retirement.js";
 import { DEFAULT_SPAWN_WATCH_SECONDS, DEFAULT_UPDATE_INTERVAL_SECONDS, MAX_WATCH_SECONDS } from "./constants.js";
 import { renderPlainRunSummary } from "./render.js";
 import type { SubagentRunRenderDetails, TextToolUpdate } from "./types.js";
@@ -65,6 +66,12 @@ export async function pollRunWithUpdates(
 	let state = getRunState(runDir, agentIds);
 
 	while (true) {
+		// Self-heal owned runs left unpersisted by a parent restart (receipt
+		// recovery + retirement markers); bounded, asynchronous, non-blocking.
+		// Runs INSIDE the loop: owned state stays nonterminal until the
+		// retirement proof is cached, so every extra iteration here is the
+		// recurring route that keeps retrying that proof.
+		reconcileOwnedRuns(runDir, agentIds);
 		state = getRunState(runDir, agentIds);
 		emitRunUpdate(options.onUpdate, {
 			runDir,

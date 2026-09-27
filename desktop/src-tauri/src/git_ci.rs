@@ -78,6 +78,7 @@ enum GitCiAvailability {
     UnsupportedRemote,
     CliMissing,
     AuthRequired,
+    HeadChanged,
     Error,
 }
 
@@ -151,6 +152,7 @@ pub(crate) struct GitCiSnapshot {
 pub(crate) struct GitCiJobsResult {
     run_id: String,
     jobs: Vec<GitCiJob>,
+    head_changed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -380,7 +382,19 @@ fn ci_status_from(
     cancelled: &AtomicBool,
 ) -> Result<GitCiSnapshot, String> {
     let root = git_repository_root(workspace)?;
-    ensure_current_head(&root, expected_head)?;
+    if !current_head_matches(&root, expected_head)? {
+        return Ok(GitCiSnapshot {
+            provider: None,
+            availability: GitCiAvailability::HeadChanged,
+            remote_name: None,
+            host: None,
+            project: None,
+            head_sha: expected_head.to_owned(),
+            local_only: false,
+            runs: Vec::new(),
+            error: None,
+        });
+    }
     let remote = match resolve_remote(&root) {
         Ok(Some(remote)) => remote,
         Ok(None) => {
@@ -483,7 +497,13 @@ fn ci_jobs_from(
     cancelled: &AtomicBool,
 ) -> Result<GitCiJobsResult, String> {
     let root = git_repository_root(workspace)?;
-    ensure_current_head(&root, expected_head)?;
+    if !current_head_matches(&root, expected_head)? {
+        return Ok(GitCiJobsResult {
+            run_id: run_id.to_owned(),
+            jobs: Vec::new(),
+            head_changed: true,
+        });
+    }
     let remote = resolve_remote(&root)?.ok_or("No Git remote is configured")?;
     let executable_name = match remote.provider {
         GitCiProvider::Github => "gh",
@@ -519,6 +539,7 @@ fn ci_jobs_from(
     Ok(GitCiJobsResult {
         run_id: run_id.to_owned(),
         jobs,
+        head_changed: false,
     })
 }
 
@@ -541,13 +562,10 @@ fn unavailable_snapshot(
     }
 }
 
-fn ensure_current_head(root: &Path, expected_head: &str) -> Result<(), String> {
+fn current_head_matches(root: &Path, expected_head: &str) -> Result<bool, String> {
     let output = git_output(root, &["rev-parse", "HEAD"])?;
     let head = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if head != expected_head {
-        return Err("Git HEAD changed while CI status was being requested".to_owned());
-    }
-    Ok(())
+    Ok(head == expected_head)
 }
 
 fn resolve_remote(root: &Path) -> Result<Option<RemoteInfo>, String> {

@@ -1,5 +1,9 @@
 <script lang="ts">
   import Brain from "@lucide/svelte/icons/brain";
+  import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
+  import Circle from "@lucide/svelte/icons/circle";
+  import CirclePause from "@lucide/svelte/icons/circle-pause";
+  import Clock3 from "@lucide/svelte/icons/clock-3";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import UserRound from "@lucide/svelte/icons/user-round";
   import { agentIcon } from "../lib/agent-icons";
@@ -18,6 +22,7 @@
   } from "../lib/session-subagents";
   import {
     currentSessionTodoTask,
+    visibleSessionTodoRows,
     type SessionTodoSnapshot,
     type SessionTodoStatus,
   } from "../lib/session-todos";
@@ -42,14 +47,33 @@
 
   const hasTodoProgress = $derived(summary.openTodos > 0 && summary.totalTodos > 0);
   const indicators = $derived(sessionSubagentIndicators(subagentSnapshot));
-  const compactIndicators = $derived(indicators.slice(0, 3));
+  const compactIndicators = $derived(indicators.slice(0, 6));
   const hiddenAgentCount = $derived(Math.max(0, indicators.length - compactIndicators.length));
   const currentTodo = $derived(currentSessionTodoTask(todoSnapshot));
+  const todoRows = $derived(visibleSessionTodoRows(todoSnapshot));
   const activityTone = $derived(sessionActivityTone(summary, promptRunning, sessionNeedsInput));
   const activityLabel = $derived(sessionActivityLabel(summary, promptRunning, sessionNeedsInput));
   const visible = $derived(
     !sessionActivityOpen && (summary.activeSubagents > 0 || hasTodoProgress),
   );
+  let todoTooltipBody = $state<HTMLDivElement>();
+
+  function scrollTodoTooltipToCurrent(): void {
+    if (!currentTodo || !todoTooltipBody) return;
+    requestAnimationFrame(() => {
+      const body = todoTooltipBody;
+      if (!body) return;
+      const target = body.querySelector<HTMLElement>('[data-session-todo-current="true"]');
+      if (!target) return;
+      const bodyRect = body.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const centered = body.scrollTop
+        + targetRect.top
+        - bodyRect.top
+        - Math.max(0, (bodyRect.height - targetRect.height) / 2);
+      body.scrollTop = Math.max(0, centered);
+    });
+  }
 
   function activityToneClass(): string {
     if (activityTone === "warning") return "text-tool-warning";
@@ -182,6 +206,8 @@
           type="button"
           aria-label={"Open session activity. Plan " + summary.completedTodos + "/" + summary.totalTodos + (currentTodo ? ". Current item " + currentTodo.subject : "")}
           aria-describedby={currentTodo ? "session-todo-status-tooltip" : undefined}
+          onmouseenter={scrollTodoTooltipToCurrent}
+          onfocus={scrollTodoTooltipToCurrent}
           onclick={onOpenSessionActivity}
         >
           <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -197,44 +223,61 @@
           >
             <div class="flex items-center gap-2">
               <span class="font-semibold text-foreground">Plan</span>
-              <span class={["ml-auto text-xs font-medium", todoStatusTone(currentTodo.status)]}>
-                {todoStatusLabel(currentTodo.status)}
+              <span class="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
+                {summary.completedTodos}/{summary.totalTodos}
               </span>
             </div>
             <div
+              bind:this={todoTooltipBody}
               class="mt-1 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain pr-1"
               data-session-todo-tooltip-body
             >
-              <h4 class="break-words text-xs font-medium leading-4 text-foreground">
-                <span class="mr-1 font-mono text-muted-foreground">#{currentTodo.id}</span>{currentTodo.subject}
-              </h4>
-              {#if currentTodo.activeForm}
-                <p class="mt-1 break-words text-xs leading-4 text-foreground/80">{currentTodo.activeForm}</p>
-              {/if}
-              {#if currentTodo.description && currentTodo.description !== currentTodo.activeForm}
-                <p class="mt-1 break-words text-xs leading-4 text-muted-foreground">{currentTodo.description}</p>
-              {/if}
-            </div>
-            {#if currentTodo.thinking || currentTodo.owner || currentTodo.blockedBy?.length}
-              <div class="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                {#if currentTodo.thinking}
-                  <span class="inline-flex items-center gap-1">
-                    <Brain class="h-3 w-3" aria-hidden="true" />{currentTodo.thinking}
-                  </span>
-                {/if}
-                {#if currentTodo.owner}
-                  <span class="inline-flex min-w-0 items-center gap-1">
-                    <UserRound class="h-3 w-3 shrink-0" aria-hidden="true" />
-                    <span class="truncate">{currentTodo.owner}</span>
-                  </span>
-                {/if}
-                {#if currentTodo.blockedBy?.length}
-                  <span class="text-tool-warning">
-                    Blocked by {currentTodo.blockedBy.map((id) => "#" + id).join(", ")}
-                  </span>
-                {/if}
+              <div class="space-y-0.5">
+                {#each todoRows as row (row.task.id)}
+                  {@const task = row.task}
+                  {@const isCurrent = task.id === currentTodo.id}
+                  <article
+                    class={[
+                      "rounded-md border-l-2 py-1.5 pr-1.5",
+                      isCurrent ? "border-l-primary bg-panel-selected" : "border-l-transparent",
+                      task.status === "completed" && "opacity-60",
+                    ]}
+                    style:padding-left={`${6 + Math.min(row.depth, 4) * 10}px`}
+                    data-session-todo-current={isCurrent ? "true" : undefined}
+                  >
+                    <div class="flex min-w-0 items-start gap-1.5">
+                      <span class={["mt-px shrink-0", todoStatusTone(task.status)]} title={todoStatusLabel(task.status)}>
+                        {#if task.status === "completed"}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else if task.status === "in_progress"}<Clock3 class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else if task.status === "deferred"}<CirclePause class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else}<Circle class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+                      </span>
+                      <div class="min-w-0 flex-1">
+                        <div class="flex min-w-0 items-start gap-2">
+                          <h4 class={["min-w-0 flex-1 break-words text-xs font-medium leading-4 text-foreground", task.status === "completed" && "line-through"]}>
+                            <span class="mr-1 font-mono text-muted-foreground">#{task.id}</span>{task.subject}
+                          </h4>
+                          <span class={["shrink-0 text-xs font-medium", todoStatusTone(task.status)]}>{todoStatusLabel(task.status)}</span>
+                        </div>
+                        {#if task.activeForm}
+                          <p class="mt-0.5 break-words text-xs leading-4 text-foreground/80">{task.activeForm}</p>
+                        {/if}
+                        {#if task.description && task.description !== task.activeForm}
+                          <p class="mt-0.5 break-words text-xs leading-4 text-muted-foreground">{task.description}</p>
+                        {/if}
+                        {#if task.thinking || task.owner || task.blockedBy?.length}
+                          <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+                            {#if task.thinking}<span class="inline-flex items-center gap-1"><Brain class="h-2.5 w-2.5" aria-hidden="true" />{task.thinking}</span>{/if}
+                            {#if task.owner}<span class="inline-flex min-w-0 items-center gap-1"><UserRound class="h-2.5 w-2.5 shrink-0" aria-hidden="true" /><span class="truncate">{task.owner}</span></span>{/if}
+                            {#if task.blockedBy?.length}<span class="text-tool-warning">Blocked by {task.blockedBy.map((id) => `#${id}`).join(", ")}</span>{/if}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                  </article>
+                {/each}
               </div>
-            {/if}
+            </div>
           </div>
         {/if}
       </div>

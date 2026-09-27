@@ -76,10 +76,14 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - The fast Registry poll also returns the specific dirty project artifacts among
   `tasks`, `plans`, and `todo`. WorkspaceSidebar consumes each new fast-poll
   `checkedAtMs` at most once and feeds its dirty artifact list into the same
-  Desktop background sync coordinator used by direct saves only while the
-  coordinator is idle. Pending/syncing/error phases therefore do not create
-  duplicate pushes, while a later poll can still detect a second external change
-  to the same artifact without requiring an intermediate clean artifact set.
+  Desktop background sync coordinator used by direct saves. Desktop always
+  reloads the matching local renderer state when a new poll reports a change:
+  `tasks` reloads the task document, while `plans` and `todo` reload the
+  project-document snapshot used by Registry plan selection. A new background
+  push is scheduled only while the coordinator is idle, so pending/syncing/error
+  phases do not create duplicate pushes or prevent the local UI from reflecting
+  filesystem changes. A later poll can still detect a second external change to
+  the same artifact without requiring an intermediate clean artifact set.
 - Remote Registry state, task execution state, Project Explorer read errors, and mounted Settings errors flow reactively from their existing owners. The fast indicator poll additionally performs a local-only Registry check over `.pi/registry.json`, reusable resources, and project artifacts; it never fetches/clones the Registry or runs Registry Git commands. Session todo/Subagent state is intentionally presented in session tabs/status chrome/the contextual inspector rather than in the workspace Activity Bar.
 - IDX overview health has a separate approximately 60-second foreground / 180-second background cadence because it invokes IDX. Both the shared service and mounted IDX panel coalesce refreshes to at most one in-flight request plus one queued refresh. While the IDX view is mounted, its own idle overview refresh is reused instead of issuing duplicate health commands; workspace/generation guards prevent a late background response from overwriting newer panel state.
 - Refocusing or making the window visible triggers an immediate refresh.

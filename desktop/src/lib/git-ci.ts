@@ -1,5 +1,5 @@
 export type GitCiProvider = "github" | "gitlab";
-export type GitCiAvailability = "ready" | "noRemote" | "ambiguousRemote" | "unsupportedRemote" | "cliMissing" | "authRequired" | "error";
+export type GitCiAvailability = "ready" | "noRemote" | "ambiguousRemote" | "unsupportedRemote" | "cliMissing" | "authRequired" | "headChanged" | "error";
 export type GitCiStatus = "queued" | "running" | "success" | "failure" | "cancelled" | "neutral";
 
 export interface GitCiRun {
@@ -40,6 +40,18 @@ export interface GitCiSnapshot {
 export interface GitCiJobsResult {
   readonly runId: string;
   readonly jobs: GitCiJob[];
+  readonly headChanged?: boolean;
+}
+
+export interface GitCiSetupGuide {
+  readonly providerLabel: string;
+  readonly cliName: "gh" | "glab";
+  readonly host: string;
+  readonly installCommand: string;
+  readonly authCommand: string;
+  readonly installUrl: string;
+  readonly authUrl: string;
+  readonly needsInstall: boolean;
 }
 
 export interface GitCiPanelState {
@@ -78,4 +90,37 @@ export function gitCiStatusLabel(status: GitCiStatus | undefined): string {
   if (status === "cancelled") return "cancelled";
   if (status === "neutral") return "complete";
   return "no runs";
+}
+
+export function gitCiSetupGuide(snapshot: GitCiSnapshot | undefined): GitCiSetupGuide | undefined {
+  if (!snapshot?.provider || (snapshot.availability !== "cliMissing" && snapshot.availability !== "authRequired")) {
+    return undefined;
+  }
+  const host = snapshot.host ?? (snapshot.provider === "github" ? "github.com" : "gitlab.com");
+  if (snapshot.provider === "github") {
+    return {
+      providerLabel: "GitHub CLI",
+      cliName: "gh",
+      host,
+      installCommand: "brew install gh",
+      authCommand: `gh auth login --hostname ${shellQuote(host)}`,
+      installUrl: "https://cli.github.com/",
+      authUrl: "https://cli.github.com/manual/gh_auth_login",
+      needsInstall: snapshot.availability === "cliMissing",
+    };
+  }
+  return {
+    providerLabel: "GitLab CLI",
+    cliName: "glab",
+    host,
+    installCommand: "brew install glab",
+    authCommand: `glab auth login --hostname ${shellQuote(host)}`,
+    installUrl: "https://docs.gitlab.com/cli/",
+    authUrl: "https://docs.gitlab.com/cli/authentication/",
+    needsInstall: snapshot.availability === "cliMissing",
+  };
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

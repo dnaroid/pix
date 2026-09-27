@@ -372,9 +372,11 @@
     const projectChanges = indicatorServiceState.poll?.registry.projectChanges ?? [];
     if (!checkedAtMs || checkedAtMs === observedRegistryProjectPollAt) return;
     observedRegistryProjectPollAt = checkedAtMs;
-    if (registryBackgroundSync.phase !== "idle" || projectChanges.length === 0) return;
+    if (projectChanges.length === 0) return;
     const changed = [...new Set(projectChanges)];
+    const observedWorkspace = workspace;
     queueMicrotask(() => {
+      if (workspace !== observedWorkspace) return;
       for (const artifact of changed) onRegistryProjectChange(artifact);
     });
   });

@@ -469,7 +469,7 @@
     return !editorMode
       && !questionMode
       && ready
-      && !!activeSessionId;
+      && hasConversationTarget;
   }
 
   function handleProjectTreeDragStateEvent(event: Event): void {

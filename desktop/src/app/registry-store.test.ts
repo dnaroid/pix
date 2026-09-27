@@ -87,4 +87,58 @@ describe("registry background project sync", () => {
     expect(setOperationRunning).not.toHaveBeenCalled();
     expect(store.backgroundSyncState.phase).toBe("idle");
   });
+
+  it("reloads project documents when an external plans change is observed", () => {
+    vi.useFakeTimers();
+    const loadProjectTasks = vi.fn();
+    const loadProjectDocuments = vi.fn();
+    const store = createRegistryStore({
+      client: () => null,
+      operationRunning: () => false,
+      workspace: () => "/project",
+      sessionWorkspace: () => "/project",
+      setOperationRunning: vi.fn(),
+      setErrorMessage: vi.fn(),
+      loadProjectTasks,
+      loadProjectDocuments,
+      reportError: vi.fn(),
+    });
+
+    store.observeProjectChange("plans");
+
+    expect(loadProjectDocuments).toHaveBeenCalledOnce();
+    expect(loadProjectDocuments).toHaveBeenCalledWith("/project");
+    expect(loadProjectTasks).not.toHaveBeenCalled();
+    expect(store.backgroundSyncState).toMatchObject({
+      phase: "pending",
+      dirtyScopes: ["plans"],
+    });
+    store.reset();
+  });
+
+  it("reloads externally changed plans even while another registry sync is pending", () => {
+    vi.useFakeTimers();
+    const loadProjectDocuments = vi.fn();
+    const store = createRegistryStore({
+      client: () => null,
+      operationRunning: () => false,
+      workspace: () => "/project",
+      sessionWorkspace: () => "/project",
+      setOperationRunning: vi.fn(),
+      setErrorMessage: vi.fn(),
+      loadProjectTasks: vi.fn(),
+      loadProjectDocuments,
+      reportError: vi.fn(),
+    });
+    store.scheduleProjectSync("tasks");
+
+    store.observeProjectChange("plans");
+
+    expect(loadProjectDocuments).toHaveBeenCalledWith("/project");
+    expect(store.backgroundSyncState).toMatchObject({
+      phase: "pending",
+      dirtyScopes: ["tasks"],
+    });
+    store.reset();
+  });
 });

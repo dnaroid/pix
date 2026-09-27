@@ -322,7 +322,7 @@
 
     {#if workspaceName}
       <div
-        class="col-start-2 flex min-w-0 max-w-[260px] items-center gap-1 justify-self-center px-1.5 font-mono text-xs"
+        class="col-start-2 flex min-w-0 max-w-[260px] items-center gap-1 justify-self-center px-1.5 font-mono text-xs max-[1120px]:hidden"
         title={workspacePath ?? workspaceName}
         data-runtime-workspace
       >
@@ -339,7 +339,7 @@
       </div>
     {:else if showSkeletons}
       <div
-        class="col-start-2 flex min-w-0 items-center gap-1 justify-self-center px-1.5"
+        class="col-start-2 flex min-w-0 items-center gap-1 justify-self-center px-1.5 max-[1120px]:hidden"
         data-runtime-workspace-skeleton
         aria-hidden="true"
       >

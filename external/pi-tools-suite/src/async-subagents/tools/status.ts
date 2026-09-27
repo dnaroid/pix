@@ -3,6 +3,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
 import { getRunState, resolveSubagentRunDir, validateBasename } from "../lib.js";
+import { reconcileOwnedRuns } from "../core/owned-retirement.js";
 import { INLINE_RENDERING } from "../constants.js";
 import { formatAgentStatus } from "../format.js";
 import { emptyToolSlot } from "../ui.js";
@@ -22,6 +23,9 @@ export function registerStatusTool(pi: ExtensionAPI): void {
 			if (params.agentIds) {
 				for (const id of params.agentIds) validateBasename(id, "agentId");
 			}
+			// Self-heal owned runs left unpersisted by a parent restart; the
+			// reconciliation is bounded, asynchronous, and never blocks the read.
+			reconcileOwnedRuns(runDir, params.agentIds);
 			const state = getRunState(runDir, params.agentIds);
 
 			if (state.agents.length === 0) {

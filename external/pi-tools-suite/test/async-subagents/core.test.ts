@@ -591,9 +591,9 @@ Research only this project.
 			fallbackModels: ["openai-codex/gpt-6-luna"],
 		});
 		for (const [subagentType, model, fallbackModels] of [
-			["research", "zai/glm-5-turbo", ["openai-codex/gpt-6-luna"]],
+			["research", "zai/glm-5.3-flash", ["openai-codex/gpt-6-luna"]],
 			["implement", "zai/glm-5.3", ["openai-codex/gpt-6-sol"]],
-			["verify", "zai/glm-5-turbo", ["openai-codex/gpt-6-luna"]],
+			["verify", "zai/glm-5.3-flash", ["openai-codex/gpt-6-luna"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
 			expect(role.task.model).toBe(model);

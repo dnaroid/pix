@@ -4,6 +4,8 @@ import { activityFromProgressRecord } from "./activity.js";
 import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
 import { readStructuredResult } from "./structured-result.js";
 import type { AgentResult, AgentState, RpcEventRecord, RunState } from "./types.js";
+import { ownedOutcomeSync, ownedRecoveredExitSync, type OwnedRunOutcome } from "./owned-launch-integration.js";
+import { ownedArtifactsPresentSync, ownedRetiredSync, reconcileOwnedRuns } from "./owned-retirement.js";
 
 const MAX_RPC_EVENT_LINE_CHARS = 1024 * 1024;
 const LAST_ACTIVITY_TAIL_BYTES = 64 * 1024;
@@ -34,7 +36,42 @@ export function getAgentState(
 	if (pid !== undefined) state.pid = pid;
 
 	const exitCodeFile = path.join(agentDir, "exit_code");
-	if (fs.existsSync(exitCodeFile)) {
+	// Unknown ownership fails closed: surviving owned-launch artifacts (even
+	// without a readable pointer) mark the run owned.
+	const owned = ownedArtifactsPresentSync(agentDir);
+	const exitCodeFileExists = fs.existsSync(exitCodeFile);
+	let parseExitCodeFile = !owned && exitCodeFileExists;
+	if (owned) {
+		// The bridge's PID, stale exit_code, and RPC events cannot establish
+		// that the owned coalition has drained; only the receipt chain can.
+		const outcome = ownedOutcomeSync(agentDir);
+		// Receipt-before-bootout contract: a drained (or unproven-failure)
+		// receipt is not terminal state until BOTH exact UUID jobs are
+		// durably retired. Keeping wait/poll nonterminal until then is what
+		// keeps restart reconciliation retrying the retirement proof, so a
+		// receipt the supervisor wrote before booting out its jobs can never
+		// leave deletion/reuse permanently blocked. A fenced (never-launched)
+		// run follows the same rule, so every other surviving directory of
+		// the agent must be retired too.
+		const terminalReceipt = outcome.kind === "launch-failed" ||
+			((outcome.kind === "drained-ok" || outcome.kind === "drained-fail" || outcome.kind === "unproven-fail" ||
+				outcome.kind === "never-launched") && ownedRetiredSync(agentDir));
+		if (!terminalReceipt) {
+			// No final proof yet: keep the run pending on any ambiguity —
+			// never "stopped" from a dead bridge PID, never "failed" from an
+			// RPC prompt-failure event.
+			state.status = "running";
+		} else {
+			const recovered = ownedTerminalExit(agentDir, outcome, exitCodeFileExists ? fs.readFileSync(exitCodeFile, "utf-8").trim() : undefined);
+			if (!recovered) state.status = "running";
+			else if ("stopped" in recovered) state.status = "stopped";
+			else {
+				state.exitCode = recovered.exitCode;
+				state.status = recovered.exitCode === 0 ? "done" : "failed";
+			}
+		}
+	}
+	if (parseExitCodeFile) {
 		const code = parseInt(fs.readFileSync(exitCodeFile, "utf-8").trim(), 10);
 		if (isNaN(code)) {
 			state.status = "stopped";
@@ -43,19 +80,18 @@ export function getAgentState(
 			state.status = code === 0 ? "done" : "failed";
 		}
 	} else if (
+		!owned &&
 		checkRpcPromptFailure &&
 		hasRpcPromptFailure(path.join(agentDir, "events.jsonl"))
 	) {
 		state.exitCode = 1;
 		state.status = "failed";
-	} else {
-		if (pid !== undefined) {
-			try {
-				process.kill(pid, 0);
-				state.status = "running";
-			} catch {
-				state.status = "stopped";
-			}
+	} else if (!owned && pid !== undefined) {
+		try {
+			process.kill(pid, 0);
+			state.status = "running";
+		} catch {
+			state.status = "stopped";
 		}
 	}
 
@@ -74,6 +110,9 @@ export function getAgentState(
 
 	const retryPendingFile = path.join(agentDir, "retry_pending");
 	const stopRequestedFile = path.join(agentDir, "stop_requested");
+	// Owned runs reach this only once terminal and retired; a pending retry
+	// must still surface as nonterminal so wait/poll do not return "failed"
+	// for an attempt the retry chain will relaunch.
 	if (fs.existsSync(retryPendingFile) && !fs.existsSync(stopRequestedFile) && state.status !== "running" && state.status !== "done") {
 		state.status = "retrying";
 		const nextRetryAt = readTrimmed(path.join(agentDir, "next_retry_at"));
@@ -106,6 +145,28 @@ function readTrimmed(filePath: string): string | undefined {
 	if (!fs.existsSync(filePath)) return undefined;
 	const value = fs.readFileSync(filePath, "utf-8").trim();
 	return value || undefined;
+}
+
+/**
+ * Terminal exit for an owned run with a final receipt. A persisted exit
+ * record from the in-process completion path wins when it is self-consistent
+ * with the receipt ("stopped", or a numeric code whose failure/success
+ * matches the receipt kind); anything absent, unparsable, or contradicting
+ * the receipt (for example a stale 0 against a drained-fail receipt) is
+ * recovered deterministically from the receipt chain instead.
+ */
+function ownedTerminalExit(
+	agentDir: string,
+	outcome: OwnedRunOutcome,
+	rawExitRecord: string | undefined,
+): { exitCode: number } | { stopped: true } | undefined {
+	if (rawExitRecord === "stopped") return { stopped: true };
+	if (rawExitRecord !== undefined && /^-?\d+$/.test(rawExitRecord)) {
+		const code = parseInt(rawExitRecord, 10);
+		if (outcome.kind !== "drained-ok" && code === 0) return { exitCode: 1 };
+		return { exitCode: code };
+	}
+	return ownedRecoveredExitSync(agentDir, outcome);
 }
 
 function readPid(pidFile: string): number | undefined {
@@ -305,6 +366,9 @@ export async function waitForAgents(
 	const start = Date.now();
 
 	while (true) {
+		// Self-heal owned runs left unpersisted by a parent restart (receipt
+		// recovery + retirement markers); never blocks this loop.
+		reconcileOwnedRuns(runDir, agentIds);
 		const state = getRunState(runDir, agentIds);
 		const terminal = state.agents.filter(
 			(a) =>

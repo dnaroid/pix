@@ -84,11 +84,12 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain("<SettingsPanel configOptions={settingsConfigOptions}");
   });
 
-  it("feeds externally observed project registry changes into background sync", () => {
+  it("routes externally observed registry changes through the local-state observer", () => {
     expect(sidebarSource).toContain("indicatorServiceState.poll?.registry.projectChanges");
     expect(sidebarSource).toContain("checkedAtMs === observedRegistryProjectPollAt");
-    expect(sidebarSource).toContain('registryBackgroundSync.phase !== "idle"');
+    expect(sidebarSource).toContain("if (workspace !== observedWorkspace) return;");
     expect(sidebarSource).toContain("onRegistryProjectChange(artifact)");
+    expect(sidebarViewModelSource).toContain("onRegistryProjectChange: options.registry.observeProjectChange");
   });
 
   it("wires explicit Git and Registry project initialization actions", () => {

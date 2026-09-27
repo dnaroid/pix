@@ -13,6 +13,7 @@ const ERROR_POLL_MS = 60_000;
 
 type GitCiStoreOptions = {
   workspace: () => string;
+  onTargetStale?: () => void | Promise<void>;
 };
 
 function requestScope(): string {
@@ -40,6 +41,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
   let jobsRequestId: string | undefined;
   let jobsRunningRunId: string | undefined;
   let jobsQueue: string[] = [];
+  let observedRunIds = new Set<string>();
 
   let snapshot = $state<GitCiSnapshot | undefined>(undefined);
   let loading = $state(false);
@@ -65,10 +67,49 @@ export function createGitCiStore(options: GitCiStoreOptions) {
 
   function clearJobs(): void {
     jobsQueue = [];
+    observedRunIds.clear();
     cancelNative(jobsRequestId);
     jobs = new Map();
     jobsLoading = new Set();
     jobsErrors = new Map();
+  }
+
+  function notifyTargetStale(): void {
+    void options.onTargetStale?.();
+  }
+
+  function invalidateStaleTarget(): void {
+    clearTimer();
+    clearJobs();
+    snapshot = undefined;
+    error = null;
+    notifyTargetStale();
+  }
+
+  function isHeadChangedError(reason: unknown): boolean {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    return message === "Git HEAD changed while CI status was being requested";
+  }
+
+  function queueJobs(runId: string, refreshCached = false): void {
+    if (disposed || !active || !snapshot?.runs.some((run) => run.id === runId)) return;
+    if (
+      (!refreshCached && jobs.has(runId))
+      || jobsLoading.has(runId)
+      || jobsRunningRunId === runId
+      || jobsQueue.includes(runId)
+    ) return;
+    jobsQueue.push(runId);
+    if (!jobs.has(runId)) jobsLoading = new Set(jobsLoading).add(runId);
+    void pumpJobs();
+  }
+
+  function refreshObservedJobs(): void {
+    const visibleRunIds = new Set(snapshot?.runs.map((run) => run.id) ?? []);
+    for (const runId of [...observedRunIds]) {
+      if (visibleRunIds.has(runId)) queueJobs(runId, true);
+      else observedRunIds.delete(runId);
+    }
   }
 
   function updateTarget(git: GitSnapshot | undefined): void {
@@ -145,8 +186,13 @@ export function createGitCiStore(options: GitCiStoreOptions) {
         || targetHead !== head
         || statusRequestId !== requestId
       ) return;
+      if (next.availability === "headChanged") {
+        invalidateStaleTarget();
+        return;
+      }
       snapshot = next;
       error = null;
+      refreshObservedJobs();
     } catch (reason) {
       if (
         disposed
@@ -155,6 +201,10 @@ export function createGitCiStore(options: GitCiStoreOptions) {
         || targetHead !== head
         || statusRequestId !== requestId
       ) return;
+      if (isHeadChangedError(reason)) {
+        invalidateStaleTarget();
+        return;
+      }
       snapshot = undefined;
       error = reason instanceof Error ? reason.message : String(reason);
     } finally {
@@ -174,10 +224,8 @@ export function createGitCiStore(options: GitCiStoreOptions) {
 
   function loadJobs(runId: string): void {
     if (disposed || !active || !snapshot?.runs.some((run) => run.id === runId)) return;
-    if (jobs.has(runId) || jobsLoading.has(runId)) return;
-    jobsQueue.push(runId);
-    jobsLoading = new Set(jobsLoading).add(runId);
-    void pumpJobs();
+    observedRunIds.add(runId);
+    queueJobs(runId);
   }
 
   async function pumpJobs(): Promise<void> {
@@ -211,6 +259,10 @@ export function createGitCiStore(options: GitCiStoreOptions) {
         || jobsRequestId !== requestId
         || result.runId !== runId
       ) return;
+      if (result.headChanged) {
+        invalidateStaleTarget();
+        return;
+      }
       const nextJobs = new Map(jobs);
       nextJobs.set(runId, result.jobs);
       jobs = nextJobs;
@@ -225,6 +277,10 @@ export function createGitCiStore(options: GitCiStoreOptions) {
         || targetHead !== head
         || jobsRequestId !== requestId
       ) return;
+      if (isHeadChangedError(reason)) {
+        invalidateStaleTarget();
+        return;
+      }
       const nextErrors = new Map(jobsErrors);
       nextErrors.set(runId, reason instanceof Error ? reason.message : String(reason));
       jobsErrors = nextErrors;

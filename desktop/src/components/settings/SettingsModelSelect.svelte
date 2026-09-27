@@ -3,6 +3,8 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Search from "@lucide/svelte/icons/search";
   import { tick } from "svelte";
+  import ModelProviderIcon from "../ModelProviderIcon.svelte";
+  import { modelDisplayToneClass, modelRefTone } from "../../lib/model-display";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
   import {
     searchSettingsModelOptions,
@@ -128,6 +130,7 @@
     onclick={() => open ? close() : show()}
     onkeydown={handleTriggerKeydown}
   >
+    {#if value}<ModelProviderIcon provider={value} />{/if}
     <span class="min-w-0 flex-1 truncate">{triggerLabel}</span>
     <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
   </button>
@@ -158,7 +161,7 @@
         {#each filteredOptions as option, index (option.value)}
           <button
             class={[
-              "grid min-h-8 w-full cursor-pointer grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 rounded-md px-1.5 py-1 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              "grid min-h-8 w-full cursor-pointer grid-cols-[16px_16px_minmax(0,1fr)] items-center gap-1.5 rounded-md px-1.5 py-1 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               index === selectedIndex && "bg-accent text-accent-foreground",
             ]}
             type="button"
@@ -170,8 +173,9 @@
             onclick={() => choose(option)}
           >
             {#if option.value === value}<Check class="h-3.5 w-3.5 text-primary" aria-hidden="true" />{:else}<span aria-hidden="true"></span>{/if}
+            <ModelProviderIcon provider={option.value} />
             <span class="min-w-0">
-              <strong class="block truncate text-xs font-medium">{option.label}</strong>
+              <strong class={["block truncate text-xs font-medium", option.value ? modelDisplayToneClass(modelRefTone(option.value)) : ""]}>{option.label}</strong>
               {#if option.description}<small class="block truncate font-mono text-xs text-muted-foreground">{option.description}</small>{/if}
             </span>
           </button>

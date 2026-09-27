@@ -10,9 +10,9 @@ Implemented; this is the current project-state registry contract.
 
 ## Goal
 
-Synchronize project-scoped tasks, plans, TODO, and workspace state through the private Git
-registry without making task attachments depend on machine-specific absolute
-paths.
+Synchronize project-scoped tasks, plans, TODO, and workspace state through the
+private Git registry without making task attachments depend on machine-specific
+absolute paths.
 
 ## Scope
 
@@ -68,7 +68,11 @@ Those portable markers are not written to the local project task file.
    dirty; saving a file under `.pi/plans/` marks `plans` dirty; successful
    Desktop saves of `.pi/workspace.jsonc` mark `workspace` dirty. The fast sidebar
    Registry poll also reports project artifacts that changed outside those
-   Desktop save paths, so agent/external edits enter the same coordinator.
+   Desktop save paths, so agent/external edits enter the same coordinator. Those
+   external-change signals also refresh the corresponding local Desktop store
+   before sync: `tasks` reloads the task document, while `plans` and `todo`
+   reload the project-document snapshot. A queued signal is discarded if the
+   workspace changed before it is applied.
 9. Dirty project-state writes are debounced for approximately 900 ms. Repeated
    writes to one artifact collapse into one push, while more than one dirty
    artifact collapses into one `push project` operation.

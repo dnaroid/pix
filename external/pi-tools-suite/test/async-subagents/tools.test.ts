@@ -914,7 +914,7 @@ setTimeout(() => {}, 1000);
 		expect(result.content[0].text).toContain("Started 1 agent(s) so far; maxConcurrent=5 (project-wide).");
 		expect(result.content[0].text).toContain("All scheduled agents are no longer running or queued.");
 		expect(result.details.mode).toBe("spawn");
-		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", subagentType: "research", model: "zai/glm-5-turbo", icon: "search" }]);
+		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", subagentType: "research", model: "zai/glm-5.3-flash", icon: "search" }]);
 		expect(updates.length).toBeGreaterThan(0);
 		expect(rpcEvents).toEqual(expect.arrayContaining([
 			expect.objectContaining({ type: "message_start" }),

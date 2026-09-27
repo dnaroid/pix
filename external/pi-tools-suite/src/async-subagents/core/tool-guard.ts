@@ -10,6 +10,9 @@ export const SUBAGENT_DENIED_TOOLS = new Set([
 	"async_subagents_result",
 	"async_subagents_stop",
 	"async_subagents_cleanup",
+	// Approved policy (G2): the Claude provider registers this at
+	// session_start; web search via the provider is prohibited in every child.
+	"pi_claude_code_provider_web_search",
 ]);
 
 export function filterSubagentTools(tools: readonly string[] | undefined): string[] | undefined {
@@ -36,4 +39,9 @@ export default function subagentToolGuard(pi: ExtensionAPI): void {
 
 	pi.on("session_start", applyGuard);
 	pi.on("model_select", applyGuard);
+	// Defense in depth: a denied tool that becomes active later (lazy
+	// registration, reload) is still never executed.
+	pi.on("tool_call", (event) => SUBAGENT_DENIED_TOOLS.has(event.toolName)
+		? { block: true, reason: `${event.toolName} is not available to sub-agents` }
+		: undefined);
 }

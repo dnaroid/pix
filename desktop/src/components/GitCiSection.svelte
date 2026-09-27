@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Minus from "@lucide/svelte/icons/minus";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -8,6 +10,7 @@
   import { openExternalHref } from "../lib/external-links";
   import {
     gitCiAggregate,
+    gitCiSetupGuide,
     gitCiStatusLabel,
     type GitCiPanelState,
     type GitCiStatus,
@@ -17,6 +20,8 @@
 
   const aggregate = $derived(gitCiAggregate(ci.snapshot));
   const providerLabel = $derived(ci.snapshot?.provider === "github" ? "GitHub Actions" : ci.snapshot?.provider === "gitlab" ? "GitLab CI" : "CI");
+  const setupGuide = $derived(gitCiSetupGuide(ci.snapshot));
+  let copiedCommand = $state<string | null>(null);
 
   function statusClass(status: GitCiStatus | undefined): string {
     if (status === "success") return "text-tool-success";
@@ -42,6 +47,15 @@
   function openUrl(url: string | undefined): void {
     if (!url) return;
     void openExternalHref(url).catch(() => undefined);
+  }
+
+  async function copyCommand(command: string): Promise<void> {
+    try {
+      await writeText(command);
+      copiedCommand = command;
+    } catch {
+      copiedCommand = null;
+    }
   }
 </script>
 
@@ -71,7 +85,37 @@
       <button class="shrink-0 rounded-sm px-1 hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={ci.loading} onclick={ci.onRefresh}>Refresh</button>
     </div>
 
-    {#if availabilityMessage()}
+    {#if setupGuide}
+      <div class="space-y-2 rounded-md border border-tool-warning/25 bg-tool-warning/5 p-2 text-xs">
+        <p class="leading-4 text-foreground">
+          {setupGuide.needsInstall
+            ? `${setupGuide.providerLabel} (${setupGuide.cliName}) is required to read CI for ${setupGuide.host}.`
+            : `${setupGuide.providerLabel} is installed, but Pix needs an authenticated account for ${setupGuide.host}.`}
+        </p>
+        {#if setupGuide.needsInstall}
+          <div class="space-y-1">
+            <div class="flex min-w-0 items-center gap-1.5">
+              <code class="min-w-0 flex-1 overflow-x-auto rounded-sm bg-code px-1.5 py-1 font-mono text-xs text-foreground">{setupGuide.installCommand}</code>
+              <button class="inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" aria-label="Copy CLI install command" onclick={() => void copyCommand(setupGuide.installCommand)}>
+                {#if copiedCommand === setupGuide.installCommand}<Check class="h-3 w-3" aria-hidden="true" />Copied{:else}<ClipboardCopy class="h-3 w-3" aria-hidden="true" />Copy{/if}
+              </button>
+            </div>
+            <button class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => openUrl(setupGuide.installUrl)}>Installation guide <ExternalLink class="h-3 w-3" aria-hidden="true" /></button>
+          </div>
+        {/if}
+        <div class="space-y-1">
+          <p class="text-muted-foreground">{setupGuide.needsInstall ? "Then authenticate:" : "Authenticate in a terminal:"}</p>
+          <div class="flex min-w-0 items-center gap-1.5">
+            <code class="min-w-0 flex-1 overflow-x-auto rounded-sm bg-code px-1.5 py-1 font-mono text-xs text-foreground">{setupGuide.authCommand}</code>
+            <button class="inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" aria-label="Copy CLI authentication command" onclick={() => void copyCommand(setupGuide.authCommand)}>
+              {#if copiedCommand === setupGuide.authCommand}<Check class="h-3 w-3" aria-hidden="true" />Copied{:else}<ClipboardCopy class="h-3 w-3" aria-hidden="true" />Copy{/if}
+            </button>
+          </div>
+          <button class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => openUrl(setupGuide.authUrl)}>Authentication guide <ExternalLink class="h-3 w-3" aria-hidden="true" /></button>
+        </div>
+        <p class="leading-4 text-muted-foreground">After setup completes, use Refresh to retry CI detection.</p>
+      </div>
+    {:else if availabilityMessage()}
       <p class={["text-xs leading-4 break-words", ci.snapshot?.availability === "error" || ci.error ? "text-tool-error" : "text-muted-foreground"]} role={ci.snapshot?.availability === "error" || ci.error ? "alert" : undefined}>{availabilityMessage()}</p>
     {/if}
 

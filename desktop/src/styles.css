@@ -58,7 +58,10 @@
   --color-tool-warning: var(--tool-warning);
   --color-tool-info: var(--tool-info);
   --color-tool-error: var(--tool-error);
+  --color-model-anthropic: var(--model-anthropic);
   --color-model-openai: var(--model-openai);
+  --color-model-zai: var(--model-zai);
+  --color-thinking-low: var(--thinking-low);
   --color-thinking-xhigh: var(--thinking-xhigh);
   --color-thinking-max: var(--thinking-max);
 
@@ -149,7 +152,10 @@
   --tool-warning: #9a631d;
   --tool-info: #246b8e;
   --tool-error: #a44949;
-  --model-openai: #75671f;
+  --model-anthropic: #98503a;
+  --model-openai: #176b62;
+  --model-zai: #3859d6;
+  --thinking-low: #75671f;
   --thinking-xhigh: #cf333d;
   --thinking-max: #b91c57;
 
@@ -225,7 +231,10 @@
     --tool-warning: #e5c07b;
     --tool-info: #56b6c2;
     --tool-error: #e06c75;
-    --model-openai: #c8b45a;
+    --model-anthropic: #e18a6d;
+    --model-openai: #65c2b1;
+    --model-zai: #8ea2ff;
+    --thinking-low: #c8b45a;
     --thinking-xhigh: #ff8a86;
     --thinking-max: #ff5f8f;
   }

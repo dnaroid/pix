@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,11 +15,27 @@ import { createBoundedFileWriter, createDeferredFileWriter, resolveSubagentLogLi
 import { filterSubagentTools } from "./tool-guard.js";
 import type { AgentCompletionHandler, AgentTask, RpcEventHandler, RpcEventRecord, SpawnedAgent } from "./types.js";
 import { isRecord, isoNow, serializeJsonLine } from "./utils.js";
+import { forgetOwnedHandle, launchPreparedOwnedAgent, ownedOutcomeSync, readOwnedMetadata, requestOwnedCancel, OWNED_METADATA, type OwnedLaunchBinaries, type OwnedLaunchHandle } from "./owned-launch-integration.js";
+import { ownedArtifactsPresentSync, ownedDeletableSync, verifyOwnedRetirementAsync } from "./owned-retirement.js";
+import {
+	normalizeProviderArgs,
+	resolveFinalModel,
+	resolveProviderExtensions,
+	selectsClaudeProvider,
+	subagentEnvModel,
+	type InstalledPackageLocator,
+} from "./provider-extensions.js";
+import { fenceOwnedLaunchRunAsync, ownedLaunchClaimProtocolSync, readOwnedLaunchClaimSync } from "./owned-launch/marker.js";
 
 export interface SpawnAgentOptions {
 	parentSession?: string;
 	timeoutMs?: number;
 	maxResultBytes?: number;
+	ownedBinaries?: OwnedLaunchBinaries;
+	/** Test seam for Pi's installed-package lookup (provider dependency resolution). */
+	locateProviderPackagesForTest?: InstalledPackageLocator;
+	/** Unit-test-only native boundary; production tool never supplies this. */
+	ownedLaunchForTest?: (request: { agentDir: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; binaries: OwnedLaunchBinaries }) => OwnedLaunchHandle;
 }
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -32,6 +48,12 @@ const AGENT_SETTLED_TERMINATE_GRACE_MS = 50;
 const AGENT_SETTLED_COMPLETION_FALLBACK_MS = 1_000;
 const EXIT_STDIO_FLUSH_GRACE_MS = 10;
 const PROGRESS_LOG_MAX_BYTES = 1024 * 1024;
+/** Background drain-settlement poll interval; bounded so the loop stays off the hot path. */
+const OWNED_SETTLE_INTERVAL_MS = 1_000;
+/** Grace after the bridge ended before a never-released run may be probed for absent jobs. */
+const OWNED_BRIDGE_END_GRACE_MS = 2_000;
+/** Bounded launchctl budget while settling a completion (retirement marker caching). */
+const OWNED_SETTLE_RETIREMENT_BUDGET_MS = 10_000;
 
 export function shouldPersistSubagentSessions(env: NodeJS.ProcessEnv = process.env): boolean {
 	return isTruthyEnv(env.ASYNC_SUBAGENTS_ENABLE_SESSIONS);
@@ -49,6 +71,31 @@ export function spawnAgent(
 	validateBasename(task.id, "task.id");
 	const agentDir = path.join(runDir, task.id);
 	fs.mkdirSync(agentDir, { recursive: true });
+	// Sub-agent roles are self-contained. Never inherit/discover skills, and do
+	// not allow profile/user extra args to re-enable or inject them. Model and
+	// provider override spellings the child CLI rejects are normalized first,
+	// so ownership, provider dependencies, and the child agree on one model.
+	const forwardedExtraArgs = normalizeProviderArgs(withoutSkillArgs(extraArgs));
+	const configuredModel = task.model?.trim() || subagentEnvModel();
+	const selectedModel = resolveFinalModel(configuredModel, forwardedExtraArgs);
+	const explicitModel = resolveFinalModel(task.model, forwardedExtraArgs);
+	const owned = selectsClaudeProvider(selectedModel, forwardedExtraArgs);
+	// This check MUST precede reuse cleanup and any child spawn, including direct
+	// spawnAgent calls that bypass the asynchronous tool preflight.
+	if (owned && (process.platform !== "darwin" || !options.ownedBinaries))
+		throw new Error("pi-claude-code-provider requires prepared macOS owned-launch binaries");
+	// Extension-backed providers are resolved before any artifact changes or
+	// child exists; a ProviderExtensionError is permanent (a synchronous throw
+	// is never retried and never falls back).
+	const providerExtensions = resolveProviderExtensions({
+		selectedModel, explicitModel, claudeSelected: owned, forwardedArgs: forwardedExtraArgs, cwd,
+		locateInstalled: options.locateProviderPackagesForTest,
+	});
+	// Kernel drain and launchd retirement are distinct facts: reuse is refused
+	// until every owned-launch UUID directory (including any left from older
+	// generations, even without a readable pointer) is both terminal and retired.
+	if (ownedArtifactsPresentSync(agentDir) && !ownedDeletableSync(agentDir))
+		throw new Error("previous owned sub-agent is not verified drained and retired; refusing reuse");
 	prepareUiQaWorkspace(agentDir, task.subagentType);
 
 	// Clean previous state when reusing a run directory/agent id.
@@ -70,6 +117,8 @@ export function spawnAgent(
 		"stop_signal",
 		"retry_pending",
 		"next_retry_at",
+		"process_group",
+		OWNED_METADATA,
 	]) {
 		try {
 			fs.unlinkSync(path.join(agentDir, f));
@@ -88,23 +137,15 @@ export function spawnAgent(
 	// detached subprocesses do not depend on persisted local pi settings.
 	const persistSessions = shouldPersistSubagentSessions();
 	const sessionDir = persistSessions ? getAgentSessionDir(agentDir) : undefined;
-	// Sub-agent roles are self-contained. Never inherit/discover skills, and do
-	// not allow profile/user extra args to re-enable or inject them.
-	const forwardedExtraArgs = withoutSkillArgs(extraArgs);
 	if (sessionDir) fs.mkdirSync(sessionDir, { recursive: true });
 	const piArgs: string[] = ["--mode", "rpc"];
 	if (sessionDir) piArgs.push("--session-dir", sessionDir);
 	else piArgs.push("--no-session");
 	piArgs.push("--no-extensions");
 	piArgs.push("--extension", getModelToolsExtensionPath());
-	// Preserve `--no-extensions` unless this invocation explicitly selects an
-	// Antigravity model. Environment/default models do not opt the provider in.
-	const configuredModel = task.model || getEnvModel();
-	const selectedModel = resolveSelectedModel(configuredModel, forwardedExtraArgs);
-	const explicitModel = resolveSelectedModel(task.model, forwardedExtraArgs);
-	if (explicitModel?.startsWith("antigravity/") && explicitModel.length > "antigravity/".length) {
-		piArgs.push("--extension", getAntigravityAuthExtensionPath());
-	}
+	// `--no-extensions` stays; only the allowlisted provider dependencies of
+	// the final selected model are added (see provider-extensions.ts).
+	for (const extension of providerExtensions) piArgs.push("--extension", extension);
 	piArgs.push("--no-skills");
 	if (configuredModel) piArgs.push("--model", configuredModel);
 	const selectedTools = task.tools ? filterSubagentTools(selectSuitableToolsForModel(selectedModel, task.tools)) : undefined;
@@ -150,9 +191,12 @@ export function spawnAgent(
 		progressStream.write(serializeJsonLine({ at: isoNow(), stage, ...details }));
 	};
 
-	const proc = spawn(invocation.command, invocation.args, {
+	const env = subagentEnvironment(process.env, isUiQaType(task.subagentType) ? agentDir : undefined);
+	const ownedHandle = owned ? (options.ownedLaunchForTest ?? launchPreparedOwnedAgent)({ agentDir, command: invocation.command, args: invocation.args, cwd, env, binaries: options.ownedBinaries! }) : undefined;
+	// The prepared bridge guarantees three piped stdio streams, just as spawn() does.
+	const proc: ChildProcessWithoutNullStreams = (ownedHandle?.process as ChildProcessWithoutNullStreams | undefined) ?? spawn(invocation.command, invocation.args, {
 		cwd,
-		env: subagentEnvironment(process.env, isUiQaType(task.subagentType) ? agentDir : undefined),
+		env,
 		stdio: ["pipe", "pipe", "pipe"],
 		detached: process.platform !== "win32",
 	});
@@ -165,6 +209,7 @@ export function spawnAgent(
 	let lastAssistantResult = "";
 	let lastAgentEndError = "";
 	let timedOut = false;
+	let agentSettledRequested = false;
 	let shouldKeepStderr = false;
 	let timeoutTimer: NodeJS.Timeout | undefined;
 	let timeoutKillTimer: NodeJS.Timeout | undefined;
@@ -189,6 +234,95 @@ export function spawnAgent(
 	};
 
 	const notifyComplete = (exitCode: number) => {
+		if (completionNotified) return;
+		if (ownedHandle) {
+			// Do not release the semaphore or enter retry/fallback while cleanup is
+			// uncertain. Poll tiny durable receipts off the hot path until a
+			// terminal proof exists; a missing receipt leaves ownership explicitly
+			// pending, never terminal, and the background poll never gives up.
+			if (ownedCompletionPending) return;
+			ownedCompletionPending = true;
+			ownedPendingExitCode = exitCode;
+			scheduleOwnedSettle();
+			return;
+		}
+		commitCompletion(exitCode);
+	};
+	let ownedCompletionPending = false;
+	let ownedPendingExitCode = 0;
+	let ownedPendingReported = false;
+	let ownedSettleScheduled = false;
+	let ownedSettleStopped = false;
+	let ownedBridgeEndedAt: number | undefined;
+	const markOwnedBridgeEnded = () => { ownedBridgeEndedAt ??= Date.now(); };
+	const finishOwnedCompletion = (exitCode: number) => {
+		ownedSettleStopped = true;
+		ownedCompletionPending = false;
+		forgetOwnedHandle(agentDir);
+		commitCompletion(exitCode);
+	};
+	const settleOwnedCompletion = async () => {
+		if (ownedSettleStopped || completionNotified) return;
+		// The agent directory (or its ownership pointer) can disappear through
+		// cleanup or external action; never settle a stale run.
+		if (!fs.existsSync(agentDir) || !fs.existsSync(path.join(agentDir, OWNED_METADATA))) {
+			finishOwnedCompletion(ownedPendingExitCode);
+			return;
+		}
+		const outcome = ownedOutcomeSync(agentDir);
+		if (outcome.kind === "drained-ok" || outcome.kind === "drained-fail" || outcome.kind === "launch-failed" ||
+			outcome.kind === "never-launched") {
+			// Kernel drainage proves the receipt, but the attempt may only
+			// FINISH at the safe retirement/reuse boundary: the supervisor
+			// historically wrote receipts before booting out its jobs, and a
+			// completion that fires early lets retry/fallback relaunch the same
+			// agent directory straight into the reuse guard ("not verified
+			// drained and retired"), terminating the whole retry chain
+			// spuriously. The bounded verifier caches the durable retirement
+			// marker once the exact UUID labels are confirmed absent; until
+			// then keep this attempt open and keep polling off the hot path.
+			if (await verifyOwnedRetirementAsync(agentDir, { overallDeadlineMs: OWNED_SETTLE_RETIREMENT_BUDGET_MS }).catch(() => false)) {
+				finishOwnedCompletion(ownedPendingExitCode);
+				return;
+			}
+		} else if (outcome.kind === "unproven-fail") {
+			// The receipt claims terminal failure without kernel proof: settle
+			// only once the exact launchd targets are confirmed absent.
+			if (await verifyOwnedRetirementAsync(agentDir, { overallDeadlineMs: OWNED_SETTLE_RETIREMENT_BUDGET_MS })) {
+				finishOwnedCompletion(ownedPendingExitCode);
+				return;
+			}
+		} else if (ownedBridgeEndedAt !== undefined && Date.now() - ownedBridgeEndedAt >= OWNED_BRIDGE_END_GRACE_MS) {
+			// Our own bridge ended (exit/close, or a spawn-level error) without
+			// any verdict; even a still-live bridge that has not claimed simply
+			// loses the fence below. If it never took the exclusive launch claim, it never
+			// bound or bootstrapped anything; fencing the run makes that a
+			// durable never-launched outcome that the next settle iteration
+			// retires. A bridge-claimed run stays pending until its receipt.
+			const meta = readOwnedMetadata(agentDir);
+			if (meta && ownedLaunchClaimProtocolSync(meta.runDir) && readOwnedLaunchClaimSync(meta.runDir) === "none")
+				await fenceOwnedLaunchRunAsync(meta.runDir);
+		}
+		if (!ownedPendingReported) {
+			// Report pending exactly once and keep the progress stream open for
+			// the final completion record.
+			ownedPendingReported = true;
+			writeProgress("owned_drain_pending", { reason: outcome.kind });
+		}
+		scheduleOwnedSettle();
+	};
+	const scheduleOwnedSettle = () => {
+		if (ownedSettleScheduled || ownedSettleStopped || completionNotified) return;
+		ownedSettleScheduled = true;
+		const timer = setTimeout(() => {
+			ownedSettleScheduled = false;
+			// The settle loop is fire-and-forget: a transient error must never
+			// surface as an unhandled rejection nor abandon receipt recovery.
+			settleOwnedCompletion().catch(() => scheduleOwnedSettle());
+		}, OWNED_SETTLE_INTERVAL_MS);
+		timer.unref?.();
+	};
+	const commitCompletion = (exitCode: number) => {
 		if (completionNotified) return;
 		if (exitCode !== 0) shouldKeepStderr = true;
 		completionNotified = true;
@@ -236,15 +370,25 @@ export function spawnAgent(
 
 	const finalizeCompletion = (code: number | null, signal: NodeJS.Signals | null) => {
 		if (completionNotified) return;
-		if (!timeoutKillTimer && !agentSettledCompletionFallbackTimer) scheduleProcessTreeKill("process_exit");
+		if (!ownedHandle && !timeoutKillTimer && !agentSettledCompletionFallbackTimer) scheduleProcessTreeKill("process_exit");
 		writeSuppressedRpcEventSummary(transcriptStream, suppressedRpcEventCounts);
-		const exitCode = resolveAgentExitCode({
+		let exitCode = resolveAgentExitCode({
 			timedOut,
 			completedFromAgentEnd,
 			lastAgentEndError,
 			code,
 			signal,
 		});
+		if (ownedHandle) {
+			// A successful RPC event does not override the payload's actual exit
+			// status relayed by the native bridge. Cancellation after agent_settled
+			// is intentional after RPC completion; preserve an RPC error as failure.
+			if (timedOut) exitCode = AGENT_TIMEOUT_EXIT_CODE;
+			else if (code === 143 && agentSettledRequested && (completedFromAgentEnd || lastAgentEndError) &&
+				!fs.existsSync(path.join(agentDir, "stop_requested"))) exitCode = lastAgentEndError ? 1 : 0;
+			else if (code !== 0) exitCode = code ?? 1;
+			else if (!completedFromAgentEnd || lastAgentEndError) exitCode = 1;
+		}
 		if (fs.existsSync(agentDir)) {
 			if (exitCode === 0 && !fs.existsSync(path.join(agentDir, "result.md")) && lastAssistantResult.trim()) {
 				fs.writeFileSync(path.join(agentDir, "result.md"), lastAssistantResult.trim(), "utf-8");
@@ -260,6 +404,14 @@ export function spawnAgent(
 
 	const scheduleAgentSettledTermination = () => {
 		if (agentSettledKillTimer) return;
+		agentSettledRequested = true;
+		if (ownedHandle) {
+			agentSettledKillTimer = setTimeout(() => {
+				try { requestOwnedCancel(agentDir); } catch (error) { writeProgress("owned_cancel_pending", { error: String(error) }); }
+			}, AGENT_SETTLED_TERMINATE_GRACE_MS);
+			agentSettledKillTimer.unref?.();
+			return;
+		}
 		agentSettledKillTimer = setTimeout(() => {
 			agentSettledKillTimer = undefined;
 			try {
@@ -303,19 +455,22 @@ export function spawnAgent(
 			}
 			try {
 				writeProgress("shutdown_signal", { reason: "timeout", signal: "SIGTERM" });
-				terminateChildProcessTree(proc, "SIGTERM");
+				if (ownedHandle) requestOwnedCancel(agentDir);
+				else terminateChildProcessTree(proc, "SIGTERM");
 			} catch {
 				/* process may have exited between the timer and signal */
 			}
-			timeoutKillTimer = setTimeout(() => {
+			if (!ownedHandle) {
+				timeoutKillTimer = setTimeout(() => {
 				try {
 					writeProgress("shutdown_signal", { reason: "timeout", signal: "SIGKILL" });
 					terminateChildProcessTree(proc, "SIGKILL");
 				} catch {
 					/* process may have exited after SIGTERM */
 				}
-			}, AGENT_TIMEOUT_KILL_GRACE_MS);
-			timeoutKillTimer.unref?.();
+				}, AGENT_TIMEOUT_KILL_GRACE_MS);
+				timeoutKillTimer.unref?.();
+			}
 		}, timeoutMs);
 		timeoutTimer.unref?.();
 	}
@@ -344,11 +499,12 @@ export function spawnAgent(
 				const errorText = typeof event.error === "string" ? event.error : "RPC prompt failed";
 				fs.writeFileSync(path.join(agentDir, "result.md"), errorText, "utf-8");
 				try {
-					terminateChildProcessTree(proc, "SIGTERM");
+					if (ownedHandle) requestOwnedCancel(agentDir);
+					else terminateChildProcessTree(proc, "SIGTERM");
 				} catch {
 					/* process may have exited immediately after emitting the failure */
 				}
-				scheduleProcessTreeKill("prompt_failed");
+				if (!ownedHandle) scheduleProcessTreeKill("prompt_failed");
 				notifyComplete(1);
 				return;
 			}
@@ -414,6 +570,7 @@ export function spawnAgent(
 		exitFinalizationTimer.unref?.();
 	};
 	const recordProcessTermination = (code: number | null, signal: NodeJS.Signals | null) => {
+		if (ownedHandle) markOwnedBridgeEnded();
 		processTermination ??= { code, signal };
 		finalizeAfterStdout();
 	};
@@ -425,6 +582,7 @@ export function spawnAgent(
 	proc.once("close", recordProcessTermination);
 
 	proc.once("error", (error) => {
+		if (ownedHandle) markOwnedBridgeEnded();
 		const message = String(error);
 		stderrStream.write(`${message}\n`);
 		shouldKeepStderr = true;
@@ -433,12 +591,15 @@ export function spawnAgent(
 		}
 		stderrStream.flush();
 		transcriptStream.end();
+		if (ownedHandle) {
+			try { requestOwnedCancel(agentDir); } catch { /* supervisor may still be starting; receipt remains required */ }
+		}
 		notifyComplete(1);
 	});
 
 	const pid = proc.pid!;
 	fs.writeFileSync(path.join(agentDir, "pid"), String(pid), "utf-8");
-	if (process.platform !== "win32") fs.writeFileSync(path.join(agentDir, "process_group"), String(pid), "utf-8");
+	if (!ownedHandle && process.platform !== "win32") fs.writeFileSync(path.join(agentDir, "process_group"), String(pid), "utf-8");
 	writeProgress("spawned", { pid });
 
 	proc.stdin.write([
@@ -478,28 +639,10 @@ function withoutSkillArgs(args: string[]): string[] {
 	return filtered;
 }
 
-function resolveSelectedModel(configuredModel: string | undefined, extraArgs: string[]): string | undefined {
-	let model = configuredModel?.trim() || undefined;
-	for (let index = 0; index < extraArgs.length; index += 1) {
-		const arg = extraArgs[index];
-		if (arg === "--model" || arg === "-m") {
-			model = extraArgs[index + 1]?.trim() || undefined;
-			index += 1;
-			continue;
-		}
-		if (arg.startsWith("--model=")) {
-			model = arg.slice("--model=".length).trim() || undefined;
-		}
-	}
-	return model;
-}
+
 
 function getModelToolsExtensionPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "model-tools", "index.ts");
-}
-
-function getAntigravityAuthExtensionPath(): string {
-	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "antigravity-auth", "index.ts");
 }
 
 function terminateChildProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
@@ -801,12 +944,6 @@ function extractAssistantMessageText(message: unknown): string {
 			parts.push(item.text);
 	}
 	return parts.join("\n\n").trim();
-}
-
-function getEnvModel(): string | undefined {
-	const value = process.env.ASYNC_SUBAGENTS_MODEL || process.env.PI_SUBAGENTS_MODEL;
-	const trimmed = value?.trim();
-	return trimmed ? trimmed : undefined;
 }
 
 function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.ProcessEnv {

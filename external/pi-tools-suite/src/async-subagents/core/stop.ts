@@ -5,6 +5,9 @@ import { terminateProcess, terminateProcessTree } from "./process.js";
 import { writeStructuredResult } from "./structured-result.js";
 import type { AgentState } from "./types.js";
 import { isoNow } from "./utils.js";
+import { readOwnedMetadata, requestOwnedCancel, verifiedOwnedDrainSync } from "./owned-launch-integration.js";
+import { listOwnedLaunchRunDirs, ownedArtifactsPresentSync } from "./owned-retirement.js";
+import { writeOwnedLaunchCancelMarker } from "./owned-launch/marker.js";
 
 export type StopSignal = "SIGTERM" | "SIGINT" | "SIGKILL";
 
@@ -43,6 +46,52 @@ function stopAgent(runDir: string, agent: AgentState, signal: StopSignal): StopA
 		pid: agent.pid,
 		stopped: false,
 	};
+	const agentDir = path.join(runDir, agent.id);
+	// Any surviving owned-launch artifact — the ownership pointer OR UUID run
+	// directories — selects the owned cancellation path. A pointerless owned
+	// run must NEVER fall through to the legacy PID signal or a terminal
+	// "stopped" write: the saved PID may already name an unrelated process,
+	// and only the durable receipt chain can prove the coalition drained.
+	if (ownedArtifactsPresentSync(agentDir)) {
+		if (verifiedOwnedDrainSync(agentDir) && agent.status !== "running")
+			return { ...result, message: `agent is ${agent.status}` };
+		try {
+			// Durable intent first. Never signal a saved bridge PID or process group.
+			fs.writeFileSync(path.join(agentDir, "stop_requested"), isoNow(), "utf8");
+			fs.writeFileSync(path.join(agentDir, "stop_signal"), signal, "utf8");
+		} catch (error) {
+			return { ...result, signal, error: error instanceof Error ? error.message : String(error) };
+		}
+		if (!readOwnedMetadata(agentDir)) {
+			// Pointerless owned artifacts: without a readable pointer there is
+			// no in-process handle and no metadata-directed cancel, but the
+			// durable cancel marker is addressed by run directory, which the
+			// supervisor polls pre-release and on every monitoring iteration.
+			// Write it into every surviving UUID run dir and stay non-terminal:
+			// drain proof is still pending, so no PID signal and no exit_code.
+			const markerErrors: string[] = [];
+			for (const ownedRunDir of listOwnedLaunchRunDirs(agentDir)) {
+				try {
+					writeOwnedLaunchCancelMarker(ownedRunDir);
+				} catch (error) {
+					markerErrors.push(error instanceof Error ? error.message : String(error));
+				}
+			}
+			return {
+				...result,
+				signal,
+				stopped: false,
+				message: "owned artifacts present without a readable pointer; durable cancel requested, drain pending",
+				...(markerErrors.length > 0 ? { error: `cancel marker failed: ${markerErrors.join("; ")}` } : {}),
+			};
+		}
+		try {
+			requestOwnedCancel(agentDir);
+			return { ...result, signal, message: "owned cancellation requested; drain pending" };
+		} catch (error) {
+			return { ...result, signal, error: error instanceof Error ? error.message : String(error) };
+		}
+	}
 
 	if (agent.status === "planned" || agent.status === "retrying") {
 		markStopped(runDir, agent.id, signal, agent.status === "planned" ? "Sub-agent stopped before launch." : "Sub-agent retry cancelled before relaunch.");

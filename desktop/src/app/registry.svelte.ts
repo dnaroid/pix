@@ -194,6 +194,14 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     await refreshProjectInitialization();
   }
 
+  function reloadLocalProjectState(scope: RegistryProjectSyncScope, workspace: string): void {
+    if (scope === "workspace" || scope === "project") void options.loadWorkspaceSettings?.(workspace);
+    if (scope === "tasks" || scope === "project") void options.loadProjectTasks(workspace);
+    if (scope === "plans" || scope === "todo" || scope === "project") {
+      void options.loadProjectDocuments(workspace);
+    }
+  }
+
   async function runAction(request: RegistryActionRequest, nextActionId: string): Promise<void> {
     const requestClient = options.client();
     const workspace = options.workspace();
@@ -216,13 +224,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       const next = await requestClient.registryAction(workspace, request);
       if (!current()) return;
       snapshot = next;
-      if (request.action === "pull-project") {
-        if (request.scope === "workspace" || request.scope === "project") void options.loadWorkspaceSettings?.(workspace);
-        if (request.scope === "tasks" || request.scope === "project") void options.loadProjectTasks(workspace);
-        if (request.scope === "plans" || request.scope === "todo" || request.scope === "project") {
-          void options.loadProjectDocuments(workspace);
-        }
-      }
+      if (request.action === "pull-project") reloadLocalProjectState(request.scope, workspace);
     } catch (error) {
       if (current()) options.reportError(error);
     } finally {
@@ -237,6 +239,13 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   function refresh(): void {
     void refreshProjectInitialization();
     void runAction({ action: "refresh" }, "refresh");
+  }
+
+  function observeProjectChange(scope: RegistryProjectSyncScope): void {
+    const workspace = options.workspace();
+    if (!workspace) return;
+    reloadLocalProjectState(scope, workspace);
+    if (backgroundSyncState.phase === "idle") scheduleProjectSync(scope);
   }
 
   function reset(): void {
@@ -274,6 +283,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     autoCleanProject,
     runAction,
     refresh,
+    observeProjectChange,
     scheduleProjectSync,
     reset,
   };

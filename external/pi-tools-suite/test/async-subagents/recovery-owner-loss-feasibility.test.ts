@@ -29,57 +29,20 @@
 // solely from the persisted authentic checkpoint files and performs the same
 // exact-token cleanup, with its receipt and an independent ps absence both
 // observed before C's watchdog and before `finally`. The post-kill/pre-receipt
-// idempotent restart (R1 dying after killing C but before its receipt) is
-// deliberately not exercised; R2 rejects an already-dead target rather than
-// treating it as successful idempotent recovery.
+// idempotent restart (R1 dying after killing C but before its receipt) lives
+// in recovery-postkill-restart.test.ts under an explicit supervisor mode and
+// checkpoint contract; this file's plain-generation R2 still rejects an
+// already-dead target rather than treating it as successful idempotent
+// recovery.
 import { test, expect } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-
-const launchctl = (args: string[], timeout = 4000) => spawnSync("launchctl", args, { timeout, encoding: "utf8" });
-const escapeXml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
-const psOf = (pids: number[]) => spawnSync("ps", ["-p", pids.filter(p => p > 0).join(","), "-o", "pid="], { timeout: 4000, encoding: "utf8" });
-const leafIsAlive = (pid: number) => {
-  const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { timeout: 4000, encoding: "utf8" });
-  if (result.error || result.signal || result.stderr.trim()) throw new Error(`ps failed: ${result.error?.message ?? result.signal ?? result.stderr}`);
-  if (result.status === 1 && result.stdout.trim() === "") return false;
-  if (result.status !== 0 || !result.stdout.trim()) throw new Error(`ambiguous ps result: ${result.status} ${result.stderr}`);
-  return !result.stdout.trim().startsWith("Z");
-};
-const actorsAreAbsent = (pids: number[]) => {
-  const result = psOf(pids);
-  if (result.error || result.signal || result.stderr.trim()) throw new Error(`ps failed: ${result.error?.message ?? result.signal ?? result.stderr}`);
-  if (result.status === 0 && result.stdout.trim()) return false;
-  if (result.status === 1 && result.stdout.trim() === "") return true;
-  throw new Error(`ambiguous ps result: ${result.status} ${result.stderr}`);
-};
-
-async function waitFor(predicate: () => boolean, deadlineMs: number, what: string) {
-  const end = Date.now() + deadlineMs;
-  while (Date.now() < end) {
-    if (predicate()) return;
-    await Bun.sleep(50);
-  }
-  throw new Error(`deadline waiting for ${what}`);
-}
-
-type Checkpoint = { role: string; pid: number; pidversion: number; start: number; deadline: number };
-const parseCp = (path: string): Checkpoint => {
-  const text = readFileSync(path, "utf8");
-  const m = text.match(/role=(\S+) pid=(\d+) pidversion=(\d+) token=[0-9a-f]{64} start=(\d+) deadline=(\d+)/);
-  if (!m) throw new Error(`unparseable checkpoint ${path}: ${text}`);
-  return { role: m[1], pid: Number(m[2]), pidversion: Number(m[3]), start: Number(m[4]), deadline: Number(m[5]) };
-};
-const parseReceipt = (path: string) =>
-  Object.fromEntries([...readFileSync(path, "utf8").matchAll(/([a-z_]+)=(\S+)/g)].map(m => [m[1], m[2]]));
-
-// Restart test only; the baseline test keeps its inline plist. The optional
-// generation argument selects generation-suffixed supervisor artifacts.
-const supervisorPlist = (label: string, supervisorBin: string, dir: string, gen?: string) =>
-  `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${escapeXml(label)}</string><key>ProgramArguments</key><array><string>${escapeXml(supervisorBin)}</string><string>${escapeXml(dir)}</string>${gen ? `<string>${escapeXml(gen)}</string>` : ""}</array><key>RunAtLoad</key><true/><key>StandardOutPath</key><string>${escapeXml(join(dir, "job.out"))}</string><key>StandardErrorPath</key><string>${escapeXml(join(dir, "job.err"))}</string></dict></plist>`;
+import {
+  actorsAreAbsent, compileFixture, escapeXml, fileExists, leafIsAlive, launchctl,
+  parseCp, parseReceipt, psInfo, psOf, supervisorPlist, waitFor,
+} from "./recovery-harness";
 
 test.skipIf(process.platform !== "darwin" || process.env.PI_OFFLINE_COALITION_PROBE !== "1")("independent launchd recovery supervisor cleans the setsid descendant after joint app/helper loss", async () => {
   const domain = `gui/${process.getuid!()}`;
@@ -90,8 +53,6 @@ test.skipIf(process.platform !== "darwin" || process.env.PI_OFFLINE_COALITION_PR
   const service = `${domain}/${label}`;
   const plist = join(dir, "job.plist");
   const receiptPath = join(dir, "receipt.json");
-  const compile = (source: string, out: string) =>
-    spawnSync("xcrun", ["clang", "-std=c11", "-Wall", "-Wextra", "-Werror", join(import.meta.dir, source), "-lbsm", "-o", out], { timeout: 20_000, encoding: "utf8" });
   let registered = false;
   let bootstrapped = false;
   let ok = false;
@@ -100,9 +61,9 @@ test.skipIf(process.platform !== "darwin" || process.env.PI_OFFLINE_COALITION_PR
   try {
     const actorsBin = join(dir, "actors");
     const supervisorBin = join(dir, "supervisor");
-    const actorsCompile = compile("fixtures/recovery-actors.c", actorsBin);
+    const actorsCompile = compileFixture("recovery-actors.c", actorsBin);
     expect(actorsCompile.status, actorsCompile.stderr || actorsCompile.error?.message).toBe(0);
-    const supervisorCompile = compile("fixtures/recovery-supervisor.c", supervisorBin);
+    const supervisorCompile = compileFixture("recovery-supervisor.c", supervisorBin);
     expect(supervisorCompile.status, supervisorCompile.stderr || supervisorCompile.error?.message).toBe(0);
 
     app = Bun.spawn([actorsBin, "app", dir], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -114,8 +75,6 @@ test.skipIf(process.platform !== "darwin" || process.env.PI_OFFLINE_COALITION_PR
 
     // The fake descendant escaped via setsid+exec before any owner died: it
     // leads its own process group, distinct from the app's inherited group.
-    const psInfo = (pid: number, keywords: string[]) =>
-      spawnSync("ps", ["-p", String(pid), ...keywords.map(k => `-o ${k}=`)], { timeout: 4000, encoding: "utf8" });
     const leafPre = psInfo(leafCp.pid, ["pgid"]);
     expect(leafPre.status, leafPre.stderr).toBe(0);
     const leafPgid = Number(leafPre.stdout.trim());
@@ -210,11 +169,7 @@ test.skipIf(process.platform !== "darwin" || process.env.PI_OFFLINE_COALITION_PR
     return { gen, label, service: `${domain}/${label}`, plist: join(dir, `job-${gen}.plist`) };
   };
   const jobs = { r1: mkJob("a"), r2: mkJob("b") };
-  const compile = (source: string, out: string) =>
-    spawnSync("xcrun", ["clang", "-std=c11", "-Wall", "-Wextra", "-Werror", join(import.meta.dir, source), "-lbsm", "-o", out], { timeout: 20_000, encoding: "utf8" });
   const cp = (role: string) => parseCp(join(dir, `${role}.json`));
-  const psInfo = (pid: number, keywords: string[]) =>
-    spawnSync("ps", ["-p", String(pid), ...keywords.map(k => `-o ${k}=`)], { timeout: 4000, encoding: "utf8" });
   const registered = { r1: false, r2: false };
   const bootstrapped = { r1: false, r2: false };
   // Set only after the mid-test bootout returned 0 AND the exact service lookup reported absence.
@@ -225,9 +180,9 @@ test.skipIf(process.platform !== "darwin" || process.env.PI_OFFLINE_COALITION_PR
   try {
     const actorsBin = join(dir, "actors");
     const supervisorBin = join(dir, "supervisor");
-    const actorsCompile = compile("fixtures/recovery-actors.c", actorsBin);
+    const actorsCompile = compileFixture("recovery-actors.c", actorsBin);
     expect(actorsCompile.status, actorsCompile.stderr || actorsCompile.error?.message).toBe(0);
-    const supervisorCompile = compile("fixtures/recovery-supervisor.c", supervisorBin);
+    const supervisorCompile = compileFixture("recovery-supervisor.c", supervisorBin);
     expect(supervisorCompile.status, supervisorCompile.stderr || supervisorCompile.error?.message).toBe(0);
 
     app = Bun.spawn([actorsBin, "app", dir], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });

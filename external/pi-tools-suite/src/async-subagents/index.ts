@@ -36,6 +36,7 @@ import type { LiveAgent, SubagentsLiveStateEvent } from "./types.js";
 import type { AgentState } from "./core/types.js";
 import { publishRpcSessionState } from "../lib/rpc-session-state.js";
 import { clearSubagentsNativeWidget, updateSubagentsNativeWidget } from "./native-tui.js";
+import { ownedArtifactsPresentSync, ownedDeletableSync } from "./core/owned-retirement.js";
 
 function isTerminalAgentStatus(status: AgentState["status"]): boolean {
 	return status === "done" || status === "failed" || status === "stopped";
@@ -473,8 +474,9 @@ async function cleanupProjectSubagentState(
 	signalShutdownTargets(shutdownPlan.targets, "SIGKILL");
 
 	for (const target of shutdownPlan.targets) stopRunBestEffort(target.runDir, target.agentIds, "SIGKILL");
-	deleteRunDirs(shutdownPlan.runDirsToDelete);
-	removeSubagentRunsFromRegistry(cwd, shutdownPlan.runDirsToDelete);
+	const deletable = shutdownPlan.runDirsToDelete.filter((dir) => !hasPendingOwnedRun(dir));
+	deleteRunDirs(deletable);
+	removeSubagentRunsFromRegistry(cwd, deletable);
 	removeEmptySubagentState(cwd);
 }
 
@@ -564,6 +566,11 @@ function signalShutdownTargets(targets: ShutdownTarget[], signal: StopSignal): n
 		try {
 			const state = getRunState(target.runDir, target.agentIds);
 			for (const agent of state.agents) {
+				// Session shutdown must not use a recorded bridge PID (nor its
+				// group) for an owned run. stopAgents writes the durable cancel
+				// marker. Artifacts alone (even without a pointer) mark the run
+				// owned: unknown ownership never falls back to PID signaling.
+				if (ownedArtifactsPresentSync(path.join(target.runDir, agent.id))) continue;
 				if (agent.status !== "running" || !agent.pid || agent.pid <= 0) continue;
 				try {
 					process.kill(agent.pid, signal);
@@ -577,6 +584,14 @@ function signalShutdownTargets(targets: ShutdownTarget[], signal: StopSignal): n
 		}
 	}
 	return signaled;
+}
+
+function hasPendingOwnedRun(runDir: string): boolean {
+	try {
+		return fs.readdirSync(runDir, { withFileTypes: true }).some((entry) => entry.isDirectory() &&
+			ownedArtifactsPresentSync(path.join(runDir, entry.name)) &&
+			!ownedDeletableSync(path.join(runDir, entry.name)));
+	} catch { return true; }
 }
 
 function sleep(ms: number): Promise<void> {

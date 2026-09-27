@@ -150,7 +150,7 @@ export function createDesktopSidebarViewModel(options: {
     onRegistryInitializeProject: () => void options.registry.initializeProject(),
     onRegistryCleanProject: () => void options.registry.cleanProject(),
     onRegistryAction: (request, actionId) => void options.registry.runAction(request, actionId),
-    onRegistryProjectChange: options.registry.scheduleProjectSync,
+    onRegistryProjectChange: options.registry.observeProjectChange,
     onWorkspaceSettingsSave: (workspace) => {
       if (workspace === options.workspace()) options.registry.scheduleProjectSync("workspace");
     },

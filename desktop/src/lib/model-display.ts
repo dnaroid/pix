@@ -7,9 +7,14 @@ export type ModelDisplayTone =
   | "success"
   | "warning"
   | "error"
+  | "model-anthropic"
   | "model-openai"
+  | "model-zai"
+  | "thinking-low"
   | "thinking-xhigh"
   | "thinking-max";
+
+export type ModelProviderBrand = "anthropic" | "google" | "openai" | "zai";
 
 export function modelDisplayToneClass(tone: ModelDisplayTone | undefined): string {
   switch (tone) {
@@ -20,7 +25,10 @@ export function modelDisplayToneClass(tone: ModelDisplayTone | undefined): strin
     case "success": return "text-tool-success";
     case "warning": return "text-tool-warning";
     case "error": return "text-tool-error";
+    case "model-anthropic": return "text-model-anthropic";
     case "model-openai": return "text-model-openai";
+    case "model-zai": return "text-model-zai";
+    case "thinking-low": return "text-thinking-low";
     case "thinking-xhigh": return "text-thinking-xhigh";
     case "thinking-max": return "text-thinking-max";
     case "muted": return "text-muted-foreground";
@@ -40,20 +48,40 @@ const MODEL_PROVIDER_PALETTE: readonly ModelDisplayTone[] = [
 const THINKING_PALETTE: readonly ModelDisplayTone[] = [
   "muted",
   "success",
-  "model-openai",
+  "thinking-low",
   "warning",
   "error",
   "thinking-xhigh",
   "thinking-max",
 ];
 
-/** Mirrors the TUI's shipped modelColors rules, then its provider-hash fallback palette. */
+export function modelProviderBrand(providerOrRef: string): ModelProviderBrand | undefined {
+  const normalized = providerOrRef.trim().toLowerCase();
+  const provider = normalized.includes("/") ? normalized.slice(0, normalized.indexOf("/")) : normalized;
+  if (provider === "anthropic") return "anthropic";
+  if (provider === "antigravity" || provider === "google") return "google";
+  if (provider === "openai" || provider === "openai-codex") return "openai";
+  if (provider === "zai" || provider === "z.ai" || provider === "zhipu" || provider === "zhipuai") return "zai";
+  return undefined;
+}
+
+export function modelProviderTone(providerOrRef: string): ModelDisplayTone | undefined {
+  switch (modelProviderBrand(providerOrRef)) {
+    case "anthropic": return "model-anthropic";
+    case "google": return undefined;
+    case "openai": return "model-openai";
+    case "zai": return "model-zai";
+    default: return undefined;
+  }
+}
+
+/** Uses distinct Desktop provider colors first, then the TUI rules and provider-hash fallback. */
 export function modelRefTone(modelRef: string): ModelDisplayTone {
   const normalized = modelRef.trim().toLowerCase();
+  const providerTone = modelProviderTone(normalized);
+  if (providerTone) return providerTone;
   if (/^antigravity\/antigravity-claude-/u.test(normalized)) return "error";
   if (normalized.startsWith("antigravity/")) return "warning";
-  if (normalized.startsWith("openai-codex/")) return "model-openai";
-  if (normalized.startsWith("zai/")) return "success";
 
   const provider = normalized.slice(0, Math.max(0, normalized.indexOf("/"))) || normalized;
   return MODEL_PROVIDER_PALETTE[hashString(provider) % MODEL_PROVIDER_PALETTE.length] ?? "info";

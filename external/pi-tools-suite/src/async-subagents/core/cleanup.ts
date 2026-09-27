@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
+import { ownedArtifactsPresentSync, ownedDeletableSync } from "./owned-retirement.js";
 
 export function findCleanupCandidates(
 	runRoot: string,
@@ -37,6 +38,7 @@ export function findCleanupCandidates(
 
 export function deleteRunDirs(runDirs: string[]): void {
 	for (const dir of runDirs) {
+		if (hasUndeletableOwnedAgent(dir)) throw new Error(`owned run is not verified drained and retired: ${dir}`);
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 }
@@ -60,7 +62,17 @@ function isCompletedRun(runDir: string): boolean {
 		if (!hasLaunchedAgentPrompt(runDir, entry.name)) continue;
 		const agentDir = path.join(runDir, entry.name);
 		foundAgent = true;
+		// Unknown ownership fails closed: any owned-launch artifact without a
+		// verified drain + retirement proof keeps the run undeletable.
+		if (ownedArtifactsPresentSync(agentDir) && !ownedDeletableSync(agentDir)) return false;
 		if (!fs.existsSync(path.join(agentDir, "exit_code"))) return false;
 	}
 	return foundAgent;
+}
+
+function hasUndeletableOwnedAgent(runDir: string): boolean {
+	if (!isDir(runDir)) return false;
+	return fs.readdirSync(runDir, { withFileTypes: true }).some((entry) => entry.isDirectory() &&
+		ownedArtifactsPresentSync(path.join(runDir, entry.name)) &&
+		!ownedDeletableSync(path.join(runDir, entry.name)));
 }
