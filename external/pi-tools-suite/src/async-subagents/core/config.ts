@@ -4,11 +4,11 @@ import { loadPiToolsSuiteConfig } from "../../config.js";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./browser-qa.js";
 import {
+	applyVendorPolicy,
 	defaultFrontierConfig,
 	economyBlockReason,
 	frontierCandidatesForRole,
 	isFrontierModel,
-	isSameModel,
 	modelVendor,
 	type FrontierConfig,
 } from "./frontier-models.js";
@@ -314,22 +314,17 @@ export function resolveAgentTaskConfig(
 		}
 	}
 
-	if (parentProviderPolicy === "prefer-other" && !explicitModel && parentVendor) {
-		const rank = (ref: string) => isSameModel(ref, parentModelRef, frontier) ? 2 : modelVendor(ref, frontier) === parentVendor ? 1 : 0;
-		candidates = [0, 1, 2].flatMap((level) => candidates.filter((ref) => rank(ref) === level));
+	if (parentProviderPolicy === "prefer-other" && !explicitModel) {
+		candidates = applyVendorPolicy(candidates, "prefer-other", parentModelRef, frontier);
 	}
 	if (parentProviderPolicy === "require-other") {
 		if (hasProviderArg(extraArgs)) {
 			throw new SubagentModelSelectionError(task.id, "--provider cannot be combined with cross-vendor selection; use a provider/model reference.");
 		}
-		const isOtherVendor = (ref: string) => {
-			const vendor = modelVendor(ref, frontier);
-			return vendor !== undefined && vendor !== parentVendor && !isSameModel(ref, parentModelRef, frontier);
-		};
-		if (explicitModel && !isOtherVendor(explicitModel)) {
+		if (explicitModel && applyVendorPolicy([explicitModel], "require-other", parentModelRef, frontier).length === 0) {
 			throw new SubagentModelSelectionError(task.id, `Explicit model override ${explicitModel} shares the parent's vendor (${parentVendor}); cross-vendor selection is required.`);
 		}
-		candidates = candidates.filter(isOtherVendor);
+		candidates = applyVendorPolicy(candidates, "require-other", parentModelRef, frontier);
 		if (candidates.length === 0) {
 			throw new SubagentModelSelectionError(task.id, `No model from a vendor other than the parent's (${parentVendor}) is available in the configured candidates/overrides${economyNote(economyBlocked)}.`);
 		}

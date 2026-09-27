@@ -11,6 +11,7 @@
     type SettingsSchema,
   } from "../../lib/settings";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
+  import { frontierModelRows, serializeFrontierModelRows } from "../../lib/frontier-models-settings";
   import { BUILTIN_AGENT_CATALOG } from "../../lib/builtin-agent-catalog";
   import {
     toolsSuiteModuleStates,
@@ -19,6 +20,7 @@
   } from "../../lib/tools-suite-module-visibility";
   import SettingsBuiltinAgentVisibility from "./SettingsBuiltinAgentVisibility.svelte";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
+  import SettingsFrontierModels from "./SettingsFrontierModels.svelte";
   import SettingsJsonValue from "./SettingsJsonValue.svelte";
   import SettingsModelList from "./SettingsModelList.svelte";
   import SettingsModelSelect from "./SettingsModelSelect.svelte";
@@ -29,7 +31,7 @@
   import SettingsSwitch from "./SettingsSwitch.svelte";
   import SettingsTextInput from "./SettingsTextInput.svelte";
 
-  export type ToolsSuiteSettingsSection = "general" | "automation" | "dcp" | "context" | "integrations";
+  export type ToolsSuiteSettingsSection = "general" | "subagents" | "automation" | "dcp" | "context" | "integrations";
 
   const THINKING_STRICTNESS = [
     { value: "conservative", label: "Conservative" },
@@ -183,6 +185,24 @@
     </SettingsFieldRow>
     <SettingsFieldRow label="Secret redaction notifications" description="Show a warning when secret material is redacted." explicit={has(["secretFirewall", "notify"])} defaultLabel={defaultLabel(["secretFirewall", "notify"])} onReset={() => reset(["secretFirewall", "notify"])}>
       <SettingsSwitch value={bool(["secretFirewall", "notify"])} onChange={(value) => set(["secretFirewall", "notify"], value)} />
+    </SettingsFieldRow>
+  </div>
+{:else if section === "subagents"}
+  <div class="px-2.5 py-2.5">
+    <h2 class="text-sm font-semibold text-foreground">Sub-agents</h2>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Frontier models for the oracle and review roles, and the economy switch for every role.</p>
+  </div>
+  <div class="border-y border-sidebar-border/70 bg-panel">
+    <SettingsFieldRow label="Economy mode" description="Skip frontier models marked Expensive for every sub-agent role, including explicit model overrides. Applies to the next spawn without a restart." explicit={has(["economy"])} defaultLabel={defaultLabel(["economy"])} onReset={() => reset(["economy"])}>
+      <SettingsSwitch value={bool(["economy"])} onChange={(value) => set(["economy"], value)} />
+    </SettingsFieldRow>
+    <SettingsFieldRow label="Frontier models" description="Preference order for oracle, frontier-review, and delivery-review. A frontier parent gets an oracle from another vendor; add a new frontier release here instead of editing agent files." explicit={has(["frontierModels"])} defaultLabel="Default · built-in list" onReset={() => reset(["frontierModels"])}>
+      <SettingsFrontierModels
+        value={frontierModelRows(json(["frontierModels"]))}
+        economy={bool(["economy"])}
+        {models}
+        onChange={(rows) => set(["frontierModels"], serializeFrontierModelRows(rows))}
+      />
     </SettingsFieldRow>
   </div>
 {:else if section === "automation"}

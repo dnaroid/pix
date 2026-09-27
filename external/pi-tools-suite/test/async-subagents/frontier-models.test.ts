@@ -11,6 +11,7 @@ import {
 } from "../../src/async-subagents/core/config.js";
 import {
 	defaultFrontierConfig,
+	frontierOracleCandidates,
 	isSameModel,
 	modelVendor,
 	normalizeFrontierModels,
@@ -166,6 +167,19 @@ describe("oracle frontier selection", () => {
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		fs.writeFileSync(file, "---\nmodelSelection: frontier\nmodels: [zai/glm-5.3]\n---\nBad.\n");
 		expect(() => loadSubagentConfig(cwd, {})).toThrow(/conflicts with models/);
+	});
+});
+
+describe("frontierOracleCandidates", () => {
+	test("matches the resolver's oracle chain for every parent class and economy state", () => {
+		for (const economy of [false, true]) {
+			const config = configWith({ economy });
+			for (const parent of ["zai/glm-5.3", "openai-codex/gpt-6-sol", "openai/gpt-6-astra", "zai/glm-5.3-flash", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5"]) {
+				const expected = frontierOracleCandidates(parent, config.frontier!);
+				if (expected.length === 0) expect(() => oracle(config, parent)).toThrow();
+				else expect(oracle(config, parent)).toEqual(expected);
+			}
+		}
 	});
 });
 

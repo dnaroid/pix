@@ -134,6 +134,40 @@ export function frontierCandidatesForRole(role: string | undefined, frontier: Fr
 }
 
 /**
+ * Apply a concrete parent-vendor policy to an ordered candidate list.
+ * `prefer-other` keeps every candidate: other vendors, then the parent's
+ * vendor, then the parent's own model. `require-other` keeps only candidates
+ * of a known other vendor that are not the parent's model.
+ */
+export function applyVendorPolicy(
+	candidates: readonly string[],
+	policy: "prefer-other" | "require-other",
+	parentRef: string | undefined,
+	frontier: FrontierConfig,
+): string[] {
+	const parentVendor = modelVendor(parentRef, frontier);
+	if (policy === "require-other") {
+		return candidates.filter((ref) => {
+			const vendor = modelVendor(ref, frontier);
+			return vendor !== undefined && vendor !== parentVendor && !isSameModel(ref, parentRef, frontier);
+		});
+	}
+	if (!parentVendor) return [...candidates];
+	const rank = (ref: string) => isSameModel(ref, parentRef, frontier) ? 2 : modelVendor(ref, frontier) === parentVendor ? 1 : 0;
+	return [0, 1, 2].flatMap((level) => candidates.filter((ref) => rank(ref) === level));
+}
+
+/**
+ * The configured oracle chain for a parent before runtime availability
+ * checks: frontier candidates for `role`, minus economy-blocked models, with
+ * another vendor required for a frontier parent and preferred otherwise.
+ */
+export function frontierOracleCandidates(parentRef: string, frontier: FrontierConfig, role = "oracle"): string[] {
+	const candidates = frontierCandidatesForRole(role, frontier).filter((ref) => !economyBlockReason(ref, frontier));
+	return applyVendorPolicy(candidates, isFrontierModel(parentRef, frontier) ? "require-other" : "prefer-other", parentRef, frontier);
+}
+
+/**
  * Normalize a raw `frontierModels` config value. Invalid entries are dropped
  * rather than failing config load, matching the suite's lenient layering.
  */

@@ -22,7 +22,7 @@
   import ToolsSuiteSettingsEditor from "./settings/ToolsSuiteSettingsEditor.svelte";
 
   type DesktopSection = "general" | "models" | "assistant" | "voice" | "editor" | "source-control" | "advanced";
-  type ToolsSection = "general" | "automation" | "dcp" | "context" | "integrations" | "advanced";
+  type ToolsSection = "general" | "subagents" | "automation" | "dcp" | "context" | "integrations" | "advanced";
 
   const DESKTOP_SECTIONS = [
     { id: "general", label: "General" },
@@ -35,6 +35,7 @@
   ] as const;
   const TOOLS_SECTIONS = [
     { id: "general", label: "General" },
+    { id: "subagents", label: "Sub-agents" },
     { id: "automation", label: "Automation" },
     { id: "dcp", label: "DCP" },
     { id: "context", label: "Context" },

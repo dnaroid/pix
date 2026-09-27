@@ -22,7 +22,9 @@ import sessionSubagentsSource from "./SessionSubagentsPanel.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
 import desktopSettingsEditorSource from "./settings/DesktopSettingsEditor.svelte?raw";
+import settingsFrontierModelsSource from "./settings/SettingsFrontierModels.svelte?raw";
 import settingsModelListSource from "./settings/SettingsModelList.svelte?raw";
+import toolsSuiteSettingsEditorSource from "./settings/ToolsSuiteSettingsEditor.svelte?raw";
 import settingsModelRoutingTiersSource from "./settings/SettingsModelRoutingTiers.svelte?raw";
 import settingsModelSelectSource from "./settings/SettingsModelSelect.svelte?raw";
 import settingsModelVisibilitySource from "./settings/SettingsModelVisibility.svelte?raw";
@@ -433,6 +435,18 @@ describe("desktop visual regressions", () => {
     expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');
+  });
+
+  it("edits frontier models with the live catalog in the Sub-agents section", () => {
+    expect(settingsSource).toContain('{ id: "subagents", label: "Sub-agents" }');
+    expect(toolsSuiteSettingsEditorSource).toContain('label="Economy mode"');
+    expect(toolsSuiteSettingsEditorSource).toContain('label="Frontier models"');
+    expect(toolsSuiteSettingsEditorSource).toContain("<SettingsFrontierModels");
+    expect(settingsFrontierModelsSource).toContain("<SettingsModelSelect");
+    expect(settingsFrontierModelsSource).toContain("frontierOraclePreview");
+    expect(settingsFrontierModelsSource).not.toContain("<select");
+    expect(settingsFrontierModelsSource).not.toContain("cursor-pointer");
+    expect(settingsFrontierModelsSource).not.toContain("rounded-xl");
   });
 
   it("shows pi-tools-suite module descriptions on hover like bundled agents", () => {
