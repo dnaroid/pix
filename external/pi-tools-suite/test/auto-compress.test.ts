@@ -139,6 +139,47 @@ describe("summary source manifest + extractive fallback", () => {
 		expect(summary).toContain("src/payments.ts");
 	});
 
+	test("extractive fallback stays compact: tool output yields only labelled checkpoints, bounded args/errors, superseded failures", async () => {
+		const { buildExtractiveSummary, buildSummarySourceManifest } = await loadModule();
+		const sourceCode = Array.from({ length: 200 }, (_value, index) =>
+			`  test("case ${index} returns error status", () => expect(run(${index})).toBe("error"))`).join("\n");
+		const failingLog = Array.from({ length: 150 }, (_value, index) =>
+			index % 5 === 0 ? `FAIL tests/x.test.ts > case ${index}\n  Error: expected status 200` : `  at frame${index} (src/x.ts:${index})`).join("\n");
+		const messages = [
+			textMessage("user", "Fix the failing parser tests.", 1),
+			{ role: "assistant", timestamp: 2, content: [{ type: "toolCall", id: "read-1", name: "read", input: { path: "tests/x.test.ts" } }] },
+			{ role: "toolResult", toolCallId: "read-1", toolName: "read", isError: false, timestamp: 3,
+				content: [{ type: "text", text: `Decision: TOOL_LABELLED_CHECKPOINT\n${sourceCode}` }] },
+			{ role: "assistant", timestamp: 4, content: [{ type: "toolCall", id: "test-1", name: "bash", input: { command: "bun test" } }] },
+			{ role: "toolResult", toolCallId: "test-1", toolName: "bash", isError: true, timestamp: 5, content: [{ type: "text", text: failingLog }] },
+			{ role: "assistant", timestamp: 6, content: [{ type: "toolCall", id: "write-1", name: "write", input: { path: "src/x.ts", content: "FILE_BODY ".repeat(600) } }] },
+			{ role: "toolResult", toolCallId: "write-1", toolName: "write", isError: false, timestamp: 7, content: [{ type: "text", text: "ok" }] },
+			{ role: "assistant", timestamp: 8, content: [{ type: "toolCall", id: "test-2", name: "bash", input: { command: "bun test" } }] },
+			{ role: "toolResult", toolCallId: "test-2", toolName: "bash", isError: false, timestamp: 9, content: [{ type: "text", text: "200 pass, 0 fail" }] },
+			{ role: "assistant", timestamp: 10, content: [{ type: "toolCall", id: "lint-1", name: "bash", input: { command: "bun run lint" } }] },
+			{ role: "toolResult", toolCallId: "lint-1", toolName: "bash", isError: true, timestamp: 11,
+				content: [{ type: "text", text: `${"lint progress line\n".repeat(400)}error: LINT_STILL_ACTIONABLE in src/y.ts` }] },
+		];
+		const summary = buildExtractiveSummary(
+			"Parser fix",
+			{ startId: "m001", endId: "m011", messageCount: messages.length, estimatedTokens: 10_000, includedBlockIds: [], reason: "test" },
+			buildSummarySourceManifest(messages),
+		);
+
+		expect(summary.length).toBeLessThan(JSON.stringify(messages).length * 0.2);
+		expect(summary).toContain("Decision: TOOL_LABELLED_CHECKPOINT");
+		expect(summary).not.toContain("returns error status");
+		expect(summary).not.toContain("FILE_BODY");
+		expect(summary).toContain("src/x.ts");
+		expect(summary).toMatch(/\[\d+ chars omitted\]/);
+		// The fixed failure keeps its outcome but loses the excerpt; the open one keeps a bounded excerpt.
+		expect(summary).toMatch(/test-1 bash outcome=error superseded_by=src-\d+$/m);
+		expect(summary).not.toContain("at frame");
+		expect(summary).toContain("LINT_STILL_ACTIONABLE");
+		expect(summary).toContain("error excerpt bounded");
+		expect(summary).not.toContain("lint progress line\\nlint progress line");
+	});
+
 	test("extractive fallback may exceed 8192 tokens when the source is much larger", async () => {
 		const { prepareCompressionSummary } = await loadModule();
 		const messages = Array.from({ length: 12 }, (_value, index) =>

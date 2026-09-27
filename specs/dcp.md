@@ -298,7 +298,22 @@ need a larger continuation record to preserve every explicit checkpoint. Its
 acceptance is governed by the same exact source/replacement and full-provider-
 projection gain checks as other automatic summaries, while source-manifest and
 operation deadlines remain bounded. A replacement with non-positive gain is
-rejected. Protected user/tag/tool fragments and bounded
+rejected.
+
+The extractive floor is a continuity index, not a copy of the source. Free-text
+checkpoint matching (decision/constraint/verification/next-step wording) applies
+to user and assistant prose only; tool output (file reads, logs, search hits)
+contributes only label-anchored checkpoints such as `Decision: ...`. Tool-call
+string arguments longer than 240 characters (file bodies, patches) are replaced
+by a size marker. Error excerpts are bounded to error-keyword lines plus the
+tail. An errored result whose identical invocation (same tool and arguments)
+later succeeds in the same range is recorded as `superseded_by=<src>` without
+an excerpt, so a fixed failure never outranks the final outcome.
+
+Because the extractive floor is much weaker than an agent-authored summary, the
+DCP system prompt states who writes summaries: without a configured summarizer
+model the agent is told to always write the `compress` `summary` itself; with
+one, it may omit it. Protected user/tag/tool fragments and bounded
 subagent artifacts are carried through a deduplicated ledger so repeated
 rollups do not recursively duplicate them.
 

@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
-import { loadConfig, modelKeysFromContext, resolveModelConfig } from "./config.js"
+import { loadConfig, modelKeysFromContext, resolveModelConfig, summarizerModelRefs } from "./config.js"
 import {
 	createState,
 	resetState,
@@ -23,6 +23,8 @@ import {
 import {
 	SYSTEM_PROMPT,
 	MANUAL_MODE_SYSTEM_PROMPT,
+	SUMMARY_AUTHORING_DELEGATED,
+	SUMMARY_AUTHORING_SELF,
 	CONTEXT_LIMIT_NUDGE_STRONG,
 	CONTEXT_LIMIT_NUDGE_SOFT,
 	TURN_NUDGE,
@@ -443,9 +445,12 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		if (journalBlockedReason) throw new DcpJournalError(`DCP journal is blocked: ${journalBlockedReason}`)
 		if (!journalSupported) return { systemPrompt: event.systemPrompt }
 
-		const promptAddition = state.manualMode
+		const summaryAuthoring = summarizerModelRefs(effectiveConfig.compress.autoCompress).length > 0
+			? SUMMARY_AUTHORING_DELEGATED
+			: SUMMARY_AUTHORING_SELF
+		const promptAddition = `${state.manualMode
 			? MANUAL_MODE_SYSTEM_PROMPT
-			: SYSTEM_PROMPT
+			: SYSTEM_PROMPT}\n${summaryAuthoring}`
 
 		return {
 			systemPrompt: event.systemPrompt + "\n\n" + promptAddition,

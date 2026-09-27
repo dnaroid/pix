@@ -27,6 +27,21 @@ routine reminders may be skipped when no safe useful slice exists.
 `.trim()
 
 /**
+ * Appended to the DCP system prompt: tells the agent whether an omitted
+ * \`summary\` is written by a configured summarizer model or falls back to the
+ * deterministic extractive record (which is far weaker than an agent summary).
+ */
+export const SUMMARY_AUTHORING_SELF = `
+No DCP summarizer model is configured: always write the \`compress\` \`summary\`
+yourself. An omitted summary becomes a coarse extractive record.
+`.trim()
+
+export const SUMMARY_AUTHORING_DELEGATED = `
+A DCP summarizer model is configured: you may omit the \`compress\` \`summary\`
+unless parent-authored continuation wording is genuinely required.
+`.trim()
+
+/**
  * Used as the \`description\` field when registering the \`compress\` tool.
  *
  * Tool signature:
@@ -52,8 +67,9 @@ errors that are still actionable, verification state, unresolved blockers, and
 next steps. If work remains unfinished include \`Active objective\` and \`Next
 step\`. Do not infer, invent, or add facts. Preserve uncertainty. Do not copy long
 raw code, JSON, diffs, logs, or tool output; use short literals only when needed.
-Normally omit \`summary\`: DCP generates it. An explicit \`summary\` overrides
-generation when parent-authored continuation wording is genuinely required.
+Write \`summary\` yourself: you know which facts the task still needs. Omit it
+only when the DCP system prompt says a summarizer model is configured; without
+one, an omitted summary becomes a coarse deterministic extractive record.
 
 MODES:
 - \`ranges\`: contiguous \`startId..endId\` spans.
