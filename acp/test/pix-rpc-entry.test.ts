@@ -119,3 +119,213 @@ test("Pix RPC forwards only bounded prepared-map metadata and preserves legacy s
 		assert.deepEqual(stats(), { messageCount: 3, pixDcpTokensSaved: 12 });
 	}
 });
+
+/**
+ * Loads the Anthropic header-capture patch with stand-ins shaped like the real
+ * SDK surface it hooks: `ModelRuntime.prototype.stream/streamSimple` receiving
+ * `{ sessionId, onResponse }` options, and `AgentSession.prototype.getSessionStats`.
+ * `respond(response)` replays a provider response through whichever stream call
+ * the patch wraps, exactly like pi-ai's `onResponse` hook would.
+ */
+async function loadAnthropicUsageCapture() {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	const patch = source.slice(
+		source.indexOf("// --- Anthropic API-key response-header usage capture ---"),
+		source.indexOf("// --- end Anthropic API-key response-header usage capture ---"),
+	);
+	const seenOptions: unknown[] = [];
+	let currentResponse: { status: number; headers: Record<string, string> } = { status: 200, headers: {} };
+	class ModelRuntime {
+		constructor(private readonly subscription = false) {}
+		isUsingSubscription() { return this.subscription; }
+		stream(model: unknown, context: unknown, options: unknown) {
+			seenOptions.push(options);
+			return (options as { onResponse?: (response: unknown, model: unknown) => unknown }).onResponse?.(currentResponse, model);
+		}
+		streamSimple(model: unknown, context: unknown, options: unknown) {
+			seenOptions.push(options);
+			return (options as { onResponse?: (response: unknown, model: unknown) => unknown }).onResponse?.(currentResponse, model);
+		}
+	}
+	class Session {
+		constructor(sessionId: string, model: unknown) {
+			this.sessionId = sessionId;
+			this.agent = { state: { model } };
+		}
+		getSessionStats(): Record<string, unknown> { return { sessionId: this.sessionId, messageCount: 1 }; }
+		private readonly sessionId: string;
+		readonly agent: { state: { model: unknown } };
+	}
+	runInNewContext(patch, { AgentSession: Session, ModelRuntime });
+	return {
+		ModelRuntime,
+		Session,
+		seenOptions,
+		respond(response: { status: number; headers: Record<string, string> }) { currentResponse = response; },
+	};
+}
+
+const RATE_HEADERS = {
+	"content-type": "application/json",
+	"Anthropic-Ratelimit-Requests-Limit": "1000",
+	"anthropic-ratelimit-requests-remaining": "250",
+	"anthropic-ratelimit-requests-reset": "27s",
+	"x-api-key": "sk-ant-api03-SECRET",
+	"authorization": "Bearer SECRET",
+	"request-id": "req_123",
+};
+
+test("Pix RPC captures Anthropic rate-limit headers through the real stream hook", async () => {
+	const harness = await loadAnthropicUsageCapture();
+	harness.respond({ status: 200, headers: RATE_HEADERS });
+	const innerCalls: unknown[] = [];
+	const runtime = new harness.ModelRuntime(false);
+	const claude4 = { provider: "anthropic", id: "claude-4" };
+	const options = {
+		sessionId: "session-1",
+		onResponse: async (response: unknown, model: unknown) => {
+			innerCalls.push({ response, model });
+			return "inner-result";
+		},
+	};
+
+	const result = await runtime.streamSimple(claude4, {}, options);
+	assert.equal(result, "inner-result", "the wrapped onResponse keeps the SDK callback's result");
+	assert.equal(innerCalls.length, 1, "the SDK's own after_provider_response hook still fires");
+	assert.notEqual(harness.seenOptions[0], options, "capture wraps the options instead of mutating the caller's object");
+	assert.equal((harness.seenOptions[0] as { sessionId?: string }).sessionId, "session-1");
+
+	const stats = new harness.Session("session-1", claude4).getSessionStats();
+	// JSON round-trip: records are created inside the VM realm.
+	const record = JSON.parse(JSON.stringify(stats.pixAnthropicUsage)) as { modelKey: string; status: number; headers: Record<string, string>; receivedAt: number };
+	assert.equal(record.modelKey, "anthropic/claude-4");
+	assert.equal(record.status, 200);
+	// Only rate-limit headers are retained; credentials never reach the record.
+	assert.deepEqual(record.headers, {
+		"anthropic-ratelimit-requests-limit": "1000",
+		"anthropic-ratelimit-requests-remaining": "250",
+		"anthropic-ratelimit-requests-reset": "27s",
+	});
+	assert.equal(typeof record.receivedAt, "number");
+	assert.ok(record.receivedAt > 0);
+	assert.equal(JSON.stringify(stats).includes("SECRET"), false);
+});
+
+test("Pix RPC skips header capture for subscription sessions and non-Anthropic routes", async () => {
+	const harness = await loadAnthropicUsageCapture();
+	harness.respond({ status: 200, headers: { "anthropic-ratelimit-requests-limit": "1000", "anthropic-ratelimit-requests-remaining": "1" } });
+	const innerCalls: unknown[] = [];
+	const options = {
+		sessionId: "session-1",
+		onResponse: async (response: unknown) => { innerCalls.push(response); },
+	};
+
+	// OAuth subscription auth keeps its quota-endpoint path: no capture at all.
+	const subscription = new harness.ModelRuntime(true);
+	await subscription.streamSimple({ provider: "anthropic", id: "claude-4" }, {}, options);
+	assert.equal(harness.seenOptions[0], options, "subscription options pass through untouched");
+	assert.equal(innerCalls.length, 1);
+
+	// Non-Anthropic providers and sessionless requests are left alone too.
+	const runtime = new harness.ModelRuntime(false);
+	await runtime.stream({ provider: "openai", id: "gpt-5" }, {}, options);
+	await runtime.streamSimple({ provider: "anthropic", id: "claude-4" }, {}, { onResponse: options.onResponse });
+	assert.equal(harness.seenOptions[1], options);
+	assert.equal((harness.seenOptions[2] as { sessionId?: string }).sessionId, undefined);
+	assert.equal(new harness.Session("session-1", { provider: "anthropic", id: "claude-4" }).getSessionStats().pixAnthropicUsage, undefined);
+});
+
+test("Pix RPC isolates captured usage per session and model with bounded history", async () => {
+	const harness = await loadAnthropicUsageCapture();
+	const runtime = new harness.ModelRuntime(false);
+	const claude4 = { provider: "anthropic", id: "claude-4" };
+	const claude3 = { provider: "anthropic", id: "claude-3" };
+	// Records live in the VM realm; read them through a JSON round-trip.
+	const remainingFor = (sessionId: string, model: unknown): string | undefined => {
+		const stats = new harness.Session(sessionId, model).getSessionStats();
+		if (stats.pixAnthropicUsage === undefined) return undefined;
+		const record = JSON.parse(JSON.stringify(stats.pixAnthropicUsage)) as { headers: Record<string, string> };
+		return record.headers["anthropic-ratelimit-requests-remaining"];
+	};
+	const respond = (sessionId: string, model: { provider: string; id: string }, remaining: string) => {
+		harness.respond({
+			status: 200,
+			headers: { "anthropic-ratelimit-requests-remaining": remaining },
+		});
+		return runtime.streamSimple(model, {}, { sessionId, onResponse: async () => undefined });
+	};
+
+	// Concurrent sessions keep independent latest records for the same model.
+	await respond("session-1", claude4, "100");
+	await respond("session-2", claude4, "900");
+	assert.equal(remainingFor("session-1", claude4), "100");
+	assert.equal(remainingFor("session-2", claude4), "900");
+
+	// A session's record is only exposed for its CURRENT model; switching
+	// models never serves the previous model's snapshot.
+	await respond("session-1", claude3, "500");
+	assert.equal(remainingFor("session-1", claude3), "500");
+	assert.equal(remainingFor("session-2", claude4), "900");
+	// Switching back to a model only ever serves that model's own record.
+	assert.equal(remainingFor("session-1", claude4), "100");
+
+	// History stays bounded: the oldest route record is evicted beyond 16.
+	for (let i = 0; i < 20; i += 1) {
+		await respond(`burst-${i}`, claude4, String(i));
+	}
+	assert.equal(new harness.Session("session-1", claude3).getSessionStats().pixAnthropicUsage, undefined);
+	assert.equal(remainingFor("burst-19", claude4), "19");
+
+	// Responses without usable rate-limit headers never create records.
+	harness.respond({ status: 500, headers: { "content-type": "application/json" } });
+	await runtime.streamSimple(claude4, {}, { sessionId: "session-empty", onResponse: async () => undefined });
+	assert.equal(new harness.Session("session-empty", claude4).getSessionStats().pixAnthropicUsage, undefined);
+});
+
+test("Pix RPC keeps Anthropic usage alongside the DCP session-stats patch", async () => {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	// Start at the DCP stats symbol so both stats patches install in order,
+	// and end past parseDcpContextMap like the DCP patch test above.
+	const patch = source.slice(
+		source.indexOf("const PIX_DCP_RUNTIME_STATS_SYMBOL"),
+		source.indexOf("/** @type {WeakMap"),
+	);
+	const seenOptions: unknown[] = [];
+	class ModelRuntime {
+		isUsingSubscription() { return false; }
+		streamSimple(model: unknown, context: unknown, options: unknown) {
+			seenOptions.push(options);
+			return (options as { onResponse?: (response: unknown, model: unknown) => unknown }).onResponse?.({
+				status: 200,
+				headers: { "anthropic-ratelimit-requests-remaining": "424" },
+			}, model);
+		}
+	}
+	class Session {
+		constructor(sessionId: string, model: unknown) {
+			this.sessionId = sessionId;
+			this.agent = { state: { model } };
+		}
+		getSessionStats(): Record<string, unknown> { return { sessionId: this.sessionId }; }
+		private readonly sessionId: string;
+		readonly agent: { state: { model: unknown } };
+	}
+	const sandbox = {
+		AgentSession: Session,
+		ModelRuntime,
+		[Symbol.for("pix.dcp.runtime-stats")]: () => ({ tokensSaved: 12 }),
+	};
+	runInNewContext(patch, sandbox);
+
+	await new ModelRuntime().streamSimple({ provider: "anthropic", id: "claude-4" }, {}, {
+		sessionId: "session-both",
+		onResponse: async () => undefined,
+	});
+	const stats = new Session("session-both", { provider: "anthropic", id: "claude-4" }).getSessionStats();
+	assert.equal(stats.pixDcpTokensSaved, 12);
+	assert.equal(
+		(stats.pixAnthropicUsage as { headers: Record<string, string> }).headers["anthropic-ratelimit-requests-remaining"],
+		"424",
+	);
+	assert.equal(seenOptions.length, 1);
+});

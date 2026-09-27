@@ -13,10 +13,14 @@
     clampUsagePercent,
     contextUsageTone,
     dcpStatsBody,
+    displayModelUsage,
     formatCompactTokens,
     formatResetDuration,
+    limitingRateWindow,
     modelUsageTone,
+    modelUsageWindowLabel,
     modelUsageWindowWillExhaustBeforeReset,
+    shortModelUsageAccountLabel,
     type UsageTone,
   } from "../lib/runtime-status";
   import {
@@ -72,6 +76,11 @@
   const contextMap = $derived(dcpContextMap(status?.context, parseDcpContextMap(status?.dcpContextMap)));
   const contextLegend = $derived(contextLegendItems());
   const dcpBody = $derived(dcpStatsBody(status?.dcpStats));
+  // Quota usage wins while the provider quota is the freshest observation;
+  // an API-key header snapshot pushed after a mid-session auth switch (or a
+  // quota left over from a previous model) must not stay hidden behind it.
+  const modelUsage = $derived(displayModelUsage(status));
+  const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
   const usageWindowItems = $derived(usageWindows());
 
   onMount(() => {
@@ -178,18 +187,26 @@
     );
   }
 
-  function limitTitle(label: "H" | "W", window: ModelUsageLimitWindow): string {
-    const name = label === "H" ? "Hourly" : "Weekly";
+  function limitTitle(label: "H" | "W" | "R", window: ModelUsageLimitWindow): string {
+    const name = modelUsageWindowLabel(label, window);
     const weeklySlices = label === "W"
       ? ` · day slices ${weeklyDayLabels(window).join(" · ")} (aggregate quota, not per-day usage)`
       : "";
-    return `${name} limit · ${Math.round(window.remainingPercent)}% remaining · resets ${formatResetDuration(window.resetAt, now)}${weeklySlices}`;
+    // Header windows without a known reset carry no honest countdown.
+    const reset = label === "R" && window.resetAt <= now
+      ? ""
+      : ` · resets ${formatResetDuration(window.resetAt, now)}`;
+    return `${name} limit · ${Math.round(window.remainingPercent)}% remaining${reset}${weeklySlices}`;
   }
 
-  function usageWindows(): Array<{ label: "H" | "W"; window: ModelUsageLimitWindow }> {
-    const windows: Array<{ label: "H" | "W"; window: ModelUsageLimitWindow }> = [];
-    if (status?.modelUsage?.hourly) windows.push({ label: "H", window: status.modelUsage.hourly });
-    if (status?.modelUsage?.weekly) windows.push({ label: "W", window: status.modelUsage.weekly });
+  function usageWindows(): Array<{ key: string; label: "H" | "W" | "R"; window: ModelUsageLimitWindow }> {
+    const windows: Array<{ key: string; label: "H" | "W" | "R"; window: ModelUsageLimitWindow }> = [];
+    if (modelUsage?.hourly) windows.push({ key: "H", label: "H", window: modelUsage.hourly });
+    if (modelUsage?.weekly) windows.push({ key: "W", label: "W", window: modelUsage.weekly });
+    // Header-derived rate limits collapse into the single most-limiting
+    // short window so the status bar stays one compact indicator.
+    const rate = limitingRateWindow(modelUsage);
+    if (rate) windows.push({ key: "R", label: "R", window: rate });
     return windows;
   }
 
@@ -348,7 +365,7 @@
       </div>
     {/if}
 
-    {#if sessionUsageAvailable || status?.modelUsage}
+    {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage}
       <div class="relative col-start-3 shrink-0 justify-self-end">
         <button
           class="flex h-6 min-w-0 items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
@@ -361,15 +378,15 @@
           onclick={toggleUsage}
         >
           <span class="font-sans text-xs text-muted-foreground max-[900px]:hidden">Usage</span>
-          {#if status?.modelUsage?.accountEmail}
-            <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{status.modelUsage.accountEmail}</span>
+          {#if usageAccountLabel}
+            <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{usageAccountLabel}</span>
           {/if}
-          {#each usageWindowItems as { label, window } (label)}
+          {#each usageWindowItems as { key, label, window } (key)}
               {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
               <span class="flex items-center gap-1" title={limitTitle(label, window)}>
-                {#if usageWindowItems.length > 1}
-                  <span class="text-muted-foreground">{label === "H" ? "Hourly" : "Weekly"}</span>
+                {#if label === "R" || usageWindowItems.length > 1}
+                  <span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
                 {/if}
                 <span
                   class={["relative h-1.5 overflow-hidden rounded-sm bg-border", label === "W" ? "w-14" : "w-8"]}
@@ -391,7 +408,9 @@
                 {#if exhaustsEarly}
                   <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
                 {/if}
-                <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
+                {#if label !== "R" || window.resetAt > now}
+                  <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
+                {/if}
               </span>
           {/each}
         </button>

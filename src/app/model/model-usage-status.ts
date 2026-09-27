@@ -69,6 +69,8 @@ export type ModelUsageLimitWindow = {
 	readonly resetAt: number;
 	readonly windowSeconds: number;
 	readonly hasKnownWindowDuration?: boolean;
+	/** Short display label for header-derived windows, e.g. `RPM`/`TPM`. */
+	readonly label?: string;
 };
 
 export type ModelUsageStatus = {
@@ -78,6 +80,8 @@ export type ModelUsageStatus = {
 	readonly accountEmail?: string;
 	readonly weekly?: ModelUsageLimitWindow;
 	readonly hourly?: ModelUsageLimitWindow;
+	/** Provider response-header window: the single most limiting Anthropic API-key bucket (RPM/TPM/ITPM/OTPM). */
+	readonly rateWindows?: readonly ModelUsageLimitWindow[];
 };
 
 type OpenAIAuthData = {
@@ -402,8 +406,9 @@ export function formatModelUsageStatusLabel(status: ModelUsageStatus | undefined
 	if (!status) return "";
 
 	const parts: string[] = [];
-	if (status.hourly) parts.push(formatUsageWindow("H", status.hourly, now));
-	if (status.weekly) parts.push(formatUsageWindow("W", status.weekly, now));
+	if (status.hourly) parts.push(formatUsageWindow(status.hourly, now));
+	if (status.weekly) parts.push(formatUsageWindow(status.weekly, now));
+	for (const window of status.rateWindows ?? []) parts.push(formatUsageWindow(window, now));
 	const limitsLabel = parts.join(" • ");
 	return status.accountEmail && limitsLabel ? `${status.accountEmail} ${limitsLabel}` : limitsLabel;
 }
@@ -414,6 +419,7 @@ export function modelUsageRemainingPercent(status: ModelUsageStatus | undefined)
 	const values: number[] = [];
 	if (status.weekly) values.push(status.weekly.remainingPercent);
 	if (status.hourly) values.push(status.hourly.remainingPercent);
+	for (const window of status.rateWindows ?? []) values.push(window.remainingPercent);
 	return values.length > 0 ? Math.min(...values) : undefined;
 }
 
@@ -681,13 +687,47 @@ function isAnthropicOAuthToken(token: string): boolean {
 	return token.startsWith("sk-ant-oat");
 }
 
-async function resolvePiAuthToken(provider: string): Promise<string | undefined> {
+/**
+ * How the current session authenticates against Anthropic. Drives which usage
+ * source is authoritative: OAuth (`sk-ant-oat`) subscriptions poll the
+ * existing `api/oauth/usage` endpoint, while API keys derive usage only from
+ * Messages response headers.
+ */
+export type AnthropicAuthKind = "oauth" | "api-key";
+
+/**
+ * Classify the Anthropic credential using Pi's own auth resolution. Only the
+ * kind is returned — tokens never leave this module — and no usage endpoint is
+ * contacted. API-key resolution is purely local (stored credential or env);
+ * the only network this can perform is an OAuth refresh-token flow, which is
+ * short-circuited for regular OAuth logins via `isUsingOAuth`.
+ */
+export async function resolveAnthropicAuthKind(): Promise<AnthropicAuthKind> {
 	try {
 		const modelRuntime = await ModelRuntime.create({
 			authPath: getPiAuthPath(),
 			allowModelNetwork: false,
 		});
-		const resolved = await modelRuntime.getAuth(provider);
+		if (modelRuntime.isUsingOAuth("anthropic")) return "oauth";
+
+		// `claude setup-token` subscription tokens are stored as plain keys;
+		// they keep using the oauth/usage endpoint like model requests do.
+		const token = await resolvePiAuthToken("anthropic", modelRuntime);
+		if (token && isAnthropicOAuthToken(token)) return "oauth";
+	} catch {
+		// Unresolvable auth: fall back to header-only usage. The endpoint query
+		// itself also refuses plain API keys, so nothing breaks either way.
+	}
+	return "api-key";
+}
+
+async function resolvePiAuthToken(provider: string, modelRuntime?: ModelRuntime): Promise<string | undefined> {
+	try {
+		const runtime = modelRuntime ?? await ModelRuntime.create({
+			authPath: getPiAuthPath(),
+			allowModelNetwork: false,
+		});
+		const resolved = await runtime.getAuth(provider);
 		if (resolved?.auth.apiKey) return resolved.auth.apiKey;
 		const authorization = Object.entries(resolved?.auth.headers ?? {})
 			.find(([name]) => name.toLowerCase() === "authorization")?.[1];
@@ -1690,9 +1730,14 @@ function maskCredential(value: string): string {
 	return `${visible.slice(0, 4)}****${visible.slice(-4)}`;
 }
 
-function formatUsageWindow(_prefix: "W" | "H", window: ModelUsageLimitWindow, now: number): string {
+function formatUsageWindow(window: ModelUsageLimitWindow, now: number): string {
 	const warning = modelUsageWindowWillExhaustBeforeReset(window, now) ? ` ${APP_ICONS.alert}` : "";
-	return `${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)}${warning} ${formatDurationShort(window.resetAt, now)}`;
+	// A header-derived window without reset metadata reports a live snapshot;
+	// claiming an immediate "reset" countdown would be wrong, so it is omitted.
+	const countdown = window.resetAt > now || window.hasKnownWindowDuration === true
+		? ` ${formatDurationShort(window.resetAt, now)}`
+		: "";
+	return `${window.label ? `${window.label} ` : ""}${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)}${warning}${countdown}`;
 }
 
 function modelUsageWindowWillExhaustBeforeReset(window: ModelUsageLimitWindow, now: number): boolean {

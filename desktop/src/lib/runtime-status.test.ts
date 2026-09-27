@@ -1,18 +1,23 @@
 import { assert, describe, expect, it } from "vitest";
-import type { ModelUsageStatus, RuntimeStatus } from "./acp-client";
+import type { ModelUsageLimitWindow, ModelUsageStatus, RuntimeStatus } from "./acp-client";
 import {
   EMPTY_RUNTIME_STATUS_GENERATIONS,
   beginRuntimeStatusRefresh,
   contextUsageTone,
   dcpStatsBody,
+  displayModelUsage,
   formatCompactTokens,
   formatResetDuration,
   isLatestRuntimeStatusRefresh,
+  limitingRateWindow,
   mergePushedContextUsage,
   mergePushedDcpTokensSaved,
+  mergePushedModelUsage,
   mergeRuntimeStatusResponse,
   modelUsageTone,
+  modelUsageWindowLabel,
   modelUsageWindowWillExhaustBeforeReset,
+  shortModelUsageAccountLabel,
 } from "./runtime-status";
 
 const updatedAt = Date.UTC(2026, 8, 11, 12, 0, 0);
@@ -35,6 +40,16 @@ const quotaReadyStatus: RuntimeStatus = {
   sessionId: "session-1",
   modelUsageRefresh: "ready",
   modelUsage: freshQuotaUsage,
+};
+/** Anthropic API-key usage observed from response headers (RPM + TPM). */
+const headerRateUsage: ModelUsageStatus = {
+  modelKey: "anthropic/claude-sonnet-4-6",
+  provider: "anthropic",
+  updatedAt,
+  rateWindows: [
+    { remainingPercent: 40, resetAt: updatedAt + 30_000, windowSeconds: 60, hasKnownWindowDuration: true, label: "RPM" },
+    { remainingPercent: 25, resetAt: updatedAt + 41_000, windowSeconds: 60, hasKnownWindowDuration: true, label: "TPM" },
+  ],
 };
 
 describe("desktop runtime status helpers", () => {
@@ -245,5 +260,212 @@ describe("desktop runtime status helpers", () => {
     assert(merged);
     expect(merged.modelUsage).toEqual(staleQuotaUsage);
     expect(merged.modelUsageRefresh).toBe("skipped");
+  });
+
+  it("merges pushed header usage without disturbing quota state", () => {
+    const previous: RuntimeStatus = {
+      ...snapshotOnlyStatus,
+      context: { tokens: 64_000, contextWindow: 200_000, percent: 32 },
+      modelUsageRefresh: "ready",
+      modelUsage: freshQuotaUsage,
+    };
+    const pushed = mergePushedModelUsage(previous, "session-1", headerRateUsage);
+
+    expect(pushed.headerUsage).toEqual(headerRateUsage);
+    expect(pushed.modelUsage).toEqual(freshQuotaUsage);
+    expect(pushed.modelUsageRefresh).toBe("ready");
+    expect(pushed.context?.percent).toBe(32);
+
+    const cleared = mergePushedModelUsage(pushed, "session-1", undefined);
+    expect(cleared.headerUsage).toBeUndefined();
+    expect(cleared.modelUsage).toEqual(freshQuotaUsage);
+
+    // A push without any prior snapshot still creates a minimal status.
+    const fresh = mergePushedModelUsage(undefined, "session-2", headerRateUsage);
+    expect(fresh.sessionId).toBe("session-2");
+    expect(fresh.modelUsageRefresh).toBe("skipped");
+    expect(fresh.headerUsage).toEqual(headerRateUsage);
+  });
+
+  it("keeps pushed header usage when an older quota request settles afterward", () => {
+    const quotaRequest = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, true);
+    const pushedGeneration = beginRuntimeStatusRefresh(quotaRequest.generations, false);
+    const pushed = mergePushedModelUsage(undefined, "session-1", headerRateUsage);
+
+    // The quota response settles after the push moved the snapshot generation;
+    // only its quota fields may merge, and the pushed header usage survives.
+    const merged = mergeRuntimeStatusResponse(
+      pushed,
+      quotaReadyStatus,
+      isLatestRuntimeStatusRefresh(
+        pushedGeneration.generations,
+        quotaRequest.snapshotGeneration,
+        quotaRequest.quotaGeneration,
+      ),
+    );
+
+    assert(merged);
+    expect(merged.modelUsage).toEqual(freshQuotaUsage);
+    expect(merged.modelUsageRefresh).toBe("ready");
+    expect(merged.headerUsage).toEqual(headerRateUsage);
+  });
+
+  it("keeps a stale in-flight OAuth quota reply from hiding a fresher pushed header snapshot", () => {
+    // An OAuth quota request is in flight when the credential switches to an
+    // API key: the fresh header snapshot is pushed before the OAuth reply.
+    const quotaRequest = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, true);
+    const pushedGeneration = beginRuntimeStatusRefresh(quotaRequest.generations, false);
+    const pushed = mergePushedModelUsage(undefined, "session-1", headerRateUsage);
+
+    // The stale OAuth reply settles last — even with a newer updatedAt — and
+    // must not claim display precedence over the pushed header snapshot.
+    const lateOAuthReply: RuntimeStatus = {
+      sessionId: "session-1",
+      modelUsageRefresh: "ready",
+      modelUsage: { ...freshQuotaUsage, updatedAt: updatedAt + 60_000 },
+    };
+    const merged = mergeRuntimeStatusResponse(
+      pushed,
+      lateOAuthReply,
+      {
+        ...isLatestRuntimeStatusRefresh(
+          pushedGeneration.generations,
+          quotaRequest.snapshotGeneration,
+          quotaRequest.quotaGeneration,
+        ),
+        quotaPredatesHeaderPush: true,
+      },
+    );
+
+    assert(merged);
+    expect(merged.modelUsage).toBeUndefined();
+    expect(merged.modelUsageRefresh).toBe("skipped");
+    expect(merged.headerUsage).toEqual(headerRateUsage);
+    expect(displayModelUsage(merged)).toEqual(headerRateUsage);
+  });
+
+  it("keeps a stale in-flight quota clearing from erasing fresher pushed header usage", () => {
+    // The same staleness guard applies when the stale reply reports
+    // "unavailable": the push, not the pre-switch reply, owns the truth.
+    const quotaRequest = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, true);
+    const pushedGeneration = beginRuntimeStatusRefresh(quotaRequest.generations, false);
+    const pushed = mergePushedModelUsage(undefined, "session-1", headerRateUsage);
+    const merged = mergeRuntimeStatusResponse(
+      pushed,
+      { ...quotaReadyStatus, modelUsageRefresh: "unavailable" },
+      {
+        ...isLatestRuntimeStatusRefresh(
+          pushedGeneration.generations,
+          quotaRequest.snapshotGeneration,
+          quotaRequest.quotaGeneration,
+        ),
+        quotaPredatesHeaderPush: true,
+      },
+    );
+
+    assert(merged);
+    expect(merged.modelUsage).toBeUndefined();
+    expect(merged.modelUsageRefresh).toBe("skipped");
+    expect(merged.headerUsage).toEqual(headerRateUsage);
+  });
+
+  it("displays the freshest usage source across auth and model switches", () => {
+    // A single known source is displayed as-is.
+    expect(displayModelUsage(undefined)).toBeUndefined();
+    expect(displayModelUsage(quotaReadyStatus)).toEqual(freshQuotaUsage);
+    expect(displayModelUsage({ ...snapshotOnlyStatus, headerUsage: headerRateUsage })).toEqual(headerRateUsage);
+
+    // OAuth stays authoritative while its quota refreshes stay freshest, even
+    // with an older API-key header snapshot still around.
+    const oauthQuota: ModelUsageStatus = { ...freshQuotaUsage, updatedAt: updatedAt + 30_000 };
+    expect(displayModelUsage({
+      ...snapshotOnlyStatus,
+      modelUsage: oauthQuota,
+      headerUsage: headerRateUsage,
+    })).toEqual(oauthQuota);
+
+    // A header snapshot pushed after the last quota sample means the session
+    // switched to API-key auth mid-session: the stale OAuth quota must not
+    // hide it.
+    const pushedHeaderUsage: ModelUsageStatus = { ...headerRateUsage, updatedAt: updatedAt + 30_000 };
+    expect(displayModelUsage({
+      ...snapshotOnlyStatus,
+      modelUsage: freshQuotaUsage,
+      headerUsage: pushedHeaderUsage,
+    })).toEqual(pushedHeaderUsage);
+
+    // Model switches follow the same rule: quota left over from the previous
+    // model loses to a fresh header snapshot for the current model.
+    const previousModelQuota: ModelUsageStatus = {
+      ...freshQuotaUsage,
+      modelKey: "anthropic/claude-opus-4-6",
+      updatedAt: updatedAt - 30_000,
+    };
+    expect(displayModelUsage({
+      ...snapshotOnlyStatus,
+      modelUsage: previousModelQuota,
+      headerUsage: headerRateUsage,
+    })).toEqual(headerRateUsage);
+    // A fresh quota for the current model stays authoritative over a leftover
+    // header snapshot from the previous model.
+    const currentModelHeader: ModelUsageStatus = { ...headerRateUsage, updatedAt: updatedAt - 30_000 };
+    expect(displayModelUsage({
+      ...snapshotOnlyStatus,
+      modelUsage: freshQuotaUsage,
+      headerUsage: currentModelHeader,
+    })).toEqual(freshQuotaUsage);
+  });
+
+  it("keeps a stale snapshot's header usage while a newer quota refresh merges", () => {
+    const request = beginRuntimeStatusRefresh(EMPTY_RUNTIME_STATUS_GENERATIONS, true);
+    const withHeader: RuntimeStatus = {
+      ...snapshotOnlyStatus,
+      modelUsageRefresh: "ready",
+      modelUsage: freshQuotaUsage,
+      headerUsage: headerRateUsage,
+    };
+    const merged = mergeRuntimeStatusResponse(
+      withHeader,
+      { ...quotaReadyStatus, modelUsage: staleQuotaUsage },
+      isLatestRuntimeStatusRefresh(
+        request.generations,
+        request.snapshotGeneration - 1,
+        request.quotaGeneration,
+      ),
+    );
+    assert(merged);
+    expect(merged.modelUsage).toEqual(staleQuotaUsage);
+    expect(merged.headerUsage).toEqual(headerRateUsage);
+  });
+
+  it("collapses header rate windows into the single most-limiting window", () => {
+    expect(limitingRateWindow(headerRateUsage)?.label).toBe("TPM");
+    expect(limitingRateWindow(headerRateUsage)?.remainingPercent).toBe(25);
+    // Ties resolve to the window that resets first.
+    const tied: ModelUsageStatus = {
+      ...headerRateUsage,
+      rateWindows: [
+        { remainingPercent: 10, resetAt: updatedAt + 90_000, windowSeconds: 60, label: "TPM" },
+        { remainingPercent: 10, resetAt: updatedAt + 30_000, windowSeconds: 60, label: "RPM" },
+      ],
+    };
+    expect(limitingRateWindow(tied)?.label).toBe("RPM");
+    expect(limitingRateWindow({ ...headerRateUsage, rateWindows: [] })).toBeUndefined();
+    expect(limitingRateWindow(undefined)).toBeUndefined();
+    expect(limitingRateWindow(freshQuotaUsage)).toBeUndefined();
+  });
+
+  it("labels short rate windows and truncates long account labels", () => {
+    const minute: ModelUsageLimitWindow = { remainingPercent: 40, resetAt: updatedAt + 30_000, windowSeconds: 60 };
+    expect(modelUsageWindowLabel("H", minute)).toBe("Min");
+    expect(modelUsageWindowLabel("W", { ...minute, windowSeconds: 604_800 })).toBe("Weekly");
+    expect(modelUsageWindowLabel("R", { ...minute, label: "TPM" })).toBe("TPM");
+    expect(modelUsageWindowLabel("R", minute)).toBe("Rate");
+
+    expect(shortModelUsageAccountLabel(undefined)).toBeUndefined();
+    expect(shortModelUsageAccountLabel("  ")).toBeUndefined();
+    expect(shortModelUsageAccountLabel("dev@example.com")).toBe("dev@example.com");
+    expect(shortModelUsageAccountLabel("sk-ant-api03-abcdefgh")).toBe("sk-ant-api03-ab…");
+    expect(shortModelUsageAccountLabel("short", 4)).toBe("sho…");
   });
 });

@@ -6,12 +6,136 @@ process.env.AI_AGENT = "pi";
 process.emitWarning = () => {};
 
 const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
-const { AgentSession } = await import("@earendil-works/pi-coding-agent");
+const { AgentSession, ModelRuntime } = await import("@earendil-works/pi-coding-agent");
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
 const PIX_CLEAR_TODOS_MESSAGE = "\u0000pix:clear-todos";
 const PIX_DCP_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.runtime-stats");
+
+// --- Anthropic API-key response-header usage capture -----------------------
+//
+// Anthropic Messages responses carry `anthropic-ratelimit-*` headers that are
+// the only usage signal for plain API keys (no subscription quota endpoint).
+// Capture them per (session, model) from provider responses and expose the
+// latest record for the session's CURRENT model through session stats. The
+// ACP adapter parses them with the shared Pix model-usage module; subscription
+// (OAuth) auth is skipped because its quota is served by the usage endpoint.
+
+const PIX_ANTHROPIC_USAGE_HEADER_PREFIXES = ["anthropic-ratelimit-", "x-ratelimit-"];
+const PIX_ANTHROPIC_USAGE_MAX_HEADERS = 32;
+const PIX_ANTHROPIC_USAGE_MAX_RECORDS = 16;
+
+/** @type {Map<string, {modelKey: string, status: number, headers: Record<string, string>, receivedAt: number}>} */
+const pixAnthropicUsageRecords = new Map();
+
+function pixAnthropicUsageKey(sessionId, modelKey) {
+	return `${sessionId}\0${modelKey}`;
+}
+
+function isAnthropicProvider(provider) {
+	return typeof provider === "string" && provider.toLowerCase() === "anthropic";
+}
+
+function captureAnthropicUsageHeaders(response, model) {
+	const headers = response?.headers;
+	if (!headers || typeof headers !== "object" || !model) return undefined;
+	const selected = {};
+	let count = 0;
+	for (const [name, value] of Object.entries(headers)) {
+		const lowerName = name.toLowerCase();
+		if (!PIX_ANTHROPIC_USAGE_HEADER_PREFIXES.some((prefix) => lowerName.startsWith(prefix))) continue;
+		const key = lowerName;
+		const text = typeof value === "string" ? value.trim() : "";
+		if (!key || !text) continue;
+		selected[key] = text;
+		count += 1;
+		if (count >= PIX_ANTHROPIC_USAGE_MAX_HEADERS) break;
+	}
+	if (count === 0) return undefined;
+	return {
+		modelKey: `${model.provider}/${model.id}`,
+		status: typeof response.status === "number" ? response.status : 0,
+		headers: selected,
+		receivedAt: Date.now(),
+	};
+}
+
+function recordAnthropicUsage(sessionId, record) {
+	const key = pixAnthropicUsageKey(sessionId, record.modelKey);
+	pixAnthropicUsageRecords.delete(key);
+	pixAnthropicUsageRecords.set(key, record);
+	while (pixAnthropicUsageRecords.size > PIX_ANTHROPIC_USAGE_MAX_RECORDS) {
+		const oldest = pixAnthropicUsageRecords.keys().next().value;
+		if (oldest === undefined) break;
+		pixAnthropicUsageRecords.delete(oldest);
+	}
+}
+
+function pixAnthropicUsageForSession(sessionId, model) {
+	if (!sessionId || !model?.provider || !model?.id) return undefined;
+	const record = pixAnthropicUsageRecords.get(pixAnthropicUsageKey(sessionId, `${model.provider}/${model.id}`));
+	if (!record) return undefined;
+	return {
+		modelKey: record.modelKey,
+		status: record.status,
+		headers: { ...record.headers },
+		receivedAt: record.receivedAt,
+	};
+}
+
+function pixWrapStreamOptions(runtime, model, options) {
+	if (!options || typeof options !== "object") return options;
+	const sessionId = typeof options.sessionId === "string" ? options.sessionId : undefined;
+	if (!sessionId || !isAnthropicProvider(model?.provider)) return options;
+	try {
+		if (typeof runtime?.isUsingSubscription === "function" && runtime.isUsingSubscription(model.provider)) {
+			return options;
+		}
+	} catch {
+		return options;
+	}
+	const inner = typeof options.onResponse === "function" ? options.onResponse : undefined;
+	return {
+		...options,
+		onResponse: async (response, responseModel) => {
+			try {
+				const record = captureAnthropicUsageHeaders(response, responseModel ?? model);
+				if (record) recordAnthropicUsage(sessionId, record);
+			} catch {
+				// Usage capture is best-effort; never fail the provider stream.
+			}
+			if (inner) return inner(response, responseModel);
+			return undefined;
+		},
+	};
+}
+
+function installAnthropicUsageCapture() {
+	if (typeof ModelRuntime !== "function") return;
+	for (const method of ["stream", "streamSimple"]) {
+		const original = ModelRuntime.prototype[method];
+		if (typeof original !== "function") continue;
+		ModelRuntime.prototype[method] = function pixCaptureUsage(model, context, options) {
+			return original.call(this, model, context, pixWrapStreamOptions(this, model, options));
+		};
+	}
+	const originalStats = AgentSession.prototype.getSessionStats;
+	if (typeof originalStats !== "function") return;
+	AgentSession.prototype.getSessionStats = function pixAnthropicUsageStats() {
+		const stats = originalStats.call(this);
+		try {
+			const model = this?.agent?.state?.model;
+			const usage = pixAnthropicUsageForSession(stats?.sessionId, model);
+			return usage ? { ...stats, pixAnthropicUsage: usage } : stats;
+		} catch {
+			return stats;
+		}
+	};
+}
+
+installAnthropicUsageCapture();
+// --- end Anthropic API-key response-header usage capture -------------------
 
 const originalGetSessionStats = AgentSession.prototype.getSessionStats;
 AgentSession.prototype.getSessionStats = function pixGetSessionStats() {

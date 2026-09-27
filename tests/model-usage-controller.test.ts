@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 import { AppModelUsageController, type AppModelUsageQuery } from "../src/app/model/model-usage-controller.js";
-import type { ModelUsageDescriptor, ModelUsageStatus } from "../src/app/model/model-usage-status.js";
+import { MODEL_USAGE_POLL_INTERVAL_MS } from "../src/app/constants.js";
+import type { AnthropicAuthKind, ModelUsageDescriptor, ModelUsageStatus } from "../src/app/model/model-usage-status.js";
 import type { SessionModel } from "../src/app/types.js";
+
+const FIXED_NOW = Date.parse("2025-07-01T12:00:00.000Z");
 
 describe("model usage controller", () => {
 	it("keeps cached usage per provider/model when switching sessions", async () => {
@@ -243,13 +246,309 @@ describe("model usage controller", () => {
 
 		assert.equal(queryCount, 1);
 	});
+
+	it("derives API-key Anthropic usage from response headers without provider queries", async () => {
+		const activeSession = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		let queryCount = 0;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => Promise.resolve("api-key"),
+			render: () => {},
+		}, async (descriptor) => {
+			queryCount++;
+			return anthropicEndpointStatus(descriptor, 50);
+		});
+
+		controller.observeSession(activeSession);
+		await settlePromises();
+		controller.startPolling();
+		controller.stopPolling();
+		assert.deepEqual(controller.refreshNow(), { kind: "unsupported" });
+		assert.equal(controller.statusLabel(), "");
+		assert.equal(queryCount, 0);
+
+		const recorded = controller.observeResponseHeaders({
+			version: 1,
+			sessionId: "session-a",
+			modelRef: "anthropic/claude-sonnet-4-6",
+			status: 200,
+			headers: {
+				"anthropic-ratelimit-requests-limit": "1000",
+				"anthropic-ratelimit-requests-remaining": "500",
+				"anthropic-ratelimit-requests-reset": "2025-07-01T12:00:30Z",
+			},
+		}, FIXED_NOW);
+		assert.equal(recorded, true);
+		assert.match(controller.statusLabel(), /^RPM 50%/u);
+		assert.equal(queryCount, 0);
+	});
+
+	it("keeps polling the oauth usage endpoint for OAuth sessions and ignores their headers", async () => {
+		const activeSession = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		const queriedKinds: string[] = [];
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => Promise.resolve("oauth"),
+			render: () => {},
+		}, async (descriptor) => {
+			queriedKinds.push(descriptor.kind);
+			return anthropicEndpointStatus(descriptor, 62);
+		});
+
+		controller.observeSession(activeSession);
+		await settlePromises();
+		assert.deepEqual(queriedKinds, ["anthropic"]);
+
+		const refresh = controller.refreshNow();
+		assert.equal(refresh.kind, "started");
+		if (refresh.kind !== "started") throw new Error("Expected started refresh");
+		assert.equal(await refresh.promise, "refreshed");
+		assert.match(controller.statusLabel(), /^62%/u);
+
+		// Header samples never override the authoritative subscription status.
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "anthropic/claude-sonnet-4-6", "1000", "100"), FIXED_NOW), false);
+		assert.match(controller.statusLabel(), /^62%/u);
+	});
+
+	it("defers the first header sample until the auth kind resolves to api-key", async () => {
+		const activeSession = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		let resolveKind: ((kind: AnthropicAuthKind) => void) | undefined;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => new Promise<AnthropicAuthKind>((resolve) => {
+				resolveKind = resolve;
+			}),
+			render: () => {},
+		});
+
+		controller.observeSession(activeSession);
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "anthropic/claude-sonnet-4-6", "1000", "100"), FIXED_NOW), false);
+		assert.equal(controller.statusLabel(), "");
+
+		resolveKind?.("api-key");
+		await settlePromises();
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+	});
+
+	it("drops a pending header sample if its session closes before auth resolution", async () => {
+		const activeSession = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		let resolveKind: ((kind: AnthropicAuthKind) => void) | undefined;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => new Promise<AnthropicAuthKind>((resolve) => {
+				resolveKind = resolve;
+			}),
+			render: () => {},
+		});
+		controller.observeSession(activeSession);
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "anthropic/claude-sonnet-4-6", "1000", "100"), FIXED_NOW), false);
+		controller.forgetSessionSamples("session-a");
+		resolveKind?.("api-key");
+		await settlePromises();
+		// Even if the same ID is reopened, its previous incarnation's pending
+		// response must not reappear when auth classification eventually settles.
+		controller.observeSession(sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a"));
+		assert.equal(controller.statusLabel(), "");
+	});
+
+	it("tolerates auth-kind resolution completing after the active model changed", async () => {
+		let activeSession: AgentSession = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		let resolveKind: ((kind: AnthropicAuthKind) => void) | undefined;
+		const queriedKinds: string[] = [];
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => new Promise<AnthropicAuthKind>((resolve) => {
+				resolveKind = resolve;
+			}),
+			render: () => {},
+		}, async (descriptor) => {
+			queriedKinds.push(descriptor.kind);
+			return usageStatus(descriptor, 62);
+		});
+
+		controller.observeSession(activeSession);
+		// Switch away before the classifier answers: the stale completion must
+		// neither crash nor query the anthropic usage endpoint afterwards.
+		activeSession = sessionWithModel("openai-codex", "gpt-5.5");
+		controller.observeSession(activeSession);
+
+		resolveKind?.("oauth");
+		await settlePromises();
+		assert.deepEqual(queriedKinds, ["openai"]);
+	});
+
+	it("isolates API-key header usage per session and model", async () => {
+		const sessionA = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		const sessionB = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-b");
+		let activeSession: AgentSession = sessionA;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => Promise.resolve("api-key"),
+			render: () => {},
+		});
+
+		controller.observeSession(activeSession);
+		await settlePromises();
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "anthropic/claude-sonnet-4-6", "1000", "100"), FIXED_NOW), true);
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+
+		// A sample captured by another open tab never repaints the active one.
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-b", "anthropic/claude-sonnet-4-6", "1000", "900"), FIXED_NOW), true);
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+
+		activeSession = sessionB;
+		controller.observeSession(sessionB);
+		assert.match(controller.statusLabel(), /^RPM 90%/u);
+
+		// Switching the model within a session uses that model's own samples.
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-b", "anthropic/claude-opus-4-6", "1000", "400"), FIXED_NOW), true);
+		const opusSession = sessionWithModel("anthropic", "claude-opus-4-6", "medium", "session-b");
+		activeSession = opusSession;
+		controller.observeSession(opusSession);
+		assert.match(controller.statusLabel(), /^RPM 40%/u);
+
+		activeSession = sessionA;
+		controller.observeSession(sessionA);
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+	});
+
+	it("clears a session's observed samples on teardown and preserves other sessions", async () => {
+		const sessionA = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		const sessionB = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-b");
+		let activeSession: AgentSession = sessionA;
+		let renderCount = 0;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => Promise.resolve("api-key"),
+			render: () => {
+				renderCount++;
+			},
+		});
+
+		controller.observeSession(activeSession);
+		await settlePromises();
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "anthropic/claude-sonnet-4-6", "1000", "100"), FIXED_NOW), true);
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-b", "anthropic/claude-sonnet-4-6", "1000", "900"), FIXED_NOW), true);
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+
+		// Teardown of session-a (tab close / disposal): its samples are dropped,
+		// and because it was the visible route the status clears immediately.
+		const rendersBeforeForget = renderCount;
+		controller.forgetSessionSamples("session-a");
+		assert.ok(renderCount > rendersBeforeForget);
+		assert.equal(controller.statusLabel(), "");
+
+		// The concurrently open session-b keeps its own samples untouched.
+		activeSession = sessionB;
+		controller.observeSession(sessionB);
+		assert.match(controller.statusLabel(), /^RPM 90%/u);
+
+		// Reopening session-a under the SAME session id is a fresh incarnation:
+		// no stale sample may resurface before a new response arrives.
+		const reopenedA = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		activeSession = reopenedA;
+		controller.observeSession(reopenedA);
+		assert.equal(controller.statusLabel(), "");
+	});
+
+	it("forgets only the samples of the torn-down session even when inactive", async () => {
+		const sessionA = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		let activeSession: AgentSession = sessionA;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => Promise.resolve("api-key"),
+			render: () => {},
+		});
+
+		controller.observeSession(activeSession);
+		await settlePromises();
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "anthropic/claude-sonnet-4-6", "1000", "100"), FIXED_NOW), true);
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+
+		// A background tab's session-b closes while session-a stays active: no
+		// render is triggered for the visible (unaffected) route.
+		controller.forgetSessionSamples("session-b");
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+
+		// Unknown ids are a no-op.
+		controller.forgetSessionSamples("session-never-seen");
+		assert.match(controller.statusLabel(), /^RPM 10%/u);
+	});
+
+	it("purges the other usage source when the auth kind flips mid-session", async () => {
+		const activeSession = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		let kind: AnthropicAuthKind = "api-key";
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => Promise.resolve(kind),
+			render: () => {},
+		}, async (descriptor) => anthropicEndpointStatus(descriptor, 62));
+
+		const realNow = Date.now;
+		let nowMs = FIXED_NOW;
+		Date.now = () => nowMs;
+		try {
+			controller.observeSession(activeSession);
+			await settlePromises();
+			assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "anthropic/claude-sonnet-4-6", "1000", "100"), nowMs), true);
+			assert.match(controller.statusLabel(), /^RPM 10%/u);
+
+			// Log in with OAuth between polls. Once re-classification lands, the
+			// header sample must stop shadowing the oauth/usage endpoint status.
+			kind = "oauth";
+			nowMs += MODEL_USAGE_POLL_INTERVAL_MS + 1;
+			assert.deepEqual(controller.refreshNow(), { kind: "unsupported" });
+			await settlePromises();
+			await settlePromises();
+			assert.match(controller.statusLabel(), /^62%/u);
+		} finally {
+			Date.now = realNow;
+		}
+	});
+
+	it("ignores header payloads that cannot describe an Anthropic model route", async () => {
+		const activeSession = sessionWithModel("anthropic", "claude-sonnet-4-6", "medium", "session-a");
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			anthropicAuthKind: () => Promise.resolve("api-key"),
+			render: () => {},
+		});
+		controller.observeSession(activeSession);
+		await settlePromises();
+
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "openai-codex/gpt-5.5", "1000", "100"), FIXED_NOW), false);
+		assert.equal(controller.observeResponseHeaders(headerPayload("session-a", "not-a-model-ref", "1000", "100"), FIXED_NOW), false);
+		assert.equal(controller.observeResponseHeaders({
+			version: 1,
+			sessionId: "session-a",
+			modelRef: "anthropic/claude-sonnet-4-6",
+			status: 200,
+			headers: {},
+		}, FIXED_NOW), false);
+		assert.equal(controller.statusLabel(), "");
+	});
 });
 
-function sessionWithModel(provider: string, id: string, thinkingLevel = "medium"): AgentSession {
+function sessionWithModel(provider: string, id: string, thinkingLevel = "medium", sessionId = "session-a"): AgentSession {
 	return {
 		model: { provider, id } as SessionModel,
 		thinkingLevel,
+		sessionId,
 	} as unknown as AgentSession;
+}
+
+function headerPayload(sessionId: string, modelRef: string, limit: string, remaining: string) {
+	return {
+		version: 1 as const,
+		sessionId,
+		modelRef,
+		status: 200,
+		headers: {
+			"anthropic-ratelimit-requests-limit": limit,
+			"anthropic-ratelimit-requests-remaining": remaining,
+			"anthropic-ratelimit-requests-reset": "2025-07-01T12:00:30Z",
+		},
+	};
 }
 
 function usageStatus(descriptor: ModelUsageDescriptor, remainingPercent: number): ModelUsageStatus {
@@ -261,6 +560,20 @@ function usageStatus(descriptor: ModelUsageDescriptor, remainingPercent: number)
 			remainingPercent,
 			resetAt: Date.now() + 60 * 60 * 1000,
 			windowSeconds: 7 * 24 * 60 * 60,
+		},
+	};
+}
+
+function anthropicEndpointStatus(descriptor: ModelUsageDescriptor, remainingPercent: number): ModelUsageStatus {
+	return {
+		modelKey: descriptor.modelKey,
+		provider: "anthropic",
+		updatedAt: Date.now(),
+		hourly: {
+			remainingPercent,
+			resetAt: Date.now() + 60 * 60 * 1000,
+			windowSeconds: 5 * 60 * 60,
+			hasKnownWindowDuration: true,
 		},
 	};
 }

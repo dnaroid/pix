@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import { createAgentSessionServices, discoverAndLoadExtensions, type LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
+	bundledModelUsageExtensionPath,
 	bundledQuestionExtensionPath,
 	bundledSkillsInstallPath,
 	bundledSkillsSourcePath,
@@ -372,20 +373,23 @@ describe("bundled extensions", () => {
 		const sessionTitleExtensionPath = bundledSessionTitleExtensionPath();
 		const terminalBellExtensionPath = bundledTerminalBellExtensionPath();
 		const telegramConnectorExtensionPath = bundledTelegramConnectorExtensionPath();
+		const modelUsageExtensionPath = bundledModelUsageExtensionPath();
 		assert.deepEqual(getBundledExtensionPaths(), [
 			questionExtensionPath,
 			sessionTitleExtensionPath,
 			terminalBellExtensionPath,
 			telegramConnectorExtensionPath,
+			modelUsageExtensionPath,
 		]);
 
 		const result = await loadBundledExtensions();
 		assert.deepEqual(result.errors, []);
-		assert.equal(result.extensions.length, 4);
+		assert.equal(result.extensions.length, 5);
 		assert.ok(result.extensions.some((extension) => extension.tools.has("question")));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(sessionTitleExtensionPath)));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(terminalBellExtensionPath)));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(telegramConnectorExtensionPath)));
+		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(modelUsageExtensionPath)));
 	});
 
 	it("keeps the bundled question tool ahead of other question registrations", async () => {

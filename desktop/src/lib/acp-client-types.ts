@@ -139,6 +139,8 @@ export interface ModelUsageLimitWindow {
   readonly resetAt: number;
   readonly windowSeconds: number;
   readonly hasKnownWindowDuration?: boolean;
+  /** Short display label for header-derived windows, e.g. `RPM`/`TPM`. */
+  readonly label?: string;
 }
 
 export interface ModelUsageStatus {
@@ -148,6 +150,8 @@ export interface ModelUsageStatus {
   readonly accountEmail?: string;
   readonly hourly?: ModelUsageLimitWindow;
   readonly weekly?: ModelUsageLimitWindow;
+  /** Provider response-header rate-limit windows (Anthropic RPM/TPM). */
+  readonly rateWindows?: readonly ModelUsageLimitWindow[];
 }
 
 export type ModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
@@ -191,6 +195,12 @@ export interface RuntimeStatus {
   readonly dcpStats?: string;
   readonly modelUsageRefresh: ModelUsageRefresh;
   readonly modelUsage?: ModelUsageStatus;
+  /**
+   * Anthropic API-key usage observed from provider response headers. Kept
+   * separate from quota `modelUsage` so pushes refresh it instantly without
+   * being invalidated by quota refresh completions.
+   */
+  readonly headerUsage?: ModelUsageStatus;
 }
 
 export interface DcpStatsStatus {

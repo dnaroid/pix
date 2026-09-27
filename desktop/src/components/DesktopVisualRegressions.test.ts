@@ -363,6 +363,15 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("aggregate quota, not per-day usage");
   });
 
+  it("shows the single rate-limit window label beside the percentage without hover", () => {
+    // The collapsed API-key rate window (RPM/ITPM/OTPM/TPM) keeps a visible
+    // label even as the only indicator; OAuth H/W labels stay as they were.
+    expect(runtimeStatusSource).toContain("displayModelUsage(status)");
+    expect(runtimeStatusSource).toContain("limitingRateWindow(modelUsage)");
+    expect(runtimeStatusSource).toContain('{#if label === "R" || usageWindowItems.length > 1}');
+    expect(runtimeStatusSource).toContain('<span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>');
+  });
+
   it("keeps the model and thinking selector available while a prompt is running", () => {
     expect(statusSource).toContain('disabled={!canConfigure || changingConfig !== null}');
 

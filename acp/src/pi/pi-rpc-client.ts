@@ -124,7 +124,30 @@ export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>> &
 	readonly pixDcpTokensSaved?: number | undefined;
 	/** Live DCP context-map snapshot injected by Pix's RPC entry. */
 	readonly pixDcpContextMap?: PiDcpContextMap | undefined;
+	/**
+	 * Latest Anthropic API-key response rate-limit headers observed by Pix's
+	 * RPC entry for this session's current model. Absent when the provider is
+	 * not Anthropic, uses subscription auth, or no response has been seen yet.
+	 */
+	readonly pixAnthropicUsage?: PiAnthropicUsageRecord | undefined;
 };
+
+/**
+ * Raw provider response-header observation for Anthropic API-key usage.
+ *
+ * Transported unparsed so header→window mapping stays owned by the shared
+ * Pix model-usage module; the ACP agent parses and caches per session.
+ */
+export interface PiAnthropicUsageRecord {
+	/** `${provider}/${modelId}` of the model whose response carried the headers. */
+	readonly modelKey: string;
+	/** HTTP status of the observed provider response. */
+	readonly status: number;
+	/** Bounded `anthropic-ratelimit-*` response headers (lowercase names). */
+	readonly headers: Record<string, string>;
+	/** Epoch milliseconds when the response was received. */
+	readonly receivedAt: number;
+}
 
 export interface PiDcpContextMap {
 	readonly revision: number;

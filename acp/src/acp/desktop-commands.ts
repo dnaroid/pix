@@ -113,6 +113,8 @@ export interface DesktopModelUsageLimitWindow {
 	readonly resetAt: number;
 	readonly windowSeconds: number;
 	readonly hasKnownWindowDuration?: boolean;
+	/** Short display label for header-derived windows, e.g. `RPM`/`TPM`. */
+	readonly label?: string;
 }
 
 export interface DesktopModelUsageStatus {
@@ -122,6 +124,8 @@ export interface DesktopModelUsageStatus {
 	readonly accountEmail?: string;
 	readonly weekly?: DesktopModelUsageLimitWindow;
 	readonly hourly?: DesktopModelUsageLimitWindow;
+	/** Provider response-header windows (Anthropic RPM/TPM or OAuth unified quota). */
+	readonly rateWindows?: readonly DesktopModelUsageLimitWindow[];
 }
 
 export type DesktopModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
@@ -133,6 +137,14 @@ export interface DesktopRuntimeStatusResponse {
 	readonly dcpContextMap: DesktopDcpContextMap | null;
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
+	/**
+	 * Anthropic API-key usage parsed from provider response headers recorded
+	 * for this session's current model. Purely observational: it never
+	 * triggers a provider request and is kept separate from quota
+	 * `modelUsage` so header pushes and quota refreshes cannot clobber
+	 * each other.
+	 */
+	readonly headerUsage?: DesktopModelUsageStatus;
 }
 
 export interface DesktopDcpContextMap {

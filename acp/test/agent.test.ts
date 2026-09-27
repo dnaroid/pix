@@ -63,6 +63,7 @@ import {
 	PIX_CONTEXT_USAGE_CHANNEL,
 	PIX_DCP_TOKENS_SAVED_CHANNEL,
 	PIX_DCP_CONTEXT_MAP_CHANNEL,
+	PIX_MODEL_USAGE_CHANNEL,
 	PIX_SESSION_STATE_METHOD,
 } from "../src/acp/session-state-bridge.js";
 import type {
@@ -1495,7 +1496,8 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 			await waitFor(() => savingsNotifications.length === 1);
 			await waitFor(() => mapNotifications.length === 1);
 			assert.deepEqual(mapNotifications[0]?.data, preparedDcpMapFixture);
-			assert.equal(pi.getSessionStatsCalls, 1);
+			// Context and model-usage pushes each read the session snapshot once.
+			assert.equal(pi.getSessionStatsCalls, 2);
 			assert.deepEqual(notifications[0], {
 				sessionId: session.sessionId,
 				channel: PIX_CONTEXT_USAGE_CHANNEL,
@@ -1523,7 +1525,8 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 			await waitFor(() => savingsNotifications.length === 2);
 			await waitFor(() => mapNotifications.length === 2);
 			assert.equal(mapNotifications[1]?.data, null, "unavailable after compaction explicitly clears the old map");
-			assert.equal(pi.getSessionStatsCalls, 2);
+			// Compaction only refreshes the context snapshot (no header record).
+			assert.equal(pi.getSessionStatsCalls, 3);
 			assert.deepEqual(notifications[1], {
 				sessionId: session.sessionId,
 				channel: PIX_CONTEXT_USAGE_CHANNEL,
@@ -1542,7 +1545,7 @@ test("Pix Desktop pushes context usage on message and compaction boundaries with
 			});
 			await waitFor(() => notifications.length === 3);
 			await waitFor(() => savingsNotifications.length === 3);
-			assert.equal(pi.getSessionStatsCalls, 3, "extension-handled slash commands get one boundary snapshot");
+			assert.equal(pi.getSessionStatsCalls, 4, "extension-handled slash commands get one boundary snapshot");
 			assert.deepEqual(notifications[2], {
 				sessionId: session.sessionId,
 				channel: PIX_CONTEXT_USAGE_CHANNEL,
@@ -1736,6 +1739,270 @@ test("Pix Desktop deduplicates concurrent quota refreshes for one session model 
 		assert.equal(firstResult.modelUsage?.hourly?.remainingPercent, 75);
 		assert.equal(secondResult.modelUsage?.hourly?.remainingPercent, 75);
 	});
+});
+
+type HeaderUsageNotification = { sessionId: string; channel: string; data: unknown };
+
+function anthropicHeaderRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		modelKey: "anthropic/claude-4",
+		status: 200,
+		headers: {
+			"anthropic-ratelimit-requests-limit": "1000",
+			"anthropic-ratelimit-requests-remaining": "400",
+			"anthropic-ratelimit-requests-reset": "30s",
+		},
+		receivedAt: Date.parse("2025-07-01T12:00:00.000Z"),
+		...overrides,
+	};
+}
+
+/** Deterministic shared-module stand-in: derives one window from the record. */
+function headerUsageFromRecord(record: { modelKey: string; headers: Record<string, string>; receivedAt: number }) {
+	const limit = Number(record.headers["anthropic-ratelimit-requests-limit"] ?? "0");
+	const remaining = Number(record.headers["anthropic-ratelimit-requests-remaining"] ?? "0");
+	return {
+		modelKey: record.modelKey,
+		provider: "anthropic" as const,
+		updatedAt: record.receivedAt,
+		rateWindows: [{
+			remainingPercent: limit > 0 ? Math.round((remaining / limit) * 100) : 0,
+			resetAt: record.receivedAt + 30_000,
+			windowSeconds: 60,
+			hasKnownWindowDuration: true,
+			label: "RPM",
+		}],
+	};
+}
+
+function registerHeaderUsageSink(notifications: HeaderUsageNotification[]) {
+	return (app: ReturnType<typeof client>) => {
+		const customNotifications = app as unknown as {
+			onNotification(
+				method: string,
+				parser: (params: unknown) => HeaderUsageNotification,
+				handler: (ctx: { params: HeaderUsageNotification }) => void,
+			): void;
+		};
+		customNotifications.onNotification(
+			PIX_SESSION_STATE_METHOD,
+			(params) => params as HeaderUsageNotification,
+			(ctx) => {
+				if (ctx.params.channel === PIX_MODEL_USAGE_CHANNEL) notifications.push(ctx.params);
+			},
+		);
+	};
+}
+
+test("Pix Desktop pushes Anthropic API-key header usage immediately without quota I/O", async () => {
+	const notifications: HeaderUsageNotification[] = [];
+	let quotaQueries = 0;
+	const { adapter, clients } = createTestAdapter({
+		queryModelUsage: async () => {
+			quotaQueries += 1;
+			return { refresh: "unavailable" };
+		},
+		parseAnthropicUsageHeaders: async (record) => headerUsageFromRecord(record),
+	});
+
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-header-usage").start();
+		const pi = clients[0]!;
+
+		// A response boundary without a recorded header snapshot pushes nothing.
+		pi.emit({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+		} as PiEvent);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(notifications.length, 0, "no record means no usage push");
+
+		Object.assign(pi.sessionStats, {
+			pixAnthropicUsage: anthropicHeaderRecord({
+				headers: {
+					"anthropic-ratelimit-requests-limit": "1000",
+					"anthropic-ratelimit-requests-remaining": "400",
+					"x-api-key": "sk-ant-api03-SECRET",
+					"authorization": "Bearer SECRET",
+				},
+			}),
+		});
+		pi.emit({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+		} as PiEvent);
+		await waitFor(() => notifications.length === 1);
+
+		assert.deepEqual(notifications[0], {
+			sessionId: session.sessionId,
+			channel: PIX_MODEL_USAGE_CHANNEL,
+			data: headerUsageFromRecord({
+				modelKey: "anthropic/claude-4",
+				headers: {
+					"anthropic-ratelimit-requests-limit": "1000",
+					"anthropic-ratelimit-requests-remaining": "400",
+				},
+				receivedAt: Date.parse("2025-07-01T12:00:00.000Z"),
+			}),
+		});
+		// Security: the pushed payload carries parsed usage only — raw response
+		// headers (and any credentials inside them) never cross the wire.
+		const pushed = notifications[0]!.data as Record<string, unknown>;
+		assert.equal("headers" in pushed, false);
+		assert.equal(JSON.stringify(pushed).includes("SECRET"), false);
+
+		const response = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
+			sessionId: session.sessionId,
+			refreshModelUsage: false,
+		}) as DesktopRuntimeStatusResponse;
+		assert.deepEqual(response.headerUsage, notifications[0]!.data);
+		assert.equal(response.modelUsageRefresh, "skipped");
+		assert.equal(quotaQueries, 0, "header usage must not hit a provider quota endpoint");
+	}, registerHeaderUsageSink(notifications));
+});
+
+test("Pix Desktop clears pushed header usage when the session model changes", async () => {
+	const notifications: HeaderUsageNotification[] = [];
+	const { adapter, clients } = createTestAdapter({
+		parseAnthropicUsageHeaders: async (record) => headerUsageFromRecord(record),
+	});
+
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-header-usage-model-switch").start();
+		const pi = clients[0]!;
+		Object.assign(pi.sessionStats, { pixAnthropicUsage: anthropicHeaderRecord() });
+
+		pi.emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } } as PiEvent);
+		await waitFor(() => notifications.length === 1);
+
+		// Switching models must not keep serving the previous model's snapshot.
+		await pi.setModel("anthropic", "claude-3");
+		pi.emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } } as PiEvent);
+		await waitFor(() => notifications.length === 2);
+		assert.deepEqual(notifications[1], {
+			sessionId: session.sessionId,
+			channel: PIX_MODEL_USAGE_CHANNEL,
+			data: null,
+		});
+
+		// And a later snapshot request exposes no header usage for the new model.
+		const response = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
+			sessionId: session.sessionId,
+			refreshModelUsage: false,
+		}) as DesktopRuntimeStatusResponse;
+		assert.equal(response.headerUsage, undefined);
+	}, registerHeaderUsageSink(notifications));
+});
+
+test("Pix Desktop isolates concurrent sessions' header usage", async () => {
+	const notifications: HeaderUsageNotification[] = [];
+	const { adapter, clients } = createTestAdapter({
+		parseAnthropicUsageHeaders: async (record) => headerUsageFromRecord(record),
+	});
+
+	await connect(adapter, async (cx) => {
+		const first = await cx.buildSession("/tmp/runtime-header-usage-a").start();
+		const second = await cx.buildSession("/tmp/runtime-header-usage-b").start();
+		const piA = clients[0]!;
+		const piB = clients[1]!;
+		assert.notEqual(first.sessionId, second.sessionId);
+
+		Object.assign(piA.sessionStats, {
+			pixAnthropicUsage: anthropicHeaderRecord({
+				headers: {
+					"anthropic-ratelimit-requests-limit": "1000",
+					"anthropic-ratelimit-requests-remaining": "100",
+				},
+			}),
+		});
+		Object.assign(piB.sessionStats, {
+			pixAnthropicUsage: anthropicHeaderRecord({
+				headers: {
+					"anthropic-ratelimit-requests-limit": "1000",
+					"anthropic-ratelimit-requests-remaining": "900",
+				},
+			}),
+		});
+
+		piA.emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } } as PiEvent);
+		piB.emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } } as PiEvent);
+		await waitFor(() => notifications.length === 2);
+
+		// Each push carries its own session id and its own session's observed
+		// usage; neither session ever sees the other's snapshot.
+		const bySession = new Map(notifications.map((n) => [n.sessionId, n]));
+		assert.equal(bySession.size, 2);
+		const aUsage = bySession.get(first.sessionId)?.data as { rateWindows?: Array<{ remainingPercent: number }> };
+		const bUsage = bySession.get(second.sessionId)?.data as { rateWindows?: Array<{ remainingPercent: number }> };
+		assert.equal(aUsage?.rateWindows?.[0]?.remainingPercent, 10);
+		assert.equal(bUsage?.rateWindows?.[0]?.remainingPercent, 90);
+	}, registerHeaderUsageSink(notifications));
+});
+
+test("Pix Desktop drops header-usage pushes after the session is closed", async () => {
+	const notifications: HeaderUsageNotification[] = [];
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => { release = resolve; });
+	const { adapter, clients } = createTestAdapter({
+		parseAnthropicUsageHeaders: async (record) => {
+			await gate;
+			return headerUsageFromRecord(record);
+		},
+	});
+
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-header-usage-teardown").start();
+		const pi = clients[0]!;
+		Object.assign(pi.sessionStats, { pixAnthropicUsage: anthropicHeaderRecord() });
+
+		pi.emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } } as PiEvent);
+		// Let the push reach the gated parser before tearing the session down.
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		await cx.request("session/close", { sessionId: session.sessionId });
+		release();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		assert.equal(notifications.length, 0, "closed sessions must not receive usage pushes");
+	}, registerHeaderUsageSink(notifications));
+});
+
+test("Pix Desktop ignores malformed Anthropic header records without pushing", async () => {
+	const notifications: HeaderUsageNotification[] = [];
+	const { adapter, clients } = createTestAdapter({
+		parseAnthropicUsageHeaders: async (record) => headerUsageFromRecord(record),
+	});
+
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-header-usage-invalid").start();
+		const pi = clients[0]!;
+
+		const invalid = [
+			undefined,
+			"nope",
+			anthropicHeaderRecord({ modelKey: "claude-4" }),
+			anthropicHeaderRecord({ modelKey: "anthropic/claude-4", status: Number.NaN }),
+			anthropicHeaderRecord({ receivedAt: 0 }),
+			anthropicHeaderRecord({ headers: [] }),
+			anthropicHeaderRecord({ headers: { "anthropic-ratelimit-requests-limit": 1000 } }),
+			anthropicHeaderRecord({ headers: {} }),
+		];
+		for (const record of invalid) {
+			Object.assign(pi.sessionStats, { pixAnthropicUsage: record });
+			pi.emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } } as PiEvent);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+		assert.equal(notifications.length, 0);
+
+		// The runtime-status response equally refuses to echo malformed records.
+		Object.assign(pi.sessionStats, { pixAnthropicUsage: anthropicHeaderRecord({ headers: { ok: 1 } }) });
+		const response = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
+			sessionId: session.sessionId,
+			refreshModelUsage: false,
+		}) as DesktopRuntimeStatusResponse;
+		assert.equal(response.headerUsage, undefined);
+	}, registerHeaderUsageSink(notifications));
 });
 
 test("Pix Desktop exposes generic resumable stops and continues without a user prompt", async () => {

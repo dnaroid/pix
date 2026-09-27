@@ -1,5 +1,5 @@
 import type { ContextUsageStatus, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
-import { parseContextUsageStatus } from "../lib/acp-response-parsers";
+import { parseContextUsageStatus, parseModelUsageStatus } from "../lib/acp-response-parsers";
 import { newerDcpContextMap, parseDcpContextMap } from "../lib/dcp-context-map";
 import {
   EMPTY_RUNTIME_STATUS_GENERATIONS,
@@ -7,6 +7,7 @@ import {
   isLatestRuntimeStatusRefresh,
   mergePushedContextUsage,
   mergePushedDcpTokensSaved,
+  mergePushedModelUsage,
   mergeRuntimeStatusResponse,
   type RuntimeStatusGenerations,
 } from "../lib/runtime-status";
@@ -14,6 +15,7 @@ import {
   PIX_CONTEXT_USAGE_CHANNEL,
   PIX_DCP_TOKENS_SAVED_CHANNEL,
   PIX_DCP_CONTEXT_MAP_CHANNEL,
+  PIX_MODEL_USAGE_CHANNEL,
   type SessionStateNotification,
 } from "../lib/session-state";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
@@ -30,7 +32,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   let sessionUsageRefreshing = $state<Set<string>>(new Set());
   let sessionUsageFailed = $state<Set<string>>(new Set());
 
-  type StatusOwner = { generations: RuntimeStatusGenerations; dcp: number; usage: number };
+  type StatusOwner = { generations: RuntimeStatusGenerations; dcp: number; usage: number; headerPushSnapshotGeneration?: number };
   const owners = new Map<string, StatusOwner>();
   let lifecycleGeneration = 0;
 
@@ -63,14 +65,25 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     try {
       const next = await requestClient.runtimeStatus(sessionId, refreshModelUsage);
       if (requestLifecycleGeneration !== lifecycleGeneration || requestClient !== options.client() || !options.isReady(sessionId) || owners.get(sessionId) !== owner) return;
+      // A quota request that started before the newest header-usage push was
+      // issued under the previous credential/model; its reply is stale after a
+      // mid-session auth switch or model switch and must not override the
+      // pushed API-key header snapshot. Evaluated at settlement so pushes that
+      // land while the request is in flight count too.
+      const quotaPredatesHeaderPush = request.quotaGeneration !== undefined
+        && owner.headerPushSnapshotGeneration !== undefined
+        && request.snapshotGeneration < owner.headerPushSnapshotGeneration;
       const merged = mergeRuntimeStatusResponse(
         statuses.get(sessionId),
         next,
-        isLatestRuntimeStatusRefresh(
-          owner.generations,
-          request.snapshotGeneration,
-          request.quotaGeneration,
-        ),
+        {
+          ...isLatestRuntimeStatusRefresh(
+            owner.generations,
+            request.snapshotGeneration,
+            request.quotaGeneration,
+          ),
+          ...(quotaPredatesHeaderPush ? { quotaPredatesHeaderPush: true } : {}),
+        },
       );
       if (!merged) return;
       const nextStatuses = new Map(statuses);
@@ -128,6 +141,39 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       nextStatuses.set(
         notification.sessionId,
         mergePushedDcpTokensSaved(statuses.get(notification.sessionId), notification.sessionId, tokensSaved),
+      );
+      statuses = nextStatuses;
+      return true;
+    }
+    if (notification.channel === PIX_MODEL_USAGE_CHANNEL) {
+      if (!options.isReady(notification.sessionId)) return true;
+      let headerUsage: RuntimeStatus["headerUsage"] = undefined;
+      if (notification.data !== null) {
+        try {
+          headerUsage = parseModelUsageStatus(notification.data);
+        } catch {
+          return true;
+        }
+      }
+      // A pushed header-usage snapshot is newer than any runtime-status
+      // request that started before this notification. Advance only the
+      // snapshot generation; header usage lives outside the quota fields, so
+      // an in-flight quota refresh may still merge its own results later —
+      // unless it started before this push (recorded below), in which case its
+      // quota was fetched under the pre-push credential/model.
+      const owner = ownerFor(notification.sessionId);
+      const pushRequest = beginRuntimeStatusRefresh(owner.generations, false);
+      owner.generations = pushRequest.generations;
+      // Remember the snapshot generation this push stamped so quota requests
+      // that started earlier are recognized as stale when they settle. A
+      // clearing push (null data) drops the marker: with no header snapshot,
+      // fresh quota replies may merge normally again (OAuth is authoritative).
+      if (headerUsage) owner.headerPushSnapshotGeneration = pushRequest.snapshotGeneration;
+      else owner.headerPushSnapshotGeneration = undefined;
+      const nextStatuses = new Map(statuses);
+      nextStatuses.set(
+        notification.sessionId,
+        mergePushedModelUsage(statuses.get(notification.sessionId), notification.sessionId, headerUsage),
       );
       statuses = nextStatuses;
       return true;

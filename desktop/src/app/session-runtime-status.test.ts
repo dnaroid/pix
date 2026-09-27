@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeStatus, SessionUsageStatus } from "../lib/acp-client";
+import { displayModelUsage } from "../lib/runtime-status";
 import { createSessionRuntimeStatus } from "./session-runtime-status.svelte";
 
 function deferred<T>() {
@@ -173,4 +174,139 @@ describe("runtime status lifecycle", () => {
     store.reset();
     expect(store.ownedSessionCount).toBe(0);
   });
+
+  const headerUsage = {
+    modelKey: "anthropic/claude-sonnet-4-6",
+    provider: "anthropic",
+    updatedAt: 1_757_590_400_000,
+    rateWindows: [
+      { remainingPercent: 25, resetAt: 1_757_590_441_000, windowSeconds: 60, hasKnownWindowDuration: true, label: "TPM" },
+    ],
+  } as const;
+
+  const pushUsage = (store: ReturnType<typeof createSessionRuntimeStatus>, sessionId: string, data: unknown) =>
+    store.handleSessionState({ sessionId, channel: "model-usage", data });
+
+  it("merges pushed header usage without quota refreshes and clears it on demand", async () => {
+    const { store, requests } = setup();
+    const initial = store.refreshStatus("a");
+    requests[0]!.resolve({
+      ...status(10),
+      modelUsageRefresh: "ready",
+      modelUsage: { modelKey: "openai/gpt-5", provider: "openai", updatedAt: 1, hourly: { remainingPercent: 80, resetAt: 2, windowSeconds: 3_600 } },
+    });
+    await initial;
+
+    expect(pushUsage(store, "a", headerUsage)).toBe(true);
+    const merged = store.statuses.get("a");
+    expect(merged?.headerUsage).toEqual(headerUsage);
+    expect(merged?.modelUsage?.hourly?.remainingPercent).toBe(80);
+    expect(merged?.context?.tokens).toBe(10);
+
+    // Invalid payloads are ignored, and null clears only the header usage.
+    expect(pushUsage(store, "a", { modelKey: 5 })).toBe(true);
+    expect(store.statuses.get("a")?.headerUsage).toEqual(headerUsage);
+    expect(pushUsage(store, "a", null)).toBe(true);
+    expect(store.statuses.get("a")?.headerUsage).toBeUndefined();
+    expect(store.statuses.get("a")?.modelUsage?.hourly?.remainingPercent).toBe(80);
+
+    // Unknown channels stay unhandled.
+    expect(store.handleSessionState({ sessionId: "a", channel: "unknown", data: null })).toBe(false);
+  });
+
+  it("ignores pushed header usage until the runtime is ready", () => {
+    const { store, setReady } = setup();
+    setReady(false);
+    expect(pushUsage(store, "a", headerUsage)).toBe(true);
+    expect(store.statuses.size).toBe(0);
+  });
+
+  it("keeps pushed header usage over an older in-flight status reply", async () => {
+    const { store, requests } = setup();
+    const first = store.refreshStatus("a");
+    requests[0]!.resolve(status(10));
+    await first;
+    const stale = store.refreshStatus("a");
+    pushUsage(store, "a", headerUsage);
+    // The stale reply must not clobber the push or previously known context.
+    requests[1]!.resolve(status(90));
+    await stale;
+    expect(store.statuses.get("a")?.headerUsage).toEqual(headerUsage);
+    expect(store.statuses.get("a")?.context?.tokens).toBe(10);
+  });
+
+  // OAuth subscription quota for the same model, fetched before the
+  // credential switched to an API key.
+  const oauthQuota = {
+    modelKey: "anthropic/claude-sonnet-4-6",
+    provider: "anthropic",
+    updatedAt: 1_757_590_500_000,
+    hourly: { remainingPercent: 60, resetAt: 1_757_590_800_000, windowSeconds: 18_000 },
+    weekly: { remainingPercent: 45, resetAt: 1_757_600_000_000, windowSeconds: 604_800 },
+  } as const;
+
+  it("keeps a fresh API-key header snapshot over a stale in-flight OAuth quota reply", async () => {
+    const { store, requests } = setup();
+    // The quota request starts while the session still authenticates with
+    // OAuth; the credential switches to an API key mid-flight and the fresh
+    // header snapshot is pushed before the OAuth reply settles.
+    const oauthReply = store.refreshStatus("a", true);
+    expect(store.modelUsageRefreshing.has("a")).toBe(true);
+    pushUsage(store, "a", headerUsage);
+    requests[0]!.resolve({ ...status(10), modelUsageRefresh: "ready", modelUsage: oauthQuota });
+    await oauthReply;
+
+    const merged = store.statuses.get("a");
+    expect(merged?.headerUsage).toEqual(headerUsage);
+    // The stale OAuth windows must not merge and hide the header snapshot.
+    expect(merged?.modelUsage).toBeUndefined();
+    expect(merged?.modelUsageRefresh).toBe("skipped");
+    expect(displayModelUsage(merged)).toEqual(headerUsage);
+    expect(store.modelUsageRefreshing.has("a")).toBe(false);
+  });
+
+  it("merges quota normally when the request started after the last header push", async () => {
+    const { store, requests } = setup();
+    // A leftover header snapshot predates the quota request (for example the
+    // credential switched back to OAuth): the fresh OAuth quota is
+    // authoritative and merges without suppression. The newer full snapshot
+    // no longer carries header usage, so the pushed snapshot is retired.
+    pushUsage(store, "a", headerUsage);
+    const oauthReply = store.refreshStatus("a", true);
+    requests[0]!.resolve({ ...status(10), modelUsageRefresh: "ready", modelUsage: oauthQuota });
+    await oauthReply;
+
+    const merged = store.statuses.get("a");
+    expect(merged?.modelUsage).toEqual(oauthQuota);
+    expect(merged?.headerUsage).toBeUndefined();
+    expect(displayModelUsage(merged)).toEqual(oauthQuota);
+  });
+
+  it("re-enables quota merges once the pushed header snapshot is cleared", async () => {
+    const { store, requests } = setup();
+    pushUsage(store, "a", headerUsage);
+    pushUsage(store, "a", null);
+    const oauthReply = store.refreshStatus("a", true);
+    requests[0]!.resolve({ ...status(10), modelUsageRefresh: "ready", modelUsage: oauthQuota });
+    await oauthReply;
+
+    const merged = store.statuses.get("a");
+    expect(merged?.headerUsage).toBeUndefined();
+    expect(merged?.modelUsage).toEqual(oauthQuota);
+  });
+
+  for (const invalidate of ["forget", "reset"] as const) {
+    it(`${invalidate} drops pushed header usage and rejects late pushes`, () => {
+      const { store, setReady } = setup();
+      pushUsage(store, "a", headerUsage);
+      expect(store.statuses.get("a")?.headerUsage).toEqual(headerUsage);
+      if (invalidate === "forget") store.forget("a"); else store.reset();
+      // The runtime is no longer ready after either lifecycle transition.
+      setReady(false);
+      expect(store.statuses.has("a")).toBe(false);
+      // Late pushes after invalidation never resurrect the session.
+      expect(pushUsage(store, "a", headerUsage)).toBe(true);
+      expect(store.statuses.has("a")).toBe(false);
+    });
+  }
 });

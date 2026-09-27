@@ -55,7 +55,6 @@ import {
 import {
 	getAgentDir,
 	getPackageDir,
-	ModelRuntime,
 	SessionManager,
 	SettingsManager,
 	type JsonAgentSessionEvent,
@@ -89,6 +88,7 @@ import {
 	type PiEvent,
 	type PiImageContent,
 	type PiModel,
+	type PiAnthropicUsageRecord,
 	type PiRpcClientOptions,
 	type PiSessionEntry,
 	type PiSessionState,
@@ -260,6 +260,7 @@ import {
 	PIX_CONTEXT_USAGE_CHANNEL,
 	PIX_DCP_CONTEXT_MAP_CHANNEL,
 	PIX_DCP_TOKENS_SAVED_CHANNEL,
+	PIX_MODEL_USAGE_CHANNEL,
 	PIX_SESSION_STATE_METHOD,
 	sessionStateEnvelopeFromUiRequest,
 	type PixSessionStateNotification,
@@ -337,6 +338,14 @@ interface AgentSessionState {
 	contextUsagePushGeneration: number;
 	/** Guards config-option pushes against session replacement and bursts. */
 	configOptionsPushGeneration: number;
+	/**
+	 * Session-scoped Anthropic API-key usage parsed from provider response
+	 * headers. Kept separate from quota `modelUsage` so header pushes can
+	 * refresh instantly without invalidating in-flight quota refreshes.
+	 */
+	headerUsage: DesktopModelUsageStatus | undefined;
+	/** Guards model-usage pushes against session replacement and bursts. */
+	modelUsagePushGeneration: number;
 }
 
 interface PendingDesktopNewSession {
@@ -389,6 +398,11 @@ export interface PixAcpAgentOptions {
 	readonly gitAssistant?: GitAssistant;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
 	readonly queryModelUsage?: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
+	/**
+	 * Parses an Anthropic API-key response-header record into a usage status
+	 * (overridable for tests; the default uses the shared Pix module).
+	 */
+	readonly parseAnthropicUsageHeaders?: (record: PiAnthropicUsageRecord) => Promise<DesktopModelUsageStatus | undefined>;
 	/** Pix autocomplete config reader (overridable for hermetic tests). */
 	readonly loadAutocompleteConfig?: (cwd: string) => AutocompleteConfig;
 	/** Pix default-model reader (overridable for hermetic tests). */
@@ -424,6 +438,7 @@ export class PixAcpAgent {
 	private readonly enhancePrompt: PromptEnhancer;
 	private readonly gitAssistant: GitAssistant;
 	private readonly queryModelUsage: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
+	private readonly parseAnthropicUsageHeaders: (record: PiAnthropicUsageRecord) => Promise<DesktopModelUsageStatus | undefined>;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
 	private readonly loadDefaultModel: (cwd: string) => PixDefaultModel | undefined;
 	private readonly loadIgnoreContextFiles: (cwd: string) => boolean;
@@ -454,6 +469,7 @@ export class PixAcpAgent {
 		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
 		this.queryModelUsage = options.queryModelUsage ?? queryPixModelUsage;
+		this.parseAnthropicUsageHeaders = options.parseAnthropicUsageHeaders ?? parsePixAnthropicUsageHeaders;
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
@@ -1688,6 +1704,8 @@ export class PixAcpAgent {
 			contextInventoryNoticeReason: undefined,
 			contextUsagePushGeneration: 0,
 			configOptionsPushGeneration: 0,
+			headerUsage: undefined,
+			modelUsagePushGeneration: 0,
 		};
 		// Register routing before start so session_start extension state emitted
 		// during RPC startup is delivered instead of being dropped.
@@ -1878,6 +1896,12 @@ export class PixAcpAgent {
 		) {
 			this.scheduleContextUsagePush(session);
 		}
+		if (event.type === "message_end") {
+			// Provider responses carrying Anthropic rate-limit headers have just
+			// been recorded by the pi entry; refresh the pushed usage snapshot
+			// without any network request.
+			this.scheduleModelUsagePush(session);
+		}
 		if (event.type === "thinking_level_changed") {
 			// Server-side thinking changes (todo-thinking overrides, builtin
 			// /thinking and /model commands) are not visible through the event
@@ -1931,6 +1955,70 @@ export class PixAcpAgent {
 	private scheduleConfigOptionsPush(session: AgentSessionState): void {
 		const generation = ++session.configOptionsPushGeneration;
 		queueMicrotask(() => void this.pushConfigOptions(session, generation));
+	}
+
+	private scheduleModelUsagePush(session: AgentSessionState): void {
+		const generation = ++session.modelUsagePushGeneration;
+		queueMicrotask(() => void this.pushModelUsage(session, generation));
+	}
+
+	/**
+	 * Push freshly observed Anthropic API-key response-header usage to Desktop.
+	 *
+	 * Reads the session-scoped header record through session stats (local RPC,
+	 * no provider network), parses it with the shared Pix module, and pushes
+	 * the parsed status — or `null` to clear a previously pushed snapshot when
+	 * the active session/model no longer has header usage.
+	 */
+	private async pushModelUsage(session: AgentSessionState, generation: number): Promise<void> {
+		if (
+			this.sessions.get(session.acpSessionId) !== session
+			|| session.modelUsagePushGeneration !== generation
+		) return;
+
+		try {
+			const [state, stats] = await Promise.all([session.pi.getState(), session.pi.getSessionStats()]);
+			if (
+				this.sessions.get(session.acpSessionId) !== session
+				|| session.modelUsagePushGeneration !== generation
+			) return;
+			const headerUsage = await this.sessionHeaderUsage(state, stats);
+			if (
+				this.sessions.get(session.acpSessionId) !== session
+				|| session.modelUsagePushGeneration !== generation
+			) return;
+			// Only notify when something changed: a fresh snapshot, or `null` to
+			// clear a previously pushed one. Reading `previous` before parsing
+			// matters — the parse result alone cannot tell whether a clear is due.
+			const previous = session.headerUsage;
+			if (!headerUsage && !previous) return;
+			session.headerUsage = headerUsage;
+			await session.client.notify(PIX_SESSION_STATE_METHOD, {
+				sessionId: session.acpSessionId,
+				channel: PIX_MODEL_USAGE_CHANNEL,
+				data: headerUsage ?? null,
+			});
+		} catch (error) {
+			if (this.sessions.get(session.acpSessionId) !== session) return;
+			this.options.logger.warn(`model usage push failed: ${stringifyUnknown(error)}`);
+		}
+	}
+
+	/**
+	 * Resolve session-scoped Anthropic API-key header usage for the session's
+	 * CURRENT model. A record for a different model is ignored, so usage never
+	 * leaks across model switches or other sessions. Pure: callers own caching.
+	 */
+	private async sessionHeaderUsage(
+		state: PiSessionState,
+		stats: PiSessionStats,
+	): Promise<DesktopModelUsageStatus | undefined> {
+		const modelKey = state.model ? `${state.model.provider}/${state.model.id}` : undefined;
+		const record = anthropicUsageRecordFromStats(stats);
+		if (!record || !modelKey || record.modelKey !== modelKey) return undefined;
+		const status = await this.parseAnthropicUsageHeaders(record);
+		if (!status || status.modelKey !== modelKey) return undefined;
+		return status;
 	}
 
 	private async pushConfigOptions(session: AgentSessionState, generation: number): Promise<void> {
@@ -2197,6 +2285,9 @@ export class PixAcpAgent {
 			? await this.querySessionModelUsage(session.acpSessionId, state)
 			: { refresh: "skipped" as const };
 		const dcpTokensSaved = dcpTokensSavedFromStats(stats);
+		// Header usage comes from the session's recorded provider responses;
+		// exposing it costs no provider network request.
+		const headerUsage = await this.sessionHeaderUsage(state, stats);
 
 		return {
 			sessionId: session.acpSessionId,
@@ -2205,6 +2296,7 @@ export class PixAcpAgent {
 			dcpContextMap: dcpContextMapFromStats(stats) ?? null,
 			modelUsageRefresh: modelUsage.refresh,
 			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
+			...(headerUsage ? { headerUsage } : {}),
 		};
 	}
 
@@ -3241,6 +3333,19 @@ type SharedModelUsageModule = {
 	queryModelUsageStatus?: (descriptor: unknown) => Promise<DesktopModelUsageStatus | undefined>;
 };
 
+type SharedHeaderUsageModule = {
+	/** Shared Anthropic response-header usage parser (header cache API). */
+	anthropicUsageStatusFromResponseHeaders?: (
+		headers: Record<string, string>,
+		modelKey: string,
+		now?: number,
+	) => DesktopModelUsageStatus | undefined;
+};
+
+type SharedAnthropicAuthModule = {
+	resolveAnthropicAuthKind?: () => Promise<"oauth" | "api-key">;
+};
+
 type SharedDcpStatsModule = {
 	formatDcpStatistics?: (input: {
 		branch?: readonly unknown[];
@@ -3259,6 +3364,54 @@ function dcpTokensSavedFromStats(stats: PiSessionStats): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0
 		? Math.round(value)
 		: undefined;
+}
+
+/**
+ * Validate the raw Anthropic response-header record injected by Pix's RPC
+ * entry into session stats. Returns `undefined` for absent or malformed data
+ * instead of trusting the child process blindly.
+ */
+function anthropicUsageRecordFromStats(stats: PiSessionStats): PiAnthropicUsageRecord | undefined {
+	const value = stats.pixAnthropicUsage;
+	if (!value || typeof value !== "object") return undefined;
+	const { modelKey, status, headers, receivedAt } = value;
+	if (typeof modelKey !== "string" || !modelKey.includes("/")) return undefined;
+	if (typeof status !== "number" || !Number.isFinite(status)) return undefined;
+	if (typeof receivedAt !== "number" || !Number.isFinite(receivedAt) || receivedAt <= 0) return undefined;
+	if (!headers || typeof headers !== "object" || Array.isArray(headers)) return undefined;
+	const bounded: Record<string, string> = {};
+	let count = 0;
+	for (const [name, headerValue] of Object.entries(headers)) {
+		if (typeof headerValue !== "string" || !headerValue.trim()) continue;
+		bounded[name.toLowerCase()] = headerValue;
+		count += 1;
+		if (count >= 64) break;
+	}
+	if (count === 0) return undefined;
+	return { modelKey, status, headers: bounded, receivedAt };
+}
+
+/**
+ * Parse an Anthropic API-key response-header record with the shared Pix
+ * header-usage module (the same parser the TUI uses for its header cache).
+ * Degrades to "no usage" when the shared module does not expose the parser.
+ */
+async function parsePixAnthropicUsageHeaders(
+	record: PiAnthropicUsageRecord,
+): Promise<DesktopModelUsageStatus | undefined> {
+	try {
+		const authModuleUrl = new URL("../../../dist/app/model/model-usage-status.js", import.meta.url).href;
+		const auth = await import(authModuleUrl) as SharedAnthropicAuthModule;
+		// Subscription credentials use the OAuth quota endpoint, even when they
+		// were stored as a key. Never display Messages rate limits as that quota.
+		if (!auth.resolveAnthropicAuthKind || await auth.resolveAnthropicAuthKind() !== "api-key") return undefined;
+		const moduleUrl = new URL("../../../dist/app/model/anthropic-header-usage.js", import.meta.url).href;
+		const usage = await import(moduleUrl) as SharedHeaderUsageModule;
+		if (!usage.anthropicUsageStatusFromResponseHeaders) return undefined;
+		return usage.anthropicUsageStatusFromResponseHeaders(record.headers, record.modelKey, record.receivedAt) ?? undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function dcpContextMapFromStats(stats: PiSessionStats): PiSessionStats["pixDcpContextMap"] {

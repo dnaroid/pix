@@ -135,11 +135,14 @@ Port order follows the mapping layers proven by upstream `pi-acp`
    `/follow-up`, `/model [provider/id]`, `/thinking`); other `/…` text
    (extension commands, prompt templates, `/skill:*`) is passed through to
    pi's native expansion. Verified live against pi 0.84.4.
-5. **pix extras** — done where the protocol allows: client image attach is
-   forwarded through `session/prompt`, and `export_html` is exposed via the
-   `/export` slash command (see step 4). Usage/`model-usage-status`
-   surfacing is **deferred upstream**: pi 0.85.0's RPC protocol emits no
-   usage events, so there is nothing to translate until the SDK grows one.
+5. **pix extras** — client image attach is forwarded through `session/prompt`,
+   and `export_html` is exposed via `/export` (see step 4). Desktop's private
+   runtime-status request retrieves model quotas through Pix's shared usage
+   module. For Anthropic API keys, the Pix RPC entry observes rate-limit
+   headers on actual Messages responses and exposes a bounded, session-scoped
+   snapshot through session stats; the adapter pushes that snapshot to the
+   status bar. This is Pix-specific plumbing, not a native pi RPC usage event
+   or an extra Anthropic usage request.
 
 ## Known limitations
 

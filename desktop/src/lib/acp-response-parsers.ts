@@ -32,6 +32,7 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus {
 
   const context = value.context === undefined ? undefined : parseContextUsageStatus(value.context);
   const modelUsage = value.modelUsage === undefined ? undefined : parseModelUsageStatus(value.modelUsage);
+  const headerUsage = value.headerUsage === undefined ? undefined : parseModelUsageStatus(value.headerUsage);
   const dcpContextMap = parseDcpContextMap(value.dcpContextMap);
   if (
     value.dcpTokensSaved !== undefined
@@ -50,6 +51,7 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus {
     ...(typeof value.dcpStats === "string" ? { dcpStats: value.dcpStats } : {}),
     modelUsageRefresh: value.modelUsageRefresh as ModelUsageRefresh,
     ...(modelUsage ? { modelUsage } : {}),
+    ...(headerUsage ? { headerUsage } : {}),
   };
 }
 
@@ -111,7 +113,7 @@ function parseSessionUsageTotals(value: unknown): SessionUsageTotals {
   };
 }
 
-function parseModelUsageStatus(value: unknown): ModelUsageStatus {
+export function parseModelUsageStatus(value: unknown): ModelUsageStatus {
   if (
     !isRecord(value)
     || typeof value.modelKey !== "string"
@@ -120,6 +122,7 @@ function parseModelUsageStatus(value: unknown): ModelUsageStatus {
   ) throw new Error("invalid Pix model usage");
   const hourly = value.hourly === undefined ? undefined : parseModelUsageLimitWindow(value.hourly);
   const weekly = value.weekly === undefined ? undefined : parseModelUsageLimitWindow(value.weekly);
+  const rateWindows = parseModelUsageRateWindows(value.rateWindows);
   return {
     modelKey: value.modelKey,
     provider: value.provider as ModelUsageStatus["provider"],
@@ -127,7 +130,16 @@ function parseModelUsageStatus(value: unknown): ModelUsageStatus {
     ...(typeof value.accountEmail === "string" ? { accountEmail: value.accountEmail } : {}),
     ...(hourly ? { hourly } : {}),
     ...(weekly ? { weekly } : {}),
+    ...(rateWindows ? { rateWindows } : {}),
   };
+}
+
+function parseModelUsageRateWindows(value: unknown): ModelUsageLimitWindow[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("invalid Pix model usage rate windows");
+  const windows = value.map((window) => parseModelUsageLimitWindow(window));
+  if (windows.length === 0) return undefined;
+  return windows;
 }
 
 function parseModelUsageLimitWindow(value: unknown): ModelUsageLimitWindow {
@@ -137,12 +149,14 @@ function parseModelUsageLimitWindow(value: unknown): ModelUsageLimitWindow {
     || !isFiniteNumber(value.resetAt)
     || !isFiniteNumber(value.windowSeconds)
     || (value.hasKnownWindowDuration !== undefined && typeof value.hasKnownWindowDuration !== "boolean")
+    || (value.label !== undefined && (typeof value.label !== "string" || value.label.trim() === ""))
   ) throw new Error("invalid Pix model usage window");
   return {
     remainingPercent: Number(value.remainingPercent),
     resetAt: Number(value.resetAt),
     windowSeconds: Number(value.windowSeconds),
     ...(typeof value.hasKnownWindowDuration === "boolean" ? { hasKnownWindowDuration: value.hasKnownWindowDuration } : {}),
+    ...(typeof value.label === "string" ? { label: value.label } : {}),
   };
 }
 

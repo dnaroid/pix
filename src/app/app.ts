@@ -72,6 +72,10 @@ import { checkAndUpdateIdxOnStartup, formatIdxStartupUpdateNotice } from "./cli/
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import {
+	MODEL_USAGE_RESPONSE_HEADERS_EVENT,
+	parseModelUsageResponseHeadersPayload,
+} from "./model/anthropic-header-usage.js";
+import {
 	parseSubagentCatalogState,
 	SUBAGENTS_CATALOG_STATE_EVENT,
 	type SubagentCatalogState,
@@ -272,7 +276,15 @@ export class PiUiExtendApp {
 			deactivateRuntimeForDraft: () => this.deactivateRuntimeForDraft(),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			activateRuntime: (runtime, options) => this.activateRuntime(runtime, options),
-			disposeRuntime: (runtime) => this.terminalController.disposeRuntime(runtime),
+			disposeRuntime: (runtime) => {
+				// Capture the session identity before disposal tears the session
+				// down: header-captured usage belongs to this session instance, and a
+				// later reopen of the same session ID must start from fresh samples.
+				const sessionId = runtime.session.sessionManager.getSessionId();
+				return this.terminalController.disposeRuntime(runtime).finally(() => {
+					this.modelUsageController.forgetSessionSamples(sessionId);
+				});
+			},
 			isRunning: () => this.running,
 			setStatus: (status) => this.setStatus(status),
 			setSessionStatus: (session) => this.setSessionStatus(session),
@@ -1284,6 +1296,10 @@ export class PiUiExtendApp {
 		runtime.setBeforeSessionInvalidate(() => {
 			if (!this.running || this.runtime !== runtime) return;
 			this.extensionUiController.clearWidgets(this.activeExtensionUiScope());
+			// The runtime is about to replace or dispose this session instance:
+			// its header-captured usage must not survive into a session later
+			// opened under the same session ID.
+			this.modelUsageController.forgetSessionSamples(runtime.session.sessionManager.getSessionId());
 		});
 		await this.bindCurrentSession(options);
 	}
@@ -1312,6 +1328,13 @@ export class PiUiExtendApp {
 				if (catalog?.sessionId) this.subagentCatalogBySessionId.set(catalog.sessionId, catalog);
 			}
 			if (channel === TODO_STATE_EVENT) this.todoWidgetController.observeLiveState(data);
+			if (channel === MODEL_USAGE_RESPONSE_HEADERS_EVENT) {
+				// Anthropic usage captured from live Messages response headers;
+				// the payload identifies its own session/model route so samples
+				// stay isolated per session even across concurrently open tabs.
+				const payload = parseModelUsageResponseHeadersPayload(data);
+				if (payload) this.modelUsageController.observeResponseHeaders(payload);
+			}
 		});
 	}
 
