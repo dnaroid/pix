@@ -64,7 +64,7 @@ describe("model usage status", () => {
 		assert.equal(anthropicUsageStatusFromResponse({}, "anthropic/claude-opus-4-7", now), undefined);
 	});
 
-	it("queries Anthropic usage with the stored Claude OAuth token and skips API keys", async () => {
+	it("queries Anthropic usage with Claude OAuth tokens from auth.json or env and skips API keys", async () => {
 		const oldFetch = globalThis.fetch;
 		let usageRequests = 0;
 		globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -102,6 +102,23 @@ describe("model usage status", () => {
 				assert.equal((await queryAccountUsageReport()).anthropic, undefined);
 			});
 			assert.equal(usageRequests, 2);
+
+			await withPiAuthAsync({ anthropic: { type: "api_key", key: "sk-ant-oat-test" } }, async () => {
+				assert.equal((await queryModelUsageStatus(descriptor))?.hourly?.remainingPercent, 60);
+			});
+			assert.equal(usageRequests, 3);
+
+			const previousOAuthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
+			process.env.ANTHROPIC_OAUTH_TOKEN = "sk-ant-oat-test";
+			try {
+				await withPiAuthAsync({}, async () => {
+					assert.equal((await queryModelUsageStatus(descriptor))?.weekly?.remainingPercent, 90);
+				});
+			} finally {
+				if (previousOAuthToken === undefined) delete process.env.ANTHROPIC_OAUTH_TOKEN;
+				else process.env.ANTHROPIC_OAUTH_TOKEN = previousOAuthToken;
+			}
+			assert.equal(usageRequests, 4);
 		} finally {
 			globalThis.fetch = oldFetch;
 		}

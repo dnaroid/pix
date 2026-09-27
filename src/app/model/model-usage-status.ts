@@ -625,9 +625,7 @@ async function queryAnthropicModelUsage(modelKey: string): Promise<ModelUsageSta
 }
 
 async function queryAnthropicAccountUsage(now: number): Promise<AccountUsageReport["anthropic"] | undefined> {
-	const stored = (await readPiAuth()).anthropic;
-	if (stored?.type !== "oauth" || !stored.access) return undefined;
-	const account = stored.email || "Claude subscription";
+	const account = (await readPiAuth()).anthropic?.email || "Claude subscription";
 
 	try {
 		const accessToken = await readAnthropicAccessToken();
@@ -667,10 +665,36 @@ function anthropicAccountWindow(
 
 async function readAnthropicAccessToken(): Promise<string | undefined> {
 	const credential = (await readPiAuth()).anthropic;
-	// API-key auth has no subscription quota to report.
-	if (credential?.type !== "oauth" || !credential.access) return undefined;
-	if (!isExpired(credential)) return credential.access;
-	return (await refreshPiOAuthCredential("anthropic", "Anthropic")).access;
+	if (credential?.type === "oauth" && credential.access) {
+		if (!isExpired(credential)) return credential.access;
+		return (await refreshPiOAuthCredential("anthropic", "Anthropic")).access;
+	}
+
+	// Resolve the token the way model requests do, so `claude setup-token` tokens
+	// from ANTHROPIC_OAUTH_TOKEN/ANTHROPIC_AUTH_TOKEN or saved as a key also work.
+	// Plain API keys have no subscription quota to report.
+	const token = await resolvePiAuthToken("anthropic");
+	return token && isAnthropicOAuthToken(token) ? token : undefined;
+}
+
+function isAnthropicOAuthToken(token: string): boolean {
+	return token.startsWith("sk-ant-oat");
+}
+
+async function resolvePiAuthToken(provider: string): Promise<string | undefined> {
+	try {
+		const modelRuntime = await ModelRuntime.create({
+			authPath: getPiAuthPath(),
+			allowModelNetwork: false,
+		});
+		const resolved = await modelRuntime.getAuth(provider);
+		if (resolved?.auth.apiKey) return resolved.auth.apiKey;
+		const authorization = Object.entries(resolved?.auth.headers ?? {})
+			.find(([name]) => name.toLowerCase() === "authorization")?.[1];
+		return typeof authorization === "string" ? authorization.replace(/^Bearer\s+/iu, "") : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 async function fetchAnthropicUsage(accessToken: string): Promise<AnthropicUsageResponse> {
