@@ -7,10 +7,8 @@ Light foundation: **Claude+** —
 `https://tweakcn.com/themes/cmdght103000n04lh3e2ae93r`
 Dark direction: **high-contrast, cool desktop palette inspired by Zed**
 
-The machine-readable Claude+ reference used as the light-theme foundation is
-bundled with the frontend skill at the workspace-relative runtime path:
-
-`$WORKSPACE/.pi/skills/pix-desktop-frontend/references/claude-plus.theme.json`
+The live light and dark token values are defined in `desktop/src/styles.css`;
+the tweakcn link records the light-theme origin only.
 
 ## 1. Product character
 
@@ -45,10 +43,8 @@ For visual implementation, use this priority:
 1. Explicit task requirements.
 2. Live semantic theme tokens in `desktop/src/styles.css`.
 3. This `DESIGN.md`.
-4. The bundled Pix IDE visual-language reference.
-5. The bundled Claude+ theme reference for light-theme intent.
-6. Existing neighboring UI patterns that do not conflict with the above.
-7. Generic frontend conventions.
+4. Existing neighboring UI patterns that do not conflict with the above.
+5. Generic frontend conventions.
 
 Do not copy a legacy local style when it contradicts the current semantic theme.
 
