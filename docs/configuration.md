@@ -175,6 +175,13 @@ Desktop exposes the user-level `disabledBuiltinAgents` list under
 The same General section exposes built-in suite modules as an enabled/disabled
 checklist instead of raw `enabledModules` / `disabledModules` / `modules` JSON.
 
+DCP is intentionally narrower than the general suite layering above: its
+`dcp` section is read only from the user-level
+`~/.config/pi/pi-tools-suite.jsonc`. Protected tool continuity is bounded by
+`dcp.compress.maxProtectedToolContinuityBytes` (default `65536`). The budget
+applies to shaped tool receipts/digests in one compression block; exact
+protected fragments are never silently truncated to satisfy it.
+
 ## Model providers
 
 Pix uses credentials supported by Pi. The common paths are:

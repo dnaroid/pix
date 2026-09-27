@@ -36,6 +36,8 @@ export interface DcpConfig {
     protectedTools: string[] // these tool outputs always protected from pruning
     protectTags: boolean
     protectUserMessages: boolean
+    /** Provider-visible byte ceiling for shaped tool continuity in one block. */
+    maxProtectedToolContinuityBytes?: number
     autoCandidates: {
       enabled: boolean
       minContextPercent: number

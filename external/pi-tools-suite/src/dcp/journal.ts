@@ -128,6 +128,13 @@ function validateExactBlock(value: unknown): asserts value is CompressionBlock {
       throw new DcpJournalError(`DCP journal block b${value.id} has invalid ${key}`);
     }
   }
+  if (value.summaryCoreTokenEstimate !== undefined &&
+    (typeof value.summaryCoreTokenEstimate !== "number" || !Number.isFinite(value.summaryCoreTokenEstimate) || value.summaryCoreTokenEstimate < 0)) {
+    throw new DcpJournalError(`DCP journal block b${value.id} has invalid summaryCoreTokenEstimate`);
+  }
+  if (value.continuityFormatVersion !== undefined && value.continuityFormatVersion !== 2) {
+    throw new DcpJournalError(`DCP journal block b${value.id} has invalid continuityFormatVersion`);
+  }
   if (value.commitMetrics !== undefined) {
     const m = value.commitMetrics;
     if (!isRecord(m) || typeof m.operationId !== "string" || !m.operationId ||
@@ -160,7 +167,11 @@ function validateExactBlock(value: unknown): asserts value is CompressionBlock {
       || (fragment.kind !== "user" && fragment.kind !== "prompt" && fragment.kind !== "tool")
       || typeof fragment.origin !== "string" || fragment.origin.length === 0
       || typeof fragment.hash !== "string" || !/^[a-f0-9]{64}$/i.test(fragment.hash)
-      || typeof fragment.text !== "string") {
+      || typeof fragment.text !== "string"
+      || (fragment.representation !== undefined && !["exact", "digest", "receipt", "aggregate"].includes(fragment.representation as string))
+      || (fragment.sourceHash !== undefined && (typeof fragment.sourceHash !== "string" || !/^[a-f0-9]{64}$/i.test(fragment.sourceHash)))
+      || (fragment.sourceBytes !== undefined && !finiteNonNegativeInteger(fragment.sourceBytes))
+      || (fragment.policyVersion !== undefined && fragment.policyVersion !== 2)) {
       throw new DcpJournalError(`DCP journal block b${value.id} has malformed protectedFragments`);
     }
   }

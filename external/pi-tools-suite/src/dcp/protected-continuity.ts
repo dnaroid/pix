@@ -9,17 +9,24 @@ import {
 } from "./pruner-tools.js";
 import type { ToolRecord } from "./state.js";
 
-export type ToolContinuityMode = "none" | "digest" | "verbatim";
+export type ToolContinuityMode = "none" | "digest" | "receipt" | "verbatim";
 
 export interface ToolContinuityDecision {
 	mode: ToolContinuityMode;
 	text?: string;
 	reason: string;
+	/** Stable identity of the raw delivered output represented by this decision. */
+	sourceHash?: string;
+	/** Raw delivered output size before continuity shaping. */
+	sourceBytes?: number;
 }
 
 const SHELL_TOOLS = new Set(["bash", "shell", "powershell", "exec", "execute"]);
+const MUTATION_TOOLS = new Set(["apply_patch", "write", "edit", "ast_apply", "patch"]);
 const MAX_COMMAND_CHARS = 2_048;
 const MAX_ERROR_EXCERPT_CHARS = 2_048;
+const MAX_MUTATION_SUMMARY_CHARS = 2_048;
+const MAX_CHANGED_FILES = 40;
 const TEST_DIGEST_MAX_BYTES = 8_192;
 
 function normalizeToolName(name: string): string {
@@ -39,6 +46,14 @@ function renderedCommand(record: ToolRecord): string {
 
 function outputIdentity(output: string): string {
 	return `${Buffer.byteLength(output, "utf8")} bytes, sha256:${stableDigest(output)}`;
+}
+
+function sourceMetadata(record: ToolRecord): Pick<ToolContinuityDecision, "sourceHash" | "sourceBytes"> {
+	const output = record.outputText ?? "";
+	return {
+		sourceHash: stableDigest(output),
+		sourceBytes: Buffer.byteLength(output, "utf8"),
+	};
 }
 
 function boundedErrorExcerpt(output: string): string | undefined {
@@ -78,6 +93,61 @@ function shellDigest(record: ToolRecord, kind: "inspection" | "test-build", body
 	return lines.join("\n");
 }
 
+function shellReceipt(record: ToolRecord): string {
+	const output = record.outputText ?? "";
+	const classification = classifyShellCommand(record.inputArgs);
+	const lines = [
+		`### Tool continuity receipt: ${record.toolName}`,
+		`Command: ${renderedCommand(record)}`,
+		`Classification: ${classification.kind}/${classification.scope}`,
+		`Outcome: ${record.isError ? "error" : "success"}`,
+		`Raw output identity: ${outputIdentity(output)}`,
+	];
+	const excerpt = boundedErrorExcerpt(output);
+	if (excerpt) lines.push(record.isError ? "Actionable error excerpt:" : "Bounded output evidence:", excerpt);
+	lines.push("Exact raw output remains in session history and is omitted from live protected continuity.");
+	return lines.join("\n");
+}
+
+function recordDetails(record: ToolRecord): Record<string, unknown> | undefined {
+	const details = record.outputDetails;
+	return details && typeof details === "object" && !Array.isArray(details)
+		? details as Record<string, unknown>
+		: undefined;
+}
+
+function boundedChangedFiles(details: Record<string, unknown> | undefined): string[] {
+	const changedFiles = details?.changedFiles;
+	if (!Array.isArray(changedFiles)) return [];
+	return changedFiles
+		.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+		.slice(0, MAX_CHANGED_FILES);
+}
+
+function mutationReceipt(record: ToolRecord): string {
+	const output = record.outputText ?? "";
+	const details = recordDetails(record);
+	const changedFiles = boundedChangedFiles(details);
+	const rawSummary = typeof details?.summary === "string" ? details.summary.trim() : "";
+	const summary = rawSummary.length > MAX_MUTATION_SUMMARY_CHARS
+		? rawSummary.slice(0, MAX_MUTATION_SUMMARY_CHARS) + "\n[summary truncated]"
+		: rawSummary;
+	const lines = [
+		`### Mutation continuity receipt: ${record.toolName}`,
+		`Outcome: ${record.isError ? "error" : "success"}`,
+	];
+	if (changedFiles.length > 0) {
+		lines.push(`Changed files (${changedFiles.length}${Array.isArray(details?.changedFiles) && details.changedFiles.length > changedFiles.length ? "+" : ""}):`);
+		lines.push(...changedFiles.map((file) => `- ${file}`));
+	}
+	if (summary) lines.push("Producer summary:", summary);
+	const excerpt = boundedErrorExcerpt(output);
+	if (record.isError && excerpt) lines.push("Actionable error excerpt:", excerpt);
+	lines.push(`Raw output identity: ${outputIdentity(output)}`);
+	lines.push("Exact raw output remains in session history and is omitted from live protected continuity.");
+	return lines.join("\n");
+}
+
 function verbatimToolText(record: ToolRecord): string | undefined {
 	const output = (record.outputText ?? "").trim();
 	return output ? `### Tool: ${record.toolName}\n${output}` : undefined;
@@ -90,9 +160,21 @@ function preferSmallerDigest(
 ): ToolContinuityDecision {
 	const verbatim = verbatimToolText(record);
 	if (verbatim && digest.length >= verbatim.length) {
-		return { mode: "verbatim", reason: `${reason}-not-smaller`, text: verbatim };
+		return { mode: "verbatim", reason: `${reason}-not-smaller`, text: verbatim, ...sourceMetadata(record) };
 	}
-	return { mode: "digest", reason, text: digest };
+	return { mode: "digest", reason, text: digest, ...sourceMetadata(record) };
+}
+
+function preferSmallerReceipt(
+	record: ToolRecord,
+	reason: string,
+	receipt: string,
+): ToolContinuityDecision {
+	const verbatim = verbatimToolText(record);
+	if (verbatim && receipt.length >= verbatim.length) {
+		return { mode: "verbatim", reason: `${reason}-not-smaller`, text: verbatim, ...sourceMetadata(record) };
+	}
+	return { mode: "receipt", reason, text: receipt, ...sourceMetadata(record) };
 }
 
 function gatewayCompactRepresentation(record: ToolRecord): string | undefined {
@@ -116,18 +198,23 @@ export function toolRecordContinuity(record: ToolRecord, config: DcpConfig): Too
 	if (!isToolRecordPruningProtected(record, config)) return { mode: "none", reason: "not-pruning-protected" };
 	const normalized = normalizeToolName(record.toolName);
 	const output = record.outputText ?? "";
-	if (!SHELL_TOOLS.has(normalized)) {
-		return {
-			mode: "verbatim",
-			reason: "non-shell-protected-tool",
-			text: verbatimToolText(record),
-		};
-	}
 	if (isToolRecordProtectedByFilePattern(record, config)) {
 		return {
 			mode: "verbatim",
 			reason: "protected-file-pattern",
 			text: verbatimToolText(record),
+			...sourceMetadata(record),
+		};
+	}
+	if (MUTATION_TOOLS.has(normalized)) {
+		return preferSmallerReceipt(record, "mutation-receipt", mutationReceipt(record));
+	}
+	if (!SHELL_TOOLS.has(normalized)) {
+		return {
+			mode: "verbatim",
+			reason: "non-shell-protected-tool",
+			text: verbatimToolText(record),
+			...sourceMetadata(record),
 		};
 	}
 	const gatewayCompact = gatewayCompactRepresentation(record);
@@ -136,6 +223,7 @@ export function toolRecordContinuity(record: ToolRecord, config: DcpConfig): Too
 			mode: "verbatim",
 			reason: "gateway-compacted",
 			text: `### Tool: ${record.toolName}\n${gatewayCompact}`,
+			...sourceMetadata(record),
 		};
 	}
 
@@ -160,16 +248,17 @@ export function toolRecordContinuity(record: ToolRecord, config: DcpConfig): Too
 			mode: "verbatim",
 			reason: `test-build-${compact.reason}`,
 			text: verbatimToolText(record),
+			...sourceMetadata(record),
 		};
 	}
 
-	return {
-		mode: "verbatim",
-		reason: classification.kind === "mutation"
-			? "shell-mutation"
+	return preferSmallerReceipt(
+		record,
+		classification.kind === "mutation"
+			? "shell-mutation-receipt"
 			: classification.scope === "compound"
-				? "shell-compound"
-				: "shell-unknown",
-		text: verbatimToolText(record),
-	};
+				? "shell-compound-receipt"
+				: "shell-unknown-receipt",
+		shellReceipt(record),
+	);
 }

@@ -246,7 +246,7 @@ export function unknownCompressionIdError(rawId: string, state: DcpState): Error
 }
 
 function formatRestoredBlock(block: CompressionBlock): string {
-  return `[Previously compressed: ${block.topic}]\n${block.summary}`
+  return `[Previously compressed: ${block.topic}]\n${renderCompressionBlockSummary(block)}`
 }
 
 /**
@@ -515,25 +515,217 @@ function compressionProtectedFragment(
 	kind: CompressionProtectedFragment["kind"],
 	origin: string,
 	text: string,
+	metadata: Pick<CompressionProtectedFragment, "representation" | "sourceHash" | "sourceBytes" | "policyVersion"> = {},
 ): CompressionProtectedFragment {
 	return {
 		kind,
 		origin,
 		hash: createHash("sha256").update(text).digest("hex"),
 		text,
+		...metadata,
 	}
+}
+
+function protectedFragmentIdentity(fragment: CompressionProtectedFragment): string {
+	if (fragment.kind === "tool" && fragment.sourceHash) {
+		return `${fragment.origin}:source:${fragment.sourceHash}`
+	}
+	return `${fragment.origin}:text:${fragment.hash}`
 }
 
 function mergeProtectedFragments(...groups: CompressionProtectedFragment[][]): CompressionProtectedFragment[] {
 	const merged: CompressionProtectedFragment[] = []
 	const seen = new Set<string>()
 	for (const fragment of groups.flat()) {
-		const key = `${fragment.origin}:${fragment.hash}`
+		const key = protectedFragmentIdentity(fragment)
 		if (seen.has(key)) continue
 		seen.add(key)
 		merged.push(fragment)
 	}
 	return merged
+}
+
+function toolFragmentFromDecision(
+	toolCallId: string,
+	decision: ReturnType<typeof toolRecordContinuity>,
+): CompressionProtectedFragment | undefined {
+	const text = decision.text?.trim()
+	if (!text) return undefined
+	return compressionProtectedFragment("tool", `tool:${toolCallId}`, text, {
+		representation: decision.mode === "digest" || decision.mode === "receipt" ? decision.mode : "exact",
+		sourceHash: decision.sourceHash,
+		sourceBytes: decision.sourceBytes,
+		policyVersion: 2,
+	})
+}
+
+function normalizeInheritedProtectedFragments(
+	coveredBlocks: CompressionBlock[],
+	state: DcpState,
+	config: DcpConfig,
+): CompressionProtectedFragment[] {
+	const normalized: CompressionProtectedFragment[] = []
+	for (const fragment of coveredBlocks.flatMap((block) => block.protectedFragments ?? [])) {
+		if (fragment.kind !== "tool") {
+			normalized.push(fragment)
+			continue
+		}
+		const match = /^tool:(.+)$/.exec(fragment.origin)
+		const record = match ? state.toolCalls.get(match[1]!) : undefined
+		if (!match || !record || record.toolName === "compress" || !isToolRecordProtected(record, config)) {
+			normalized.push(fragment)
+			continue
+		}
+		const decision = toolRecordContinuity(record, config)
+		if (fragment.sourceHash && decision.sourceHash && fragment.sourceHash !== decision.sourceHash) {
+			// Same origin with a different raw identity is ambiguous. Retain the
+			// persisted evidence rather than silently rebinding it to new output.
+			normalized.push(fragment)
+			continue
+		}
+		normalized.push(toolFragmentFromDecision(match[1]!, decision) ?? fragment)
+	}
+	return mergeProtectedFragments(normalized)
+}
+
+function protectedFragmentBytes(fragment: CompressionProtectedFragment): number {
+	return Buffer.byteLength(fragment.text, "utf8")
+}
+
+function normalizedToolName(name: string | undefined): string {
+	return (name ?? "unknown").trim().toLowerCase().replace(/[\s-]+/g, "_")
+}
+
+function isMutationContinuityTool(name: string | undefined): boolean {
+	return ["apply_patch", "write", "edit", "ast_apply", "patch"].includes(normalizedToolName(name))
+}
+
+function aggregateToolContinuity(
+	fragments: CompressionProtectedFragment[],
+	state: DcpState,
+	maxBytes: number,
+): CompressionProtectedFragment {
+	let errors = 0
+	let mutations = 0
+	let sourceBytes = 0
+	const byTool = new Map<string, number>()
+	const changedFiles = new Set<string>()
+	const manifest: string[] = []
+	for (const fragment of fragments) {
+		const match = /^tool:(.+)$/.exec(fragment.origin)
+		const record = match ? state.toolCalls.get(match[1]!) : undefined
+		const toolName = normalizedToolName(record?.toolName)
+		byTool.set(toolName, (byTool.get(toolName) ?? 0) + 1)
+		if (record?.isError) errors++
+		if (isMutationContinuityTool(record?.toolName)) mutations++
+		sourceBytes += Math.max(0, fragment.sourceBytes ?? 0)
+		const details = record?.outputDetails
+		if (details && typeof details === "object" && !Array.isArray(details)) {
+			const files = (details as Record<string, unknown>).changedFiles
+			if (Array.isArray(files)) {
+				for (const file of files) {
+					if (typeof file === "string" && file.trim() && changedFiles.size < 24) changedFiles.add(file.trim())
+				}
+			}
+		}
+		manifest.push(`${fragment.origin}:${fragment.sourceHash ?? fragment.hash}`)
+	}
+	const manifestHash = createHash("sha256").update(manifest.sort().join("\n")).digest("hex")
+	const toolSummary = [...byTool.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([name, count]) => `${name}=${count}`)
+		.join(", ")
+	const lines = [
+		"### Historical tool continuity aggregate",
+		`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
+		`Tools: ${toolSummary || "unknown"}.`,
+		`Raw source represented: ${sourceBytes} bytes; manifest sha256:${manifestHash}.`,
+	]
+	if (changedFiles.size > 0) lines.push(`Changed files observed: ${[...changedFiles].join(", ")}.`)
+	lines.push("Exact historical outputs remain in session history; this aggregate is continuation-only evidence.")
+	let text = lines.join("\n")
+	if (Buffer.byteLength(text, "utf8") > maxBytes) {
+		text = [
+			"### Historical tool continuity aggregate",
+			`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
+			`Raw source represented: ${sourceBytes} bytes; manifest sha256:${manifestHash}.`,
+		].join("\n")
+	}
+	return compressionProtectedFragment("tool", `tool-ledger:${manifestHash}`, text, {
+		representation: "aggregate",
+		sourceHash: manifestHash,
+		sourceBytes,
+		policyVersion: 2,
+	})
+}
+
+/**
+ * Bound provider-visible tool continuity per block. Exact/legacy fragments are
+ * never dropped: if they alone exceed the configured ceiling, compression
+ * fails closed. Shaped receipts/digests are prioritized by actionable errors,
+ * mutation evidence and recency; overflow is replaced by one deterministic
+ * recoverable aggregate whose exact source remains in the raw session.
+ */
+export function budgetProtectedToolFragments(
+	fragments: CompressionProtectedFragment[],
+	state: DcpState,
+	config: DcpConfig,
+): CompressionProtectedFragment[] {
+	const configuredBudget = config.compress.maxProtectedToolContinuityBytes
+	const maxBytes = typeof configuredBudget === "number" && Number.isFinite(configuredBudget) && configuredBudget > 0
+		? Math.max(1_024, Math.floor(configuredBudget))
+		: 64 * 1024
+	const toolEntries = fragments
+		.map((fragment, index) => ({ fragment, index }))
+		.filter(({ fragment }) => fragment.kind === "tool")
+	if (toolEntries.length === 0) return fragments
+	const totalBytes = toolEntries.reduce((sum, { fragment }) => sum + protectedFragmentBytes(fragment), 0)
+	if (totalBytes <= maxBytes) return fragments
+
+	const exact = toolEntries.filter(({ fragment }) => !fragment.representation || fragment.representation === "exact")
+	const exactBytes = exact.reduce((sum, { fragment }) => sum + protectedFragmentBytes(fragment), 0)
+	if (exactBytes > maxBytes) {
+		throw new Error(
+			`Protected exact tool continuity requires ${exactBytes} bytes, above the ${maxBytes}-byte block budget; ` +
+			"cannot compact safely without recoverable provenance.",
+		)
+	}
+
+	const shaped = toolEntries.filter(({ fragment }) => fragment.representation && fragment.representation !== "exact")
+	const reserveForAggregate = Math.min(2_048, Math.max(256, maxBytes - exactBytes))
+	let remaining = Math.max(0, maxBytes - exactBytes - reserveForAggregate)
+	const selected = new Set(exact.map(({ index }) => index))
+	const ranked = [...shaped].sort((left, right) => {
+		const recordFor = (entry: typeof left) => {
+			const match = /^tool:(.+)$/.exec(entry.fragment.origin)
+			return match ? state.toolCalls.get(match[1]!) : undefined
+		}
+		const leftRecord = recordFor(left)
+		const rightRecord = recordFor(right)
+		const priority = (record: ReturnType<typeof recordFor>) => record?.isError ? 3 : isMutationContinuityTool(record?.toolName) ? 2 : 1
+		return priority(rightRecord) - priority(leftRecord) || right.index - left.index
+	})
+	for (const entry of ranked) {
+		const bytes = protectedFragmentBytes(entry.fragment)
+		if (bytes > remaining) continue
+		selected.add(entry.index)
+		remaining -= bytes
+	}
+	const dropped = toolEntries.filter(({ index }) => !selected.has(index)).map(({ fragment }) => fragment)
+	if (dropped.length === 0) return fragments
+	const aggregateBudget = Math.max(128, maxBytes - exactBytes - [...selected]
+		.filter((index) => !exact.some((entry) => entry.index === index))
+		.reduce((sum, index) => sum + protectedFragmentBytes(fragments[index]!), 0))
+	const aggregate = aggregateToolContinuity(dropped, state, aggregateBudget)
+	const result = fragments.filter((fragment, index) => fragment.kind !== "tool" || selected.has(index))
+	result.push(aggregate)
+	const resultToolBytes = result
+		.filter((fragment) => fragment.kind === "tool")
+		.reduce((sum, fragment) => sum + protectedFragmentBytes(fragment), 0)
+	if (resultToolBytes > maxBytes) {
+		throw new Error(`Protected tool continuity aggregate cannot fit the ${maxBytes}-byte block budget safely.`)
+	}
+	return mergeProtectedFragments(result)
 }
 
 function collectCurrentProtectedFragments(
@@ -572,9 +764,8 @@ function collectCurrentProtectedFragments(
 		const record = state.toolCalls.get(toolCallId)
 		if (!record || record.toolName === "compress" || !isToolRecordProtected(record, config)) continue
 		const continuity = toolRecordContinuity(record, config)
-		const text = continuity.text?.trim()
-		if (!text) continue
-		fragments.push(compressionProtectedFragment("tool", `tool:${toolCallId}`, text))
+		const fragment = toolFragmentFromDecision(toolCallId, continuity)
+		if (fragment) fragments.push(fragment)
 	}
 	return mergeProtectedFragments(fragments)
 }
@@ -601,11 +792,11 @@ export async function prepareCompressionProtectedFragments(
   const { startTimestamp, endTimestamp, startMessageId, endMessageId, state, config, mode, cwd } = options
   const ids = { startMessageId, endMessageId }
   const { coveredBlocks } = findCoveredAndPartialBlocks(startTimestamp, endTimestamp, state, ids)
-  const fragments = mergeProtectedFragments(
-    collectInheritedProtectedFragments(coveredBlocks),
+  let fragments = mergeProtectedFragments(
+	normalizeInheritedProtectedFragments(coveredBlocks, state, config),
     collectCurrentProtectedFragments(startTimestamp, endTimestamp, state, config, mode, ids),
   )
-  if (!cwd) return fragments
+  if (!cwd) return budgetProtectedToolFragments(fragments, state, config)
 
   const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
   let totalArtifactBytes = 0
@@ -639,23 +830,86 @@ export async function prepareCompressionProtectedFragments(
       "tool",
       `artifact:${toolCallId}:${artifact.artifactPath}`,
       `### Expanded subagent result: ${artifact.artifactPath}\n${artifact.text}`,
+	  { representation: "exact", sourceHash: createHash("sha256").update(artifact.text).digest("hex"), sourceBytes: artifactBytes, policyVersion: 2 },
     ))
   }
-  return mergeProtectedFragments(fragments)
-}
-
-function collectInheritedProtectedFragments(coveredBlocks: CompressionBlock[]): CompressionProtectedFragment[] {
-	return mergeProtectedFragments(
-		...coveredBlocks.map((block) => block.protectedFragments ?? []),
-	)
+  fragments = mergeProtectedFragments(fragments)
+  return budgetProtectedToolFragments(fragments, state, config)
 }
 
 function appendProtectedFragmentLedger(summary: string, fragments: CompressionProtectedFragment[]): string {
 	const missing = fragments.filter((fragment) => !summary.includes(fragment.text))
 	if (missing.length === 0) return summary
 	return summary +
-		"\n\nThe following protected continuity fragments were preserved verbatim:" +
+		"\n\nThe following protected continuity fragments were preserved for continuation:" +
 		missing.map((fragment) => `\n\n${fragment.text}`).join("")
+}
+
+const LEGACY_CONTINUITY_LEDGER_HEADINGS = [
+	"\n\nThe following user messages from this compressed range were preserved verbatim:",
+	"\n\nThe following protected prompt information appeared in the selected user message(s) and must be preserved verbatim:",
+	"\n\nThe following protected continuity fragments were preserved verbatim:",
+	"\n\nThe following protected continuity fragments were preserved for continuation:",
+]
+
+/**
+ * Recover the semantic summary core of a block. New separated blocks already
+ * store only the core. Legacy v2 blocks embedded the protected ledger at the
+ * end of `summary`; that suffix can be removed deterministically because DCP
+ * itself inserted the heading.
+ */
+export function compressionBlockCoreSummary(
+	block: Pick<CompressionBlock, "summary" | "continuityFormatVersion">,
+): string {
+	if (block.continuityFormatVersion === 2) return block.summary
+	let end = block.summary.length
+	for (const heading of LEGACY_CONTINUITY_LEDGER_HEADINGS) {
+		const index = block.summary.indexOf(heading)
+		if (index >= 0) end = Math.min(end, index)
+	}
+	return block.summary.slice(0, end).trimEnd()
+}
+
+/** Render the provider-visible summary for both legacy inline-ledger blocks and new separated blocks. */
+export function renderCompressionBlockSummary(block: Pick<CompressionBlock, "summary" | "protectedFragments" | "continuityFormatVersion">): string {
+	if (block.continuityFormatVersion !== 2) return block.summary
+	return appendProtectedFragmentLedger(block.summary, block.protectedFragments ?? [])
+}
+
+export interface CompressionContinuityRepackPreview {
+	summaryCore: string
+	protectedFragments: CompressionProtectedFragment[]
+	renderedSummary: string
+	estimatedTokens: number
+	estimatedGainTokens: number
+}
+
+/**
+ * Pure deterministic preview for rewriting one existing block under the
+ * current continuity policy. It never mutates the old block and therefore can
+ * be used by candidate planning before a transaction is created.
+ */
+export function previewCompressionContinuityRepack(
+	block: CompressionBlock,
+	state: DcpState,
+	config: DcpConfig,
+): CompressionContinuityRepackPreview {
+	const summaryCore = compressionBlockCoreSummary(block)
+	const protectedFragments = budgetProtectedToolFragments(
+		normalizeInheritedProtectedFragments([block], state, config),
+		state,
+		config,
+	)
+	const renderedSummary = appendProtectedFragmentLedger(summaryCore, protectedFragments)
+	const estimatedTokens = estimateTokens(renderedSummary)
+	const currentTokens = Math.max(0, Math.round(block.summaryTokenEstimate ?? estimateTokens(renderCompressionBlockSummary(block))))
+	return {
+		summaryCore,
+		protectedFragments,
+		renderedSummary,
+		estimatedTokens,
+		estimatedGainTokens: Math.max(0, currentTokens - estimatedTokens),
+	}
 }
 
 export function estimateVisibleRangeTokens(
@@ -881,37 +1135,17 @@ export function createRangeCompressionBlock(
     },
   )
 
-  const userPreservedSummary = mode === "range"
-    ? appendProtectedUserMessages(
-      placeholderSummary,
-      startTimestamp,
-      endTimestamp,
-      state,
-      config.compress.protectUserMessages,
-      ids,
-    )
-    : placeholderSummary
-
-  const promptPreservedSummary = appendProtectedPromptInfo(
-    userPreservedSummary,
-    startTimestamp,
-    endTimestamp,
-    state,
-    config,
-    ids,
-  )
-
-  const protectedFragments = mergeProtectedFragments(
-    collectInheritedProtectedFragments(coveredBlocks),
+  const protectedFragments = budgetProtectedToolFragments(mergeProtectedFragments(
+    normalizeInheritedProtectedFragments(coveredBlocks, state, config),
     collectCurrentProtectedFragments(startTimestamp, endTimestamp, state, config, mode, ids),
     preparedProtectedFragments,
-  )
-  const ledgerPreservedSummary = appendProtectedFragmentLedger(promptPreservedSummary, protectedFragments)
+  ), state, config)
+  const renderedSummary = appendProtectedFragmentLedger(placeholderSummary, protectedFragments)
 
   const block: CompressionBlock = {
     id: state.nextBlockId++,
     topic,
-    summary: ledgerPreservedSummary,
+    summary: placeholderSummary,
     startTimestamp,
     endTimestamp,
     startMessageId,
@@ -920,7 +1154,8 @@ export function createRangeCompressionBlock(
     anchorMessageId,
     createdByToolCallId,
     active: true,
-    summaryTokenEstimate: estimateTokens(ledgerPreservedSummary),
+    summaryTokenEstimate: estimateTokens(renderedSummary),
+    summaryCoreTokenEstimate: estimateTokens(placeholderSummary),
     createdAt: Date.now(),
     coveredBlockIds: coveredBlocks.map((covered) => covered.id),
     mode,
@@ -929,6 +1164,7 @@ export function createRangeCompressionBlock(
     sourceMembers: copyMembers(sourceMembers!),
     mutationMembers: copyMembers(mutationMembers!),
     protectedFragments,
+    continuityFormatVersion: 2,
   }
 
   state.compressionBlocks.push(block)

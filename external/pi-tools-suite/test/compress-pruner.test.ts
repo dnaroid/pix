@@ -15,6 +15,7 @@ import {
   applyAnchoredNudges,
   clearDcpNudgeAnchors,
   detectCompressionBlockConsolidationCandidate,
+  detectCompressionContinuityRepackCandidate,
   detectCompressionCandidate,
   detectEmergencyCompressionCandidate,
   detectMessageCompressionCandidates,
@@ -44,7 +45,12 @@ import {
 } from "../src/dcp/state.js";
 import { stableMessageKeys } from "../src/dcp/pruner-message-ids.js";
 import { applyCompressionBlocks } from "../src/dcp/pruner-compression-blocks.js";
-import { createRangeCompressionBlock as createRuntimeRangeCompressionBlock } from "../src/dcp/compression-blocks.js";
+import {
+  budgetProtectedToolFragments,
+  previewCompressionContinuityRepack,
+  createRangeCompressionBlock as createRuntimeRangeCompressionBlock,
+  renderCompressionBlockSummary,
+} from "../src/dcp/compression-blocks.js";
 import { canonicalMessageHash } from "../src/dcp/conversation-index.js";
 import {
   stripStaleDcpMetadataFromAssistantMessage,
@@ -823,6 +829,180 @@ describe("DCP pruning effectiveness", () => {
     expect(minimal!.reason).toContain("minimal oldest protocol-safe prefix");
   });
 
+  test("budget-aware candidate sizes recovery after protected continuity retention", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        protectedTools: ["compress", "write", "edit", "read"],
+        autoCandidates: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          minMessages: 2,
+          minTokens: 0,
+        },
+      } as any,
+    });
+    const exactOutput = "protected exact read evidence\n".repeat(700);
+    const exactRecord = toolRecord("exact-read", "read", "read::exact", 5_000, 0, { path: "src/exact.ts" });
+    exactRecord.outputText = exactOutput;
+    state.toolCalls.set("exact-read", exactRecord);
+
+    const pruned = applyPruning([
+      textMessage("user", "old request", 1),
+      assistantToolCall("exact-read", 2),
+      toolResult("exact-read", "read", exactOutput, 3),
+      textMessage("assistant", `compressible analysis ${"z".repeat(12_000)}`, 4),
+      textMessage("user", "recent protected request", 5),
+    ], state, cfg);
+
+    const candidate = detectCompressionCandidate(pruned, state, cfg, 0.9, { requiredSavingsTokens: 1_000 });
+
+    expect(candidate).not.toBeNull();
+    expect(candidate!.estimatedRetentionTokens).toBeGreaterThan(1_000);
+    expect(candidate!.estimatedRecoverableTokens).toBeGreaterThanOrEqual(1_000);
+    expect(state.messageMetaSnapshot.get(candidate!.endId)?.role).toBe("assistant");
+    expect(state.messageMetaSnapshot.get(candidate!.endId)?.text).toContain("compressible analysis");
+  });
+
+  test("tool continuity budget aggregates shaped overflow and fails closed for oversized exact evidence", () => {
+    const state = createState();
+    const cfg = config({ compress: { maxProtectedToolContinuityBytes: 4_096 } as any });
+    const fragments = Array.from({ length: 24 }, (_, index) => {
+      const id = `patch-${index}`;
+      const record = toolRecord(id, "apply_patch", `apply_patch::${index}`, 2_000);
+      record.outputDetails = { changedFiles: [`src/file-${index}.ts`], summary: `patch ${index}` };
+      state.toolCalls.set(id, record);
+      return {
+        kind: "tool" as const,
+        origin: `tool:${id}`,
+        hash: index.toString(16).padStart(64, "0"),
+        text: `receipt-${index}\n${"evidence ".repeat(100)}`,
+        representation: "receipt" as const,
+        sourceHash: (index + 100).toString(16).padStart(64, "0"),
+        sourceBytes: 10_000,
+        policyVersion: 2 as const,
+      };
+    });
+
+    const bounded = budgetProtectedToolFragments(fragments, state, cfg);
+    const toolBytes = bounded
+      .filter((fragment) => fragment.kind === "tool")
+      .reduce((sum, fragment) => sum + Buffer.byteLength(fragment.text, "utf8"), 0);
+    const aggregate = bounded.find((fragment) => fragment.representation === "aggregate");
+
+    expect(toolBytes).toBeLessThanOrEqual(4_096);
+    expect(aggregate?.text).toContain("Historical tool continuity aggregate");
+    expect(aggregate?.text).toContain("apply_patch");
+    expect(bounded.length).toBeLessThan(fragments.length);
+
+    const exactCfg = config({ compress: { maxProtectedToolContinuityBytes: 1_024 } as any });
+    expect(() => budgetProtectedToolFragments([{
+      kind: "tool",
+      origin: "artifact:required",
+      hash: "a".repeat(64),
+      text: "MUST_REMAIN_EXACT".repeat(400),
+      representation: "exact",
+      policyVersion: 2,
+    }], createState(), exactCfg)).toThrow(/exact tool continuity requires/i);
+  });
+
+  test("legacy block continuity is re-normalized only with matching recoverable provenance", () => {
+    const cfg = config({ compress: { maxProtectedToolContinuityBytes: 64 * 1024 } as any });
+    const state = createState();
+    const output = "Success. Updated the following files:\nsrc/a.ts\n" + "diagnostic detail\n".repeat(1_500);
+    const exactText = `### Tool: apply_patch\n${output.trim()}`;
+    const patchRecord = toolRecord("legacy-patch", "apply_patch", "apply_patch::legacy", 8_000);
+    patchRecord.outputText = output;
+    patchRecord.outputDetails = { changedFiles: ["src/a.ts"], summary: "Updated src/a.ts" };
+    state.toolCalls.set("legacy-patch", patchRecord);
+    const legacy = block(1, 1, 1);
+    legacy.summary = `semantic continuation core\n\nThe following protected continuity fragments were preserved verbatim:\n\n${exactText}`;
+    legacy.summaryTokenEstimate = estimateTokens(legacy.summary);
+    legacy.protectedFragments = [{
+      kind: "tool",
+      origin: "tool:legacy-patch",
+      hash: "b".repeat(64),
+      text: exactText,
+    }];
+
+    const preview = previewCompressionContinuityRepack(legacy, state, cfg);
+    expect(preview.summaryCore).toBe("semantic continuation core");
+    expect(preview.protectedFragments).toHaveLength(1);
+    expect(preview.protectedFragments[0]?.representation).toBe("receipt");
+    expect(preview.renderedSummary).not.toContain("diagnostic detail\ndiagnostic detail");
+    expect(preview.estimatedGainTokens).toBeGreaterThan(1_000);
+
+    const noProvenance = previewCompressionContinuityRepack(legacy, createState(), cfg);
+    expect(noProvenance.protectedFragments[0]?.representation).toBeUndefined();
+    expect(noProvenance.renderedSummary).toContain("diagnostic detail\ndiagnostic detail");
+  });
+
+  test("single oversized legacy block gets a deterministic continuity repack without invoking a summarizer", async () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        maxProtectedToolContinuityBytes: 8 * 1024,
+        autoCompress: {
+          enabled: true,
+          patience: 0,
+          summarizerModel: ["zai/must-not-run"],
+          summarizerFallbackModels: [],
+          timeoutMs: 5_000,
+        },
+      } as any,
+    });
+    const rawSource = { id: "legacy-source", role: "assistant", timestamp: 1, content: [{ type: "text", text: "historical source" }] };
+    const raw = [rawSource, { id: "recent", role: "user", timestamp: 2, content: [{ type: "text", text: "continue" }] }];
+    const output = "Success. Updated the following files:\nsrc/a.ts\n" + "old patch diagnostic\n".repeat(2_000);
+    const exactText = `### Tool: apply_patch\n${output.trim()}`;
+    const oldBlock = block(1, 1, 1);
+    oldBlock.startMessageId = "id:legacy-source";
+    oldBlock.endMessageId = "id:legacy-source";
+    oldBlock.anchorTimestamp = 2;
+    oldBlock.anchorMessageId = "id:recent";
+    oldBlock.summary = `semantic continuation core\n\nThe following protected continuity fragments were preserved verbatim:\n\n${exactText}`;
+    oldBlock.summaryTokenEstimate = estimateTokens(oldBlock.summary);
+    oldBlock.sourceMembers = [{ stableId: "id:legacy-source", hash: canonicalMessageHash(rawSource) }];
+    oldBlock.mutationMembers = [{ stableId: "id:legacy-source", hash: canonicalMessageHash(rawSource) }];
+    oldBlock.protectedFragments = [{ kind: "tool", origin: "tool:legacy-patch", hash: "c".repeat(64), text: exactText }];
+    state.compressionBlocks = [oldBlock];
+    state.nextBlockId = 2;
+    const patchRecord = toolRecord("legacy-patch", "apply_patch", "apply_patch::legacy", 10_000);
+    patchRecord.outputText = output;
+    patchRecord.outputDetails = { changedFiles: ["src/a.ts"], summary: "Updated src/a.ts" };
+    state.toolCalls.set("legacy-patch", patchRecord);
+
+    const projected = applyPruning(raw, state, cfg);
+    const candidate = detectCompressionContinuityRepackCandidate(projected, state, cfg, { requiredSavingsTokens: 1_000 });
+    expect(candidate).not.toBeNull();
+    expect(candidate?.kind).toBe("continuity-repack");
+    expect(candidate?.includedBlockIds).toEqual([1]);
+    expect(candidate?.estimatedRecoverableTokens ?? 0).toBeGreaterThan(1_000);
+
+    let modelCalls = 0;
+    const result = await createAutoCompressionBlock({
+      state,
+      config: cfg,
+      messages: projected,
+      candidate: candidate!,
+      topic: "Continuity repack",
+      modelRegistry: {
+        find() { modelCalls++; throw new Error("summarizer must not run for deterministic repack"); },
+      } as any,
+    });
+
+    expect(modelCalls).toBe(0);
+    expect(result.summaryMode).toBe("programmatic");
+    expect(state.compressionBlocks.find((candidateBlock) => candidateBlock.id === 1)?.active).toBe(false);
+    const repacked = state.compressionBlocks.find((candidateBlock) => candidateBlock.id === result.blockId)!;
+    expect(repacked.continuityFormatVersion).toBe(2);
+    expect(repacked.summary).toBe("semantic continuation core");
+    expect(repacked.protectedFragments?.[0]?.representation).toBe("receipt");
+    expect(renderCompressionBlockSummary(repacked)).not.toContain("old patch diagnostic\nold patch diagnostic");
+    expect(result.projectedGain).toBeGreaterThan(1_000);
+  });
+
   test("automatic block consolidation requires a batched physically-adjacent block-only range", () => {
     const state = createState();
     const cfg = config({
@@ -1534,9 +1714,10 @@ describe("DCP pruning effectiveness", () => {
       undefined,
       { ui: { notify() {} } },
     );
-    expect(protectedState.compressionBlocks[0]?.summary).toContain("compressed safely");
-    expect(protectedState.compressionBlocks[0]?.summary).toContain("The following user messages");
-    expect(protectedState.compressionBlocks[0]?.summary).toContain("critical user intent");
+    const protectedBlock = protectedState.compressionBlocks[0]!;
+    expect(protectedBlock.summary).toContain("compressed safely");
+    expect(protectedBlock.summary).not.toContain("critical user intent");
+    expect(renderCompressionBlockSummary(protectedBlock)).toContain("critical user intent");
   });
 
   test("range and message compression accept the first raw ID after a block with the same timestamp", async () => {
@@ -1703,7 +1884,8 @@ describe("DCP pruning effectiveness", () => {
     const block = state.compressionBlocks[0];
     expect(block?.mode).toBe("message");
     expect(block?.topic).toBe("Old Prompt");
-    expect(block?.summary).toContain("exact requirement");
+    expect(block?.summary).not.toContain("exact requirement");
+    expect(renderCompressionBlockSummary(block!)).toContain("exact requirement");
 
     const pruned = applyPruning(
       [
@@ -2646,9 +2828,10 @@ describe("DCP pruning effectiveness", () => {
     }).block;
 
     expect(second.coveredBlockIds).toEqual([first.id]);
-    expect(second.summary).toContain("MUST_KEEP_EXACT_CONSTRAINT");
+    expect(second.summary).not.toContain("MUST_KEEP_EXACT_CONSTRAINT");
+    expect(renderCompressionBlockSummary(second)).toContain("MUST_KEEP_EXACT_CONSTRAINT");
     expect(second.summary).not.toContain("OLD_VERBATIM_SUMMARY_BODY");
-    expect(second.summary.match(/MUST_KEEP_EXACT_CONSTRAINT/g)).toHaveLength(1);
+    expect(renderCompressionBlockSummary(second).match(/MUST_KEEP_EXACT_CONSTRAINT/g)).toHaveLength(1);
     expect(second.protectedFragments).toHaveLength(1);
     expect(second.protectedFragments?.[0]?.origin).toBe(first.protectedFragments?.[0]?.origin);
   });
@@ -2771,7 +2954,7 @@ describe("DCP pruning effectiveness", () => {
       process.chdir(previousCwd);
     }
 
-    const summary = state.compressionBlocks[0]?.summary ?? "";
+    const summary = renderCompressionBlockSummary(state.compressionBlocks[0]!);
     expect(summary).toContain("compact subagent summary");
     expect(summary).toContain("full subagent result body");
   });
