@@ -22,10 +22,12 @@ export function createComposerDraftStore(options: ComposerDraftStoreOptions) {
 
   function save(ownerId: string | null | undefined): void {
     if (!ownerId || !options.workspace()) return;
-    drafts.set(key(ownerId), {
-      text: options.promptText(),
-      attachments: [...options.promptAttachments()],
-    });
+    set(ownerId, options.promptText(), options.promptAttachments());
+  }
+
+  function set(ownerId: string, text: string, attachments: readonly Attachment[]): void {
+    if (!ownerId || !options.workspace()) return;
+    drafts.set(key(ownerId), { text, attachments: [...attachments] });
   }
 
   function restore(ownerId: string, reset = false): void {
@@ -61,5 +63,5 @@ export function createComposerDraftStore(options: ComposerDraftStoreOptions) {
     options.replacePromptAttachments([]);
   }
 
-  return { save, restore, switchTo, forget, reset };
+  return { save, set, restore, switchTo, forget, reset };
 }

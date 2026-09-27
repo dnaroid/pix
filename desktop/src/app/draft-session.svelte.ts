@@ -2,6 +2,7 @@ import { tick } from "svelte";
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { AcpClient } from "../lib/acp-client";
 import type { Attachment } from "../lib/attachments";
+import type { TranscriptState } from "../lib/transcript";
 
 export const DRAFT_SESSION_TAB_ID = "pix:desktop-draft-session";
 
@@ -30,16 +31,19 @@ type DraftSessionOptions = {
     targetOwnerId: string,
     options?: { resetTarget?: boolean; preserveSource?: boolean },
   ) => void;
+  storeComposerDraft: (ownerId: string, text: string, attachments: readonly Attachment[]) => void;
   forgetComposerDraft: (ownerId: string) => void;
   setPromptText: (text: string) => void;
   replacePromptAttachments: (attachments: readonly Attachment[]) => void;
+  activeTranscript: () => TranscriptState;
+  setActiveTranscript: (transcript: TranscriptState) => void;
   focusComposer: () => void | Promise<void>;
   forgetRuntime: (sessionId: string) => void;
   ensureProvisionalSession: (sessionId: string, workspace: string) => void;
   showSessionTab: (sessionId: string) => void;
   retargetWorkbenchAnchors: (sourceSessionId: string, targetSessionId?: string) => void;
   retargetAttachmentDraftKey: (workspace: string, sessionId: string) => void;
-  adoptMaterializedTranscript: (sessionId: string) => void;
+  adoptMaterializedTranscript: (sessionId: string, transcript: TranscriptState) => void;
   setConfigOptions: (options: SessionConfigOption[]) => void;
   markRuntimeReady: (sessionId: string, options: SessionConfigOption[]) => void;
   rememberActiveSession: (workspace: string, sessionId: string) => void;
@@ -55,6 +59,7 @@ export function createDraftSession(options: DraftSessionOptions) {
   let materializationGeneration = 0;
   let materializationController: AbortController | null = null;
   let optimisticComposerSnapshot: { text: string; attachments: Attachment[] } | null = null;
+  let materializationTranscript: TranscriptState | null = null;
 
   function beginOptimisticSubmit(text: string, attachments: readonly Attachment[]): boolean {
     if (!active || materializing || optimisticComposerSnapshot) return false;
@@ -74,11 +79,19 @@ export function createDraftSession(options: DraftSessionOptions) {
     options.replacePromptAttachments(snapshot.attachments);
   }
 
+  function restoreOptimisticSubmitToDraft(): void {
+    const snapshot = optimisticComposerSnapshot;
+    if (!snapshot) return;
+    optimisticComposerSnapshot = null;
+    options.storeComposerDraft(DRAFT_SESSION_TAB_ID, snapshot.text, snapshot.attachments);
+  }
+
   function invalidateMaterialization(): void {
     materializationGeneration += 1;
     materializationController?.abort();
     materializationController = null;
     materializing = false;
+    materializationTranscript = null;
   }
 
   function activate(config: { resetComposer?: boolean } = {}): void {
@@ -98,6 +111,7 @@ export function createDraftSession(options: DraftSessionOptions) {
     open = true;
     active = true;
     options.switchComposerDraft(sourceOwnerId, DRAFT_SESSION_TAB_ID, { resetTarget: config.resetComposer });
+    if (materializing && materializationTranscript) options.setActiveTranscript(materializationTranscript);
     if (config.resetComposer) {
       touched = false;
       options.resetModelDraft();
@@ -126,10 +140,13 @@ export function createDraftSession(options: DraftSessionOptions) {
       return null;
     }
     const generation = ++materializationGeneration;
+    const canContinueInBackground = optimisticComposerSnapshot !== null;
     const controller = new AbortController();
     materializationController?.abort();
     materializationController = controller;
     let createdSessionId: string | null = null;
+    const transcript = options.activeTranscript();
+    materializationTranscript = transcript;
     materializing = true;
     options.setErrorMessage(null);
 
@@ -137,7 +154,7 @@ export function createDraftSession(options: DraftSessionOptions) {
       requestClient !== options.client()
       || requestWorkspace !== options.workspace()
       || generation !== materializationGeneration
-      || !active
+      || (!active && !canContinueInBackground)
     );
     const discardCreatedSession = (sessionId: string): void => {
       options.forgetRuntime(sessionId);
@@ -164,22 +181,25 @@ export function createDraftSession(options: DraftSessionOptions) {
         return null;
       }
 
+      const foreground = active;
       options.ensureProvisionalSession(created.sessionId, requestWorkspace);
       options.showSessionTab(created.sessionId);
       options.retargetWorkbenchAnchors(DRAFT_SESSION_TAB_ID, created.sessionId);
-      options.retargetAttachmentDraftKey(requestWorkspace, created.sessionId);
-      options.setActiveSessionId(created.sessionId);
+      if (foreground) {
+        options.retargetAttachmentDraftKey(requestWorkspace, created.sessionId);
+        options.setActiveSessionId(created.sessionId);
+      }
       open = false;
       active = false;
       touched = false;
       clearOptimisticSubmit();
       options.forgetComposerDraft(DRAFT_SESSION_TAB_ID);
       options.resetModelDraft();
-      options.adoptMaterializedTranscript(created.sessionId);
+      options.adoptMaterializedTranscript(created.sessionId, transcript);
       const configOptions = loaded.configOptions ?? created.configOptions ?? [];
-      options.setConfigOptions(configOptions);
+      if (foreground) options.setConfigOptions(configOptions);
       options.markRuntimeReady(created.sessionId, configOptions);
-      options.rememberActiveSession(requestWorkspace, created.sessionId);
+      if (foreground) options.rememberActiveSession(requestWorkspace, created.sessionId);
       return created.sessionId;
     } catch (error) {
       if (createdSessionId) discardCreatedSession(createdSessionId);
@@ -187,9 +207,9 @@ export function createDraftSession(options: DraftSessionOptions) {
         requestClient === options.client()
         && requestWorkspace === options.workspace()
         && generation === materializationGeneration
-        && active
       ) {
-        restoreOptimisticSubmit();
+        if (active) restoreOptimisticSubmit();
+        else restoreOptimisticSubmitToDraft();
         options.reportError(error);
       }
       return null;
@@ -197,14 +217,16 @@ export function createDraftSession(options: DraftSessionOptions) {
       if (generation === materializationGeneration) {
         if (materializationController === controller) materializationController = null;
         materializing = false;
+        materializationTranscript = null;
       }
     }
   }
 
   function deactivate(): void {
+    active = false;
+    if (materializing && optimisticComposerSnapshot) return;
     restoreOptimisticSubmit();
     invalidateMaterialization();
-    active = false;
   }
 
   function close(): void {

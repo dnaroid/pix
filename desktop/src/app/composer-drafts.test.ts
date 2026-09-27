@@ -52,4 +52,24 @@ describe("composer draft store", () => {
     expect(text).toBe("");
     expect(attachments).toEqual([]);
   });
+
+  it("can update an inactive owner's retry draft without changing the active composer", () => {
+    let text = "active session";
+    let attachments = [attachment("active")];
+    const drafts = createComposerDraftStore({
+      workspace: () => "/workspace",
+      promptText: () => text,
+      promptAttachments: () => attachments,
+      setPromptText: (next) => { text = next; },
+      replacePromptAttachments: (next) => { attachments = [...next]; },
+    });
+
+    drafts.set("draft", "retry prompt", [attachment("retry")]);
+    expect(text).toBe("active session");
+    expect(attachments.map((item) => item.id)).toEqual(["active"]);
+
+    drafts.switchTo("active", "draft");
+    expect(text).toBe("retry prompt");
+    expect(attachments.map((item) => item.id)).toEqual(["retry"]);
+  });
 });

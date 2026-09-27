@@ -11,17 +11,26 @@ function deferred<T>() {
 }
 
 describe("selecting an existing tab during draft materialization", () => {
-  it("invalidates the draft and discards a late session when selecting another tab", async () => {
+  it("lets an optimistic draft materialize in the background without stealing selection", async () => {
     const created = deferred<{ sessionId: string }>();
     const closed: string[] = [];
     let current: string | null = null;
     const prompt = "keep this prompt";
+    const optimisticTranscript = { items: [] } as never;
     const clearPrompt = vi.fn();
     const invalidateAttachmentDraft = vi.fn();
     const switchComposerDraft = vi.fn();
+    const storeComposerDraft = vi.fn();
     const forgetComposerDraft = vi.fn();
     const setPromptText = vi.fn();
     const replacePromptAttachments = vi.fn();
+    const setActiveTranscript = vi.fn();
+    const showSessionTab = vi.fn();
+    const retargetAttachmentDraftKey = vi.fn();
+    const adoptMaterializedTranscript = vi.fn();
+    const setConfigOptions = vi.fn();
+    const markRuntimeReady = vi.fn();
+    const rememberActiveSession = vi.fn();
     let draft!: ReturnType<typeof createDraftSession>;
     draft = createDraftSession({
       client: () => client as never, workspace: () => "/work", statusReady: () => true,
@@ -31,11 +40,12 @@ describe("selecting an existing tab during draft materialization", () => {
       closeSessionSelector: vi.fn(), cancelHistoryLoad: vi.fn(), resetModelDraft: vi.fn(),
       draftConfigAvailable: () => true, refreshDraftConfig: vi.fn(), draftModelOverride: () => null,
       routeDraftModel: vi.fn(async () => null),
-      switchComposerDraft, forgetComposerDraft,
+      switchComposerDraft, storeComposerDraft, forgetComposerDraft,
       setPromptText, replacePromptAttachments,
-      focusComposer: vi.fn(), forgetRuntime: vi.fn(), ensureProvisionalSession: vi.fn(), showSessionTab: vi.fn(),
-      retargetWorkbenchAnchors: vi.fn(), retargetAttachmentDraftKey: vi.fn(), adoptMaterializedTranscript: vi.fn(),
-      setConfigOptions: vi.fn(), markRuntimeReady: vi.fn(), rememberActiveSession: vi.fn(),
+      activeTranscript: () => optimisticTranscript, setActiveTranscript,
+      focusComposer: vi.fn(), forgetRuntime: vi.fn(), ensureProvisionalSession: vi.fn(), showSessionTab,
+      retargetWorkbenchAnchors: vi.fn(), retargetAttachmentDraftKey, adoptMaterializedTranscript,
+      setConfigOptions, markRuntimeReady, rememberActiveSession,
       setErrorMessage: vi.fn(), reportError: vi.fn(),
     });
     const client = {
@@ -82,13 +92,21 @@ describe("selecting an existing tab during draft materialization", () => {
     expect(draft.open).toBe(true);
     expect(clearPrompt).not.toHaveBeenCalled();
     expect(invalidateAttachmentDraft).not.toHaveBeenCalled();
-    expect(setPromptText).toHaveBeenCalledWith(prompt);
-    expect(setPromptText.mock.invocationCallOrder[0]).toBeLessThan(switchComposerDraft.mock.invocationCallOrder.at(-1)!);
+    expect(setPromptText).not.toHaveBeenCalled();
+    expect(replacePromptAttachments).not.toHaveBeenCalled();
     expect(switchComposerDraft).toHaveBeenCalledWith(DRAFT_SESSION_TAB_ID, "existing");
-    created.resolve({ sessionId: "late" });
-    await expect(submission).resolves.toBeNull();
-    await vi.waitFor(() => expect(closed).toContain("late"));
+    created.resolve({ sessionId: "background" });
+    await expect(submission).resolves.toBe("background");
     expect(current).toBe("existing");
-    expect(client.loadSession).not.toHaveBeenCalled();
+    expect(closed).toEqual([]);
+    expect(client.loadSession).toHaveBeenCalledWith("background", "/work");
+    expect(showSessionTab).toHaveBeenCalledWith("background");
+    expect(adoptMaterializedTranscript).toHaveBeenCalledWith("background", optimisticTranscript);
+    expect(markRuntimeReady).toHaveBeenCalledWith("background", []);
+    expect(retargetAttachmentDraftKey).not.toHaveBeenCalled();
+    expect(setConfigOptions).not.toHaveBeenCalled();
+    expect(rememberActiveSession).not.toHaveBeenCalled();
+    expect(draft.open).toBe(false);
+    expect(draft.materializing).toBe(false);
   });
 });

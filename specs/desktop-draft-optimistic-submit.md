@@ -29,11 +29,17 @@ in first-prompt model routing just as it is for non-optimistic materialization.
 - If materialization fails while the draft is still active, the original text
   and attachments are restored to the composer and the optimistic transcript
   message is rolled back.
-- If the user selects another session while draft materialization is pending,
-  the original composer draft is restored before switching owners so it remains
-  available when the user returns to the draft. Any late ACP session created by
-  the abandoned materialization is closed and must not replace the selected
-  session.
+- If the user selects another session after the optimistic first prompt has been
+  accepted, that selection does not abandon the send. Materialization continues
+  in the background, the real session adopts the captured optimistic transcript,
+  and the prepared prompt is sent to that real session without replacing the
+  session the user selected or overwriting its composer/runtime/config state.
+- Explicit draft discard/close, workspace/client invalidation, or another stale
+  materialization generation still cancels startup. Any ACP session created by a
+  stale generation is closed instead of being promoted.
+- If background materialization fails after the user has selected another
+  session, the original text and attachments are stored under the draft owner
+  for retry without replacing the currently selected composer.
 - Successful materialization must adopt the optimistic transcript rather than
   replacing it with an empty transcript.
 
@@ -44,11 +50,13 @@ in first-prompt model routing just as it is for non-optimistic materialization.
 - `desktop/src/app/desktop-prompt-action-services.ts::createDesktopPromptActionServices`
 - `desktop/src/app/desktop-session-transition-services.ts::createDesktopSessionTransitionServices`
 - `desktop/src/app/session-tab-selection.ts::createSessionTabSelection`
+- `desktop/src/app/composer-drafts.ts::createComposerDraftStore`
 
 ## Tests
 
 - `desktop/src/app/prompt-submit.test.ts`
 - `desktop/src/app/draft-tab-selection.test.ts`
+- `desktop/src/app/composer-drafts.test.ts`
 - `desktop/src/components/DesktopDraftSessionConcurrency.test.ts`
 
 ## Verification
@@ -57,6 +65,10 @@ in first-prompt model routing just as it is for non-optimistic materialization.
   materialization promise is still unresolved.
 - After successful materialization, the prompt request runs once against the
   real session id and the optimistic message remains in the transcript.
-- Failed or abandoned materialization restores draft input without leaking a
-  late-created session into the active workbench.
+- Switching to another conversation while startup is pending leaves that
+  conversation selected while the accepted prompt materializes and sends in the
+  background.
+- Failed materialization keeps retry input with the draft owner; explicitly
+  abandoned or stale materialization does not leak a late-created session into
+  the active workbench.
 - Desktop Svelte/TypeScript checks complete with zero errors and warnings.

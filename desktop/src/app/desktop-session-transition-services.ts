@@ -82,9 +82,12 @@ export function createDesktopSessionTransitionServices(
     draftModelOverride: options.draftModelOverride,
     routeDraftModel: options.routeDraftModel,
     switchComposerDraft: composerDrafts.switchTo,
+    storeComposerDraft: composerDrafts.set,
     forgetComposerDraft: composerDrafts.forget,
     setPromptText: options.setPromptText,
     replacePromptAttachments: options.replacePromptAttachments,
+    activeTranscript: () => options.state.transcript,
+    setActiveTranscript: options.state.setTranscript,
     focusComposer: options.focusComposer,
     forgetRuntime: (sessionId) => options.sessionCoordinator().forgetRuntime(sessionId),
     ensureProvisionalSession: options.sessions.catalog.ensureProvisional,
@@ -92,8 +95,7 @@ export function createDesktopSessionTransitionServices(
     retargetWorkbenchAnchors: (sourceSessionId, targetSessionId) =>
       options.workbenchController().retargetSessionAnchors(sourceSessionId, targetSessionId),
     retargetAttachmentDraftKey: options.retargetAttachmentDraftKey,
-    adoptMaterializedTranscript: (sessionId) =>
-      options.state.setSessionTranscript(sessionId, options.state.transcript),
+    adoptMaterializedTranscript: options.state.setSessionTranscript,
     setConfigOptions: options.state.setConfigOptions,
     markRuntimeReady: options.sessions.runtime.markReady,
     rememberActiveSession: options.sessions.tabs.rememberActive,

@@ -94,10 +94,8 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     draftSessionTabActive: () => options.transitions.draft.active,
     beginOptimisticDraftSubmit: options.transitions.draft.beginOptimisticSubmit,
     materializeDraftSession: options.transitions.draft.materialize,
-    activeSessionRuntimeReady: () => options.state.runtimeReady,
-    promptRunning: () => options.state.sessionId
-      ? options.prompt.runtime.isRunning(options.state.sessionId)
-      : false,
+    sessionRuntimeReady: options.sessions.runtime.isReady,
+    promptRunning: options.prompt.runtime.isRunning,
     openSessionStartTab: options.transitions.draft.openStartTab,
     enhancePromptDraft: options.conversation.enhancePromptDraft,
     importConversationPath: options.conversation.importConversationPath,

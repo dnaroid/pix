@@ -3,21 +3,21 @@ import type { AcpClient } from "../lib/acp-client";
 import { createPromptSubmit } from "./prompt-submit";
 
 describe("createPromptSubmit terminal commands", () => {
-  it("renders the first normal draft prompt optimistically before materialization finishes", async () => {
+  it("keeps the optimistic first draft prompt alive when another tab is selected during materialization", async () => {
     let promptText = "Implement the subsystem";
     const promptAttachments: never[] = [];
     let activeSessionId: string | null = null;
     let finishMaterialization!: (sessionId: string | null) => void;
     const materializeDraftSession = vi.fn(() => new Promise<string | null>((resolve) => {
-      finishMaterialization = (sessionId) => {
-        activeSessionId = sessionId;
-        resolve(sessionId);
-      };
+      finishMaterialization = resolve;
     }));
     const rollbackOptimisticMessage = vi.fn();
     const appendUserMessage = vi.fn(() => rollbackOptimisticMessage);
     const beginOptimisticDraftSubmit = vi.fn(() => true);
-    const runPromptRequest = vi.fn(async () => {});
+    const sentSessionIds: string[] = [];
+    const runPromptRequest = vi.fn(async (_client: AcpClient, sessionId: string) => {
+      sentSessionIds.push(sessionId);
+    });
     const client = {} as AcpClient;
     const submit = createPromptSubmit({
       client: () => client,
@@ -33,7 +33,7 @@ describe("createPromptSubmit terminal commands", () => {
       draftSessionTabActive: () => activeSessionId === null,
       beginOptimisticDraftSubmit,
       materializeDraftSession,
-      activeSessionRuntimeReady: () => true,
+      sessionRuntimeReady: (sessionId: string) => sessionId === "session-auto",
       promptRunning: () => false,
       openSessionStartTab: async () => {},
       enhancePromptDraft: async () => {},
@@ -77,10 +77,13 @@ describe("createPromptSubmit terminal commands", () => {
     expect(materializeDraftSession).toHaveBeenCalledWith("Implement the subsystem", 0);
     expect(runPromptRequest).not.toHaveBeenCalled();
 
+    activeSessionId = "existing-session";
     finishMaterialization("session-auto");
     await pendingSubmit;
 
     expect(runPromptRequest).toHaveBeenCalled();
+    expect(sentSessionIds).toEqual(["session-auto"]);
+    expect(activeSessionId).toBe("existing-session");
     expect(rollbackOptimisticMessage).not.toHaveBeenCalled();
   });
 
@@ -106,7 +109,7 @@ describe("createPromptSubmit terminal commands", () => {
       draftSessionTabActive: () => true,
       beginOptimisticDraftSubmit: () => true,
       materializeDraftSession: vi.fn(async () => { throw new Error("must not materialize"); }),
-      activeSessionRuntimeReady: () => false,
+      sessionRuntimeReady: () => false,
       promptRunning: () => true,
       openSessionStartTab: async () => {},
       enhancePromptDraft: async () => {},
@@ -170,7 +173,7 @@ describe("createPromptSubmit terminal commands", () => {
       draftSessionTabActive: () => false,
       beginOptimisticDraftSubmit: () => false,
       materializeDraftSession: async () => null,
-      activeSessionRuntimeReady: () => true,
+      sessionRuntimeReady: () => true,
       promptRunning: () => false,
       openSessionStartTab: async () => {},
       enhancePromptDraft: async () => {},
@@ -229,7 +232,7 @@ describe("createPromptSubmit terminal commands", () => {
       draftSessionTabActive: () => true,
       beginOptimisticDraftSubmit: () => true,
       materializeDraftSession: async () => null,
-      activeSessionRuntimeReady: () => false,
+      sessionRuntimeReady: () => false,
       promptRunning: () => false,
       openSessionStartTab: async () => {},
       enhancePromptDraft: async () => {},

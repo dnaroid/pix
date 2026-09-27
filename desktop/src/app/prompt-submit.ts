@@ -24,8 +24,8 @@ type PromptSubmitOptions = {
   draftSessionTabActive: () => boolean;
   beginOptimisticDraftSubmit: (text: string, attachments: readonly Attachment[]) => boolean;
   materializeDraftSession: (prompt?: string, attachmentCount?: number) => Promise<string | null>;
-  activeSessionRuntimeReady: () => boolean;
-  promptRunning: () => boolean;
+  sessionRuntimeReady: (sessionId: string) => boolean;
+  promptRunning: (sessionId: string) => boolean;
   openSessionStartTab: () => void | Promise<void>;
   enhancePromptDraft: (draft: string) => void | Promise<void>;
   importConversationPath: (path: string) => void | Promise<void>;
@@ -116,17 +116,17 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       switch (desktopCommand.kind) {
         case "new":
         case "new_tab":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           await options.openSessionStartTab();
           break;
         case "enhance":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           await options.enhancePromptDraft(desktopCommand.draft);
           break;
         case "import":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           if (desktopCommand.path) await options.importConversationPath(desktopCommand.path);
           else await options.chooseImportSession();
@@ -141,7 +141,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
           break;
         }
         case "resume":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           if (desktopCommand.path) await options.resumeConversationPath(desktopCommand.path);
           else options.openSessionSelector();
@@ -151,7 +151,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
           options.openSessionSelector(desktopCommand.query, "open");
           break;
         case "delete":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           options.openSessionSelector(desktopCommand.query, "delete");
           break;
@@ -172,17 +172,17 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
           await getCurrentWindow().close();
           break;
         case "reload":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           await options.reloadResources();
           break;
         case "fork":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           await options.forkConversation(desktopCommand.entryId);
           break;
         case "model":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           options.closeProjectSelector();
           options.closeSessionSelector();
@@ -190,7 +190,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
           else options.setCommandPicker(commandPickerState("model", [...options.displayedConfigOptions()]));
           break;
         case "thinking":
-          if (options.promptRunning()) return;
+          if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
           options.closeProjectSelector();
           options.closeSessionSelector();
@@ -230,7 +230,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       draftKey = options.attachmentDraftKey();
       draftGeneration = options.attachmentGeneration();
     }
-    if (!options.activeSessionRuntimeReady()) return;
+    if (!options.sessionRuntimeReady(sessionId)) return;
 
     if (terminalCommand?.kind === "chat") {
       options.setErrorMessage(null);
@@ -252,7 +252,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       return;
     }
 
-    if (options.promptRunning()) {
+    if (options.promptRunning(sessionId)) {
       if (text.startsWith("/")) {
         options.reportError(new Error(
           "Slash commands cannot run while the agent is responding. Use /queue to pause a message for later.",
