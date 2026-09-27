@@ -90,6 +90,17 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     }
   }
 
+  /**
+   * Refresh local status, then update remote refs so ahead/behind reflects the
+   * current upstream state. This never pulls or changes working-tree files.
+   */
+  async function refreshRemoteStatus(): Promise<void> {
+    await refresh();
+    const current = snapshot;
+    if (!current?.remotes.length) return;
+    await runMutation("fetch", "git_fetch");
+  }
+
   async function runMutation(
     nextActionId: string,
     command: string,
@@ -347,6 +358,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     get workbenchOpenedOrder() { return workbenchOpenedOrder; },
     reset,
     refresh,
+    refreshRemoteStatus,
     runMutation,
     stage,
     unstage,
