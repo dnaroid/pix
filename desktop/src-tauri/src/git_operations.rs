@@ -1,5 +1,6 @@
 //! Secondary Source Control commands. Mutations deliberately avoid force, clean,
-//! implicit merges and dropping stashes; all work runs off the UI thread.
+//! implicit merges and dropping user stashes (Update only drops its own
+//! auto-stash after it re-applied cleanly); all work runs off the UI thread.
 use super::{
     git_has_head, git_output, git_repository_root, git_status_from, run_blocking,
     validate_git_relative_path,
@@ -31,6 +32,21 @@ pub(crate) async fn git_fetch(workspace: String) -> Result<(), String> {
 #[tauri::command]
 pub(crate) async fn git_pull(workspace: String) -> Result<(), String> {
     run_blocking(move || pull_from(Path::new(&workspace))).await
+}
+
+/// Result of the one-click "Update project" command.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitUpdateResult {
+    /// Incoming commits applied by the fast-forward (0 when already up to date).
+    incoming: u32,
+    /// Local changes were stashed around the fast-forward and restored.
+    stashed: bool,
+}
+
+#[tauri::command]
+pub(crate) async fn git_update(workspace: String) -> Result<GitUpdateResult, String> {
+    run_blocking(move || update_from(Path::new(&workspace))).await
 }
 
 #[tauri::command]
@@ -93,6 +109,105 @@ fn pull_from(workspace: &Path) -> Result<(), String> {
         ],
     )
     .map(|_| ())
+}
+
+const UPDATE_STASH_MESSAGE: &str = "Pix: auto-stash before update";
+
+/// JetBrains-style "Update project": fetch the upstream remote, then
+/// fast-forward the current branch, carrying uncommitted work across in a
+/// temporary stash. Divergence is still reported rather than merged/rebased.
+fn update_from(workspace: &Path) -> Result<GitUpdateResult, String> {
+    let root = git_repository_root(workspace)?;
+    let snapshot = git_status_from(&root)?;
+    if snapshot.detached || snapshot.upstream.is_none() {
+        return Err("Update requires a branch with an upstream".to_owned());
+    }
+    if snapshot.changes.iter().any(|change| change.conflicted) {
+        return Err("Resolve conflicts before updating".to_owned());
+    }
+    git_output(&root, &["fetch"])?;
+    let snapshot = git_status_from(&root)?;
+    if snapshot.behind == 0 {
+        return Ok(GitUpdateResult {
+            incoming: 0,
+            stashed: false,
+        });
+    }
+    if snapshot.ahead > 0 {
+        return Err(format!(
+            "Branch has diverged ({} outgoing, {} incoming). Update only fast-forwards; merge or rebase manually.",
+            snapshot.ahead, snapshot.behind
+        ));
+    }
+    let stash = if snapshot.changes.is_empty() {
+        None
+    } else {
+        git_output(
+            &root,
+            &[
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                UPDATE_STASH_MESSAGE,
+            ],
+        )?;
+        Some(git_stdout_line(&root, &["rev-parse", "refs/stash"])?)
+    };
+    let merged = git_output(
+        &root,
+        &[
+            "-c",
+            "merge.autostash=false",
+            "merge",
+            "--ff-only",
+            "--no-edit",
+            "@{upstream}",
+        ],
+    );
+    let restored = match &stash {
+        Some(commit) => restore_update_stash(&root, commit),
+        None => Ok(()),
+    };
+    merged?;
+    restored?;
+    Ok(GitUpdateResult {
+        incoming: snapshot.behind,
+        stashed: stash.is_some(),
+    })
+}
+
+fn git_stdout_line(root: &Path, args: &[&str]) -> Result<String, String> {
+    let output = git_output(root, args)?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// Re-apply the update auto-stash and drop only that exact entry once it has
+/// applied cleanly. On conflict the stash is kept so no work can be lost.
+fn restore_update_stash(root: &Path, commit: &str) -> Result<(), String> {
+    let applied = git_output(root, &["stash", "apply", "--index", commit]).or_else(|error| {
+        // --index refuses when staged changes no longer apply to the new base;
+        // fall back to a plain apply only while nothing has been touched yet.
+        if git_status_from(root)?.changes.is_empty() {
+            git_output(root, &["stash", "apply", commit])
+        } else {
+            Err(error)
+        }
+    });
+    if let Err(error) = applied {
+        return Err(format!(
+            "Updated, but restoring local changes conflicted. They are kept in the stash \"{UPDATE_STASH_MESSAGE}\". {error}"
+        ));
+    }
+    let listing = git_stdout_line(root, &["stash", "list", "--format=%gd%x00%H"])?;
+    if let Some((reference, _)) = listing
+        .lines()
+        .filter_map(|line| line.split_once('\0'))
+        .find(|(_, hash)| *hash == commit)
+    {
+        git_output(root, &["stash", "drop", reference])?;
+    }
+    Ok(())
 }
 
 fn history_from(workspace: &Path) -> Result<Vec<GitHistoryEntry>, String> {
@@ -363,5 +478,105 @@ mod tests {
             history_from(&repo.0).unwrap()[0].subject,
             "local divergence"
         );
+    }
+
+    #[test]
+    fn git_update_fetches_fast_forwards_and_carries_local_changes() {
+        let repo = Repository::new();
+        let remote = Repository::new();
+        let other = Repository::new();
+        repo.commit("base");
+        assert!(update_from(&repo.0).is_err(), "no upstream yet");
+        git_output(&remote.0, &["config", "core.bare", "true"]).unwrap();
+        for clone in [&repo, &other] {
+            git_output(
+                &clone.0,
+                &["remote", "add", "origin", remote.0.to_str().unwrap()],
+            )
+            .unwrap();
+        }
+        git_output(&repo.0, &["push", "-u", "origin", "main"]).unwrap();
+        git_output(&other.0, &["pull", "origin", "main"]).unwrap();
+        assert_eq!(
+            update_from(&repo.0).unwrap(),
+            GitUpdateResult {
+                incoming: 0,
+                stashed: false
+            }
+        );
+
+        fs::write(other.0.join("remote.txt"), "remote").unwrap();
+        git_output(&other.0, &["add", "remote.txt"]).unwrap();
+        git_output(&other.0, &["commit", "-m", "remote change"]).unwrap();
+        git_output(&other.0, &["push", "origin", "main"]).unwrap();
+        // A pre-existing user stash is never touched.
+        fs::write(repo.0.join("tracked.txt"), "user stash").unwrap();
+        stash_save_from(&repo.0).unwrap();
+        // Staged, unstaged and untracked work survives the update unchanged.
+        fs::write(repo.0.join("tracked.txt"), "staged").unwrap();
+        git_output(&repo.0, &["add", "tracked.txt"]).unwrap();
+        fs::write(repo.0.join("tracked.txt"), "unstaged").unwrap();
+        fs::write(repo.0.join("new.txt"), "untracked").unwrap();
+        assert_eq!(
+            update_from(&repo.0).unwrap(),
+            GitUpdateResult {
+                incoming: 1,
+                stashed: true
+            }
+        );
+        assert_eq!(history_from(&repo.0).unwrap()[0].subject, "remote change");
+        assert_eq!(
+            fs::read_to_string(repo.0.join("tracked.txt")).unwrap(),
+            "unstaged"
+        );
+        assert_eq!(
+            git_output(&repo.0, &["show", ":tracked.txt"])
+                .unwrap()
+                .stdout,
+            b"staged"
+        );
+        assert!(repo.0.join("new.txt").exists());
+        let stashes = stash_list_from(&repo.0).unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert!(stashes[0].subject.contains("Pix: saved changes"));
+
+        // Divergence is reported and leaves history and local work untouched.
+        git_output(&repo.0, &["add", "-A"]).unwrap();
+        git_output(&repo.0, &["commit", "-m", "local divergence"]).unwrap();
+        other.commit("remote divergence");
+        git_output(&other.0, &["push", "origin", "main"]).unwrap();
+        assert!(update_from(&repo.0).unwrap_err().contains("diverged"));
+        assert_eq!(
+            history_from(&repo.0).unwrap()[0].subject,
+            "local divergence"
+        );
+    }
+
+    #[test]
+    fn git_update_keeps_auto_stash_when_restore_conflicts() {
+        let repo = Repository::new();
+        let remote = Repository::new();
+        let other = Repository::new();
+        repo.commit("base");
+        git_output(&remote.0, &["config", "core.bare", "true"]).unwrap();
+        for clone in [&repo, &other] {
+            git_output(
+                &clone.0,
+                &["remote", "add", "origin", remote.0.to_str().unwrap()],
+            )
+            .unwrap();
+        }
+        git_output(&repo.0, &["push", "-u", "origin", "main"]).unwrap();
+        git_output(&other.0, &["pull", "origin", "main"]).unwrap();
+        other.commit("remote edit");
+        git_output(&other.0, &["push", "origin", "main"]).unwrap();
+        fs::write(repo.0.join("tracked.txt"), "local edit").unwrap();
+        let error = update_from(&repo.0).unwrap_err();
+        assert!(error.contains(UPDATE_STASH_MESSAGE), "{error}");
+        assert_eq!(history_from(&repo.0).unwrap()[0].subject, "remote edit");
+        let stashes = stash_list_from(&repo.0).unwrap();
+        assert!(stashes
+            .iter()
+            .any(|stash| stash.subject.contains(UPDATE_STASH_MESSAGE)));
     }
 }

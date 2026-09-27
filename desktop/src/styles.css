@@ -351,6 +351,10 @@ html, body, #app {
   }
   :where(a[href]) { cursor: pointer; }
   :where(img, svg, a) { -webkit-user-drag: none; }
+  /* Disclosures draw their own Lucide chevron. WebKit (the macOS Tauri view)
+   * keeps painting ::-webkit-details-marker even with list-style: none. */
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
 }
 /*
  * Desktop keyboard focus should stay discoverable without looking like a

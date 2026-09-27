@@ -1,9 +1,11 @@
 <script lang="ts">
+  import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
+  import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import CloudDownload from "@lucide/svelte/icons/cloud-download";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
-  import Upload from "@lucide/svelte/icons/upload";
   import Wrench from "@lucide/svelte/icons/wrench";
   import Check from "@lucide/svelte/icons/check";
   import Minus from "@lucide/svelte/icons/minus";
@@ -11,7 +13,7 @@
   import { onMount } from "svelte";
   import { gitReviewHasFindings, stagedGitChanges, unstagedGitChanges, type GitDiffScope, type GitSnapshot } from "../lib/git";
   import { gitCiAggregate, gitCiStatusLabel, type GitCiPanelState, type GitCiStatus } from "../lib/git-ci";
-  import { gitPushBlockedReason, gitReviewStatus, type GitPanelWorkflow } from "../lib/git-workflow";
+  import { gitPushBlockedReason, gitReviewStatus, gitUpdateBlockedReason, type GitPanelWorkflow } from "../lib/git-workflow";
   import GitCiSection from "./GitCiSection.svelte";
   import GitChangesSection from "./GitChangesSection.svelte";
   import GitCommitComposer from "./GitCommitComposer.svelte";
@@ -41,6 +43,10 @@
   const unstaged = $derived(unstagedGitChanges(snapshot));
   const busy = $derived(actionId !== null || llmActionId !== null || workflow.resolveRunning);
   const pushBlocked = $derived(gitPushBlockedReason(snapshot));
+  const updateBlocked = $derived(gitUpdateBlockedReason(snapshot));
+  const diverged = $derived(Boolean(snapshot && snapshot.ahead > 0 && snapshot.behind > 0));
+  const tool = "inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-40";
+  const progressLabel = $derived(actionId === "update" ? "Updating project…" : actionId === "fetch" ? "Fetching remotes…" : "Updating repository…");
   const reviewStatus = $derived(gitReviewStatus(workflow.review?.text));
   const findings = $derived(gitReviewHasFindings(workflow.review?.text));
   const reviewLoading = $derived(llmActionId?.startsWith("review:") === true);
@@ -65,29 +71,44 @@
 </script>
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-sidebar" aria-label="Git source control">
-  <header class="shrink-0 space-y-1 border-b border-sidebar-border bg-panel p-2">
-    <div class="flex min-w-0 items-center gap-1.5">
-      <GitBranch class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+  <header class="shrink-0 border-b border-sidebar-border bg-panel">
+    <div class="flex h-9 min-w-0 items-center gap-0.5 pr-1 pl-2" role="toolbar" aria-label="Source Control actions">
+      <GitBranch class="mr-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       {#if snapshot}
-        <div class="relative min-w-0 flex-1">
-          <select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pl-2 pr-7 font-mono text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
+        <div class="relative mr-1 min-w-0 flex-1">
+          <select class="h-6 w-full appearance-none rounded-sm border border-input bg-panel-strong pl-2 pr-6 font-mono text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
             aria-label="Current branch" value={snapshot.branch} disabled={busy}
             onchange={(event) => { const branch = event.currentTarget.value; if (branch && branch !== snapshot?.branch) onSwitchBranch(branch); }}>
             {#if snapshot.detached}<option value="HEAD" disabled>Detached HEAD</option>{/if}
             {#each snapshot.branches as branch (branch.name)}<option value={branch.name}>{branch.name}</option>{/each}
           </select>
-          <ChevronDown class="pointer-events-none absolute right-2 top-2 h-3 w-3 text-muted-foreground" aria-hidden="true" />
+          <ChevronDown class="pointer-events-none absolute top-1.5 right-1.5 h-3 w-3 text-muted-foreground" aria-hidden="true" />
         </div>
+        <button class={[tool, snapshot.behind > 0 && !diverged && "text-tool-info"]} type="button" aria-label="Update project"
+          title={updateBlocked ?? `Update project: fetch and fast-forward ${snapshot.upstream}. Local changes are stashed and restored automatically.`}
+          disabled={busy || Boolean(updateBlocked)} onclick={() => void workflow.onRepositoryAction("update")}>
+          <ArrowDownToLine class={["h-3.5 w-3.5", actionId === "update" && "animate-pulse"]} aria-hidden="true" />
+          {#if snapshot.behind > 0}<span class="font-mono text-xs tabular-nums">{snapshot.behind}</span>{/if}
+        </button>
+        <button class={tool} type="button" aria-label={snapshot.upstream ? "Push" : "Publish branch"}
+          disabled={busy || Boolean(pushBlocked) || !snapshot.head || Boolean(snapshot.upstream && snapshot.ahead === 0)}
+          title={pushBlocked ?? (snapshot.upstream ? `Push ${snapshot.ahead} outgoing commit(s)` : "Publish branch and set upstream")} onclick={onPush}>
+          <ArrowUpFromLine class={["h-3.5 w-3.5", actionId === "push" && "animate-pulse"]} aria-hidden="true" />
+          {#if snapshot.ahead > 0}<span class="font-mono text-xs tabular-nums">{snapshot.ahead}</span>{/if}
+        </button>
+        <button class={tool} type="button" aria-label="Fetch" title="Fetch all remotes without changing local files"
+          disabled={busy || !snapshot.remotes.length} onclick={() => void workflow.onRepositoryAction("fetch")}>
+          <CloudDownload class={["h-3.5 w-3.5", actionId === "fetch" && "animate-pulse"]} aria-hidden="true" />
+        </button>
       {:else}<span class="flex-1 text-xs font-medium">Source Control</span>{/if}
-      <button class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" title="Refresh Git status" aria-label="Refresh Git status" disabled={loading || busy} onclick={onRefresh}><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
+      <button class={tool} type="button" title="Refresh Git status" aria-label="Refresh Git status" disabled={loading || busy} onclick={onRefresh}><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
     </div>
     {#if snapshot}
-      <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-        <span class="min-w-0 flex-1 truncate" title={snapshot.upstream ?? "No upstream configured"}>{snapshot.upstream ?? "Local branch"}</span>
-        <span class="shrink-0 font-mono" title="Outgoing / incoming commits" aria-label={`${snapshot.ahead} outgoing, ${snapshot.behind} incoming commits`}>↑{snapshot.ahead} ↓{snapshot.behind}</span>
+      <div class="flex h-7 min-w-0 items-center gap-2 border-t border-sidebar-border/60 px-2 text-xs text-muted-foreground">
+        <span class="min-w-0 flex-1 truncate font-mono" title={snapshot.upstream ?? "No upstream configured"}>{snapshot.upstream ?? "Local branch · no upstream"}</span>
         {#if snapshot.head}
-          <button class={["inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1 font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40", ciStatusClass(ciStatus)]}
-            type="button" disabled={ci.loading} title={ci.snapshot?.error ?? ci.error ?? `CI status for ${snapshot.head.slice(0, 8)}`} onclick={ci.onRefresh}>
+          <button class={["inline-flex h-5 shrink-0 items-center gap-1 rounded-sm px-1 hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40", ciStatusClass(ciStatus)]}
+            type="button" disabled={ci.loading} title={ci.snapshot?.error ?? ci.error ?? `CI status for ${snapshot.head.slice(0, 8)} · click to refresh`} onclick={ci.onRefresh}>
             {#if ci.loading}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />
             {:else if ciStatus === "success"}<Check class="h-3 w-3" aria-hidden="true" />
             {:else if ciStatus === "failure"}<X class="h-3 w-3" aria-hidden="true" />
@@ -96,11 +117,6 @@
             CI {ciLabel}
           </button>
         {/if}
-        <button class="inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button"
-          disabled={busy || Boolean(pushBlocked) || !snapshot.head || Boolean(snapshot.upstream && snapshot.ahead === 0)}
-          title={pushBlocked ?? (snapshot.upstream ? "Push outgoing commits" : "Publish branch and set upstream")} onclick={onPush}>
-          <Upload class="h-3 w-3" aria-hidden="true" />{actionId === "push" ? "Pushing…" : snapshot.upstream ? "Push" : "Publish"}
-        </button>
       </div>
     {/if}
   </header>
@@ -108,9 +124,10 @@
   <div class="min-h-0 flex-1 overflow-y-auto">
     {#if error}<div class="border-b border-tool-error/25 bg-tool-error/5 px-3 py-2 text-xs leading-4 text-tool-error break-words" role="alert">{error}</div>{/if}
     {#if workflow.notice && !error}<div class="border-b border-sidebar-border px-3 py-2 text-xs leading-4 text-tool-success" role="status">{workflow.notice}</div>{/if}
-    {#if actionId && actionId !== "push" && actionId !== "commit"}<p class="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground" role="status"><RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />Updating repository…</p>{/if}
+    {#if actionId && actionId !== "push" && actionId !== "commit"}<p class="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground" role="status"><RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{progressLabel}</p>{/if}
     {#if snapshot}
-      {#if snapshot.behind > 0}<p class="border-b border-tool-warning/20 bg-tool-warning/5 px-3 py-2 text-xs leading-4 text-tool-warning">{snapshot.behind} incoming commit(s). {snapshot.ahead > 0 ? "Branches have diverged. Resolve divergence before pushing." : "Pull from Repository tools before pushing."}</p>{/if}
+      {#if diverged}<p class="border-b border-tool-warning/20 bg-tool-warning/5 px-3 py-2 text-xs leading-4 text-tool-warning">Branch has diverged: {snapshot.ahead} outgoing, {snapshot.behind} incoming. Update only fast-forwards; merge or rebase in a terminal before pushing.</p>
+      {:else if snapshot.behind > 0}<p class="border-b border-tool-info/20 bg-tool-info/5 px-3 py-2 text-xs leading-4 text-tool-info">{snapshot.behind} incoming commit(s). Use Update project to fast-forward; local changes are carried over.</p>{/if}
       {#if conflicts}<p class="border-b border-tool-error/20 bg-tool-error/5 px-3 py-2 text-xs leading-4 text-tool-error" role="status">{conflicts} conflicted file(s). Resolve and stage them before committing.</p>{/if}
       {#if workflow.review || reviewLoading}
         <section class="space-y-2 border-b border-sidebar-border px-2 py-2" aria-label="Code review checkpoint">
