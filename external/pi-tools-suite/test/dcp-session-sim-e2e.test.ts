@@ -154,6 +154,61 @@ describe("DCP deterministic session-simulation E2E", () => {
       expect(report.aborts).toBe(0);
     } finally { sim.dispose(); }
   });
+  test("single long turn: stale re-reads are suggested in-turn and compress surgically", async () => {
+    const sim = await DcpSessionSimulator.create({
+      contextWindow: 16_000,
+      sessionId: "in-turn-stale-observations",
+      configure(config) {
+        config.debug = false;
+        for (const strategy of Object.values(config.strategies)) strategy.enabled = false;
+        config.compress.minContextPercent = 0.20;
+        config.compress.maxContextPercent = 0.90;
+        config.compress.summaryBuffer = false;
+        config.compress.nudgeFrequency = 1;
+        config.compress.autoCandidates.enabled = false;
+        Object.assign(config.compress.messageMode, {
+          enabled: true, minContextPercent: 0.20, keepRecentTurns: 1, mediumTokens: 300, highTokens: 100_000, maxSuggestions: 5,
+        });
+        config.compress.autoCompress.enabled = false;
+        config.compress.autoCompress.summarizerModel = [];
+        config.compress.autoCompress.summarizerFallbackModels = [];
+      },
+    });
+    try {
+      sim.appendUser("Refactor src/parser.ts. This is one long task.");
+      const oldBody = `OLD_PARSER_BODY\n${"function oldParse() { return legacy(); }\n".repeat(160)}`;
+      const lexer = `LEXER\n${"token();\n".repeat(400)}`;
+      await sim.toolTurn({ toolName: "read", input: { path: "src/parser.ts" }, output: oldBody, label: "read-parser" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/lexer.ts" }, output: lexer, label: "read-lexer" });
+      await sim.toolTurn({ toolName: "edit", input: { path: "src/parser.ts", oldText: "legacy", newText: "modern" }, output: "Edited src/parser.ts", label: "edit" });
+      await sim.toolTurn({ toolName: "read", input: { path: "src/lexer.ts" }, output: lexer, label: "read-lexer-again" });
+      // Routine pressure is first crossed here; the reminder rides this fresh tool result.
+      await sim.toolTurn({ toolName: "read", input: { path: "src/parser.ts", offset: 1 }, output: `NEW_PARSER_BODY\n${"function parse() { return modern(); }\n".repeat(160)}`, label: "read-parser-again" });
+      const projected = await sim.project("stale-recommendation");
+      const reminder = sim.state.nudgeAnchors[0]?.renderedReminder ?? "";
+      expect(reminder).toContain("file changed later by a write/edit");
+      expect(reminder).toContain("superseded by a later identical call");
+      const suggested = [...reminder.matchAll(/(m\d+) \(high, toolResult, ~\d+ tokens, (?:file changed|superseded)/g)].map((match) => match[1]!);
+      expect(suggested).toHaveLength(2);
+
+      const { result } = await sim.compressTurn({
+        topic: "Stale reads",
+        messages: suggested.map((messageId) => ({ messageId, summary: "Superseded read; current content is in a later read." })),
+      });
+      expect(result.isError).not.toBe(true);
+      expect(result.details).toMatchObject({ committed: true });
+      expect(result.details.netGain).toBeGreaterThan(0);
+
+      const after = await sim.project("after-stale-compress");
+      const text = JSON.stringify(after.messages);
+      expect(after.sample.projectedTokens).toBeLessThan(projected.sample.projectedTokens);
+      expect(text).not.toContain("OLD_PARSER_BODY");
+      expect(text).toContain("NEW_PARSER_BODY");
+      expect(text).toContain("Refactor src/parser.ts");
+      expect(sim.report()).toMatchObject({ aborts: 0, providerCapacityViolations: 0 });
+    } finally { sim.dispose(); }
+  });
+
   test("keeps a long tool-heavy session bounded while materially reducing provider-token occurrences", async () => {
     const sim = await DcpSessionSimulator.create({
       contextWindow: 20_000,

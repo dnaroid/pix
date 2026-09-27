@@ -571,19 +571,30 @@ export function detectMessageCompressionCandidates(
   // If the transcript does not yet contain enough complete user turns to
   // satisfy the retention policy, every message belongs to the protected
   // recent window. Do not reinterpret the live head as stale history.
-  if (recentUserTurns < keepRecentTurns || cutoffIndex < 0) return [];
+  const hasHistory = recentUserTurns >= keepRecentTurns && cutoffIndex >= 0;
+  const history = hasHistory ? boundaries.slice(0, cutoffIndex + 1) : [];
+  const recentWindow = hasHistory ? boundaries.slice(cutoffIndex + 1) : boundaries;
 
   const stale = staleObservationReasons(messages, state, config);
   const staleReason = (candidate: CandidateBoundary): string | undefined => {
     const toolCallId = state.messageMetaSnapshot.get(candidate.id)?.toolCallId;
     return toolCallId ? stale.get(toolCallId) : undefined;
   };
+  // Inside the protected recent window (typically one long autonomous turn)
+  // only provably stale observations are offered: a later identical call or a
+  // later edit already replaced them, and the provider has seen them, so the
+  // live head never loses anything it still depends on.
+  const recentStale = recentWindow.filter((candidate) => {
+    if (candidate.role !== "toolResult" && candidate.role !== "bashExecution") return false;
+    const toolCallId = state.messageMetaSnapshot.get(candidate.id)?.toolCallId;
+    return toolCallId !== undefined && stale.has(toolCallId) && state.providerSeenToolIds.has(toolCallId);
+  });
+  if (history.length === 0 && recentStale.length === 0) return [];
   const mediumTokens = Math.max(1, settings.mediumTokens ?? 500);
   const highTokens = Math.max(mediumTokens, settings.highTokens ?? 5000);
   const maxSuggestions = Math.max(1, settings.maxSuggestions ?? 5);
 
-  return boundaries
-    .slice(0, cutoffIndex + 1)
+  return [...history, ...recentStale]
     .filter((candidate) => !candidate.isSystemReminder)
     .filter((candidate) => candidate.role !== "user" || !config.compress.protectUserMessages)
     // V2 message mode replaces only the selected body, so completed tool

@@ -72,4 +72,18 @@ describe("DCP stale observations", () => {
     expect(byCall.get("read-b-1")).toMatchObject({ priority: "high", stale: "superseded by a later identical call" });
     expect(byCall.get("read-b-2")?.stale).toBeUndefined();
   });
+
+  test("inside the live turn only provider-seen stale observations are suggested", () => {
+    const { state, messages } = scenario();
+    messages.pop(); // one long autonomous turn: no later user message
+    const config = dcpConfig();
+    const projected = applyPruning(messages, state, config);
+    expect(detectMessageCompressionCandidates(projected, state, config, 0.5)).toEqual([]);
+
+    state.providerSeenToolIds.add("read-b-1");
+    state.providerSeenToolIds.add("read-b-2");
+    const candidates = detectMessageCompressionCandidates(projected, state, config, 0.5);
+    expect(candidates.map((candidate) => state.messageMetaSnapshot.get(candidate.messageId)?.toolCallId)).toEqual(["read-b-1"]);
+    expect(candidates[0]).toMatchObject({ priority: "high", stale: "superseded by a later identical call" });
+  });
 });

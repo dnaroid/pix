@@ -332,7 +332,10 @@ read or keyed observation that a later identical call re-observed, or a read of
 a file a later successful write/edit changed, is marked stale, ranked high and
 reported with its reason. Staleness is derived from projection order, never
 timestamps, and only raises suggestion priority; it does not prune anything by
-itself.
+itself. Inside the protected recent window (typically one long
+autonomous turn, where ordinary message-mode history is empty) a stale
+observation is still suggested, but only when the provider has completed-send
+evidence for it; the protected window is otherwise unchanged.
 
 Exact v2 source/mutation membership hashes are canonicalized with JSONL-stable
 value semantics before publication. In-memory-only `undefined` fields (notably
