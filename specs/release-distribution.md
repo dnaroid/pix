@@ -311,6 +311,14 @@ gate or registry dependency.
 macOS payload Mach-O files are signed inside-out before archiving/bundling. With
 no identity they are ad-hoc signed. The embedded Node executable alone receives
 Node-specific JIT/native-addon entitlements; the GUI uses separate entitlements.
+Both the portable macOS TUI archive and the Desktop `pix-runtime` payload include
+the prebuilt `helpers/macos-accessibility` UI-QA driver. Preparation compiles it
+before the payloads split; release signing applies the fixed
+`org.pix.ui-qa.macos-accessibility` identifier, then the archive/installer smoke
+and installed runner check its signature. Installed QA does not need `swiftc` or
+fall back to a per-project executable. With a Developer ID certificate the
+helper's certificate-based TCC identity can persist across updates; ad-hoc
+signing still uses a code-hash requirement and may require renewed user grants.
 Optional Apple Developer ID and notarization credentials and Windows PFX signing
 credentials are supplied as Actions secrets, imported into temporary runner
 stores, and cleaned with `always()` steps. They are never embedded in artifacts.

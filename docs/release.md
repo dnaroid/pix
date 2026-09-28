@@ -56,6 +56,16 @@ The release builder sets `CI=true` even locally so DMG creation does not need Fi
 automation permissions. Development commands (`dev:desktop`, `watch:all`,
 `build:desktop`) remain separate and do not make distributable bundles.
 
+macOS TUI and Desktop payloads both include `helpers/macos-accessibility`,
+compiled during preparation and signed with `APPLE_SIGNING_IDENTITY` along with
+the runtime. Use the **same Apple Developer ID certificate** for subsequent
+releases if UI-QA Accessibility/Screen Recording grants should survive helper
+updates. Without that identity, builds are ad-hoc signed for local validation;
+an updated helper can require new user consent. This is separate from the
+Tauri updater signing key. Release smoke verifies the helper's code signature
+and stable identifier in both payload variants. Users must grant the helper
+itself access in macOS System Settings, not just Pix Desktop.
+
 To iterate on the Desktop wrapper after preparing its runtime, use
 `npm run release:build:desktop -- <target>`; rebuild the full release after any
 Pix/ACP/dependency change. `release:smoke` and `release:smoke:desktop` rerun checks

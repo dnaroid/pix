@@ -62,6 +62,8 @@ export async function smokeDesktop(name = hostTarget()) {
       } finally {
         run("hdiutil", ["detach", mount]);
       }
+      // --deep strict verification includes every nested payload binary, such as the
+      // UI-QA accessibility helper signed by sign-runtime with its stable identifier.
       run("codesign", ["--verify", "--deep", "--strict", app]);
       payload = join(app, "Contents/Resources/pix-runtime");
       const binary = run("/usr/libexec/PlistBuddy", ["-c", "Print CFBundleExecutable", join(app, "Contents/Info.plist")], {

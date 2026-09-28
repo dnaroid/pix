@@ -6,6 +6,7 @@ import { installNode } from "./node-runtime.mjs";
 import { cleanBuildOutputs, pruneDependencies } from "./prune.mjs";
 import { dedupePackages } from "./dedupe.mjs";
 import { recordSize } from "./size-budget.mjs";
+import { compileMacosHelper } from "./ui-qa-helper.mjs";
 
 export async function prepare(name = hostTarget(), { withDesktop = true } = {}) {
   const target = targetInfo(name);
@@ -30,6 +31,9 @@ export async function prepare(name = hostTarget(), { withDesktop = true } = {}) 
   const trimmed = await pruneDependencies(app, target);
   const tuiShared = await dedupePackages(app);
   const node = await installNode(payload, target);
+  // The Desktop payload is a copy of this TUI payload: bundle the prebuilt UI-QA
+  // helper before the copy so both payloads ship the same signed binary.
+  if (target.platform === "darwin") await compileMacosHelper(payload, target);
   await finalize(payload, name, node, "tui", { pix: trimmed, shared: tuiShared });
   await recordSize(payload, target, "tui");
 

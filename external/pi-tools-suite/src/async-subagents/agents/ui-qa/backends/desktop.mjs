@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { prepareMacosHelper } from "../drivers/macos/helper-cache.mjs";
+import { bundledMacosHelper } from "../drivers/macos/release-helper.mjs";
 
 const MACOS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/macos/macos-accessibility.swift", import.meta.url));
 const WINDOWS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/windows/windows-uia.ps1", import.meta.url));
@@ -88,7 +89,8 @@ async function probeMacosDesktopBackend(context, supportedCapabilities) {
 			reason: accessibility
 				? "macOS Accessibility permission is granted for the bundled semantic driver"
 				: "macOS Accessibility permission is missing for the process that runs UI QA",
-			remediation: accessibility ? undefined : "grant Accessibility access to the terminal/Pi host in System Settings > Privacy & Security > Accessibility, then rerun",
+			remediation: accessibility && screenRecording ? undefined
+				: `grant ${helper.file} access in System Settings > Privacy & Security > Accessibility and/or Screen Recording (as reported missing), then rerun; Pix Desktop approval alone does not grant this helper access`,
 			details: { accessibility, screenRecording, sck },
 		};
 	} catch (error) {
@@ -98,7 +100,7 @@ async function probeMacosDesktopBackend(context, supportedCapabilities) {
 			supportedCapabilities,
 			missingCapabilities: ["semanticAccessibility", "accessibilitySnapshot", "windowScreenshot", "windowVideo"],
 			reason: `macOS accessibility driver is unavailable: ${safeReason(error)}`,
-			remediation: "install Apple Command Line Tools (xcrun/swiftc) or use a packaged build of the bundled macOS accessibility helper",
+			remediation: "for an installed Pix release, reinstall the complete signed release if its helper is missing/invalid; in a development checkout install Apple Command Line Tools (xcrun/swiftc) and check the private helper cache/signing identity. Grant the helper access in System Settings if doctor reports missing permissions",
 		};
 	}
 }
@@ -603,24 +605,10 @@ async function ensureDesktopHelper(context) {
 }
 
 async function ensureMacosHelper(context) {
+	const bundled = await bundledMacosHelper({ source: MACOS_DRIVER_SOURCE, deadline: context.deadline, run: runOwnedProcess });
+	if (bundled) return { file: bundled, argsPrefix: [], label: "macOS accessibility helper", supportsWindowVideo: true };
 	if (!fs.existsSync(MACOS_DRIVER_SOURCE)) throw new Error("bundled macOS accessibility helper source is missing");
-	const helpersDir = path.join(context.workspaceDir, "helpers");
-	createPrivateDirectory(context.workspaceDir, helpersDir);
-	const digest = createHash("sha256").update(fs.readFileSync(MACOS_DRIVER_SOURCE)).digest("hex").slice(0, 16);
-	const binary = path.join(helpersDir, `macos-accessibility-${digest}`);
-	if (fs.existsSync(binary)) {
-		const stat = fs.lstatSync(binary);
-		if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("macOS helper cache entry is not a regular file");
-		return { file: binary, argsPrefix: [], label: "macOS accessibility helper", supportsWindowVideo: true };
-	}
-	const temporary = `${binary}.${process.pid}.tmp`;
-	const result = await runOwnedProcess("xcrun", ["swiftc", "-O", MACOS_DRIVER_SOURCE, "-o", temporary], {
-		cwd: context.workspaceDir,
-		timeoutMs: remainingTimeout(context, 60_000),
-	});
-	if (result.code !== 0) throw new Error(result.stderr || `swiftc exited ${result.code}`);
-	fs.chmodSync(temporary, 0o700);
-	fs.renameSync(temporary, binary);
+	const binary = await prepareMacosHelper({ projectRoot: context.projectRoot, source: MACOS_DRIVER_SOURCE, deadline: context.deadline, run: runOwnedProcess });
 	return { file: binary, argsPrefix: [], label: "macOS accessibility helper", supportsWindowVideo: true };
 }
 
@@ -901,14 +889,6 @@ function resolveProjectDirectory(projectRoot, value) {
 	const real = fs.realpathSync(resolved);
 	if (!isInside(projectRoot, real) || !fs.statSync(real).isDirectory()) throw new Error("launch.cwd must be a project-local directory");
 	return real;
-}
-
-function createPrivateDirectory(root, target) {
-	if (!isInside(root, target)) throw new Error("helper cache must stay inside the UI QA workspace");
-	if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-	const stat = fs.lstatSync(target);
-	if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("helper cache must be a real directory");
-	if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) throw new Error("helper cache must use mode 0700");
 }
 
 function stepTimeout(step, context) {

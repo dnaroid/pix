@@ -6,10 +6,14 @@ import { fileURLToPath } from "node:url";
 import { hostTarget, nodeExecutable, outputPaths, readJson, run, targetInfo, version } from "./common.mjs";
 import { smokeEnvironment } from "./smoke-environment.mjs";
 import { auditPayload } from "./size-budget.mjs";
+import { assertMacosHelper } from "./ui-qa-helper.mjs";
 
 export async function smokePayload(payload, scratch, expectedVariant) {
   const manifest = readJson(join(payload, "release.json"));
   if (expectedVariant) assert.equal(manifest.variant, expectedVariant);
+  // Both the portable TUI archive and the installed Desktop payload must carry the
+  // signed UI-QA helper; this shared check covers both smoke paths.
+  if (manifest.target === "macos-arm64") await assertMacosHelper(payload);
   await auditPayload(payload, targetInfo(manifest.target), manifest.variant);
   const { cwd, env } = await smokeEnvironment(scratch);
   const options = { cwd, env, timeout: 180_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };

@@ -170,6 +170,26 @@ current-session model availability.
   dependencies/permissions or unsupported platforms return `BLOCKED`. The agent
   must not install UI automation dependencies, change OS privacy/accessibility
   permissions, disable sandboxing, or operate unrelated user windows.
+- In source/development runs, the macOS helper lives at the stable per-project path
+  `.pi/ui-qa/helpers/macos-accessibility`, outside each agent's ephemeral
+  workspace. Repeated probes reuse a verified executable. Source changes build
+  privately and replace it atomically; its code-signing identifier is fixed to
+  `org.pix.ui-qa.macos-accessibility` rather than the staging filename. By
+  default the helper is ad-hoc signed: unchanged builds retain their identity,
+  but a source update changes its code-hash-based designated requirement and
+  may require a fresh user approval. Set `PI_UI_QA_MACOS_CODESIGN_IDENTITY` to
+  an available keychain signing certificate to use a certificate-based
+  designated requirement that survives updates. Do not assume Pix Desktop's
+  own Accessibility/Screen Recording approvals transfer to this helper; check
+  `doctor` in the active login session and grant permissions in System Settings
+  for the helper if needed. The runner never grants TCC permissions itself.
+- Installed macOS releases (portable TUI and Desktop) instead use the executable
+  at `helpers/macos-accessibility` in their release payload. It is built during
+  release preparation, signed with the release Apple signing identity and the
+  fixed helper identifier, and signature-checked before execution. A missing
+  or invalid packaged helper blocks QA rather than invoking `swiftc` in the
+  user's project. Certificate signing can keep the helper's TCC identity across
+  updates; ad-hoc signing remains a code-hash identity that may need reapproval.
 - PTY-presentation runs automatically retain a bounded asciicast v2 replay in
   `artifacts.videos`. It is generated from timestamped PTY output and resize
   events, capped at 1 MiB, and is explicitly terminal-state replay rather than
@@ -371,6 +391,8 @@ current-session model availability.
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/bridge-client.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/helper-cache.mjs`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/release-helper.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/windows/windows-uia.ps1`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/linux/linux-atspi.py`
 - `external/pi-tools-suite/src/async-subagents/core/ui-qa.ts`
@@ -380,6 +402,8 @@ current-session model availability.
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.e2e.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-helper-cache.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-release-helper.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-desktop.e2e.test.ts`
 - `external/pi-tools-suite/test/async-subagents/selection-e2e.test.ts`
 

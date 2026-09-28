@@ -152,6 +152,30 @@ wrappers hand off to the real GUI descendant without making that descendant
 invisible to accessibility automation or leaving it behind after QA. On macOS,
 `wait-window --pgid` services the AppKit run loop between polls so
 NSWorkspace can register a GUI descendant launched after waiting begins.
+In source/development runs, the bundled macOS driver is built into a
+project-stable, private `.pi/ui-qa/helpers/macos-accessibility` executable
+rather than the per-agent workspace. Its SHA-256 sidecar is checked under an
+exclusive build lock; changed
+source is compiled and signed in a private staging file, verified, then
+atomically replaces the executable at the same path. The signature uses the
+fixed `org.pix.ui-qa.macos-accessibility` identifier, not the staging filename.
+When `PI_UI_QA_MACOS_CODESIGN_IDENTITY` names an available keychain signing
+certificate, its certificate-based designated requirement can persist across
+source updates. Without a certificate the helper is ad-hoc signed: its
+designated requirement pins the code hash, so an updated build requires a new
+user TCC grant even though the executable path and signing identifier stay
+constant. Permissions belong to the helper identity; approval of Pix Desktop
+alone is not proof that the helper's doctor sees them.
+An installed macOS release instead selects the signed
+`helpers/macos-accessibility` from its own payload, both in portable TUI and
+Desktop's `pix-runtime`. The release builds it before copying the TUI payload
+for Desktop, signs it with the same fixed identifier and release Apple signing
+identity, and verifies the signature at packaging and at runtime. A missing or
+invalid release helper blocks QA with reinstall guidance; the installed build
+does not compile a replacement in the current project or require Xcode tools.
+With a certificate-based designated requirement, the helper can retain its
+TCC identity across release updates; the ad-hoc release fallback has a
+code-hash requirement and may need renewed user approval after updates.
 Windows uses the owned launcher PID as a process-tree root: UI Automation resolves the
 actual GUI descendant before interaction, and cleanup stays scoped to the
 launcher plus that correlated GUI root. Launch environments allow bounded
@@ -220,6 +244,8 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/bridge-client.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/helper-cache.mjs`
+- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/release-helper.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/windows/windows-uia.ps1`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/linux/linux-atspi.py`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
@@ -229,6 +255,8 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-helper-cache.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-release-helper.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-desktop.e2e.test.ts`
 
 ## Verification
