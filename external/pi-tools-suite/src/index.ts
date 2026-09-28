@@ -2,6 +2,7 @@ import { loadPiToolsSuiteConfig } from "./config";
 import { publishContextInventoryState } from "./context-inventory";
 import { isPixOwnedHost } from "./lib/native-pi-tui.js";
 import { PI_TOOLS_SUITE_MODULE_CATALOG, type PiToolsSuiteModuleCatalogEntry } from "./module-catalog.js";
+import { registerProviderWebSearchGuard } from "./provider-web-search-guard.js";
 import { publishStartupModuleList } from "./startup-section";
 
 type ExtensionAPI = any;
@@ -44,6 +45,7 @@ export default async function piToolsSuite(pi: ExtensionAPI) {
 			throw new Error(`Failed to load pi-tools-suite module ${module.name}: ${message}`);
 		}
 	}
+	registerProviderWebSearchGuard(pi);
 
 	// Register last so the snapshot observes model-specific tool selection after
 	// every module's session/model hooks have run.
