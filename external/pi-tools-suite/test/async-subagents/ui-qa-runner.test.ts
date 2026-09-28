@@ -586,6 +586,50 @@ process.stdin.on("data", (data) => {
 		expect(result.payload.selection.missingCapabilities).not.toContain("terminalRecording");
 	});
 
+	test("bracketed paste keeps an immediate Enter outside the pasted prompt", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "fixture.mjs", `
+process.stdin.setRawMode?.(true);
+process.stdout.write("\\x1b[?2004hReady\\r\\n");
+let input = "";
+process.stdin.on("data", (chunk) => {
+  input += chunk.toString();
+  if (!input.includes("\\r")) return;
+  process.stdout.write(input === "\\x1b[200~Please respond\\x1b[201~\\r" ? "Submitted\\r\\n" : "Malformed input\\r\\n");
+  process.exit(0);
+});
+`);
+		writeFlow(uiWorkspace, "paste.jsonc", {
+			target: { command: { argv: [nodeExecutable, "fixture.mjs"] } },
+			steps: [
+				{ action: "waitForText", text: "Ready" },
+				{ action: "sendPaste", text: "Please respond" },
+				{ action: "sendKeys", keys: ["enter"] },
+				{ action: "waitForText", text: "Submitted" },
+				{ action: "assertProcessExited", exitCode: 0 },
+			],
+		});
+		const result = invoke(project, agentDir, ["run", "--flow", "paste.jsonc", "--run-id", "paste", "--runner-timeout-ms", "10000"]);
+		expectRunnerStatus(result, 0);
+		expect(result.payload.status).toBe("PASSED");
+		expect(result.payload.observations).toContainEqual({ action: "sendPaste", characters: 14 });
+	});
+
+	test("refuses bracketed paste when the target has not enabled it", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeProjectFile(project, "fixture.mjs", "process.stdout.write('Ready\\r\\n'); setInterval(() => {}, 1000);\n");
+		writeFlow(uiWorkspace, "paste.jsonc", {
+			target: { command: { argv: [nodeExecutable, "fixture.mjs"] } },
+			steps: [
+				{ action: "waitForText", text: "Ready" },
+				{ action: "sendPaste", text: "Please respond" },
+			],
+		});
+		const result = invoke(project, agentDir, ["run", "--flow", "paste.jsonc", "--run-id", "paste-unsupported", "--runner-timeout-ms", "10000"]);
+		expect(result.payload.status).toBe("FAILED");
+		expect(result.payload.reason).toContain("target has not enabled bracketed paste mode");
+	});
+
 	test("keeps PTY presentation as the backward-compatible default and makes native terminal explicit", () => {
 		expect(resolveTuiPresentation({ target: { command: { argv: ["node", "fixture.mjs"] } } })).toBe("pty");
 		expect(resolveTuiPresentation({ target: { command: { argv: ["node", "fixture.mjs"], presentation: "native-terminal" } } })).toBe("native-terminal");

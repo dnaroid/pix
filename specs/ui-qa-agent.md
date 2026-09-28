@@ -185,7 +185,12 @@ supplies `PI_UI_QA=1`. TUI targets may use their ordinary explicit project and
 session arguments to open deterministic state inside the real PTY before
 assertions. Because PTY input and application rendering are asynchronous, TUI
 flows wait for the expected text or a stable frame after input before asserting
-the resulting screen.
+the resulting screen. PTY flows may send printable text as a bracketed paste
+with `sendPaste` before a separate Enter key when the target supports bracketed
+paste; the runner rejects the action unless the target enabled bracketed paste
+mode. This prevents a bulk text write and immediate Enter from merging into
+one unbracketed multiline paste. Visible-text assertions include prompt/editor
+echo, so response assertions require an observable marker absent from the input.
 Repeated unnamed Desktop evidence steps receive collision-free filenames based
 on their action and step index, while explicit names remain available for stable
 human-readable labels.

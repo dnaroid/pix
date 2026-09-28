@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fetchLatestReleaseVersion, isReleaseInstall, readReleaseInstallInfo, releaseUpdateHint } from "./release-update.js";
 import { schedulePortableTuiUpdate } from "./portable-update.js";
+import { createPortableUpdateProgress } from "./portable-update-progress.js";
 export { isReleaseInstall } from "./release-update.js";
 
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
@@ -387,12 +388,15 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 		}
 		if (check.status === "current" && !options.force) return 0;
 		if (["skipped", "unknown", "unavailable"].includes(check.status) && !options.force) return 1;
+		const progress = createPortableUpdateProgress();
 		try {
-			const update = await pixUpdateDeps.schedulePortableTuiUpdate(check.packageRoot, check.currentVersion);
+			const update = await pixUpdateDeps.schedulePortableTuiUpdate(check.packageRoot, check.currentVersion, 10_000, progress.stage);
+			progress.stop();
 			console.log(`Downloaded and verified Pix ${update.version} (${update.assetName}).`);
 			console.log("The portable installation will be replaced atomically after this updater process exits. Start `pix` again after the command returns.");
 			return 0;
 		} catch (error) {
+			progress.stop();
 			console.error(`Portable Pix update failed before replacement: ${error instanceof Error ? error.message : String(error)}`);
 			console.error("The current installation was left unchanged.");
 			return 1;

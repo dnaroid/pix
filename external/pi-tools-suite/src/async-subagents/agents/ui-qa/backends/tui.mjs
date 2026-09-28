@@ -20,6 +20,7 @@ const STEP_FIELDS = {
 	waitForStable: new Set(["action", "settleMs", "timeoutMs"]),
 	waitForText: new Set(["action", "text", "settleMs", "timeoutMs"]),
 	sendText: new Set(["action", "text", "timeoutMs"]),
+	sendPaste: new Set(["action", "text", "timeoutMs"]),
 	sendKeys: new Set(["action", "keys", "timeoutMs"]),
 	resize: new Set(["action", "cols", "rows", "settleMs", "timeoutMs"]),
 	assertText: new Set(["action", "text", "timeoutMs"]),
@@ -259,6 +260,16 @@ async function executeStep(options) {
 			if (/[\u0000-\u001f\u007f]/u.test(text)) throw new Error("sendText cannot contain control characters; use sendKeys");
 			if (state().exited) throw new Error("cannot send text after the PTY process exited");
 			processHandle.write(text);
+			observations.push({ action: step.action, characters: [...text].length });
+			return;
+		}
+		case "sendPaste": {
+			const text = boundedText(step.text, "sendPaste.text");
+			if (/[\u0000-\u001f\u007f]/u.test(text)) throw new Error("sendPaste cannot contain control characters; use sendKeys");
+			if (state().exited) throw new Error("cannot paste text after the PTY process exited");
+			await state().writeChain;
+			if (!terminal.modes.bracketedPasteMode) throw new Error("target has not enabled bracketed paste mode; use sendText instead");
+			processHandle.write(`\x1b[200~${text}\x1b[201~`);
 			observations.push({ action: step.action, characters: [...text].length });
 			return;
 		}

@@ -385,8 +385,10 @@ end-to-end in-app update test, or a before/after DMG comparison.
 ### Portable TUI updater
 
 `/update` inside the TUI remains a non-mutating check. `pix update --check` does
-the same from a shell. `pix update` on a valid portable TUI installation fetches
-the latest stable GitHub Release, selects the exact target archive, downloads it
+the same from a shell. `pix update` shows an animated stage indicator on a
+terminal and plain stage lines when output is redirected. On a valid portable
+TUI installation it fetches the latest stable GitHub Release, selects the exact
+target archive, downloads it
 and `SHA256SUMS` with bounded byte counts, and requires exactly one matching
 SHA-256 entry. It never trusts a filename substring or npm metadata.
 

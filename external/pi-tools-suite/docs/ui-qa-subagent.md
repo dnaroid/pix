@@ -162,6 +162,11 @@ current-session model availability.
   terminal host stdin/protocol responses are bridged back to it; flows wait for
   expected text or a stable frame after `sendText`/`sendKeys` before asserting
   or capturing the resulting state.
+  PTY-only `sendPaste` wraps printable input in bracketed-paste delimiters for
+  targets that enabled it (otherwise the action fails safely), preventing a
+  subsequent Enter from being swallowed as an unbracketed multiline paste when
+  PTY writes merge. Screen text includes
+  prompt/editor echo; assert a response marker absent from the submitted input.
 - Native desktop verification is selected from `target.application`. macOS uses
   the bundled Accessibility/CGWindow/ScreenCaptureKit helper, Windows uses the
   bundled PowerShell/.NET UI Automation helper, and Linux uses the bundled

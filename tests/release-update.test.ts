@@ -71,7 +71,12 @@ test("portable TUI update schedules verified replacement while Desktop refuses C
   let scheduled = 0;
   setPixUpdateTestDeps({
     checkPixUpdate: async () => result,
-    schedulePortableTuiUpdate: async () => { scheduled++; return { version: "2.0.1", assetName: "pix-tui-2.0.1-macos-arm64.tar.gz" }; },
+    schedulePortableTuiUpdate: async (_root, _version, _timeout, onProgress) => {
+      scheduled++;
+      assert.equal(typeof onProgress, "function");
+      onProgress?.("Downloading Pix...");
+      return { version: "2.0.1", assetName: "pix-tui-2.0.1-macos-arm64.tar.gz" };
+    },
   });
   t.after(() => setPixUpdateTestDeps());
   assert.equal(await runPixUpdateCli(["--check"]), 0);

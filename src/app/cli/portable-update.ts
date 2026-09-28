@@ -224,10 +224,11 @@ async function extractArchive(archive: string, destination: string): Promise<voi
 	else await extractTar({ file: archive, cwd: destination, strict: true, preservePaths: false });
 }
 
-export async function schedulePortableTuiUpdate(packageRoot: string, currentVersion: string, timeoutMs = 10_000): Promise<PortableUpdateResult> {
+export async function schedulePortableTuiUpdate(packageRoot: string, currentVersion: string, timeoutMs = 10_000, onProgress?: (stage: string) => void): Promise<PortableUpdateResult> {
 	const install = readReleaseInstallInfo(packageRoot);
 	if (!install) throw new Error("Portable release marker is missing or invalid; automatic update is disabled");
 	if (install.variant !== "tui") throw new Error("This is a Desktop installation; use the native Desktop updater");
+	onProgress?.("Checking release assets...");
 	const release = await fetchLatestStableRelease(currentVersion, timeoutMs);
 	if (!release) throw new Error("No stable GitHub Release is available");
 	const { archive: asset, checksums } = portableReleaseAssets(release, install.target);
@@ -235,20 +236,24 @@ export async function schedulePortableTuiUpdate(packageRoot: string, currentVers
 	let helperRoot: string | undefined;
 	let stagedSibling: string | undefined;
 	try {
+		onProgress?.(`Downloading Pix ${release.version} and checksums...`);
 		const archive = join(scratch, asset.name);
 		const checksumFile = join(scratch, "SHA256SUMS");
 		await Promise.all([
 			download(asset.url, archive, MAX_ARCHIVE_BYTES, asset.size),
 			download(checksums.url, checksumFile, MAX_CHECKSUM_BYTES, checksums.size),
 		]);
+		onProgress?.("Verifying download checksum...");
 		const expected = parseSha256Sums(await readFile(checksumFile, "utf8"), asset.name);
 		const actual = await sha256(archive);
 		if (actual !== expected) throw new Error(`Downloaded Pix checksum mismatch for ${asset.name}`);
 
+		onProgress?.("Extracting and validating release...");
 		const extraction = join(scratch, "extracted");
 		await extractArchive(archive, extraction);
 		const staged = join(extraction, "pix");
 		await validateStagedPortableTui(staged, release.version, install.target);
+		onProgress?.("Smoke-testing downloaded Pix runtime...");
 		await verifyStagedPortableTui(staged, scratch);
 
 		const realPackageRoot = await realpath(packageRoot);
@@ -260,6 +265,7 @@ export async function schedulePortableTuiUpdate(packageRoot: string, currentVers
 		const suffix = `${process.pid}-${Date.now()}`;
 		stagedSibling = join(parent, `.${basename(installRoot)}.update-${suffix}`);
 		const backupRoot = join(parent, `.${basename(installRoot)}.backup-${suffix}`);
+		onProgress?.("Staging verified release alongside installation...");
 		await rm(stagedSibling, { recursive: true, force: true });
 		await cp(staged, stagedSibling, { recursive: true, verbatimSymlinks: true });
 		await validateStagedPortableTui(stagedSibling, release.version, install.target);
@@ -290,6 +296,7 @@ export async function schedulePortableTuiUpdate(packageRoot: string, currentVers
 		child.unref();
 		stagedSibling = undefined;
 		helperRoot = undefined;
+		onProgress?.("Cleaning up temporary update files...");
 		return { version: release.version, assetName: asset.name };
 	} finally {
 		await rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
