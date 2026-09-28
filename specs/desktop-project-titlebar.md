@@ -178,8 +178,10 @@ without blocking desktop interactions.
 - `desktop/src/lib/recent-projects.test.ts` covers normalized full-path fallback
   identity and two-letter project abbreviations.
 - `desktop/src/app/project-workspace.test.ts` covers URL precedence over stale
-  storage and retaining the URL workspace when storage fails; Rust tests cover
-  QA workspace validation and URL query encoding/replacement.
+  storage and retaining the URL workspace when storage fails. It also checks
+  active-only startup refresh, lazy reads for inactive recent projects, cached
+  color retention, and stale read rejection across switching and saving; Rust
+  tests cover QA workspace validation and URL query encoding/replacement.
 - `desktop/src/lib/project-colors.test.ts` covers JSONC override parsing and
   fallback behavior.
 - `desktop/src/components/ProjectSwitcher.test.ts` covers current/new-window
