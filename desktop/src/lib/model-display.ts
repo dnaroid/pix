@@ -14,7 +14,7 @@ export type ModelDisplayTone =
   | "thinking-xhigh"
   | "thinking-max";
 
-export type ModelProviderBrand = "anthropic" | "google" | "openai" | "zai";
+export type ModelProviderBrand = "anthropic" | "google" | "ollama" | "openai" | "openrouter" | "zai";
 
 export function modelDisplayToneClass(tone: ModelDisplayTone | undefined): string {
   switch (tone) {
@@ -60,7 +60,9 @@ export function modelProviderBrand(providerOrRef: string): ModelProviderBrand | 
   const provider = normalized.includes("/") ? normalized.slice(0, normalized.indexOf("/")) : normalized;
   if (provider === "anthropic" || provider === "pi-claude-code-provider") return "anthropic";
   if (provider === "antigravity" || provider === "google") return "google";
+  if (provider === "ollama" || provider === "ollama-cloud") return "ollama";
   if (provider === "openai" || provider === "openai-codex") return "openai";
+  if (provider === "openrouter") return "openrouter";
   if (
     provider === "zai"
     || provider === "z.ai"
@@ -71,6 +73,7 @@ export function modelProviderBrand(providerOrRef: string): ModelProviderBrand | 
     || provider === "zai-coding-plan"
     || provider === "zhipuai-coding-plan"
   ) return "zai";
+
   return undefined;
 }
 
@@ -78,7 +81,9 @@ export function modelProviderTone(providerOrRef: string): ModelDisplayTone | und
   switch (modelProviderBrand(providerOrRef)) {
     case "anthropic": return "model-anthropic";
     case "google": return undefined;
+    case "ollama": return undefined;
     case "openai": return "model-openai";
+    case "openrouter": return undefined;
     case "zai": return "model-zai";
     default: return undefined;
   }

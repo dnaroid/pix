@@ -20,6 +20,11 @@ describe("model/thinking display tones", () => {
     expect(modelProviderBrand("zai-coding-plan/glm-5.3")).toBe("zai");
     expect(modelProviderBrand("zai-coding-cn/glm-5.3")).toBe("zai");
     expect(modelProviderBrand("zhipuai-coding-plan/glm-5.3")).toBe("zai");
+    expect(modelProviderBrand("openrouter/~openai/gpt-6-sol:high")).toBe("openrouter");
+    expect(modelProviderBrand("openrouter/z-ai/glm-5.3:max")).toBe("openrouter");
+    expect(modelProviderBrand("ollama/qwen3:8b")).toBe("ollama");
+    expect(modelProviderBrand("ollama-cloud/gpt-oss:120b")).toBe("ollama");
+    expect(modelProviderBrand("opencode/glm-5.3:max")).toBeUndefined();
     expect(modelProviderBrand("other/model")).toBeUndefined();
   });
 
