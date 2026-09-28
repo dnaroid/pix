@@ -9,6 +9,12 @@ import { fileURLToPath } from "node:url";
 // no installed provider, network, Pi process, or external ancestry snapshot.
 const source = fileURLToPath(new URL("./fixtures/native-ownership.c", import.meta.url));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// This harness asserts eventual kernel/process cleanup, not sub-4-second
+// scheduling latency. Hosted macOS runners can take just over 4s to deliver the
+// final ChildProcess exit after the stopped-parent/zombie-child scenario has
+// already completed correctly, so keep the wait bounded but leave scheduler
+// headroom before the 15s per-test deadline.
+const REAP_TIMEOUT_MS = 8_000;
 function value(dir: string, name: string): number {
 	const path = join(dir, name);
 	return existsSync(path) ? Number(readFileSync(path, "utf8")) : 0;
@@ -44,7 +50,7 @@ async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
 		return await Promise.race([promise, new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new Error(`${label} not reaped`)), 4000);
+			timer = setTimeout(() => reject(new Error(`${label} not reaped`)), REAP_TIMEOUT_MS);
 		})]);
 	} finally { if (timer) clearTimeout(timer); }
 }
