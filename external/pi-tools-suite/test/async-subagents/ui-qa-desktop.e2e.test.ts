@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -8,6 +8,43 @@ const RUN_E2E = process.platform === "darwin" && /^(1|true|yes)$/i.test(process.
 const e2eTest = RUN_E2E ? test : test.skip;
 const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
 const fixtureSource = path.resolve(import.meta.dir, "../fixtures/ui-qa/macos-accessibility-fixture.swift");
+const helperSource = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift");
+
+e2eTest("wait-window discovers a late GUI descendant in the launched process group", () => {
+	const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ui-qa-pgid-e2e-")));
+	let wrapper: ReturnType<typeof spawn> | undefined;
+	try {
+		const fixture = path.join(project, "accessibility-fixture");
+		const helper = path.join(project, "macos-accessibility");
+		for (const [source, executable] of [[fixtureSource, fixture], [helperSource, helper]]) {
+			const compile = spawnSync("xcrun", ["swiftc", "-O", source, "-o", executable], { encoding: "utf8", timeout: 120_000 });
+			expect(compile.status, compile.stderr).toBe(0);
+		}
+		const doctor = spawnSync(helper, ["doctor"], { encoding: "utf8", timeout: 10_000 });
+		expect(doctor.stdout).toContain("accessibility=granted");
+		// Keep the wrapper alive long enough for wait-window to poll before the GUI
+		// exists, then let the GUI outlive its parent in the same owned POSIX group.
+		wrapper = spawn(process.execPath, ["-e", `
+const { spawn } = require("node:child_process");
+setTimeout(() => { spawn(process.argv[1], [], { stdio: "ignore" }); }, 3000);
+`, fixture], { detached: true, stdio: "ignore" });
+		expect(wrapper.pid).toBeGreaterThan(0);
+		const result = spawnSync(helper, ["wait-window", "--pgid", String(wrapper.pid), "--timeout", "9", "--print-pid"], {
+			encoding: "utf8", timeout: 12_000,
+		});
+		expect(result.status, result.stderr).toBe(0);
+		const guiPID = Number(result.stdout.trim());
+		expect(guiPID).toBeGreaterThan(0);
+		expect(guiPID).not.toBe(wrapper.pid);
+		const group = spawnSync("ps", ["-o", "pgid=", "-p", String(guiPID)], { encoding: "utf8" });
+		expect(group.stdout.trim()).toBe(String(wrapper.pid));
+	} finally {
+		if (wrapper?.pid) {
+			try { process.kill(-wrapper.pid, "SIGKILL"); } catch { /* group already exited */ }
+		}
+		fs.rmSync(project, { recursive: true, force: true });
+	}
+}, 180_000);
 
 e2eTest("macOS desktop backend semantically activates a real AppKit control", () => {
 	const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ui-qa-desktop-e2e-")));

@@ -928,7 +928,10 @@ func run(_ arguments: Arguments) throws {
                 }
                 return
             }
-            usleep(200_000)
+            // NSWorkspace updates its running-app list through the main run loop.
+            // Sleeping here freezes the snapshot when the GUI registers after
+            // wait-window starts (notably a wrapper's later --pgid descendant).
+            RunLoop.current.run(until: min(Date().addingTimeInterval(0.2), deadline))
         }
         throw Failure("window did not appear within \(timeout)s")
 

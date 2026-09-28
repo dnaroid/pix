@@ -206,6 +206,9 @@ current-session model availability.
   owned launcher PID as a process-tree root: UIA resolves the actual GUI
   descendant before interaction, and scoped cleanup uses `taskkill /T` against
   the owned launcher plus that correlated GUI root rather than an app name.
+  On macOS, `wait-window --pgid` must keep the AppKit run loop servicing
+  NSWorkspace registration while waiting for a late GUI descendant; a sleeping
+  poll can retain an empty application list even after the AX window appears.
 
 ## Unified capability-first runner contract
 
@@ -429,7 +432,10 @@ current-session model availability.
     window, semantically activates its control, and retains accessibility,
     screenshot, and automatic exact-window video evidence. Windows/Linux
     real-host smokes are required before claiming those platform integrations
-    runtime-verified; macOS tests do not substitute for that evidence.
+    runtime-verified; macOS tests do not substitute for that evidence. The
+    opt-in macOS process-group regression starts `wait-window` before a wrapper
+    creates its GUI descendant, then verifies the returned PID belongs to the
+    wrapper's group without requiring Screen Recording permission.
 
 ## Real-browser regression test
 

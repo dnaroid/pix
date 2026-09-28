@@ -154,11 +154,23 @@ describe("oracle frontier selection", () => {
 		const cwd = temp();
 		const file = path.join(cwd, ".pi", "agents", "oracle.md");
 		fs.mkdirSync(path.dirname(file), { recursive: true });
-		fs.writeFileSync(file, "---\nmodels: [anthropic/claude-opus-5, zai/glm-5.3]\n---\nProject oracle.\n");
+		// Same-name project roles replace built-ins completely, so the project
+		// oracle owns its cross-vendor policy instead of inheriting the built-in's.
+		fs.writeFileSync(file, "---\nmodels: [anthropic/claude-opus-5, zai/glm-5.3]\nparentProviderPolicy: require-other-if-frontier\n---\nProject oracle.\n");
 		const config = loadSubagentConfig(cwd, {});
 		expect(config.types.oracle.modelSelection).toBeUndefined();
 		expect(config.types.oracle.parentProviderPolicy).toBe("require-other-if-frontier");
 		expect(oracle(config, "zai/glm-5.3")).toEqual(["anthropic/claude-opus-5"]);
+	});
+
+	test("an omitted vendor policy does not fall through to the replaced built-in oracle", () => {
+		const cwd = temp();
+		const file = path.join(cwd, ".pi", "agents", "oracle.md");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, "---\nmodels: [anthropic/claude-opus-5, zai/glm-5.3]\n---\nProject oracle.\n");
+		const config = loadSubagentConfig(cwd, {});
+		expect(config.types.oracle.parentProviderPolicy).toBeUndefined();
+		expect(oracle(config, "zai/glm-5.3")).toEqual(["anthropic/claude-opus-5", "zai/glm-5.3"]);
 	});
 
 	test("rejects modelSelection combined with an explicit candidate list", () => {

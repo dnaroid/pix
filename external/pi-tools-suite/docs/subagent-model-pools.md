@@ -20,6 +20,8 @@ policy, not a price oracle.
   assume release authority.
 - `oracle`: a deliberate cross-vendor frontier second opinion, not automatic
   worker escalation.
+- `knowledge-auditor`: economical docs-only finalization role that runs the
+  task-scoped repository-knowledge audit after implementation.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
 agent is warranted when it adds a durable contract, capabilities or resources,

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
-import { createModelDraftConfig, type ModelConfigOptions } from "./model-draft-config.svelte";
+import type { ModelConfigOptions } from "./model-config-options";
+import { createModelDraftConfig } from "./model-draft-config.svelte";
 
 function draftOptions(responses: Array<Record<string, unknown>>) {
   let index = 0;

@@ -149,8 +149,10 @@ than approximating locale/timezone/reduced-motion semantics.
 POSIX desktop launch contracts are correlated and cleaned up by their owned
 detached process group, not only by the launcher PID. This lets package-manager
 wrappers hand off to the real GUI descendant without making that descendant
-invisible to accessibility automation or leaving it behind after QA. Windows
-uses the owned launcher PID as a process-tree root: UI Automation resolves the
+invisible to accessibility automation or leaving it behind after QA. On macOS,
+`wait-window --pgid` services the AppKit run loop between polls so
+NSWorkspace can register a GUI descendant launched after waiting begins.
+Windows uses the owned launcher PID as a process-tree root: UI Automation resolves the
 actual GUI descendant before interaction, and cleanup stays scoped to the
 launcher plus that correlated GUI root. Launch environments allow bounded
 `PI_UI_QA_*` bootstrap
@@ -248,7 +250,9 @@ and bounded asciicast evidence, unsafe launch and path rejection, timeout
 bounds, platform blockers, cross-platform native-terminal provider selection,
 and static/protocol contracts for the bundled Windows UIA and Linux AT-SPI
 helpers. An opt-in real macOS AppKit accessibility flow covers the currently
-available host E2E with automatic exact-window video. Windows/Linux real-host
+available host E2E with automatic exact-window video; a separate opt-in macOS
+regression waits for a late GUI descendant in the wrapper's group without
+requiring Screen Recording. Windows/Linux real-host
 smokes remain platform-host verification rather than being inferred from tests
 executed on macOS. Browser runner tests continue covering the trusted
 credential-owning backend.

@@ -42,7 +42,6 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
       if (requestGeneration !== usageGeneration) return;
       void refreshUsage(modelRef, thinkingLevel);
     }, MODEL_USAGE_CREDENTIAL_RETRY_MS);
-    timer.unref?.();
     credentialRetryTimer = timer;
   }
 

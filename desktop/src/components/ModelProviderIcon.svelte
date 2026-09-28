@@ -11,6 +11,12 @@
 
   const brand = $derived(modelProviderBrand(provider));
   const toneClass = $derived(modelDisplayToneClass(modelProviderTone(provider)));
+  const fallbackLabel = $derived.by(() => {
+    const normalized = provider.trim();
+    if (!normalized) return "";
+    const providerName = normalized.includes("/") ? normalized.slice(0, normalized.indexOf("/")) : normalized;
+    return providerName.slice(0, 1).toUpperCase();
+  });
 </script>
 
 <span class={["grid h-4 w-4 shrink-0 place-items-center", toneClass, className]} aria-hidden="true">
@@ -30,5 +36,7 @@
     <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd">
       <path d="M12.105 2 9.927 4.953H.653L2.83 2h9.275Zm11.149 17.048L21.078 22h-9.242l2.174-2.952h9.244ZM24 2 9.264 22H0L14.736 2H24Z" />
     </svg>
+  {:else if fallbackLabel}
+    <span class="text-[9px] font-semibold leading-none uppercase">{fallbackLabel}</span>
   {/if}
 </span>

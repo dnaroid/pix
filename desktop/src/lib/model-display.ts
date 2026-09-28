@@ -61,7 +61,16 @@ export function modelProviderBrand(providerOrRef: string): ModelProviderBrand | 
   if (provider === "anthropic" || provider === "pi-claude-code-provider") return "anthropic";
   if (provider === "antigravity" || provider === "google") return "google";
   if (provider === "openai" || provider === "openai-codex") return "openai";
-  if (provider === "zai" || provider === "z.ai" || provider === "zhipu" || provider === "zhipuai") return "zai";
+  if (
+    provider === "zai"
+    || provider === "z.ai"
+    || provider === "zhipu"
+    || provider === "zhipuai"
+    || provider === "zai-coding"
+    || provider === "zai-coding-cn"
+    || provider === "zai-coding-plan"
+    || provider === "zhipuai-coding-plan"
+  ) return "zai";
   return undefined;
 }
 

@@ -17,6 +17,9 @@ describe("model/thinking display tones", () => {
     expect(modelProviderBrand("google/gemini-3-pro")).toBe("google");
     expect(modelProviderBrand("openai-codex/gpt-5.6-sol")).toBe("openai");
     expect(modelProviderBrand("zai/glm-5-turbo")).toBe("zai");
+    expect(modelProviderBrand("zai-coding-plan/glm-5.3")).toBe("zai");
+    expect(modelProviderBrand("zai-coding-cn/glm-5.3")).toBe("zai");
+    expect(modelProviderBrand("zhipuai-coding-plan/glm-5.3")).toBe("zai");
     expect(modelProviderBrand("other/model")).toBeUndefined();
   });
 

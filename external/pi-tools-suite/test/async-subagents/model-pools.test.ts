@@ -38,7 +38,7 @@ describe("role-owned model candidates", () => {
 	test("ships one oracle role selecting from the frontier list with a cross-vendor policy", () => {
 		const config = loadSubagentConfig(temp(), {});
 		expect(Object.keys(config.types).sort()).toEqual([
-			"delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify",
+			"delivery-review", "frontier-review", "implement", "knowledge-auditor", "oracle", "research", "ui-qa", "verify",
 		]);
 		expect(config.types.oracle.models).toBeUndefined();
 		expect(config.types.oracle.modelSelection).toBe("frontier");
