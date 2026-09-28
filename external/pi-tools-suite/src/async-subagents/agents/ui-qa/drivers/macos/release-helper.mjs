@@ -34,7 +34,11 @@ export async function bundledMacosHelper({ source, deadline, run }) {
 		if (error.code !== "ENOENT") throw error;
 		throw new Error(`bundled macOS accessibility helper is missing: ${binary}; reinstall the complete Pix release`);
 	}
-	if (!stat.isFile() || stat.isSymbolicLink() || !(stat.mode & 0o111)) {
+	// The exec bit is the tamper gate on POSIX payloads. Windows stat modes
+	// never carry exec bits, so only the regular-file and symlink checks
+	// apply there.
+	const missingExecBit = process.platform !== "win32" && !(stat.mode & 0o111);
+	if (!stat.isFile() || stat.isSymbolicLink() || missingExecBit) {
 		throw new Error(`bundled macOS accessibility helper is not an executable regular file: ${binary}; reinstall the complete Pix release`);
 	}
 	const result = await run("codesign", ["--verify", "--strict", "--test-requirement", `=identifier "${IDENTIFIER}"`, binary], {
