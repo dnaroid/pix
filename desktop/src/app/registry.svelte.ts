@@ -17,7 +17,6 @@ type RegistryStoreOptions = {
   operationRunning: () => boolean;
   workspace: () => string;
   sessionWorkspace: (sessionId: string) => string | undefined;
-  setOperationRunning: (running: boolean) => void;
   setErrorMessage: (message: string | null) => void;
   loadProjectTasks: (workspace: string) => void | Promise<void>;
   loadProjectDocuments: (workspace: string) => void | Promise<void>;
@@ -127,10 +126,14 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     const workspace = options.workspace();
     const requestGeneration = lifecycleGeneration;
     const current = () => requestGeneration === lifecycleGeneration && options.workspace() === workspace;
-    if (!workspace || actionId !== null || backgroundSyncState.phase === "syncing") return false;
+    if (
+      !workspace
+      || options.operationRunning()
+      || actionId !== null
+      || backgroundSyncState.phase === "syncing"
+    ) return false;
 
     actionId = "initialize-project";
-    options.setOperationRunning(true);
     options.setErrorMessage(null);
     let initialized = false;
     try {
@@ -149,7 +152,6 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     } finally {
       if (current()) {
         actionId = null;
-        options.setOperationRunning(false);
         backgroundSync.retry();
         if (initialized) refresh();
       }
@@ -160,10 +162,14 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     const workspace = options.workspace();
     const requestGeneration = lifecycleGeneration;
     const current = () => requestGeneration === lifecycleGeneration && options.workspace() === workspace;
-    if (!workspace || actionId !== null || backgroundSyncState.phase === "syncing") return false;
+    if (
+      !workspace
+      || options.operationRunning()
+      || actionId !== null
+      || backgroundSyncState.phase === "syncing"
+    ) return false;
 
     actionId = "cleanup-project";
-    options.setOperationRunning(true);
     options.setErrorMessage(null);
     try {
       await invoke<number>("clean_project_pi", { workspace });
@@ -176,7 +182,6 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     } finally {
       if (current()) {
         actionId = null;
-        options.setOperationRunning(false);
         backgroundSync.retry();
       }
     }
@@ -218,7 +223,9 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     ) return;
 
     actionId = nextActionId;
-    options.setOperationRunning(true);
+    // Registry RPC runs in its own workspace-scoped disposable Pi runtime.
+    // Keep exclusivity local to Registry; the global Desktop operation lock
+    // would unnecessarily disable unrelated workbench UI while Git is running.
     options.setErrorMessage(null);
     try {
       const next = await requestClient.registryAction(workspace, request);
@@ -230,7 +237,6 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     } finally {
       if (current()) {
         actionId = null;
-        options.setOperationRunning(false);
         backgroundSync.retry();
       }
     }

@@ -30,6 +30,7 @@ Make collapsed Desktop activity rows compactly show the full thinking/tool flow,
 - Existing result loading, status icons, tool arguments, and thinking-body rendering remain available inside the combined activity group.
 - Group construction is linear in the number of transcript entries: each contiguous activity run is collected and summarized once. Collapsed names are derived from tool metadata without formatting raw inputs or patches.
 - A collapsed group does not mount its child rows. Opening the group mounts compact headers only; thinking Markdown and tool bodies mount only while their own disclosure is open. Nested disclosure state survives closing/reopening the group and is scoped to the active session.
+- The expanded group's vertical tool gutter is an accessible collapse button: clicking the line or its adjacent hit area, or activating it by keyboard, closes the group without clearing nested disclosures or triggering tool-result loads. Focus returns to the group header so keyboard users can reopen it.
 - Opening a group does not request all deferred results. Only opening an individual deferred tool result requests its body; the session-history controller deduplicates in-flight loads and does not re-request hydrated results.
 
 ## Related files

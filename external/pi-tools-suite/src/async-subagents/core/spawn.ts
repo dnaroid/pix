@@ -39,8 +39,8 @@ export interface SpawnAgentOptions {
 }
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
-const BROWSER_QA_WORKSPACE_DIR = "browser-qa";
 const UI_QA_WORKSPACE_DIR = "ui-qa";
+const UI_QA_BROWSER_WORKSPACE_DIR = "browser";
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const AGENT_TIMEOUT_EXIT_CODE = 124;
 const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
@@ -970,20 +970,20 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 
 function prepareUiQaWorkspace(agentDir: string, subagentType: string | undefined): void {
 	const workspace = path.join(agentDir, UI_QA_WORKSPACE_DIR);
-	const browserWorkspace = path.join(agentDir, BROWSER_QA_WORKSPACE_DIR);
 	fs.rmSync(workspace, { recursive: true, force: true });
-	fs.rmSync(browserWorkspace, { recursive: true, force: true });
 	if (!isUiQaType(subagentType)) return;
-	const flows = path.join(browserWorkspace, "flows");
 	const uiFlows = path.join(workspace, "flows");
+	const browserWorkspace = path.join(workspace, UI_QA_BROWSER_WORKSPACE_DIR);
+	const browserFlows = path.join(browserWorkspace, "flows");
 	fs.mkdirSync(workspace, { recursive: true, mode: 0o700 });
 	fs.mkdirSync(uiFlows, { recursive: true, mode: 0o700 });
-	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
+	fs.mkdirSync(browserWorkspace, { recursive: true, mode: 0o700 });
+	fs.mkdirSync(browserFlows, { recursive: true, mode: 0o700 });
 	if (process.platform !== "win32") {
 		fs.chmodSync(workspace, 0o700);
 		fs.chmodSync(uiFlows, 0o700);
 		fs.chmodSync(browserWorkspace, 0o700);
-		fs.chmodSync(flows, 0o700);
+		fs.chmodSync(browserFlows, 0o700);
 	}
 }
 

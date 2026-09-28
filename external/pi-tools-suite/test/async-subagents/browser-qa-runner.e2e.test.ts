@@ -87,7 +87,7 @@ e2eTest("runs public QA without auth, then records form login and private action
 		const { port } = server.address() as AddressInfo;
 		const origin = `http://127.0.0.1:${port}`;
 		const agentDir = createBrowserQaAgent(project);
-		const publicFlowPath = path.join(agentDir, "browser-qa", "flows", "public.jsonc");
+		const publicFlowPath = path.join(agentDir, "ui-qa", "browser", "flows", "public.jsonc");
 		writePrivateJson(publicFlowPath, {
 			steps: [
 				{ action: "goto", path: "/public" },
@@ -153,7 +153,7 @@ e2eTest("runs public QA without auth, then records form login and private action
 				},
 			},
 		});
-		const flowPath = path.join(agentDir, "browser-qa", "flows", "mock.jsonc");
+		const flowPath = path.join(agentDir, "ui-qa", "browser", "flows", "mock.jsonc");
 		writePrivateJson(flowPath, {
 			viewport: { width: 844, height: 847 },
 			environment: { locale: "en-GB", timezoneId: "Europe/London", colorScheme: "dark", reducedMotion: "no-preference" },
@@ -230,7 +230,7 @@ e2eTest("runs public QA without auth, then records form login and private action
 		expect(privateActionClickedAt - lastPrivatePageLoadedAt).toBeGreaterThanOrEqual(600);
 		expect(dialogActionReceived).toBe(true);
 
-		const evidenceDir = path.join(fs.realpathSync(agentDir), "browser-qa", "evidence", "real-artifacts", "mock");
+		const evidenceDir = path.join(fs.realpathSync(agentDir), "ui-qa", "browser", "evidence", "real-artifacts", "mock");
 		const screenshots = result.json.artifacts.screenshots;
 		expect(screenshots.map((artifact) => path.basename(artifact.path)).sort()).toEqual(["final.png", "private-action-complete.png"]);
 		expect(result.json.artifacts.videos).toHaveLength(2);
@@ -329,7 +329,7 @@ function writePrivateJson(file: string, value: unknown): void {
 
 function createBrowserQaAgent(project: string): string {
 	const agentDir = path.join(project, ".pi", "subagents", "browser-qa-e2e", "qa-agent");
-	const workspace = path.join(agentDir, "browser-qa");
+	const workspace = path.join(agentDir, "ui-qa", "browser");
 	const flows = path.join(workspace, "flows");
 	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
 	fs.writeFileSync(path.join(agentDir, "prompt.md"), "browser QA E2E\n", "utf8");

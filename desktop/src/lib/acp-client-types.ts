@@ -152,6 +152,13 @@ export interface ModelUsageStatus {
   readonly weekly?: ModelUsageLimitWindow;
   /** Provider response-header rate-limit windows (Anthropic RPM/TPM). */
   readonly rateWindows?: readonly ModelUsageLimitWindow[];
+  /**
+   * Cached (not current) quota: the last successful Claude Code windows
+   * resent through a transiently absent credential. Each window survives
+   * only until its own reset and must always be displayed as stale, never
+   * as a fresh observation.
+   */
+  readonly stale?: true;
 }
 
 export type ModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
@@ -201,9 +208,34 @@ export interface RuntimeStatus {
    * being invalidated by quota refresh completions.
    */
   readonly headerUsage?: ModelUsageStatus;
+  /**
+   * Transient response flag: the Claude Code quota refresh was unavailable
+   * only because no usable Claude Code credential exists locally. Consumers
+   * may retry sooner (local credential reads only, no provider network);
+   * it is not persisted into merged status snapshots.
+   */
+  readonly modelUsageCredentialPending?: true;
 }
 
 export interface DcpStatsStatus {
   readonly sessionId: string;
   readonly dcpStats?: string;
+}
+
+/**
+ * Manual Claude Code quota refresh (`pix/session/claude_quota_refresh`): the
+ * agent briefly launched the Claude CLI headless (best-effort login nudge;
+ * output is never captured), then reread the local credential and queried the
+ * normal Pix quota endpoint. Available only for the session's active
+ * `pi-claude-code-provider` route.
+ */
+export interface ClaudeQuotaRefreshStatus {
+  readonly sessionId: string;
+  /** Whether the Claude CLI child could be launched at all. */
+  readonly launched: boolean;
+  readonly refresh: "ready" | "unavailable" | "failed";
+  /** Fresh quota for `ready`; the cached `stale` snapshot for credential-pending `unavailable`. */
+  readonly modelUsage?: ModelUsageStatus;
+  /** See `RuntimeStatus.modelUsageCredentialPending`. */
+  readonly modelUsageCredentialPending?: true;
 }

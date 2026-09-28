@@ -123,6 +123,41 @@ Those portable markers are not written to the local project task file.
     suggest that leaving it blank will derive one automatically. Interactive
     remote setup gives generic Git URL guidance when no remote is configured,
     rather than presenting an example repository as a usable value.
+18. Pix Desktop presents reusable Registry resources as an IDE-style catalog.
+    Project artifacts stay in the dedicated project-sync review surface and do
+    not appear in the reusable-resource browser. Reusable resources with a local
+    copy appear under **Installed**; remote-only reusable resources appear under
+    **Marketplace**. Stale provenance entries with neither a local nor a current
+    remote copy do not masquerade as Marketplace entries. Search and resource-
+    type filtering apply only within the active catalog section, while existing
+    install/update/push/uninstall/remove actions keep their current Registry
+    semantics. **Installed** is local-first and remains available when no remote
+    is configured; in that state the snapshot scans local skills/agents and
+    exposes only local actions. **Marketplace** is the remote Git registry and
+    prompts for connection when no remote is configured. Project-state
+    initialization is likewise independent: an uninitialized tasks/plans
+    scaffold does not hide the reusable-resource catalog.
+19. Foreground Registry actions (refresh/install/update/push/pull/uninstall/
+    remove) use Registry-local busy state and do not take Pix Desktop's global
+    operation-running lock. The rest of the workbench remains interactive while
+    Registry Git/filesystem work runs in its disposable workspace-scoped Pi
+    runtime. Workspace/client generation guards discard stale completions after
+    a workspace switch or lifecycle reset. Registry-local controls may still be
+    disabled while their own action is active. Local project initialization and
+    reclaimable `.pi` cleanup follow the same rule: they use the Registry
+    `actionId`, never the Desktop-global lock.
+20. Desktop workspace Registry actions execute in a disposable Pi RPC runtime
+    marked specifically for Registry ownership. Resource-changing commands in
+    that runtime invalidate Registry snapshot caches but do not call
+    `ctx.reload()`: reloading the disposable runtime would invalidate the
+    extension context before its authoritative post-action snapshot can be
+    published. Normal conversation/TUI Registry commands retain their live
+    context reload behavior. ACP treats the snapshot as a separate asynchronous
+    event and waits for it with a bounded timeout after the command
+    acknowledgement, rather than assuming one event-loop turn is sufficient.
+    Therefore a successful first push must not be reported as
+    `resource registry did not publish a workspace snapshot` merely because
+    snapshot delivery is delayed.
 
 ## Compatibility
 
@@ -243,7 +278,8 @@ Those portable markers are not written to the local project task file.
   independence.
 - Registry store/panel tests cover local initialization without a ready ACP
   session, local `.pi` size/reclaimable-byte reporting and allowlist-based
-  garbage cleanup, background TTL cleanup and stale-workspace lifecycle guards.
+  garbage cleanup, background TTL cleanup, stale-workspace lifecycle guards, and
+  the Installed/Marketplace separation for reusable Registry resources.
   Sidebar tests cover
   pending/syncing/error presentation, initialization/storage wiring and the
   shared animated indicator. Rust coverage verifies that storage

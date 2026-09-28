@@ -25,6 +25,9 @@
     sessionUsageRefreshing,
     sessionUsageFailed,
     sessionUsageAvailable,
+    claudeCodeRoute = false,
+    claudeLimitsRefreshing = false,
+    claudeLimitsFailed = false,
     sessionActivity,
     sessionSubagentSnapshot,
     sessionTodoSnapshot,
@@ -34,6 +37,7 @@
     onSetConfig,
     onOpenModelThinking,
     onOpenSessionUsage,
+    onRefreshClaudeLimits = () => {},
     onClearTodos,
     onOpenSessionActivity,
   }: {
@@ -48,6 +52,9 @@
     sessionUsageRefreshing: boolean;
     sessionUsageFailed: boolean;
     sessionUsageAvailable: boolean;
+    claudeCodeRoute?: boolean;
+    claudeLimitsRefreshing?: boolean;
+    claudeLimitsFailed?: boolean;
     sessionActivity: SessionActivitySummary;
     sessionSubagentSnapshot: SessionSubagentSnapshot | undefined;
     sessionTodoSnapshot: SessionTodoSnapshot | undefined;
@@ -57,6 +64,7 @@
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
     onOpenSessionUsage: () => void;
+    onRefreshClaudeLimits?: () => void;
     onClearTodos: () => Promise<boolean>;
     onOpenSessionActivity: () => void;
   } = $props();
@@ -128,7 +136,11 @@
       loadingSessionUsage={sessionUsageRefreshing}
       {sessionUsageFailed}
       {sessionUsageAvailable}
+      {claudeCodeRoute}
+      {claudeLimitsRefreshing}
+      {claudeLimitsFailed}
       onOpenSessionUsage={onOpenSessionUsage}
+      onRefreshClaudeLimits={onRefreshClaudeLimits}
     />
     {#each configOptions as option (option.id)}
       {#if option.id === "model" || option.id === "thought_level"}

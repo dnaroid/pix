@@ -9,6 +9,16 @@ import {
 } from "../lib/model-thinking";
 import type { ModelConfigOptions } from "./model-config-options";
 
+/**
+ * Delay before retrying a draft quota refresh flagged
+ * `modelUsageCredentialPending`: the Claude Code credential was missing, so
+ * the retry's provider query reads only local credentials and performs no
+ * provider network traffic until Claude Code refreshes its login. The chain
+ * stops at the first response that is ready, failed, or unavailable without
+ * the flag, and is skipped when the staged selection moved on.
+ */
+const MODEL_USAGE_CREDENTIAL_RETRY_MS = 60_000;
+
 export function createModelDraftConfig(options: ModelConfigOptions) {
   let configOptions = $state<SessionConfigOption[]>([]);
   let modelOverride = $state<{ modelRef: string; thinkingLevel: string } | null>(null);
@@ -21,6 +31,26 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
   let usageGeneration = 0;
   let routingStatusGeneration = 0;
   let selectionInitialized = false;
+  let credentialRetryTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function scheduleModelUsageCredentialRetry(requestGeneration: number, modelRef: string, thinkingLevel: string): void {
+    if (credentialRetryTimer) return;
+    const timer = setTimeout(() => {
+      credentialRetryTimer = undefined;
+      // The staged selection must still be this request's selection; a newer
+      // refreshUsage/applySelection already superseded it.
+      if (requestGeneration !== usageGeneration) return;
+      void refreshUsage(modelRef, thinkingLevel);
+    }, MODEL_USAGE_CREDENTIAL_RETRY_MS);
+    timer.unref?.();
+    credentialRetryTimer = timer;
+  }
+
+  function clearModelUsageCredentialRetry(): void {
+    if (!credentialRetryTimer) return;
+    clearTimeout(credentialRetryTimer);
+    credentialRetryTimer = undefined;
+  }
 
   async function refreshUsage(
     modelRef?: string,
@@ -52,6 +82,9 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
         modelUsageRefresh: response.modelUsageRefresh,
         ...(response.modelUsage ? { modelUsage: response.modelUsage } : {}),
       };
+      if (response.modelUsageRefresh === "unavailable" && response.modelUsageCredentialPending === true) {
+        scheduleModelUsageCredentialRetry(requestGeneration, effectiveModelRef, effectiveThinking);
+      }
     } catch {
       // Draft quota is best-effort just like live runtime quota. Keep the model
       // selector usable even when provider usage is temporarily unavailable.
@@ -126,6 +159,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     autoRoutingSelected = false;
     routedTierId = undefined;
     selectionInitialized = false;
+    clearModelUsageCredentialRetry();
     generation += 1;
     usageGeneration += 1;
     routingStatusGeneration += 1;

@@ -11,6 +11,14 @@
     type SettingsSchema,
   } from "../../lib/settings";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
+  import {
+    removeTodoThinkingOverrideFromSource,
+    renameTodoThinkingOverrideInSource,
+    setTodoThinkingOverrideInSource,
+    todoThinkingOverrideRows,
+    type TodoThinkingOverrideRow,
+    type TodoThinkingOverrideValue,
+  } from "../../lib/todo-thinking-overrides-settings";
   import { frontierModelRows, serializeFrontierModelRows } from "../../lib/frontier-models-settings";
   import { BUILTIN_AGENT_CATALOG } from "../../lib/builtin-agent-catalog";
   import {
@@ -30,6 +38,7 @@
   import SettingsStringList from "./SettingsStringList.svelte";
   import SettingsSwitch from "./SettingsSwitch.svelte";
   import SettingsTextInput from "./SettingsTextInput.svelte";
+  import SettingsTodoThinkingOverrides from "./SettingsTodoThinkingOverrides.svelte";
 
   export type ToolsSuiteSettingsSection = "general" | "subagents" | "automation" | "dcp" | "context" | "integrations";
 
@@ -69,6 +78,10 @@
   const parsed = $derived(parseSettingsSource(source).value);
   const moduleStates = $derived(toolsSuiteModuleStates(parsed, PI_TOOLS_SUITE_MODULE_CATALOG));
   const unknownModuleNames = $derived(toolsSuiteUnknownModuleNames(parsed, PI_TOOLS_SUITE_MODULE_CATALOG));
+  const todoThinkingRows = $derived(todoThinkingOverrideRows(
+    settingsDefaultValue("pi-tools-suite", schema, ["todoThinkingOverrides"]).value,
+    has(["todoThinkingOverrides"]) ? settingsValue(parsed, ["todoThinkingOverrides"]) : undefined,
+  ));
 
   function has(path: readonly string[]): boolean {
     return settingsHasValue(parsed, path);
@@ -153,6 +166,22 @@
   function updateModule(name: string, enabled: boolean): void {
     onChange(updateToolsSuiteModuleSource(source, parsed, name, enabled));
   }
+
+  function addTodoThinkingOverride(pattern: string, level: string): void {
+    onChange(setTodoThinkingOverrideInSource(source, pattern, level));
+  }
+
+  function renameTodoThinkingOverride(row: TodoThinkingOverrideRow, pattern: string): void {
+    onChange(renameTodoThinkingOverrideInSource(source, row, pattern));
+  }
+
+  function updateTodoThinkingOverride(row: TodoThinkingOverrideRow, level: TodoThinkingOverrideValue): void {
+    onChange(setTodoThinkingOverrideInSource(source, row.pattern, level));
+  }
+
+  function removeTodoThinkingOverride(row: TodoThinkingOverrideRow): void {
+    onChange(removeTodoThinkingOverrideFromSource(source, row));
+  }
 </script>
 
 {#if section === "general"}
@@ -214,8 +243,15 @@
     <SettingsFieldRow label="Todo thinking" description="Allow todo items to switch and restore model thinking levels as work moves in progress." explicit={has(["todoThinking"])} defaultLabel={defaultLabel(["todoThinking"])} onReset={() => reset(["todoThinking"])}>
       <SettingsSwitch value={bool(["todoThinking"])} onChange={(value) => set(["todoThinking"], value)} />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Todo thinking overrides" description="Per-model thinking policy. Keys can be provider/model names or wildcard patterns; null removes an inherited override." explicit={has(["todoThinkingOverrides"])} defaultLabel={defaultLabel(["todoThinkingOverrides"])} onReset={() => reset(["todoThinkingOverrides"])}>
-      <SettingsJsonValue value={json(["todoThinkingOverrides"])} rows={6} placeholder={'{\n  "provider/model": "high"\n}'} onChange={(value) => updateJson(["todoThinkingOverrides"], value)} />
+    <SettingsFieldRow label="Todo thinking overrides" description="Choose a forced thinking level for exact models or wildcard patterns. Use No override to clear inherited policy." explicit={has(["todoThinkingOverrides"])} defaultLabel={defaultLabel(["todoThinkingOverrides"])} onReset={() => reset(["todoThinkingOverrides"])}>
+      <SettingsTodoThinkingOverrides
+        rows={todoThinkingRows}
+        {models}
+        onAdd={addTodoThinkingOverride}
+        onRename={renameTodoThinkingOverride}
+        onLevelChange={updateTodoThinkingOverride}
+        onRemove={removeTodoThinkingOverride}
+      />
     </SettingsFieldRow>
     <SettingsFieldRow label="Lookup model" description="Vision-capable helper model used by image lookup. Use Disable to store null explicitly." explicit={has(["lookupModel"])} defaultLabel={defaultLabel(["lookupModel"])} onReset={() => reset(["lookupModel"])}>
       <SettingsModelSelect value={text(["lookupModel"])} {models} emptyLabel="Disabled" onChange={(value) => value ? set(["lookupModel"], value) : set(["lookupModel"], null)} />

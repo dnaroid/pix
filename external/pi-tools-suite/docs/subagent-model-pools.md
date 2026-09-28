@@ -154,11 +154,10 @@ different-provider rule; provider diversity belongs to the role policy.
 `requireDifferentProvider: true` remains accepted as a compatibility alias for
 `parentProviderPolicy: require-other`. New profiles should use the enum directly.
 
-## Parent-model visibility gates
+## Role visibility gates
 
 `forParentTier: frontier | non-frontier` exposes a role only to parents in that
 tier of the frontier list; an unknown parent keeps the role visible.
-
 
 Agent frontmatter can independently gate whether a role exists for the current
 parent model. `forParentModels` is an optional allow-list and
@@ -167,6 +166,12 @@ fields accept model patterns such as `zai/*` and affect the parent catalog,
 explicit role validation, and automatic routing. They do not choose the child
 model; `models` and the provider policy do that.
 
+`requiresIndexedProject: true` is an independent project-context visibility
+gate. It requires `.indexer-cli/` at the project root resolved from the current
+cwd and affects the same parent catalog, explicit-role validation, and automatic
+routing surfaces. It deliberately checks only the project marker, not whether
+`idx` is currently executable, and never initializes the project.
+
 ## Project-local customization and compatibility
 
 Projects customize role behavior by adding or replacing
@@ -174,6 +179,12 @@ Projects customize role behavior by adding or replacing
 sub-agent preset selection, `AGENTS_PRESET`, or `/subagent-preset` runtime
 surface. A project that wants different worker economics changes the ordered
 candidate list of the relevant role instead of selecting a global model pool.
+
+A project-local file with the same name as a bundled role replaces that bundled
+profile completely. Omitted fields do not fall through to the built-in
+definition. The effective parent catalog explicitly reports active same-name
+replacements so the parent knows it is seeing project-owned semantics. There
+are no role-name aliases or partial-merge exceptions.
 
 Old role names are not implicit aliases. `quick`, `scan`, `review`, `deep`,
 `docs`, `frontend`, and `tests` work only when explicitly defined as ordinary
@@ -191,7 +202,7 @@ have no effect. Migrate role definitions and model candidate choices to
 `<project>/.pi/agents/*.md`. To hide only selected bundled roles, use top-level
 `disabledBuiltinAgents` in `pi-tools-suite.jsonc`; later config layers may
 re-enable names with `enabledBuiltinAgents`. The filter runs before project-local
-Markdown is merged, so a same-named project role can intentionally replace a
+Markdown is applied, so a same-named project role can intentionally replace a
 disabled built-in.
 
 ## Compact handoff

@@ -9,9 +9,9 @@ describe("RegistryPanel refresh lifecycle", () => {
     expect(sidebarSource).toContain("onclick={onRegistryRefresh}");
   });
 
-  it("offers local .pi initialization before remote registry configuration", () => {
+  it("keeps project-sync initialization separate from remote registry configuration", () => {
     expect(panelSource).toContain("projectInitialized === false");
-    expect(panelSource).toContain("Initialize project Registry");
+    expect(panelSource).toContain("Project sync is not initialized");
     expect(panelSource).toContain("onclick={onInitializeProject}");
     expect(panelSource).toContain('actionId === "initialize-project"');
   });
@@ -42,5 +42,22 @@ describe("RegistryPanel refresh lifecycle", () => {
   it("treats a missing project key as a non-Git project-sync setup state", () => {
     expect(panelSource).toContain("Project sync needs a key");
     expect(panelSource).toContain("Set a project key; Git is optional");
+  });
+
+  it("separates reusable resources into Installed and Marketplace views", () => {
+    expect(panelSource).toContain('let catalogSection = $state<RegistryCatalogSection>("installed")');
+    expect(panelSource).toContain('aria-label="Installed resources"');
+    expect(panelSource).toContain('aria-label="Marketplace resources"');
+    expect(panelSource).toContain("registryCatalogItems(catalogItems, catalogSection)");
+    expect(panelSource).toContain('.filter((item) => item.type !== "project")');
+    expect(panelSource).not.toContain('<option value="project">Project</option>');
+    expect(panelSource).toContain("onclick={() => item.artifact && onOpenProjectArtifact(item.artifact)}");
+  });
+
+  it("keeps Installed usable without Marketplace or project-sync initialization", () => {
+    expect(panelSource).toContain('!snapshot.configured && catalogSection === "marketplace"');
+    expect(panelSource).toContain("Marketplace is not connected");
+    expect(panelSource).toContain("Project sync is not initialized");
+    expect(panelSource).not.toContain('{#if projectInitialized === false}\n      <div class="px-3 py-6 text-center">');
   });
 });

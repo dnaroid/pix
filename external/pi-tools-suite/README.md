@@ -56,10 +56,14 @@ model-facing contract is:
    absent, ask before running setup rather than inventing a template. Declare
    `kind: spec` and intended `status` in frontmatter and list
    project-relative implementation/test paths in the appropriate sections.
-3. After implementation, run task-scoped `repo_audit` with the changed paths.
-   Compare candidate documents against the final code and tests; fix actual
-   semantic drift. An audit candidate is not proof of an error, and a reviewed
-   no-impact result is valid. Changed code never automatically rewrites specs.
+3. After implementation, delegate the final task-scoped knowledge pass to
+   `knowledge-auditor` when that role is present in the effective catalog. Give
+   it a concise behavior/result summary plus the exact project-relative paths
+   changed by the task. It runs `idx audit`, fixes only small confirmed
+   documentation drift, and escalates substantial or ambiguous drift. If the
+   role is unavailable/disabled, run the existing parent-owned `repo_audit`
+   fallback. An audit candidate is not proof of an error, and a reviewed
+   no-impact result is valid.
 
 Retrieval is bounded: output may be truncated, hybrid mode may degrade with
 diagnostics, and an empty result does not prove that no contract exists.
@@ -68,12 +72,13 @@ correctness verdict. The reviewer owns the final decision.
 
 Mechanical refactors, typo/formatting edits, exact renames, and other changes
 that do not alter project behavior do not require this knowledge-maintenance
-lifecycle. When `idx` is unavailable or the project is not indexed, none of
-these requirements are injected; use the normal repository workflow instead.
-For repo-aware projects, completing a todo when only the final active todo
-remains adds one compact reminder to reconcile affected specs and run a
-task-scoped audit when needed before closing that final todo. File mutations
-themselves do not emit knowledge reminders.
+lifecycle. Repo-aware tools still require both indexed project state and an
+executable `idx`. The `knowledge-auditor` visibility gate intentionally
+requires only `.indexer-cli/`; if `idx` is missing at execution time, the
+child reports a blocker instead of installing or initializing anything. For
+indexed projects, completing a todo when only the final active todo remains adds
+one compact reminder to hand the final knowledge pass to the auditor. File
+mutations themselves do not emit knowledge reminders.
 
 ## Session recovery
 
@@ -498,11 +503,13 @@ Explicit task/CLI model overrides suppress automatic fallbacks. Setting
 `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) deliberately selects the parent model and
 strips conflicting model arguments; this is not the economical default.
 
-The six built-in modes are `research` (read-only evidence and independent
+The eight built-in modes are `research` (read-only evidence and independent
 review), `implement` (bounded code, docs, tests, or UI changes), `verify`
 (run checks and diagnose logs without fixing files), `ui-qa` (real browser,
 terminal/TUI, and desktop-GUI verification), `frontier-review` (independent
-post-implementation review), and `oracle` (deliberate strong second opinion).
+post-implementation review), `delivery-review` (explicit delivery-readiness
+assessment), `knowledge-auditor` (final indexed-repository documentation
+audit/minor drift repair), and `oracle` (deliberate strong second opinion).
 Ordinary workers use economical model candidates; no built-in parent-tier
 rule promotes them to a flagship. Oracle is the exception, not an automatic
 retry for difficult work. Task-specific discipline belongs in the brief.
@@ -547,8 +554,9 @@ Model/thinking overrides are not substitutes for selecting a role.
 The router remains enabled as a fallback for omitted types: use it when the role
 is unclear or the user explicitly requests automatic routing. Only omitted
 tasks are classified, in one batch; the parent's explicit choices are preserved.
-Real UI QA still requires explicit `subagentType: "ui-qa"`. Explicit legacy
-`browser-qa` requests normalize to `ui-qa` for compatibility.
+Real UI QA requires explicit `subagentType: "ui-qa"`. There is no
+`browser-qa` role alias; that name is valid only when a project explicitly
+defines its own independent `.pi/agents/browser-qa.md` role.
 
 Unknown explicit types and failed/incomplete automatic routing reject the
 **entire spawn batch before run state or child processes are created**. The tool
@@ -607,12 +615,25 @@ You are this project's staff reviewer. Apply the repo rules from
 AGENTS.md before approving anything; cite file paths first.
 ```
 
-- Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
+- Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`, parent-model gates, and `requiresIndexedProject`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
 - Array fields accept block lists (`- item`), inline arrays (`[a, b]`), or comma-separated strings (`tools: read, grep, bash`). The frontmatter YAML subset is intentionally small: scalars, quoted strings, numbers, comments, lists, and nested maps for `modelByParent`/`retry`. Tabs, block scalars (`|`/`>`), anchors/aliases, and flow maps are hard errors naming file and line.
 - The markdown body becomes `promptAppend`: it is appended after the standard generated prompt (parent objective + task + output format), so the agent still receives its task in the usual structure. Use frontmatter `promptOverride` for full prompt replacement.
-- Precedence: bundled Markdown defines the built-ins, then the nearest project `.pi/agents/*.md` file overrides the same-named built-in field-by-field. Markdown is the only source of agent role/profile definitions. The removed `asyncSubagents` section and old standalone config-path variables are not read.
+- Precedence: bundled Markdown defines the built-ins, then the nearest project
+  `.pi/agents/*.md` definition replaces a same-named built-in profile
+  completely. Omitted fields do not inherit from the built-in. There are no
+  role-name aliases or partial-merge exceptions. Markdown is the only source of
+  agent role/profile definitions. The removed `asyncSubagents` section and old
+  standalone config-path variables are not read.
 - Files without frontmatter are skipped (a `README.md` there is fine). Definition loading is uncached: edits apply on the next config read/spawn without a restart, and the effective system-prompt catalog is rebuilt at parent-agent start.
 - Bundled roles use the same format internally under `src/async-subagents/agents/*.md`; built-in and project-local profiles therefore share one parser and normalization path instead of maintaining a second role-description schema in TypeScript.
+- The parent catalog explicitly prints the active bundled-role names replaced by
+  project-local definitions, so chat context reflects that the local role owns
+  the complete effective contract.
+- `requiresIndexedProject: true` hides a role unless the project root resolved
+  from the current cwd contains `.indexer-cli/`. The marker alone controls
+  visibility; `idx` does not need to be on `PATH` for the role to appear.
+  The gate applies consistently to the parent catalog, auto-router, and explicit
+  role validation. The built-in `knowledge-auditor` uses this flag.
 - `icon` names an agent glyph for UIs that render sub-agent widgets (pix TUI panel, Pix Desktop subagents panel): `agent` (neutral default), `search`, `code`, `flask`, `globe`, `sparkles`, `brain`, `wrench`, `terminal`, `bug`, `book`, `eye`, `zap`, `rocket`. The value is passed through opaquely; unknown names render as the neutral agent icon, and status stays color-coded next to it.
 
 ### Real UI QA (browser, TUI, and desktop GUI)
@@ -682,13 +703,12 @@ Every async sub-agent launches with `--no-skills`, and skill flags in
 `extraArgs` are stripped rather than forwarded. Agent roles are self-contained;
 there is no profile field for injecting skills and no built-in QA `--skill`.
 
-Model/thinking/tool-only overrides should use a project `ui-qa.md` and inherit
-the bundled Markdown workflow. A legacy project `browser-qa.md` is migrated to
-the canonical `ui-qa` profile when no `ui-qa.md` override exists. A project
-Markdown body replaces the inherited
-`promptAppend` under the usual field-level merge rules; custom QA instructions must preserve the runner-only,
-credential, target, and evidence contracts. Runner-enforced isolation and
-credential handling remain in code, not in the prompt.
+A project `ui-qa.md` completely replaces the bundled UI-QA profile, like every
+other same-named project role. It does not inherit bundled models, tools,
+thinking, visibility fields, or Markdown instructions. Projects that replace
+`ui-qa` must explicitly carry forward every bundled field/instruction they
+still require. Runtime runner/workspace isolation and credential handling remain
+enforced in code.
 
 Public browser QA does not require an auth profile or `.pi/qa_auth.jsonc`: run it
 with an explicit base URL, whose exact origin becomes the fail-closed allowlist.

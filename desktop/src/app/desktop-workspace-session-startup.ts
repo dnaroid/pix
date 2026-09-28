@@ -12,7 +12,6 @@ type DesktopWorkspaceSessionStartupOptions = {
   sessions: DesktopSessionServices;
   draft: DraftSession;
   state: ActiveSessionState;
-  setOperationRunning: (running: boolean) => void;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
 };
@@ -27,7 +26,6 @@ export function createDesktopWorkspaceSessionStartup(options: DesktopWorkspaceSe
     runtime: options.sessions.runtime,
     history: options.sessions.history,
     state: options.state,
-    setOperationRunning: options.setOperationRunning,
     setErrorMessage: options.setErrorMessage,
     reportError: options.reportError,
   });

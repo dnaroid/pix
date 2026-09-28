@@ -30,6 +30,7 @@ const PROVENANCE_VERSION = 1;
 const SYSTEM_CUSTOM_MESSAGE_TYPE = "pix-system";
 const STATUS_MESSAGE_KIND = "resource-registry-status";
 export const REGISTRY_STATE_EVENT = "pi-tools-suite:resource-registry:state";
+const REGISTRY_WORKSPACE_RPC_ENV = "PIX_ACP_REGISTRY_WORKSPACE_RPC";
 const DESC_MAX = 90;
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -1212,29 +1213,31 @@ function registryStatusRank(kind: RegistryStatusKind): number {
 	return index < 0 ? Number.MAX_SAFE_INTEGER : index;
 }
 
-function reusableUiActions(status: RegistryStatus): RegistryUiAction[] {
+function reusableUiActions(status: RegistryStatus, remoteConfigured = true): RegistryUiAction[] {
 	const actions: RegistryUiAction[] = [];
-	switch (status.kind) {
-		case "not-installed":
-			actions.push("install");
-			break;
-		case "update-available":
-		case "missing-local":
-			actions.push("update");
-			break;
-		case "local-changes":
-		case "local-only":
-		case "untracked-local":
-		case "removed-remote":
-			actions.push("push");
-			break;
-		case "up-to-date":
-		case "diverged":
-		case "registry-changed":
-			break;
+	if (remoteConfigured) {
+		switch (status.kind) {
+			case "not-installed":
+				actions.push("install");
+				break;
+			case "update-available":
+			case "missing-local":
+				actions.push("update");
+				break;
+			case "local-changes":
+			case "local-only":
+			case "untracked-local":
+			case "removed-remote":
+				actions.push("push");
+				break;
+			case "up-to-date":
+			case "diverged":
+			case "registry-changed":
+				break;
+		}
 	}
 	if (status.local) actions.push("uninstall");
-	if (status.remote) actions.push("remove");
+	if (remoteConfigured && status.remote) actions.push("remove");
 	return actions;
 }
 
@@ -1257,7 +1260,11 @@ function projectUiActions(status: ProjectArtifactStatus): RegistryUiAction[] {
 	}
 }
 
-function registryUiItems(statuses: RegistryStatus[], projectStatus?: ProjectStatusBundle): RegistryUiItem[] {
+function registryUiItems(
+	statuses: RegistryStatus[],
+	projectStatus?: ProjectStatusBundle,
+	remoteConfigured = true,
+): RegistryUiItem[] {
 	const items: RegistryUiItem[] = [
 		...statuses.map((status): RegistryUiItem => ({
 			id: `${status.type}:${status.name}`,
@@ -1271,7 +1278,7 @@ function registryUiItems(statuses: RegistryStatus[], projectStatus?: ProjectStat
 				: {}),
 			local: Boolean(status.local),
 			remote: Boolean(status.remote),
-			actions: reusableUiActions(status),
+			actions: reusableUiActions(status, remoteConfigured),
 		})),
 		...(projectStatus?.statuses ?? []).map((status): RegistryUiItem => ({
 			id: `project:${status.artifact}`,
@@ -1294,6 +1301,15 @@ function registryUiItems(statuses: RegistryStatus[], projectStatus?: ProjectStat
 	});
 }
 
+async function collectLocalRegistryStatuses(project: ProjectContext): Promise<RegistryStatus[]> {
+	return (await scanProject(project)).map((local) => ({
+		type: local.type,
+		name: local.name,
+		kind: "local-only",
+		local,
+	}));
+}
+
 async function collectRegistryUiSnapshot(
 	pi: ExtensionAPI,
 	project: ProjectContext,
@@ -1303,11 +1319,12 @@ async function collectRegistryUiSnapshot(
 	const config = loadPiToolsSuiteConfig([], { cwd }).resourceRegistry;
 	const checkedAt = new Date().toISOString();
 	if (!config.remote) {
+		const statuses = await collectLocalRegistryStatuses(cwd);
 		return {
 			version: 1,
 			configured: false,
 			branch: config.branch,
-			items: [],
+			items: registryUiItems(statuses, undefined, false),
 			checkedAt,
 			...(error ? { error } : {}),
 		};
@@ -1536,6 +1553,11 @@ async function reloadAfterResourceChange(ctx: ExtensionCommandContext): Promise<
 	} catch (error) {
 		if (!isStaleExtensionContextError(error)) throw error;
 	}
+	// Desktop Registry actions run in a disposable workspace-scoped Pi runtime.
+	// Reloading that runtime invalidates its extension context before the
+	// authoritative post-action snapshot can be published back to Desktop.
+	// Normal conversation/TUI contexts still reload after local resource changes.
+	if (process.env[REGISTRY_WORKSPACE_RPC_ENV] === "1") return;
 	try {
 		await ctx.reload();
 	} catch (error) {

@@ -1,10 +1,11 @@
 import type { ContentBlock, SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk";
 import { isAgentControlState, type AgentControlAction } from "./agent-control";
 import { parseRegistrySnapshot, type RegistryActionRequest, type RegistrySnapshot } from "./registry";
-import { isRecord, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
+import { isRecord, parseClaudeQuotaRefresh, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
 import type {
   AgentControlStatus,
   AutocompleteSettings,
+  ClaudeQuotaRefreshStatus,
   DcpStatsStatus,
   DraftSessionConfig,
   ForkMessage,
@@ -47,6 +48,7 @@ export class AcpPixExtensions {
     configOptions: SessionConfigOption[];
     modelUsageRefresh: RuntimeStatus["modelUsageRefresh"];
     modelUsage?: RuntimeStatus["modelUsage"];
+    modelUsageCredentialPending?: true;
     modelRoutingEnabled: boolean;
     modelRoutingDefault: boolean;
   }> {
@@ -70,6 +72,7 @@ export class AcpPixExtensions {
       configOptions: response.configOptions as SessionConfigOption[],
       modelUsageRefresh: runtime.modelUsageRefresh,
       ...(runtime.modelUsage ? { modelUsage: runtime.modelUsage } : {}),
+      ...(runtime.modelUsageCredentialPending ? { modelUsageCredentialPending: true } : {}),
       modelRoutingEnabled: response.modelRoutingEnabled === true,
       modelRoutingDefault: response.modelRoutingDefault === true,
     };
@@ -201,6 +204,14 @@ export class AcpPixExtensions {
 
   async sessionUsage(sessionId: string): Promise<SessionUsageStatus> {
     return parseSessionUsageStatus(await this.request<unknown>("pix/session/usage", { sessionId }, null));
+  }
+
+  /**
+   * Manual Claude Code quota refresh. Must outlive the bounded headless
+   * Claude CLI child plus the credential reread and quota query that follow.
+   */
+  async claudeQuotaRefresh(sessionId: string): Promise<ClaudeQuotaRefreshStatus> {
+    return parseClaudeQuotaRefresh(await this.request<unknown>("pix/session/claude_quota_refresh", { sessionId }, 180_000));
   }
 
   async bash(

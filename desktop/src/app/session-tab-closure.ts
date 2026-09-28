@@ -1,9 +1,29 @@
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
 import type { SessionLoader, SessionTabControllerOptions } from "./session-tab-controller-options";
 
+export type SessionActionTracker = {
+  isBusy: (sessionId: string) => boolean;
+  begin: (sessionId: string) => boolean;
+  end: (sessionId: string) => void;
+};
+
+export function createSessionActionTracker(): SessionActionTracker {
+  const sessionIds = new Set<string>();
+  return {
+    isBusy: (sessionId) => sessionIds.has(sessionId),
+    begin: (sessionId) => {
+      if (sessionIds.has(sessionId)) return false;
+      sessionIds.add(sessionId);
+      return true;
+    },
+    end: (sessionId) => { sessionIds.delete(sessionId); },
+  };
+}
+
 export function createSessionTabClosure(
   options: SessionTabControllerOptions,
   loadSession: SessionLoader,
+  sessionActions: SessionActionTracker = createSessionActionTracker(),
 ) {
   async function closeWorkspaceSessions(): Promise<void> {
     options.runtime.invalidatePrewarm();
@@ -40,7 +60,7 @@ export function createSessionTabClosure(
     preferredNextSessionId?: string,
   ): Promise<boolean> {
     options.tabs.closeSelector();
-    if (options.sessionMutationRunning()) return false;
+    if (options.sessionMutationRunning() || sessionActions.isBusy(sessionId)) return false;
     const tabSessionIds = options.tabSessionIds();
     if (sessionId === DRAFT_SESSION_TAB_ID) {
       if (!options.draft.open || tabSessionIds.length === 0) return false;
@@ -67,23 +87,27 @@ export function createSessionTabClosure(
     }
     options.runtime.invalidatePrewarm();
     const requestClient = options.client();
+    const requestWorkspace = options.workspace();
+    const current = () => requestClient === options.client() && requestWorkspace === options.workspace();
     if (sessionId !== options.state.sessionId) {
-      options.setOperationRunning(true);
+      if (!sessionActions.begin(sessionId)) return false;
       options.setErrorMessage(null);
       options.tabs.markClosed(sessionId);
       try {
         await requestClient?.closeSession(sessionId);
+        if (!current()) return true;
         options.forgetRuntime(sessionId);
         options.clearSessionActivity(sessionId);
         options.state.deleteSessionTranscript(sessionId);
         options.forgetComposerDraft(sessionId);
         options.retargetWorkbenchAnchors(sessionId, options.state.sessionId ?? undefined);
       } catch (error) {
+        if (!current()) return false;
         options.tabs.show(sessionId);
         options.reportError(error);
         return false;
       } finally {
-        options.setOperationRunning(false);
+        sessionActions.end(sessionId);
       }
       return true;
     }
@@ -122,7 +146,14 @@ export function createSessionTabClosure(
 
   async function deleteSelectedSession(sessionId: string): Promise<void> {
     const requestClient = options.client();
-    if (!requestClient || options.sessionMutationRunning() || options.promptRunning(sessionId)) return;
+    if (
+      !requestClient
+      || options.sessionMutationRunning()
+      || options.promptRunning(sessionId)
+      || sessionActions.isBusy(sessionId)
+    ) return;
+    const requestWorkspace = options.workspace();
+    const current = () => requestClient === options.client() && requestWorkspace === options.workspace();
     const session = options.catalog.sessions.find((candidate) => candidate.sessionId === sessionId);
     const title = session?.title || "Untitled conversation";
     if (!window.confirm(`Permanently delete “${title}”?\n\nThis removes the Pi session file and its DCP sidecar state.`)) return;
@@ -132,10 +163,12 @@ export function createSessionTabClosure(
     const nextSessionId = deletingActive
       ? options.catalog.sessions.find((candidate) => candidate.sessionId !== sessionId)?.sessionId
       : undefined;
-    options.setOperationRunning(true);
+    if (deletingActive) options.setOperationRunning(true);
+    else if (!sessionActions.begin(sessionId)) return;
     options.setErrorMessage(null);
     try {
       await requestClient.deleteSession(sessionId);
+      if (!current()) return;
       options.forgetRuntime(sessionId);
       options.clearSessionActivity(sessionId);
       options.state.deleteSessionTranscript(sessionId);
@@ -149,12 +182,17 @@ export function createSessionTabClosure(
       }
       await options.catalog.refresh();
     } catch (error) {
-      options.reportError(error);
+      if (current()) options.reportError(error);
       return;
     } finally {
-      options.setOperationRunning(false);
+      if (deletingActive) {
+        if (current()) options.setOperationRunning(false);
+      } else {
+        sessionActions.end(sessionId);
+      }
     }
 
+    if (!current()) return;
     if (!deletingActive) return;
     if (nextSessionId && options.catalog.sessions.some((candidate) => candidate.sessionId === nextSessionId)) {
       await loadSession(nextSessionId);

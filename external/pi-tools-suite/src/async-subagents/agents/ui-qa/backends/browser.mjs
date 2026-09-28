@@ -203,9 +203,10 @@ function normalizeLoopbackBrowserUrl(value) {
 }
 
 function createAdapterFlow(context, flow) {
-	const browserFlows = path.join(context.agentDir, "browser-qa", "flows");
-	validatePrivateDirectory(context.agentDir, path.join(context.agentDir, "browser-qa"), "browser QA workspace");
-	validatePrivateDirectory(path.join(context.agentDir, "browser-qa"), browserFlows, "browser QA flow workspace");
+	const browserWorkspace = path.join(context.agentDir, "ui-qa", "browser");
+	const browserFlows = path.join(browserWorkspace, "flows");
+	validatePrivateDirectory(path.join(context.agentDir, "ui-qa"), browserWorkspace, "browser QA workspace");
+	validatePrivateDirectory(browserWorkspace, browserFlows, "browser QA flow workspace");
 	const file = path.join(browserFlows, `ui-qa-${context.runId}.jsonc`);
 	if (fs.existsSync(file)) throw new Error("browser adapter flow already exists for this run id");
 	fs.writeFileSync(file, `${JSON.stringify(flow, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });

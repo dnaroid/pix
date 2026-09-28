@@ -33,6 +33,7 @@
 
   const initiallyOpen = untrack(() => item.tools.filter(isUserBashTool).map((tool) => tool.id));
   let expanded = $state(initiallyOpen.length > 0);
+  let groupSummary: HTMLElement;
   // Preserve individual disclosures when the outer group is collapsed, but do
   // not keep their Markdown, diffs or attachment components mounted offscreen.
   const expandedEntries = new SvelteSet(initiallyOpen);
@@ -55,7 +56,7 @@
   data-transcript-entry-id={item.id}
   class={["transcript-entry group/activity w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80", gapClass]}
 >
-  <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+  <summary bind:this={groupSummary} class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/activity:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
     <ToolStatusIcon status={item.status} lifecycleOnly class="h-3 w-3 opacity-75" />
     <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
@@ -74,7 +75,13 @@
     </span>
   </summary>
   {#if expanded}
-    <div class="mt-1 ml-[7px] space-y-0.5 border-l border-code-border pl-2.5">
+    <div class="relative mt-1 ml-[7px] space-y-0.5 pl-2.5">
+      <button
+        type="button"
+        aria-label="Collapse tool activity"
+        class="group/gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] cursor-pointer justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+        onclick={() => { expanded = false; groupSummary.focus(); }}
+      ><span class="h-full w-px bg-code-border transition-colors group-hover/gutter:bg-foreground/50 group-focus-visible/gutter:bg-foreground/50" aria-hidden="true"></span></button>
       {#each item.entries as entry (entry.id)}
         {#if entry.type === "message"}
           <details class="group/thought" data-activity-entry-id={entry.id} open={expandedEntries.has(entry.id)} ontoggle={(event) => toggleEntry(event, entry)}>

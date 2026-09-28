@@ -33,6 +33,129 @@ describe("model usage controller", () => {
 		assert.equal(queries, 2);
 	});
 
+	it("retries Claude Code quota early while its local credential is missing, then disarms on success", async () => {
+		const claudeSession = sessionWithModel("pi-claude-code-provider", "claude-opus-5-5");
+		const otherSession = sessionWithModel("openai-codex", "gpt-5.5");
+		let activeSession: AgentSession = claudeSession;
+		const claudeQueries: number[] = [];
+		let credentialAvailable = false;
+		let quotaAvailable = false;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			render: () => {},
+		}, async (descriptor) => {
+			if (descriptor.kind !== "claude-code") return usageStatus(descriptor, 50);
+			claudeQueries.push(Date.now());
+			return quotaAvailable ? usageStatus(descriptor, 72) : undefined;
+		}, async () => credentialAvailable);
+
+		const realNow = Date.now;
+		let nowMs = FIXED_NOW;
+		Date.now = () => nowMs;
+		try {
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW]);
+
+			// Toggling away and back re-attempts the active route through the
+			// interval gate: 20s after the first attempt is still too early.
+			nowMs += 20_000;
+			activeSession = otherSession;
+			controller.observeSession(otherSession);
+			await settlePromises();
+			activeSession = claudeSession;
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW]);
+
+			// 31s after the unavailable attempt the accelerated credential retry
+			// fires without waiting for the five-minute poll interval.
+			nowMs += 11_000;
+			activeSession = otherSession;
+			controller.observeSession(otherSession);
+			activeSession = claudeSession;
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW, FIXED_NOW + 31_000]);
+			assert.equal(controller.statusLabel(), "");
+
+			// The fast cadence never drops below the credential retry interval.
+			nowMs += 10_000;
+			activeSession = otherSession;
+			controller.observeSession(otherSession);
+			activeSession = claudeSession;
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW, FIXED_NOW + 31_000]);
+
+			// Claude Code refreshed its login: the next accelerated retry now
+			// succeeds, disarms the fast cadence, and shows fresh quota.
+			credentialAvailable = true;
+			quotaAvailable = true;
+			nowMs += 21_000;
+			activeSession = otherSession;
+			controller.observeSession(otherSession);
+			activeSession = claudeSession;
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW, FIXED_NOW + 31_000, FIXED_NOW + 62_000]);
+			assert.match(controller.statusLabel(), /^72%/u);
+
+			// Disarmed: a later switch inside the poll interval issues no query.
+			nowMs += 33_000;
+			activeSession = otherSession;
+			controller.observeSession(otherSession);
+			activeSession = claudeSession;
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW, FIXED_NOW + 31_000, FIXED_NOW + 62_000]);
+			assert.match(controller.statusLabel(), /^72%/u);
+		} finally {
+			Date.now = realNow;
+		}
+	});
+
+	it("keeps the regular cadence when a Claude Code credential exists but the endpoint returns no quota", async () => {
+		const claudeSession = sessionWithModel("pi-claude-code-provider", "claude-opus-5-5");
+		const otherSession = sessionWithModel("openai-codex", "gpt-5.5");
+		let activeSession: AgentSession = claudeSession;
+		const claudeQueries: number[] = [];
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			render: () => {},
+		}, async (descriptor) => {
+			if (descriptor.kind !== "claude-code") return usageStatus(descriptor, 50);
+			claudeQueries.push(Date.now());
+			return undefined;
+		}, async () => true);
+
+		const realNow = Date.now;
+		let nowMs = FIXED_NOW;
+		Date.now = () => nowMs;
+		try {
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW]);
+
+			// A present credential means the unavailability came from the usage
+			// endpoint response; faster retries would add provider network load.
+			nowMs += 90_000;
+			activeSession = otherSession;
+			controller.observeSession(otherSession);
+			activeSession = claudeSession;
+			controller.observeSession(claudeSession);
+			await settlePromises();
+			await settlePromises();
+			assert.deepEqual(claudeQueries, [FIXED_NOW]);
+		} finally {
+			Date.now = realNow;
+		}
+	});
+
 	it("keeps cached usage per provider/model when switching sessions", async () => {
 		let activeSession = sessionWithModel("openai-codex", "gpt-5.5");
 		let renderCount = 0;

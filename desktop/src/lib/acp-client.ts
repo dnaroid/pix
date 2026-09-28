@@ -26,6 +26,7 @@ import type {
   AcpTransport,
   AgentControlStatus,
   AutocompleteSettings,
+  ClaudeQuotaRefreshStatus,
   DcpStatsStatus,
   DraftSessionConfig,
   ForkMessage,
@@ -52,6 +53,7 @@ export type {
   AcpTransportHandlers,
   AgentControlStatus,
   AutocompleteSettings,
+  ClaudeQuotaRefreshStatus,
   ContextUsageStatus,
   DcpStatsStatus,
   DraftSessionConfig,
@@ -335,6 +337,10 @@ export class AcpClient {
 
   sessionUsage(sessionId: string): Promise<SessionUsageStatus> {
     return this.pix.sessionUsage(sessionId);
+  }
+
+  claudeQuotaRefresh(sessionId: string): Promise<ClaudeQuotaRefreshStatus> {
+    return this.pix.claudeQuotaRefresh(sessionId);
   }
 
   cancel(sessionId: string): Promise<void> {

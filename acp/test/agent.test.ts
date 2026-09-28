@@ -36,6 +36,7 @@ import {
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_RESUME_PATH_METHOD,
 	PIX_RUNTIME_STATUS_METHOD,
+	PIX_CLAUDE_QUOTA_REFRESH_METHOD,
 	PIX_SESSION_USAGE_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
 	PIX_SESSION_IMAGE_METHOD,
@@ -1743,6 +1744,59 @@ test("Pix Desktop deduplicates concurrent quota refreshes for one session model 
 
 type HeaderUsageNotification = { sessionId: string; channel: string; data: unknown };
 
+test("Pix Desktop flags credential-pending Claude Code quota unavailability for faster local-only retries", async () => {
+	const results: Array<{ refresh: "unavailable"; credentialPending?: true }> = [
+		{ refresh: "unavailable", credentialPending: true },
+		{ refresh: "unavailable" },
+	];
+	let index = 0;
+	const { adapter } = createTestAdapter({
+		queryModelUsage: async () => results[Math.min(index, results.length - 1)]!,
+	});
+
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-quota-credential-pending").start();
+		const first = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
+			sessionId: session.sessionId,
+			refreshModelUsage: true,
+		}) as DesktopRuntimeStatusResponse;
+		assert.equal(first.modelUsageRefresh, "unavailable");
+		assert.equal(first.modelUsageCredentialPending, true);
+		index += 1;
+
+		// Once a credential exists (or another provider is unavailable), the
+		// flag is absent so clients keep the regular refresh cadence.
+		const second = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
+			sessionId: session.sessionId,
+			refreshModelUsage: true,
+		}) as DesktopRuntimeStatusResponse;
+		assert.equal(second.modelUsageRefresh, "unavailable");
+		assert.equal(second.modelUsageCredentialPending, undefined);
+	});
+});
+
+test("manual Claude limits discard a route switched while the CLI runs", async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => { release = resolve; });
+	let nudges = 0;
+	let quotaQueries = 0;
+	const { adapter, clients } = createTestAdapter({
+		claudeCodeLoginNudge: async () => { nudges += 1; await gate; return true; },
+		queryModelUsage: async () => { quotaQueries += 1; return { refresh: "unavailable" }; },
+	});
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-claude-manual-switch").start();
+		await clients[0]!.setModel("pi-claude-code-provider", "claude-opus");
+		const first = cx.request(PIX_CLAUDE_QUOTA_REFRESH_METHOD, { sessionId: session.sessionId });
+		await waitFor(() => nudges === 1);
+		await clients[0]!.setModel("anthropic", "claude-4");
+		release();
+		await assert.rejects(first, /claude quota refresh requires an active pi-claude-code-provider model/);
+		assert.equal(nudges, 1);
+		assert.equal(quotaQueries, 0, "route switch must not query or expose the previous route's limits");
+	});
+});
+
 function anthropicHeaderRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
 		modelKey: "anthropic/claude-4",
@@ -2616,13 +2670,20 @@ test("Pix Desktop registry actions run in a disposable workspace runtime without
 					});
 					finalSnapshot = { ...snapshot, projectKey: "manual-key" };
 				}
-				pi.emit({
+				const emitSnapshot = () => pi.emit({
 					type: "extension_ui_request",
 					id: `registry-state-${registryClients.length}`,
 					method: "setWidget",
 					widgetKey: "pix.session-state",
 					widgetLines: ["pi-tools-suite:resource-registry:state", JSON.stringify(finalSnapshot)],
 				});
+				if (message === "/registry rpc update skill pdf") {
+					// Real pi can acknowledge the extension-handled command before the
+					// corresponding UI event has crossed the RPC event stream.
+					setTimeout(emitSnapshot, 20);
+					return;
+				}
+				emitSnapshot();
 			};
 			registryClients.push(pi);
 			return pi;
@@ -2669,6 +2730,7 @@ test("Pix Desktop registry actions run in a disposable workspace runtime without
 		assert.equal(typeof (elicitationParams[0] as { requestId?: string }).requestId, "string");
 		for (const options of registryOptions) {
 			assert.equal(options.cwd, "/tmp/registry-gui");
+			assert.equal(options.env?.PIX_ACP_REGISTRY_WORKSPACE_RPC, "1");
 			assert.ok(options.args?.includes("--no-session"));
 			assert.ok(options.args?.includes("--extension"));
 		}

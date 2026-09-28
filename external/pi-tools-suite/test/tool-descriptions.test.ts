@@ -108,6 +108,7 @@ describe("tool descriptions", () => {
 		expect(text).toContain("general indexed behavior/task discovery");
 		expect(text).toContain("parent model");
 		expect(text).toContain("material behavior change");
+		expect(text).toContain("knowledge-auditor");
 		expect(text).toContain("primary spec");
 		expect(text).toContain("semantic drift");
 		expect(text).toContain(".indexer-cli/spec-template.md");

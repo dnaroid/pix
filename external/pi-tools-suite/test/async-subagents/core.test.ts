@@ -526,7 +526,7 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "knowledge-auditor", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(config.types["frontier-review"].modelSelection).toBe("frontier");
 		expect(config.types.oracle.modelSelection).toBe("frontier");
@@ -560,6 +560,7 @@ Research only this project.
 		expect(buildSubagentCatalogPrompt(config)).not.toContain("- oracle:");
 		expect(buildSubagentCatalogPrompt(config)).not.toContain("- ui-qa:");
 		expect(buildSubagentCatalogPrompt(config)).toContain("- research: Project-specific research role.");
+		expect(buildSubagentCatalogPrompt(config)).toContain("Active project replacements of built-ins: research.");
 		await expect(routeSubagentTasks([
 			{ id: "oracle", task: "second opinion", subagentType: "oracle" },
 		], config, {})).rejects.toThrow(/Unknown subagentType/);
@@ -585,7 +586,7 @@ Research only this project.
 	test.serial("resolves the built-in balanced role models and UI QA profile", () => {
 		const cwd = tempDir();
 		const config = loadSubagentConfig(cwd, {});
-		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
+		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "ui-qa" }, config);
 		const runner = getBrowserQaRunnerPath();
 		const uiRunner = getUiQaRunnerPath();
 
@@ -667,6 +668,7 @@ Research only this project.
 			"delivery-review",
 			"frontier-review",
 			"implement",
+			"knowledge-auditor",
 			"oracle",
 			"research",
 			"ui-qa",
@@ -675,6 +677,8 @@ Research only this project.
 		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
 		expect(definitions["frontier-review"]?.raw.forParentTier).toBe("non-frontier");
 		expect(definitions["delivery-review"]?.raw.tools).toEqual(["read", "grep", "bash"]);
+		expect(definitions["knowledge-auditor"]?.raw.requiresIndexedProject).toBe(true);
+		expect(definitions["knowledge-auditor"]?.raw.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
 		expect(definitions["delivery-review"]?.raw.promptAppend).toContain("End with confidence");
 		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
@@ -709,11 +713,12 @@ Research only this project.
 		expect(Object.keys(definitions).sort()).not.toContain("desktop");
 	});
 
-	test.serial("inherits QA instructions with model overrides", () => {
+	test.serial("treats project browser-qa as an ordinary independent role, not a ui-qa alias", () => {
 		const cwd = tempDir();
 		writeFile(path.join(cwd, ".pi", "agents", "browser-qa.md"), `---
 model: custom/qa
 ---
+	Independent project browser role.
 `);
 		const config = loadSubagentConfig(cwd, {});
 		const resolved = resolveAgentTaskConfig({
@@ -721,11 +726,15 @@ model: custom/qa
 			promptOverride: "Custom brief: {task}", promptAppend: "Check the mobile layout too.",
 		}, config);
 
-		expect(resolved.task.subagentType).toBe("ui-qa");
+		expect(resolved.task.subagentType).toBe("browser-qa");
 		expect(resolved.task.model).toBe("custom/qa");
 		expect(generatePrompt(resolved.task)).toStartWith("Custom brief: verify the browser bug");
-		expect(generatePrompt(resolved.task)).toContain("guide --backend browser");
+		expect(generatePrompt(resolved.task)).not.toContain("guide --backend browser");
 		expect(generatePrompt(resolved.task)).toContain("Check the mobile layout too.");
+		expect(config.projectAgentMetadata?.["browser-qa"]).toEqual({
+			sourceName: "browser-qa",
+			replacesBuiltin: false,
+		});
 	});
 
 	test.serial("selects explicit roles or falls back to the configured default", () => {
@@ -783,6 +792,7 @@ Review carefully.
 	test.serial("uses internal runtime defaults plus per-agent retry and max result config", () => {
 		const cwd = tempDir();
 		writeFile(path.join(cwd, ".pi", "agents", "research.md"), `---
+models: [zai/glm-5.3-flash]
 maxResultBytes: 3
 retry:
   maxRetries: 2
@@ -971,6 +981,7 @@ Advise only.
 			expect(builtin.types.verify?.icon).toBe("flask");
 			expect(builtin.types["ui-qa"]?.icon).toBe("bug");
 			expect(builtin.types["frontier-review"]?.icon).toBe("eye");
+			expect(builtin.types["knowledge-auditor"]?.icon).toBe("book-open");
 			expect(builtin.types.oracle?.icon).toBe("sparkles");
 		});
 
@@ -1528,7 +1539,7 @@ setTimeout(() => {}, 2000);
 		const cwd = tempDir();
 		const runDir = createRunDir(cwd, "ui-qa-workspace");
 		const agentDir = path.join(runDir, "qa-agent");
-		const staleEvidence = path.join(agentDir, "browser-qa", "evidence", "stale.png");
+		const staleEvidence = path.join(agentDir, "ui-qa", "browser", "evidence", "stale.png");
 		const staleNativeEvidence = path.join(agentDir, "ui-qa", "evidence", "stale.txt");
 		const capturedEnv = path.join(cwd, "captured-ui-qa-agent-dir");
 		writeFile(staleEvidence, "stale");
@@ -1554,12 +1565,12 @@ setTimeout(() => {}, 1000);
 		expect(fs.existsSync(staleNativeEvidence)).toBe(false);
 		expect(fs.statSync(path.join(agentDir, "ui-qa")).isDirectory()).toBe(true);
 		expect(fs.statSync(path.join(agentDir, "ui-qa", "flows")).isDirectory()).toBe(true);
-		expect(fs.statSync(path.join(agentDir, "browser-qa", "flows")).isDirectory()).toBe(true);
+		expect(fs.statSync(path.join(agentDir, "ui-qa", "browser", "flows")).isDirectory()).toBe(true);
 		if (process.platform !== "win32") {
 			expect(fs.statSync(path.join(agentDir, "ui-qa")).mode & 0o777).toBe(0o700);
 			expect(fs.statSync(path.join(agentDir, "ui-qa", "flows")).mode & 0o777).toBe(0o700);
-			expect(fs.statSync(path.join(agentDir, "browser-qa")).mode & 0o777).toBe(0o700);
-			expect(fs.statSync(path.join(agentDir, "browser-qa", "flows")).mode & 0o777).toBe(0o700);
+			expect(fs.statSync(path.join(agentDir, "ui-qa", "browser")).mode & 0o777).toBe(0o700);
+			expect(fs.statSync(path.join(agentDir, "ui-qa", "browser", "flows")).mode & 0o777).toBe(0o700);
 		}
 	});
 

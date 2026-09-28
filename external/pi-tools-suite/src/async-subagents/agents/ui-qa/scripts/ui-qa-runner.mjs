@@ -348,7 +348,7 @@ function resolveAgentDirectory(projectRoot, value) {
 	const recordedProject = fs.readFileSync(path.join(real, "project_cwd"), "utf8").trim();
 	if (!recordedProject || fs.realpathSync(recordedProject) !== projectRoot) throw new UiQaError("FAILED", "UI QA agent directory belongs to another project");
 	const type = fs.readFileSync(path.join(real, "subagent_type"), "utf8").trim();
-	if (type !== "ui-qa" && type !== "browser-qa") throw new UiQaError("FAILED", "UI QA runner requires a ui-qa/browser-qa agent directory");
+	if (type !== "ui-qa") throw new UiQaError("FAILED", "UI QA runner requires a ui-qa agent directory");
 	const workspace = path.join(real, WORKSPACE_RELATIVE);
 	validatePrivateDirectory(real, workspace, "UI QA workspace");
 	validatePrivateDirectory(workspace, path.join(workspace, FLOW_RELATIVE), "UI QA flow workspace");

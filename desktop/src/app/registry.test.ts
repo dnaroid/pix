@@ -8,14 +8,12 @@ function fixture() {
   let workspace = "/project";
   const loadProjectTasks = vi.fn(async () => {});
   const loadProjectDocuments = vi.fn(async () => {});
-  const setOperationRunning = vi.fn();
   const reportError = vi.fn();
   const store = createRegistryStore({
     client: () => null,
     operationRunning: () => false,
     workspace: () => workspace,
     sessionWorkspace: () => undefined,
-    setOperationRunning,
     setErrorMessage: vi.fn(),
     loadProjectTasks,
     loadProjectDocuments,
@@ -25,7 +23,6 @@ function fixture() {
     store,
     loadProjectTasks,
     loadProjectDocuments,
-    setOperationRunning,
     reportError,
     setWorkspace(value: string) {
       workspace = value;
@@ -111,7 +108,6 @@ describe("Registry project initialization", () => {
       store,
       loadProjectTasks,
       loadProjectDocuments,
-      setOperationRunning,
     } = fixture();
     let initialized = false;
     invoke.mockImplementation(async (command: string) => {
@@ -136,7 +132,6 @@ describe("Registry project initialization", () => {
 
     expect(loadProjectTasks).toHaveBeenCalledWith("/project");
     expect(loadProjectDocuments).toHaveBeenCalledWith("/project");
-    expect(setOperationRunning.mock.calls).toEqual([[true], [false]]);
     await vi.waitFor(() => expect(store.projectInitialized).toBe(true));
     await vi.waitFor(() => expect(store.projectPiSizeBytes).toBe(1536));
   });
@@ -146,7 +141,6 @@ describe("Registry project initialization", () => {
       store,
       loadProjectTasks,
       loadProjectDocuments,
-      setOperationRunning,
     } = fixture();
     let cleanupBytes = 512;
     let totalBytes = 4096;
@@ -176,7 +170,6 @@ describe("Registry project initialization", () => {
     expect(invoke).toHaveBeenCalledWith("clean_project_pi", { workspace: "/project" });
     expect(loadProjectTasks).not.toHaveBeenCalled();
     expect(loadProjectDocuments).not.toHaveBeenCalled();
-    expect(setOperationRunning.mock.calls).toEqual([[true], [false]]);
     expect(store.projectInitialized).toBe(true);
     expect(store.projectPiSizeBytes).toBe(3584);
     expect(store.projectPiCleanupBytes).toBe(0);
@@ -184,7 +177,7 @@ describe("Registry project initialization", () => {
   });
 
   it("runs TTL auto-clean without the foreground operation lock and refreshes current storage", async () => {
-    const { store, setOperationRunning } = fixture();
+    const { store } = fixture();
     let totalBytes = 4096;
     let cleanupBytes = 512;
     invoke.mockImplementation(async (command: string) => {
@@ -207,7 +200,6 @@ describe("Registry project initialization", () => {
     await store.autoCleanProject("/project");
 
     expect(invoke).toHaveBeenCalledWith("auto_clean_project_pi", { workspace: "/project" });
-    expect(setOperationRunning).not.toHaveBeenCalled();
     expect(store.projectPiSizeBytes).toBe(3840);
     expect(store.projectPiCleanupBytes).toBe(256);
     expect(store.projectPiCleanupAvailable).toBe(true);
@@ -262,7 +254,6 @@ describe("Registry workspace actions", () => {
       operationRunning: () => false,
       workspace: () => "/project",
       sessionWorkspace: () => undefined,
-      setOperationRunning: vi.fn(),
       setErrorMessage: vi.fn(),
       loadProjectTasks: vi.fn(),
       loadProjectDocuments: vi.fn(),

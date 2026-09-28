@@ -10,6 +10,7 @@ import resourceRegistry, { __test } from "../src/resource-registry/index.js";
 const originalHome = process.env.HOME;
 const originalCache = process.env.XDG_CACHE_HOME;
 const originalRpcStateBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+const originalRegistryWorkspaceRpc = process.env.PIX_ACP_REGISTRY_WORKSPACE_RPC;
 const roots: string[] = [];
 
 // Real Git/filesystem scenarios spawn many processes on Windows. This is a
@@ -25,6 +26,8 @@ afterEach(() => {
 	else process.env.XDG_CACHE_HOME = originalCache;
 	if (originalRpcStateBridge === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 	else process.env.PIX_ACP_SESSION_STATE_BRIDGE = originalRpcStateBridge;
+	if (originalRegistryWorkspaceRpc === undefined) delete process.env.PIX_ACP_REGISTRY_WORKSPACE_RPC;
+	else process.env.PIX_ACP_REGISTRY_WORKSPACE_RPC = originalRegistryWorkspaceRpc;
 	for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -155,6 +158,49 @@ describe("resource registry", () => {
 		expect(__test.projectKeyFromGitRemote("https://github.com/dnaroid/pi-ui-extend.git")).toBe("github.com__dnaroid__pi-ui-extend");
 	});
 
+	test("publishes installed local resources before a Marketplace remote is configured", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(path.join(project, ".pi", "skills", "local-skill"), { recursive: true });
+		fs.mkdirSync(path.join(project, ".pi", "agents"), { recursive: true });
+		fs.writeFileSync(
+			path.join(project, ".pi", "skills", "local-skill", "SKILL.md"),
+			"---\ndescription: Local skill\n---\n\nLocal skill body.\n",
+		);
+		fs.writeFileSync(
+			path.join(project, ".pi", "agents", "local-agent.md"),
+			"---\ndescription: Local agent\nmodels: [test/model]\n---\n\nLocal agent body.\n",
+		);
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		const h = harness(project);
+
+		const snapshot = await __test.collectRegistryUiSnapshot(h.pi, project);
+
+		expect(snapshot.configured).toBe(false);
+		expect(snapshot.remote).toBeUndefined();
+		expect(snapshot.items).toEqual([
+			expect.objectContaining({
+				id: "agent:local-agent",
+				type: "agent",
+				status: "local-only",
+				local: true,
+				remote: false,
+				actions: ["uninstall"],
+			}),
+			expect.objectContaining({
+				id: "skill:local-skill",
+				type: "skill",
+				status: "local-only",
+				local: true,
+				remote: false,
+				actions: ["uninstall"],
+			}),
+		]);
+	});
+
 	test("a project without Git origin keeps reusable Registry resources usable and asks only for a project key", async () => {
 		const root = tempRoot();
 		const home = path.join(root, "home");
@@ -244,7 +290,8 @@ describe("resource registry", () => {
 		process.env.HOME = home;
 		process.env.XDG_CACHE_HOME = path.join(root, "cache");
 		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
-		const { remote } = createRegistry(root);
+		process.env.PIX_ACP_REGISTRY_WORKSPACE_RPC = "1";
+		const { remote, seed } = createRegistry(root);
 		const h = harness(project);
 		const command = h.commands.get("registry");
 
@@ -278,7 +325,24 @@ describe("resource registry", () => {
 			remote: true,
 			actions: ["uninstall", "remove"],
 		});
-		expect(h.reloads).toBe(1);
+		expect(h.reloads).toBe(0);
+
+		fs.mkdirSync(path.join(project, ".pi", "agents"), { recursive: true });
+		fs.writeFileSync(
+			path.join(project, ".pi", "agents", "architect.md"),
+			"---\ndescription: Architecture review\nmodels: [test/model]\n---\n\nReview architecture.\n",
+		);
+		await command.handler("rpc push agent architect", h.ctx);
+		const pushed = JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+		expect(pushed.items.find((item: any) => item.id === "agent:architect")).toMatchObject({
+			status: "up-to-date",
+			local: true,
+			remote: true,
+			actions: ["uninstall", "remove"],
+		});
+		expect(h.reloads).toBe(0);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		expect(fs.readFileSync(path.join(seed, "agents", "architect.md"), "utf8")).toContain("Architecture review");
 	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("serializes the startup Desktop snapshot with the Registry panel refresh", async () => {

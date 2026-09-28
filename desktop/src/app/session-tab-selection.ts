@@ -2,7 +2,10 @@ import { emptyTranscript } from "../lib/transcript";
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
 import type { SessionTabControllerOptions } from "./session-tab-controller-options";
 
-export function createSessionTabSelection(options: SessionTabControllerOptions) {
+export function createSessionTabSelection(
+  options: SessionTabControllerOptions,
+  sessionActionRunning: (sessionId: string) => boolean = () => false,
+) {
   async function loadSession(sessionId: string): Promise<void> {
     const requestClient = options.client();
     const canSelectDuringDraftStartup = options.draft.materializing
@@ -12,6 +15,7 @@ export function createSessionTabSelection(options: SessionTabControllerOptions) 
     if (
       !requestClient
       || (!options.canUseSession() && !canSelectDuringDraftStartup)
+      || sessionActionRunning(sessionId)
       || sessionId === options.state.sessionId
     ) return;
     const requestWorkspace = options.workspace();
@@ -53,6 +57,7 @@ export function createSessionTabSelection(options: SessionTabControllerOptions) 
       || !requestWorkspace
       || !options.statusReady()
       || options.sessionMutationRunning()
+      || sessionActionRunning(sessionId)
       || sessionId === sourceSessionId
     ) {
       if (sessionId === sourceSessionId) options.tabs.closeSelector();

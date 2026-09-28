@@ -1,4 +1,5 @@
 import type {
+  ClaudeQuotaRefreshStatus,
   ContextUsageStatus,
   ModelUsageLimitWindow,
   ModelUsageRefresh,
@@ -43,6 +44,17 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus {
   if (value.modelUsageRefresh === "ready" && !modelUsage) {
     throw new Error("pix/session/runtime_status returned ready without model usage");
   }
+  if (
+    value.modelUsageCredentialPending !== undefined
+    && (value.modelUsageCredentialPending !== true || value.modelUsageRefresh !== "unavailable")
+  ) {
+    throw new Error("pix/session/runtime_status returned an invalid credential-pending flag");
+  }
+  // Outside a ready refresh, the only valid modelUsage is the credential-
+  // pending stale cache.
+  if (modelUsage && value.modelUsageRefresh !== "ready" && !(value.modelUsageCredentialPending === true && modelUsage.stale === true)) {
+    throw new Error("pix/session/runtime_status returned model usage without a supporting refresh");
+  }
   return {
     sessionId: value.sessionId,
     ...(dcpContextMap ? { dcpContextMap } : {}),
@@ -52,6 +64,7 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus {
     modelUsageRefresh: value.modelUsageRefresh as ModelUsageRefresh,
     ...(modelUsage ? { modelUsage } : {}),
     ...(headerUsage ? { headerUsage } : {}),
+    ...(value.modelUsageCredentialPending === true ? { modelUsageCredentialPending: true } : {}),
   };
 }
 
@@ -123,6 +136,9 @@ export function parseModelUsageStatus(value: unknown): ModelUsageStatus {
   const hourly = value.hourly === undefined ? undefined : parseModelUsageLimitWindow(value.hourly);
   const weekly = value.weekly === undefined ? undefined : parseModelUsageLimitWindow(value.weekly);
   const rateWindows = parseModelUsageRateWindows(value.rateWindows);
+  if (value.stale !== undefined && value.stale !== true) {
+    throw new Error("invalid Pix model usage stale marker");
+  }
   return {
     modelKey: value.modelKey,
     provider: value.provider as ModelUsageStatus["provider"],
@@ -131,6 +147,43 @@ export function parseModelUsageStatus(value: unknown): ModelUsageStatus {
     ...(hourly ? { hourly } : {}),
     ...(weekly ? { weekly } : {}),
     ...(rateWindows ? { rateWindows } : {}),
+    ...(value.stale === true ? { stale: true } : {}),
+  };
+}
+
+/**
+ * Parse `pix/session/claude_quota_refresh`. The manual refresh never reports
+ * `skipped`; its only non-ready `modelUsage` is the credential-pending stale
+ * cache, and `launched` records whether the Claude CLI child could start.
+ */
+export function parseClaudeQuotaRefresh(value: unknown): ClaudeQuotaRefreshStatus {
+  if (
+    !isRecord(value)
+    || typeof value.sessionId !== "string"
+    || typeof value.launched !== "boolean"
+    || !["ready", "unavailable", "failed"].includes(String(value.refresh))
+  ) {
+    throw new Error("pix/session/claude_quota_refresh returned an invalid response");
+  }
+  const modelUsage = value.modelUsage === undefined ? undefined : parseModelUsageStatus(value.modelUsage);
+  if (value.refresh === "ready" && !modelUsage) {
+    throw new Error("pix/session/claude_quota_refresh returned ready without model usage");
+  }
+  if (
+    value.modelUsageCredentialPending !== undefined
+    && (value.modelUsageCredentialPending !== true || value.refresh !== "unavailable")
+  ) {
+    throw new Error("pix/session/claude_quota_refresh returned an invalid credential-pending flag");
+  }
+  if (modelUsage && value.refresh !== "ready" && !(value.modelUsageCredentialPending === true && modelUsage.stale === true)) {
+    throw new Error("pix/session/claude_quota_refresh returned model usage without a supporting refresh");
+  }
+  return {
+    sessionId: value.sessionId,
+    launched: value.launched,
+    refresh: value.refresh as ClaudeQuotaRefreshStatus["refresh"],
+    ...(modelUsage ? { modelUsage } : {}),
+    ...(value.modelUsageCredentialPending === true ? { modelUsageCredentialPending: true } : {}),
   };
 }
 

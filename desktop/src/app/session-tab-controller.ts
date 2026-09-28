@@ -1,12 +1,13 @@
 import type { SessionTabControllerOptions } from "./session-tab-controller-options";
 import { createSessionSelectorActions } from "./session-selector-actions";
-import { createSessionTabClosure } from "./session-tab-closure";
+import { createSessionActionTracker, createSessionTabClosure } from "./session-tab-closure";
 import { createSessionTabSelection } from "./session-tab-selection";
 
 export function createSessionTabController(options: SessionTabControllerOptions) {
-  const selection = createSessionTabSelection(options);
-  const selector = createSessionSelectorActions(options, selection);
-  const closure = createSessionTabClosure(options, selection.loadSession);
+  const sessionActions = createSessionActionTracker();
+  const selection = createSessionTabSelection(options, sessionActions.isBusy);
+  const selector = createSessionSelectorActions(options, selection, sessionActions.isBusy);
+  const closure = createSessionTabClosure(options, selection.loadSession, sessionActions);
 
   return {
     loadSession: selection.loadSession,

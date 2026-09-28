@@ -5,6 +5,7 @@ import type { createSessionCoordinator } from "./session-coordinator";
 import type { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import { shouldShowStatusBarSkeletons, type StatusBarConnectionStatus } from "./status-bar-skeleton";
+import { modelThinkingConfigState } from "../lib/model-thinking";
 
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
 
@@ -69,6 +70,13 @@ export function createDesktopStatusBarViewModel(options: {
       sessionUsageRefreshing: sessionId ? options.runtime.sessionUsageRefreshing.has(sessionId) : false,
       sessionUsageFailed: sessionId ? options.runtime.sessionUsageFailed.has(sessionId) : false,
       sessionUsageAvailable: !!sessionId && runtimeReady,
+      // The manual Claude Code limit refresh exists only for a live (non-draft)
+      // session whose active model routes through pi-claude-code-provider.
+      claudeCodeRoute: !!sessionId
+        && !draft
+        && modelThinkingConfigState(options.displayedConfigOptions()).currentModel?.provider === "pi-claude-code-provider",
+      claudeLimitsRefreshing: sessionId ? options.runtime.claudeLimitsRefreshing.has(sessionId) : false,
+      claudeLimitsFailed: sessionId ? options.runtime.claudeLimitsFailed.has(sessionId) : false,
       sessionActivity,
       sessionSubagentSnapshot: options.sessionSubagentSnapshot(),
       sessionTodoSnapshot: options.sessionTodoSnapshot(),
@@ -78,6 +86,7 @@ export function createDesktopStatusBarViewModel(options: {
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),
       onOpenModelThinking: options.modelConfig.openPicker,
       onOpenSessionUsage: () => void options.sessionCoordinator.refreshActiveSessionUsage(),
+      onRefreshClaudeLimits: () => void options.sessionCoordinator.refreshActiveClaudeLimits(),
       onClearTodos: () => sessionId ? options.clearSessionTodos(sessionId) : Promise.resolve(false),
       onOpenSessionActivity: () => options.inspectorPreference.setOpen(true),
     };

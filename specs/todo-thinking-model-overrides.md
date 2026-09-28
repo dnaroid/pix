@@ -32,6 +32,11 @@ Allow cheaper or less capable models to use one enforced thinking level for ever
 - A configured level unsupported by the selected model is normalized with the existing nearest-supported-level behavior.
 - Later config layers merge entries by key and may remove an inherited entry with `null`.
 - Runtime enforcement applies even when the model supplies another valid `thinking` value or omits it.
+- Pix Desktop's structured Settings UI edits these overrides as model/pattern rows
+  with a thinking-level selector rather than a raw JSON value. Known models are
+  suggested while wildcard and bare-model patterns remain free-form. Inherited
+  rows remain visible, and choosing **No override** stores the `null` removal
+  marker; Advanced JSONC remains the escape hatch for direct source editing.
 
 ## Related files
 
@@ -40,11 +45,16 @@ Allow cheaper or less capable models to use one enforced thinking level for ever
 - `external/pi-tools-suite/src/default-pi-tools-suite-config.ts`
 - `src/schemas/pi-tools-suite-schema.ts`
 - `schemas/pi-tools-suite.json`
+- `desktop/src/components/settings/ToolsSuiteSettingsEditor.svelte`
+- `desktop/src/components/settings/SettingsTodoThinkingOverrides.svelte`
+- `desktop/src/lib/todo-thinking-overrides-settings.ts`
 
 ## Verification
 
 - Config-layer tests for merge and removal.
 - Todo lifecycle tests for forced create/update behavior and thinking switch/restore.
+- Desktop settings helper/component tests cover inherited rows, `null` removal
+  markers, wildcard entry UI, and replacement of the generic JSON textarea.
 - pi-tools-suite deterministic check and host check.
 
 ## Evidence

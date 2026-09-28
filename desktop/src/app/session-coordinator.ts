@@ -96,6 +96,11 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     if (sessionId) await options.runtime.refreshSessionUsage(sessionId);
   }
 
+  async function refreshActiveClaudeLimits(): Promise<void> {
+    const sessionId = options.state.sessionId;
+    if (sessionId) await options.runtime.refreshClaudeLimits(sessionId);
+  }
+
   function clearActivity(sessionId: string): void {
     options.activity.clear(sessionId);
     options.metadata.clear(sessionId);
@@ -119,6 +124,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     refreshActiveModelUsage,
     refreshActiveDcpStats,
     refreshActiveSessionUsage,
+    refreshActiveClaudeLimits,
     clearActivity,
     resetActivity: options.activity.reset,
     openActivity: options.activity.open,

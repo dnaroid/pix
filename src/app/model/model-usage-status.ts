@@ -84,6 +84,13 @@ export type ModelUsageStatus = {
 	readonly hourly?: ModelUsageLimitWindow;
 	/** Provider response-header window: the single most limiting Anthropic API-key bucket (RPM/TPM/ITPM/OTPM). */
 	readonly rateWindows?: readonly ModelUsageLimitWindow[];
+	/**
+	 * Cached (not current) quota: the last successful windows retained through
+	 * a transiently absent Claude Code credential. Each window is kept only
+	 * until its own reset and must always be displayed as stale, never as a
+	 * fresh observation.
+	 */
+	readonly stale?: true;
 };
 
 type OpenAIAuthData = {
@@ -313,6 +320,13 @@ export function modelUsageDescriptor(model: SessionModel | undefined, thinkingLe
 	return undefined;
 }
 
+/**
+ * Local-only Claude Code credential probe (see the auth module). Re-exported
+ * here because quota polling and the ACP shared-module boundary consume it
+ * from this module.
+ */
+export { claudeCodeCredentialAvailable } from "./claude-code-usage-auth.js";
+
 export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor): Promise<ModelUsageStatus | undefined> {
 	switch (descriptor.kind) {
 		case "openai":
@@ -413,24 +427,60 @@ export function formatAccountUsageReport(report: AccountUsageReport, now = repor
 }
 
 export function formatModelUsageStatusLabel(status: ModelUsageStatus | undefined, now = Date.now()): string {
-	if (!status) return "";
+	const live = liveStaleModelUsage(status, now);
+	if (!live) return "";
 
 	const parts: string[] = [];
-	if (status.hourly) parts.push(formatUsageWindow(status.hourly, now));
-	if (status.weekly) parts.push(formatUsageWindow(status.weekly, now));
-	for (const window of status.rateWindows ?? []) parts.push(formatUsageWindow(window, now));
+	if (live.hourly) parts.push(formatUsageWindow(live.hourly, now));
+	if (live.weekly) parts.push(formatUsageWindow(live.weekly, now));
+	for (const window of live.rateWindows ?? []) parts.push(formatUsageWindow(window, now));
 	const limitsLabel = parts.join(" • ");
-	return status.accountEmail && limitsLabel ? `${status.accountEmail} ${limitsLabel}` : limitsLabel;
+	const label = live.accountEmail && limitsLabel ? `${live.accountEmail} ${limitsLabel}` : limitsLabel;
+	// Cached percentages are never presented as current: the marker stays
+	// visible as long as any stale window is displayed.
+	return live.stale ? `${APP_ICONS.timerSand} stale ${label}` : label;
 }
 
-export function modelUsageRemainingPercent(status: ModelUsageStatus | undefined): number | undefined {
-	if (!status) return undefined;
+export function modelUsageRemainingPercent(status: ModelUsageStatus | undefined, now = Date.now()): number | undefined {
+	const live = liveStaleModelUsage(status, now);
+	if (!live) return undefined;
 
 	const values: number[] = [];
-	if (status.weekly) values.push(status.weekly.remainingPercent);
-	if (status.hourly) values.push(status.hourly.remainingPercent);
-	for (const window of status.rateWindows ?? []) values.push(window.remainingPercent);
+	if (live.weekly) values.push(live.weekly.remainingPercent);
+	if (live.hourly) values.push(live.hourly.remainingPercent);
+	for (const window of live.rateWindows ?? []) values.push(window.remainingPercent);
 	return values.length > 0 ? Math.min(...values) : undefined;
+}
+
+/**
+ * Retain a quota snapshot as explicitly stale cache. Only windows whose reset
+ * has not passed survive — an expired window describes a quota period that is
+ * over, so it is dropped instead of aging indefinitely. Returns `undefined`
+ * when nothing current enough remains.
+ */
+export function markModelUsageStale(status: ModelUsageStatus | undefined, now = Date.now()): ModelUsageStatus | undefined {
+	if (!status) return undefined;
+	const hourly = status.hourly !== undefined && status.hourly.resetAt > now ? status.hourly : undefined;
+	const weekly = status.weekly !== undefined && status.weekly.resetAt > now ? status.weekly : undefined;
+	if (!hourly && !weekly) return undefined;
+	const { hourly: _oldHourly, weekly: _oldWeekly, ...withoutWindows } = status;
+	return {
+		...withoutWindows,
+		stale: true,
+		...(hourly ? { hourly } : {}),
+		...(weekly ? { weekly } : {}),
+	};
+}
+
+/**
+ * Display view of a quota snapshot. Fresh statuses pass through unchanged; a
+ * stale (cached) status loses windows whose reset has passed and disappears
+ * entirely once every window has expired, so cached values never outlive the
+ * window they describe.
+ */
+export function liveStaleModelUsage(status: ModelUsageStatus | undefined, now = Date.now()): ModelUsageStatus | undefined {
+	if (!status?.stale) return status;
+	return markModelUsageStale(status, now);
 }
 
 export function openAIUsageStatusFromResponse(

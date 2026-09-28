@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPiToolsSuiteConfig, type TodoThinkingLevel as ConfigTodoThinkingLevel } from "../config.js";
 import { isAgentBusyRaceError } from "../context-usage.js";
-import { hasAvailableIndexedProjectRoot } from "../lib/project.js";
+import { hasIndexedProjectRoot } from "../lib/project.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
@@ -36,7 +36,7 @@ const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
 const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
 const REPO_KNOWLEDGE_FINALIZATION_REMINDER =
-	"📚 Before completing the final todo: if behavior/contracts changed, run task-scoped repo_audit on changed paths and reconcile affected docs with code/tests; skip for mechanical changes.";
+	"📚 Before completing the final todo: delegate the final task-scoped knowledge pass to subagentType='knowledge-auditor'. Give it a concise behavior/result summary and the exact project-relative paths changed by this task. It must run idx audit, fix only small confirmed documentation drift, and escalate substantial or ambiguous drift.";
 
 function completesTodo(info: { action: string; params: TaskMutationParams }): boolean {
 	if (info.action === "update") return info.params.status === "completed";
@@ -49,7 +49,7 @@ function repoKnowledgeFinalizationReminder(
 	ctx: ExtensionContext,
 	info: { action: string; params: TaskMutationParams },
 ): string | undefined {
-	if (!hasAvailableIndexedProjectRoot(ctx.cwd)) return undefined;
+	if (!hasIndexedProjectRoot(ctx.cwd)) return undefined;
 	if (!completesTodo(info)) return undefined;
 	const remainingActive = selectVisibleTasks(state).filter((task) => ACTIVE_STATUSES.has(task.status));
 	return remainingActive.length === 1 ? REPO_KNOWLEDGE_FINALIZATION_REMINDER : undefined;

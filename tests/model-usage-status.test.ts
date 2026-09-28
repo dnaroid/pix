@@ -12,6 +12,8 @@ import {
 	googleAntigravityUsageStatusFromResponse,
 	modelUsageDescriptor,
 	modelUsageRemainingPercent,
+	markModelUsageStale,
+	liveStaleModelUsage,
 	openAIUsageStatusFromResponse,
 	queryAccountUsageReport,
 	queryModelUsageStatus,
@@ -26,6 +28,19 @@ import type { SessionModel } from "../src/app/types.js";
 import { claudeCodeKeychainService, tokenFromClaudeCredential } from "../src/app/model/claude-code-usage-auth.js";
 
 describe("model usage status", () => {
+	it("expires cached Claude quota windows independently", () => {
+		const now = Date.UTC(2026, 0, 1);
+		const status = {
+			provider: "anthropic" as const,
+			modelKey: "pi-claude-code-provider/opus",
+			updatedAt: now,
+			hourly: { remainingPercent: 20, resetAt: now + 1_000, windowSeconds: 18_000 },
+			weekly: { remainingPercent: 70, resetAt: now + 3_000, windowSeconds: 604_800 },
+		};
+		assert.equal(markModelUsageStale(status, now + 1_001)?.hourly, undefined);
+		assert.equal(markModelUsageStale(status, now + 1_001)?.weekly?.remainingPercent, 70);
+		assert.equal(liveStaleModelUsage(markModelUsageStale(status, now), now + 3_000), undefined);
+	});
 	it("builds descriptors for OpenAI quota-backed models only", () => {
 		assert.deepEqual(modelUsageDescriptor({ provider: "openai-codex", id: "gpt-5.5" } as SessionModel), {
 			kind: "openai",

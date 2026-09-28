@@ -14,7 +14,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "../vendor/fflate.mjs";
 const CONFIG_RELATIVE = ".pi/qa_auth.jsonc";
 const AUTH_SECRET_PLACEHOLDER = /^__PI_QA_SECRET_[1-9][0-9]*__$/;
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
-const QA_WORKSPACE_RELATIVE = "browser-qa";
+const QA_WORKSPACE_RELATIVE = path.join("ui-qa", "browser");
 const EVIDENCE_RELATIVE = "evidence";
 const UI_READY_SETTLE_MS = 500;
 const UI_READY_POLL_MS = 100;
@@ -2697,8 +2697,8 @@ function resolveBrowserQaAgentDirectory(cwd, value) {
 		throw new Error("browser QA agent directory belongs to another project");
 	}
 	const subagentType = fs.readFileSync(typeFile, "utf8").trim();
-	if (subagentType !== "ui-qa" && subagentType !== "browser-qa") {
-		throw new Error("browser QA runner requires a ui-qa/browser-qa sub-agent directory");
+	if (subagentType !== "ui-qa") {
+		throw new Error("browser QA runner requires a ui-qa sub-agent directory");
 	}
 
 	const workspace = path.join(real, QA_WORKSPACE_RELATIVE);

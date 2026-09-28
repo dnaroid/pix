@@ -44,17 +44,15 @@ describe("parent-first sub-agent routing", () => {
 		expect(live.getApiKeyAndHeaders).not.toHaveBeenCalled();
 	});
 
-	test("normalizes the legacy browser-qa role to ui-qa without routing", async () => {
-		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-ui-qa-alias-test-"));
+	test("rejects browser-qa when no project-local role defines that exact name", async () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-ui-qa-name-test-"));
 		tempDirs.push(cwd);
 		const cfg = loadSubagentConfig(cwd, {});
 		cfg.routing = { ...config().routing, enabled: false };
 		const live = context(async () => { throw new Error("must not call the router"); });
-		const result = await routeSubagentTasks([
+		await expect(routeSubagentTasks([
 			{ id: "qa", task: "Verify the desktop app", subagentType: "browser-qa" },
-		], cfg, live.ctx);
-		expect(result.tasks[0]?.subagentType).toBe("ui-qa");
-		expect(result.usedLlm).toBe(false);
+		], cfg, live.ctx)).rejects.toThrow(/Unknown subagentType/);
 		expect(live.complete).not.toHaveBeenCalled();
 	});
 

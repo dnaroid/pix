@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import Hourglass from "@lucide/svelte/icons/hourglass";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { ModelUsageLimitWindow, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { parseDcpContextMap } from "../lib/dcp-context-map";
@@ -36,7 +38,11 @@
     loadingSessionUsage = false,
     sessionUsageFailed = false,
     sessionUsageAvailable = false,
+    claudeCodeRoute = false,
+    claudeLimitsRefreshing = false,
+    claudeLimitsFailed = false,
     onOpenSessionUsage,
+    onRefreshClaudeLimits = () => {},
   }: {
     status?: RuntimeStatus;
     showSkeletons?: boolean;
@@ -44,7 +50,12 @@
     loadingSessionUsage?: boolean;
     sessionUsageFailed?: boolean;
     sessionUsageAvailable?: boolean;
+    /** Active session model routes through pi-claude-code-provider. */
+    claudeCodeRoute?: boolean;
+    claudeLimitsRefreshing?: boolean;
+    claudeLimitsFailed?: boolean;
     onOpenSessionUsage: () => void;
+    onRefreshClaudeLimits?: () => void;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
@@ -292,6 +303,15 @@
           {#if usageAccountLabel}
             <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{usageAccountLabel}</span>
           {/if}
+          {#if modelUsage?.stale}
+            <span
+              class="flex items-center gap-0.5 text-muted-foreground"
+              title="Cached quota from the last successful refresh; each window stays visible only until its own reset"
+            >
+              <Hourglass class="h-2.5 w-2.5" aria-hidden="true" />
+              <span>stale</span>
+            </span>
+          {/if}
           {#each usageWindowItems as { key, label, window } (key)}
               {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
@@ -400,6 +420,32 @@
                 </section>
               {/if}
             </div>
+            {#if claudeCodeRoute && sessionUsageAvailable}
+              <div class="border-t border-border px-3 py-2 text-xs">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-muted-foreground">Claude Code limits</span>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={claudeLimitsRefreshing}
+                    onclick={onRefreshClaudeLimits}
+                    aria-label="Refresh Claude Code limits"
+                  >
+                    {#if claudeLimitsRefreshing}
+                      <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+                    {:else}
+                      <RefreshCw class="h-3 w-3" aria-hidden="true" />
+                    {/if}
+                    {claudeLimitsRefreshing ? "Refreshing…" : "Refresh limits"}
+                  </button>
+                </div>
+                {#if claudeLimitsFailed}
+                  <p class="mt-1 text-tool-warning" role="status">Could not refresh Claude Code limits. Retry or check your Claude Code login.</p>
+                {:else if claudeLimitsRefreshing}
+                  <p class="mt-1 text-muted-foreground" role="status">Checking Claude Code login and limits…</p>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>

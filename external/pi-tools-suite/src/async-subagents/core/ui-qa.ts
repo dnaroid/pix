@@ -1,11 +1,10 @@
 import { fileURLToPath } from "node:url";
 
-/** Canonical UI-QA role plus the pre-rename compatibility alias. */
+/** Canonical UI-QA role. */
 export const UI_QA_TYPE = "ui-qa";
-export const LEGACY_BROWSER_QA_TYPE = "browser-qa";
 
 export function isUiQaType(value: string | undefined): boolean {
-	return value === UI_QA_TYPE || value === LEGACY_BROWSER_QA_TYPE;
+	return value === UI_QA_TYPE;
 }
 
 /** Non-secret, launcher-owned path supplied only to UI-QA children. */

@@ -31,6 +31,7 @@ export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
 export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
 export const PIX_DCP_STATS_METHOD = "pix/session/dcp_stats";
 export const PIX_SESSION_USAGE_METHOD = "pix/session/usage";
+export const PIX_CLAUDE_QUOTA_REFRESH_METHOD = "pix/session/claude_quota_refresh";
 export const PIX_DRAFT_CONFIG_METHOD = "pix/session/draft_config";
 export const PIX_MODEL_ROUTING_STATUS_METHOD = "pix/model/routing_status";
 export const PIX_MODEL_ROUTE_METHOD = "pix/model/route";
@@ -52,6 +53,14 @@ export interface DesktopDraftConfigResponse {
 	readonly configOptions: SessionConfigOption[];
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
+	/**
+	 * True when the Claude Code quota refresh was unavailable only because no
+	 * usable Claude Code credential exists locally. A client retry then costs
+	 * local credential reads only (no provider network) until Claude Code
+	 * refreshes its login. The response may additionally carry the route's
+	 * last successful windows as a `stale` `modelUsage` snapshot.
+	 */
+	readonly modelUsageCredentialPending?: true;
 	readonly modelRoutingEnabled?: boolean;
 	readonly modelRoutingDefault?: boolean;
 }
@@ -126,6 +135,12 @@ export interface DesktopModelUsageStatus {
 	readonly hourly?: DesktopModelUsageLimitWindow;
 	/** Provider response-header windows (Anthropic RPM/TPM or OAuth unified quota). */
 	readonly rateWindows?: readonly DesktopModelUsageLimitWindow[];
+	/**
+	 * Cached (not current) quota: the last successful Claude Code windows
+	 * re-sent through a transiently absent credential. Each window survives
+	 * only until its own reset and clients must display it as stale.
+	 */
+	readonly stale?: true;
 }
 
 export type DesktopModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
@@ -145,6 +160,32 @@ export interface DesktopRuntimeStatusResponse {
 	 * each other.
 	 */
 	readonly headerUsage?: DesktopModelUsageStatus;
+	/**
+	 * True when the Claude Code quota refresh was unavailable only because no
+	 * usable Claude Code credential exists locally. A client retry then costs
+	 * local credential reads only (no provider network) until Claude Code
+	 * refreshes its login. The response may additionally carry the route's
+	 * last successful windows as a `stale` `modelUsage` snapshot.
+	 */
+	readonly modelUsageCredentialPending?: true;
+}
+
+/**
+ * Manual Claude Code quota refresh for the session-usage popover: the agent
+ * briefly launches the Claude CLI headless (best-effort login nudge; output
+ * is never captured), then rereads the local credential and queries the
+ * normal Pix quota endpoint. Available only while the session's active model
+ * routes through `pi-claude-code-provider`.
+ */
+export interface DesktopClaudeQuotaRefreshResponse {
+	readonly sessionId: string;
+	/** Whether the Claude CLI child could be launched at all. */
+	readonly launched: boolean;
+	readonly refresh: Exclude<DesktopModelUsageRefresh, "skipped">;
+	/** Fresh quota for `ready`; the cached `stale` snapshot for credential-pending `unavailable`. */
+	readonly modelUsage?: DesktopModelUsageStatus;
+	/** See `DesktopRuntimeStatusResponse.modelUsageCredentialPending`. */
+	readonly modelUsageCredentialPending?: true;
 }
 
 export interface DesktopDcpContextMap {

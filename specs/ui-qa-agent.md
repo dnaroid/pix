@@ -41,12 +41,12 @@ providers' credential, isolation, evidence, and cleanup protections.
   or extra skill read is required.
 - The capability-first runner and its browser/TUI/desktop backends live under
   `agents/ui-qa/`. The trusted Playwright browser runner, vendor
-  dependency/license, and legacy JSONC assets are grouped under
+  dependency/license, and browser JSONC assets are grouped under
   `agents/ui-qa/browser/`; the Chrome DevTools adapter lives under
   `agents/ui-qa/drivers/` and probes the external `chrome-devtools` CLI rather
-  than loading a project skill. Vendor bytes stay unchanged; both runners
-  accept the canonical `ui-qa` owner type as well as the legacy alias. JSONC
-  examples are optional reference assets, not additional instructions.
+  than loading a project skill. Vendor bytes stay unchanged; both runners accept
+  only the canonical `ui-qa` owner type. JSONC examples are optional reference
+  assets, not additional instructions.
 - The old skill and separate design/scaffold documents are removed. Ordinary
   `.pi/agents` discovery remains non-recursive, so assets cannot become roles.
 
@@ -60,10 +60,9 @@ launcher also appends `--models <effective-model>` after forwarded arguments,
 preventing persisted model patterns from resolving unrelated providers in the
 isolated child.
 
-Explicit legacy `browser-qa` task names normalize to `ui-qa`. A project-local
-`browser-qa.md` override is migrated to the canonical role when no `ui-qa.md`
-override is present, preserving model/tool/thinking customization across the
-rename.
+`ui-qa` is the only built-in UI-QA role name. `browser-qa` has no alias or
+migration path; a project-local `browser-qa.md` is an ordinary independent
+project role and receives no UI-QA runner/workspace treatment.
 
 The launcher sets non-secret `PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER` paths
 resolved relative to the installed package. QA instructions invoke the unified
@@ -72,8 +71,8 @@ execution; they invoke the trusted browser runner directly only for auth profile
 discovery/scaffolding as the browser-auth guide instructs.
 Inherited runner/workspace paths are replaced for QA children and stripped from
 other children. Unified flows plus native/TUI evidence use the private
-agent-local `ui-qa/` workspace; the trusted browser backend retains its
-historical `browser-qa/` workspace.
+agent-local `ui-qa/` workspace; the trusted browser backend uses its
+`ui-qa/browser/` subdirectory.
 Model-authored flows are credential-free but still use mode `0600` on POSIX so
 the existing runner path/privacy validation succeeds without weakening it.
 

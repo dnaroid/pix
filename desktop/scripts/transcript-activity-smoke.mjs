@@ -108,7 +108,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 }, colorScheme: "dark" });
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${address.port}/__activity-test__`);
+  await page.goto(`http://127.0.0.1:${address.port}/__activity-test__`, { waitUntil: "domcontentloaded", timeout: 120_000 });
   await page.waitForFunction(() => !!window.activitySmoke);
   await page.evaluate(() => window.activitySmoke.setSynthetic("session-a"));
 
@@ -132,8 +132,12 @@ try {
   await toolSummary.click();
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 1, "repeat open must coalesce in-flight loads");
 
-  await outerSummary.click();
+  const gutter = outer.getByRole("button", { name: "Collapse tool activity" });
+  await gutter.click({ position: { x: 7, y: 10 } });
   await page.waitForFunction(() => document.querySelectorAll("[data-activity-entry-id]").length === 0);
+  assert.equal(await outer.evaluate(node => node.open), false, "clicking the expanded tool gutter collapses the group");
+  assert.equal(await outerSummary.evaluate(node => node === document.activeElement), true, "collapse returns focus to the group header");
+  assert.deepEqual(await page.evaluate(() => window.activitySmoke.requests.map(request => request.toolCallId)), ["tool-1"]);
   await page.evaluate(() => window.activitySmoke.finish("tool-1", "HYDRATED_BODY"));
   assert.equal(await page.locator(".tool-result").count(), 0, "late result must not mount a collapsed body");
   await outerSummary.click();
@@ -142,6 +146,13 @@ try {
 
   await page.locator('[data-activity-entry-id="thought:0"] > summary').click();
   await page.waitForFunction(() => document.body.textContent.includes("HIDDENTHOUGHT0"));
+  await gutter.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => !document.querySelector("details[data-transcript-entry-id]").open);
+  assert.equal(await outerSummary.evaluate(node => node === document.activeElement), true);
+  await outerSummary.click();
+  await page.waitForFunction(() => document.body.textContent.includes("HIDDENTHOUGHT0"));
+  assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 1, "gutter collapse retains child disclosure state");
   await page.locator('[data-activity-entry-id="tool:3"] summary').click();
   await page.waitForFunction(() => window.activitySmoke.requests.length === 2);
   await page.evaluate(() => window.activitySmoke.setSynthetic("session-b"));
@@ -208,7 +219,7 @@ try {
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 2);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: "passed", scenarios: ["lazy DOM", "per-tool hydration", "duplicate toggles",
-    "late result after collapse", "session replacement", "skill label and header-only live highlights and duration", "duration freeze and timer teardown",
+    "click/keyboard gutter collapse and preserved disclosure", "late result after collapse", "session replacement", "skill label and header-only live highlights and duration", "duration freeze and timer teardown",
     "keyboard disclosure", "large collapsed history"], stress }, null, 2));
 } finally {
   await browser?.close();

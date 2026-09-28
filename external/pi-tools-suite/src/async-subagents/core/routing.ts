@@ -4,7 +4,7 @@ import type { AgentTask } from "./types.js";
 import {
 	currentModelRef,
 	defaultSubagentType,
-	filterSubagentConfigForParentModel,
+	filterSubagentConfigForContext,
 	normalizeSubagentType,
 	resolveSubagentRoutingConfig,
 	type ResolvedSubagentRoutingConfig,
@@ -12,6 +12,7 @@ import {
 } from "./config.js";
 
 export interface SubagentRoutingContext {
+	cwd?: string;
 	model?: unknown;
 	modelRegistry?: ModelCompletionRegistry & {
 		find(provider: string, modelId: string): Model<Api> | undefined;
@@ -47,7 +48,7 @@ export class SubagentRoutingError extends Error {
 const ROUTER_SYSTEM_PROMPT = [
 	"You route Pi async sub-agent tasks to the best configured subagentType.",
 	"Choose exactly one allowed type for each task. Use the allowed type descriptions as the source of truth.",
-	"Prefer a matching project specialist. Otherwise use research for reading/evidence or focused review questions, implement for code/docs/tests/UI changes, verify for running checks, ui-qa for real user-interface testing across browsers, TUIs, and desktop GUIs, and frontier-review for an independent post-implementation code review when that type is allowed. Oracle is a deliberate strong second opinion, not routine code review or the default for difficult work.",
+	"Prefer a matching project specialist. Otherwise use research for reading/evidence or focused review questions, implement for code/docs/tests/UI changes, verify for running checks, ui-qa for real user-interface testing across browsers, TUIs, and desktop GUIs, frontier-review for an independent post-implementation code review when that type is allowed, and knowledge-auditor for the final indexed-repository knowledge audit when it is allowed. Oracle is a deliberate strong second opinion, not routine code review or the default for difficult work.",
 	"Return only strict JSON with this shape: {\"routes\":[{\"id\":\"task-id\",\"subagentType\":\"type\"}]}",
 	"Do not include markdown, comments, explanations, or unknown types.",
 ].join("\n");
@@ -66,7 +67,7 @@ export async function routeSubagentTasks(
 		return subagentType !== task.subagentType ? { ...task, subagentType } : task;
 	});
 	const parentModel = currentModelRef(ctx.model);
-	const effectiveConfig = filterSubagentConfigForParentModel(config, parentModel);
+	const effectiveConfig = filterSubagentConfigForContext(config, { parentModelRef: parentModel, cwd: ctx.cwd });
 	const invalidTasks = tasks.filter((task) => hasText(task.subagentType)
 		&& !Object.prototype.hasOwnProperty.call(config.types, task.subagentType));
 	if (invalidTasks.length > 0) {
@@ -76,7 +77,7 @@ export async function routeSubagentTasks(
 		&& !Object.prototype.hasOwnProperty.call(effectiveConfig.types, task.subagentType));
 	if (unavailableTasks.length > 0) {
 		throw routingError(
-			`subagentType unavailable for parent model ${parentModel ?? "(unknown)"}: ${unavailableTasks.map((task) => `${task.id}=${JSON.stringify(task.subagentType)}`).join(", ")}.`,
+			`subagentType unavailable for parent model ${parentModel ?? "(unknown)"} or project context: ${unavailableTasks.map((task) => `${task.id}=${JSON.stringify(task.subagentType)}`).join(", ")}.`,
 			unavailableTasks,
 			effectiveConfig,
 		);

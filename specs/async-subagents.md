@@ -86,14 +86,13 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    `routing.fallbackModels`, then the current parent model, de-duplicating refs
    and continuing past unavailable/provider-error candidates. Abort remains
    terminal. `[confirmed by code, routing.ts/ultrawork-auto.ts]`
-9. **UI QA special role**: `ui-qa` is the canonical real-UI role for browser,
-   terminal/TUI, and desktop-GUI verification. Explicit legacy `browser-qa`
-   requests normalize to `ui-qa`, and a project-local `browser-qa.md` override
-   migrates to the canonical profile when no `ui-qa.md` exists. Like every
-   async sub-agent it runs without skills. UI QA additionally receives
+9. **UI QA special role**: `ui-qa` is the only built-in real-UI role for
+   browser, terminal/TUI, and desktop-GUI verification. `browser-qa` is not an
+   alias; a project may define that name only as an ordinary independent role.
+   Like every async sub-agent, `ui-qa` runs without skills. UI QA additionally receives
    `PI_SUBAGENT_AGENT_DIR` plus launcher-owned `PI_UI_QA_RUNNER` and
    `PI_BROWSER_QA_RUNNER` paths, and gets private `ui-qa/flows/` plus
-   browser-backend `browser-qa/flows/` workspaces.
+   browser-backend `ui-qa/browser/flows/` workspaces.
    The start prompt is a thin common contract: the child loads exactly one
    backend guide (`browser`/`tui`/`desktop`, plus `browser --topic auth` only
    when authentication is required) through the read-only allowlisted
@@ -109,7 +108,22 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     before project `.pi/agents/*.md` definitions merge, so a project-local role
     may intentionally reuse a disabled built-in name. Disabled built-ins are
     absent from the parent catalog, explicit-role validation, and automatic
-    routing. `[confirmed by code, config.ts; confirmed by tests, config.test.ts/core.test.ts]`
+    routing. A project-local role whose filename exactly matches a bundled role
+    replaces that bundled profile completely; omitted fields are not inherited.
+    The parent catalog explicitly lists active project replacements. There are
+    no role-name aliases or partial-merge exceptions. `[confirmed by code,
+    config.ts/agent-catalog.ts; confirmed by tests, core.test.ts]`
+    Role profiles may additionally set `requiresIndexedProject: true`.
+    This project-context gate requires only `.indexer-cli/` at the resolved
+    project root and filters the parent catalog, automatic router, and explicit
+    role validation. It does not require the `idx` executable and does not
+    initialize anything. The bundled `knowledge-auditor` uses this gate.
+    `[confirmed by code, config.ts/agent-catalog.ts/routing.ts]`
+    `knowledge-auditor` is a low-thinking economical docs-only finalization
+    role: the parent supplies a behavior/result summary and exact task-changed
+    paths; the child runs task-scoped `idx audit`, fixes only small confirmed
+    documentation drift, and escalates substantial or ambiguous drift rather
+    than inventing a contract.
 11. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
 12. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
 13. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
@@ -936,8 +950,7 @@ runtime is unchanged.
 
 ### Tools (`tools/*.ts`)
 - **spawn**: `{tasks: AgentTask[], runDir?, slug?, thinking?, extraArgs?, timeoutSeconds?, watchSeconds?}`. `AgentTask = {id?, task, scope?, subagentType?, model?, thinking?, promptAppend?, promptOverride?, focus?, imagePaths?, tools?, extraArgs?, timeoutSeconds?, parentObjective?}`. `[confirmed by code]`
-- `ui-qa` is an explicit built-in role. The compatibility name `browser-qa`
-  normalizes to it before explicit-type validation/routing. UI-QA tasks require
+- `ui-qa` is an explicit built-in role and has no compatibility alias. UI-QA tasks require
   confirmed image-capable model candidates even when `imagePaths` is empty.
   `[confirmed by code, routing.ts/model-selection.ts]`
 - **status** `{runDir?, agentIds?}`, **wait** `{runDir?, agentIds?, timeout?, interval?, failFast?}`, **result** `{runDir?, agentId}`, **stop** `{runDir?, agentIds?, force?, signal?}`, **cleanup** `{runRoot?, days?, keep?, delete?}`. `[confirmed by code]`
@@ -959,7 +972,7 @@ runtime is unchanged.
       model_fallback_from?, model_fallback_to?, model_fallback.log?,
       sessions/   (if ASYNC_SUBAGENTS_ENABLE_SESSIONS)
       ui-qa/flows/ (for ui-qa; unified flows plus native/TUI evidence)
-      browser-qa/flows/ (for ui-qa; trusted browser backend workspace)
+      ui-qa/browser/flows/ (for ui-qa; trusted browser backend workspace)
 ```
 `[confirmed by code]`
 
@@ -1038,8 +1051,8 @@ runtime is unchanged.
 - `external/pi-tools-suite/test/async-subagents/tools.test.ts`: public tool
   validation and spawn/status/wait/result/stop integration.
 - `external/pi-tools-suite/test/async-subagents/routing.test.ts`: explicit and
-  automatic role routing, parent-model gates, routing failures, and the legacy
-  `browser-qa` → `ui-qa` alias.
+  automatic role routing, parent-model/project gates, unknown-role failures,
+  and confirmation that `browser-qa` has no built-in alias.
 - `external/pi-tools-suite/test/async-subagents/model-pools.test.ts` and
   `model-pool-contract.test.ts`: role candidate ordering, parent-provider policy,
   runtime availability, and session fallback behavior.

@@ -23,18 +23,37 @@ type WorkspaceSessionStartupOptions = {
   runtime: SessionRuntime;
   history: SessionHistory;
   state: ActiveSessionState;
-  setOperationRunning: (running: boolean) => void;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
 };
 
 export function createWorkspaceSessionStartup(options: WorkspaceSessionStartupOptions) {
-  async function open(): Promise<void> {
+  let opening: {
+    client: AcpClient;
+    workspace: string;
+    promise: Promise<void>;
+  } | null = null;
+
+  function open(): Promise<void> {
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
-    if (!requestClient || !requestWorkspace) return;
+    if (!requestClient || !requestWorkspace) return Promise.resolve();
+    const activeOpening = opening;
+    if (
+      activeOpening
+      && activeOpening.client === requestClient
+      && activeOpening.workspace === requestWorkspace
+    ) {
+      return activeOpening.promise;
+    }
+    const pending = openNow(requestClient, requestWorkspace).finally(() => {
+      if (opening?.promise === pending) opening = null;
+    });
+    opening = { client: requestClient, workspace: requestWorkspace, promise: pending };
+    return pending;
+  }
 
-    options.setOperationRunning(true);
+  async function openNow(requestClient: AcpClient, requestWorkspace: string): Promise<void> {
     options.setErrorMessage(null);
     try {
       const desktopTabSessionIds = options.tabs.sessionTabsForProject(requestWorkspace);
@@ -75,10 +94,6 @@ export function createWorkspaceSessionStartup(options: WorkspaceSessionStartupOp
       options.state.setSessionId(null);
       options.state.setTranscript(emptyTranscript);
       options.reportError(error);
-    } finally {
-      if (options.client() === requestClient && options.workspace() === requestWorkspace) {
-        options.setOperationRunning(false);
-      }
     }
   }
 

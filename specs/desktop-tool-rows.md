@@ -29,7 +29,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Porting TUI body previews or per-project `toolRenderer` overrides to desktop.
 - Synthesizing a clean comment-checker result when the hook emits no notice.
 - Producing an `ast_apply` diff when the tool result does not contain enough before/after data; its textual result and LSP diagnostics still render.
-- Changing tool-result content or the explicit expand/collapse affordance.
+- Changing tool-result content or the per-tool result disclosure affordance. The activity group's gutter collapse control is specified separately in `specs/desktop-activity-row-timing.md`.
 
 ## Behavior
 

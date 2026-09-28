@@ -1,5 +1,5 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { MODEL_USAGE_POLL_INTERVAL_MS, MODEL_USAGE_STATUS_TICK_MS } from "../constants.js";
+import { MODEL_USAGE_CREDENTIAL_RETRY_MS, MODEL_USAGE_POLL_INTERVAL_MS, MODEL_USAGE_STATUS_TICK_MS } from "../constants.js";
 import { parseModelRef } from "./model-ref.js";
 import {
 	anthropicUsageStatusFromResponseHeaders,
@@ -7,7 +7,10 @@ import {
 } from "./anthropic-header-usage.js";
 import type { SessionModel } from "../types.js";
 import {
+	claudeCodeCredentialAvailable,
 	formatModelUsageStatusLabel,
+	liveStaleModelUsage,
+	markModelUsageStale,
 	modelUsageDescriptor,
 	queryModelUsageStatus,
 	resolveAnthropicAuthKind,
@@ -55,11 +58,16 @@ export class AppModelUsageController {
 	private anthropicAuthKindInFlight: Promise<void> | undefined;
 	private anthropicAuthKindResolvedAt = 0;
 	private pendingResponseHeaders: { payload: ModelUsageResponseHeadersPayload; now: number } | undefined;
+	// Claude Code routes whose quota was unavailable only because no usable
+	// local credential exists. They retry at the faster local-only cadence
+	// until a refresh succeeds or fails against the usage endpoint.
+	private readonly credentialRetryModelKeys = new Set<string>();
 	private timer: ReturnType<typeof setInterval> | undefined;
 
 	constructor(
 		private readonly host: AppModelUsageControllerHost,
 		private readonly queryUsageStatus: AppModelUsageQuery = queryModelUsageStatus,
+		private readonly isClaudeCodeCredentialAvailable: () => Promise<boolean> = claudeCodeCredentialAvailable,
 	) {}
 
 	startPolling(): void {
@@ -158,6 +166,7 @@ export class AppModelUsageController {
 	}
 
 	private tick(force = false): void {
+		this.purgeExpiredStaleUsage();
 		const session = this.host.runtimeSession();
 		this.syncActiveModel(session);
 		const descriptor = this.activeDescriptor(session);
@@ -174,7 +183,7 @@ export class AppModelUsageController {
 		if (descriptor.kind === "anthropic") this.ensureAnthropicAuthKind();
 
 		const lastAttemptAt = this.lastAttemptAt.get(cacheKey) ?? 0;
-		if (force || Date.now() - lastAttemptAt >= MODEL_USAGE_POLL_INTERVAL_MS) {
+		if (force || Date.now() - lastAttemptAt >= this.pollIntervalMs(cacheKey)) {
 			this.refresh(force, descriptor);
 			return;
 		}
@@ -257,32 +266,93 @@ export class AppModelUsageController {
 		if (this.inFlightModelKeys.has(modelKey)) return undefined;
 
 		const lastAttemptAt = this.lastAttemptAt.get(modelKey) ?? 0;
-		if (!force && Date.now() - lastAttemptAt < MODEL_USAGE_POLL_INTERVAL_MS) return undefined;
+		if (!force && Date.now() - lastAttemptAt < this.pollIntervalMs(modelKey)) return undefined;
 
 		this.inFlightModelKeys.add(modelKey);
 		this.lastAttemptAt.set(modelKey, Date.now());
 
 		return this.queryUsageStatus(descriptor).then(
-			(status) => {
+			async (status) => {
 			// An OAuth lookup may finish after the credential changed to an API
 			// key. Never reintroduce its subscription window in that session.
 			if (descriptor.kind === "anthropic" && this.anthropicAuthKind !== "oauth") return "unavailable" as const;
 				if (status) {
+					this.credentialRetryModelKeys.delete(modelKey);
 					this.statuses.set(modelKey, status);
 					return "refreshed" as const;
 				}
 
-				this.statuses.delete(modelKey);
+				// No quota from the query. A Claude Code route with no usable
+				// local credential never reached the usage endpoint: keep the
+				// last successful windows as explicitly stale cache (each only
+				// until its own reset) and arm the faster local-only retry.
+				// Any other unavailability — including an endpoint answer of
+				// "no quota" while a credential exists — clears the display
+				// instead of guessing, and never arms the fast retry.
+				if (descriptor.kind === "claude-code" && await this.claudeCodeCredentialAbsent()) {
+					this.credentialRetryModelKeys.add(modelKey);
+					this.retainStaleClaudeCodeUsage(modelKey);
+				} else {
+					this.statuses.delete(modelKey);
+				}
 				return "unavailable" as const;
 			},
 			() => {
 				// Keep the previous value for this model on transient network/auth failures.
+				// The attempt reached the usage endpoint, so the fast local-only
+				// cadence no longer applies.
+				this.credentialRetryModelKeys.delete(modelKey);
 				return "failed" as const;
 			},
 		).finally(() => {
 			this.inFlightModelKeys.delete(modelKey);
 			if (this.activeModelKey === modelKey) this.host.render();
 		});
+	}
+
+	/**
+	 * Effective poll interval for a model route. Claude Code routes whose quota
+	 * was unavailable only because no usable local credential exists retry at
+	 * the faster cadence: that retry re-reads the Keychain/credentials file
+	 * only (no provider network) until Claude Code refreshes its login.
+	 */
+	private pollIntervalMs(modelKey: string): number {
+		return this.credentialRetryModelKeys.has(modelKey) ? MODEL_USAGE_CREDENTIAL_RETRY_MS : MODEL_USAGE_POLL_INTERVAL_MS;
+	}
+
+	/**
+	 * Local-only probe: true when no usable Claude Code credential exists. A
+	 * probe failure is treated as "credential present" so it can never fake
+	 * credential absence (which would retain stale cache and add fast retries
+	 * after a mere endpoint failure).
+	 */
+	private async claudeCodeCredentialAbsent(): Promise<boolean> {
+		try {
+			return !(await this.isClaudeCodeCredentialAvailable());
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Keep the last successful quota for a Claude Code route as explicitly
+	 * stale cache. Windows whose reset already passed are dropped; when none
+	 * survive the route shows no quota at all.
+	 */
+	private retainStaleClaudeCodeUsage(modelKey: string): void {
+		const stale = markModelUsageStale(this.statuses.get(modelKey));
+		if (stale) this.statuses.set(modelKey, stale);
+		else this.statuses.delete(modelKey);
+	}
+
+	/** Drop stale caches whose windows have all reset so no old status lingers. */
+	private purgeExpiredStaleUsage(now = Date.now()): void {
+		for (const [modelKey, status] of this.statuses) {
+			if (status.stale !== true) continue;
+			const live = liveStaleModelUsage(status, now);
+			if (live) this.statuses.set(modelKey, live);
+			else this.statuses.delete(modelKey);
+		}
 	}
 
 	private syncActiveModel(session: AgentSession | undefined): boolean {

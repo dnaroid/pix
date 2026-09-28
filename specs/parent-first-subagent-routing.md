@@ -21,10 +21,13 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
 1. Parent prompts and both task schemas share one selection guideline: set a
    clearly matching role, prefer a matching project specialist, and preserve a
    user-requested role. Omission is allowed for uncertainty or a user request for
-   automatic routing. Before prompt/routing, `forParentModels` /
-   `notForParentModels` gates remove roles that are unavailable to the current
-   parent model. Real UI QA retains its explicit `ui-qa` requirement; legacy
-   `browser-qa` requests normalize to that role before validation.
+   automatic routing. Before prompt/routing, parent-model gates and project
+   capability gates remove unavailable roles. `requiresIndexedProject: true`
+   requires `.indexer-cli/` at the resolved project root. Real UI QA requires
+   the explicit built-in `ui-qa` role; there is no `browser-qa` alias.
+   The parent catalog also names active project-local replacements of bundled
+   roles. A same-named project role is the complete effective profile; the
+   parent must not assume omitted built-in tools, gates, models, or instructions.
 2. Explicit names are validated against the effective config before any router
    request. Unknown names are errors, not unconfigured/ad-hoc agent profiles.
    Valid names bypass routing and its provider/auth calls, even when disabled.
@@ -59,6 +62,11 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
    appropriate only when the child result is a true dependency for the next
    decision and no independent parent work remains. If requirements change, the
    affected worker is stopped or rescoped before it continues editing.
+10. When `knowledge-auditor` is present in the effective catalog, the parent
+    delegates the final task-scoped repository-knowledge pass to it with a
+    concise behavior/result summary and the exact project-relative task-changed
+    paths. The auditor may repair only small confirmed documentation drift;
+    substantial or ambiguous drift returns to the parent for a decision.
 
 ## Unchanged behavior
 

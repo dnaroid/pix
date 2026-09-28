@@ -16,6 +16,11 @@ export const TOAST_DURATION_MS = 5000;
 export const STATUS_BLINK_INTERVAL_MS = 500;
 export const MODEL_USAGE_STATUS_TICK_MS = 60_000;
 export const MODEL_USAGE_POLL_INTERVAL_MS = 5 * 60_000;
+// Faster retry cadence while a Claude Code route has no usable local
+// credential. Retrying then only re-reads the Keychain/credentials file
+// (no provider network), so Claude Code refreshing its login is picked up
+// within a tick instead of after the full polling interval.
+export const MODEL_USAGE_CREDENTIAL_RETRY_MS = 30_000;
 export const REQUEST_HISTORY_VERSION = 1;
 export const REQUEST_HISTORY_MAX_ENTRIES = 200;
 export const REQUEST_HISTORY_MAX_BYTES = 128 * 1024;

@@ -82,6 +82,7 @@ const PIX_FILE_IMAGES_META_KEY = "pix.fileImages";
 const MAX_PROMPT_FILE_IMAGE_COUNT = 10;
 const MAX_PROMPT_FILE_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_PROMPT_FILE_IMAGES_TOTAL_BYTES = 50 * 1024 * 1024;
+const REGISTRY_SNAPSHOT_TIMEOUT_MS = 5_000;
 import {
 	isExtensionUiRequest,
 	type PiClient,
@@ -107,6 +108,7 @@ import {
 	PIX_ENHANCE_PROMPT_METHOD,
 	PIX_AGENT_CONTROL_METHOD,
 	PIX_BRANCH_USER_MESSAGES_METHOD,
+	PIX_CLAUDE_QUOTA_REFRESH_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
@@ -163,6 +165,7 @@ import {
 	type DesktopModelRouteRequest,
 	type DesktopModelRouteResponse,
 	type DesktopBashRequest,
+	type DesktopClaudeQuotaRefreshResponse,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
 	type DesktopImportSessionRequest,
@@ -204,6 +207,7 @@ import {
 	bashExecutionStartUpdate,
 } from "./bash-execution.js";
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
+import { launchClaudeCodeLoginNudge } from "./claude-code-login-nudge.js";
 import {
 	defaultRoutingDecision,
 	loadModelRoutingConfig,
@@ -399,6 +403,12 @@ export interface PixAcpAgentOptions {
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
 	readonly queryModelUsage?: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
 	/**
+	 * Headless Claude CLI login nudge for the manual Claude Code quota
+	 * refresh (overridable for tests; the default launches a bounded child
+	 * whose output is never captured).
+	 */
+	readonly claudeCodeLoginNudge?: () => Promise<boolean>;
+	/**
 	 * Parses an Anthropic API-key response-header record into a usage status
 	 * (overridable for tests; the default uses the shared Pix module).
 	 */
@@ -429,6 +439,12 @@ export class PixAcpAgent {
 	private readonly sessionLifecycle = new Map<string, Promise<void>>();
 	/** Deduplicates concurrent account-quota I/O for one Desktop session/model/thinking route. */
 	private readonly modelUsageRefreshes = new Map<string, Promise<ModelUsageRefreshResult>>();
+	/** Last successful quota snapshot per Claude Code route, resent as `stale` cache while the credential is absent. */
+	private readonly claudeCodeQuotaCache = new Map<string, DesktopModelUsageStatus>();
+	/** Single-flight headless Claude CLI login nudge; at most one child at a time. */
+	private claudeLoginNudgeInFlight: Promise<boolean> | undefined;
+	/** Deduplicates concurrent manual Claude Code quota refreshes per session. */
+	private readonly claudeQuotaRefreshes = new Map<string, Promise<DesktopClaudeQuotaRefreshResponse>>();
 	private readonly app: AgentApp;
 	private readonly options: PixAcpAgentOptions;
 	private readonly sessionMap: SessionMapStore;
@@ -438,6 +454,7 @@ export class PixAcpAgent {
 	private readonly enhancePrompt: PromptEnhancer;
 	private readonly gitAssistant: GitAssistant;
 	private readonly queryModelUsage: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
+	private readonly claudeCodeLoginNudge: () => Promise<boolean>;
 	private readonly parseAnthropicUsageHeaders: (record: PiAnthropicUsageRecord) => Promise<DesktopModelUsageStatus | undefined>;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
 	private readonly loadDefaultModel: (cwd: string) => PixDefaultModel | undefined;
@@ -469,6 +486,7 @@ export class PixAcpAgent {
 		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
 		this.queryModelUsage = options.queryModelUsage ?? queryPixModelUsage;
+		this.claudeCodeLoginNudge = options.claudeCodeLoginNudge ?? launchClaudeCodeLoginNudge;
 		this.parseAnthropicUsageHeaders = options.parseAnthropicUsageHeaders ?? parsePixAnthropicUsageHeaders;
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
@@ -522,6 +540,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_SESSION_USAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopSessionUsage(ctx.params),
+			)
+			.onRequest(PIX_CLAUDE_QUOTA_REFRESH_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopClaudeQuotaRefresh(ctx.params),
 			)
 			.onRequest(PIX_DRAFT_CONFIG_METHOD, parseDesktopDraftConfigRequest, (ctx) =>
 				this.desktopDraftConfig(ctx.params),
@@ -619,6 +640,8 @@ export class PixAcpAgent {
 	 */
 	async dispose(): Promise<void> {
 		this.disposed = true;
+		this.claudeCodeQuotaCache.clear();
+		this.claudeQuotaRefreshes.clear();
 		await Promise.allSettled([...this.pendingSpawns]);
 		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
@@ -707,11 +730,14 @@ export class PixAcpAgent {
 			toolsSuiteExtensionPath,
 		));
 		let snapshot: unknown;
+		let resolveSnapshot: ((value: unknown) => void) | undefined;
 		const unsubscribe = pi.onEvent((event) => {
 			if (!isExtensionUiRequest(event)) return;
 			const state = sessionStateEnvelopeFromUiRequest(event);
 			if (state?.channel === "pi-tools-suite:resource-registry:state") {
 				snapshot = state.data;
+				resolveSnapshot?.(state.data);
+				resolveSnapshot = undefined;
 				return;
 			}
 			void this.handleWorkspaceRegistryUiRequest(pi, event, client);
@@ -726,13 +752,33 @@ export class PixAcpAgent {
 			// Ignore any advisory startup snapshot; the command below publishes the
 			// authoritative post-action snapshot after its filesystem/Git work.
 			snapshot = undefined;
+			const snapshotEvent = new Promise<unknown>((resolve) => { resolveSnapshot = resolve; });
 			await pi.prompt(registryRpcCommand(params));
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
 			if (snapshot === undefined) {
-				throw new RequestError(ERROR_SERVER, "resource registry did not publish a workspace snapshot");
+				let timeout: ReturnType<typeof setTimeout> | undefined;
+				try {
+					snapshot = await Promise.race([
+						snapshotEvent,
+						new Promise<never>((_resolve, reject) => {
+							timeout = setTimeout(() => {
+								reject(new RequestError(
+									ERROR_SERVER,
+									"resource registry did not publish a workspace snapshot",
+								));
+							}, REGISTRY_SNAPSHOT_TIMEOUT_MS);
+							timeout.unref?.();
+						}),
+					]);
+				} finally {
+					if (timeout !== undefined) clearTimeout(timeout);
+				}
+			}
+			if (snapshot === undefined) {
+				throw new RequestError(ERROR_SERVER, "resource registry published an empty workspace snapshot");
 			}
 			return { snapshot };
 		} finally {
+			resolveSnapshot = undefined;
 			unsubscribe();
 			await pi.stop().catch(() => undefined);
 		}
@@ -2295,7 +2341,7 @@ export class PixAcpAgent {
 			...(dcpTokensSaved !== undefined ? { dcpTokensSaved } : {}),
 			dcpContextMap: dcpContextMapFromStats(stats) ?? null,
 			modelUsageRefresh: modelUsage.refresh,
-			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
+			...this.modelUsageResponseFields(state.model, modelUsage),
 			...(headerUsage ? { headerUsage } : {}),
 		};
 	}
@@ -2439,7 +2485,7 @@ export class PixAcpAgent {
 					thoughtLevelOption(thinkingLevel, levels),
 				],
 				modelUsageRefresh: modelUsage.refresh,
-				...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
+				...this.modelUsageResponseFields(current, modelUsage),
 				modelRoutingEnabled,
 				modelRoutingDefault,
 			};
@@ -2454,11 +2500,110 @@ export class PixAcpAgent {
 		const existing = this.modelUsageRefreshes.get(key);
 		if (existing) return existing;
 
-		const pending = this.queryModelUsage(state).finally(() => {
+		const pending = this.queryModelUsage(state).then((result) => {
+			this.rememberClaudeCodeQuota(model, result);
+			return result;
+		}).finally(() => {
 			if (this.modelUsageRefreshes.get(key) === pending) this.modelUsageRefreshes.delete(key);
 		});
 		this.modelUsageRefreshes.set(key, pending);
 		return pending;
+	}
+
+	/** Keep the last successful quota per Claude Code route for stale-cache resend. */
+	private rememberClaudeCodeQuota(
+		model: PiSessionState["model"] | undefined,
+		result: ModelUsageRefreshResult,
+	): void {
+		if (result.refresh !== "ready" || !result.status || !isClaudeCodeRoute(model)) return;
+		this.claudeCodeQuotaCache.set(claudeCodeRouteKey(model), result.status);
+	}
+
+	/**
+	 * Shared `modelUsage`/`modelUsageCredentialPending` response fields. A
+	 * credential-pending unavailability additionally carries the route's last
+	 * successful windows as an explicitly `stale` snapshot (windows whose
+	 * reset already passed are dropped), so clients can keep a clearly marked
+	 * cache instead of an empty display until Claude Code refreshes its login.
+	 */
+	private modelUsageResponseFields(
+		model: PiSessionState["model"] | undefined,
+		result: ModelUsageRefreshResult | { refresh: "skipped" },
+	): { modelUsage?: DesktopModelUsageStatus; modelUsageCredentialPending?: true } {
+		if (result.refresh === "ready" && result.status) return { modelUsage: result.status };
+		if (result.refresh === "skipped" || !result.credentialPending) return {};
+		const stale = staleClaudeCodeQuotaStatus(this.claudeCodeQuotaCache.get(claudeCodeRouteKey(model)));
+		return {
+			...(stale ? { modelUsage: stale } : {}),
+			modelUsageCredentialPending: true,
+		};
+	}
+
+	/**
+	 * Manual Claude Code quota refresh for the session-usage popover. Only the
+	 * active `pi-claude-code-provider` route may use it. It briefly launches
+	 * the Claude CLI headless (single-flight: duplicate clicks share one
+	 * bounded child, whose output is never captured), then rereads the local
+	 * credential through the normal quota query for the route that is current
+	 * when the child exits.
+	 */
+	private async desktopClaudeQuotaRefresh(params: DesktopSessionRequest): Promise<DesktopClaudeQuotaRefreshResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		const existing = this.claudeQuotaRefreshes.get(session.acpSessionId);
+		if (existing) return existing;
+
+		const pending = this.runClaudeQuotaRefresh(session).finally(() => {
+			if (this.claudeQuotaRefreshes.get(session.acpSessionId) === pending) {
+				this.claudeQuotaRefreshes.delete(session.acpSessionId);
+			}
+		});
+		this.claudeQuotaRefreshes.set(session.acpSessionId, pending);
+		return pending;
+	}
+
+	private async runClaudeQuotaRefresh(session: AgentSessionState): Promise<DesktopClaudeQuotaRefreshResponse> {
+		// Route guard before any child launch: this affordance exists only
+		// for the active Claude Code route.
+		const initialRoute = (await session.pi.getState()).model;
+		if (!isClaudeCodeRoute(initialRoute)) {
+			throw new RequestError(ERROR_INVALID_PARAMS, "claude quota refresh requires an active pi-claude-code-provider model");
+		}
+		const launched = await this.nudgeClaudeCodeLogin();
+		// Session guard: the connection must not have forgotten or replaced
+		// this session while the bounded child ran.
+		if (this.sessions.get(session.acpSessionId) !== session) {
+			throw new RequestError(ERROR_SERVER, `session ${session.acpSessionId} changed while refreshing Claude Code limits`);
+		}
+		// Model guard: the user may have switched models while the child ran.
+		// Query the route that is current now and refuse when it is no longer
+		// a Claude Code route instead of reporting another selection's quota.
+		const state = await session.pi.getState();
+		if (!isClaudeCodeRoute(state.model) || claudeCodeRouteKey(state.model) !== claudeCodeRouteKey(initialRoute)) {
+			throw new RequestError(ERROR_INVALID_PARAMS, "claude quota refresh requires an active pi-claude-code-provider model");
+		}
+		const result = await this.queryModelUsage(state);
+		// An account/model switch during the endpoint request invalidates its
+		// reply just as a switch during the headless nudge does.
+		if (this.sessions.get(session.acpSessionId) !== session
+			|| claudeCodeRouteKey((await session.pi.getState()).model) !== claudeCodeRouteKey(state.model)) {
+			throw new RequestError(ERROR_SERVER, "Claude Code route changed while refreshing limits");
+		}
+		this.rememberClaudeCodeQuota(state.model, result);
+		return {
+			sessionId: session.acpSessionId,
+			launched,
+			refresh: result.refresh,
+			...this.modelUsageResponseFields(state.model, result),
+		};
+	}
+
+	/** At most one headless Claude child at a time; concurrent callers share its outcome. */
+	private nudgeClaudeCodeLogin(): Promise<boolean> {
+		this.claudeLoginNudgeInFlight ??= this.claudeCodeLoginNudge().finally(() => {
+			this.claudeLoginNudgeInFlight = undefined;
+		});
+		return this.claudeLoginNudgeInFlight;
 	}
 
 	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState): Promise<void> {
@@ -3237,7 +3382,10 @@ function registryPiClientOptions(
 	return {
 		piEntry,
 		cwd,
-		env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
+		env: {
+			PIX_ACP_SESSION_STATE_BRIDGE: "1",
+			PIX_ACP_REGISTRY_WORKSPACE_RPC: "1",
+		},
 		args: [
 			...(toolsSuiteExtensionPath ? ["--extension", toolsSuiteExtensionPath] : []),
 			"--no-session",
@@ -3331,6 +3479,8 @@ function formatUsageStats(stats: PiSessionStats): string {
 type SharedModelUsageModule = {
 	modelUsageDescriptor?: (model: PiSessionState["model"], thinkingLevel?: string) => unknown;
 	queryModelUsageStatus?: (descriptor: unknown) => Promise<DesktopModelUsageStatus | undefined>;
+	/** Local-only Claude Code credential probe (never performs provider network I/O). */
+	claudeCodeCredentialAvailable?: () => Promise<boolean>;
 };
 
 type SharedHeaderUsageModule = {
@@ -3434,9 +3584,16 @@ function dcpContextMapFromStats(stats: PiSessionStats): PiSessionStats["pixDcpCo
 	};
 }
 
-type ModelUsageRefreshResult =
-	| { readonly refresh: "ready"; readonly status: DesktopModelUsageStatus }
-	| { readonly refresh: "unavailable" | "failed" };
+type ModelUsageRefreshResult = {
+	readonly refresh: "ready" | "unavailable" | "failed";
+	/** Present for "ready", and for credential-pending "unavailable" with cached stale windows. */
+	readonly status?: DesktopModelUsageStatus;
+	/**
+	 * True when the Claude Code quota refresh was unavailable only because no
+	 * usable local credential exists: the usage endpoint was never contacted.
+	 */
+	readonly credentialPending?: true;
+};
 
 async function queryPixModelUsage(state: PiSessionState): Promise<ModelUsageRefreshResult> {
 	try {
@@ -3446,10 +3603,47 @@ async function queryPixModelUsage(state: PiSessionState): Promise<ModelUsageRefr
 		const descriptor = usage.modelUsageDescriptor(state.model, state.thinkingLevel);
 		if (!descriptor) return { refresh: "unavailable" };
 		const status = await usage.queryModelUsageStatus(descriptor);
-		return status ? { refresh: "ready", status } : { refresh: "unavailable" };
+		if (status) return { refresh: "ready", status };
+		// A Claude Code quota miss with no local credential is worth a faster
+		// client retry: until Claude Code refreshes its login, each retry costs
+		// only local credential reads and no provider network traffic.
+		if (
+			(descriptor as { kind?: unknown }).kind === "claude-code"
+			&& usage.claudeCodeCredentialAvailable
+			&& !(await usage.claudeCodeCredentialAvailable())
+		) return { refresh: "unavailable", credentialPending: true };
+		return { refresh: "unavailable" };
 	} catch {
 		return { refresh: "failed" };
 	}
+}
+
+function isClaudeCodeRoute(model: PiSessionState["model"] | undefined): boolean {
+	return model?.provider.toLowerCase() === "pi-claude-code-provider";
+}
+
+/** Cache key for one Claude Code model route, matching the quota `modelKey`. */
+function claudeCodeRouteKey(model: PiSessionState["model"] | undefined): string {
+	return `${model?.provider ?? ""}/${model?.id ?? ""}`;
+}
+
+/**
+ * Cached-display view of the last successful Claude Code quota for one route:
+ * windows whose reset already passed are dropped (a reset window describes a
+ * quota period that is over), and the snapshot is explicitly marked stale so
+ * clients can never present it as current. Returns `undefined` when no window
+ * survives.
+ */
+function staleClaudeCodeQuotaStatus(
+	cached: DesktopModelUsageStatus | undefined,
+	now = Date.now(),
+): DesktopModelUsageStatus | undefined {
+	if (!cached) return undefined;
+	const hourly = cached.hourly !== undefined && cached.hourly.resetAt > now ? cached.hourly : undefined;
+	const weekly = cached.weekly !== undefined && cached.weekly.resetAt > now ? cached.weekly : undefined;
+	if (!hourly && !weekly) return undefined;
+	const { hourly: _oldHourly, weekly: _oldWeekly, ...withoutWindows } = cached;
+	return { ...withoutWindows, stale: true, ...(hourly ? { hourly } : {}), ...(weekly ? { weekly } : {}) };
 }
 
 async function aggregatePixSessionUsage(entries: readonly unknown[]): Promise<DesktopSessionUsageReport> {

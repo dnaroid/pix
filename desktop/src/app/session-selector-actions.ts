@@ -8,6 +8,7 @@ import type {
 export function createSessionSelectorActions(
   options: SessionTabControllerOptions,
   selection: { loadSession: SessionLoader; replaceCurrentTabWithSession: SessionReplacer },
+  sessionActionRunning: (sessionId: string) => boolean = () => false,
 ) {
   function openSessionSelector(query = "", mode: "open" | "delete" = "open"): void {
     if (!options.workspace() || !options.statusReady()) return;
@@ -20,6 +21,7 @@ export function createSessionSelectorActions(
   }
 
   function selectSession(sessionId: string): void {
+    if (sessionActionRunning(sessionId)) return;
     if (options.draft.active) {
       void selectSessionFromDraft(sessionId);
       return;
@@ -32,7 +34,7 @@ export function createSessionSelectorActions(
   }
 
   async function selectSessionFromDraft(sessionId: string): Promise<void> {
-    if (!options.draft.active || options.sessionMutationRunning()) return;
+    if (!options.draft.active || options.sessionMutationRunning() || sessionActionRunning(sessionId)) return;
     options.draft.close();
     options.clearPrompt();
     options.invalidateAttachmentDraft();

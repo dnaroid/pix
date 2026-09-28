@@ -15,8 +15,8 @@ e2eTest("macOS desktop backend semantically activates a real AppKit control", ()
 		const agentDir = path.join(project, ".pi", "subagents", "run", "qa");
 		const uiWorkspace = path.join(agentDir, "ui-qa");
 		fs.mkdirSync(path.join(uiWorkspace, "flows"), { recursive: true, mode: 0o700 });
-		fs.mkdirSync(path.join(agentDir, "browser-qa", "flows"), { recursive: true, mode: 0o700 });
-		for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "subagents"), path.join(project, ".pi", "subagents", "run"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), path.join(agentDir, "browser-qa"), path.join(agentDir, "browser-qa", "flows")]) fs.chmodSync(directory, 0o700);
+		fs.mkdirSync(path.join(uiWorkspace, "browser", "flows"), { recursive: true, mode: 0o700 });
+		for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "subagents"), path.join(project, ".pi", "subagents", "run"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), path.join(uiWorkspace, "browser"), path.join(uiWorkspace, "browser", "flows")]) fs.chmodSync(directory, 0o700);
 		fs.writeFileSync(path.join(agentDir, "prompt.md"), "QA prompt\n", { mode: 0o600 });
 		fs.writeFileSync(path.join(agentDir, "project_cwd"), `${project}\n`, { mode: 0o600 });
 		fs.writeFileSync(path.join(agentDir, "subagent_type"), "ui-qa\n", { mode: 0o600 });
@@ -66,8 +66,8 @@ e2eTest("macOS desktop backend records exact-window video concurrently with the 
 		const agentDir = path.join(project, ".pi", "subagents", "run", "qa");
 		const uiWorkspace = path.join(agentDir, "ui-qa");
 		fs.mkdirSync(path.join(uiWorkspace, "flows"), { recursive: true, mode: 0o700 });
-		fs.mkdirSync(path.join(agentDir, "browser-qa", "flows"), { recursive: true, mode: 0o700 });
-		for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "subagents"), path.join(project, ".pi", "subagents", "run"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), path.join(agentDir, "browser-qa"), path.join(agentDir, "browser-qa", "flows")]) fs.chmodSync(directory, 0o700);
+		fs.mkdirSync(path.join(uiWorkspace, "browser", "flows"), { recursive: true, mode: 0o700 });
+		for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "subagents"), path.join(project, ".pi", "subagents", "run"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), path.join(uiWorkspace, "browser"), path.join(uiWorkspace, "browser", "flows")]) fs.chmodSync(directory, 0o700);
 		fs.writeFileSync(path.join(agentDir, "prompt.md"), "QA prompt\n", { mode: 0o600 });
 		fs.writeFileSync(path.join(agentDir, "project_cwd"), `${project}\n`, { mode: 0o600 });
 		fs.writeFileSync(path.join(agentDir, "subagent_type"), "ui-qa\n", { mode: 0o600 });

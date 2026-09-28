@@ -11,26 +11,19 @@ const execFileAsync = promisify(execFile);
 export async function readClaudeCodeUsageToken(): Promise<string | undefined> {
 	// Tests never query the developer's environment, Keychain or actual Claude configuration.
 	if (process.env.NODE_ENV === "test") {
-		return readCredentialFile(process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH);
+		return selectClaudeCodeUsageToken(undefined, () => readRawCredential(process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH));
 	}
 
 	// The adapter's Claude subprocess deliberately allows only CLAUDE_CONFIG_DIR
 	// and a small set of ordinary host variables through. In particular, Pi's
 	// ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN never reach this route.
 	const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
-	if (process.platform === "darwin") {
-		try {
-			const { stdout } = await execFileAsync(
-				"/usr/bin/security",
-				["find-generic-password", "-s", claudeCodeKeychainService(configDir), "-w"],
-				{ timeout: 3_000, maxBuffer: 64 * 1024 },
-			);
-			return tokenFromClaudeCredential(stdout);
-		} catch {
-			// Claude Code falls back to a local file when the Keychain is unavailable.
-		}
-	}
-	return readCredentialFile(join(configDir || join(homedir(), ".claude"), ".credentials.json"));
+	return selectClaudeCodeUsageToken(
+		process.platform === "darwin"
+			? () => readKeychainCredential(claudeCodeKeychainService(configDir))
+			: undefined,
+		() => readRawCredential(join(configDir || join(homedir(), ".claude"), ".credentials.json")),
+	);
 }
 
 export function claudeCodeKeychainService(configDir?: string): string {
@@ -39,10 +32,52 @@ export function claudeCodeKeychainService(configDir?: string): string {
 	return `Claude Code-credentials-${hash}`;
 }
 
-async function readCredentialFile(path: string | undefined): Promise<string | undefined> {
+/**
+ * Local-only Claude Code credential probe: true when a usable (unexpired)
+ * Claude Code token is readable. Performs no provider network I/O, so quota
+ * polling may retry at a faster cadence while this stays false — each retry
+ * only re-reads the Keychain/credentials file until Claude Code refreshes
+ * its login.
+ */
+export async function claudeCodeCredentialAvailable(): Promise<boolean> {
+	return (await readClaudeCodeUsageToken()) !== undefined;
+}
+
+/**
+ * Pick the first usable Claude Code login token. A Keychain entry that is
+ * present but invalid or expired must not mask a valid `.credentials.json`
+ * fallback — Claude Code itself keeps both locations in sync only after it
+ * refreshes its login, so the fresher copy can be either one. Both readers are
+ * local-only and never write or refresh credentials.
+ */
+export async function selectClaudeCodeUsageToken(
+	readKeychain: (() => Promise<string | undefined>) | undefined,
+	readFile: () => Promise<string | undefined>,
+): Promise<string | undefined> {
+	if (readKeychain) {
+		// An unavailable/locked Keychain is not an error here: fall back to the
+		// credential file exactly like Claude Code does.
+		const keychain = await readKeychain().catch(() => undefined);
+		const keychainToken = keychain === undefined ? undefined : tokenFromClaudeCredential(keychain);
+		if (keychainToken) return keychainToken;
+	}
+	const file = await readFile().catch(() => undefined);
+	return file === undefined ? undefined : tokenFromClaudeCredential(file);
+}
+
+async function readKeychainCredential(service: string): Promise<string | undefined> {
+	const { stdout } = await execFileAsync(
+		"/usr/bin/security",
+		["find-generic-password", "-s", service, "-w"],
+		{ timeout: 3_000, maxBuffer: 64 * 1024 },
+	);
+	return stdout;
+}
+
+async function readRawCredential(path: string | undefined): Promise<string | undefined> {
 	if (!path) return undefined;
 	try {
-		return tokenFromClaudeCredential(await readFile(path, "utf8"));
+		return await readFile(path, "utf8");
 	} catch {
 		return undefined;
 	}

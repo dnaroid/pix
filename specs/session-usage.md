@@ -62,6 +62,11 @@ percentages with spend attributable to one conversation.
 - Desktop loads the spend report on demand through `pix/session/usage`; TUI reads
   the owning session's complete persisted entries on demand. Opening the popup
   does not start a model request and does not refresh provider quota.
+- For an active Claude Code provider session, Desktop also offers an explicit
+  `Refresh limits` action in this popover. This action is separate from opening
+  Usage and from recorded session spend; it nudges a bounded headless Claude
+  CLI, then queries Pix's quota endpoint and updates the independent status-bar
+  limits. It never interprets CLI output as billable usage or quota.
 - Active TUI/Desktop sessions expose `Usage` even when their provider has no
   quota API, because recorded session spend does not depend on quota support.
 - Desktop marks session spend requestable only after that session's Pi runtime is

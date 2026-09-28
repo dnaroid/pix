@@ -12,6 +12,7 @@ type ConversationSessionActionsOptions = {
   client: () => AcpClient | null;
   state: ActiveSessionState;
   workspace: () => string;
+  promptText: () => string;
   operationRunning: () => boolean;
   setOperationRunning: (running: boolean) => void;
   promptRunning: () => boolean;
@@ -38,10 +39,27 @@ type ConversationSessionActionsOptions = {
 };
 
 export function createConversationSessionActions(options: ConversationSessionActionsOptions) {
+  const enhancementOwners = new Map<string, {
+    client: AcpClient;
+    workspace: string;
+  }>();
+
   async function enhancePromptDraft(initialDraft: string): Promise<void> {
     const requestClient = options.client();
     const sessionId = options.state.sessionId;
-    if (!requestClient || !sessionId || !options.state.runtimeReady) return;
+    const requestWorkspace = options.workspace();
+    const existingOwner = sessionId ? enhancementOwners.get(sessionId) : undefined;
+    if (
+      !requestClient
+      || !sessionId
+      || !requestWorkspace
+      || !options.state.runtimeReady
+      || (
+        existingOwner
+        && existingOwner.client === requestClient
+        && existingOwner.workspace === requestWorkspace
+      )
+    ) return;
 
     let draft = initialDraft.trim();
     if (!draft) {
@@ -52,18 +70,29 @@ export function createConversationSessionActions(options: ConversationSessionAct
     }
     if (!draft) return;
 
-    options.setOperationRunning(true);
+    const sourcePromptText = options.promptText();
+    const owner = { client: requestClient, workspace: requestWorkspace };
+    enhancementOwners.set(sessionId, owner);
     options.setErrorMessage(null);
     try {
       const enhanced = await requestClient.enhancePrompt(sessionId, draft);
-      if (requestClient !== options.client() || sessionId !== options.state.sessionId) return;
+      if (
+        requestClient !== options.client()
+        || sessionId !== options.state.sessionId
+        || requestWorkspace !== options.workspace()
+        || options.promptText() !== sourcePromptText
+      ) return;
       options.setPromptText(enhanced);
     } catch (error) {
-      options.reportError(error);
-    } finally {
-      if (requestClient === options.client() && sessionId === options.state.sessionId) {
-        options.setOperationRunning(false);
+      if (
+        requestClient === options.client()
+        && sessionId === options.state.sessionId
+        && requestWorkspace === options.workspace()
+      ) {
+        options.reportError(error);
       }
+    } finally {
+      if (enhancementOwners.get(sessionId) === owner) enhancementOwners.delete(sessionId);
     }
   }
 

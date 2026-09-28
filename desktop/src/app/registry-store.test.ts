@@ -6,7 +6,7 @@ import { createRegistryStore } from "./registry.svelte";
 afterEach(() => vi.useRealTimers());
 
 describe("registry background project sync", () => {
-  it("does not reload the next workspace or unlock its action after a stale pull finishes", async () => {
+  it("does not reload the next workspace after a stale pull finishes", async () => {
     let finishPull!: () => void;
     const registryAction = vi.fn(() => new Promise<any>((resolve) => {
       finishPull = () => resolve({ version: 1, configured: true, branch: "main", items: [], checkedAt: "now" });
@@ -16,13 +16,11 @@ describe("registry background project sync", () => {
     const loadWorkspaceSettings = vi.fn();
     const loadProjectTasks = vi.fn();
     const loadProjectDocuments = vi.fn();
-    const setOperationRunning = vi.fn();
     const store = createRegistryStore({
       client: () => client,
       operationRunning: () => false,
       workspace: () => workspace,
       sessionWorkspace: () => workspace,
-      setOperationRunning,
       setErrorMessage: vi.fn(),
       loadWorkspaceSettings,
       loadProjectTasks,
@@ -39,7 +37,47 @@ describe("registry background project sync", () => {
     expect(loadWorkspaceSettings).not.toHaveBeenCalled();
     expect(loadProjectTasks).not.toHaveBeenCalled();
     expect(loadProjectDocuments).not.toHaveBeenCalled();
-    expect(setOperationRunning).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Registry update busy state local to the Registry store", async () => {
+    let finishUpdate!: () => void;
+    const registryAction = vi.fn(() => new Promise<any>((resolve) => {
+      finishUpdate = () => resolve({
+        version: 1,
+        configured: true,
+        branch: "main",
+        items: [],
+        checkedAt: "now",
+      });
+    }));
+    const client = { registryAction } as unknown as AcpClient;
+    const store = createRegistryStore({
+      client: () => client,
+      operationRunning: () => false,
+      workspace: () => "/project",
+      sessionWorkspace: () => "/project",
+      setErrorMessage: vi.fn(),
+      loadProjectTasks: vi.fn(),
+      loadProjectDocuments: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    const pending = store.runAction(
+      { action: "update", type: "skill", name: "pdf" },
+      "skill:pdf:update",
+    );
+
+    expect(store.actionId).toBe("skill:pdf:update");
+    expect(registryAction).toHaveBeenCalledWith("/project", {
+      action: "update",
+      type: "skill",
+      name: "pdf",
+    });
+
+    finishUpdate();
+    await pending;
+
+    expect(store.actionId).toBeNull();
   });
 
   it("pushes a debounced project artifact without taking the foreground operation lock", async () => {
@@ -51,14 +89,12 @@ describe("registry background project sync", () => {
       items: [],
       checkedAt: "now",
     }));
-    const setOperationRunning = vi.fn();
     const client = { registryAction } as unknown as AcpClient;
     const store = createRegistryStore({
       client: () => client,
       operationRunning: () => false,
       workspace: () => "/project",
       sessionWorkspace: () => "/project",
-      setOperationRunning,
       setErrorMessage: vi.fn(),
       loadProjectTasks: vi.fn(),
       loadProjectDocuments: vi.fn(),
@@ -84,7 +120,6 @@ describe("registry background project sync", () => {
       action: "push-project",
       scope: "tasks",
     });
-    expect(setOperationRunning).not.toHaveBeenCalled();
     expect(store.backgroundSyncState.phase).toBe("idle");
   });
 
@@ -97,7 +132,6 @@ describe("registry background project sync", () => {
       operationRunning: () => false,
       workspace: () => "/project",
       sessionWorkspace: () => "/project",
-      setOperationRunning: vi.fn(),
       setErrorMessage: vi.fn(),
       loadProjectTasks,
       loadProjectDocuments,
@@ -124,7 +158,6 @@ describe("registry background project sync", () => {
       operationRunning: () => false,
       workspace: () => "/project",
       sessionWorkspace: () => "/project",
-      setOperationRunning: vi.fn(),
       setErrorMessage: vi.fn(),
       loadProjectTasks: vi.fn(),
       loadProjectDocuments,

@@ -4,6 +4,7 @@ import { fuzzySearch } from "./fuzzy";
 export const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
 
 export type RegistryResourceType = "skill" | "agent" | "project";
+export type RegistryCatalogSection = "installed" | "marketplace";
 export type RegistryProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
 export type RegistryStatus =
   | "up-to-date"
@@ -88,6 +89,20 @@ export function registryHasAttention(snapshot: RegistrySnapshot | undefined): bo
     || item.status === "diverged"
     || item.status === "registry-changed"
   );
+}
+
+export function registryCatalogSection(item: RegistryItem): RegistryCatalogSection | undefined {
+  if (item.type === "project") return undefined;
+  if (item.local) return "installed";
+  if (item.remote) return "marketplace";
+  return undefined;
+}
+
+export function registryCatalogItems(
+  items: readonly RegistryItem[],
+  section: RegistryCatalogSection,
+): RegistryItem[] {
+  return items.filter((item) => registryCatalogSection(item) === section);
 }
 
 export function registryPrimaryAction(item: RegistryItem): RegistryItemAction | undefined {

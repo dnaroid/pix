@@ -37,7 +37,7 @@ function createProject(type = "ui-qa") {
 	tempDirs.push(project);
 	const agentDir = path.join(project, ".pi", "subagents", "run", "qa");
 	const uiWorkspace = path.join(agentDir, "ui-qa");
-	const browserWorkspace = path.join(agentDir, "browser-qa");
+	const browserWorkspace = path.join(uiWorkspace, "browser");
 	fs.mkdirSync(path.join(uiWorkspace, "flows"), { recursive: true, mode: 0o700 });
 	fs.mkdirSync(path.join(browserWorkspace, "flows"), { recursive: true, mode: 0o700 });
 	for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "subagents"), path.join(project, ".pi", "subagents", "run"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), browserWorkspace, path.join(browserWorkspace, "flows")]) {
@@ -251,6 +251,15 @@ describe("ui-qa guide routing", () => {
 });
 
 describe("capability-first UI QA runner", () => {
+	test("rejects the removed browser-qa owner type", () => {
+		const { project, agentDir, uiWorkspace } = createProject("browser-qa");
+		writeFlow(uiWorkspace, "browser.jsonc", { version: 1, target: { url: "https://example.test/path" } });
+		const result = invoke(project, agentDir, ["probe", "--flow", "browser.jsonc"]);
+		expectRunnerStatus(result, 1);
+		expect(result.payload.status).toBe("FAILED");
+		expect(result.payload.reason).toContain("requires a ui-qa agent directory");
+	});
+
 	test("gives repeated unnamed desktop evidence steps collision-free filenames", () => {
 		expect(desktopEvidenceName(undefined, 1, "snapshot")).toBe("snapshot-2");
 		expect(desktopEvidenceName(undefined, 6, "snapshot")).toBe("snapshot-7");

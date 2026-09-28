@@ -56,11 +56,26 @@ without treating generated answers or audit candidates as semantic proof.
   Compare affected documents against final source and tests and fix actual
   semantic drift. Audit candidates are not proof of drift, and a reviewed
   no-impact decision is valid. Mechanical/non-behavioral changes skip this step.
+- Async-subagents ships a built-in `knowledge-auditor` role for the final
+  post-implementation knowledge pass. Its `requiresIndexedProject: true` gate
+  makes it visible only when the project root contains `.indexer-cli/`;
+  visibility does not depend on `idx` being executable. The parent gives it a
+  concise behavior/result summary plus exact task-changed project-relative
+  paths. It runs `idx audit` through its shell, fixes only small unambiguous
+  documentation drift grounded in final code/tests, refreshes the index after
+  edits, and escalates substantial/ambiguous/new-contract work without guessing.
+- When `knowledge-auditor` is effective, the final audit responsibility is
+  delegated to it instead of spending the parent model on routine drift cleanup.
+  The parent retains decisions and handles escalations. If the role is disabled
+  or unavailable, the existing parent-owned `repo_audit` workflow remains the
+  fallback.
 
 ## Related files
 
 - `external/pi-tools-suite/src/tool-descriptions.ts`
 - `external/pi-tools-suite/src/repo-discovery/index.ts`
+- `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
+- `external/pi-tools-suite/src/async-subagents/core/config.ts`
 - `external/pi-tools-suite/test/tool-descriptions.test.ts`
 - `external/pi-tools-suite/test/repo-discovery.test.ts`
 - `external/pi-tools-suite/README.md`

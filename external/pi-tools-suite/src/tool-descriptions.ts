@@ -75,6 +75,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				SUBAGENT_DELEGATION_GUIDANCE,
 				"Each agent role owns an ordered model candidate list. Parent-provider policy and runtime availability select the first usable candidate; project-local .pi/agents/*.md files may replace role profiles. Do not override the model merely to choose a role.",
 				SUBAGENT_TYPE_SELECTION_GUIDANCE,
+				"When knowledge-auditor appears in the effective catalog, use it for the final task-scoped repository-knowledge pass after implementation; give it the concise final behavior/result plus exact task-changed project-relative paths, and handle any escalation in the parent.",
 				repoDiscovery
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
 					: "Use first for broad codebase discovery split into tracks, review axes, or incident-triage hypotheses when repo_* tools are unavailable.",
@@ -85,7 +86,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"For every real UI QA, UI bug reproduction, or user-facing fix-verification request across browser, terminal/TUI, or desktop GUI, immediately spawn subagentType='ui-qa' even for a single track and before inspecting files or checking prerequisites. The ui-qa sub-agent must discover the actual target/control path and report missing prerequisites; do not preflight, perform, or substitute requested UI QA in the parent agent. " +
 				"Give ui-qa a concise acceptance brief: the known target URL/app/command, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
 				"For other work, first do a bounded parent discovery pass to resolve intent/semantics and the main causal path. If the diagnosis and desired behavior are already clear from a few targeted reads/searches, continue in the parent; delegate only a named uncertainty, independent track, noisy evidence step, or substantial well-specified implementation slice. Do not delegate implement work before cause, desired behavior, and acceptance criteria are settled. " +
-				SUBAGENT_TYPE_SELECTION_GUIDANCE + " After spawn, continue independent parent work; do not call status/wait merely for progress, and wait only when the child result blocks the next decision. " +
+				SUBAGENT_TYPE_SELECTION_GUIDANCE + " When knowledge-auditor appears in the effective catalog, delegate the final task-scoped repository-knowledge pass to it after implementation, with the concise final behavior/result and exact task-changed project-relative paths; the parent handles escalations. After spawn, continue independent parent work; do not call status/wait merely for progress, and wait only when the child result blocks the next decision. " +
 				(repoDiscovery
 					? "For general repo discovery, start with repo_context; use repo_search for focused code lookup. Delegate independent tracks/hypotheses/review axes even when repo_* tools exist. Read result only after completion when findings are needed."
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, delegate bounded research tracks for broad discovery rather than flooding parent context. Read result only after completion when findings are needed."),
@@ -97,6 +98,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				SUBAGENT_DELEGATION_GUIDANCE,
 				"For non-UI debugging and repository work, do a short parent-first causal pass before delegation. Resolve user intent and product/UX semantics first; if targeted discovery already establishes the diagnosis and desired behavior, do not spawn research to duplicate it.",
 				"Delegate implementation only after cause, desired behavior, and acceptance criteria are settled. Prefer the smallest coherent slice; keep compact sequential fixes in the parent and use workers where isolation, independent verification, or substantial scope provides clear value.",
+				"When `knowledge-auditor` is present in the effective role catalog, use it as the final repository-knowledge handoff: supply the concise final behavior/result and exact task-changed project-relative paths; accept small documentation repairs from the child and keep substantial/ambiguous decisions in the parent.",
 				repoDiscovery
 					? "For general discovery, start with repo_context; use repo_search for focused code lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
 					: "For one small discovery question, use direct read/grep; when repo_* tools are unavailable, delegate scoped research to keep broad search output outside the parent context.",
@@ -167,7 +169,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 	{
 		name: "repo_audit", label: "Repo Audit", command: "audit",
 		description: "Task-scoped documentation relationship signals for changed paths; read-only, not proof of semantic correctness.",
-		promptSnippet: "After a material behavior change, run repo_audit with only this task's changed paths; compare relevant source documents with code/tests and fix real semantic drift.",
+		promptSnippet: "After a material behavior change, use the knowledge-auditor sub-agent for the final task-scoped audit when that role is available; otherwise run repo_audit with only this task's changed paths. Compare relevant source documents with code/tests and fix real semantic drift.",
 		promptGuidelines: [
 			"Keep or create the primary spec in the same task; reviewed no-impact is valid. Skip for mechanical edits. Audit may use a stale indexed snapshot; read primary sources and verify semantics.",
 			"For a new spec, use the non-overwriting template installed by idx init at .indexer-cli/spec-template.md. Declare kind: spec and the intended status in frontmatter; list project-root-relative paths under Implementation and Tests. If the template is absent, ask before running setup instead of inventing one.",

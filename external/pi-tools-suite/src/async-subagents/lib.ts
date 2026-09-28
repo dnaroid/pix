@@ -13,7 +13,7 @@ export type {
 } from "./core/types.js";
 
 export { createRunDir, getRunRoot, hasAgentPrompt, hasLaunchedAgentPrompt, hasQueuedAgentPrompt, resolveRunDir, validateBasename } from "./core/paths.js";
-export type { ModelByParentEntry, ParentProviderPolicy, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
+export type { ModelByParentEntry, ParentProviderPolicy, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentAvailabilityContext, SubagentConfig, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
 export type { FrontierConfig, FrontierModelEntry } from "./core/frontier-models.js";
 export { DEFAULT_FRONTIER_MODELS, isFrontierModel, isSameModel, modelVendor } from "./core/frontier-models.js";
 export {
@@ -22,9 +22,11 @@ export {
 	DEFAULT_MAX_CONCURRENT,
 	DEFAULT_RETRY_CONFIG,
 	DEFAULT_ROUTING_CONFIG,
+	filterSubagentConfigForContext,
 	filterSubagentConfigForParentModel,
 	getBuiltinSubagentDefinitionsDir,
 	isBlindModelRef,
+	isSubagentTypeAvailableForContext,
 	isSubagentTypeAvailableForParent,
 	loadSubagentConfig,
 	resolveAgentTaskConfig,
@@ -37,7 +39,6 @@ export { routeSubagentTasks, SubagentRoutingError } from "./core/routing.js";
 export {
 	BROWSER_QA_RUNNER_ENV,
 	UI_QA_RUNNER_ENV,
-	LEGACY_BROWSER_QA_TYPE,
 	UI_QA_TYPE,
 	getBrowserQaRunnerPath,
 	getUiQaRunnerPath,

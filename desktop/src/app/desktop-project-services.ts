@@ -22,7 +22,6 @@ type DesktopProjectServicesOptions = {
   activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
   setActiveWorkbenchTabId: (id: WorkbenchTabId | null) => void;
   nextWorkbenchAuxOrder: () => number;
-  setOperationRunning: (running: boolean) => void;
   setErrorMessage: (message: string | null) => void;
   clearError: () => void;
   reportError: (error: unknown) => void;
@@ -73,7 +72,6 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     operationRunning: options.operationRunning,
     workspace: options.workspace,
     sessionWorkspace: options.sessionWorkspace,
-    setOperationRunning: options.setOperationRunning,
     setErrorMessage: options.setErrorMessage,
     loadProjectTasks: tasks.load,
     loadProjectDocuments: documents.load,

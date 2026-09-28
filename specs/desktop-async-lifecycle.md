@@ -32,6 +32,16 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - Runtime session loads use the in-flight request itself as their owner, not a recyclable per-ID generation. Forget/reset (or an externally ready runtime) drops pending ownership; old success or failure cannot mutate a reopened ID, revoke its activity, or report an obsolete error, even with the same client and workspace. Terminal loads release their pending ownership and closed IDs retain no load-generation tombstones.
 - Todo/subagent activity accepts only notifications carrying the current opaque attachment owner. Desktop passes an owner in ACP new/fork/load metadata, fresh for each new attachment or reopen (including reattachment to a live Pi runtime); repeated loads within an attachment preserve it. ACP captures that owner when enqueueing each activity envelope. New/fork startup snapshots are staged under bounded pending-request ownership until the response supplies the session ID; failed, canceled, or reset requests discard it. `markReady` preserves the existing owner. A forgotten session drops ownership, so delayed old envelopes cannot repopulate activity even with newer timestamps. ACP retains the most recent Todo and Subagent snapshots for a live runtime and replays them with original timestamps on reattachment. `checkedAt` orders snapshots only within an attachment/channel, never relative to a global close clock; no historical closed-ID metadata is retained.
 - A canceled git-review fix-session creation forgets the newly installed runtime/activity owner before awaiting closure of the orphan session, so a reopened ID cannot be forgotten by the old close completion. If direct source restoration after a fork fails, it forgets the opened source owner only while the original history attachment is still current and no replacement runtime became ready; stale failures cannot clear a replacement attachment.
+- Workspace session startup coalesces only requests for the same ACP client and
+  workspace and does not acquire/release the Desktop-global operation lock.
+  This prevents nested startup from releasing an enclosing workspace transition,
+  while a workspace/client replacement can immediately start a distinct owner.
+- Closing or deleting a background session uses per-session action ownership
+  instead of the Desktop-global operation lock. Target-session selection is
+  rejected while that session action is active, and stale completions after a
+  client/workspace replacement do not clear runtime/activity state in the new
+  workspace. Active-session close/delete remain atomic active-session
+  transitions.
 
 ## Non-goals and limits
 
@@ -49,6 +59,8 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - `desktop/src/app/session-runtime-status.svelte.ts`
 - `desktop/src/app/session-runtime-loading.ts`
 - `desktop/src/app/session-tab-closure.ts`
+- `desktop/src/app/session-tab-controller.ts`
+- `desktop/src/app/workspace-session-startup.ts`
 - `desktop/src/lib/tauri-transport.ts`
 - `desktop/src/lib/acp-json-rpc.ts`
 - `desktop/src/lib/acp-client.ts`
@@ -68,6 +80,10 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - `desktop/src/app/session-runtime-status.test.ts` covers owner replacement, late responses, and bounded closed-session metadata; `desktop/src/app/session-activity.test.ts` and history concurrency tests cover late notifications and cursor pruning.
 - `desktop/src/app/session-runtime-loading.test.ts` covers stale success/failure after reset or forget with the same ID/client/workspace, activity retention on stale failure, current-owner failure, and bounded pending metadata across many closed IDs.
 - `desktop/src/app/git-assist-workflow.test.ts` covers orphan creation and same-ID reattachment during deferred close; `desktop/src/app/conversation-fork-action.test.ts` covers failed direct source restoration ownership, including same-ID replacement.
+- `desktop/src/app/session-tab-closure.test.ts` covers local background
+  close/delete ownership and stale workspace completion;
+  `desktop/src/app/workspace-session-startup.test.ts` covers same-owner
+  coalescing and workspace owner replacement.
 - `desktop/src/lib/acp-client.test.ts` and `acp/test/agent.test.ts` cover attachment metadata, startup ownership, and cached activity replay on live-runtime reattachment.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`

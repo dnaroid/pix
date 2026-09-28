@@ -1,4 +1,4 @@
-import type { ContextUsageStatus, ModelUsageLimitWindow, ModelUsageStatus, RuntimeStatus } from "./acp-client";
+import type { ClaudeQuotaRefreshStatus, ContextUsageStatus, ModelUsageLimitWindow, ModelUsageStatus, RuntimeStatus } from "./acp-client";
 import { newerDcpContextMap } from "./dcp-context-map";
 
 export type UsageTone = "success" | "warning" | "error";
@@ -138,9 +138,22 @@ export function mergeRuntimeStatusResponse(
   if (quotaRefresh) {
     modelUsageRefresh = next.modelUsageRefresh;
     if (next.modelUsageRefresh === "ready") modelUsage = next.modelUsage;
-    else if (next.modelUsageRefresh === "unavailable") modelUsage = undefined;
+    // A credential-pending unavailability may carry the route's last
+    // successful windows as an explicitly stale cache; any other
+    // unavailability clears the display instead of guessing.
+    else if (next.modelUsageRefresh === "unavailable") {
+      modelUsage = next.modelUsage?.stale === true ? next.modelUsage : undefined;
+    }
   }
-  const { modelUsage: _snapshotModelUsage, headerUsage: _snapshotHeaderUsage, dcpStats: _snapshotDcpStats, ...snapshotWithoutModelUsage } = snapshot;
+  // `modelUsageCredentialPending` is a transient per-response retry hint; it
+  // is deliberately not persisted into merged status snapshots.
+  const {
+    modelUsage: _snapshotModelUsage,
+    headerUsage: _snapshotHeaderUsage,
+    dcpStats: _snapshotDcpStats,
+    modelUsageCredentialPending: _snapshotCredentialPending,
+    ...snapshotWithoutModelUsage
+  } = snapshot;
   return {
     ...snapshotWithoutModelUsage,
     dcpContextMap: newerDcpContextMap(previous?.dcpContextMap, snapshot.dcpContextMap),
@@ -148,6 +161,33 @@ export function mergeRuntimeStatusResponse(
     ...(dcpStats ? { dcpStats } : {}),
     ...(modelUsage ? { modelUsage } : {}),
     ...(headerUsage ? { headerUsage } : {}),
+  };
+}
+
+/**
+ * Merge a manual Claude Code quota refresh into a session's status snapshot.
+ * Only the quota fields change: `ready` installs the fresh quota, a
+ * credential-pending `unavailable` keeps the response's explicitly `stale`
+ * cache (or clears quota when no window survives), any other `unavailable`
+ * clears quota, and a `failed` refresh keeps the previous quota untouched.
+ */
+export function mergeClaudeQuotaRefresh(
+  previous: RuntimeStatus | undefined,
+  sessionId: string,
+  next: Pick<ClaudeQuotaRefreshStatus, "refresh" | "modelUsage">,
+): RuntimeStatus {
+  const base: RuntimeStatus = previous ?? { sessionId, modelUsageRefresh: "skipped" };
+  let modelUsage = base.modelUsage;
+  if (next.refresh === "ready") modelUsage = next.modelUsage;
+  else if (next.refresh === "unavailable") {
+    modelUsage = next.modelUsage?.stale === true ? next.modelUsage : undefined;
+  }
+  const { modelUsage: _previousModelUsage, ...withoutModelUsage } = base;
+  return {
+    ...withoutModelUsage,
+    sessionId,
+    modelUsageRefresh: next.refresh,
+    ...(modelUsage ? { modelUsage } : {}),
   };
 }
 
@@ -208,14 +248,31 @@ export function mergePushedModelUsage(
 }
 
 /**
+ * Display view of a cached (`stale`) quota snapshot: windows whose reset has
+ * passed are dropped and nothing remains once every window expired, so cached
+ * values never outlive the window they describe. Fresh statuses pass through.
+ */
+export function liveModelUsage(
+  status: ModelUsageStatus | undefined,
+  now = Date.now(),
+): ModelUsageStatus | undefined {
+  if (!status?.stale) return status;
+  const hourly = status.hourly !== undefined && status.hourly.resetAt > now ? status.hourly : undefined;
+  const weekly = status.weekly !== undefined && status.weekly.resetAt > now ? status.weekly : undefined;
+  if (!hourly && !weekly) return undefined;
+  const { hourly: _oldHourly, weekly: _oldWeekly, ...withoutWindows } = status;
+  return { ...withoutWindows, ...(hourly ? { hourly } : {}), ...(weekly ? { weekly } : {}) };
+}
+
+/**
  * The usage source the status bar displays. The provider quota stays
  * authoritative while its refreshes remain the freshest observation (OAuth
  * sessions); an API-key header snapshot newer than the quota sample means the
  * credential switched mid-session — or the quota describes a previous model —
  * so the stale quota must not hide the fresh header snapshot.
  */
-export function displayModelUsage(status: RuntimeStatus | undefined): ModelUsageStatus | undefined {
-  const quota = status?.modelUsage;
+export function displayModelUsage(status: RuntimeStatus | undefined, now = Date.now()): ModelUsageStatus | undefined {
+  const quota = liveModelUsage(status?.modelUsage, now);
   const header = status?.headerUsage;
   if (!quota || !header) return quota ?? header;
   return header.updatedAt > quota.updatedAt ? header : quota;

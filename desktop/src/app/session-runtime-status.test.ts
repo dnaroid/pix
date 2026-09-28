@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import type { RuntimeStatus, SessionUsageStatus } from "../lib/acp-client";
+import { describe, expect, it, vi } from "vitest";
+import type { ClaudeQuotaRefreshStatus, RuntimeStatus, SessionUsageStatus } from "../lib/acp-client";
 import { displayModelUsage } from "../lib/runtime-status";
 import { createSessionRuntimeStatus } from "./session-runtime-status.svelte";
 
@@ -19,16 +19,19 @@ function setup() {
   const requests: ReturnType<typeof deferred<RuntimeStatus>>[] = [];
   const stats: ReturnType<typeof deferred<{ dcpStats: string }>>[] = [];
   const usage: ReturnType<typeof deferred<SessionUsageStatus>>[] = [];
+  const limits: ReturnType<typeof deferred<ClaudeQuotaRefreshStatus>>[] = [];
+  const quotaFlags: boolean[] = [];
   const client = {
-    runtimeStatus() { const request = deferred<RuntimeStatus>(); requests.push(request); return request.promise; },
+    runtimeStatus(_sessionId: string, refreshModelUsage: boolean) { const request = deferred<RuntimeStatus>(); requests.push(request); quotaFlags.push(refreshModelUsage); return request.promise; },
     dcpStats() { const request = deferred<{ dcpStats: string }>(); stats.push(request); return request.promise; },
     sessionUsage() { const request = deferred<SessionUsageStatus>(); usage.push(request); return request.promise; },
+    claudeQuotaRefresh() { const request = deferred<ClaudeQuotaRefreshStatus>(); limits.push(request); return request.promise; },
   };
   const store = createSessionRuntimeStatus({
     client: () => client as unknown as NonNullable<ReturnType<Parameters<typeof createSessionRuntimeStatus>[0]["client"]>>,
     isReady: () => ready,
   });
-  return { store, requests, stats, usage, setReady: (value: boolean) => { ready = value; } };
+  return { store, requests, stats, usage, limits, quotaFlags, setReady: (value: boolean) => { ready = value; } };
 }
 
 function usageStatus(cost: number): SessionUsageStatus {
@@ -37,6 +40,41 @@ function usageStatus(cost: number): SessionUsageStatus {
 }
 
 describe("runtime status lifecycle", () => {
+  it("manual Claude limits are single-flight and win over older automatic quota while snapshots continue", async () => {
+    const { store, requests, limits, quotaFlags } = setup();
+    const old = store.refreshStatus("a", true);
+    const manual = store.refreshClaudeLimits("a");
+    const duplicate = store.refreshClaudeLimits("a");
+    const snapshot = store.refreshStatus("a", true);
+    expect(limits).toHaveLength(1);
+    expect(quotaFlags).toEqual([true, false]);
+    requests[0]!.resolve({ ...status(10), modelUsageRefresh: "ready", modelUsage: { provider: "anthropic", modelKey: "pi-claude-code-provider/opus", updatedAt: Date.now(), hourly: { remainingPercent: 10, resetAt: Date.now() + 1_000, windowSeconds: 18000 } } });
+    await old;
+    requests[1]!.resolve(status(20));
+    await snapshot;
+    limits[0]!.resolve({ sessionId: "a", launched: true, refresh: "ready", modelUsage: { provider: "anthropic", modelKey: "pi-claude-code-provider/opus", updatedAt: Date.now(), hourly: { remainingPercent: 80, resetAt: Date.now() + 1_000, windowSeconds: 18000 } } });
+    await Promise.all([manual, duplicate]);
+    expect(store.statuses.get("a")?.context?.tokens).toBe(20);
+    expect(store.statuses.get("a")?.modelUsage?.hourly?.remainingPercent).toBe(80);
+    expect(store.claudeLimitsRefreshing.has("a")).toBe(false);
+  });
+
+  for (const invalidate of ["forget", "reset"] as const) {
+    it(`${invalidate} discards manual Claude refresh and cannot clear a new owner's busy state`, async () => {
+      const { store, limits } = setup();
+      const old = store.refreshClaudeLimits("a");
+      if (invalidate === "forget") store.forget("a"); else store.reset();
+      const current = store.refreshClaudeLimits("a");
+      limits[0]!.resolve({ sessionId: "a", launched: true, refresh: "ready", modelUsage: { provider: "anthropic", modelKey: "old", updatedAt: Date.now() } });
+      await old;
+      expect(store.statuses.has("a")).toBe(false);
+      expect(store.claudeLimitsRefreshing.has("a")).toBe(true);
+      limits[1]!.resolve({ sessionId: "a", launched: false, refresh: "unavailable" });
+      await current;
+      expect(store.claudeLimitsFailed.has("a")).toBe(true);
+      expect(store.claudeLimitsRefreshing.has("a")).toBe(false);
+    });
+  }
   it("preserves a pushed map against pending replies and out-of-order revisions, then clears null", async () => {
     const { store, requests } = setup();
     const old = store.refreshStatus("a", true);
@@ -309,4 +347,69 @@ describe("runtime status lifecycle", () => {
       expect(store.statuses.has("a")).toBe(false);
     });
   }
+});
+
+describe("model usage credential retry", () => {
+  const claudeCodeQuota = {
+    modelKey: "pi-claude-code-provider/claude-opus-5-5",
+    provider: "anthropic",
+    updatedAt: 1_757_590_500_000,
+    hourly: { remainingPercent: 60, resetAt: 1_757_590_800_000, windowSeconds: 18_000 },
+  } as const;
+
+  it("retries a credential-pending quota refresh once per interval and stops once it resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, requests } = setup();
+      const first = store.refreshStatus("a", true);
+      requests[0]!.resolve({ ...status(10), modelUsageRefresh: "unavailable", modelUsageCredentialPending: true });
+      await first;
+
+      // The transient flag never persists into the merged snapshot.
+      expect(store.statuses.get("a")?.modelUsageCredentialPending).toBeUndefined();
+      vi.advanceTimersByTime(59_999);
+      expect(requests).toHaveLength(1);
+
+      vi.advanceTimersByTime(1);
+      expect(requests).toHaveLength(2);
+      requests[1]!.resolve({ ...status(10), modelUsageRefresh: "ready", modelUsage: claudeCodeQuota });
+      await vi.advanceTimersByTimeAsync(1);
+
+      // Ready without the flag: no further retries are scheduled.
+      vi.advanceTimersByTime(120_000);
+      expect(requests).toHaveLength(2);
+      expect(store.statuses.get("a")?.modelUsage?.hourly?.remainingPercent).toBe(60);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not schedule a retry for unavailability without the credential-pending flag", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, requests } = setup();
+      const first = store.refreshStatus("a", true);
+      requests[0]!.resolve({ ...status(10), modelUsageRefresh: "unavailable" });
+      await first;
+      vi.advanceTimersByTime(120_000);
+      expect(requests).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the pending retry when the session is forgotten", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, requests } = setup();
+      const first = store.refreshStatus("a", true);
+      requests[0]!.resolve({ ...status(10), modelUsageRefresh: "unavailable", modelUsageCredentialPending: true });
+      await first;
+      store.forget("a");
+      vi.advanceTimersByTime(120_000);
+      expect(requests).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

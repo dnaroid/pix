@@ -3,10 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
 	deleteRunDirs,
+	filterSubagentConfigForContext,
 	getRunState,
 	getRunRoot,
 	getSubagentRegistryPath,
-	filterSubagentConfigForParentModel,
 	isBlindModelRef,
 	loadSubagentConfig,
 	listSubagentSessionRecords,
@@ -106,7 +106,7 @@ function createSubagentCatalogState(ctx: unknown): SubagentCatalogStateEvent {
 	const cwd = (ctx as { cwd?: string } | undefined)?.cwd ?? process.cwd();
 	const model = modelRefFromContext(ctx);
 	const config = safeLoadSubagentConfig(cwd);
-	const effective = config ? filterSubagentConfigForParentModel(config, model) : undefined;
+	const effective = config ? filterSubagentConfigForContext(config, { parentModelRef: model, cwd }) : undefined;
 	const sessionManager = (ctx as {
 		sessionManager?: { getSessionId?: () => string; getSessionFile?: () => string | undefined };
 	} | undefined)?.sessionManager;
@@ -353,7 +353,7 @@ function safeLoadSubagentConfig(cwd: string) {
 
 function subagentCatalogPrompt(cwd: string, parentModelRef?: string): string | undefined {
 	const config = safeLoadSubagentConfig(cwd);
-	return config ? buildSubagentCatalogPrompt(config, parentModelRef) : undefined;
+	return config ? buildSubagentCatalogPrompt(config, parentModelRef, cwd) : undefined;
 }
 
 function modelRefFromContext(ctx: unknown): string | undefined {

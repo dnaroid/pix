@@ -59,6 +59,7 @@ modelByParent:
 forParentModels: [zai/*, openai-codex/*]
 notForParentModels: [openai-codex/gpt-6-sol*]
 forParentTier: non-frontier # frontier | non-frontier
+requiresIndexedProject: true
 parentProviderPolicy: require-other # any | prefer-other | require-other | require-other-if-frontier
 ---
 
@@ -69,6 +70,7 @@ You are a ... role prompt (markdown body).
   error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
   `models`, `modelSelection`, legacy `fallbackModels`/`modelByParent`,
   `forParentModels`, `notForParentModels`, `forParentTier`,
+  `requiresIndexedProject`,
   `parentProviderPolicy`, deprecated
   `requireDifferentProvider`, `thinking`, `tools`, `extraArgs`,
   `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`).
@@ -81,6 +83,12 @@ You are a ... role prompt (markdown body).
   `frontierModels` list instead of `models` (they are mutually exclusive in one
   file; a project file with `models` replaces an inherited `modelSelection`).
   `forParentTier` exposes a role only to frontier or non-frontier parents.
+- `requiresIndexedProject: true` exposes a role only when the project root
+  resolved from the current cwd contains `.indexer-cli/`. This is a visibility
+  gate only: it does not require `idx` to be executable and does not initialize
+  the project. The gate applies to the parent catalog, automatic routing, and
+  explicit-role validation. A raw loaded config may still contain the role so an
+  explicit request can be reported as unavailable rather than unknown.
 - `parentProviderPolicy` defaults to `any` and compares model vendors
   (family owners inferred from the model id, provider id as fallback), not
   provider strings. `prefer-other` stable-partitions other-vendor candidates
@@ -114,8 +122,10 @@ Within `loadSubagentConfig` (no caching — re-read per spawn/command call):
 2. top-level pi-tools-suite `disabledBuiltinAgents` removes selected bundled
    roles; `enabledBuiltinAgents` in a later suite config layer can re-enable an
    inherited disable;
-3. project `.pi/agents/*.md`, with agent-file fields overriding same-named
-   built-in role fields or recreating a name removed by the bundled-role filter;
+3. project `.pi/agents/*.md`; a same-named project role replaces the bundled
+   role profile completely rather than inheriting omitted built-in fields, and
+   it may recreate a name removed by the bundled-role filter. There are no
+   role-name aliases or partial-merge exceptions;
 4. environment model, routing, concurrency, result-size, and timeout overrides.
 
 User/global `pi-tools-suite.jsonc`, `$PI_CONFIG_DIR`, project
@@ -132,10 +142,13 @@ the current sub-agent profile merge pipeline.
   spawn **without** any reload.
 - `before_agent_start` also rebuilds an `<available_subagent_types>` system
   prompt section from the fully merged config whenever the `subagents` tool is
-  available. Parent-model gates are applied before rendering. It contains type
-  names plus bounded `description` text, so the parent sees project-local roles
-  valid for its current model without a restart. `/reload` still refreshes
-  ordinary extension registration state.
+  available. Parent-model and project-context gates are applied before
+  rendering. It contains type names plus bounded `description` text, so the
+  parent sees only roles valid for its current model/project without a restart.
+  When a project-local definition completely replaces a same-named bundled
+  role, the catalog explicitly tells the parent which built-in names were
+  replaced so the chat context does not imply inherited built-in behavior.
+  `/reload` still refreshes ordinary extension registration state.
 
 ### Built-in definition source
 
@@ -146,6 +159,11 @@ the current sub-agent profile merge pipeline.
 - `defaultType` is now `research` while bundled files are loaded in
   deterministic filename order. Spec 29 supersedes silent spawn-error fallback
   with parent-first role selection and recoverable routing errors.
+- The bundled `knowledge-auditor` is an economical docs-only finalization role.
+  It sets `requiresIndexedProject: true`, so it exists in raw built-in config
+  but is effective only for projects with `.indexer-cli/`. It runs the final
+  task-scoped audit, fixes only small unambiguous documentation drift, and
+  escalates substantial or ambiguous contract drift to the parent.
 - Runtime-only invariants stay in runtime code. All async sub-agents disable
   skill discovery and reject skill injection through `extraArgs`; role files are
   therefore self-contained. As extended by `ui-qa-agent.md`, `ui-qa` additionally
@@ -153,8 +171,7 @@ the current sub-agent profile merge pipeline.
   `agents/ui-qa.md` body is a thin common contract plus deterministic guide
   routing; backend-specific browser/TUI/Desktop/auth instructions live in
   non-role assets under `agents/ui-qa/guides/` and are loaded through the
-  allowlisted UI-QA runner. Legacy `browser-qa` requests normalize to that
-  canonical role.
+  allowlisted UI-QA runner. `ui-qa` is the only built-in UI-QA role name.
 
 ## Non-goals
 
@@ -167,7 +184,8 @@ the current sub-agent profile merge pipeline.
 ## Tests
 
 `external/pi-tools-suite/test/async-subagents/core.test.ts`, describe
-"project agent definitions (.pi/agents)": load+merge, body→promptAppend, name
+"project agent definitions (.pi/agents)": load/replacement semantics,
+body→promptAppend, name
 mismatch error, no-frontmatter skip, broken YAML error with path, walk-up
 discovery, project preset/profile precedence, resolved
 model/thinking/tools/modelByParent/retry behavior, and a fresh-reload test (file
@@ -176,4 +194,6 @@ Additional tests verify that bundled roles are sourced from individual Markdown
 files and that `before_agent_start` exposes a project-local role in the effective
 system-prompt catalog while omitting that catalog when `subagents` is not an
 available tool. Config tests also cover layered bundled-role disable/re-enable,
-and core tests verify that a same-named project role survives a bundled disable.
+and core tests verify that a same-named project role survives a bundled disable,
+fully replaces omitted built-in fields, and is announced as a project
+replacement in the parent catalog.

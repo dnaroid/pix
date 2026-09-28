@@ -33,6 +33,7 @@ type DesktopConversationServicesOptions = {
   clearCommandPicker: () => void;
   setCommandPicker: (picker: CommandPickerState | null) => void;
   requestLocalTextInput: (message: string, title: string) => Promise<string | undefined>;
+  promptText: () => string;
   setPromptText: (text: string) => void;
   setPromptAttachments: (attachments: Attachment[]) => void;
   invalidateAttachmentDraft: () => void;
@@ -50,6 +51,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
     client: options.client,
     state: options.state,
     workspace: options.workspace,
+    promptText: options.promptText,
     operationRunning: options.operationRunning,
     setOperationRunning: options.setOperationRunning,
     promptRunning: options.promptRunning,

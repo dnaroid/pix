@@ -229,6 +229,44 @@ describe("ACP JSON-RPC client", () => {
       modelUsageRefresh: "ready",
       modelUsage: { modelKey: "gpt-5.6-sol" },
     });
+
+    const pending = client.draftConfig("/workspace", { modelRef: "pi-claude-code-provider/claude-opus-5-5" }, true);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(4));
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 3).id,
+      result: {
+        configOptions: [],
+        modelUsageRefresh: "unavailable",
+        modelUsageCredentialPending: true,
+        modelRoutingEnabled: true,
+        modelRoutingDefault: true,
+      },
+    });
+    await expect(pending).resolves.toMatchObject({
+      modelUsageRefresh: "unavailable",
+      modelUsageCredentialPending: true,
+    });
+
+    // The flag is only valid for an unavailable refresh, never for ready.
+    const malformed = client.draftConfig("/workspace", { modelRef: "pi-claude-code-provider/claude-opus-5-5" }, true);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(5));
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 4).id,
+      result: {
+        configOptions: [],
+        modelUsageRefresh: "ready",
+        modelUsageCredentialPending: true,
+        modelUsage: {
+          modelKey: "claude-opus-5-5",
+          provider: "anthropic",
+          updatedAt: 123,
+          hourly: { remainingPercent: 75, resetAt: 456, windowSeconds: 18_000 },
+        },
+      },
+    });
+    await expect(malformed).rejects.toThrow();
     await client.dispose();
   });
 

@@ -62,21 +62,21 @@ current-session model availability.
   `--skill=...` flags are removed from `extraArgs`, and role profiles have no
   skill-loading field. The thin agent Markdown plus its on-demand bundled
   guides are the complete role instruction source.
-- Explicit legacy `browser-qa` tasks normalize to `ui-qa`; a project-local
-  `browser-qa.md` profile override is migrated onto the canonical `ui-qa`
-  profile during config loading. Installed browser resources are part of the
-  canonical `ui-qa` tree, while the private runtime workspace keeps its
-  historical `browser-qa/` name for compatibility.
+- `ui-qa` is the only built-in UI-QA role name. `browser-qa` is not an alias;
+  a project-local `browser-qa.md` is an ordinary independent project role and
+  receives no UI-QA special treatment. Installed browser resources remain part
+  of the canonical `ui-qa` tree. The browser backend uses the private
+  `ui-qa/browser/` subdirectory of the same canonical workspace.
 - The launcher sets `PI_UI_QA_RUNNER` to the absolute capability-first runner
   and `PI_BROWSER_QA_RUNNER` to its trusted browser backend, replacing inherited
   values and stripping both from ordinary children. QA uses the unified runner
   for backend probe/run and the browser runner directly only for credential
   profile discovery or form-auth scaffolding.
-- Model-only profile overrides inherit the workflow. An explicit profile
-  `promptAppend` replaces the body like any other agent profile; it is not an
-  immutable security boundary. Runtime protections remain in the runner, and
-  the thin prompt's guide-routing requirement does not weaken them: every
-  backend action still goes through the runner's fail-closed checks.
+- A project `ui-qa.md` completely replaces the bundled role profile. It does
+  not inherit bundled model/tool/thinking fields or Markdown instructions, so
+  projects must explicitly carry forward every bundled field/instruction they
+  still require. Runtime protections remain in the runner and are not prompt
+  boundaries.
 
 ## Browser launch contract
 
@@ -113,7 +113,7 @@ current-session model availability.
   or QA evidence.
 - Generated browser state is private cache under `.pi/qa-auth-state`. Ephemeral
   flows, evidence, and result manifests are written under the owning agent's
-  `.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Multiple profiles use
+  `.pi/subagents/<run>/<agent-id>/ui-qa/browser/` workspace. Multiple profiles use
   separate browser contexts/evidence directories, and normal sub-agent shutdown
   or cleanup removes the whole workspace with its run.
 - Missing, rejected, or expired explicitly selected auth returns a
@@ -299,8 +299,9 @@ current-session model availability.
 - Target discovery is a bounded preflight, not an open-ended research task. The
   sub-agent invokes the runner within 45 seconds or returns `BLOCKED`; it does
   not spend the full launcher budget reading source or probing prerequisites.
-- The launcher injects `PI_SUBAGENT_AGENT_DIR`, pre-creates private `ui-qa/` and
-  `browser-qa/flows/` workspaces, and clears stale UI/browser QA files when an
+- The launcher injects `PI_SUBAGENT_AGENT_DIR`, pre-creates private
+  `ui-qa/flows/` and `ui-qa/browser/flows/` workspaces, and clears stale
+  UI/browser QA files when an
   agent id is reused. The runner validates the directory's project/type
   metadata and refuses flows outside it; the model cannot select a shared
   evidence root.
@@ -382,9 +383,8 @@ current-session model availability.
 ## Acceptance criteria
 
 1. `ui-qa` resolves to the intended model/fallback and its inline Markdown
-   workflow; explicit legacy `browser-qa` requests resolve to it, and its
-   isolated child process can register the configured
-   model provider.
+   workflow, has no built-in role alias, and its isolated child process can
+   register the configured model provider.
 2. Every child spawn contains `--no-skills` but no `--skill`. The QA child
    receives the thin common contract plus guide-routing workflow in its initial
    prompt, loads exactly one base backend guide and only its routed detail topic
@@ -403,9 +403,8 @@ current-session model availability.
 5. Native/TUI evidence, including bounded PTY replay, native-terminal real-
    window screenshots/video when requested and available, and exact-window
    desktop video when available, lives under the owning agent's `ui-qa/`
-   workspace; browser flows/evidence remain under its browser-backend
-   `browser-qa/` workspace. Deleting the run removes both while persistent auth
-   config/state remains.
+   workspace; browser flows/evidence live under `ui-qa/browser/`. Deleting the
+   run removes both while persistent auth config/state remains.
 6. Runner tests prove that network activity and visible loading indicators are
    awaited, persistent loading fails the flow, visible actions retain a stable
    500 ms video interval, and context-wide click/drag video visualization is

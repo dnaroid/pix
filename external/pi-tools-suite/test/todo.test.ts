@@ -748,12 +748,7 @@ describe.serial("todo extension lifecycle", () => {
 		const extension = (await import("../src/todo/index.js")).default;
 		const pi = new FakePi();
 		const cwd = mkdtempSync(join(tmpdir(), "todo-repo-finalization-"));
-		const binDir = join(cwd, "bin");
-		const previousPath = process.env.PATH;
 		mkdirSync(join(cwd, ".indexer-cli"));
-		mkdirSync(binDir);
-		writeFileSync(join(binDir, "idx"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-		process.env.PATH = `${binDir}${delimiter}${previousPath ?? ""}`;
 		const ctx = {
 			cwd,
 			hasUI: false,
@@ -774,10 +769,10 @@ describe.serial("todo extension lifecycle", () => {
 
 			const completed = await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
 			expect(completed.content[0].text).toContain("Before completing the final todo");
-			expect(completed.content[0].text).toContain("run task-scoped repo_audit on changed paths");
-			expect(completed.content[0].text).toContain("skip for mechanical changes");
+			expect(completed.content[0].text).toContain("subagentType='knowledge-auditor'");
+			expect(completed.content[0].text).toContain("exact project-relative paths changed by this task");
+			expect(completed.content[0].text).toContain("escalate substantial or ambiguous drift");
 		} finally {
-			process.env.PATH = previousPath;
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	});
@@ -805,7 +800,7 @@ describe.serial("todo extension lifecycle", () => {
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "implementing" }, undefined, undefined, ctx);
 
 			const completed = await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
-			expect(completed.content[0].text).not.toContain("run task-scoped repo_audit on changed paths");
+			expect(completed.content[0].text).not.toContain("subagentType='knowledge-auditor'");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

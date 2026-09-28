@@ -1,0 +1,125 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { buildSubagentCatalogPrompt } from "../../src/async-subagents/core/agent-catalog.js";
+import {
+	filterSubagentConfigForContext,
+	loadSubagentConfig,
+} from "../../src/async-subagents/core/config.js";
+import { generatePrompt } from "../../src/async-subagents/core/prompt.js";
+import { routeSubagentTasks } from "../../src/async-subagents/core/routing.js";
+
+const tempDirs: string[] = [];
+
+function tempDir(): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-auditor-agent-"));
+	tempDirs.push(dir);
+	return dir;
+}
+
+function writeFile(file: string, content: string): void {
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, content);
+}
+
+afterEach(() => {
+	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe("built-in knowledge-auditor role", () => {
+	test("ships as an economical docs-only role with indexed-project visibility", () => {
+		const cwd = tempDir();
+		const config = loadSubagentConfig(cwd, {});
+		const role = config.types["knowledge-auditor"];
+
+		expect(role).toBeDefined();
+		expect(role.requiresIndexedProject).toBe(true);
+		expect(role.models).toEqual(["zai/glm-5.3-flash", "openai-codex/gpt-6-luna"]);
+		expect(role.thinking).toBe("low");
+		expect(role.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
+		expect(role.timeoutMs).toBe(300_000);
+		expect(role.promptAppend).toContain("Run `idx audit`");
+		expect(role.promptAppend).toContain("ESCALATE");
+		expect(generatePrompt({
+			id: "audit",
+			task: "Audit the final knowledge drift",
+			subagentType: "knowledge-auditor",
+			model: role.models![0],
+			promptAppend: role.promptAppend,
+		})).toContain("small, unambiguous drift");
+	});
+
+	test("is hidden without .indexer-cli and becomes available from the project marker alone", async () => {
+		const cwd = tempDir();
+		const config = loadSubagentConfig(cwd, {});
+
+		expect(config.types["knowledge-auditor"]).toBeDefined();
+		expect(filterSubagentConfigForContext(config, { cwd }).types["knowledge-auditor"]).toBeUndefined();
+		expect(buildSubagentCatalogPrompt(config, undefined, cwd)).not.toContain("- knowledge-auditor:");
+		await expect(routeSubagentTasks([
+			{ id: "audit", task: "Run the final knowledge audit", subagentType: "knowledge-auditor" },
+		], config, { cwd })).rejects.toThrow(/subagentType unavailable for parent model \(unknown\) or project context/);
+
+		fs.mkdirSync(path.join(cwd, ".indexer-cli"));
+
+		expect(filterSubagentConfigForContext(config, { cwd }).types["knowledge-auditor"]).toBeDefined();
+		expect(buildSubagentCatalogPrompt(config, undefined, cwd)).toContain("- knowledge-auditor:");
+		const routed = await routeSubagentTasks([
+			{ id: "audit", task: "Run the final knowledge audit", subagentType: "knowledge-auditor" },
+		], config, { cwd });
+		expect(routed.usedLlm).toBe(false);
+		expect(routed.tasks[0]?.subagentType).toBe("knowledge-auditor");
+	});
+
+	test("a same-name project role completely replaces the built-in role and announces the replacement", () => {
+		const cwd = tempDir();
+		writeFile(path.join(cwd, ".pi", "agents", "knowledge-auditor.md"), `---
+description: Project-specific knowledge audit wording.
+models: [zai/glm-5.3-flash]
+thinking: medium
+---
+Keep the project-specific audit convention too.
+`);
+
+		const config = loadSubagentConfig(cwd, {});
+		const role = config.types["knowledge-auditor"];
+		expect(role.description).toBe("Project-specific knowledge audit wording.");
+		expect(role.models).toEqual(["zai/glm-5.3-flash"]);
+		expect(role.thinking).toBe("medium");
+		expect(role.requiresIndexedProject).toBeUndefined();
+		expect(role.tools).toBeUndefined();
+		expect(filterSubagentConfigForContext(config, { cwd }).types["knowledge-auditor"]).toBeDefined();
+		expect(config.projectAgentMetadata?.["knowledge-auditor"]).toEqual({
+			sourceName: "knowledge-auditor",
+			replacesBuiltin: true,
+		});
+		const catalog = buildSubagentCatalogPrompt(config, undefined, cwd)!;
+		expect(catalog).toContain("Project-local agent definitions replace same-named built-ins completely.");
+		expect(catalog).toContain("Active project replacements of built-ins: knowledge-auditor.");
+		expect(catalog).toContain("- knowledge-auditor: Project-specific knowledge audit wording.");
+	});
+
+	test("accepts the generic visibility flag only as a boolean", () => {
+		const cwd = tempDir();
+		writeFile(path.join(cwd, ".pi", "agents", "indexed-only.md"), `---
+description: Indexed-only helper.
+models: [zai/glm-5.3-flash]
+requiresIndexedProject: true
+---
+Indexed only.
+`);
+		const valid = loadSubagentConfig(cwd, {});
+		expect(valid.types["indexed-only"]?.requiresIndexedProject).toBe(true);
+		expect(filterSubagentConfigForContext(valid, { cwd }).types["indexed-only"]).toBeUndefined();
+
+		writeFile(path.join(cwd, ".pi", "agents", "indexed-only.md"), `---
+description: Invalid indexed-only helper.
+models: [zai/glm-5.3-flash]
+requiresIndexedProject: yes
+---
+Invalid.
+`);
+		expect(() => loadSubagentConfig(cwd, {})).toThrow(/requiresIndexedProject must be a boolean/);
+	});
+});

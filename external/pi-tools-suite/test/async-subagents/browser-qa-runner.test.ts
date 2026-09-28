@@ -39,7 +39,7 @@ function writeAuth(project: string, profiles: Record<string, unknown>): void {
 
 function createBrowserQaAgent(project: string, id = "qa-agent"): string {
 	const agentDir = path.join(project, ".pi", "subagents", "test-run", id);
-	const workspace = path.join(agentDir, "browser-qa");
+	const workspace = path.join(agentDir, "ui-qa", "browser");
 	const flows = path.join(workspace, "flows");
 	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
 	writeFile(path.join(agentDir, "prompt.md"), "browser QA test\n");
@@ -53,7 +53,7 @@ function createBrowserQaAgent(project: string, id = "qa-agent"): string {
 }
 
 function writeAgentFlow(agentDir: string, content: string, name = "flow.jsonc"): string {
-	const file = path.join(agentDir, "browser-qa", "flows", name);
+	const file = path.join(agentDir, "ui-qa", "browser", "flows", name);
 	writeFile(file, content);
 	return file;
 }
@@ -507,7 +507,7 @@ describe("private browser QA runner", () => {
 				lastStage: "browser_launch",
 			},
 		});
-		const progress = fs.readFileSync(path.join(agentDir, "browser-qa", "progress.jsonl"), "utf8");
+		const progress = fs.readFileSync(path.join(agentDir, "ui-qa", "browser", "progress.jsonl"), "utf8");
 		expect(progress).toContain('"stage":"browser_launch_started"');
 		expect(progress).toContain('"stage":"browser_launch_timed_out"');
 		expect(progress).toContain('"stage":"runner_finished"');
@@ -578,7 +578,7 @@ describe("private browser QA runner", () => {
 
 		expect(Date.now() - startedAt).toBeLessThan(7000);
 		expect(result).toMatchObject({ code: 1, stderr: "", json: { status: "QA_RUN_FAILED", profile: "public" } });
-		const progress = fs.readFileSync(path.join(agentDir, "browser-qa", "progress.jsonl"), "utf8");
+		const progress = fs.readFileSync(path.join(agentDir, "ui-qa", "browser", "progress.jsonl"), "utf8");
 		expect(progress).toContain('"stage":"trace_sanitize_started"');
 		expect(progress).toContain('"stage":"trace_sanitize_timed_out"');
 		expect(progress).toContain('"stage":"runner_finished"');
@@ -1383,7 +1383,7 @@ describe("private browser QA runner", () => {
 		writeAuth(symlinked, { admin: profile("top-secret-cookie") });
 		installFakePlaywright(symlinked);
 		const realFlow = writeAgentFlow(symlinkedAgentDir, '{"steps":[{"action":"goto","path":"/"}]}', "real-flow.jsonc");
-		const symlinkedFlow = path.join(symlinkedAgentDir, "browser-qa", "flows", "flow.jsonc");
+		const symlinkedFlow = path.join(symlinkedAgentDir, "ui-qa", "browser", "flows", "flow.jsonc");
 		fs.symlinkSync(realFlow, symlinkedFlow);
 		const symlinkResult = run(symlinked, ["run", "--profile", "admin", "--flow", symlinkedFlow, "--run-id", "symlink"], symlinkedAgentDir);
 		expect(symlinkResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
@@ -1394,10 +1394,10 @@ describe("private browser QA runner", () => {
 		writeAuth(collision, { admin: profile("top-secret-cookie") });
 		installFakePlaywright(collision);
 		const collisionFlow = writeAgentFlow(collisionAgentDir, '{"steps":[{"action":"goto","path":"/"}]}');
-		const evidenceDir = path.join(collisionAgentDir, "browser-qa", "evidence", "proof", "admin");
+		const evidenceDir = path.join(collisionAgentDir, "ui-qa", "browser", "evidence", "proof", "admin");
 		fs.mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
-		fs.chmodSync(path.join(collisionAgentDir, "browser-qa", "evidence"), 0o700);
-		fs.chmodSync(path.join(collisionAgentDir, "browser-qa", "evidence", "proof"), 0o700);
+		fs.chmodSync(path.join(collisionAgentDir, "ui-qa", "browser", "evidence"), 0o700);
+		fs.chmodSync(path.join(collisionAgentDir, "ui-qa", "browser", "evidence", "proof"), 0o700);
 		writeFile(path.join(evidenceDir, "keep"), "original");
 		const collisionResult = run(collision, ["run", "--profile", "admin", "--flow", collisionFlow, "--run-id", "proof"], collisionAgentDir);
 		expect(collisionResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
@@ -1488,14 +1488,14 @@ describe("private browser QA runner", () => {
 		] }));
 
 		const result = run(project, ["run", "--profile", "admin", "--flow", flow, "--run-id", "proof"], agentDir);
-		const relativeEvidenceDir = path.relative(fs.realpathSync(project), path.join(agentDir, "browser-qa", "evidence", "proof", "admin")).split(path.sep).join("/");
+		const relativeEvidenceDir = path.relative(fs.realpathSync(project), path.join(agentDir, "ui-qa", "browser", "evidence", "proof", "admin")).split(path.sep).join("/");
 		expect(result).toMatchObject({
 			code: 0,
 			stderr: "",
 			json: { status: "QA_PASSED", profile: "admin", evidenceDir: relativeEvidenceDir },
 		});
 		expect(result.json.evidence.sort()).toEqual(["final.png", "trace.zip", "video.webm"]);
-		const evidenceDir = path.join(fs.realpathSync(agentDir), "browser-qa", "evidence", "proof", "admin");
+		const evidenceDir = path.join(fs.realpathSync(agentDir), "ui-qa", "browser", "evidence", "proof", "admin");
 		expect(result.json.artifacts).toEqual({
 			downloads: [],
 			screenshots: [{ path: path.join(evidenceDir, "final.png"), uri: pathToFileURL(path.join(evidenceDir, "final.png")).href }],

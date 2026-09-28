@@ -246,7 +246,6 @@
     activeConversationWorkbenchTabId: () => activeConversationWorkbenchTabId,
     setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
     nextWorkbenchAuxOrder: () => ++workbenchAuxSequence,
-    setOperationRunning: (running) => operationRunning = running,
     setErrorMessage: errors.set,
     clearError: errors.clear,
     reportError,
@@ -292,6 +291,7 @@
     clearCommandPicker: () => desktopCommands.setPicker(null),
     setCommandPicker: (picker) => desktopCommands.setPicker(picker),
     requestLocalTextInput: (message, title) => elicitationStore.requestLocalTextInput(message, title),
+    promptText: () => promptText,
     setPromptText: (text) => promptText = text,
     setPromptAttachments: (attachments) => promptAttachments = attachments,
     invalidateAttachmentDraft: () => attachmentDrafts.invalidate(),
@@ -433,7 +433,6 @@
     sessions: sessionServices,
     draft: draftSession,
     state: activeSessionState,
-    setOperationRunning: (running) => operationRunning = running,
     setErrorMessage: errors.set,
     reportError,
   });

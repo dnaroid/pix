@@ -3,6 +3,8 @@ import {
   REGISTRY_STATE_CHANNEL,
   compareRegistryItems,
   registryActionLabel,
+  registryCatalogItems,
+  registryCatalogSection,
   registryFriendlyActionLabel,
   registryFriendlyStatusDescription,
   registryFriendlyStatusLabel,
@@ -141,6 +143,61 @@ describe("registry session state", () => {
       "agent:local",
       "skill:remote",
     ]);
+  });
+
+  it("separates installed resources from Marketplace and excludes project artifacts", () => {
+    const installed: RegistryItem = {
+      id: "skill:installed",
+      type: "skill",
+      name: "installed",
+      status: "up-to-date",
+      statusLabel: "UP TO DATE",
+      icon: "✓",
+      local: true,
+      remote: true,
+      actions: ["uninstall"],
+    };
+    const available: RegistryItem = {
+      id: "agent:available",
+      type: "agent",
+      name: "available",
+      status: "not-installed",
+      statusLabel: "NOT INSTALLED",
+      icon: "·",
+      local: false,
+      remote: true,
+      actions: ["install"],
+    };
+    const project: RegistryItem = {
+      id: "project:todo",
+      type: "project",
+      name: "TODO.md",
+      artifact: "todo",
+      status: "up-to-date",
+      statusLabel: "UP TO DATE",
+      icon: "✓",
+      local: true,
+      remote: true,
+      actions: [],
+    };
+    const stale: RegistryItem = {
+      id: "skill:stale",
+      type: "skill",
+      name: "stale",
+      status: "removed-remote",
+      statusLabel: "REMOVED REMOTE",
+      icon: "!",
+      local: false,
+      remote: false,
+      actions: [],
+    };
+
+    expect(registryCatalogSection(installed)).toBe("installed");
+    expect(registryCatalogSection(available)).toBe("marketplace");
+    expect(registryCatalogSection(project)).toBeUndefined();
+    expect(registryCatalogSection(stale)).toBeUndefined();
+    expect(registryCatalogItems([available, project, stale, installed], "installed")).toEqual([installed]);
+    expect(registryCatalogItems([available, project, stale, installed], "marketplace")).toEqual([available]);
   });
 
   it("uses user-facing sync labels", () => {

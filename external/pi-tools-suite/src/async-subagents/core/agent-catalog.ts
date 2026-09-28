@@ -1,4 +1,4 @@
-import { filterSubagentConfigForParentModel, type SubagentConfig } from "./config.js";
+import { filterSubagentConfigForContext, type SubagentConfig } from "./config.js";
 import { SUBAGENT_DELEGATION_GUIDANCE } from "./agent-strategy.js";
 
 export const SUBAGENT_TYPE_SELECTION_GUIDANCE = "Choose and set subagentType from the available catalog when a role clearly matches, preferring a matching project-local specialist. Preserve a user-requested role when it is available in the current catalog. Omit subagentType only when unsure or when the user explicitly requests automatic routing; the LLM router handles omissions only. Model/thinking overrides are not substitutes for choosing a role.";
@@ -10,10 +10,20 @@ const MAX_DESCRIPTION_CHARS = 500;
  * The config has already merged built-ins, config files, and project-local
  * `.pi/agents/*.md`, so this stays aligned with what spawn/routing can use.
  */
-export function buildSubagentCatalogPrompt(config: SubagentConfig, parentModelRef?: string): string | undefined {
-	const effectiveConfig = filterSubagentConfigForParentModel(config, parentModelRef);
+export function buildSubagentCatalogPrompt(config: SubagentConfig, parentModelRef?: string, cwd?: string): string | undefined {
+	const effectiveConfig = filterSubagentConfigForContext(config, { parentModelRef, cwd });
 	const entries = Object.entries(effectiveConfig.types).sort(([left], [right]) => left.localeCompare(right));
 	if (entries.length === 0) return undefined;
+	const activeProjectReplacements = entries
+		.map(([name]) => ({ name, metadata: effectiveConfig.projectAgentMetadata?.[name] }))
+		.filter((item) => item.metadata?.replacesBuiltin)
+		.map((item) => item.name);
+	const projectReplacementGuidance = activeProjectReplacements.length > 0
+		? `Project-local agent definitions replace same-named built-ins completely. Active project replacements of built-ins: ${activeProjectReplacements.join(", ")}.`
+		: undefined;
+	const knowledgeFinalizationGuidance = effectiveConfig.types["knowledge-auditor"]
+		? "At the end of an implementation task, delegate the final task-scoped repository-knowledge audit to `knowledge-auditor`; give it a concise behavior/result summary and the exact project-relative paths changed by this task. It fixes only small confirmed documentation drift and escalates substantial or ambiguous drift back to the parent."
+		: undefined;
 
 	return [
 		'<available_subagent_types>',
@@ -21,6 +31,8 @@ export function buildSubagentCatalogPrompt(config: SubagentConfig, parentModelRe
 		"These names are valid explicit `subagentType` values. Project-local `.pi/agents/*.md` roles are included when enabled by the current config.",
 		SUBAGENT_TYPE_SELECTION_GUIDANCE,
 		SUBAGENT_DELEGATION_GUIDANCE,
+		...(projectReplacementGuidance ? [projectReplacementGuidance] : []),
+		...(knowledgeFinalizationGuidance ? [knowledgeFinalizationGuidance] : []),
 		...entries.map(([name, profile]) => `- ${escapePromptText(name)}: ${catalogDescription(profile.description)}`),
 		'</available_subagent_types>',
 	].join("\n");

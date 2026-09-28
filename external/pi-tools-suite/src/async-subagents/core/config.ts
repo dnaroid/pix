@@ -1,8 +1,8 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPiToolsSuiteConfig } from "../../config.js";
+import { hasIndexedProjectRoot } from "../../lib/project.js";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
-import { LEGACY_BROWSER_QA_TYPE, UI_QA_TYPE } from "./ui-qa.js";
 import {
 	applyVendorPolicy,
 	defaultFrontierConfig,
@@ -60,6 +60,8 @@ export interface SubagentTypeConfig {
 	notForParentModels?: string[];
 	/** Expose the role only to parents in this tier of the suite's frontier list. */
 	forParentTier?: "frontier" | "non-frontier";
+	/** Expose the role only when the current project root contains `.indexer-cli/`. */
+	requiresIndexedProject?: boolean;
 	/**
 	 * Relationship between child candidates and the parent model's vendor.
 	 * Vendors are model-family owners (openai, zai, anthropic, ...), so one
@@ -131,6 +133,11 @@ export interface SubagentConfig {
 	timeoutMs?: number;
 	/** Suite-level frontier model list and economy switch. Defaults to the built-in list. */
 	frontier?: FrontierConfig;
+	/** Internal metadata for project-local role definitions surfaced to the parent catalog. */
+	projectAgentMetadata?: Record<string, {
+		sourceName: string;
+		replacesBuiltin: boolean;
+	}>;
 }
 
 export interface ResolvedAgentTaskConfig {
@@ -168,6 +175,13 @@ export interface ResolveAgentTaskOptions {
 	parentModel?: string;
 	/** Force a wall-clock timeout for every sub-agent spawned by this call. */
 	timeoutMs?: number;
+}
+
+export interface SubagentAvailabilityContext {
+	/** Current parent model ref used by the existing parent-model gates. */
+	parentModelRef?: string;
+	/** Current working directory used to resolve project capability gates. */
+	cwd?: string;
 }
 
 const TRUE_ENV_PATTERN = /^(1|true|yes|on)$/i;
@@ -225,7 +239,8 @@ export function loadSubagentConfig(cwd: string, env?: NodeJS.ProcessEnv): Subage
 	config.frontier = { models: suiteConfig.frontierModels, economy: suiteConfig.economy };
 	// Project-local agent definitions (.pi/agents/*.md) are the only project
 	// source of role/profile configuration and are loaded fresh on every call.
-	mergeConfig(config, projectAgentTypes(cwd));
+	// Same-named project roles replace built-ins completely.
+	applyProjectAgentTypes(config, projectAgentTypes(cwd));
 	applyEnvModelOverrides(config, runtimeEnv);
 	applyEnvRoutingOverrides(config, runtimeEnv);
 	applyEnvRuntimeOverrides(config, runtimeEnv);
@@ -236,17 +251,31 @@ export function getBuiltinSubagentDefinitionsDir(): string {
 	return BUILTIN_AGENTS_DIR;
 }
 
+interface ProjectAgentTypes {
+	types: Record<string, SubagentTypeConfig>;
+	metadata: NonNullable<SubagentConfig["projectAgentMetadata"]>;
+}
+
 /** Normalize `.pi/agents/*.md` definitions through the shared type-profile path. */
-function projectAgentTypes(cwd: string): Partial<SubagentConfig> {
+function projectAgentTypes(cwd: string): ProjectAgentTypes {
 	const definitions = readProjectAgentDefinitions(cwd);
-	const legacyUiQa = definitions[LEGACY_BROWSER_QA_TYPE];
-	if (legacyUiQa) {
-		if (!definitions[UI_QA_TYPE]) definitions[UI_QA_TYPE] = legacyUiQa;
-		delete definitions[LEGACY_BROWSER_QA_TYPE];
-	}
+	const metadata: NonNullable<SubagentConfig["projectAgentMetadata"]> = {};
 	const types = normalizeAgentDefinitions(definitions);
-	if (Object.keys(types).length === 0) return {};
-	return { types };
+	for (const name of Object.keys(types)) {
+		metadata[name] = {
+			sourceName: name,
+			replacesBuiltin: Object.prototype.hasOwnProperty.call(BUILTIN_CONFIG.types, name),
+		};
+	}
+	return { types, metadata };
+}
+
+function applyProjectAgentTypes(config: SubagentConfig, project: ProjectAgentTypes): void {
+	if (Object.keys(project.types).length === 0) return;
+	config.projectAgentMetadata = project.metadata;
+	for (const [name, profile] of Object.entries(project.types)) {
+		config.types[name] = profile;
+	}
 }
 
 function normalizeAgentDefinitions(definitions: Record<string, AgentDefinition>): Record<string, SubagentTypeConfig> {
@@ -424,6 +453,35 @@ export function isSubagentTypeAvailableForParent(
 	return true;
 }
 
+/** Whether one role is available to the current parent and project context. */
+export function isSubagentTypeAvailableForContext(
+	profile: SubagentTypeConfig,
+	context: SubagentAvailabilityContext,
+	frontier: FrontierConfig = defaultFrontierConfig(),
+): boolean {
+	if (profile.requiresIndexedProject === true) {
+		if (!context.cwd || !hasIndexedProjectRoot(context.cwd)) return false;
+	}
+	return isSubagentTypeAvailableForParent(profile, context.parentModelRef, frontier);
+}
+
+/**
+ * Return the effective config visible to the current parent and project.
+ * Context-gated roles stay in the raw config so explicit requests can be
+ * reported as unavailable rather than unknown.
+ */
+export function filterSubagentConfigForContext(
+	config: SubagentConfig,
+	context: SubagentAvailabilityContext,
+): SubagentConfig {
+	const frontier = frontierConfigOf(config);
+	const types = Object.fromEntries(
+		Object.entries(config.types).filter(([name, profile]) => isSubagentTypeAvailableForContext(profile, context, frontier)
+			&& crossVendorRoleCanResolve(name, config, context.parentModelRef)),
+	);
+	return Object.keys(types).length === Object.keys(config.types).length ? config : { ...config, types };
+}
+
 /**
  * Return the effective config visible to a particular parent model. Only the
  * role catalog is filtered; routing policy, retry defaults, and other global
@@ -447,12 +505,10 @@ export function selectSubagentType(task: AgentTask, config: SubagentConfig): str
 	return defaultSubagentType(config);
 }
 
-/** Preserve explicit legacy browser-qa calls after the built-in role was broadened to ui-qa. */
 export function normalizeSubagentType(value: string | undefined, config: SubagentConfig): string | undefined {
 	const requested = trimString(value);
 	if (!requested) return undefined;
 	if (Object.prototype.hasOwnProperty.call(config.types, requested)) return requested;
-	if (requested === LEGACY_BROWSER_QA_TYPE && Object.prototype.hasOwnProperty.call(config.types, UI_QA_TYPE)) return UI_QA_TYPE;
 	return requested;
 }
 
@@ -492,6 +548,10 @@ export function normalizeSubagentTypeProfile(
 	const fallbackModels = models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined;
 	const parentProviderPolicy = normalizeParentProviderPolicy(rawProfile.parentProviderPolicy, name, file);
 	const requireDifferentProvider = rawProfile.requireDifferentProvider;
+	const requiresIndexedProject = rawProfile.requiresIndexedProject;
+	if (requiresIndexedProject !== undefined && typeof requiresIndexedProject !== "boolean") {
+		throw new Error(`Agent ${name}: requiresIndexedProject must be a boolean (${file})`);
+	}
 	if (requireDifferentProvider !== undefined && typeof requireDifferentProvider !== "boolean") {
 		throw new Error(`Agent ${name}: requireDifferentProvider must be a boolean (${file})`);
 	}
@@ -509,6 +569,7 @@ export function normalizeSubagentTypeProfile(
 		forParentModels: normalizeParentModelPatterns(rawProfile.forParentModels, "forParentModels", name, file),
 		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
 		forParentTier: normalizeParentTier(rawProfile.forParentTier, name, file),
+		requiresIndexedProject,
 		parentProviderPolicy: parentProviderPolicy ?? (requireDifferentProvider ? "require-other" : undefined),
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
@@ -519,12 +580,6 @@ export function normalizeSubagentTypeProfile(
 		maxResultBytes: finiteNumber(rawProfile.maxResultBytes) !== undefined ? Math.max(0, Math.round(finiteNumber(rawProfile.maxResultBytes)!)) : undefined,
 		timeoutMs: positiveMilliseconds(rawProfile.timeoutMs),
 	};
-}
-
-function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): void {
-	for (const [name, profile] of Object.entries(source.types ?? {})) {
-		target.types[name] = mergeTypeProfile(target.types[name] ?? {}, profile);
-	}
 }
 
 /** Preserve legacy field overrides without allowing inherited primary models
@@ -575,6 +630,7 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.forParentModels !== undefined) compact.forParentModels = profile.forParentModels;
 	if (profile.notForParentModels !== undefined) compact.notForParentModels = profile.notForParentModels;
 	if (profile.forParentTier !== undefined) compact.forParentTier = profile.forParentTier;
+	if (profile.requiresIndexedProject !== undefined) compact.requiresIndexedProject = profile.requiresIndexedProject;
 	if (profile.parentProviderPolicy !== undefined) compact.parentProviderPolicy = profile.parentProviderPolicy;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
