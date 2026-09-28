@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { PixConfig } from "../src/config.js";
 import { APP_ICONS } from "../src/app/icons.js";
-import { renderConversationToolEntry } from "../src/app/rendering/conversation-tool-renderer.js";
+import { renderConversationToolEntry, renderThinkingEntry } from "../src/app/rendering/conversation-tool-renderer.js";
 import { THEMES } from "../src/theme.js";
 
 const pixConfig: PixConfig = {
@@ -12,13 +12,15 @@ const pixConfig: PixConfig = {
 		tools: {},
 	},
 	outputFilters: { patterns: [] },
-	promptEnhancer: { modelRef: "test/model" },
-	autocomplete: { modelRef: "test/model", debounceMs: 350, timeoutMs: 3000, maxTokens: 48, maxPromptTokens: 1200, includeRecentMessages: 0 },
+	modelRouting: { enabled: false, default: false, modelRef: "test/router", fallbackModels: [], defaultTier: "standard", tiers: [] },
+	promptEnhancer: { modelRef: "test/model", fallbackModels: [] },
+	autocomplete: { modelRef: "test/model", fallbackModels: [], debounceMs: 350, timeoutMs: 3000, maxTokens: 48, maxPromptTokens: 1200, includeRecentMessages: 0 },
 	modelColors: { rules: {} },
 	iconTheme: { name: "nerdFont" },
 	dictation: { languages: { en: { deepgramLanguage: "en", label: "English" } } },
 	ignoreContextFiles: false,
 	maxProjectSessions: 0,
+	memoryWatchdog: { enabled: true, thresholdMb: 3072, heapSnapshot: true },
 };
 
 const renderOptions = {
@@ -76,5 +78,39 @@ describe("renderConversationToolEntry", () => {
 		assert.ok(lines.some((line) => line.text.includes(APP_ICONS.agent)));
 		assert.equal(lines.some((line) => line.text.includes(APP_ICONS.timerSand)), false);
 		assert.ok(lines.some((line) => line.text.includes("task:Build docs")));
+	});
+});
+
+describe("renderThinkingEntry", () => {
+	it("does not read a collapsed thinking body when previewLines is zero", () => {
+		const collapsedThinkingConfig: PixConfig = {
+			...pixConfig,
+			toolRenderer: {
+				...pixConfig.toolRenderer,
+				tools: {
+					...pixConfig.toolRenderer.tools,
+					thinking: { previewLines: 0, direction: "head", color: "assistantForeground" },
+				},
+			},
+		};
+		const entry = {
+			id: "thinking-1",
+			kind: "thinking" as const,
+			get text(): string {
+				throw new Error("collapsed thinking body should not be read");
+			},
+			expanded: false,
+			startedAt: 1_000,
+			status: "running" as const,
+		};
+
+		const lines = renderThinkingEntry(entry, 80, {
+			...renderOptions,
+			pixConfig: collapsedThinkingConfig,
+			currentTimeMs: 2_000,
+		});
+
+		assert.equal(lines.length, 1);
+		assert.match(lines[0]?.text ?? "", /thinking .*1s/u);
 	});
 });

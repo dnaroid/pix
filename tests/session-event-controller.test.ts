@@ -973,6 +973,35 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[1]?.kind === "session-aborted" ? entries[1].text : undefined, "Session aborted.");
 	});
 
+	it("reconciles thinking deltas from the authoritative partial message", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "thinking_delta",
+				contentIndex: 0,
+				delta: "first",
+				partial: { role: "assistant", content: [{ type: "thinking", thinking: "first" }] },
+			},
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "thinking_delta",
+				contentIndex: 0,
+				// Simulate an OpenAI-compatible endpoint that reports cumulative reasoning
+				// in the delta field while still exposing the authoritative partial message.
+				delta: "first second",
+				partial: { role: "assistant", content: [{ type: "thinking", thinking: "first second" }] },
+			},
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "thinking" ? entries[0].text : undefined, "first second");
+	});
+
 	it("ignores stale thinking updates after assistant text has started", () => {
 		const entries: Entry[] = [];
 		const controller = createController(entries);

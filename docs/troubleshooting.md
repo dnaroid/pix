@@ -69,6 +69,33 @@ Pix Desktop has a dedicated IDX panel. When `idx` is unavailable, the panel can
 install a managed copy into Pix's private tools directory. Project index
 initialization remains a separate explicit action.
 
+## TUI memory grows rapidly during model thinking
+
+If the `pix`/Pi TUI process grows into multiple gigabytes while a model is
+streaming reasoning, first check whether the persisted session is actually
+large. A small JSONL session together with rapidly increasing RSS is a strong
+signal that the growth is in the live rendering/streaming path rather than in
+stored conversation history.
+
+Pix has two protections for this failure mode:
+
+- collapsed thinking rows whose preview is disabled do not format, wrap, or
+  syntax-highlight their hidden body on every streaming update;
+- when a provider exposes an authoritative partial thinking block, Pix
+  reconciles against that snapshot instead of blindly appending the event's
+  `delta`, because some OpenAI-compatible endpoints report cumulative reasoning
+  text in the delta field.
+
+The second case is especially dangerous: repeatedly appending cumulative
+snapshots makes the in-memory thinking string grow approximately quadratically
+even though the final persisted assistant message can remain small.
+
+For diagnosis, leave the memory watchdog enabled. It writes RSS/heap reports to
+`~/.config/pi/memory-reports/` and periodic samples to `~/.config/pi/pix.log`.
+See [Memory watchdog](configuration.md#memory-watchdog) and the engineering note
+[TUI streaming-thinking memory growth](../specs/tui-streaming-thinking-memory.md)
+for the root cause, invariants, and regression coverage.
+
 ## Pix Desktop Linux AppImage opens a blank window
 
 If terminal stderr contains:

@@ -84,9 +84,20 @@ export function renderThinkingEntry(
 	options: ConversationToolRenderOptions,
 ): RenderedLine[] {
 	const rule = resolveToolRule(THINKING_TOOL_NAME, options.pixConfig.toolRenderer);
-	const markdownText = entry.text ? formatMarkdownTables(entry.text, Math.max(1, width - 2)) : "";
-	const expandedText = trimTrailingBlankLines(markdownText);
 	const forceExpanded = Boolean(options.allThinkingExpanded);
+	const superCompact = Boolean(options.superCompactTools && !forceExpanded);
+	const collapsedBodyVisible = !rule.hidden
+		&& !rule.compactHidden
+		&& !(rule.defaultExpanded === true && !superCompact)
+		&& rule.previewLines !== 0;
+	// The default thinking rule is collapsed with previewLines=0. Long reasoning
+	// streams can reach hundreds of thousands of tokens, so formatting and syntax
+	// scanning text that renderToolBlock will immediately discard turns a cheap
+	// header update into repeated full-history allocations. Do not even touch the
+	// growing body unless this render can actually show it.
+	const bodyVisible = !rule.hidden && (forceExpanded || entry.expanded || collapsedBodyVisible);
+	const markdownText = bodyVisible && entry.text ? formatMarkdownTables(entry.text, Math.max(1, width - 2)) : "";
+	const expandedText = trimTrailingBlankLines(markdownText);
 	const compactExpandedText = options.superCompactTools && forceExpanded ? removeBlankLines(expandedText) : expandedText;
 	const expanded = forceExpanded || (entry.expanded && expandedText.trim().length > 0);
 	const elapsed = thinkingElapsedText(entry, options.currentTimeMs ?? Date.now());
@@ -106,7 +117,7 @@ export function renderThinkingEntry(
 		bodyWrap: "word",
 		syntaxHighlight: compactExpandedText ? markdownSyntaxHighlightsForText(compactExpandedText) : undefined,
 	}, rule, width, options.colors, {
-		superCompact: Boolean(options.superCompactTools && !forceExpanded),
+		superCompact,
 		backgroundOverride: options.colors.thinkingMessageBackground,
 		showGutter: true,
 	});

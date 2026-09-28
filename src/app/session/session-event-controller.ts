@@ -790,7 +790,15 @@ export class AppSessionEventController {
 				if (assistantEvent.delta.length === 0) return;
 				if (this.currentThinkingEntryId === undefined && this.hasStartedCurrentAssistantText()) return;
 				this.host.setSessionActivity("thinking");
-				this.appendThinkingText(assistantEvent.delta);
+				{
+					// Prefer the authoritative partial message when the provider supplies one.
+					// Most providers emit true deltas, but OpenAI-compatible endpoints are not
+					// universally consistent; treating a cumulative reasoning chunk as a delta
+					// would make the in-memory thinking entry grow quadratically.
+					const snapshotText = thinkingTextSnapshotForContentIndex(event.message, assistantEvent.partial, assistantEvent.contentIndex);
+					if (snapshotText === undefined) this.appendThinkingText(assistantEvent.delta);
+					else this.reconcileThinkingText(snapshotText);
+				}
 				break;
 			case "thinking_end":
 				if (this.currentThinkingEntryId === undefined && this.hasStartedCurrentAssistantText()) return;
@@ -1240,10 +1248,21 @@ function assistantTextSnapshotForContentIndex(message: unknown, partial: unknown
 	return assistantTextContentAt(message, contentIndex) ?? assistantTextContentAt(partial, contentIndex);
 }
 
+function thinkingTextSnapshotForContentIndex(message: unknown, partial: unknown, contentIndex: number | undefined): string | undefined {
+	if (contentIndex === undefined) return undefined;
+	return thinkingTextContentAt(message, contentIndex) ?? thinkingTextContentAt(partial, contentIndex);
+}
+
 function assistantTextContentAt(value: unknown, contentIndex: number): string | undefined {
 	if (!isRecord(value) || !Array.isArray(value.content)) return undefined;
 	const block = value.content[contentIndex];
 	return isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : undefined;
+}
+
+function thinkingTextContentAt(value: unknown, contentIndex: number): string | undefined {
+	if (!isRecord(value) || !Array.isArray(value.content)) return undefined;
+	const block = value.content[contentIndex];
+	return isRecord(block) && block.type === "thinking" && typeof block.thinking === "string" ? block.thinking : undefined;
 }
 
 function assistantTextContents(value: unknown): string[] {
