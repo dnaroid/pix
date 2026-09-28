@@ -48,9 +48,7 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
       options.sessionServices.tabs.setActiveSessionIds(restored.activeSessionIds);
       options.sessionServices.tabs.setSessionTabIds(restored.sessionTabIds);
     },
-    refreshProjectColors: () => options.projectServices.workspace.refreshColors(
-      options.projectServices.workspace.recentProjects,
-    ),
+    refreshProjectColors: () => options.projectServices.workspace.refreshColors([options.workspace()]),
     restoreSessionInspector: options.sessionServices.inspectorPreference.restore,
     workspace: options.workspace,
     loadWorkspaceData: (workspace) => {

@@ -61,6 +61,13 @@ while project selection/open state remains separate from transient focus.
   command surface for the focused row. The command set includes Open/Open in
   External Editor, New File/New Folder for directory targets, Copy/Paste,
   Duplicate, Rename, Copy Relative Path, and Delete where applicable.
+- The same context menu reveals the targeted file or folder in the OS file manager,
+  or opens the project folder for the root context menu. The label is **Reveal in
+  Finder** on macOS, **Show in File Explorer** on Windows, and **Show in File
+  Manager** on Linux. macOS/Windows select the targeted entry; on Linux files
+  open their containing folder and folders open themselves because a portable
+  selection mechanism is unavailable. The native command validates the target
+  against the workspace and rejects symlink targets or escaped paths.
 - `F2` renames the focused entry, `Delete` requests deletion, and the platform
   primary Copy/Paste shortcuts operate on the Project Explorer entry clipboard
   while tree focus is active. These shortcuts do not replace normal text-editing

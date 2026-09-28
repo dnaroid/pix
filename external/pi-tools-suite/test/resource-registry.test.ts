@@ -521,6 +521,73 @@ describe("resource registry", () => {
 		expect(h.reloads).toBe(4);
 	}, GIT_INTEGRATION_TIMEOUT_MS);
 
+	test("syncs an agent's same-named companion directory across its full lifecycle", async () => {
+		const root = tempRoot();
+		const project = path.join(root, "project");
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = path.join(root, "home");
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		const { remote, seed } = createRegistry(root);
+		const remoteDir = path.join(seed, "agents", "reviewer");
+		fs.mkdirSync(path.join(remoteDir, "guides"), { recursive: true });
+		fs.writeFileSync(path.join(remoteDir, "guides", "review.md"), "first guide");
+		git(seed, ["add", "agents/reviewer"]);
+		git(seed, ["commit", "-m", "Add reviewer assets"]);
+		git(seed, ["push", "origin", "main"]);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("install agent reviewer", h.ctx);
+		const localDir = path.join(project, ".pi", "agents", "reviewer");
+		const localGuide = path.join(localDir, "guides", "review.md");
+		expect(fs.readFileSync(localGuide, "utf8")).toBe("first guide");
+
+		fs.writeFileSync(localGuide, "local guide");
+		let snapshot = await __test.collectRegistryUiSnapshot(h.pi, project);
+		expect(snapshot.items.find((item) => item.id === "agent:reviewer")?.status).toBe("local-changes");
+		await command.handler("push agent reviewer", h.ctx);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		expect(fs.readFileSync(path.join(remoteDir, "guides", "review.md"), "utf8")).toBe("local guide");
+
+		fs.writeFileSync(path.join(remoteDir, "guides", "review.md"), "remote guide");
+		git(seed, ["add", "agents/reviewer"]);
+		git(seed, ["commit", "-m", "Update reviewer guide only"]);
+		git(seed, ["push", "origin", "main"]);
+		snapshot = await __test.collectRegistryUiSnapshot(h.pi, project);
+		expect(snapshot.items.find((item) => item.id === "agent:reviewer")?.status).toBe("update-available");
+		await command.handler("update agent reviewer", h.ctx);
+		expect(fs.readFileSync(localGuide, "utf8")).toBe("remote guide");
+		fs.rmSync(remoteDir, { recursive: true });
+		git(seed, ["add", "-A", "agents/reviewer"]);
+		git(seed, ["commit", "-m", "Remove reviewer assets only"]);
+		git(seed, ["push", "origin", "main"]);
+		snapshot = await __test.collectRegistryUiSnapshot(h.pi, project);
+		expect(snapshot.items.find((item) => item.id === "agent:reviewer")?.status).toBe("update-available");
+		await command.handler("update agent reviewer", h.ctx);
+		expect(fs.existsSync(localDir)).toBe(false);
+
+		fs.mkdirSync(path.join(localDir, "guides"), { recursive: true });
+		fs.writeFileSync(localGuide, "local only");
+		snapshot = await __test.collectRegistryUiSnapshot(h.pi, project);
+		expect(snapshot.items.find((item) => item.id === "agent:reviewer")?.status).toBe("local-changes");
+		fs.rmSync(localDir, { recursive: true });
+		await command.handler("push agent reviewer", h.ctx);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		expect(fs.existsSync(remoteDir)).toBe(false);
+		await command.handler("uninstall agent reviewer", h.ctx);
+		expect(fs.existsSync(path.join(project, ".pi", "agents", "reviewer.md"))).toBe(false);
+		fs.mkdirSync(localDir, { recursive: true });
+		fs.writeFileSync(path.join(project, ".pi", "agents", "reviewer.md"), "---\ndescription: Review code\nmodels: [test/model]\n---\n\nReview.\n");
+		fs.writeFileSync(path.join(localDir, "asset.txt"), "asset");
+		await command.handler("push agent reviewer", h.ctx);
+		await command.handler("remove agent reviewer", h.ctx);
+		expect(fs.existsSync(localDir)).toBe(true);
+		await command.handler("uninstall agent reviewer", h.ctx);
+		expect(fs.existsSync(localDir)).toBe(false);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		expect(fs.existsSync(remoteDir)).toBe(false);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
 	test("supports all for bulk install, update, push, remote remove, and local uninstall across skills and agents", async () => {
 		const root = tempRoot();
 		const home = path.join(root, "home");

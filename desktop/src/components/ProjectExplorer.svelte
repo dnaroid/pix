@@ -12,6 +12,7 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
+  import FolderSearch from "@lucide/svelte/icons/folder-search";
   import ImageIcon from "@lucide/svelte/icons/image";
   import Pencil from "@lucide/svelte/icons/pencil";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
@@ -92,6 +93,8 @@
   const tabbablePath = $derived(treeController.tabbablePath);
   const rootContextEntry: ProjectTreeEntry = { name: "Project", path: "", kind: "directory" };
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
+  const revealLabel = isMacOS ? "Reveal in Finder" : /Windows/.test(navigator.userAgent)
+    ? "Show in File Explorer" : "Show in File Manager";
   const menuController = createProjectExplorerMenuController({ items: menuNavigationItems });
   const menuState = menuController.state;
 
@@ -270,6 +273,7 @@
     const items: MenuNavigationItem[] = [];
     if (entry.path) items.push({ label: entry.kind === "directory" ? "Toggle Folder" : "Open" });
     items.push({ label: entry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}` });
+    items.push({ label: revealLabel });
     if (entry.kind === "directory") {
       items.push({ label: "New File…" }, { label: "New Folder…" });
     }
@@ -359,6 +363,18 @@
       clearOperationError();
     } catch (error) {
       operationError = errorMessage(error);
+    }
+  }
+
+  async function revealEntry(entry: ProjectTreeEntry): Promise<void> {
+    menuController.close(true);
+    const requestWorkspace = workspace;
+    const generation = operationGeneration;
+    try {
+      await invoke("reveal_project_entry", { workspace: requestWorkspace, path: entry.path || null });
+      if (workspace === requestWorkspace && generation === operationGeneration) clearOperationError();
+    } catch (error) {
+      if (workspace === requestWorkspace && generation === operationGeneration) operationError = errorMessage(error);
     }
   }
 
@@ -751,6 +767,10 @@
         <ExternalLink class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{menuEntry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}`}</span>
         {#if menuEntry.path}<span class="ml-auto font-mono text-xs text-muted-foreground">⇧Enter</span>{/if}
+      </button>
+      <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void revealEntry(menuEntry)}>
+        <FolderSearch class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{revealLabel}</span>
       </button>
 
       {#if menuEntry.kind === "directory"}

@@ -23,7 +23,6 @@ export function sessionTabStatusKind(options: {
   if (
     options.running
     || (options.activity?.activeSubagents ?? 0) > 0
-    || (options.activity?.inProgressTodos ?? 0) > 0
   ) return "running";
   if (options.unseenComplete) return "unseen-complete";
   return "idle";

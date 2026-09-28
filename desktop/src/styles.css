@@ -319,6 +319,18 @@ html, body, #app {
   cursor: text;
 }
 
+/* WebKit paints selection gaps across the full width of selectable block
+ * containers. Keep the transcript entries themselves out of the selection,
+ * while allowing their rendered message text to participate in native copy. */
+.transcript-pane .transcript-entry {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.transcript-pane .transcript-entry .markdown-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 :where(
   button,
   select,

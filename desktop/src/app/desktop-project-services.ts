@@ -76,7 +76,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     loadProjectTasks: tasks.load,
     loadProjectDocuments: documents.load,
     loadWorkspaceSettings: (workspace) => {
-      if (options.workspace() === workspace) projectWorkspace.refreshColors([workspace, ...projectWorkspace.recentProjects]);
+      if (options.workspace() === workspace) projectWorkspace.refreshColors([workspace]);
     },
     reportError: options.reportError,
   });

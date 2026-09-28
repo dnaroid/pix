@@ -2,6 +2,7 @@ import type { SessionInfo } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
 import { buildDesktopWorkbenchTabs, buildSessionWorkbenchTabs } from "./workbench-model";
 import { workbenchSessionTabId } from "../lib/workbench-tabs";
+import { EMPTY_SESSION_ACTIVITY } from "../lib/session-activity";
 
 function build(sessions: SessionInfo[]) {
   return buildSessionWorkbenchTabs({
@@ -59,6 +60,28 @@ describe("session workbench model", () => {
 
     expect(tab?.statusKind).toBe("paused");
     expect(tab?.title).toContain("Paused");
+  });
+
+  it("does not spin an idle session tab solely because its saved plan has in-progress work", () => {
+    const [tab] = buildSessionWorkbenchTabs({
+      sessions: [{ sessionId: "idle", cwd: "/tmp/project", title: "Idle tab" }],
+      draftSessionTabId: "draft",
+      pausedSessionIds: new Set(),
+      runningSessionIds: new Set(),
+      sessionActivityBySessionId: new Map([["idle", {
+        ...EMPTY_SESSION_ACTIVITY,
+        inProgressTodos: 1,
+        openTodos: 1,
+        totalTodos: 1,
+      }]]),
+      pendingElicitationSessionIds: new Set(),
+      unseenCompletedSessionIds: new Set(),
+      disabled: false,
+      realSessionCount: 1,
+    });
+
+    expect(tab?.statusKind).toBe("idle");
+    expect(tab?.title).toContain("Plan 0/1");
   });
 
   it("inserts a dedicated LSP installer beside the owning conversation and locks close while busy", () => {

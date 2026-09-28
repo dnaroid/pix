@@ -1615,6 +1615,14 @@ async fn open_in_external_editor(
 }
 
 #[tauri::command]
+async fn reveal_project_entry(workspace: String, path: Option<String>) -> Result<(), String> {
+    run_blocking(move || {
+        reveal_project_entry_from(Path::new(&workspace), path.as_deref().map(Path::new))
+    })
+    .await
+}
+
+#[tauri::command]
 async fn git_status(workspace: String) -> Result<GitSnapshot, String> {
     run_blocking(move || git_status_from(Path::new(&workspace))).await
 }
@@ -3029,6 +3037,69 @@ fn resolve_external_editor_target(
     Ok(target)
 }
 
+/// Resolve a reveal request to the canonical workspace root plus canonical target.
+///
+/// Reveal reuses the external-editor resolver so both features agree on escape
+/// and symbolic-link rejection, while the root itself stays a valid target.
+fn resolve_reveal_target(
+    workspace: &Path,
+    relative_path: Option<&Path>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let root = canonical_workspace(workspace)?;
+    let target = resolve_external_editor_target(workspace, relative_path)?;
+    Ok((root, target))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RevealPlatform {
+    MacOs,
+    Windows,
+    Linux,
+}
+
+impl RevealPlatform {
+    fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else if cfg!(target_os = "windows") {
+            Self::Windows
+        } else {
+            Self::Linux
+        }
+    }
+}
+
+/// How a reveal request maps onto the platform file manager.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RevealPlan {
+    /// Open the directory itself in the file manager.
+    OpenDirectory { target: PathBuf },
+    /// Reveal the entry selected inside its containing window.
+    SelectEntry { target: PathBuf },
+}
+
+fn plan_reveal_entry(
+    platform: RevealPlatform,
+    target: &Path,
+    is_workspace_root: bool,
+    target_is_directory: bool,
+) -> RevealPlan {
+    if is_workspace_root || (platform == RevealPlatform::Linux && target_is_directory) {
+        return RevealPlan::OpenDirectory {
+            target: target.to_path_buf(),
+        };
+    }
+    if platform == RevealPlatform::Linux {
+        // xdg-open has no portable selection, so open the containing folder.
+        return RevealPlan::OpenDirectory {
+            target: target.parent().unwrap_or(target).to_path_buf(),
+        };
+    }
+    RevealPlan::SelectEntry {
+        target: target.to_path_buf(),
+    }
+}
+
 fn validate_workspace_relative_path(path: &Path, label: &str) -> Result<(), String> {
     if path.as_os_str().is_empty()
         || path.is_absolute()
@@ -3968,6 +4039,100 @@ fn external_editor_executable(editor: &str) -> &str {
         "intellij" | "intellij idea" => "idea",
         _ => editor,
     }
+}
+
+fn reveal_project_entry_from(workspace: &Path, relative_path: Option<&Path>) -> Result<(), String> {
+    let (root, target) = resolve_reveal_target(workspace, relative_path)?;
+    let plan = plan_reveal_entry(
+        RevealPlatform::current(),
+        &target,
+        target == root,
+        target.is_dir(),
+    );
+    launch_reveal_entry(&plan)
+}
+
+fn launch_reveal_entry(plan: &RevealPlan) -> Result<(), String> {
+    match plan {
+        RevealPlan::OpenDirectory { target } => {
+            let mut command = Command::new(reveal_directory_program());
+            #[cfg(target_os = "windows")]
+            let target = explorer_compatible_path(target);
+            command.arg(&target);
+            spawn_reveal_process(&mut command, &target)
+        }
+        RevealPlan::SelectEntry { target } => select_reveal_target(target),
+    }
+}
+
+fn reveal_directory_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn select_reveal_target(target: &Path) -> Result<(), String> {
+    let mut command = Command::new("open");
+    command.arg("-R").arg(target);
+    spawn_reveal_process(&mut command, target)
+}
+
+#[cfg(target_os = "windows")]
+fn select_reveal_target(target: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    // Explorer only parses the documented `/select,"C:\path with spaces"` shape;
+    // standard Command quoting would quote the whole argument and break selection.
+    let mut command = Command::new("explorer");
+    let target = explorer_compatible_path(target);
+    command.raw_arg(format!("/select,\"{}\"", target.display()));
+    spawn_reveal_process(&mut command, &target)
+}
+
+#[cfg(target_os = "windows")]
+fn explorer_compatible_path(target: &Path) -> PathBuf {
+    // Canonical Windows paths use verbatim prefixes, which Explorer does not
+    // reliably accept. Convert only for the OS launcher, after validation.
+    let path = target.to_string_lossy();
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{unc}"))
+    } else if let Some(local) = path.strip_prefix(r"\\?\") {
+        PathBuf::from(local)
+    } else {
+        target.to_path_buf()
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn select_reveal_target(target: &Path) -> Result<(), String> {
+    let parent = target.parent().unwrap_or(target);
+    let mut command = Command::new("xdg-open");
+    command.arg(parent);
+    spawn_reveal_process(&mut command, parent)
+}
+
+/// Launch the reveal process without waiting for the file manager to exit.
+fn spawn_reveal_process(command: &mut Command, target: &Path) -> Result<(), String> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "failed to reveal {} in the file manager: {error}",
+                target.display()
+            )
+        })?;
+    // Reap launchers such as `open`/`xdg-open` without waiting on the UI action.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 fn read_home_file_from(
@@ -9770,6 +9935,7 @@ pub fn run() {
             copy_project_entry,
             delete_project_entry,
             open_in_external_editor,
+            reveal_project_entry,
             git_status,
             git_repository_state,
             git_initialize,
@@ -10902,6 +11068,114 @@ mod tests {
         );
         assert!(resolve_external_editor_target(&workspace, Some(Path::new("../outside"))).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn resolves_reveal_targets_only_inside_the_workspace() {
+        let workspace = temporary_workspace("reveal-project-entry");
+        fs::create_dir(workspace.join("src")).expect("create src directory");
+        fs::write(workspace.join("src/main.ts"), "export {};\n").expect("write source");
+
+        let (root, target) = resolve_reveal_target(&workspace, None).expect("resolve root");
+        let canonical_root = fs::canonicalize(&workspace).expect("canonical workspace");
+        assert_eq!(root, canonical_root);
+        assert_eq!(target, canonical_root);
+        assert_eq!(
+            resolve_reveal_target(&workspace, Some(Path::new("src/main.ts")))
+                .expect("resolve file")
+                .1,
+            fs::canonicalize(workspace.join("src/main.ts")).expect("canonical file"),
+        );
+        assert!(resolve_reveal_target(&workspace, Some(Path::new("../outside"))).is_err());
+        assert!(resolve_reveal_target(&workspace, Some(Path::new("/absolute"))).is_err());
+        assert!(resolve_reveal_target(&workspace, Some(Path::new("."))).is_ok());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reveal_targets_reject_symbolic_links() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("reveal-project-entry-symlink");
+        let outside = temporary_workspace("reveal-project-entry-outside");
+        fs::write(outside.join("secret.txt"), "secret\n").expect("write outside file");
+        symlink(
+            outside.join("secret.txt"),
+            workspace.join("secret-link.txt"),
+        )
+        .expect("create symlink");
+        assert!(resolve_reveal_target(&workspace, Some(Path::new("secret-link.txt"))).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside workspace");
+    }
+
+    #[test]
+    fn reveal_plan_opens_the_workspace_root_on_every_platform() {
+        for platform in [
+            RevealPlatform::MacOs,
+            RevealPlatform::Windows,
+            RevealPlatform::Linux,
+        ] {
+            assert_eq!(
+                plan_reveal_entry(platform, Path::new("/w/root"), true, true),
+                RevealPlan::OpenDirectory {
+                    target: PathBuf::from("/w/root"),
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn reveal_plan_selects_files_and_directories_on_macos_and_windows() {
+        for platform in [RevealPlatform::MacOs, RevealPlatform::Windows] {
+            assert_eq!(
+                plan_reveal_entry(platform, Path::new("/w/root/src/main.ts"), false, false),
+                RevealPlan::SelectEntry {
+                    target: PathBuf::from("/w/root/src/main.ts"),
+                },
+            );
+            assert_eq!(
+                plan_reveal_entry(platform, Path::new("/w/root/src"), false, true),
+                RevealPlan::SelectEntry {
+                    target: PathBuf::from("/w/root/src"),
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn reveal_plan_opens_directories_on_linux_without_selection() {
+        assert_eq!(
+            plan_reveal_entry(RevealPlatform::Linux, Path::new("/w/root/src"), false, true),
+            RevealPlan::OpenDirectory {
+                target: PathBuf::from("/w/root/src"),
+            },
+        );
+        assert_eq!(
+            plan_reveal_entry(
+                RevealPlatform::Linux,
+                Path::new("/w/root/src/main.ts"),
+                false,
+                false
+            ),
+            RevealPlan::OpenDirectory {
+                target: PathBuf::from("/w/root/src"),
+            },
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn explorer_paths_drop_verbatim_prefix_after_validation() {
+        assert_eq!(
+            explorer_compatible_path(Path::new(r"\\?\C:\work\file.txt")),
+            PathBuf::from(r"C:\work\file.txt"),
+        );
+        assert_eq!(
+            explorer_compatible_path(Path::new(r"\\?\UNC\server\share\file.txt")),
+            PathBuf::from(r"\\server\share\file.txt"),
+        );
     }
 
     #[cfg(unix)]

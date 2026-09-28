@@ -79,7 +79,8 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     } catch {
       // Keep the in-memory recent list usable when storage is unavailable.
     }
-    refreshColors(recentProjects);
+    if (options.workspace() === path) refreshColors([path]);
+    else pruneProjectColors();
   }
 
   function restore(): {
@@ -92,11 +93,18 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     return restored;
   }
 
+  function pruneProjectColors(): Set<string> {
+    const activePaths = new Set(recentProjects);
+    projectColors = new Map([...projectColors].filter(([path]) => activePaths.has(path)));
+    return activePaths;
+  }
+
   function refreshColors(paths: readonly string[]): void {
     const generation = ++colorLoadGeneration;
-    const activePaths = new Set(paths);
-    projectColors = new Map([...projectColors].filter(([path]) => activePaths.has(path)));
-    for (const projectPath of paths) void loadProjectColor(projectPath, generation);
+    const activePaths = pruneProjectColors();
+    for (const projectPath of paths) {
+      if (activePaths.has(projectPath)) void loadProjectColor(projectPath, generation);
+    }
   }
 
   async function loadProjectColor(projectPath: string, generation: number): Promise<void> {
@@ -151,7 +159,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
           if (savedColor) next.set(workspace, savedColor);
           else next.delete(workspace);
           projectColors = next;
-          refreshColors(recentProjects);
+          refreshColors([workspace]);
           options.afterSave?.(workspace);
           return undefined;
         }

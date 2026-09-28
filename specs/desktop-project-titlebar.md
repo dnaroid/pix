@@ -106,9 +106,12 @@ without blocking desktop interactions.
 - Workspace-config replacement is written to a unique same-directory temporary
   file, flushed, atomically replaced where supported, and followed by a directory
   sync. Existing `.pi/workspace.jsonc` symlinks are rejected.
-- Recent-project color overrides are loaded asynchronously on startup, whenever
-  the recent list changes, and when the switcher opens. Project switching and
-  rendering never await color IO.
+- On startup and project switch, only the active project's color override is
+  loaded. Inactive recent projects are not accessed just to render the closed
+  switcher; their overrides load asynchronously when the switcher opens.
+  Remembering a project for another window does not read its override in the
+  current window. Saving the active project's color refreshes only that
+  project's override. Project switching and rendering never await color IO.
 - Each color refresh owns a generation. A completion may mutate visible color
   state only if that generation is still current and the project still belongs
   to the recent-project list; stale completions are discarded.
@@ -135,7 +138,8 @@ without blocking desktop interactions.
 - The renderer uses the existing asynchronous `read_project_file` Tauri command;
   filesystem work stays on its blocking worker path and remains confined to the
   canonical workspace.
-- The bounded recent-project list also bounds color-load fan-out.
+- The bounded recent-project list also bounds color-load fan-out when the
+  switcher opens; startup reads only the active project's override.
 
 ## Edge cases
 

@@ -377,6 +377,12 @@
 </div>
 
 <style>
+  /* Xterm 6 draws its own overlay slider; Pix's persistent track is the sole visible control. */
+  :global(.terminal-host .xterm-scrollable-element > .scrollbar.vertical) {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   :global(.terminal-host .xterm-viewport) {
     scrollbar-width: none;
   }

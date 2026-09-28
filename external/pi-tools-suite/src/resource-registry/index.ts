@@ -558,7 +558,10 @@ async function projectArtifactRevision(
 }
 
 async function resourceRevision(pi: ExtensionAPI, runtime: RegistryRuntime, type: ResourceType, name: string): Promise<string | undefined> {
-	return pathRevision(pi, runtime, registryResourceRelativePath(type, name));
+	if (type === "skill") return pathRevision(pi, runtime, registryResourceRelativePath(type, name));
+	const file = registryResourceRelativePath(type, name);
+	const result = await runGit(pi, runtime.cacheDir, ["log", "-1", "--format=%H", "--", file, `${REGISTRY_AGENTS_DIR}/${name}`], { allowFailure: true });
+	return result.stdout.trim() || undefined;
 }
 
 function parseFrontmatterDescription(content: string): string {
@@ -692,6 +695,46 @@ async function copyTree(source: string, destination: string, relativePath = ""):
 async function replaceResource(source: string, destination: string): Promise<void> {
 	await fs.rm(destination, { recursive: true, force: true });
 	await copyTree(source, destination);
+}
+
+function agentCompanion(file: string): string {
+	return join(dirname(file), basename(file, ".md"));
+}
+
+async function agentCompanionStat(file: string): Promise<Awaited<ReturnType<typeof fs.lstat>> | undefined> {
+	try {
+		const stat = await fs.lstat(agentCompanion(file));
+		if (!stat.isDirectory()) throw new Error(`Agent companion must be a regular directory: ${agentCompanion(file)}`);
+		return stat;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+async function replaceAgent(source: string, destination: string): Promise<void> {
+	const sourceDir = agentCompanion(source);
+	const destDir = agentCompanion(destination);
+	const stat = await agentCompanionStat(source);
+	await replaceResource(source, destination);
+	await fs.rm(destDir, { recursive: true, force: true });
+	if (stat) await copyTree(sourceDir, destDir);
+}
+
+async function hashResource(type: ResourceType, path: string): Promise<string> {
+	const fileHash = await hashPath(path);
+	if (type !== "agent" || !(await agentCompanionStat(path))) return fileHash;
+	const hash = createHash("sha256");
+	hash.update(`agent-file\0${fileHash}\0companion\0`);
+	hash.update(await hashPath(agentCompanion(path)));
+	return hash.digest("hex");
+}
+
+async function agentGitPaths(pi: ExtensionAPI, runtime: RegistryRuntime, name: string): Promise<string[]> {
+	const file = registryResourceRelativePath("agent", name);
+	const dir = `${REGISTRY_AGENTS_DIR}/${name}`;
+	const tracked = await runGit(pi, runtime.cacheDir, ["ls-files", "--", dir]);
+	return (await pathExists(join(runtime.cacheDir, dir))) || tracked.stdout.trim() ? [file, dir] : [file];
 }
 
 async function hashPath(path: string): Promise<string> {
@@ -1070,7 +1113,7 @@ async function collectStatuses(pi: ExtensionAPI, project: ProjectContext, runtim
 		}
 
 		const [localHash, remoteRevision] = await Promise.all([
-			hashPath(local.path),
+			hashResource(type, local.path),
 			resourceRevision(pi, runtime, type, name),
 		]);
 		const localChanged = localHash !== tracked.hash;
@@ -1582,10 +1625,11 @@ async function installResourceWithRuntime(
 		const confirmed = await confirmOverwrite(ctx, "Resource already exists", `Overwrite project ${type} "${name}" from the registry?`);
 		if (!confirmed) throw new Error(`Project ${type} "${name}" already exists; install cancelled.`);
 	}
-	await replaceResource(source, destination);
+	if (type === "agent") await replaceAgent(source, destination);
+	else await replaceResource(source, destination);
 	const revision = await resourceRevision(pi, runtime, type, name);
 	if (!revision) throw new Error(`Cannot determine registry revision for ${type} "${name}".`);
-	await recordProvenance(ctx, runtime, type, name, revision, await hashPath(destination));
+	await recordProvenance(ctx, runtime, type, name, revision, await hashResource(type, destination));
 }
 
 async function installResource(pi: ExtensionAPI, ctx: ExtensionCommandContext, type: ResourceType, name: string): Promise<void> {
@@ -1617,14 +1661,15 @@ async function updateResourceWithRuntime(
 	if (!remoteRevision) throw new Error(`Cannot determine registry revision for ${type} "${name}".`);
 	const destination = projectResourcePath(ctx, type, name);
 	if (await pathExists(destination)) {
-		const localHash = await hashPath(destination);
+		const localHash = await hashResource(type, destination);
 		if (localHash !== tracked.hash) {
 			throw new Error(`${type} "${name}" has local changes. Push them or resolve the divergence before updating.`);
 		}
 	}
 	if (remoteRevision === tracked.revision && await pathExists(destination)) return "current";
-	await replaceResource(source, destination);
-	await recordProvenance(ctx, runtime, type, name, remoteRevision, await hashPath(destination));
+	if (type === "agent") await replaceAgent(source, destination);
+	else await replaceResource(source, destination);
+	await recordProvenance(ctx, runtime, type, name, remoteRevision, await hashResource(type, destination));
 	return "updated";
 }
 
@@ -1656,19 +1701,21 @@ async function pushResourceWithRuntime(
 		throw new Error(`${type} "${name}" changed in the registry since revision ${tracked.revision.slice(0, 8)}. Run /${COMMAND} status and update/resolve before pushing.`);
 	}
 
-	const localHash = await hashPath(source);
+	const localHash = await hashResource(type, source);
 	if (!tracked && remoteExists) {
-		const remoteHash = await hashPath(destination);
+		const remoteHash = await hashResource(type, destination);
 		if (remoteHash !== localHash) {
 			const confirmed = await confirmOverwrite(ctx, "Registry resource already exists", `Overwrite registry ${type} "${name}" with this project's untracked copy?`);
 			if (!confirmed) throw new Error(`Registry ${type} "${name}" already exists; push cancelled.`);
 		}
 	}
 
-	await replaceResource(source, destination);
+	if (type === "agent") await replaceAgent(source, destination);
+	else await replaceResource(source, destination);
 	const rel = registryResourceRelativePath(type, name);
-	await runGit(pi, runtime.cacheDir, ["add", "--", rel]);
-	const changed = (await runGit(pi, runtime.cacheDir, ["status", "--porcelain", "--", rel])).stdout.trim();
+	const paths = type === "agent" ? await agentGitPaths(pi, runtime, name) : [rel];
+	await runGit(pi, runtime.cacheDir, ["add", "-A", "--", ...paths]);
+	const changed = (await runGit(pi, runtime.cacheDir, ["status", "--porcelain", "--", ...paths])).stdout.trim();
 	if (!changed) {
 		const revision = remoteRevision ?? await resourceRevision(pi, runtime, type, name);
 		if (revision) await recordProvenance(ctx, runtime, type, name, revision, localHash);
@@ -1676,7 +1723,7 @@ async function pushResourceWithRuntime(
 	}
 
 	const verb = remoteExists ? "Update" : "Add";
-	await runGit(pi, runtime.cacheDir, ["commit", "-m", `${verb} ${type} ${name}`, "--", rel]);
+	await runGit(pi, runtime.cacheDir, ["commit", "-m", `${verb} ${type} ${name}`, "--", ...paths]);
 	try {
 		await runGit(pi, runtime.cacheDir, ["push", "-u", "origin", runtime.branch], { timeout: 180_000 });
 	} catch (error) {
@@ -1722,11 +1769,13 @@ async function removeResourceWithRuntime(
 	}
 
 	const rel = registryResourceRelativePath(type, name);
+	const paths = type === "agent" ? await agentGitPaths(pi, runtime, name) : [rel];
 	await fs.rm(target, { recursive: type === "skill", force: false });
-	await runGit(pi, runtime.cacheDir, ["add", "-A", "--", rel]);
-	const changed = (await runGit(pi, runtime.cacheDir, ["status", "--porcelain", "--", rel])).stdout.trim();
+	if (type === "agent") await fs.rm(agentCompanion(target), { recursive: true, force: true });
+	await runGit(pi, runtime.cacheDir, ["add", "-A", "--", ...paths]);
+	const changed = (await runGit(pi, runtime.cacheDir, ["status", "--porcelain", "--", ...paths])).stdout.trim();
 	if (!changed) throw new Error(`Registry ${type} "${name}" could not be staged for removal.`);
-	await runGit(pi, runtime.cacheDir, ["commit", "-m", `Remove ${type} ${name}`, "--", rel]);
+	await runGit(pi, runtime.cacheDir, ["commit", "-m", `Remove ${type} ${name}`, "--", ...paths]);
 	try {
 		await runGit(pi, runtime.cacheDir, ["push", "-u", "origin", runtime.branch], { timeout: 180_000 });
 	} catch (error) {
@@ -1761,6 +1810,7 @@ async function uninstallResource(
 		if (!confirmed) throw new Error(`Local ${type} "${name}" uninstall cancelled.`);
 	}
 	await fs.rm(target, { recursive: type === "skill", force: false });
+	if (type === "agent") await fs.rm(agentCompanion(target), { recursive: true, force: true });
 	await clearResourceProvenance(ctx, type, name);
 	notify(ctx, `Uninstalled local ${type} "${name}". Registry copy was kept. Reloading resources…`);
 	await reloadAfterResourceChange(ctx);

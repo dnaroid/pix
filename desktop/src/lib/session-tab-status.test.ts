@@ -52,7 +52,7 @@ describe("session tab status", () => {
     expect(sessionTabStatusLabel("paused", "Session running")).toBe("Paused");
   });
 
-  it("treats live subagents and in-progress plan items as running", () => {
+  it("spins for live subagents, not for a plan item left in progress after execution", () => {
     expect(sessionTabStatusKind({
       activity: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: 1 },
       paused: false,
@@ -66,7 +66,7 @@ describe("session tab status", () => {
       running: false,
       needsInput: false,
       unseenComplete: false,
-    })).toBe("running");
+    })).toBe("idle");
   });
 
   it("uses a dedicated label for unseen successful completion", () => {

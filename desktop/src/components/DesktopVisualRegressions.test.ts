@@ -567,6 +567,9 @@ describe("desktop visual regressions", () => {
     expect(terminalSource).toContain("scrollbarVisible");
     expect(terminalSource).toContain("currentTerminal.scrollToLine");
     expect(terminalSource).toContain("scrollbar-width: none");
+    expect(terminalSource).toContain(".xterm-scrollable-element > .scrollbar.vertical");
+    expect(terminalSource).toContain("visibility: hidden");
+    expect(terminalSource).toContain("pointer-events: none");
     expect(tauriLibSource).toContain('command.env("TERM", "xterm-256color")');
     expect(tauriLibSource).toContain('command.env("COLORTERM", "truecolor")');
     expect(tauriLibSource).toContain('command.env("CLICOLOR", "1")');

@@ -33,6 +33,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 
 1. Desktop application chrome is non-selectable by default.
 2. Transcript message/content text and text-file Preview surfaces opt back into normal document text selection. Pointer selection that starts in either surface cannot continue selecting sidebar, tab, toolbar, status-bar, or other control labels outside that content surface.
+   Within the transcript, transcript entry containers are kept out of selection while their rendered Markdown message text (`.markdown-text`) opts back in, so selecting across messages highlights their rendered text rather than painting full-width selection bands through empty entry space.
 3. The composer textarea and other editable text controls opt into native text selection independently of those document surfaces.
 4. With focus in the composer textarea, `Cmd+A` on macOS or `Ctrl+A` on other desktop platforms selects the composer draft only.
 5. With focus outside an editable text control, native Select All is constrained to selectable document content because surrounding desktop chrome is non-selectable.

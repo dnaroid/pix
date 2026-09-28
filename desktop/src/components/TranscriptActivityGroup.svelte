@@ -79,7 +79,7 @@
       <button
         type="button"
         aria-label="Collapse tool activity"
-        class="group/gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] cursor-pointer justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+        class="group/gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
         onclick={() => { expanded = false; groupSummary.focus(); }}
       ><span class="h-full w-px bg-code-border transition-colors group-hover/gutter:bg-foreground/50 group-focus-visible/gutter:bg-foreground/50" aria-hidden="true"></span></button>
       {#each item.entries as entry (entry.id)}

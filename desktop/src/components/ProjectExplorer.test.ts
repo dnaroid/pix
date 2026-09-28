@@ -30,6 +30,12 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("New Folder…");
     expect(explorerSource).toContain("Duplicate");
     expect(explorerSource).toContain("Copy Relative Path");
+    expect(explorerSource).toContain('"Reveal in Finder"');
+    expect(explorerSource).toContain('"Show in File Explorer"');
+    expect(explorerSource).toContain('"Show in File Manager"');
+    expect(explorerSource).toContain('items.push({ label: revealLabel })');
+    expect(explorerSource).toContain('onclick={() => void revealEntry(menuEntry)}');
+    expect(explorerSource).toContain('invoke("reveal_project_entry", { workspace: requestWorkspace, path: entry.path || null })');
     expect(menuControllerSource).toContain("menuFocusIndex");
     expect(menuControllerSource).toContain('event.key === "Escape"');
     expect(menuControllerSource).toContain('event.key === "Tab"');
