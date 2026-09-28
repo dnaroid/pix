@@ -209,7 +209,7 @@ describe("tool descriptions", () => {
 		const promptText = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
 
 		expect(promptText).toContain("delegate/parallelize/split work");
-		expect(promptText).toContain("one sequential task can qualify");
+		expect(promptText).toContain("sequential task qualifies only when it is genuinely substantial and bounded");
 		expect(promptText).toContain("do not let repo_* availability suppress delegation");
 		expect(promptText).toContain("general discovery");
 		expect(promptText).toContain("subagentType: \"ui-qa\"");

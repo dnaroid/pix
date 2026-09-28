@@ -84,8 +84,8 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			promptSnippet:
 				"For every real UI QA, UI bug reproduction, or user-facing fix-verification request across browser, terminal/TUI, or desktop GUI, immediately spawn subagentType='ui-qa' even for a single track and before inspecting files or checking prerequisites. The ui-qa sub-agent must discover the actual target/control path and report missing prerequisites; do not preflight, perform, or substitute requested UI QA in the parent agent. " +
 				"Give ui-qa a concise acceptance brief: the known target URL/app/command, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
-				"For other work, use subagents action='spawn' for economical execution or context isolation, including one bounded sequential task or explicit delegate/parallelize/split work requests. " +
-				SUBAGENT_TYPE_SELECTION_GUIDANCE + " Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
+				"For other work, first do a bounded parent discovery pass to resolve intent/semantics and the main causal path. If the diagnosis and desired behavior are already clear from a few targeted reads/searches, continue in the parent; delegate only a named uncertainty, independent track, noisy evidence step, or substantial well-specified implementation slice. Do not delegate implement work before cause, desired behavior, and acceptance criteria are settled. " +
+				SUBAGENT_TYPE_SELECTION_GUIDANCE + " After spawn, continue independent parent work; do not call status/wait merely for progress, and wait only when the child result blocks the next decision. " +
 				(repoDiscovery
 					? "For general repo discovery, start with repo_context; use repo_search for focused code lookup. Delegate independent tracks/hypotheses/review axes even when repo_* tools exist. Read result only after completion when findings are needed."
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, delegate bounded research tracks for broad discovery rather than flooding parent context. Read result only after completion when findings are needed."),
@@ -95,6 +95,8 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"When ui-qa browser testing reports missing credentials, relay its explicit request and generated `.pi/qa_auth.jsonc` template path; never inspect, populate, or edit that credential file in the parent.",
 				"After ui-qa completes a test, preserve its clickable screenshot, terminal capture, video, trace, and other evidence links in the final user-facing response whenever those artifacts exist.",
 				SUBAGENT_DELEGATION_GUIDANCE,
+				"For non-UI debugging and repository work, do a short parent-first causal pass before delegation. Resolve user intent and product/UX semantics first; if targeted discovery already establishes the diagnosis and desired behavior, do not spawn research to duplicate it.",
+				"Delegate implementation only after cause, desired behavior, and acceptance criteria are settled. Prefer the smallest coherent slice; keep compact sequential fixes in the parent and use workers where isolation, independent verification, or substantial scope provides clear value.",
 				repoDiscovery
 					? "For general discovery, start with repo_context; use repo_search for focused code lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
 					: "For one small discovery question, use direct read/grep; when repo_* tools are unavailable, delegate scoped research to keep broad search output outside the parent context.",
@@ -105,7 +107,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"Spawn multiple focused agents in one action='spawn' call for independent questions; set subagentType for clear role matches, timeoutSeconds for bounded probes, and use oracle sparingly for high-stakes uncertainty/final checks.",
 				"If spawn reports a routing error, no agents from that batch were launched. Correct the invalid or unresolved subagentType values using the available catalog and resubmit the whole batch; do not blindly retry omitted types or substitute an unsuitable role to suppress the error.",
 				"For screenshot/image inspection by blind models, use lookup; subagents only receive imagePaths when a broader delegated track genuinely needs them.",
-				"If asked to start/run/launch/test parallel sub-agents, spawn and stop; do not status/wait just for progress. Use status for recovery, wait only when needed/requested, result only after completion; compact results include artifact links.",
+				"If asked to start/run/launch/test parallel sub-agents, spawn and stop; do not status/wait just for progress. Continue independent parent work after spawn. Use status for recovery, wait only when a child result is a true dependency and no independent parent work remains, and result only after completion; compact results include artifact links. If requirements change, stop or rescope affected workers before they continue editing.",
 				"Use action='stop' for stop/cancel/kill requests and action='cleanup' with delete=true only after collecting results.",
 			],
 		},

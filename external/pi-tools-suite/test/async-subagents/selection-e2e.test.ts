@@ -214,6 +214,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe("async-subagents live e2e sub-agent type selection", () => {
+	e2eTest("keeps a clear targeted root-cause investigation in the parent", async () => {
+		await withFixtureProject(async (projectDir) => {
+			const prompt = `
+Investigate why retrying checkout can double-charge in this deliberately small fixture.
+Start with a short targeted parent-side repository/read pass and inspect only what is needed to identify the concrete cause.
+If that pass establishes the cause, explain it briefly and do not delegate. Delegate only if a named uncertainty remains after the targeted pass.`;
+
+			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "parent-first root cause");
+			expect(result.events.filter((event) => event.type === "tool_call" && event.toolName === "subagents")).toHaveLength(0);
+			expect(result.stdout).toMatch(/idempotenc|random|Math\.random|Date\.now/i);
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("keeps a compact specified implementation in the parent", async () => {
+		await withFixtureProject(async (projectDir) => {
+			const prompt = `
+Fix the known coupon-expiry bug in src/discounts.ts. The desired behavior is already settled: compare parsed timestamps rather than lexicographically comparing ISO strings.
+This is a compact local change. Make the smallest coherent edit in the parent and verify it directly; do not delegate unless a new unresolved requirement or cross-cutting uncertainty appears.`;
+
+			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "parent-first compact fix");
+			expect(result.events.filter((event) => event.type === "tool_call" && event.toolName === "subagents")).toHaveLength(0);
+			const discounts = fs.readFileSync(path.join(projectDir, "src", "discounts.ts"), "utf-8");
+			expect(discounts).not.toContain("coupon.expiresAt < new Date().toISOString()");
+			expect(discounts).toMatch(/Date\.(?:parse|now)|new Date\(/);
+		});
+	}, E2E_TIMEOUT_MS);
+
 	e2eTest("delegates real-browser QA to the explicit ui-qa profile", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `

@@ -238,7 +238,8 @@ describe.serial("extension entrypoint", () => {
 		const handler = beforeStartHandlers[0]!;
 		const glmResult = await handler({ systemPrompt: "base" }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(glmResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(glmResult.systemPrompt).toContain("one sequential task can qualify");
+		expect(glmResult.systemPrompt).toContain("shortest parent pass");
+		expect(glmResult.systemPrompt).toContain("wait only when a child result blocks the next decision");
 
 		const gptResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.5" } });
 		expect(gptResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
@@ -250,7 +251,7 @@ describe.serial("extension entrypoint", () => {
 
 		const solResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-sol" } });
 		expect(solResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(solResult.systemPrompt).toContain("Keep planning, decisions, integration");
+		expect(solResult.systemPrompt).toContain("Keep planning, decisions, product/UX choices, integration");
 
 		const customPromptResult = await handler({ systemPrompt: "base", systemPromptOptions: { customPrompt: "SYSTEM.md" } }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('<agent_strategy');

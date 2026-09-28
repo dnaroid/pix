@@ -507,13 +507,26 @@ Ordinary workers use economical model candidates; no built-in parent-tier
 rule promotes them to a flagship. Oracle is the exception, not an automatic
 retry for difficult work. Task-specific discipline belongs in the brief.
 
-Delegate when a suitable lower-cost worker can handle bounded work or noisy
-intermediate evidence should stay outside the parent context. One sequential
-task can qualify. Keep decisions and integration in the parent; read compact
-results and verify selectively rather than repeating the worker's investigation.
-Do trivial reads/edits directly. Redirect a noisy command to a log without an
-extra LLM when no interpretation is needed. `verify`'s no-edit instruction is
-a behavioral contract, not a read-only filesystem sandbox for its shell.
+For non-UI work, start with the shortest parent pass that resolves user intent,
+semantics, and the main causal path. If a few targeted repository searches or
+reads are enough to establish the diagnosis and desired behavior, continue in
+the parent instead of spawning research that repeats the same investigation.
+Delegate a named uncertainty, independent track, noisy evidence-gathering step,
+or a substantial and well-specified implementation slice that clearly benefits
+from isolation or a lower-cost worker. A sequential task qualifies only when it
+is genuinely substantial and bounded, not merely because a worker is available.
+
+Keep product/UX decisions and integration in the parent. Do not delegate
+implementation before the cause, desired behavior, and acceptance criteria are
+settled; prefer the smallest coherent slice over broad speculative cross-layer
+edits. After spawning, continue independent parent work and do not poll or wait
+merely for progress. Wait only when the child result blocks the next decision and
+no independent parent work remains. If requirements change, stop or rescope the
+affected worker before it continues editing. Read compact results and verify
+selectively rather than repeating the worker's investigation. Do trivial
+reads/edits directly. Redirect a noisy command to a log without an extra LLM when
+no interpretation is needed. `verify`'s no-edit instruction is a behavioral
+contract, not a read-only filesystem sandbox for its shell.
 
 Run `/ultrawork` or `/ulw` for orchestration, `/hyperplan` to pressure-test a
 plan, or set `ULTRAWORK=1` to apply the orchestration prompt to normal inputs.

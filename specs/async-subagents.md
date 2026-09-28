@@ -26,6 +26,28 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ## Current behavior
 
+### Parent orchestration guidance
+
+- For non-UI work, the injected cost-aware strategy tells the parent to do the
+  shortest discovery pass needed to resolve user intent, semantics, and the main
+  causal path before delegating. When a few targeted repository/context searches
+  or reads already establish the diagnosis and desired behavior, the parent
+  continues directly rather than spawning research that duplicates the same
+  investigation. `[confirmed by code, core/agent-strategy.ts]`
+- Delegation is for a named uncertainty, independent track, noisy evidence step,
+  or a genuinely substantial and bounded implementation slice that benefits from
+  isolation/lower cost. Implementation delegation begins only after cause,
+  desired behavior, and acceptance criteria are settled; the prompt prefers the
+  smallest coherent slice over broad speculative cross-layer edits. Product/UX
+  decisions and integration stay with the parent. `[confirmed by code,
+  core/agent-strategy.ts and tool-descriptions.ts]`
+- After spawn, the parent continues any independent work. It does not poll or
+  wait merely for progress; waiting is reserved for a child result that truly
+  blocks the next decision when no independent parent work remains. If the user
+  changes requirements, the affected worker is stopped or rescoped before it
+  continues editing. `[confirmed by code, core/agent-strategy.ts and
+  tool-descriptions.ts]`
+
 ### Spawn (`core/spawn.ts`)
 1. Each sub-agent is spawned via `node:child_process.spawn()` running the pi binary in RPC mode. `[confirmed by code, spawn.ts ~188]`
 2. **Pi invocation resolution** (`core/pi-invocation.ts`): detects how pi was launched (Bun virtual script, direct node script, or generic runtime). Direct pi entrypoint → `process.execPath + [currentScript, ...args]`; generic node/bun → `pi` from PATH; Windows → `process.execPath args`. `[confirmed by code]`

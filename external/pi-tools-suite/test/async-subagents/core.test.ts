@@ -423,7 +423,9 @@ describe.serial("core utils and prompt generation", () => {
 		for (const modelRef of ["zai/glm-5-turbo", "openai/gpt-5.4", "openai-codex/gpt-6-luna", "openai-codex/gpt-6-sol"]) {
 			const prompt = agentStrategyPrompt({ modelRef, env: {} })!;
 			expect(prompt).toContain('name="cost-aware-orchestrator"');
-			expect(prompt).toContain("one sequential task can qualify");
+			expect(prompt).toContain("shortest parent pass");
+			expect(prompt).toContain("cause, desired behavior and acceptance criteria are settled");
+			expect(prompt).toContain("wait only when a child result blocks the next decision");
 			expect(prompt).toContain("Reserve oracle");
 			expect(prompt).not.toContain("escalate deep");
 		}

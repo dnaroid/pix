@@ -41,6 +41,24 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
 6. With routing disabled, omissions are errors even when `defaultType` is set.
    `defaultType` remains an ambiguity hint to a working router and a legacy
    lower-level resolver default; it is not a spawn failure fallback.
+7. Outside mandatory `ui-qa`, delegation is parent-first. The parent does the
+   shortest discovery pass needed to resolve user intent, semantics, and the
+   main causal path. If targeted repository/context search or a few reads already
+   establish the diagnosis and desired behavior, the parent continues directly
+   instead of spawning research that repeats the same investigation. Delegated
+   research answers a named uncertainty, independent hypothesis, or noisy
+   evidence question. An explicit user request to delegate/parallelize/split work
+   remains a delegation trigger after this minimal scoping pass.
+8. `implement` delegation starts only after the parent has settled the cause,
+   desired behavior, and acceptance criteria. The task should be the smallest
+   coherent substantial slice that benefits from isolation or a lower-cost
+   worker; broad speculative cross-layer edits are not the default. Planning,
+   product/UX decisions, integration, and the final answer remain parent-owned.
+9. Spawn is not a reason to idle the parent. After spawning, the parent continues
+   independent work and does not poll or wait merely for progress. Waiting is
+   appropriate only when the child result is a true dependency for the next
+   decision and no independent parent work remains. If requirements change, the
+   affected worker is stopped or rescoped before it continues editing.
 
 ## Unchanged behavior
 
@@ -61,8 +79,13 @@ selection, not model routing.
   visible and create no run state; explicit spawns still apply their profiles
   with the router disabled.
 - `test/tool-descriptions.test.ts`: parent catalog and tool guidance agree.
-- Opt-in live selection evals distinguish normal explicit parent selection
-  from explicitly requested automatic routing. Direct live evals additionally
-  exercise a project-local Markdown specialist alongside built-in roles.
+- Opt-in live selection evals verify the parent-first boundary in both
+  directions: a targeted root-cause investigation and a compact already-specified
+  implementation stay in the parent without a `subagents` call, while an
+  explicit delegation request still produces one role-appropriate spawn without
+  model/thinking overrides or progress polling. They also distinguish normal
+  explicit parent selection from explicitly requested automatic routing. Direct
+  live evals additionally exercise a project-local Markdown specialist alongside
+  built-in roles.
 
 Live semantic results must be reported separately from deterministic tests.
