@@ -1,5 +1,4 @@
 <script lang="ts">
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import type { ComposerActivity } from "../lib/composer-activity";
   import { onDestroy } from "svelte";
   import { createComposerActivityHold } from "../lib/composer-activity-hold";
@@ -12,8 +11,21 @@
   const visible = $derived(displayed ?? activity);
 </script>
 
-<div data-composer-activity role="status" class="mb-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-  <LoaderCircle class="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+<div data-composer-activity role="status" class="activity-text mb-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
   <span class="min-w-0 truncate">{visible.action}</span>
   {#if visible.moreCount > 0}<span class="shrink-0">+{visible.moreCount} more</span>{/if}
 </div>
+
+<style>
+  .activity-text {
+    animation: activity-breathe 2.8s ease-in-out infinite;
+  }
+
+  @keyframes activity-breathe {
+    50% { opacity: 0.65; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .activity-text { animation: none; }
+  }
+</style>

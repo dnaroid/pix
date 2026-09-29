@@ -11,7 +11,6 @@ import {
 	bundledSkillsInstallPath,
 	bundledSkillsSourcePath,
 	bundledSessionTitleExtensionPath,
-	bundledTelegramConnectorExtensionPath,
 	bundledTerminalBellExtensionPath,
 	ensureBundledSkillsInstalled,
 	ensurePiToolsSuiteExtensionInstalled,
@@ -372,23 +371,20 @@ describe("bundled extensions", () => {
 		const questionExtensionPath = bundledQuestionExtensionPath();
 		const sessionTitleExtensionPath = bundledSessionTitleExtensionPath();
 		const terminalBellExtensionPath = bundledTerminalBellExtensionPath();
-		const telegramConnectorExtensionPath = bundledTelegramConnectorExtensionPath();
 		const modelUsageExtensionPath = bundledModelUsageExtensionPath();
 		assert.deepEqual(getBundledExtensionPaths(), [
 			questionExtensionPath,
 			sessionTitleExtensionPath,
 			terminalBellExtensionPath,
-			telegramConnectorExtensionPath,
 			modelUsageExtensionPath,
 		]);
 
 		const result = await loadBundledExtensions();
 		assert.deepEqual(result.errors, []);
-		assert.equal(result.extensions.length, 5);
+		assert.equal(result.extensions.length, 4);
 		assert.ok(result.extensions.some((extension) => extension.tools.has("question")));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(sessionTitleExtensionPath)));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(terminalBellExtensionPath)));
-		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(telegramConnectorExtensionPath)));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(modelUsageExtensionPath)));
 	});
 

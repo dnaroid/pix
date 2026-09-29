@@ -9,17 +9,15 @@ import {
   defineTool,
   type BashSpawnContext,
   type ExtensionAPI,
-  type ExtensionContext,
+  type ExtensionToolContext,
   type ToolDefinition,
   type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
-import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
 import { Type, type TSchema } from "typebox";
 import { REPO_DISCOVERY_TOOL_NAMES, claudeAliasToolDescriptions, codexAliasToolDescriptions } from "../tool-descriptions";
 import { hasAvailableIndexedProjectRoot } from "../lib/project.js";
 import { applyPatch } from "./apply-patch";
-import { isPathInside } from "./path-utils";
+import { registerShellWorkdir } from "./shell-workdir";
 import {
   detectModelProfile,
   prepareApplyPatchArgs,
@@ -222,15 +220,6 @@ function renderShellAliasResult(runtime: ModelToolsRuntime, result: unknown, opt
   return renderAliasResult(runtime, "bash", args, result, options, theme, context, "shell");
 }
 
-async function resolveWorkdir(ctx: ExtensionContext, workdir: string | undefined): Promise<string | undefined> {
-  if (!workdir) return undefined;
-  const cwdRealPath = await realpath(ctx.cwd);
-  const absolutePath = resolve(ctx.cwd, workdir);
-  const workdirRealPath = await realpath(absolutePath);
-  if (isPathInside(cwdRealPath, workdirRealPath)) return workdirRealPath;
-  throw new Error(`Working directory escapes workspace: ${workdir}`);
-}
-
 type BuiltinAliasOptions<Input> = {
   name: string;
   label: string;
@@ -365,11 +354,12 @@ function registerClaudeAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, rep
 
 async function runShellAlias(
   runtime: ModelToolsRuntime,
+  resolveWorkdir: ReturnType<typeof registerShellWorkdir>,
   id: string,
   input: ShellAliasInput,
   signal: AbortSignal | undefined,
   onUpdate: Parameters<ReturnType<typeof createBashToolDefinition>["execute"]>[3],
-  ctx: ExtensionContext,
+  ctx: ExtensionToolContext,
 ) {
   const command = toShellCommand(input);
   if (!command) throw new Error("Missing shell command");
@@ -381,7 +371,7 @@ async function runShellAlias(
   return tool.execute(id, { command, timeout: timeoutSeconds(input) }, signal, onUpdate, ctx);
 }
 
-function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repoDiscovery: boolean): void {
+function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repoDiscovery: boolean, resolveWorkdir: ReturnType<typeof registerShellWorkdir>): void {
 	const descriptions = codexAliasToolDescriptions(repoDiscovery);
   const shellParameters = Type.Object({
     command: Type.String({ description: "The shell script to execute in the user's default shell" }),
@@ -398,7 +388,7 @@ function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repo
       renderCall: (args, theme, context) => renderShellAliasCall(runtime, args, theme, context),
       renderResult: (result, options, theme, context) => renderShellAliasResult(runtime, result, options, theme, context),
       async execute(id, params, signal, onUpdate, ctx) {
-        return runShellAlias(runtime, id, params, signal, onUpdate, ctx);
+        return runShellAlias(runtime, resolveWorkdir, id, params, signal, onUpdate, ctx);
       },
     }),
   );
@@ -460,9 +450,10 @@ function shouldPreserveSelection(env: NodeJS.ProcessEnv = process.env): boolean 
 
 export default function modelTools(pi: ExtensionAPI, dependencies: Partial<ModelToolsDependencies> = {}): void {
   const runtime = createModelToolsRuntime(dependencies);
+  const resolveWorkdir = registerShellWorkdir(pi);
   const repoDiscovery = hasAvailableIndexedProjectRoot();
   registerClaudeAliases(runtime, pi, repoDiscovery);
-  registerCodexAliases(runtime, pi, repoDiscovery);
+  registerCodexAliases(runtime, pi, repoDiscovery, resolveWorkdir);
 
   let baseTools: string[] = [];
 

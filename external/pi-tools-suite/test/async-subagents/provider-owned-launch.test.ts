@@ -58,7 +58,7 @@ async function setup(): Promise<Context> {
 	const work = mkdtempSync(join(tmpdir(), "provider-owned-"));
 	try {
 		const installed = JSON.parse(readFileSync(join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"), "utf8"));
-		if (installed.version !== "0.87.1") throw new Error(`Expected installed Pi SDK 0.87.1, found ${installed.version}`);
+		if (installed.version !== "0.99.0") throw new Error(`Expected installed Pi SDK 0.99.0, found ${installed.version}`);
 		const extension = stageSnapshot(snapshot!, work);
 		return { work, extension, node: localNode(), binaries: await ensureOwnedLaunchBinaries({ cacheRoot: join(work, "cache") }), runs: [], nextId: 0 };
 	} catch (error) { console.error(`Provider-owned setup retained: ${work}`); throw error; }

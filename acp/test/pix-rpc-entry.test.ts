@@ -56,7 +56,7 @@ test("Pix RPC clears todos through the handler, never a prompt, and acknowledges
 			getCommand(name: string) { assert.equal(name, "todos-clear"); return command; },
 			createCommandContext() { return context; },
 		};
-		async prompt(_text: string, _options?: { preflightResult: (ok: boolean) => void }): Promise<void> {
+		async prompt(_text: string, _options?: { preflightResult: (disposition: string) => void }): Promise<void> {
 			assert.fail("clear must not enter normal prompt dispatch");
 		}
 	}
@@ -66,15 +66,15 @@ test("Pix RPC clears todos through the handler, never a prompt, and acknowledges
 		PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue",
 		bindPause() { assert.fail("clear must not bind a model run"); },
 	});
-	const acknowledgements: boolean[] = [];
-	const options = { preflightResult: (ok: boolean) => acknowledgements.push(ok) };
+	const acknowledgements: string[] = [];
+	const options = { preflightResult: (disposition: string) => acknowledgements.push(disposition) };
 	const session = new Session();
 	const pending = session.prompt(sentinel, options);
 	assert.equal(calls, 1);
 	assert.deepEqual(acknowledgements, []);
 	release();
 	await pending;
-	assert.deepEqual(acknowledgements, [true]);
+	assert.deepEqual(acknowledgements, ["handled"]);
 	gate = undefined;
 	handlerError = new Error("snapshot failed");
 	await assert.rejects(session.prompt(sentinel, options), /snapshot failed/u);
@@ -83,7 +83,33 @@ test("Pix RPC clears todos through the handler, never a prompt, and acknowledges
 	assert.equal(calls, 2, "busy rejection must not run the handler");
 	command = undefined;
 	await assert.rejects(session.prompt(sentinel, options), /Todo extension is unavailable/u);
-	assert.deepEqual(acknowledgements, [true], "failed requests must never report success");
+	assert.deepEqual(acknowledgements, ["handled"], "failed requests must never report success");
+});
+
+test("Pix RPC pause preflight reports SDK dispositions only on success", async () => {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	const patch = source.slice(source.indexOf("const originalPrompt ="), source.indexOf("const { main }"));
+	let streaming = false;
+	class Session {
+		isStreaming = false;
+		agent = { state: { isStreaming: false } };
+		async prompt(_text: string, _options?: { preflightResult: (disposition: string) => void }) {
+			assert.fail("pause must not enter normal prompt dispatch");
+		}
+	}
+	const session = new Session();
+	runInNewContext(patch, {
+		AgentSession: Session, PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue",
+		PIX_CLEAR_TODOS_MESSAGE: "clear",
+		requestPause() { if (!streaming) throw new Error("Agent is not running"); },
+	});
+	const dispositions: string[] = [];
+	const options = { preflightResult: (value: string) => dispositions.push(value) };
+	await assert.rejects(session.prompt("pause", options), /Agent is not running/u);
+	assert.deepEqual(dispositions, [], "failed preflight must let RPC report an error");
+	streaming = true;
+	await session.prompt("pause", options);
+	assert.deepEqual(dispositions, ["handled"]);
 });
 
 test("Pix RPC exposes live DCP token savings through session stats", async () => {

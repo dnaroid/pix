@@ -150,7 +150,7 @@ Pix ships with a bundled suite of repository and agent-workflow extensions.
 | Structural changes | AST search/rewrite, LSP diagnostics, comment checks |
 | Durable work | hierarchical todos, session recovery, project resource Registry |
 | Context control | DCP compression/pruning and context-gateway tooling |
-| Providers/integrations | usage, Antigravity, OpenCode import, web access, Telegram |
+| Providers/integrations | usage, Antigravity, OpenCode import, web access |
 
 Modules remain independently configurable; optional integrations activate only
 when their dependencies/credentials exist.
@@ -209,7 +209,7 @@ as `/opencode-import`. Pix installation itself never needs to print or overwrite
 provider secrets.
 
 See **[Configuration and accounts](docs/configuration.md)** for schemas, model
-helpers, OpenCode migration, voice input, LSP/web/Telegram setup and context-file
+helpers, OpenCode migration, voice input, LSP/web setup and context-file
 behavior.
 
 ## Documentation

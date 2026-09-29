@@ -1,7 +1,7 @@
 // T2: child isolation and the ACTUAL post-session_start tool inventory of a
 // Claude-provider child (opt-in: PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT). The
 // child is built by the real spawnAgent (argument construction + provider
-// dependency resolution) and runs as real Pi 0.87.1 with the unchanged
+// dependency resolution) and runs as real Pi 0.99.0 with the unchanged
 // provider and the offline protocol peer. Only the launchd boundary is
 // replaced by a plain spawn; nothing is signaled except that direct child.
 // The inventory is what Pi hands the provider on the first request.

@@ -272,7 +272,7 @@ function bindPause(session) {
 				pause(record);
 				return false;
 			}
-			// AgentSession 0.87 executes agent_before_settle after post-run
+			// AgentSession executes agent_before_settle after post-run
 			// bookkeeping. Preserve that boundary before deciding whether the
 			// turn can be resumed.
 			return false;
@@ -374,10 +374,9 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 	if (text === PIX_PAUSE_MESSAGE) {
 		try {
 			requestPause(this);
-			options?.preflightResult?.(true);
+			options?.preflightResult?.("handled");
 			return;
 		} catch (error) {
-			options?.preflightResult?.(false);
 			throw error;
 		}
 	}
@@ -386,11 +385,10 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 			const record = bindPause(this);
 			assertCanContinue(this);
 			const continuation = continueSession(this, record);
-			options?.preflightResult?.(true);
+			options?.preflightResult?.("started");
 			await continuation;
 			return;
 		} catch (error) {
-			options?.preflightResult?.(false);
 			throw error;
 		}
 	}
@@ -403,7 +401,7 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 		// The normal slash dispatcher reports handler errors as UI events and swallows
 		// them. Invoke the same handler directly so ACP receives a failed request.
 		await command.handler("", context);
-		options?.preflightResult?.(true);
+		options?.preflightResult?.("handled");
 		return;
 	}
 	// Bind the turn-boundary hook before the normal prompt starts. Agent captures

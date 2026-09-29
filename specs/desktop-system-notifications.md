@@ -69,5 +69,5 @@ Notify the user through the operating system when a Pix Desktop agent needs atte
 ## Evidence
 
 - Confirmed by code: ACP `session/prompt` resolves only after `agent_settled`; Desktop auto-queue draining happens after each prompt run and can start another prompt.
-- Confirmed by the existing terminal-bell/Telegram contracts: fully settled work, user-abort suppression, and question attention are the established Pix notification semantics.
+- Confirmed by the Desktop notification implementation and tests: fully settled work, user-abort suppression, and question attention determine native delivery.
 - Confirmed by Tauri documentation: the official notification plugin provides permission checks/requests and native notification delivery on Desktop platforms.

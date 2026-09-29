@@ -154,15 +154,6 @@
     else set(path, raw);
   }
 
-  function updateChatId(raw: string): void {
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      reset(["telegramConnector", "chatId"]);
-      return;
-    }
-    set(["telegramConnector", "chatId"], /^-?\d+$/u.test(trimmed) ? Number(trimmed) : raw);
-  }
-
   function updateModule(name: string, enabled: boolean): void {
     onChange(updateToolsSuiteModuleSource(source, parsed, name, enabled));
   }
@@ -461,20 +452,11 @@
 {:else if section === "integrations"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Integrations</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Notifications, Telegram, prompt commands, tool rendering, and language servers.</p>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Notifications, prompt commands, tool rendering, and language servers.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow label="Terminal bell" description="Play the terminal bell sound on completion/error." explicit={has(["terminalBell", "sound"])} defaultLabel={defaultLabel(["terminalBell", "sound"])} onReset={() => reset(["terminalBell", "sound"])}>
       <SettingsSwitch value={bool(["terminalBell", "sound"])} onChange={(value) => set(["terminalBell", "sound"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Telegram connector" description="Enable Telegram task/control integration. It can also auto-enable when token and chat id are configured." explicit={has(["telegramConnector", "enabled"])} defaultLabel={defaultLabel(["telegramConnector", "enabled"])} onReset={() => reset(["telegramConnector", "enabled"])}>
-      <SettingsSwitch value={bool(["telegramConnector", "enabled"])} onChange={(value) => set(["telegramConnector", "enabled"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Telegram bot token" explicit={has(["telegramConnector", "botToken"])} defaultLabel={defaultLabel(["telegramConnector", "botToken"])} onReset={() => reset(["telegramConnector", "botToken"])}>
-      <SettingsTextInput type="password" sensitive value={text(["telegramConnector", "botToken"])} placeholder="123456:ABC…" onChange={(value) => set(["telegramConnector", "botToken"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Telegram chat id" description="Private chat id allowed to control Pix. Numeric and string ids are supported." explicit={has(["telegramConnector", "chatId"])} defaultLabel={defaultLabel(["telegramConnector", "chatId"])} onReset={() => reset(["telegramConnector", "chatId"])}>
-      <SettingsTextInput value={text(["telegramConnector", "chatId"])} placeholder="-1001234567890" onChange={updateChatId} />
     </SettingsFieldRow>
     <SettingsFieldRow label="Prompt commands" description="Slash-command definitions keyed by command name." explicit={has(["promptCommands", "commands"])} defaultLabel={defaultLabel(["promptCommands", "commands"])} onReset={() => reset(["promptCommands", "commands"])}>
       <SettingsJsonValue value={json(["promptCommands", "commands"])} rows={8} placeholder={'{\n  "commit": { "prompt": "Commit all changes" }\n}'} onChange={(value) => updateJson(["promptCommands", "commands"], value)} />

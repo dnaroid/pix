@@ -59,13 +59,9 @@
   <summary bind:this={groupSummary} class="grid min-h-4 list-none grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/activity:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
     <span class="min-h-4 min-w-0 truncate text-xs">
-      {#each labels as label, index (label.name)}
+      {#each labels as label, index (label)}
         {#if index > 0}<span class="text-muted-foreground/45">, </span>{/if}
-        <strong
-          data-activity-name={label.name}
-          data-tool-tone={label.tone}
-          class={label.tone === undefined ? "font-normal text-muted-foreground/85" : "tool-name font-normal"}
-        >{label.name}</strong>
+        <strong data-activity-name={label} class="font-normal text-muted-foreground/85">{label}</strong>
       {/each}
     </span>
     {#if durationMs !== undefined}<span data-activity-duration class="shrink-0 text-xs text-muted-foreground/45">{formatTranscriptDuration(durationMs)}</span>{/if}

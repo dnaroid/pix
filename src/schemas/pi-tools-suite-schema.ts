@@ -64,18 +64,6 @@ const TerminalBellConfig = Type.Object(
 	{ description: "Terminal bell configuration." },
 );
 
-const TelegramConnectorConfig = Type.Object(
-	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable the Telegram task connector. Defaults to enabled when botToken and chatId are present." })),
-		botToken: Type.Optional(Type.String({ description: "Telegram Bot API token from @BotFather." })),
-		chatId: Type.Optional(Type.Union([
-			Type.String(),
-			Type.Integer(),
-		], { description: "Private Telegram chat id allowed to control Pix." })),
-	},
-	{ description: "Receive completion/question notifications and send follow-up or new-session tasks from Telegram." },
-);
-
 // ---------------------------------------------------------------------------
 // DCP (Dynamic Context Pruning)
 // ---------------------------------------------------------------------------
@@ -355,7 +343,6 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		frontierModels: Type.Optional(Type.Union([Type.Array(FrontierModelEntry), Type.Null()], { description: "Ordered frontier models used by frontier-selecting sub-agent roles (oracle, frontier-review, delivery-review). A layer's list replaces inherited entries; null restores the built-in list." })),
 		economy: Type.Optional(Type.Boolean({ description: "Economy mode: no sub-agent role selects a frontier model marked expensive. PI_TOOLS_SUITE_ECONOMY overrides it." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
-		telegramConnector: Type.Optional(TelegramConnectorConfig),
 		commentChecker: Type.Optional(CommentCheckerConfig),
 		dcp: Type.Optional(DcpConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),

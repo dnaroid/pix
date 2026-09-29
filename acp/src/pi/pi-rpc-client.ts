@@ -335,12 +335,12 @@ export class PiRpcClient implements PiClient {
 	/**
 	 * Fail in-flight work when the pi child process dies.
 	 *
-	 * The SDK `RpcClient` (pinned 0.85.0) rejects pending requests on exit
+	 * The SDK `RpcClient` rejects pending requests on exit
 	 * but exposes no disconnect event, so the exit is observed on the private
 	 * child process handle — the same handle `respondToExtensionUi` uses.
 	 */
 	private watchExit(client: RpcClient): void {
-		// Double cast: `process` is private on RpcClient (pinned 0.85.0), and
+		// Double cast: `process` is private on RpcClient, and
 		// an intersection with a private property collapses to `never`.
 		const child = (client as unknown as { process?: ChildProcess | null }).process;
 		if (!child) return;
@@ -354,8 +354,8 @@ export class PiRpcClient implements PiClient {
 		});
 	}
 
-	prompt(message: string, images?: PiImageContent[]): Promise<void> {
-		return this.requireClient().prompt(message, images);
+	async prompt(message: string, images?: PiImageContent[]): Promise<void> {
+		await this.requireClient().prompt(message, images);
 	}
 
 	async clearTodos(): Promise<void> {
@@ -382,20 +382,20 @@ export class PiRpcClient implements PiClient {
 		return rawClient.getData<PiBashResult>(response);
 	}
 
-	pause(): Promise<void> {
-		return this.requireClient().prompt(PIX_PAUSE_MESSAGE);
+	async pause(): Promise<void> {
+		await this.requireClient().prompt(PIX_PAUSE_MESSAGE);
 	}
 
-	continue(): Promise<void> {
-		return this.requireClient().prompt(PIX_CONTINUE_MESSAGE);
+	async continue(): Promise<void> {
+		await this.requireClient().prompt(PIX_CONTINUE_MESSAGE);
 	}
 
-	steer(message: string, images?: PiImageContent[]): Promise<void> {
-		return this.requireClient().steer(message, images);
+	async steer(message: string, images?: PiImageContent[]): Promise<void> {
+		await this.requireClient().steer(message, images);
 	}
 
-	followUp(message: string, images?: PiImageContent[]): Promise<void> {
-		return this.requireClient().followUp(message, images);
+	async followUp(message: string, images?: PiImageContent[]): Promise<void> {
+		await this.requireClient().followUp(message, images);
 	}
 
 	clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
@@ -410,11 +410,11 @@ export class PiRpcClient implements PiClient {
 	 * Answer a dialog `extension_ui_request`.
 	 *
 	 * The pi RPC protocol accepts `extension_ui_response` lines on stdin, but
-	 * `RpcClient` (pinned 0.85.0) has no public API for them, so this writes
+	 * `RpcClient` has no public API for them, so this writes
 	 * directly to the child process stdin. Unknown ids are ignored by pi.
 	 */
 	respondToExtensionUi(response: RpcExtensionUIResponse): void {
-		// Double cast: `process` is private on RpcClient (pinned 0.85.0), and
+		// Double cast: `process` is private on RpcClient, and
 		// an intersection with a private property collapses to `never`.
 		const client = this.requireClient() as unknown as {
 			process?: { stdin?: Writable | null } | null;

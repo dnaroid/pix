@@ -28,10 +28,12 @@ const MODEL_TOOL_TEST_DEPENDENCIES = {
 
 class FakePi {
 	tools = new Map<string, any>();
+	commands = new Map<string, any>();
 	handlers = new Map<string, any>();
 	activeTools: string[] = ["read", "bash", "custom"];
 	setCalls: string[][] = [];
 	registerTool(tool: any) { this.tools.set(tool.name, tool); }
+	registerCommand(name: string, command: any) { this.commands.set(name, command); }
 	on(name: string, handler: any) { this.handlers.set(name, handler); }
 	getActiveTools() { return this.activeTools; }
 	setActiveTools(tools: string[]) { this.setCalls.push(tools); this.activeTools = tools; }

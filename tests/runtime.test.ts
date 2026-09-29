@@ -9,7 +9,6 @@ import type { LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
 	bundledQuestionExtensionPath,
 	bundledSessionTitleExtensionPath,
-	bundledTelegramConnectorExtensionPath,
 	bundledTerminalBellExtensionPath,
 	createPixDraftModelCatalog,
 	ensureBundledSkillsInstalled,
@@ -110,7 +109,6 @@ describe("runtime installation helpers", () => {
 		assert.ok(bundled.includes(questionExtensionPath));
 		assert.ok(bundled.includes(bundledSessionTitleExtensionPath()));
 		assert.ok(bundled.includes(bundledTerminalBellExtensionPath()));
-		assert.ok(bundled.includes(bundledTelegramConnectorExtensionPath()));
 
 		const base = extensionResult([
 			extensionAt(join(questionExtensionPath, "index.ts"), { tools: ["question"] }),

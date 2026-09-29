@@ -1,6 +1,6 @@
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 
 export function isPathInside(parentPath: string, targetPath: string): boolean {
   const rel = relative(parentPath, targetPath);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }

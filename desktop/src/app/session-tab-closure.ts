@@ -128,6 +128,9 @@ export function createSessionTabClosure(
       options.history.cancel();
       options.state.clearActiveSession();
       options.retargetWorkbenchAnchors(sessionId, nextSessionId);
+      // Requests made while the closing session was still active can fail during
+      // ACP teardown. Do not carry their transient error into the fallback tab.
+      options.setErrorMessage(null);
       closed = true;
     } catch (error) {
       options.tabs.show(sessionId);

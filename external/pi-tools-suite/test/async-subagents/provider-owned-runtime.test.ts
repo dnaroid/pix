@@ -2,7 +2,7 @@
 // core/spawnAgent through the production native owned-launch route (never the
 // ownedLaunchForTest unit boundary) plus stop/state/cleanup integration, for a
 // selected pi-claude-code-provider model. Runs the real installed Pi SDK
-// 0.87.1 under the real local Node, and the hash-verified UNMODIFIED provider
+// 0.99.0 under the real local Node, and the hash-verified UNMODIFIED provider
 // 0.5.0 snapshot staged by stageSnapshot (default native=false), reusing the
 // offline fixture protocol from the launcher acceptance suite. No auth, no provider
 // install, no live inference. Every kill action addresses only an owned direct
@@ -193,7 +193,7 @@ async function scenario(name: string, body: (ctx: Context) => Promise<void>): Pr
 	let passed = false;
 	try {
 		const installed = JSON.parse(readFileSync(join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"), "utf8"));
-		if (installed.version !== "0.87.1") throw new Error(`Expected installed Pi SDK 0.87.1, found ${installed.version}`);
+		if (installed.version !== "0.99.0") throw new Error(`Expected installed Pi SDK 0.99.0, found ${installed.version}`);
 		const ctx: Context = { work, extension: stageSnapshot(snapshot!, work), node: localNode(),
 			binaries: await ensureOwnedLaunchBinaries({ cacheRoot: join(work, "cache") }), runs };
 		await body(ctx);

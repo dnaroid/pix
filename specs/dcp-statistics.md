@@ -175,7 +175,13 @@ metrics. Raw parent history is never rewritten by these reads or forks.
 same ordered branch**. The former reconstructs the complete selected ancestry;
 the latter exposes cached JSONL presentation entries. That tail can omit old
 ancestors and interleave abandoned branches, including diagnostic-only resume
-branches left by another runtime. For example:
+branches left by another runtime.
+
+`getEntryCount()` on the lazy facade counts those cached presentation entries
+until explicit hydration, matching `getEntries()` without a synchronous full
+session scan. It is not the complete ancestry count for retry validation.
+
+For example:
 
 ```text
 JSONL/presentation order: root, A, side, B, C

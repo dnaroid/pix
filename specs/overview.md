@@ -83,7 +83,6 @@ not duplicate those; IDX document retrieval can find them independently.
 | [file-link-opening](./file-link-opening.md) | File link opening (Zed / web / media routing) |
 | [tui-git-slash-commands](./tui-git-slash-commands.md) | TUI Git code-review and confirmed commit-message commands |
 | [deepgram-voice-input](./deepgram-voice-input.md) | Deepgram voice dictation (terminal and Desktop) |
-| [telegram-connector](./telegram-connector.md) | Telegram completion/question notifications and addressed remote follow-ups |
 
 **Desktop (`desktop/`, `acp/`)**
 

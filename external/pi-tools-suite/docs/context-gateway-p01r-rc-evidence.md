@@ -39,6 +39,13 @@ The same path has no durability guarantee. The test replaces its contents and a 
 
 Bash timeout, abort and non-zero exit preserve their visible status and captured visible output but reject the tool execution. The current exception bridge does not expose a structured `fullOutputPath` result. SDK-formatted error text may itself mention its generated temp path when the partial output was truncated; R-C does **not** parse such text into a trusted capability, because look-alike paths in arbitrary text are not authorization/provenance.
 
+**SDK 0.99.0 compatibility update (not part of the 0.85.1 gate above):** timeout
+and abort still reject, while a non-zero Bash exit resolves as `isError: true`
+with its visible status and, on truncation, a structured ephemeral
+`details.fullOutputPath`. The recovery validator still requires a successful
+producer, so the error result's handle is not an authorised R-A v2 recovery
+capability. Deterministic contracts cover the changed SDK result shape.
+
 The suite `ast_grep` path behaves similarly but is suite-owned: successful truncated output returns a structured full-output handle containing the complete combined output. Cancelled/killed output returns an explicit cancelled result without a full-output handle, and a real tool error throws instead of publishing a successful artifact capability.
 
 ## Broad-output decision

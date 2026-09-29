@@ -20,6 +20,7 @@ function createHarness(
   closeSession: () => Promise<Record<string, never>>,
 ) {
   let workspace = "/project";
+  let errorMessage: string | null = null;
   const state = {
     sessionId: activeSessionId,
     deleteSessionTranscript: vi.fn(),
@@ -52,16 +53,17 @@ function createHarness(
       refresh: vi.fn(async () => undefined),
     },
     tabs,
+    draft: { openStartTab: vi.fn(async () => undefined) },
     runtime: { invalidatePrewarm: vi.fn() },
     history: { cancel: vi.fn() },
     tabSessionIds: () => tabSessionIds,
     setOperationRunning: vi.fn(),
-    setErrorMessage: vi.fn(),
+    setErrorMessage: vi.fn((message: string | null) => { errorMessage = message; }),
     forgetRuntime: vi.fn(),
     clearSessionActivity: vi.fn(),
     forgetComposerDraft: vi.fn(),
     retargetWorkbenchAnchors: vi.fn(),
-    reportError: vi.fn(),
+    reportError: vi.fn((error: unknown) => { errorMessage = String(error); }),
   } as unknown as SessionTabControllerOptions;
   const loadSession = vi.fn(async () => undefined);
 
@@ -71,6 +73,7 @@ function createHarness(
     loadSession,
     options,
     tabs,
+    getErrorMessage: () => errorMessage,
     setWorkspace(value: string) { workspace = value; },
   };
 }
@@ -94,18 +97,39 @@ describe("session tab closure", () => {
 
   it("hides the active tab before ACP close resolves and loads the fallback after teardown", async () => {
     const request = deferred<Record<string, never>>();
-    const { closure, loadSession, options, tabs } = createHarness("closing", ["closing", "next"], () => request.promise);
+    const { closure, getErrorMessage, loadSession, options, tabs } = createHarness("closing", ["closing", "next"], () => request.promise);
 
     const result = closure.closeSessionTab("closing", "next");
 
     expect(tabs.markClosed).toHaveBeenCalledWith("closing");
     expect(loadSession).not.toHaveBeenCalled();
 
+    options.reportError(new Error("unknown session closing"));
     request.resolve({});
     await expect(result).resolves.toBe(true);
     expect(loadSession).toHaveBeenCalledWith("next");
+    expect(getErrorMessage()).toBeNull();
     expect(options.setOperationRunning).toHaveBeenCalledWith(true);
     expect(options.setOperationRunning).toHaveBeenCalledWith(false);
+  });
+
+  it("opens the sole-tab draft without carrying a teardown-time session error", async () => {
+    const request = deferred<Record<string, never>>();
+    const { closure, getErrorMessage, loadSession, options, tabs } = createHarness("closing", ["closing"], () => request.promise);
+
+    const pending = closure.closeSessionTab("closing");
+    expect(tabs.markClosed).toHaveBeenCalledWith("closing");
+    // Another session-scoped request may fail after ACP removes the runtime,
+    // but before the close response clears the active session ID.
+    options.reportError(new Error("unknown session closing"));
+    request.resolve({});
+
+    await expect(pending).resolves.toBe(true);
+    expect(options.state.clearActiveSession).toHaveBeenCalledOnce();
+    expect(options.tabs.forgetActive).toHaveBeenCalledWith("/project");
+    expect(options.draft.openStartTab).toHaveBeenCalledOnce();
+    expect(loadSession).not.toHaveBeenCalled();
+    expect(getErrorMessage()).toBeNull();
   });
 
   it("restores an optimistically hidden tab when ACP close fails", async () => {

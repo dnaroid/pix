@@ -181,31 +181,6 @@
       },
       "description": "Terminal bell configuration."
     },
-    "telegramConnector": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable the Telegram task connector. Defaults to enabled when botToken and chatId are present."
-        },
-        "botToken": {
-          "type": "string",
-          "description": "Telegram Bot API token from @BotFather."
-        },
-        "chatId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "integer"
-            }
-          ],
-          "description": "Private Telegram chat id allowed to control Pix."
-        }
-      },
-      "description": "Receive completion/question notifications and send follow-up or new-session tasks from Telegram."
-    },
     "commentChecker": {
       "type": "object",
       "properties": {

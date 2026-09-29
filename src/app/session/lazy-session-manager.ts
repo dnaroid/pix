@@ -159,6 +159,12 @@ class LazySessionManager implements SessionManagerFacade {
 		return this.hydrated?.getEntries() ?? [...this.entries];
 	}
 
+	// Match getEntries() on the lazy facade: this is the cached presentation
+	// tail until explicit hydration, not a reason to scan the full session on UI.
+	getEntryCount(): number {
+		return this.hydrated?.getEntryCount() ?? this.entries.length;
+	}
+
 	// Before hydration this is a presentation/file tail, NOT selected ancestry:
 	// it can omit old ancestors and contain abandoned side-branch entries.
 	// Lineage-sensitive callers must use readFullBranchEntries(); retry proofs

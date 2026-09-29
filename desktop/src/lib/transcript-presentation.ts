@@ -1,6 +1,5 @@
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
-import { toolPresentationName, toolTone } from "./tool-presentation";
-import type { ToolTone } from "./tool-presentation";
+import { toolPresentationName } from "./tool-presentation";
 import type {
   ActivityEntry,
   ActivityGroupItem,
@@ -141,8 +140,8 @@ const ACTIVITY_ACTIONS_BY_KIND: readonly (readonly [readonly string[], string])[
 /**
  * One deterministic header action for an activity group: the most recent
  * active entry in entry order while anything is live, otherwise the settled
- * outcome (`Failed` when any tool call failed). The action text is neutral;
- * native semantic colors apply to the collapsed name list, not the action.
+ * outcome (`Failed` when any tool call failed). This action is used by the
+ * pinned composer status, not the neutral collapsed name list.
  * Derived only from normalized tool metadata; command text and status payloads
  * are never inspected, so arbitrary commands are not reported as running tests
  * and a subagent status call never claims spawning.
@@ -175,41 +174,23 @@ function toolEntryAction(tool: ToolItem): string {
   return "Running tool";
 }
 
-export interface ActivityGroupPresentationLabel {
-  readonly name: string;
-  /**
-   * Native semantic tone of the name, from the same `toolTone` mapping as the
-   * expanded tool rows. Undefined only for `thinking`, which stays neutral.
-   */
-  readonly tone: ToolTone | undefined;
-}
-
 /**
  * Collapsed comma-list labels for an activity group: every distinct name in
- * first-seen order (deduplicated), each carrying its native semantic tone
- * regardless of liveness. SKILL.md reads label as `skill <name>` with the
- * skill tone, matching the expanded row.
+ * first-seen order (deduplicated). SKILL.md reads label as `skill <name>`.
  */
 export function activityGroupPresentationLabels(
   entries: readonly ActivityEntry[],
-): ActivityGroupPresentationLabel[] {
-  const labels = new Map<string, ActivityGroupPresentationLabel>();
+): string[] {
+  const labels = new Set<string>();
   for (const entry of entries) {
     if (entry.type === "tool") {
       const name = entry.skillName ? `skill ${entry.skillName}` : toolPresentationName(entry);
-      if (labels.has(name)) continue;
-      // Only repo_knowledge needs its payload for the tone, and collapsed
-      // headers must never dereference other tools' raw inputs.
-      const toneName = entry.skillName ? "skill" : name;
-      labels.set(name, {
-        name,
-        tone: toolTone(toneName, entry.kind, toneName === "repo_knowledge" ? entry.rawInput : undefined),
-      });
-    } else if (!labels.has("thinking")) {
-      labels.set("thinking", { name: "thinking", tone: undefined });
+      labels.add(name);
+    } else {
+      labels.add("thinking");
     }
   }
-  return [...labels.values()];
+  return [...labels];
 }
 export function formatTranscriptDuration(durationMs: number): string {
   const milliseconds = Math.max(0, durationMs);

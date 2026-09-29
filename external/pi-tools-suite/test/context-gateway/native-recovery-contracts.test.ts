@@ -190,7 +190,7 @@ describe("P01-R native recovery contracts", () => {
 		}
 	});
 
-	test("Bash timeout/abort/nonzero preserve visible status but do not return a structured recovery result", async () => {
+	test("Bash timeout/abort throw; nonzero returns an error result with an ephemeral handle", async () => {
 		const source = Array.from({ length: 2_500 }, (_, index) => `error-${index}-${"e".repeat(48)}`).join("\n");
 		for (const mode of ["timeout", "abort", "nonzero"] as const) {
 			const controller = new AbortController();
@@ -208,6 +208,20 @@ describe("P01-R native recovery contracts", () => {
 					},
 				},
 			});
+			if (mode === "nonzero") {
+				const result = await bash.execute("bash-nonzero", { command: "emit failure" }, undefined, undefined, { cwd: tmpdir() } as any);
+				const fullOutputPath = (result.details as any)?.fullOutputPath as string;
+				try {
+					expect(result.isError).toBe(true);
+					expect(result.structuredContent).toMatchObject({ exit_code: 7 });
+					expect(resultText(result)).toContain("Command exited with code 7");
+					expect(fullOutputPath).toBeTruthy();
+					expect(readFileSync(fullOutputPath, "utf8")).toBe(source);
+				} finally {
+					if (fullOutputPath) rmSync(fullOutputPath, { force: true });
+				}
+				continue;
+			}
 			let message = "";
 			try {
 				await bash.execute(
@@ -221,7 +235,7 @@ describe("P01-R native recovery contracts", () => {
 			} catch (error) {
 				message = error instanceof Error ? error.message : String(error);
 			}
-			expect(message).toContain(mode === "timeout" ? "timed out" : mode === "abort" ? "aborted" : "exited with code 7");
+			expect(message).toContain(mode === "timeout" ? "timed out" : "aborted");
 			const match = [...message.matchAll(/Full output: ([^\]\n]+)/g)].at(-1);
 			const tempPath = match?.[1];
 			if (tempPath && existsSync(tempPath)) rmSync(tempPath, { force: true });

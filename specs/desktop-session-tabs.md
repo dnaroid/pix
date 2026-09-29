@@ -46,6 +46,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - Repeated New Conversation actions reuse the existing draft tab instead of creating multiple empty chooser tabs.
 - Starting a project task while the UI-only draft is active creates and foregrounds the task's real conversation session. The draft tab is deactivated rather than discarded, so its unsent composer text/attachments remain owned by the draft and can be restored later; the task prompt and subsequent runtime state belong only to the new real session.
 - A sole UI-only draft tab is not closable. Its close affordance is omitted, and Delete or middle-click are ignored. Closing the last real session still transitions to one draft conversation tab, which remains the minimum session surface even if Preview/Diff are also open.
+- A successful active-session close clears transient errors from requests racing ACP teardown before showing the fallback session or draft; a failed close still restores its tab and displays the close error.
 - A UI-only draft is never persisted as the active project session, so restarting Pix cannot attempt `session/history` for it. Compatibility recovery for older mapped empty sessions remains unchanged and generation-guarded.
 - The New Conversation action uses the shared `session.new` command metadata for its platform shortcut hint; the Command Palette New/Open Conversation actions use the same UI-only draft surface.
 
@@ -91,7 +92,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed workbench ordering without changing session identity.
 - `desktop/src/app/workbench-model.test.ts` covers fork metadata propagation into workbench session tabs.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers unified roving tab semantics and kind-specific close dispatch.
-- `desktop/src/app/session-tab-closure.test.ts` controls ACP close completion to verify immediate optimistic tab removal, fallback loading after teardown, and rollback on close failure.
+- `desktop/src/app/session-tab-closure.test.ts` controls ACP close completion to verify immediate optimistic tab removal, fallback loading after teardown, stale session-error clearing before the sole-tab draft, and rollback on close failure.
 - Desktop draft/concurrency and ACP-client coverage verifies that draft config is loaded without `session/new`, a staged model selection is kept local, and the override is carried only when first-prompt materialization happens.
 - `desktop/src/app/prompt-submit.test.ts` verifies that the first draft user message renders and clears the composer before materialization resolves and is still sent to the materialized session after another conversation is selected; `desktop/src/app/draft-tab-selection.test.ts` verifies that background materialization does not steal active-session state or discard the created session.
 - `desktop/src/app/desktop-project-action-services.test.ts` verifies that launching a project task from the active UI-only draft deactivates/preserves that draft, transfers composer ownership, and foregrounds the created real task session.

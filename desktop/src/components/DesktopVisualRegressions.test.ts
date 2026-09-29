@@ -156,7 +156,7 @@ describe("desktop visual regressions", () => {
     expect(transcriptActivityGroupSource.slice(summaryStart, summaryEnd)).not.toContain("ToolStatusIcon");
   });
 
-  it("renders a one-line collapsed header: chevron, natively-toned comma list, elapsed time", () => {
+  it("renders a one-line collapsed header: chevron, neutral comma list, elapsed time", () => {
     const summaryStart = transcriptActivityGroupSource.indexOf('<summary bind:this={groupSummary}');
     const summaryEnd = transcriptActivityGroupSource.indexOf("</summary>", summaryStart);
     expect(summaryStart).toBeGreaterThanOrEqual(0);
@@ -176,14 +176,14 @@ describe("desktop visual regressions", () => {
     expect(transcriptActivityGroupSource).not.toContain("data-activity-active");
     expect(transcriptActivityGroupSource).not.toContain("data-activity-more");
     expect(transcriptActivityGroupSource).not.toContain("data-activity-settled");
-    // The comma list keeps native tones regardless of liveness; thinking stays neutral.
+    // All collapsed names share a neutral tone; expanded rows keep their tool tones.
     expect(transcriptActivityGroupSource).toContain("activityGroupPresentationLabels");
-    expect(transcriptActivityGroupSource).toContain("data-activity-name={label.name}");
-    expect(transcriptActivityGroupSource).toContain("data-tool-tone={label.tone}");
-    expect(transcriptActivityGroupSource).toContain('"tool-name font-normal"');
-    expect(transcriptActivityGroupSource).toContain('"font-normal text-muted-foreground/85"');
-    expect(transcriptActivityGroupSource).not.toContain("text-primary");
-    expect(transcriptActivityGroupSource).not.toContain("animate-pulse");
+    expect(header).toContain('data-activity-name={label} class="font-normal text-muted-foreground/85"');
+    expect(header).not.toContain("data-tool-tone");
+    expect(header).not.toContain("tool-name");
+    expect(header).not.toContain("text-primary");
+    expect(header).not.toContain("animate-pulse");
+    expect(transcriptActivityGroupSource).toContain('class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}');
     expect(transcriptActivityGroupSource).toContain('<Brain class="h-3 w-3 shrink-0 text-muted-foreground/65"');
     expect(transcriptActivityGroupSource).toContain('data-activity-thought-label class="text-muted-foreground/85"');
   });

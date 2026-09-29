@@ -70,7 +70,7 @@ describe("mixed transcript activity regressions", () => {
       get rawInput() { throw new Error("Collapsed header must not inspect the tool payload"); },
     };
     expect(activityGroupHeading([item])).toEqual({ action: "Completed", active: false, moreCount: 0, failed: false });
-    expect(activityGroupPresentationLabels([item])).toEqual([{ name: "read", tone: "inspect" }]);
+    expect(activityGroupPresentationLabels([item])).toEqual(["read"]);
     expect(isUserBashTool(item)).toBe(false);
   });
 
@@ -181,7 +181,7 @@ describe("mixed transcript activity regressions", () => {
     }
   });
 
-  it("labels the collapsed comma list with first-seen names and native tones regardless of liveness", () => {
+  it("labels the collapsed comma list with distinct first-seen names regardless of liveness", () => {
     const thought = {
       type: "message",
       id: "thought:labels",
@@ -195,27 +195,20 @@ describe("mixed transcript activity regressions", () => {
     const liveGrep = { ...tool("grep-live"), name: "grep", status: "in_progress" } as const;
     const settledBash = { ...tool("bash-done"), name: "bash", status: "completed" } as const;
     expect(activityGroupPresentationLabels([thought, settledRead, liveGrep, settledBash, settledRead])).toEqual([
-      { name: "thinking", tone: undefined },
-      { name: "read", tone: "inspect" },
-      { name: "grep", tone: "search" },
-      { name: "bash", tone: "execute" },
+      "thinking", "read", "grep", "bash",
     ]);
-    // Completed names keep their native tones: coloring never depends on liveness.
-    expect(activityGroupPresentationLabels([settledRead])).toEqual([{ name: "read", tone: "inspect" }]);
+    expect(activityGroupPresentationLabels([settledRead])).toEqual(["read"]);
     const skillRead: ToolItem = {
       ...tool("skill-read"),
       skillName: "demo",
       title: "Read .pi/skills/demo/SKILL.md",
       status: "completed",
     };
-    expect(activityGroupPresentationLabels([skillRead])).toEqual([{ name: "skill demo", tone: "skill" }]);
+    expect(activityGroupPresentationLabels([skillRead])).toEqual(["skill demo"]);
     const compress = { ...tool("compress"), name: "compress", status: "completed" } as const;
-    expect(activityGroupPresentationLabels([skillRead, compress])).toEqual([
-      { name: "skill demo", tone: "skill" },
-      { name: "compress", tone: "compress" },
-    ]);
+    expect(activityGroupPresentationLabels([skillRead, compress])).toEqual(["skill demo", "compress"]);
     const unknown = { ...tool("odd"), name: "orchestrate", kind: "unknown", status: "completed" } as const;
-    expect(activityGroupPresentationLabels([unknown])).toEqual([{ name: "orchestrate", tone: "neutral" }]);
+    expect(activityGroupPresentationLabels([unknown])).toEqual(["orchestrate"]);
   });
 
   it("does not guess commands or subagent status payloads from raw input", () => {

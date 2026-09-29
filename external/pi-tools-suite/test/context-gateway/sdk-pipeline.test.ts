@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -533,7 +533,7 @@ describe("context gateway P00: installed SDK tool_result pipeline", () => {
 		expect(secondContext).toContain('"isError":true');
 	});
 
-	test("built-in bash nonzero exit can mention a temp path in error text but loses the structured trusted handle", async () => {
+	test("built-in bash nonzero exit preserves error status and structured temp handle", async () => {
 		const observed: any[] = [];
 		const observer = extension("nonzero-observer", [async (event) => {
 			observed.push({ isError: event.isError, content: event.content, details: event.details });
@@ -560,13 +560,17 @@ describe("context gateway P00: installed SDK tool_result pipeline", () => {
 
 		expect(observed).toHaveLength(1);
 		expect(observed[0].isError).toBe(true);
-		expect(observed[0].details).toEqual({});
 		const text = JSON.stringify(observed[0].content);
 		expect(text).toContain("Command exited with code 7");
 		expect(text).toContain("Full output:");
-		// The path in visible error text is not a trusted recovery capability once
-		// the SDK error wrapper has collapsed structured details to {}.
-		expect(JSON.stringify(observed[0].details)).not.toContain("fullOutputPath");
+		const fullOutputPath = observed[0].details?.fullOutputPath as string;
+		try {
+			expect(fullOutputPath).toBeTruthy();
+			expect(readFileSync(fullOutputPath, "utf8")).toBe(source);
+			// The existing recovery validator still requires a successful producer.
+		} finally {
+			if (fullOutputPath) rmSync(fullOutputPath, { force: true });
+		}
 	});
 
 	test("session abort finalizes an in-flight bash result as an error with the captured prefix", async () => {

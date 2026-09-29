@@ -33,6 +33,8 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 	await writeFile(sessionPath, `${lines.join("\n")}\n`, "utf8");
 
 	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 5 });
+	assert.equal(manager.getEntryCount(), manager.getEntries().length);
+	assert.equal(manager.getEntryCount(), 5);
 
 	assert.deepEqual(
 		manager.getBranch().filter((entry) => entry.type === "message").map((entry) => entry.id),
@@ -42,6 +44,7 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 		manager.buildContextEntries().filter((entry) => entry.type === "message").map((entry) => entry.id),
 		Array.from({ length: 12 }, (_value, index) => `entry-${index}`),
 	);
+	assert.equal(manager.getEntryCount(), 5, "full context projection must not hydrate the presentation tail");
 
 	const reader = (manager as unknown as { createHistoryReader(): LazySessionHistoryReader | undefined }).createHistoryReader();
 	if (!reader) throw new Error("Expected lazy history reader");
@@ -54,6 +57,8 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 	assert.deepEqual(fullBranch.map((entry) => entry.id), Array.from({ length: 12 }, (_value, index) => `entry-${index}`));
 	const fullSession = await (manager as unknown as { readFullSessionEntries(): Promise<Array<{ id: string }>> }).readFullSessionEntries();
 	assert.deepEqual(fullSession.map((entry) => entry.id), Array.from({ length: 12 }, (_value, index) => `entry-${index}`));
+	manager.appendMessage({ role: "user", content: "later", timestamp: 13 } as never);
+	assert.equal(manager.getEntryCount(), 6);
 });
 
 test("lazy session manager never treats a crash-tail user message as a new provider-context root", async (t) => {

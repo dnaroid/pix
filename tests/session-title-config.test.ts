@@ -10,7 +10,9 @@ const testConfigPath = join(testConfigDir, "pix.jsonc");
 const dedicatedConfigPath = join(testConfigDir, "session-title.jsonc");
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
-delete process.env.PI_CONFIG_DIR;
+// os.homedir() can cache the process home before this fixture changes HOME.
+process.env.PI_CONFIG_DIR = testConfigDir;
+delete process.env.PIX_CONFIG_PROFILE;
 delete process.env.PI_OFFLINE;
 delete process.env.PI_SESSION_TITLE_ENABLED;
 delete process.env.PI_SESSION_TITLE_MODEL;

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import {
 	PIX_HOST_RUNTIME_SYMBOL,
@@ -54,6 +54,12 @@ const pixGlobal = globalThis as typeof globalThis & { [PIX_HOST_RUNTIME_SYMBOL]?
 const previousBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 const previousQuestionBridge = process.env.PIX_QUESTION_RPC_BRIDGE;
 const previousProfile = process.env.PIX_CONFIG_PROFILE;
+
+beforeEach(() => {
+	delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+	delete process.env.PIX_QUESTION_RPC_BRIDGE;
+	delete process.env.PIX_CONFIG_PROFILE;
+});
 
 afterEach(() => {
 	delete pixGlobal[PIX_HOST_RUNTIME_SYMBOL];

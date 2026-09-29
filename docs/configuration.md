@@ -281,9 +281,6 @@ microphone permission.
 - **Web search:** local Ollama can work without a cloud key; cloud Ollama/Tavily
   credentials can be configured with `/web-credentials`.
 - **Context7:** export `CONTEXT7_API_KEY`.
-- **Telegram connector:** configure `telegramConnector.botToken` /
-  `telegramConnector.chatId`, or `PIX_TELEGRAM_BOT_TOKEN` /
-  `PIX_TELEGRAM_CHAT_ID`.
 - **LSP:** configure/trust servers in tools-suite configuration. See
   [pi-tools-suite LSP setup](../external/pi-tools-suite/README.md#lsp-setup).
 - **IDX:** Desktop can install managed IDX from the IDX panel; TUI repository

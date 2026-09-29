@@ -192,7 +192,6 @@ function emptyOnboardingState() {
 		opencodeAntigravityExists: false,
 		webCredentialsConfigured: false,
 		context7Configured: false,
-		telegramConfigured: false,
 	};
 }
 
