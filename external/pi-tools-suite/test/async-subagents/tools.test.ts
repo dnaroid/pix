@@ -243,7 +243,7 @@ describe.serial("extension entrypoint", () => {
 
 		const gptResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.5" } });
 		expect(gptResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(gptResult.systemPrompt).toContain("lower-cost worker");
+		expect(gptResult.systemPrompt).toContain("Task size, isolation, lower cost, or worker availability alone do not justify delegation");
 
 		const lunaResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-luna" } });
 		expect(lunaResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
@@ -251,7 +251,7 @@ describe.serial("extension entrypoint", () => {
 
 		const solResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-sol" } });
 		expect(solResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(solResult.systemPrompt).toContain("Keep planning, decisions, product/UX choices, integration");
+		expect(solResult.systemPrompt).toContain("Keep planning, product/UX decisions, integration and the final answer in the parent");
 
 		const customPromptResult = await handler({ systemPrompt: "base", systemPromptOptions: { customPrompt: "SYSTEM.md" } }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('<agent_strategy');
