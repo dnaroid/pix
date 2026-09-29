@@ -83,6 +83,9 @@ const MAX_PROMPT_FILE_IMAGE_COUNT = 10;
 const MAX_PROMPT_FILE_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_PROMPT_FILE_IMAGES_TOTAL_BYTES = 50 * 1024 * 1024;
 const REGISTRY_SNAPSHOT_TIMEOUT_MS = 5_000;
+/** Structured-state channels published by the pi-tools-suite registry extension. */
+const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
+const REGISTRY_DIFF_CHANNEL = "pi-tools-suite:resource-registry:diff";
 import {
 	isExtensionUiRequest,
 	type PiClient,
@@ -124,6 +127,7 @@ import {
 	PIX_QUEUE_MESSAGE_METHOD,
 	PIX_QUEUE_STATE_METHOD,
 	PIX_REGISTRY_ACTION_METHOD,
+	PIX_REGISTRY_DIFF_METHOD,
 	PIX_RELOAD_SESSION_METHOD,
 	PIX_REQUEST_HISTORY_METHOD,
 	PIX_RESUME_PATH_METHOD,
@@ -146,6 +150,7 @@ import {
 	parseDesktopQueueActionRequest,
 	parseDesktopQueueSubmitRequest,
 	parseDesktopRegistryActionRequest,
+	parseDesktopRegistryDiffRequest,
 	parseDesktopResumePathRequest,
 	parseDesktopRuntimeStatusRequest,
 	parseDesktopSessionImageRequest,
@@ -179,6 +184,9 @@ import {
 	type DesktopQueuedUserMessage,
 	type DesktopRegistryActionRequest,
 	type DesktopRegistryActionResponse,
+	type DesktopRegistryDiffFile,
+	type DesktopRegistryDiffRequest,
+	type DesktopRegistryDiffResponse,
 	type DesktopRequestHistoryResponse,
 	type DesktopRuntimeStatusRequest,
 	type DesktopRuntimeStatusResponse,
@@ -598,6 +606,9 @@ export class PixAcpAgent {
 			.onRequest(PIX_REGISTRY_ACTION_METHOD, parseDesktopRegistryActionRequest, (ctx) =>
 				this.desktopRegistryAction(ctx.params, ctx.client),
 			)
+			.onRequest(PIX_REGISTRY_DIFF_METHOD, parseDesktopRegistryDiffRequest, (ctx) =>
+				this.desktopRegistryDiff(ctx.params, ctx.client),
+			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopTakeAutoMessage(ctx.params),
 			)
@@ -709,10 +720,22 @@ export class PixAcpAgent {
 		}
 	}
 
-	private async desktopRegistryAction(
-		params: DesktopRegistryActionRequest,
+	/**
+	 * Run one `/registry rpc` command in a disposable, non-persisted workspace
+	 * runtime and return the structured payload it publishes on `channel`.
+	 *
+	 * Registry is workspace-scoped; its private command runs in its own pi RPC
+	 * runtime instead of borrowing a conversation session. This keeps Registry
+	 * usable before the first chat tab exists and avoids coupling project
+	 * synchronization to an agent's streaming state.
+	 */
+	private async runWorkspaceRegistryCommand(
+		cwd: string,
+		command: string,
+		channel: string,
+		payloadLabel: string,
 		client: ClientCaller,
-	): Promise<DesktopRegistryActionResponse> {
+	): Promise<unknown> {
 		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
 			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
 			...(this.options.toolsSuiteExtensionPath
@@ -720,24 +743,20 @@ export class PixAcpAgent {
 				: {}),
 		});
 
-		// Registry is workspace-scoped. Run its private command in a disposable,
-		// non-persisted pi RPC runtime instead of borrowing a conversation session.
-		// This keeps Registry usable before the first chat tab exists and avoids
-		// coupling project synchronization to an agent's streaming state.
 		const pi = this.options.createPiClient(registryPiClientOptions(
 			this.options.piEntry,
-			params.cwd,
+			cwd,
 			toolsSuiteExtensionPath,
 		));
-		let snapshot: unknown;
-		let resolveSnapshot: ((value: unknown) => void) | undefined;
+		let payload: unknown;
+		let resolvePayload: ((value: unknown) => void) | undefined;
 		const unsubscribe = pi.onEvent((event) => {
 			if (!isExtensionUiRequest(event)) return;
 			const state = sessionStateEnvelopeFromUiRequest(event);
-			if (state?.channel === "pi-tools-suite:resource-registry:state") {
-				snapshot = state.data;
-				resolveSnapshot?.(state.data);
-				resolveSnapshot = undefined;
+			if (state?.channel === channel) {
+				payload = state.data;
+				resolvePayload?.(state.data);
+				resolvePayload = undefined;
 				return;
 			}
 			void this.handleWorkspaceRegistryUiRequest(pi, event, client);
@@ -746,24 +765,24 @@ export class PixAcpAgent {
 		try {
 			await pi.start();
 			const commands = await pi.getCommands();
-			if (!commands.some((command) => command.name.replace(/^\/+/, "") === "registry")) {
+			if (!commands.some((registered) => registered.name.replace(/^\/+/, "") === "registry")) {
 				throw new RequestError(ERROR_SERVER, "resource registry extension is unavailable");
 			}
-			// Ignore any advisory startup snapshot; the command below publishes the
-			// authoritative post-action snapshot after its filesystem/Git work.
-			snapshot = undefined;
-			const snapshotEvent = new Promise<unknown>((resolve) => { resolveSnapshot = resolve; });
-			await pi.prompt(registryRpcCommand(params));
-			if (snapshot === undefined) {
+			// Ignore any advisory startup publication; the command below publishes
+			// the authoritative payload after its filesystem/Git work.
+			payload = undefined;
+			const payloadEvent = new Promise<unknown>((resolve) => { resolvePayload = resolve; });
+			await pi.prompt(command);
+			if (payload === undefined) {
 				let timeout: ReturnType<typeof setTimeout> | undefined;
 				try {
-					snapshot = await Promise.race([
-						snapshotEvent,
+					payload = await Promise.race([
+						payloadEvent,
 						new Promise<never>((_resolve, reject) => {
 							timeout = setTimeout(() => {
 								reject(new RequestError(
 									ERROR_SERVER,
-									"resource registry did not publish a workspace snapshot",
+									`resource registry did not publish a ${payloadLabel}`,
 								));
 							}, REGISTRY_SNAPSHOT_TIMEOUT_MS);
 							timeout.unref?.();
@@ -773,15 +792,44 @@ export class PixAcpAgent {
 					if (timeout !== undefined) clearTimeout(timeout);
 				}
 			}
-			if (snapshot === undefined) {
-				throw new RequestError(ERROR_SERVER, "resource registry published an empty workspace snapshot");
+			if (payload === undefined) {
+				throw new RequestError(ERROR_SERVER, `resource registry published an empty ${payloadLabel}`);
 			}
-			return { snapshot };
+			return payload;
 		} finally {
-			resolveSnapshot = undefined;
+			resolvePayload = undefined;
 			unsubscribe();
 			await pi.stop().catch(() => undefined);
 		}
+	}
+
+	private async desktopRegistryAction(
+		params: DesktopRegistryActionRequest,
+		client: ClientCaller,
+	): Promise<DesktopRegistryActionResponse> {
+		const snapshot = await this.runWorkspaceRegistryCommand(
+			params.cwd,
+			registryRpcCommand(params),
+			REGISTRY_STATE_CHANNEL,
+			"workspace snapshot",
+			client,
+		);
+		return { snapshot };
+	}
+
+	/** Read-only diff between one resource's registry and project-local copies. */
+	private async desktopRegistryDiff(
+		params: DesktopRegistryDiffRequest,
+		client: ClientCaller,
+	): Promise<DesktopRegistryDiffResponse> {
+		const payload = await this.runWorkspaceRegistryCommand(
+			params.cwd,
+			registryDiffRpcCommand(params),
+			REGISTRY_DIFF_CHANNEL,
+			"workspace diff",
+			client,
+		);
+		return { files: desktopRegistryDiffFiles(payload) };
 	}
 
 	private async handleWorkspaceRegistryUiRequest(
@@ -3835,6 +3883,48 @@ function registryRpcCommand(params: DesktopRegistryActionRequest): string {
 		throw new RequestError(ERROR_SERVER, "invalid registry action request");
 	}
 	return `/registry rpc ${params.action} ${params.type} ${params.name}`;
+}
+
+function registryDiffRpcCommand(params: DesktopRegistryDiffRequest): string {
+	return `/registry rpc diff ${params.type} ${params.name}`;
+}
+
+/** Validate the registry extension's structured diff payload into ACP files. */
+function desktopRegistryDiffFiles(payload: unknown): DesktopRegistryDiffFile[] {
+	if (!isRecord(payload) || payload.version !== 1) {
+		throw new RequestError(ERROR_SERVER, "resource registry published an invalid diff payload");
+	}
+	if (payload.error !== undefined && (typeof payload.error !== "string" || payload.error.length === 0)) {
+		throw new RequestError(ERROR_SERVER, "resource registry published an invalid diff payload");
+	}
+	if (typeof payload.error === "string") {
+		throw new RequestError(ERROR_SERVER, payload.error);
+	}
+	if (!Array.isArray(payload.files)) {
+		throw new RequestError(ERROR_SERVER, "resource registry published an invalid diff payload");
+	}
+	const files: DesktopRegistryDiffFile[] = [];
+	for (const entry of payload.files) {
+		if (
+			!isRecord(entry)
+			|| typeof entry.path !== "string"
+			|| entry.path.length === 0
+			|| entry.path.includes("\0")
+			|| (entry.oldText !== null && typeof entry.oldText !== "string")
+			|| (entry.newText !== null && typeof entry.newText !== "string")
+			|| (entry.notice !== undefined && (typeof entry.notice !== "string" || entry.notice.length === 0))
+			|| (entry.notice !== undefined && (entry.oldText !== null || entry.newText !== null))
+		) {
+			throw new RequestError(ERROR_SERVER, "resource registry published an invalid diff file entry");
+		}
+		files.push({
+			path: entry.path,
+			oldText: entry.oldText,
+			newText: entry.newText,
+			...(entry.notice === undefined ? {} : { notice: entry.notice }),
+		});
+	}
+	return files;
 }
 
 function cloneQueuedUserMessage(message: DesktopQueuedUserMessage): DesktopQueuedUserMessage {

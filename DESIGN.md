@@ -153,6 +153,14 @@ Use `selection` plus `selection-foreground` for native text selection. Selection
 must remain clearly visible without becoming a saturated primary block; in dark
 mode prefer a restrained blue-tinted layer while keeping normal readable text.
 
+Exception: WebKit paints selected inline content across the full width of a
+wrapped line, so document-style surfaces (the transcript and Preview
+Markdown/source text and its edit textarea) use transparent selection
+backgrounds and paint selected glyphs in primary instead; primary-colored
+links, code, and source tokens invert to foreground so their glyphs stay
+distinct. Interaction chrome and other editable controls keep the normal
+`selection`/`selection-foreground` paint.
+
 Use `muted` for generic subdued content only when none of the more specific
 workbench roles above applies.
 

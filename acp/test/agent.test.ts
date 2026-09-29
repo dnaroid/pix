@@ -33,6 +33,7 @@ import {
 	PIX_QUEUE_MESSAGE_METHOD,
 	PIX_QUEUE_STATE_METHOD,
 	PIX_REGISTRY_ACTION_METHOD,
+	PIX_REGISTRY_DIFF_METHOD,
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_RESUME_PATH_METHOD,
 	PIX_RUNTIME_STATUS_METHOD,
@@ -2728,6 +2729,98 @@ test("Pix Desktop registry actions run in a disposable workspace runtime without
 		assert.equal(elicitationParams.length, 1);
 		assert.equal((elicitationParams[0] as { sessionId?: string }).sessionId, undefined);
 		assert.equal(typeof (elicitationParams[0] as { requestId?: string }).requestId, "string");
+		for (const options of registryOptions) {
+			assert.equal(options.cwd, "/tmp/registry-gui");
+			assert.equal(options.env?.PIX_ACP_REGISTRY_WORKSPACE_RPC, "1");
+			assert.ok(options.args?.includes("--no-session"));
+			assert.ok(options.args?.includes("--extension"));
+		}
+		assert.equal(registryClients.every((pi) => pi.started === false), true, "disposable Registry runtimes are stopped");
+	} finally {
+		await rm(extensionDir, { recursive: true, force: true });
+	}
+});
+
+test("Pix Desktop registry diff runs in a disposable workspace runtime and returns validated file texts", async () => {
+	const registryClients: FakePiClient[] = [];
+	const registryOptions: PiRpcClientOptions[] = [];
+	const extensionDir = mkdtempSync(join(tmpdir(), "registry-extension-"));
+	const extensionPath = join(extensionDir, "index.ts");
+	await writeFile(extensionPath, "// test registry extension\n");
+	const diffPayload = (files: unknown, error?: string) => ({
+		version: 1,
+		type: "skill",
+		name: "pdf",
+		files,
+		...(error ? { error } : {}),
+	});
+	const harness = createTestAdapter({
+		agentDir: join(extensionDir, "agent"),
+		toolsSuiteExtensionPath: extensionPath,
+		createPiClient: (options) => {
+			registryOptions.push(options);
+			const pi = new FakePiClient();
+			const index = registryClients.length;
+			pi.commands.push({ name: "registry", description: "Manage registry", source: "extension", sourceInfo: {} });
+			pi.promptHandledWithoutRun = true;
+			pi.promptHook = async (message) => {
+				assert.equal(message, "/registry rpc diff skill pdf");
+				pi.emit({
+					type: "extension_ui_request",
+					id: `registry-diff-${index}`,
+					method: "setWidget",
+					widgetKey: "pix.session-state",
+					widgetLines: ["pi-tools-suite:resource-registry:diff", JSON.stringify(
+						index === 0
+							? diffPayload([
+								{ path: "skills/pdf/SKILL.md", oldText: "remote v1\n", newText: "local v2\n" },
+								{ path: "skills/pdf/removed.txt", oldText: "gone\n", newText: null },
+								{ path: "skills/pdf/added.bin", oldText: null, newText: null, notice: "Project copy is binary" },
+							])
+							: index === 1
+								? diffPayload([], 'Project skill "pdf" does not exist.')
+								: diffPayload("not-an-array"),
+					)],
+				});
+			};
+			registryClients.push(pi);
+			return pi;
+		},
+	});
+
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+			const diffed = await cx.request(PIX_REGISTRY_DIFF_METHOD, {
+				cwd: "/tmp/registry-gui",
+				type: "skill",
+				name: "pdf",
+			});
+			assert.deepEqual(diffed, { files: [
+				{ path: "skills/pdf/SKILL.md", oldText: "remote v1\n", newText: "local v2\n" },
+				{ path: "skills/pdf/removed.txt", oldText: "gone\n", newText: null },
+				{ path: "skills/pdf/added.bin", oldText: null, newText: null, notice: "Project copy is binary" },
+			] });
+			await assert.rejects(
+				cx.request(PIX_REGISTRY_DIFF_METHOD, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" }),
+				/Project skill "pdf" does not exist\./,
+			);
+			await assert.rejects(
+				cx.request(PIX_REGISTRY_DIFF_METHOD, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" }),
+				/resource registry published an invalid diff payload/,
+			);
+			await assert.rejects(
+				cx.request(PIX_REGISTRY_DIFF_METHOD, { cwd: "/tmp/registry-gui", type: "tasks", name: "pdf" }),
+				/registry diff request requires cwd, type skill\|agent, and a valid resource name/,
+			);
+		});
+
+		assert.equal(harness.adapter.sessionCount, 0);
+		assert.deepEqual(registryClients.map((pi) => pi.promptCalls[0]?.message), [
+			"/registry rpc diff skill pdf",
+			"/registry rpc diff skill pdf",
+			"/registry rpc diff skill pdf",
+		]);
 		for (const options of registryOptions) {
 			assert.equal(options.cwd, "/tmp/registry-gui");
 			assert.equal(options.env?.PIX_ACP_REGISTRY_WORKSPACE_RPC, "1");

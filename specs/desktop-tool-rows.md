@@ -34,7 +34,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 ## Behavior
 
 - File tools show the path instead of repeating a human title such as `read Read path`.
-- Reads of `SKILL.md` (direct `read` and the TUI-recognized non-mutating shell reader commands) display as `skill <directory name>` in both child rows and the collapsed group header. Lightweight replay omits `rawInput` until a result is expanded, so direct reads also classify from the tool location or read title at ingestion. Arbitrary shell programs are not classified by inspecting their effects. The skill name is cached during tool ingestion/update so collapsed headers never inspect `rawInput`; active skill calls receive the usual header emphasis, while ordinary reads and shell mutations retain their normal tool name.
+- Reads of `SKILL.md` (direct `read` and the TUI-recognized non-mutating shell reader commands) display as `skill <directory name>` in both child rows and the collapsed group header. Lightweight replay omits `rawInput` until a result is expanded, so direct reads also classify from the tool location or read title at ingestion. Arbitrary shell programs are not classified by inspecting their effects. The skill name is cached during tool ingestion/update so collapsed headers never inspect `rawInput`; collapsed group list names always keep their native semantic tool tones regardless of liveness, while ordinary reads and shell mutations retain their normal tool name.
 - Read ranges use the TUI `path:offset+limit` form.
 - Shell commands collapse whitespace to one line.
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.
@@ -43,15 +43,15 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Legacy ACP updates without a programmatic name or raw input fall back to splitting the existing title.
 - Consecutive thinking and tool entries share one collapsible activity group until a visible user, assistant, or system message boundary.
 - Collapsed activity headers list normalized presentation names plus `thinking` once in first-seen order (for example `thinking, todo, repo_knowledge` even when a name occurs more than once).
-- Names with a currently active occurrence are emphasized with the semantic primary color in the activity-group header; completed/inactive header names stay muted. A live thought is active only when it has a recorded start and no recorded end, so replay data without timing metadata is not presented as live.
-- Expanding an activity group preserves the original interleaving of thinking blocks and individual tool calls. Child `thinking` rows stay muted even while live; current-activity emphasis is represented once, in the group header, like any other active tool name.
+- Collapsed group list names always render in their native semantic tool tones regardless of liveness; liveness does not add or remove name emphasis. A live thought is active only when it has a recorded start and no recorded end, so replay data without timing metadata is not presented as live.
+- Expanding an activity group preserves the original interleaving of thinking blocks and individual tool calls. Child `thinking` rows stay muted even while live; the collapsed header is a single line of natively-toned names plus the elapsed duration, with no status or action text.
 - The group itself does not hydrate tool bodies. Individual result disclosures hydrate on demand; closed groups/results do not mount their expensive Markdown, diffs, or attachment content. Reopening retains individual disclosure state within the same session, while switching sessions resets it even when replay IDs match.
 - A completed edit result patch is preferred because it carries full context. Otherwise explicit ACP diff content is used; when both are absent (notably session replay), edit and write diffs are reconstructed from recorded raw input.
 - Apply-patch input is rendered as one diff surface for both `*** Begin Patch` and unified-diff forms.
 - Failed mutations do not present their requested patch as an applied diff.
 - The mutation result text follows the diff and preserves all text blocks in order, including normal success output, `LSP diagnostics:`, and `comment-checker` notices.
 - Completed mutation rows with LSP output use an alert icon: error-colored when diagnostics contain an error, otherwise warning-colored, matching the TUI rule.
-- Activity-group summaries represent only group lifecycle (pending/running/completed) with neutral pending/completed indicators. They do not inherit failed/success outcome color or LSP warning/error attention from child tool rows; those signals stay on the concrete child call that produced them.
+- Activity-group summaries show no lifecycle status, settled outcome, or icons — only the natively-toned name list and the elapsed time on one line. They do not inherit failed/success outcome color or LSP warning/error attention from child tool rows; those signals, including the failed status icon, stay on the concrete child call that produced them.
 - LSP headers/alerts, error lines, warning lines, hints, and clean diagnostic lines receive semantic colors; comment-checker headings use the warning role.
 
 ## Related files

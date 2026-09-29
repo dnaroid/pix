@@ -89,6 +89,7 @@ export function createDesktopSidebarViewModel(options: {
     registryLoading: options.registry.actionId === "refresh",
     registryActionId: options.registry.actionId
       ?? (options.registry.backgroundSyncState.phase === "syncing" ? "background-sync" : null),
+    registryDiff: options.registry.diff,
     gitSnapshot: options.git.snapshot,
     gitUninitialized: options.git.uninitialized,
     gitLoading: options.git.loading,
@@ -153,6 +154,8 @@ export function createDesktopSidebarViewModel(options: {
     onRegistryInitializeProject: () => void options.registry.initializeProject(),
     onRegistryCleanProject: () => void options.registry.cleanProject(),
     onRegistryAction: (request, actionId) => void options.registry.runAction(request, actionId),
+    onRegistryDiff: options.registry.openDiff,
+    onRegistryCloseDiff: options.registry.closeDiff,
     onRegistryProjectChange: options.registry.observeProjectChange,
     onWorkspaceSettingsSave: (workspace) => {
       if (workspace === options.workspace()) options.registry.scheduleProjectSync("workspace");

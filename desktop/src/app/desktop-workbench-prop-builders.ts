@@ -1,6 +1,7 @@
 import type { ComponentProps } from "svelte";
 import DesktopWorkbenchSurface from "../components/DesktopWorkbenchSurface.svelte";
 import { isWorkspaceProjectFilePath } from "../lib/project-files";
+import { composerActivity } from "../lib/composer-activity";
 import type { PendingElicitation, createElicitationStore } from "./elicitation.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createAutocompleteStore } from "./autocomplete.svelte";
@@ -130,6 +131,7 @@ export function buildWorkbenchConversationProps(
 ): Pick<DesktopWorkbenchSurfaceViewProps, "transcript" | "queue" | "composer"> {
   const sessionId = options.activeSessionId();
   const pending = options.pendingElicitation();
+  const transcript = options.transcript();
   const questionMode = pending?.kind === "question"
     ? {
         message: pending.message,
@@ -149,7 +151,7 @@ export function buildWorkbenchConversationProps(
 
   return {
     transcript: {
-      transcript: options.transcript(),
+      transcript,
       activeSessionId: sessionId,
       workspace: options.workspace(),
       promptRunning: options.promptRunning(),
@@ -181,6 +183,15 @@ export function buildWorkbenchConversationProps(
       onAction: (item, action) => void options.promptQueue.actOnQueuedMessage(item, action),
     },
     composer: {
+      activity: composerActivity(transcript, {
+        sessionId,
+        running: options.promptRunning(),
+        ready: options.statusReady() && options.activeSessionRuntimeReady(),
+        historyLoading: options.sessionHistoryLoading(),
+        draft: options.draft.active,
+        controlState: options.activeAgentControlState() ?? "idle",
+        waitingForInput: pending !== null,
+      }),
       attachments: options.promptAttachments(),
       availableCommands: options.activeSlashCommands(),
       activeSessionId: sessionId,
@@ -189,7 +200,6 @@ export function buildWorkbenchConversationProps(
         && !options.sessionMutationRunning()
         && !options.sessionHistoryLoading()
         && (options.draft.active || options.activeSessionRuntimeReady()),
-      activeWorking: options.statusReady() && options.promptRunning(),
       promptRunning: options.promptRunning(),
       agentControlState: options.activeAgentControlState(),
       dragActive: options.dragActive(),

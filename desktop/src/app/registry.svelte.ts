@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AcpClient } from "../lib/acp-client";
 import {
+  registryDiffAvailable,
   registrySnapshotFromSessionState,
   type RegistryActionRequest,
+  type RegistryDiffState,
+  type RegistryItem,
   type RegistrySnapshot,
 } from "../lib/registry";
 import type { SessionStateNotification } from "../lib/session-state";
@@ -41,6 +44,8 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   let projectPiStorageLoading = $state(false);
   let projectPiStorageError = $state<string | null>(null);
   let actionId = $state<string | null>(null);
+  let diff = $state<RegistryDiffState | undefined>(undefined);
+  let diffGeneration = 0;
   let projectStateLoadGeneration = 0;
   let lifecycleGeneration = 0;
   let backgroundSyncState = $state<RegistryBackgroundSyncState>({
@@ -242,6 +247,48 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     }
   }
 
+  /**
+   * On-demand read-only comparison of one resource's registry and local
+   * copies. Diff is independent of mutating registry actions, but a late
+   * response must never replace a newer selection, workspace or closed view.
+   */
+  function openDiff(item: RegistryItem): void {
+    if (item.type === "project" || !registryDiffAvailable(item)) return;
+    const target = { type: item.type, name: item.name };
+    const requestClient = options.client();
+    const workspace = options.workspace();
+    const requestDiffGeneration = ++diffGeneration;
+    const requestLifecycleGeneration = lifecycleGeneration;
+    const current = () => requestDiffGeneration === diffGeneration
+      && requestLifecycleGeneration === lifecycleGeneration
+      && workspace === options.workspace()
+      && requestClient === options.client();
+    if (!requestClient || !workspace) {
+      diff = { phase: "error", target, error: "Registry diff needs an active workspace connection." };
+      return;
+    }
+    diff = { phase: "loading", target };
+    void (async () => {
+      try {
+        const result = await requestClient.registryDiff(workspace, target.type, target.name);
+        if (!current()) return;
+        diff = { phase: "ready", target, files: result.files };
+      } catch (error) {
+        if (!current()) return;
+        diff = {
+          phase: "error",
+          target,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })();
+  }
+
+  function closeDiff(): void {
+    diffGeneration += 1;
+    diff = undefined;
+  }
+
   function refresh(): void {
     void refreshProjectInitialization();
     void runAction({ action: "refresh" }, "refresh");
@@ -257,6 +304,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   function reset(): void {
     lifecycleGeneration += 1;
     projectStateLoadGeneration += 1;
+    diffGeneration += 1;
     snapshot = undefined;
     projectInitialized = undefined;
     projectPiSizeBytes = undefined;
@@ -265,6 +313,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     projectPiStorageLoading = false;
     projectPiStorageError = null;
     actionId = null;
+    diff = undefined;
     backgroundSync.reset();
   }
 
@@ -282,12 +331,15 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     get projectPiStorageError() { return projectPiStorageError; },
     get actionId() { return actionId; },
     get backgroundSyncState() { return backgroundSyncState; },
+    get diff() { return diff; },
     handleSessionState,
     refreshProjectInitialization,
     initializeProject,
     cleanProject,
     autoCleanProject,
     runAction,
+    openDiff,
+    closeDiff,
     refresh,
     observeProjectChange,
     scheduleProjectSync,

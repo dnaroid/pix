@@ -33,7 +33,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 
 1. Desktop application chrome is non-selectable by default.
 2. Transcript message/content text and text-file Preview surfaces opt back into normal document text selection. Pointer selection that starts in either surface cannot continue selecting sidebar, tab, toolbar, status-bar, or other control labels outside that content surface.
-   Within the transcript, transcript entry containers are kept out of selection while their rendered Markdown message text (`.markdown-text`) opts back in, so selecting across messages highlights their rendered text rather than painting full-width selection bands through empty entry space.
+   Within the transcript, entry containers exclude tool/chrome labels from selection while Markdown text opts in. WebKit can paint selected inline content across the full width of a wrapped line: the transcript and read-only Markdown/source Preview surfaces therefore have transparent selection backgrounds, and selected glyphs use the theme's primary accent color instead of a background highlight. Links, Markdown code, and primary-colored source tokens change to foreground so their selected glyphs remain distinct. The Preview edit textarea uses the same transparent background/accent glyph treatment. Selection and Copy remain native. Other editable controls (such as the composer and Preview find input) retain normal selection paint.
 3. The composer textarea and other editable text controls opt into native text selection independently of those document surfaces.
 4. With focus in the composer textarea, `Cmd+A` on macOS or `Ctrl+A` on other desktop platforms selects the composer draft only.
 5. With focus outside an editable text control, native Select All is constrained to selectable document content because surrounding desktop chrome is non-selectable.
@@ -56,6 +56,9 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
 - Manual desktop verification: drag-select through a long conversation and confirm selection stops at transcript content rather than extending into sidebar/tabs/status chrome.
+- Manual desktop verification: select across three or more wrapped lines in one Markdown paragraph; confirm only selected glyphs change color, no background color appears in the line or side gutters, and Copy returns the selected text.
+- Manual desktop verification: drag-select across several messages and confirm the empty side gutters outside the centered message column do not show selection color.
+- Manual desktop verification: select across wrapped Markdown and source lines in Preview, then edit the file and select inside the textarea; confirm selected glyphs alone change color without a line/gutter background, Copy returns the selected text, and find-input selection keeps its normal paint.
 - Manual desktop verification: focus the composer, press `Cmd+A`/`Ctrl+A`, and confirm only the draft is selected.
 - Manual desktop verification: move focus to non-editable chrome and invoke Select All; transcript text may select, but chrome/control labels do not.
 
@@ -64,3 +67,4 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 - Confirmed by code: `PromptComposer.svelte` uses a native textarea, so focused Select All remains local to the draft without a custom keyboard handler.
 - Confirmed by code: `TranscriptPane.svelte` exposes the `.transcript-pane` document-style conversation surface and already marks disclosure summaries as non-selectable controls.
 - Confirmed by implementation: global desktop CSS defaults the app root to `user-select: none`, opts `.transcript-pane`, `.preview-text-surface`, and editable controls back into text selection, and explicitly keeps common interaction roles non-selectable.
+- Confirmed by implementation: transcript and Preview document surfaces and the Preview editor textarea use transparent selection backgrounds with accent-colored selected glyphs (foreground-colored for primary-colored links/code/tokens). This avoids WebKit's full-width inline selection paint without changing native selection/copy or selection paint outside those surfaces. Visual behavior in macOS WebKit still requires manual verification.

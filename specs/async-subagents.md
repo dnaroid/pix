@@ -34,9 +34,12 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   or reads already establish the diagnosis and desired behavior, the parent
   continues directly rather than spawning research that duplicates the same
   investigation. `[confirmed by code, core/agent-strategy.ts]`
-- Delegation is for a named uncertainty, independent track, noisy evidence step,
-  or a genuinely substantial and bounded implementation slice that benefits from
-  isolation/lower cost. Implementation delegation begins only after cause,
+- The parent writes code by default. Implementation delegation requires an
+  explicit user request or a substantial independent task that can run alongside
+  useful parent work; size, isolation, lower cost, or worker availability alone
+  are insufficient. Research addresses named uncertainties or independent
+  evidence tracks. Mandatory UI QA, review and knowledge-audit gates remain
+  exceptions. Implementation delegation begins only after cause,
   desired behavior, and acceptance criteria are settled; the prompt prefers the
   smallest coherent slice over broad speculative cross-layer edits. Product/UX
   decisions and integration stay with the parent. `[confirmed by code,

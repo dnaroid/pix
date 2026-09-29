@@ -1092,4 +1092,244 @@ describe("resource registry", () => {
 		expect(h.notices.at(-1)?.message).toContain("has local changes");
 		expect(fs.readFileSync(path.join(project, ".pi", "skills", "demo", "SKILL.md"), "utf8")).toContain("local change");
 	}, GIT_INTEGRATION_TIMEOUT_MS);
+
+	test("diffs changed skill trees and agent companions read-only against the fetched registry copy", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		process.env.PIX_ACP_REGISTRY_WORKSPACE_RPC = "1";
+		const { remote, seed } = createRegistry(root);
+		fs.mkdirSync(path.join(seed, "skills", "demo", "assets"), { recursive: true });
+		fs.writeFileSync(path.join(seed, "skills", "demo", "assets", "shared.txt"), "shared v1\n");
+		fs.mkdirSync(path.join(seed, "agents", "reviewer", "guides"), { recursive: true });
+		fs.writeFileSync(path.join(seed, "agents", "reviewer", "guides", "review.md"), "first guide\n");
+		fs.writeFileSync(path.join(seed, "agents", "reviewer", "stable.txt"), "stable\n");
+		git(seed, ["add", "."]);
+		git(seed, ["commit", "-m", "Add resource assets"]);
+		git(seed, ["push", "origin", "main"]);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("install skill demo", h.ctx);
+		await command.handler("install agent reviewer", h.ctx);
+
+		const lastDiff = () => {
+			const widget = h.widgets.at(-1);
+			expect(widget?.key).toBe("pix.session-state");
+			expect(widget?.lines?.[0]).toBe("pi-tools-suite:resource-registry:diff");
+			return JSON.parse(widget?.lines?.[1] ?? "null");
+		};
+		const filesByPath = (payload: any) => new Map<string, any>(payload.files.map((file: any) => [file.path, file]));
+
+		await command.handler("rpc diff skill demo", h.ctx);
+		expect(lastDiff()).toMatchObject({ version: 1, type: "skill", name: "demo" });
+		expect(lastDiff().files).toEqual([]);
+
+		const localSkill = path.join(project, ".pi", "skills", "demo");
+		fs.writeFileSync(path.join(localSkill, "SKILL.md"), "---\ndescription: Demo skill\n---\n\nlocal skill v3\n");
+		fs.writeFileSync(path.join(localSkill, "extra.md"), "extra local\n");
+		fs.rmSync(path.join(localSkill, "assets", "shared.txt"));
+		fs.writeFileSync(path.join(seed, "skills", "demo", "SKILL.md"), "---\ndescription: Demo skill\n---\n\nremote v2\n");
+		git(seed, ["add", "skills/demo/SKILL.md"]);
+		git(seed, ["commit", "-m", "Remote skill v2"]);
+		git(seed, ["push", "origin", "main"]);
+
+		await command.handler("rpc diff skill demo", h.ctx);
+		const skillFiles = filesByPath(lastDiff());
+		expect([...skillFiles.keys()].sort()).toEqual([
+			"skills/demo/SKILL.md",
+			"skills/demo/assets/shared.txt",
+			"skills/demo/extra.md",
+		]);
+		expect(skillFiles.get("skills/demo/SKILL.md")).toMatchObject({
+			oldText: expect.stringContaining("remote v2"),
+			newText: expect.stringContaining("local skill v3"),
+		});
+		expect(skillFiles.get("skills/demo/assets/shared.txt")).toEqual({
+			path: "skills/demo/assets/shared.txt",
+			oldText: "shared v1\n",
+			newText: null,
+		});
+		expect(skillFiles.get("skills/demo/extra.md")).toEqual({
+			path: "skills/demo/extra.md",
+			oldText: null,
+			newText: "extra local\n",
+		});
+
+		fs.writeFileSync(
+			path.join(project, ".pi", "agents", "reviewer.md"),
+			"---\ndescription: Review code\nmodels: [test/model]\n---\n\nLocal review body.\n",
+		);
+		fs.rmSync(path.join(project, ".pi", "agents", "reviewer", "guides", "review.md"));
+		fs.writeFileSync(path.join(project, ".pi", "agents", "reviewer", "notes.md"), "local note\n");
+
+		await command.handler("rpc diff agent reviewer", h.ctx);
+		const agentFiles = filesByPath(lastDiff());
+		expect([...agentFiles.keys()].sort()).toEqual([
+			"agents/reviewer.md",
+			"agents/reviewer/guides/review.md",
+			"agents/reviewer/notes.md",
+		]);
+		expect(agentFiles.get("agents/reviewer.md")).toMatchObject({
+			oldText: expect.stringContaining("Review carefully"),
+			newText: expect.stringContaining("Local review body"),
+		});
+		expect(agentFiles.get("agents/reviewer/guides/review.md")).toEqual({
+			path: "agents/reviewer/guides/review.md",
+			oldText: "first guide\n",
+			newText: null,
+		});
+		expect(agentFiles.get("agents/reviewer/notes.md")).toEqual({
+			path: "agents/reviewer/notes.md",
+			oldText: null,
+			newText: "local note\n",
+		});
+
+		// The comparison is read-only: neither the project copies nor the
+		// registry remote changed, and the disposable Registry runtime never
+		// reloads (installs included, by design in workspace RPC mode).
+		expect(fs.readFileSync(path.join(localSkill, "SKILL.md"), "utf8")).toContain("local skill v3");
+		expect(fs.readFileSync(path.join(seed, "skills", "demo", "SKILL.md"), "utf8")).toContain("remote v2");
+		expect(fs.existsSync(path.join(seed, "agents", "reviewer", "guides", "review.md"))).toBe(true);
+		expect(h.reloads).toBe(0);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
+	test("registry diff validates targets, requires both copies, and rejects traversal", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const { remote } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		await command.handler(`configure ${remote} main`, h.ctx);
+
+		await expect(__test.collectRegistryDiff(h.pi, project, "skill", "../etc")).rejects.toThrow("Invalid resource name");
+		await expect(__test.collectRegistryDiff(h.pi, project, "skill", "missing")).rejects.toThrow(
+			'skill "missing" does not exist in the registry.',
+		);
+		await expect(__test.collectRegistryDiff(h.pi, project, "skill", "demo")).rejects.toThrow(
+			'Project skill "demo" does not exist.',
+		);
+		await expect(__test.collectRegistryDiff(h.pi, project, "agent", "demo")).rejects.toThrow(
+			'agent "demo" does not exist in the registry.',
+		);
+
+		const lastDiff = () => JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+		await command.handler("rpc diff widget demo", h.ctx);
+		expect(h.widgets.at(-1)?.lines?.[0]).toBe("pi-tools-suite:resource-registry:diff");
+		expect(lastDiff()).toMatchObject({ version: 1, files: [], error: "Usage: /registry rpc diff <skill|agent> <name>" });
+		await command.handler("rpc diff skill ../etc", h.ctx);
+		expect(lastDiff()).toMatchObject({ version: 1, type: "skill", name: "../etc", files: [], error: expect.stringContaining("Invalid resource name") });
+		await command.handler("rpc diff skill demo", h.ctx);
+		expect(lastDiff()).toMatchObject({
+			version: 1,
+			type: "skill",
+			name: "demo",
+			files: [],
+			error: 'Project skill "demo" does not exist.',
+		});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
+	test("registry diff reports binary and oversized files as notices instead of skipping them", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const { remote } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("install skill demo", h.ctx);
+		const localSkill = path.join(project, ".pi", "skills", "demo");
+		fs.writeFileSync(path.join(localSkill, "image.bin"), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+		fs.writeFileSync(path.join(localSkill, "big.txt"), "x".repeat(1_000_001));
+
+		await command.handler("rpc diff skill demo", h.ctx);
+		const payload = JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+		const filesByPath = new Map<string, any>(payload.files.map((file: any) => [file.path, file]));
+		expect(filesByPath.get("skills/demo/image.bin")).toEqual({
+			path: "skills/demo/image.bin",
+			oldText: null,
+			newText: null,
+			notice: "Project copy is binary",
+		});
+		expect(filesByPath.get("skills/demo/big.txt")).toMatchObject({
+			path: "skills/demo/big.txt",
+			oldText: null,
+			newText: null,
+			notice: expect.stringContaining("per-file diff limit"),
+		});
+
+		await command.handler("push skill demo", h.ctx);
+		fs.writeFileSync(path.join(localSkill, "invalid.txt"), Buffer.from([0xff, 0xfe]));
+		fs.writeFileSync(path.join(localSkill, "image.bin"), "now text\n");
+		fs.writeFileSync(path.join(localSkill, "long.txt"), "line\n".repeat(2_100));
+		await command.handler("rpc diff skill demo", h.ctx);
+		const next = JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+		expect(next.files).toContainEqual({
+			path: "skills/demo/image.bin",
+			oldText: null,
+			newText: null,
+			notice: "Registry copy is binary",
+		});
+		expect(next.files).toContainEqual({
+			path: "skills/demo/invalid.txt",
+			oldText: null,
+			newText: null,
+			notice: "Project copy is binary",
+		});
+		expect(next.files).toContainEqual({
+			path: "skills/demo/long.txt",
+			oldText: null,
+			newText: null,
+			notice: expect.stringContaining("line display limit"),
+		});
+		expect(next.files.map((file: { path: string }) => file.path)).not.toContain("skills/demo/big.txt");
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
+	test("registry diff rejects symbolic links instead of following them", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const { remote } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("install skill demo", h.ctx);
+		const secret = path.join(root, "secret.txt");
+		fs.writeFileSync(secret, "outside the resource\n");
+		fs.symlinkSync(secret, path.join(project, ".pi", "skills", "demo", "leaked.md"));
+
+		await expect(__test.collectRegistryDiff(h.pi, project, "skill", "demo")).rejects.toThrow(
+			"Registry diff cannot traverse symbolic links: skills/demo/leaked.md",
+		);
+		await command.handler("rpc diff skill demo", h.ctx);
+		const payload = JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+		expect(payload).toMatchObject({
+			version: 1,
+			type: "skill",
+			name: "demo",
+			files: [],
+			error: expect.stringContaining("symbolic links"),
+		});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 });

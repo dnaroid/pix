@@ -33,6 +33,7 @@ export {
 export { finalizeTranscriptActivity } from "./transcript-timing";
 export {
   activityGroupDuration,
+  activityGroupHeading,
   activityGroupPresentationLabels,
   formatTranscriptDuration,
   groupTranscriptItems,

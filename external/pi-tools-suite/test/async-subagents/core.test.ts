@@ -424,6 +424,8 @@ describe.serial("core utils and prompt generation", () => {
 			const prompt = agentStrategyPrompt({ modelRef, env: {} })!;
 			expect(prompt).toContain('name="cost-aware-orchestrator"');
 			expect(prompt).toContain("shortest parent pass");
+			expect(prompt).toContain("Write code in the parent by default");
+			expect(prompt).toContain("Task size, isolation, lower cost, or worker availability alone do not justify delegation");
 			expect(prompt).toContain("cause, desired behavior and acceptance criteria are settled");
 			expect(prompt).toContain("wait only when a child result blocks the next decision");
 			expect(prompt).toContain("Reserve oracle");

@@ -33,6 +33,7 @@ import settingsNumberInputSource from "./settings/SettingsNumberInput.svelte?raw
 import settingsSectionNavSource from "./settings/SettingsSectionNav.svelte?raw";
 import statusSource from "./StatusBar.svelte?raw";
 import markdownSource from "./MarkdownText.svelte?raw";
+import previewSource from "./PreviewPane.svelte?raw";
 import terminalSessionsPaneSource from "./TerminalSessionsPane.svelte?raw";
 import terminalSource from "./TerminalView.svelte?raw";
 import workbenchTerminalPaneSource from "./WorkbenchTerminalPane.svelte?raw";
@@ -105,6 +106,37 @@ describe("desktop visual regressions", () => {
     expect(styles).toContain("cursor: text;");
   });
 
+  it("colors transcript selection glyphs without painting wrapped-line or side gaps", async () => {
+    // @ts-expect-error Node fs import in Vitest runner
+    const fs = (await import(/* @vite-ignore */ "node:fs")).default;
+    // @ts-expect-error Node path import in Vitest runner
+    const path = (await import(/* @vite-ignore */ "node:path")).default;
+    // @ts-expect-error Node __dirname in Vitest runner
+    const styles = fs.readFileSync(path.resolve(__dirname, "../styles.css"), "utf-8");
+
+    expect(transcriptSource).toContain('class="transcript-pane h-full min-h-0 overflow-auto"');
+    expect(transcriptSource).toContain('class="mx-auto w-full max-w-4xl px-6');
+    expect(styles).toMatch(/:is\(\.transcript-pane, \.preview-text-surface, \.preview-editor\)::selection,\s*:is\(\.transcript-pane, \.preview-text-surface\) \*::selection\s*\{\s*background: transparent;\s*color: var\(--primary\);\s*\}/);
+    expect(styles).toMatch(/\.transcript-pane :is\(a, a \*, code, code \*\)::selection\s*\{\s*color: var\(--foreground\);\s*\}/);
+    expect(styles).not.toContain(".selection-ink");
+    expect(styles).not.toMatch(/\.transcript-pane[^{}]*::selection\s*\{[^}]*background:\s*var\(--selection\)/);
+  });
+
+  it("colors Preview document and editor selections without painting line gaps or changing find input selection", async () => {
+    // @ts-expect-error Node fs import in Vitest runner
+    const fs = (await import(/* @vite-ignore */ "node:fs")).default;
+    // @ts-expect-error Node path import in Vitest runner
+    const path = (await import(/* @vite-ignore */ "node:path")).default;
+    // @ts-expect-error Node __dirname in Vitest runner
+    const styles = fs.readFileSync(path.resolve(__dirname, "../styles.css"), "utf-8");
+
+    expect(previewSource.match(/class="preview-text-surface/g)).toHaveLength(2);
+    expect(previewSource).toContain('class="preview-editor ');
+    expect(styles).toMatch(/:is\(\.transcript-pane, \.preview-text-surface, \.preview-editor\)::selection,\s*:is\(\.transcript-pane, \.preview-text-surface\) \*::selection\s*\{\s*background: transparent;\s*color: var\(--primary\);\s*\}/);
+    expect(styles).toMatch(/\.preview-text-surface :is\(a, a \*, \.markdown-text code, \.markdown-text code \*, \.sh__token--keyword, \.sh__token--jsxliterals\)::selection\s*\{\s*color: var\(--foreground\);\s*\}/);
+    expect(styles).not.toContain(".preview-file-search::selection");
+  });
+
   it("uses semantic error and success tokens in diff view instead of primary accent", () => {
     expect(diffViewSource).not.toContain("var(--primary)");
     expect(diffViewSource).toContain("var(--tool-error)");
@@ -112,15 +144,46 @@ describe("desktop visual regressions", () => {
     expect(diffViewSource).toContain("var(--tool-info)");
   });
 
-  it("keeps tool diagnostics on child rows instead of promoting them to the activity-group summary", () => {
+  it("keeps tool diagnostics and failure on child rows instead of promoting them to the activity-group summary", () => {
     expect(transcriptActivityGroupSource).toContain("attention={toolAttention}");
-    expect(transcriptActivityGroupSource).toContain("<ToolStatusIcon status={item.status} lifecycleOnly class=");
+    expect(transcriptActivityGroupSource).toContain('<ToolStatusIcon status={tool.status} attention={toolAttention}');
     expect(transcriptActivityGroupSource).not.toContain("toolGroupAttention");
+    expect(transcriptActivityGroupSource).not.toContain("settledFailure");
+    // The collapsed header carries no status icon, so failure stays on the child call that failed.
+    const summaryStart = transcriptActivityGroupSource.indexOf('<summary bind:this={groupSummary}');
+    const summaryEnd = transcriptActivityGroupSource.indexOf("</summary>", summaryStart);
+    expect(summaryStart).toBeGreaterThanOrEqual(0);
+    expect(transcriptActivityGroupSource.slice(summaryStart, summaryEnd)).not.toContain("ToolStatusIcon");
   });
 
-  it("keeps active thinking emphasis in the activity header only", () => {
-    expect(transcriptActivityGroupSource).toContain('data-activity-active={label.active}');
-    expect(transcriptActivityGroupSource).toContain('class={label.active ? "font-medium text-primary" : "font-normal text-muted-foreground/85"}');
+  it("renders a one-line collapsed header: chevron, natively-toned comma list, elapsed time", () => {
+    const summaryStart = transcriptActivityGroupSource.indexOf('<summary bind:this={groupSummary}');
+    const summaryEnd = transcriptActivityGroupSource.indexOf("</summary>", summaryStart);
+    expect(summaryStart).toBeGreaterThanOrEqual(0);
+    const header = transcriptActivityGroupSource.slice(summaryStart, summaryEnd);
+    // One grid row — chevron | truncating comma list | duration — with no second row.
+    expect(header).toContain("grid-cols-[14px_minmax(0,1fr)_auto]");
+    expect(header).not.toContain("row-span-2");
+    expect(header).not.toContain("row-start-2");
+    // The disclosure chevron is the header's only icon; names and time share the single line.
+    expect(header).toContain('class="h-3.5 w-3.5 shrink-0 transition-transform');
+    expect(header).toContain('class="min-h-4 min-w-0 truncate text-xs"');
+    expect(header).toContain('data-activity-duration class="shrink-0 text-xs text-muted-foreground/45"');
+    expect(header).not.toContain("ToolStatusIcon");
+    expect(header).not.toContain("Brain");
+    // No aggregate status/action text remains in the collapsed chat header.
+    expect(transcriptActivityGroupSource).not.toContain("data-activity-action");
+    expect(transcriptActivityGroupSource).not.toContain("data-activity-active");
+    expect(transcriptActivityGroupSource).not.toContain("data-activity-more");
+    expect(transcriptActivityGroupSource).not.toContain("data-activity-settled");
+    // The comma list keeps native tones regardless of liveness; thinking stays neutral.
+    expect(transcriptActivityGroupSource).toContain("activityGroupPresentationLabels");
+    expect(transcriptActivityGroupSource).toContain("data-activity-name={label.name}");
+    expect(transcriptActivityGroupSource).toContain("data-tool-tone={label.tone}");
+    expect(transcriptActivityGroupSource).toContain('"tool-name font-normal"');
+    expect(transcriptActivityGroupSource).toContain('"font-normal text-muted-foreground/85"');
+    expect(transcriptActivityGroupSource).not.toContain("text-primary");
+    expect(transcriptActivityGroupSource).not.toContain("animate-pulse");
     expect(transcriptActivityGroupSource).toContain('<Brain class="h-3 w-3 shrink-0 text-muted-foreground/65"');
     expect(transcriptActivityGroupSource).toContain('data-activity-thought-label class="text-muted-foreground/85"');
   });
@@ -162,6 +225,8 @@ describe("desktop visual regressions", () => {
     expect(statusBarViewModelSource).toContain("sessionSubagentSnapshot: options.sessionSubagentSnapshot()");
     expect(statusBarViewModelSource).toContain("sessionTodoSnapshot: options.sessionTodoSnapshot()");
     expect(sessionActivityStatusHudSource).toContain("sessionSubagentIndicators(subagentSnapshot)");
+    expect(sessionActivityStatusHudSource).toContain('(indicator.agent.status === "running" || indicator.agent.status === "retrying")');
+    expect(sessionActivityStatusHudSource).toContain('"animate-pulse motion-reduce:animate-none"');
     expect(sessionActivityStatusHudSource).toContain("currentSessionTodoTask(todoSnapshot)");
     expect(sessionActivityStatusHudSource).toContain("visibleSessionTodoRows(todoSnapshot)");
     expect(sessionActivityStatusHudSource).toContain('data-session-activity-summary');
@@ -205,17 +270,18 @@ describe("desktop visual regressions", () => {
     expect(statusSource).toContain("<ModelProviderIcon provider={modelThinking.currentModel.provider} />");
   });
 
-  it("keeps ACP status out of chrome and pulses the composer border for active-conversation work", () => {
+  it("keeps ACP status out of chrome and leaves the composer free of a working pulse", () => {
     expect(statusSource).not.toContain("ACP");
     expect(statusSource).not.toContain("connection-activity");
     expect(statusSource).not.toContain("bg-status");
     expect(statusBarViewModelSource).not.toContain("status: connectionStatus");
-    expect(workbenchPropBuildersSource).toContain("activeWorking: options.statusReady() && options.promptRunning()");
-    expect(composerSource).toContain('activeWorking && "composer-working border-primary"');
-    expect(composerSource).toContain("animation: composer-working-border-pulse 1.8s ease-in-out infinite");
-    expect(composerSource).toContain("50% { border-color: var(--color-input); }");
-    expect(composerSource).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(composerSource).toContain(".composer-working { animation: none; }");
+    expect(workbenchPropBuildersSource).not.toContain("activeWorking");
+    expect(composerSource).not.toContain("activeWorking");
+    expect(composerSource).not.toContain("composer-working");
+    expect(composerSource).not.toContain("border-pulse");
+    // Ordinary input focus semantics stay intact without a working border.
+    expect(composerSource).toContain("focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/25");
+    expect(composerSource).toContain("dragActive || projectPathDragActive ? \"border-ring ring-1 ring-ring/40\" : \"border-input\"");
 
     expect(transcriptSource).not.toContain('aria-label="Pix is working"');
     expect(transcriptSource).not.toContain('LoaderCircle from "@lucide/svelte/icons/loader-circle"');

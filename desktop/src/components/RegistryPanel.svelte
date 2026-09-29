@@ -7,6 +7,7 @@
   import CircleX from "@lucide/svelte/icons/circle-x";
   import CloudOff from "@lucide/svelte/icons/cloud-off";
   import Download from "@lucide/svelte/icons/download";
+  import FileDiff from "@lucide/svelte/icons/file-diff";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2Off from "@lucide/svelte/icons/link-2-off";
@@ -23,6 +24,7 @@
   import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
   import {
     registryCatalogItems,
+    registryDiffAvailable,
     registryFriendlyActionLabel,
     registryFriendlyStatusDescription,
     registryFriendlyStatusLabel,
@@ -30,6 +32,8 @@
     searchRegistryItems,
     type RegistryActionRequest,
     type RegistryCatalogSection,
+    type RegistryDiffState,
+    type RegistryDiffTarget,
     type RegistryItem,
     type RegistryItemAction,
     type RegistryProjectArtifact,
@@ -37,6 +41,7 @@
     type RegistrySnapshot,
     type RegistryStatus,
   } from "../lib/registry";
+  import RegistryDiffPanel from "./RegistryDiffPanel.svelte";
 
   type RegistryFilter = "all" | Exclude<RegistryResourceType, "project">;
 
@@ -51,11 +56,14 @@
     loading,
     remoteDisabled,
     actionId,
+    diff,
     onRefresh,
     onInitializeProject,
     onCleanProject,
     onAction,
     onOpenProjectArtifact,
+    onDiff,
+    onCloseDiff,
   }: {
     snapshot: RegistrySnapshot | undefined;
     projectInitialized: boolean | undefined;
@@ -67,17 +75,34 @@
     loading: boolean;
     remoteDisabled: boolean;
     actionId: string | null;
+    diff: RegistryDiffState | undefined;
     onRefresh: () => void;
     onInitializeProject: () => void;
     onCleanProject: () => void;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
     onOpenProjectArtifact: (artifact: RegistryProjectArtifact) => void;
+    onDiff: (item: RegistryItem) => void;
+    onCloseDiff: () => void;
   } = $props();
 
   let filter = $state<RegistryFilter>("all");
   let catalogSection = $state<RegistryCatalogSection>("installed");
   let query = $state("");
   let projectReviewOpen = $state(false);
+  let panelRoot = $state<HTMLElement | null>(null);
+  let lastDiffTriggerId = $state<string | null>(null);
+
+  $effect(() => {
+    // Closing the diff remounts the catalog; send focus back to the Diff
+    // button that opened it instead of dropping keyboard users on the body.
+    if (diff === undefined && lastDiffTriggerId !== null) {
+      const triggerId = lastDiffTriggerId;
+      lastDiffTriggerId = null;
+      panelRoot
+        ?.querySelector<HTMLElement>(`[data-registry-diff-trigger="${CSS.escape(triggerId)}"]`)
+        ?.focus();
+    }
+  });
   const projectItems = $derived((snapshot?.items ?? []).filter((item) => item.type === "project"));
   const projectPendingItems = $derived(projectItems.filter((item) => item.status !== "up-to-date"));
   const projectConflictCount = $derived(projectItems.filter((item) => item.status === "diverged" || item.status === "registry-changed" || item.status === "untracked-local").length);
@@ -155,6 +180,27 @@
     onAction(request, `${item.id}:${action}`);
   }
 
+  function diffLoadingFor(item: RegistryItem): boolean {
+    return diff?.phase === "loading"
+      && diff.target.type === item.type
+      && diff.target.name === item.name;
+  }
+
+  function openItemDiff(item: RegistryItem): void {
+    // Remember the trigger so closing the diff can restore keyboard focus:
+    // the catalog (and this button) unmounts while the diff view is open.
+    lastDiffTriggerId = item.id;
+    onDiff(item);
+  }
+
+  function retryDiff(target: RegistryDiffTarget): void {
+    const item = (snapshot?.items ?? []).find(
+      (candidate) => candidate.type === target.type && candidate.name === target.name && registryDiffAvailable(candidate),
+    );
+    if (item) openItemDiff(item);
+    else onCloseDiff();
+  }
+
   function statusTitle(item: RegistryItem): string {
     return `${registryFriendlyStatusLabel(item)} — ${registryFriendlyStatusDescription(item)}`;
   }
@@ -200,7 +246,15 @@
   }
 </script>
 
-<section class="flex min-h-0 min-w-0 w-full flex-col overflow-hidden" aria-label="Resource registry">
+<section class="flex min-h-0 min-w-0 w-full flex-col overflow-hidden" aria-label="Resource registry" bind:this={panelRoot}>
+  {#if diff}
+    {@const diffState = diff}
+    <RegistryDiffPanel
+      diff={diffState}
+      onClose={onCloseDiff}
+      onRetry={() => retryDiff(diffState.target)}
+    />
+  {:else}
   <div class="min-w-0 space-y-1.5 border-b border-sidebar-border bg-panel p-2">
     <div class="flex min-w-0 items-center gap-2 px-1 py-1">
       <span class="min-w-0 flex-1">
@@ -451,8 +505,26 @@
                   <p class={["mt-0.5 text-xs font-semibold leading-3.5", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</p>
                   {#if item.description}<p class="line-clamp-1 text-xs leading-3.5 text-muted-foreground/80" title={item.description}>{item.description}</p>{/if}
                 </div>
-                {#if item.actions.length > 0}
+                {#if registryDiffAvailable(item) || item.actions.length > 0}
                   <div class="flex shrink-0 items-center gap-0.5">
+                    {#if registryDiffAvailable(item)}
+                      {@const diffBusy = diffLoadingFor(item)}
+                      <button
+                        class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+                        type="button"
+                        disabled={remoteDisabled || diffBusy}
+                        title={`Compare registry and local copies: ${item.name}`}
+                        aria-label={`Compare registry and local copies: ${item.name}`}
+                        data-registry-diff-trigger={item.id}
+                        onclick={() => openItemDiff(item)}
+                      >
+                        {#if diffBusy}
+                          <RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                        {:else}
+                          <FileDiff class="h-3.5 w-3.5" aria-hidden="true" />
+                        {/if}
+                      </button>
+                    {/if}
                     {#each item.actions as action}
                       {@const actionBusy = actionId === `${item.id}:${action}`}
                       {@const actionLabel = registryFriendlyActionLabel(item, action)}
@@ -492,4 +564,5 @@
       {/if}
     {/if}
   </div>
+  {/if}
 </section>

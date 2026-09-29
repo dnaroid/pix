@@ -16,7 +16,7 @@ import {
   PIX_SESSION_STATE_METHOD,
   parseSessionStateNotification,
 } from "./session-state";
-import type { RegistryActionRequest, RegistrySnapshot } from "./registry";
+import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, RegistrySnapshot } from "./registry";
 import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
@@ -268,6 +268,10 @@ export class AcpClient {
 
   registryAction(cwd: string, action: RegistryActionRequest): Promise<RegistrySnapshot> {
     return this.pix.registryAction(cwd, action);
+  }
+
+  registryDiff(cwd: string, type: Exclude<RegistryResourceType, "project">, name: string): Promise<RegistryDiff> {
+    return this.pix.registryDiff(cwd, type, name);
   }
 
   queueMessage(

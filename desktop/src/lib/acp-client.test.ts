@@ -556,6 +556,32 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("requests a read-only registry resource diff with the registry as the old side", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const files = [
+      { path: "agents/researcher.md", oldText: "old body\n", newText: "new body\n" },
+      { path: "agents/researcher/notes.md", oldText: null, newText: "added sidecar\n" },
+      { path: "agents/researcher/logo.png", oldText: null, newText: null, notice: "Binary file not shown" },
+    ];
+
+    const reading = client.registryDiff("/project", "agent", "researcher");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/registry/diff",
+      params: { cwd: "/project", type: "agent", name: "researcher" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { files } });
+    await expect(reading).resolves.toEqual({ files });
+
+    const invalid = client.registryDiff("/project", "skill", "demo");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: { files: "nope" } });
+    await expect(invalid).rejects.toThrow("pix/registry/diff returned an invalid registry diff");
+
+    await client.dispose();
+  });
+
   it("can request full session history explicitly for interactive jump", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

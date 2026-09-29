@@ -1,6 +1,13 @@
 import type { ContentBlock, SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk";
 import { isAgentControlState, type AgentControlAction } from "./agent-control";
-import { parseRegistrySnapshot, type RegistryActionRequest, type RegistrySnapshot } from "./registry";
+import {
+  parseRegistryDiff,
+  parseRegistrySnapshot,
+  type RegistryActionRequest,
+  type RegistryDiff,
+  type RegistryResourceType,
+  type RegistrySnapshot,
+} from "./registry";
 import { isRecord, parseClaudeQuotaRefresh, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
 import type {
   AgentControlStatus,
@@ -288,6 +295,22 @@ export class AcpPixExtensions {
     const snapshot = parseRegistrySnapshot(response.snapshot);
     if (!snapshot) throw new Error("pix/registry/action returned an invalid registry snapshot");
     return snapshot;
+  }
+
+  /**
+   * Read-only file-by-file comparison of one resource's registry copy (old
+   * side) against its local project copy (new side). Never syncs either side.
+   */
+  async registryDiff(
+    cwd: string,
+    type: Exclude<RegistryResourceType, "project">,
+    name: string,
+  ): Promise<RegistryDiff> {
+    const response = await this.request<unknown>("pix/registry/diff", { cwd, type, name }, null);
+    if (!isRecord(response)) throw new Error("pix/registry/diff returned an invalid response");
+    const diff = parseRegistryDiff(response);
+    if (!diff) throw new Error("pix/registry/diff returned an invalid registry diff");
+    return diff;
   }
 
   async queueMessage(

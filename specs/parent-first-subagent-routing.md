@@ -52,10 +52,12 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
    research answers a named uncertainty, independent hypothesis, or noisy
    evidence question. An explicit user request to delegate/parallelize/split work
    remains a delegation trigger after this minimal scoping pass.
-8. `implement` delegation starts only after the parent has settled the cause,
-   desired behavior, and acceptance criteria. The task should be the smallest
-   coherent substantial slice that benefits from isolation or a lower-cost
-   worker; broad speculative cross-layer edits are not the default. Planning,
+8. The parent writes code by default. `implement` delegation requires an
+   explicit user request or a substantial independent task that can run
+   alongside useful parent work; task size, isolation, lower cost, or worker
+   availability alone are not sufficient. It still starts only after the parent
+   has settled the cause, desired behavior, and acceptance criteria; broad
+   speculative cross-layer edits are not the default. Planning,
    product/UX decisions, integration, and the final answer remain parent-owned.
 9. Spawn is not a reason to idle the parent. After spawning, the parent continues
    independent work and does not poll or wait merely for progress. Waiting is

@@ -324,7 +324,7 @@
       {#if editing}
         <textarea
           bind:this={editorElement}
-          class="min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          class="preview-editor min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           bind:value={editorState.draft}
           aria-label={`Edit ${file.path}`}
           spellcheck="false"

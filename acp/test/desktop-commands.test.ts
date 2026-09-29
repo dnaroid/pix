@@ -8,12 +8,14 @@ import {
 	PIX_MODEL_ROUTING_STATUS_METHOD,
 	PIX_MODEL_ROUTE_METHOD,
 	PIX_REGISTRY_ACTION_METHOD,
+	PIX_REGISTRY_DIFF_METHOD,
 	PIX_TOOL_RESULT_METHOD,
 	parseDesktopDraftConfigRequest,
 	parseDesktopModelRoutingStatusRequest,
 	parseDesktopModelRouteRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopRegistryActionRequest,
+	parseDesktopRegistryDiffRequest,
 	parseDesktopToolResultRequest,
 } from "../src/acp/desktop-commands.js";
 
@@ -125,6 +127,32 @@ test("desktop registry actions are workspace-scoped and validate resource/projec
 	assert.throws(() => parseDesktopRegistryActionRequest({ action: "refresh" }));
 	assert.throws(() => parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "remove", type: "skill", name: "../bad" }));
 	assert.throws(() => parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "pull-project", scope: "skills" }));
+});
+
+test("desktop registry diff is workspace-scoped and validates one reusable resource target", () => {
+	assert.equal(PIX_REGISTRY_DIFF_METHOD, "pix/registry/diff");
+	assert.deepEqual(parseDesktopRegistryDiffRequest({
+		cwd: "/workspace",
+		type: "skill",
+		name: "pdf",
+		sessionId: "ignored",
+	}), {
+		cwd: "/workspace",
+		type: "skill",
+		name: "pdf",
+	});
+	assert.deepEqual(parseDesktopRegistryDiffRequest({ cwd: "/workspace", type: "agent", name: "reviewer.v2" }), {
+		cwd: "/workspace",
+		type: "agent",
+		name: "reviewer.v2",
+	});
+	assert.throws(() => parseDesktopRegistryDiffRequest({ type: "skill", name: "pdf" }));
+	assert.throws(() => parseDesktopRegistryDiffRequest({ cwd: "", type: "skill", name: "pdf" }));
+	assert.throws(() => parseDesktopRegistryDiffRequest({ cwd: "/workspace", type: "project", name: "tasks" }));
+	assert.throws(() => parseDesktopRegistryDiffRequest({ cwd: "/workspace", name: "pdf" }));
+	assert.throws(() => parseDesktopRegistryDiffRequest({ cwd: "/workspace", type: "skill" }));
+	assert.throws(() => parseDesktopRegistryDiffRequest({ cwd: "/workspace", type: "skill", name: "../bad" }));
+	assert.throws(() => parseDesktopRegistryDiffRequest({ cwd: "/workspace", type: "skill", name: "-leading" }));
 });
 
 test("desktop Git assistant accepts bounded review and commit-message diffs", () => {

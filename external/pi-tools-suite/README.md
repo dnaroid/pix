@@ -518,10 +518,11 @@ For non-UI work, start with the shortest parent pass that resolves user intent,
 semantics, and the main causal path. If a few targeted repository searches or
 reads are enough to establish the diagnosis and desired behavior, continue in
 the parent instead of spawning research that repeats the same investigation.
-Delegate a named uncertainty, independent track, noisy evidence-gathering step,
-or a substantial and well-specified implementation slice that clearly benefits
-from isolation or a lower-cost worker. A sequential task qualifies only when it
-is genuinely substantial and bounded, not merely because a worker is available.
+Write code in the parent by default. Delegate implementation only on explicit
+user request or for a substantial independent task alongside useful parent work.
+Size, isolation, lower cost, or worker availability alone are not sufficient.
+Research may address a named uncertainty or independent evidence track.
+Mandatory UI QA, review and knowledge-audit gates remain exceptions.
 
 Keep product/UX decisions and integration in the parent. Do not delegate
 implementation before the cause, desired behavior, and acceptance criteria are

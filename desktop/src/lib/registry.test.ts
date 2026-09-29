@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   REGISTRY_STATE_CHANNEL,
   compareRegistryItems,
+  parseRegistryDiff,
   registryActionLabel,
   registryCatalogItems,
   registryCatalogSection,
+  registryDiffAvailable,
   registryFriendlyActionLabel,
   registryFriendlyStatusDescription,
   registryFriendlyStatusLabel,
@@ -13,6 +15,7 @@ import {
   searchRegistryItems,
   registrySnapshotFromSessionState,
   type RegistryItem,
+  type RegistryStatus,
 } from "./registry";
 
 describe("registry session state", () => {
@@ -264,5 +267,74 @@ describe("registry session state", () => {
     expect(searchRegistryItems(items, "todo").map((item) => item.id)).toEqual(["project:todo"]);
     expect(searchRegistryItems(items, "plan").map((item) => item.id)).toEqual(["project:plans"]);
     expect(searchRegistryItems(items, "task").map((item) => item.id)).toEqual(["project:tasks"]);
+  });
+});
+
+describe("registry resource diff", () => {
+  function diffableItem(overrides: Partial<RegistryItem> = {}): RegistryItem {
+    return {
+      id: "agent:researcher",
+      type: "agent",
+      name: "researcher",
+      status: "diverged",
+      statusLabel: "DIVERGED",
+      icon: "!",
+      local: true,
+      remote: true,
+      actions: ["push", "pull"],
+      ...overrides,
+    };
+  }
+
+  it("parses a structured file diff with null sides and notices", () => {
+    const diff = parseRegistryDiff({
+      files: [
+        { path: "agents/researcher.md", oldText: "old body\n", newText: "new body\n" },
+        { path: "agents/researcher/notes.md", oldText: null, newText: "added sidecar\n" },
+        { path: "agents/researcher/old.md", oldText: "gone\n", newText: null },
+        { path: "agents/researcher/logo.png", oldText: null, newText: null, notice: "Binary file not shown" },
+      ],
+    });
+
+    expect(diff?.files).toHaveLength(4);
+    expect(diff?.files[0]).toEqual({ path: "agents/researcher.md", oldText: "old body\n", newText: "new body\n" });
+    expect(diff?.files[1]?.oldText).toBeNull();
+    expect(diff?.files[2]?.newText).toBeNull();
+    expect(diff?.files[3]).toEqual({
+      path: "agents/researcher/logo.png",
+      oldText: null,
+      newText: null,
+      notice: "Binary file not shown",
+    });
+  });
+
+  it("rejects malformed diff payloads", () => {
+    expect(parseRegistryDiff(undefined)).toBeUndefined();
+    expect(parseRegistryDiff({})).toBeUndefined();
+    expect(parseRegistryDiff({ files: "nope" })).toBeUndefined();
+    expect(parseRegistryDiff({ files: [{ path: "", oldText: null, newText: null }] })).toBeUndefined();
+    expect(parseRegistryDiff({ files: [{ path: "a.md", oldText: 7, newText: null }] })).toBeUndefined();
+    expect(parseRegistryDiff({ files: [{ path: "a.md", oldText: null, newText: null, notice: 3 }] })).toBeUndefined();
+  });
+
+  it("offers a two-sided diff only for changed resources with both copies", () => {
+    const twoSided: RegistryStatus[] = ["local-changes", "update-available", "diverged", "untracked-local"];
+    for (const status of twoSided) {
+      expect(registryDiffAvailable(diffableItem({ status }))).toBe(true);
+    }
+
+    expect(registryDiffAvailable(diffableItem({ status: "up-to-date" }))).toBe(false);
+    expect(registryDiffAvailable(diffableItem({ status: "local-only", remote: false }))).toBe(false);
+    expect(registryDiffAvailable(diffableItem({ status: "not-installed", local: false }))).toBe(false);
+    expect(registryDiffAvailable(diffableItem({ status: "missing-local", local: false }))).toBe(false);
+    expect(registryDiffAvailable(diffableItem({ status: "removed-remote", remote: false }))).toBe(false);
+    expect(registryDiffAvailable(diffableItem({ status: "registry-changed" }))).toBe(true);
+    expect(registryDiffAvailable(diffableItem({ type: "skill", status: "local-changes" }))).toBe(true);
+    expect(registryDiffAvailable({
+      ...diffableItem(),
+      type: "project",
+      artifact: "todo",
+      status: "local-changes",
+    })).toBe(false);
   });
 });

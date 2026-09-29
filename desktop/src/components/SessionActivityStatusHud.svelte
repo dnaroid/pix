@@ -150,7 +150,14 @@
           aria-describedby={tooltipId}
           onclick={onOpenSessionActivity}
         >
-          <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
+          <AgentIcon
+            class={[
+              "h-3.5 w-3.5",
+              (indicator.agent.status === "running" || indicator.agent.status === "retrying")
+                && "animate-pulse motion-reduce:animate-none",
+            ]}
+            aria-hidden="true"
+          />
         </button>
         <div
           id={tooltipId}

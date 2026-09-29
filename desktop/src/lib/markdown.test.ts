@@ -28,6 +28,7 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<code>code</code>");
     expect(html).toContain("<ul><li>first</li><li class=\"task-item\"><input type=\"checkbox\" disabled checked>done</li></ul>");
     expect(html).toContain("<blockquote><p>quoted</p></blockquote>");
+    expect(html).not.toContain('class="selection-ink"');
   });
 
   it("renders complete and streaming fenced code without interpreting its contents", () => {
@@ -278,7 +279,7 @@ describe("renderMarkdown", () => {
     expect(html).toContain(
       'data-project-file-candidate="desktop/src/components/TranscriptPane.svelte"',
     );
-    expect(html).toContain("<code>desktop/src/components/TranscriptPane.svelte</code></span>");
+    expect(html).toContain("<code>desktop/src/components/TranscriptPane.svelte</code>");
     expect(html).toContain('data-project-file-candidate="src/App.svelte"');
     expect(html).toContain('data-project-file-start-line="42"');
     expect(html).toContain('data-project-file-end-line="42"');

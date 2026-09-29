@@ -46,6 +46,27 @@ export interface RegistrySnapshot {
   readonly error?: string;
 }
 
+export interface RegistryDiffFile {
+  readonly path: string;
+  readonly oldText: string | null;
+  readonly newText: string | null;
+  readonly notice?: string;
+}
+
+export interface RegistryDiff {
+  readonly files: readonly RegistryDiffFile[];
+}
+
+export type RegistryDiffTarget = {
+  readonly type: Exclude<RegistryResourceType, "project">;
+  readonly name: string;
+};
+
+export type RegistryDiffState =
+  | { readonly phase: "loading"; readonly target: RegistryDiffTarget }
+  | { readonly phase: "ready"; readonly target: RegistryDiffTarget; readonly files: readonly RegistryDiffFile[] }
+  | { readonly phase: "error"; readonly target: RegistryDiffTarget; readonly error: string };
+
 export type RegistryActionRequest =
   | { readonly action: "refresh" | "configure" | "project-key" }
   | {
@@ -73,6 +94,13 @@ const STATUSES = new Set<RegistryStatus>([
   "registry-changed",
 ]);
 const ACTIONS = new Set<RegistryItemAction>(["install", "update", "push", "pull", "uninstall", "remove"]);
+const DIFFABLE_STATUSES = new Set<RegistryStatus>([
+  "local-changes",
+  "update-available",
+  "diverged",
+  "untracked-local",
+  "registry-changed",
+]);
 
 export function registrySnapshotFromSessionState(
   notification: SessionStateNotification,
@@ -107,6 +135,18 @@ export function registryCatalogItems(
 
 export function registryPrimaryAction(item: RegistryItem): RegistryItemAction | undefined {
   return item.actions.find((action) => action !== "uninstall" && action !== "remove");
+}
+
+/**
+ * A two-sided Diff needs both a local project copy and a registry copy that
+ * differ since the last sync. One-sided or synced resources have nothing to
+ * compare, and project-sync artifacts use their own review flow.
+ */
+export function registryDiffAvailable(item: RegistryItem): boolean {
+  return item.type !== "project"
+    && item.local
+    && item.remote
+    && DIFFABLE_STATUSES.has(item.status);
 }
 
 export function registryActionLabel(action: RegistryItemAction): string {
@@ -234,6 +274,26 @@ export function parseRegistrySnapshot(value: unknown): RegistrySnapshot | undefi
     checkedAt: value.checkedAt,
     ...(typeof value.error === "string" ? { error: value.error } : {}),
   };
+}
+
+/** Parse the `pix/registry/diff` payload. `oldText` is the registry copy, `newText` the local one. */
+export function parseRegistryDiff(value: unknown): RegistryDiff | undefined {
+  if (!isRecord(value) || !Array.isArray(value.files)) return undefined;
+  const files: RegistryDiffFile[] = [];
+  for (const candidate of value.files) {
+    if (!isRecord(candidate)) return undefined;
+    if (typeof candidate.path !== "string" || !candidate.path) return undefined;
+    if (candidate.oldText !== null && typeof candidate.oldText !== "string") return undefined;
+    if (candidate.newText !== null && typeof candidate.newText !== "string") return undefined;
+    if (candidate.notice !== undefined && typeof candidate.notice !== "string") return undefined;
+    files.push({
+      path: candidate.path,
+      oldText: candidate.oldText,
+      newText: candidate.newText,
+      ...(typeof candidate.notice === "string" ? { notice: candidate.notice } : {}),
+    });
+  }
+  return { files };
 }
 
 function parseRegistryItem(value: unknown): RegistryItem | undefined {

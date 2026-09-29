@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRegistryStore } from "./registry.svelte";
+import type { RegistryItem } from "../lib/registry";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -264,5 +265,139 @@ describe("Registry workspace actions", () => {
 
     expect(registryAction).toHaveBeenCalledWith("/project", { action: "refresh" });
     expect(store.snapshot).toEqual(snapshot);
+  });
+});
+
+describe("Registry resource diff", () => {
+  async function settle(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  function diffFixture(registryDiffImpl?: (cwd: string, type: string, name: string) => Promise<unknown>) {
+    let workspace = "/project";
+    const registryDiff = vi.fn(registryDiffImpl ?? (async () => ({ files: [] })));
+    const client = { registryDiff } as any;
+    const store = createRegistryStore({
+      client: () => client,
+      operationRunning: () => false,
+      workspace: () => workspace,
+      sessionWorkspace: () => undefined,
+      setErrorMessage: vi.fn(),
+      loadProjectTasks: vi.fn(),
+      loadProjectDocuments: vi.fn(),
+      reportError: vi.fn(),
+    });
+    return {
+      store,
+      registryDiff,
+      setWorkspace(value: string) {
+        workspace = value;
+        store.reset();
+      },
+    };
+  }
+
+  const agentItem = (overrides: Partial<RegistryItem> = {}): RegistryItem => ({
+    id: `agent:${overrides.name ?? "researcher"}`,
+    type: "agent",
+    name: "researcher",
+    status: "diverged",
+    statusLabel: "DIVERGED",
+    icon: "!",
+    local: true,
+    remote: true,
+    actions: ["push", "pull"],
+    ...overrides,
+  });
+
+  it("loads a two-sided diff on demand without running a mutating registry action", async () => {
+    const files = [{ path: "agents/researcher.md", oldText: "old\n", newText: "new\n" }];
+    const { store, registryDiff } = diffFixture(async () => ({ files }));
+
+    store.openDiff(agentItem());
+
+    expect(store.diff).toMatchObject({ phase: "loading", target: { type: "agent", name: "researcher" } });
+    await vi.waitFor(() => expect(store.diff?.phase).toBe("ready"));
+    expect(registryDiff).toHaveBeenCalledWith("/project", "agent", "researcher");
+    expect(store.diff).toMatchObject({ phase: "ready", files });
+    expect(store.actionId).toBeNull();
+  });
+
+  it("does not open a diff for one-sided or synced resources", () => {
+    const { store, registryDiff } = diffFixture();
+
+    store.openDiff(agentItem({ status: "up-to-date" }));
+    store.openDiff(agentItem({ status: "local-only", remote: false }));
+    store.openDiff(agentItem({ name: "todo", type: "project" }));
+
+    expect(store.diff).toBeUndefined();
+    expect(registryDiff).not.toHaveBeenCalled();
+  });
+
+  it("surfaces read errors instead of an empty diff", async () => {
+    const { store } = diffFixture(async () => {
+      throw new Error("registry data unavailable");
+    });
+
+    store.openDiff(agentItem());
+    await vi.waitFor(() => expect(store.diff?.phase).toBe("error"));
+
+    expect(store.diff).toMatchObject({
+      phase: "error",
+      target: { name: "researcher" },
+      error: "registry data unavailable",
+    });
+  });
+
+  it("replaces the view when another resource diff is opened before the first resolves", async () => {
+    let finishFirst!: (value: { files: unknown[] }) => void;
+    const { store, registryDiff } = diffFixture((_cwd: string, _type: string, name: string) => {
+      if (name === "researcher") {
+        return new Promise((resolve) => {
+          finishFirst = resolve;
+        });
+      }
+      return Promise.resolve({ files: [{ path: "skills/pdf/SKILL.md", oldText: null, newText: "new\n" }] });
+    });
+
+    store.openDiff(agentItem());
+    store.openDiff(agentItem({ name: "pdf", type: "skill", status: "local-changes" }));
+    await vi.waitFor(() => expect(store.diff?.phase).toBe("ready"));
+    finishFirst({ files: [{ path: "agents/researcher.md", oldText: "old\n", newText: "older\n" }] });
+    await settle();
+
+    expect(store.diff).toMatchObject({
+      phase: "ready",
+      target: { type: "skill", name: "pdf" },
+    });
+    expect(registryDiff).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a late response after the diff is closed", async () => {
+    let finish!: (value: { files: unknown[] }) => void;
+    const { store } = diffFixture(() => new Promise((resolve) => {
+      finish = resolve;
+    }));
+
+    store.openDiff(agentItem());
+    store.closeDiff();
+    finish({ files: [{ path: "agents/researcher.md", oldText: null, newText: "late\n" }] });
+    await settle();
+
+    expect(store.diff).toBeUndefined();
+  });
+
+  it("drops the diff on workspace reset and ignores its late response", async () => {
+    let finish!: (value: { files: unknown[] }) => void;
+    const { store, setWorkspace } = diffFixture(() => new Promise((resolve) => {
+      finish = resolve;
+    }));
+
+    store.openDiff(agentItem());
+    setWorkspace("/other");
+    finish({ files: [{ path: "agents/researcher.md", oldText: null, newText: "late\n" }] });
+    await settle();
+
+    expect(store.diff).toBeUndefined();
   });
 });

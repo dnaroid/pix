@@ -163,15 +163,24 @@ try {
 
   const inactiveTimerCount = await page.evaluate(() => window.activitySmoke.timerCount);
   await page.evaluate(() => window.activitySmoke.startLive());
-  const activeThinkingHeader = page.locator('[data-activity-name="thinking"]');
-  assert.equal(await activeThinkingHeader.getAttribute("data-activity-active"), "true");
+  // The collapsed chat header is one line: chevron, comma list, elapsed time.
+  const headerThinkingName = page.locator('[data-activity-name="thinking"]');
+  assert.equal(await outerSummary.locator(":scope > svg").count(), 1, "the chevron is the header's only icon");
+  assert.equal((await outerSummary.textContent()).trim().startsWith("thinking"), true,
+    "the collapsed header names the live thought once");
+  const nameBox = await headerThinkingName.boundingBox();
+  const durationBox = await page.locator("[data-activity-duration]").boundingBox();
+  assert(nameBox && durationBox
+    && Math.abs((nameBox.y + nameBox.height / 2) - (durationBox.y + durationBox.height / 2)) < 1,
+    "names and elapsed time share one header line");
+  assert.equal(await headerThinkingName.getAttribute("data-tool-tone"), null, "thinking keeps a neutral list name");
+  const neutralColor = await headerThinkingName.evaluate((node) => getComputedStyle(node).color);
   await outerSummary.click();
   const childThinking = page.locator("[data-activity-thought-label]");
   await page.waitForFunction(() => document.querySelector("[data-activity-thought-label]") !== null);
   assert.equal(await childThinking.count(), 1);
-  const headerThinkingColor = await activeThinkingHeader.evaluate((node) => getComputedStyle(node).color);
-  const childThinkingColor = await childThinking.evaluate((node) => getComputedStyle(node).color);
-  assert.notEqual(childThinkingColor, headerThinkingColor, "expanded thinking row must not duplicate active header emphasis");
+  assert.equal(await childThinking.evaluate((node) => getComputedStyle(node).color), neutralColor,
+    "thinking stays neutral in the header and child rows");
   await outerSummary.click();
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "<0.1s");
   assert.equal(await page.evaluate(() => window.activitySmoke.timerCount), inactiveTimerCount + 1, "one pane clock serves live groups");
@@ -179,27 +188,57 @@ try {
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "1.3s");
   await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "running-read",
     name: "read", title: "Read /repo/skills/demo/SKILL.md", status: "in_progress" }));
-  assert.equal(await page.locator('[data-activity-name="thinking"]').getAttribute("data-activity-active"), "false");
-  const activeSkillHeader = page.locator('[data-activity-name="skill demo"]');
-  assert.equal(await activeSkillHeader.getAttribute("data-activity-active"), "true");
+  const skillListName = page.locator('[data-activity-name="skill demo"]');
+  assert.equal(await skillListName.getAttribute("data-tool-tone"), "context");
   await outerSummary.click();
   const skillRow = page.locator('[data-activity-entry-id="tool:running-read"]');
   assert.equal(await skillRow.locator('.tool-name').textContent(), "skill");
   assert.match(await skillRow.textContent(), /skill\s+demo/);
+  const skillToneColor = await skillRow.locator(".tool-name").evaluate((node) => getComputedStyle(node).color);
   await outerSummary.click();
+  assert.equal(await skillListName.evaluate((node) => getComputedStyle(node).color), skillToneColor,
+    "the collapsed list name reuses the expanded row's native tool tone");
+  assert.notEqual(skillToneColor, neutralColor, "a tool list name is not neutral gray");
+  await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "parallel-grep",
+    name: "grep", title: "Grep", status: "in_progress", rawInput: { pattern: "TODO" } }));
+  const grepListName = page.locator('[data-activity-name="grep"]');
+  assert.equal(await grepListName.getAttribute("data-tool-tone"), "search");
+  assert.equal(await grepListName.count(), 1, "repeated names stay deduplicated in the comma list");
+  assert.match(await outerSummary.textContent(), /thinking, skill demo, grep/, "the list stays one comma-separated line");
+  await outerSummary.click();
+  const grepToneColor = await page.locator('[data-activity-entry-id="tool:parallel-grep"] .tool-name').evaluate((node) => getComputedStyle(node).color);
+  await outerSummary.click();
+  assert.equal(await grepListName.evaluate((node) => getComputedStyle(node).color), grepToneColor,
+    "the parallel tool's list name keeps its own native tone");
   assert.equal(await outer.count(), 1);
   await page.evaluate(() => window.activitySmoke.advanceClock(700));
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s");
   await page.evaluate(async () => {
     await window.activitySmoke.update({ sessionUpdate: "tool_call_update", toolCallId: "running-read", status: "completed" });
+    await window.activitySmoke.update({ sessionUpdate: "tool_call_update", toolCallId: "parallel-grep", status: "completed" });
     await window.activitySmoke.settle();
   });
-  assert.equal(await page.locator('[data-activity-active="true"]').count(), 0);
-  assert.equal(await activeSkillHeader.getAttribute("data-activity-active"), "false");
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s");
+  assert.equal(await skillListName.evaluate((node) => getComputedStyle(node).color), skillToneColor,
+    "the settled list keeps its native tone without liveness");
+  assert.equal(await grepListName.evaluate((node) => getComputedStyle(node).color), grepToneColor,
+    "the settled list keeps each tool's native tone");
   assert.equal(await page.evaluate(() => window.activitySmoke.timerCount), inactiveTimerCount, "settled activity clears the pane clock");
   await page.evaluate(() => window.activitySmoke.advanceClock(10_000));
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s", "final duration does not advance");
+  // Failure stays on the child row: the header gains no icon, text, or tone change.
+  await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call_update", toolCallId: "parallel-grep", status: "failed" }));
+  assert.equal(await outerSummary.locator(":scope > svg").count(), 1, "the header gains no failure icon");
+  assert.match(await outerSummary.textContent(), /thinking, skill demo, grep/, "the header text is unchanged by a failed child");
+  assert.equal(await grepListName.evaluate((node) => getComputedStyle(node).color), grepToneColor, "the failed tool's list tone is unchanged");
+  await outerSummary.click();
+  await page.waitForFunction(() => {
+    const row = document.querySelector('[data-activity-entry-id="tool:parallel-grep"]');
+    return row !== null && row.querySelector("svg.text-destructive") !== null;
+  });
+  assert.equal(await page.locator('[data-activity-entry-id="tool:parallel-grep"] svg.text-destructive').count(), 1,
+    "the failed child keeps its failed icon on its own row");
+  await outerSummary.click();
 
   await outerSummary.focus();
   await page.keyboard.press("Enter");
@@ -219,7 +258,7 @@ try {
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 2);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: "passed", scenarios: ["lazy DOM", "per-tool hydration", "duplicate toggles",
-    "click/keyboard gutter collapse and preserved disclosure", "late result after collapse", "session replacement", "skill label and header-only live highlights and duration", "duration freeze and timer teardown",
+    "click/keyboard gutter collapse and preserved disclosure", "late result after collapse", "session replacement", "one-line header: chevron, native-tone comma list, elapsed time, no status icons, failure stays on child rows", "duration freeze and timer teardown",
     "keyboard disclosure", "large collapsed history"], stress }, null, 2));
 } finally {
   await browser?.close();

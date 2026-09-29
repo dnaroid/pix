@@ -37,6 +37,8 @@
   } from "../lib/project-documents";
   import {
     type RegistryActionRequest,
+    type RegistryDiffState,
+    type RegistryItem,
     type RegistryProjectArtifact,
     type RegistrySnapshot,
   } from "../lib/registry";
@@ -107,6 +109,7 @@
     registryBackgroundSync,
     registryLoading,
     registryActionId,
+    registryDiff,
     gitSnapshot,
     gitUninitialized,
     gitLoading,
@@ -147,6 +150,8 @@
     onRegistryInitializeProject,
     onRegistryCleanProject,
     onRegistryAction,
+    onRegistryDiff,
+    onRegistryCloseDiff,
     onRegistryProjectChange,
     onWorkspaceSettingsSave,
     onGitRefresh,
@@ -183,6 +188,7 @@
     registryBackgroundSync: RegistryBackgroundSyncState;
     registryLoading: boolean;
     registryActionId: string | null;
+    registryDiff: RegistryDiffState | undefined;
     gitSnapshot: GitSnapshot | undefined;
     gitUninitialized: boolean;
     gitLoading: boolean;
@@ -228,6 +234,8 @@
     onRegistryInitializeProject: () => void;
     onRegistryCleanProject: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
+    onRegistryDiff: (item: RegistryItem) => void;
+    onRegistryCloseDiff: () => void;
     onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
     onWorkspaceSettingsSave: (workspace: string) => void;
     onGitRefresh: () => void;
@@ -745,11 +753,14 @@
             loading={registryLoading}
             remoteDisabled={!registryReady}
             actionId={registryActionId}
+            diff={registryDiff}
             onRefresh={onRegistryRefresh}
             onInitializeProject={onRegistryInitializeProject}
             onCleanProject={onRegistryCleanProject}
             onAction={onRegistryAction}
             onOpenProjectArtifact={openRegistryProjectArtifact}
+            onDiff={onRegistryDiff}
+            onCloseDiff={onRegistryCloseDiff}
           />
         </div>
       {:else if activeTab === "scripts"}

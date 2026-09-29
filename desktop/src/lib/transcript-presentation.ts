@@ -1,5 +1,6 @@
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
-import { toolPresentationName } from "./tool-presentation";
+import { toolPresentationName, toolTone } from "./tool-presentation";
+import type { ToolTone } from "./tool-presentation";
 import type {
   ActivityEntry,
   ActivityGroupItem,
@@ -102,30 +103,114 @@ export function activityEntryActive(entry: ActivityEntry): boolean {
   return entry.startedAtMs !== undefined && entry.endedAtMs === undefined;
 }
 
-export interface ActivityGroupPresentationLabel {
-  readonly name: string;
+export interface ActivityGroupHeading {
+  /** One deterministic action while live; the settled outcome otherwise. */
+  readonly action: string;
   readonly active: boolean;
+  /** Further active entries behind the selected action, for a `+N more` hint. */
+  readonly moreCount: number;
+  /** True when the group contains a failed tool call. */
+  readonly failed: boolean;
 }
 
+const ACTIVITY_THINKING_ACTION = "Thinking";
+
+const ACTIVITY_ACTIONS_BY_NAME: readonly (readonly [readonly string[], string])[] = [
+  [["read", "read_file", "readoutput"], "Reading code"],
+  [["grep", "rg", "glob", "find", "search", "ast_grep"], "Searching project"],
+  [
+    ["edit", "multiedit", "write", "apply_patch", "ast_apply", "create_file", "update_file", "delete_file", "remove_file", "move_file", "rename_file"],
+    "Making changes",
+  ],
+  [["bash", "shell", "shell_command", "exec", "execute", "run_command"], "Running command"],
+  [["web_search"], "Searching the web"],
+  [["web_fetch", "fetch"], "Reading web page"],
+  [["subagent", "subagents", "agent", "agents", "task"], "Managing agents"],
+  [["question"], "Waiting for input"],
+  [["todo", "get_plan", "update_plan"], "Updating plan"],
+];
+
+const ACTIVITY_ACTIONS_BY_KIND: readonly (readonly [readonly string[], string])[] = [
+  [["read"], "Reading code"],
+  [["search"], "Searching project"],
+  [["edit", "mutation", "write"], "Making changes"],
+  [["execute"], "Running command"],
+  [["agent"], "Managing agents"],
+];
+
+/**
+ * One deterministic header action for an activity group: the most recent
+ * active entry in entry order while anything is live, otherwise the settled
+ * outcome (`Failed` when any tool call failed). The action text is neutral;
+ * native semantic colors apply to the collapsed name list, not the action.
+ * Derived only from normalized tool metadata; command text and status payloads
+ * are never inspected, so arbitrary commands are not reported as running tests
+ * and a subagent status call never claims spawning.
+ */
+export function activityGroupHeading(entries: readonly ActivityEntry[]): ActivityGroupHeading {
+  let action: string | undefined;
+  let activeCount = 0;
+  let failed = false;
+  for (const entry of entries) {
+    failed ||= entry.type === "tool" && entry.status === "failed";
+    if (!activityEntryActive(entry)) continue;
+    activeCount += 1;
+    action = entry.type === "tool" ? toolEntryAction(entry) : ACTIVITY_THINKING_ACTION;
+  }
+  return action === undefined
+    ? { action: failed ? "Failed" : "Completed", active: false, moreCount: 0, failed }
+    : { action, active: true, moreCount: activeCount - 1, failed };
+}
+
+function toolEntryAction(tool: ToolItem): string {
+  if (tool.skillName) return "Reading instructions";
+  const name = toolPresentationName(tool);
+  for (const [names, action] of ACTIVITY_ACTIONS_BY_NAME) {
+    if (names.includes(name)) return action;
+  }
+  if (name.startsWith("repo_")) return "Searching project";
+  for (const [kinds, action] of ACTIVITY_ACTIONS_BY_KIND) {
+    if (kinds.includes(tool.kind)) return action;
+  }
+  return "Running tool";
+}
+
+export interface ActivityGroupPresentationLabel {
+  readonly name: string;
+  /**
+   * Native semantic tone of the name, from the same `toolTone` mapping as the
+   * expanded tool rows. Undefined only for `thinking`, which stays neutral.
+   */
+  readonly tone: ToolTone | undefined;
+}
+
+/**
+ * Collapsed comma-list labels for an activity group: every distinct name in
+ * first-seen order (deduplicated), each carrying its native semantic tone
+ * regardless of liveness. SKILL.md reads label as `skill <name>` with the
+ * context tone, matching the expanded row.
+ */
 export function activityGroupPresentationLabels(
   entries: readonly ActivityEntry[],
 ): ActivityGroupPresentationLabel[] {
   const labels = new Map<string, ActivityGroupPresentationLabel>();
   for (const entry of entries) {
-    const name = entry.type === "tool"
-      ? entry.skillName ? `skill ${entry.skillName}` : toolPresentationName(entry)
-      : "thinking";
-    const active = activityEntryActive(entry);
-    const existing = labels.get(name);
-    if (!existing) {
-      labels.set(name, { name, active });
-    } else if (active && !existing.active) {
-      labels.set(name, { ...existing, active: true });
+    if (entry.type === "tool") {
+      const name = entry.skillName ? `skill ${entry.skillName}` : toolPresentationName(entry);
+      if (labels.has(name)) continue;
+      // Only repo_knowledge needs its payload for the tone, and collapsed
+      // headers must never dereference other tools' raw inputs.
+      const toneName = entry.skillName ? "skill" : name;
+      labels.set(name, {
+        name,
+        tone: toolTone(toneName, entry.kind, toneName === "repo_knowledge" ? entry.rawInput : undefined),
+      });
+    } else if (!labels.has("thinking")) {
+      labels.set("thinking", { name: "thinking", tone: undefined });
     }
   }
   return [...labels.values()];
 }
-
 export function formatTranscriptDuration(durationMs: number): string {
   const milliseconds = Math.max(0, durationMs);
   if (milliseconds < 100) return "<0.1s";

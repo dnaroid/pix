@@ -10,6 +10,7 @@ import { parseAgentMarkdown } from "../async-subagents/core/agents-dir.js";
 import { getPiToolsSuiteUserConfigPath, loadPiToolsSuiteConfig, type ResourceRegistryConfig } from "../config.js";
 import { ignoreStaleExtensionContextError, isStaleExtensionContextError } from "../context-usage.js";
 import { publishRpcSessionState, RPC_SESSION_STATE_ENV } from "../lib/rpc-session-state.js";
+import { collectRegistryFileDiff, REGISTRY_DIFF_EVENT, type RegistryDiffPayload } from "./diff.js";
 
 const COMMAND = "registry";
 const PROJECT_DIR = ".pi";
@@ -2424,6 +2425,72 @@ function parseAction(value: string | undefined): RegistryAction | undefined {
 	return undefined;
 }
 
+/**
+ * Read-only on-demand diff between the registry's cached remote copy (old
+ * side) and the project-local copy (new side) of one reusable skill or agent.
+ *
+ * The isolated, per-process UI cache is refreshed first so the old side
+ * reflects the registry's current state without racing a background push in
+ * the shared action cache. Neither the project copy nor the remote is modified.
+ * Compared paths stay under `skills/` or `agents/` roots, so project-sync
+ * artifacts cannot be reached from the type-constrained roots.
+ */
+async function collectRegistryDiff(
+	pi: ExtensionAPI,
+	project: ProjectContext,
+	type: ResourceType,
+	name: string,
+): Promise<RegistryDiffPayload> {
+	validateName(name);
+	const cwd = projectCwd(project);
+	const runtime = { ...loadRuntimeConfig(cwd), cacheDir: registryUiCacheRoot() };
+	return withRegistryUiCache(runtime.cacheDir, async () => {
+		await ensureRegistryCache(pi, runtime);
+		const oldBase = runtime.cacheDir;
+		const newBase = join(cwd, PROJECT_DIR);
+		const primary = type === "skill" ? `${REGISTRY_SKILLS_DIR}/${name}` : `${REGISTRY_AGENTS_DIR}/${name}.md`;
+		if (!(await pathExists(join(oldBase, ...primary.split("/"))))) throw new Error(`${type} "${name}" does not exist in the registry.`);
+		if (!(await pathExists(join(newBase, ...primary.split("/"))))) throw new Error(`Project ${type} "${name}" does not exist.`);
+		const roots = type === "skill"
+			? [primary]
+			: [primary, `${REGISTRY_AGENTS_DIR}/${name}`];
+		return {
+			version: 1,
+			type,
+			name,
+			files: await collectRegistryFileDiff(oldBase, newBase, roots),
+		};
+	});
+}
+
+async function handleRpcDiffCommand(
+	pi: ExtensionAPI,
+	parts: string[],
+	ctx: ExtensionCommandContext,
+): Promise<void> {
+	const type = resourceType(parts[0]);
+	const name = parts[1];
+	if (!type || !name) {
+		publishRpcSessionState(ctx, REGISTRY_DIFF_EVENT, {
+			version: 1,
+			files: [],
+			error: `Usage: /${COMMAND} rpc diff <skill|agent> <name>`,
+		} satisfies RegistryDiffPayload);
+		return;
+	}
+	try {
+		publishRpcSessionState(ctx, REGISTRY_DIFF_EVENT, await collectRegistryDiff(pi, ctx, type, name));
+	} catch (error) {
+		publishRpcSessionState(ctx, REGISTRY_DIFF_EVENT, {
+			version: 1,
+			type,
+			name,
+			files: [],
+			error: error instanceof Error ? error.message : String(error),
+		} satisfies RegistryDiffPayload);
+	}
+}
+
 async function handleRpcCommand(
 	pi: ExtensionAPI,
 	parts: string[],
@@ -2433,6 +2500,10 @@ async function handleRpcCommand(
 	if (!action || action === "refresh") {
 		invalidateRegistryUiSnapshot(ctx.cwd);
 		await publishRegistryUiSnapshot(pi, ctx);
+		return;
+	}
+	if (action === "diff") {
+		await handleRpcDiffCommand(pi, parts.slice(1), ctx);
 		return;
 	}
 	if (!["install", "update", "push", "pull", "remove", "uninstall", "configure", "project-key"].includes(action)) {
@@ -2630,6 +2701,7 @@ export default function resourceRegistry(pi: ExtensionAPI): void {
 }
 
 export const __test = {
+	collectRegistryDiff,
 	collectRegistryUiSnapshot,
 	collectStatuses,
 	hashPath,

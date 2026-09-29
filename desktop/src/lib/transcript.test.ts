@@ -5,7 +5,7 @@ import {
   applyDeferredToolResult,
   applySessionUpdate,
   applySessionUpdates,
-  activityGroupPresentationLabels,
+  activityGroupHeading,
   emptyTranscript,
   finalizeTranscriptActivity,
   formatTranscriptDuration,
@@ -443,7 +443,7 @@ describe("transcript display groups", () => {
     expect(completedGroup).toMatchObject({ status: "completed", active: false });
   });
 
-  it("keeps thinking in the header and marks active names for observability", () => {
+  it("keeps thinking in the header and selects the most recent live action", () => {
     const completedShell = toolItem("shell-completed", "completed", "shell");
     const runningShell = toolItem("shell-running", "in_progress", "shell");
     const activeThought = {
@@ -459,10 +459,9 @@ describe("transcript display groups", () => {
     expect(group).toMatchObject({ type: "activity-group", status: "in_progress", active: true });
     if (group?.type !== "activity-group") throw new Error("expected activity group");
 
-    expect(activityGroupPresentationLabels(group.entries)).toEqual([
-      { name: "shell", active: true },
-      { name: "thinking", active: true },
-    ]);
+    expect(activityGroupHeading(group.entries)).toEqual({
+      action: "Running command", active: true, moreCount: 1, failed: false,
+    });
   });
 
   it("does not treat replay thinking without timing as live activity", () => {
@@ -477,9 +476,9 @@ describe("transcript display groups", () => {
     const group = groupTranscriptItems([replayThought])[0];
     expect(group).toMatchObject({ type: "activity-group", status: "completed", active: false });
     if (group?.type !== "activity-group") throw new Error("expected activity group");
-    expect(activityGroupPresentationLabels(group.entries)).toEqual([
-      { name: "thinking", active: false },
-    ]);
+    expect(activityGroupHeading(group.entries)).toEqual({
+      action: "Completed", active: false, moreCount: 0, failed: false,
+    });
   });
 
   it("hides redundant image labels when previews are present", () => {

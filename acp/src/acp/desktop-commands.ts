@@ -24,6 +24,7 @@ export const PIX_QUEUE_ACTION_METHOD = "pix/session/queue_action";
 export const PIX_TAKE_AUTO_MESSAGE_METHOD = "pix/session/take_auto_message";
 export const PIX_QUEUE_CONSUMED_METHOD = "pix/session/queue_consumed";
 export const PIX_REGISTRY_ACTION_METHOD = "pix/registry/action";
+export const PIX_REGISTRY_DIFF_METHOD = "pix/registry/diff";
 export const PIX_GIT_ASSIST_METHOD = "pix/git/assist";
 export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages";
 export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
@@ -398,6 +399,31 @@ export interface DesktopRegistryActionResponse {
 	readonly snapshot: unknown;
 }
 
+export type DesktopRegistryDiffResourceType = "skill" | "agent";
+
+export interface DesktopRegistryDiffRequest {
+	readonly cwd: string;
+	readonly type: DesktopRegistryDiffResourceType;
+	readonly name: string;
+}
+
+/**
+ * One changed file of a read-only Registry resource diff. `oldText` is the
+ * registry (remote cached) copy and `newText` the project-local copy; null
+ * means absent on that side. A notice replaces both texts for binary or
+ * oversized files.
+ */
+export interface DesktopRegistryDiffFile {
+	readonly path: string;
+	readonly oldText: string | null;
+	readonly newText: string | null;
+	readonly notice?: string;
+}
+
+export interface DesktopRegistryDiffResponse {
+	readonly files: readonly DesktopRegistryDiffFile[];
+}
+
 export function parseDesktopSessionRequest(value: unknown): DesktopSessionRequest {
 	if (!isRecord(value) || typeof value.sessionId !== "string" || value.sessionId.length === 0) {
 		throw new RequestError(ERROR_INVALID_PARAMS, "request requires a non-empty string sessionId field");
@@ -649,6 +675,24 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		};
 	}
 	throw new RequestError(ERROR_INVALID_PARAMS, `unsupported registry action: ${value.action}`);
+}
+
+export function parseDesktopRegistryDiffRequest(value: unknown): DesktopRegistryDiffRequest {
+	if (
+		!isRecord(value)
+		|| typeof value.cwd !== "string"
+		|| value.cwd.trim().length === 0
+		|| (value.type !== "skill" && value.type !== "agent")
+		|| typeof value.name !== "string"
+		|| !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.name)
+		|| value.name.includes("..")
+	) {
+		throw new RequestError(
+			ERROR_INVALID_PARAMS,
+			"registry diff request requires cwd, type skill|agent, and a valid resource name",
+		);
+	}
+	return { cwd: value.cwd, type: value.type, name: value.name };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
