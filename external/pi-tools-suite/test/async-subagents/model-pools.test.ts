@@ -48,11 +48,11 @@ describe("role-owned model candidates", () => {
 		// Non-frontier parent: other-vendor frontier first, same-vendor frontier after.
 		const fromLuna = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "openai-codex/gpt-6-luna" });
 		expect(fromLuna.task.model).toBe("zai/glm-5.3");
-		expect(fromLuna.fallbackModels).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol"]);
+		expect(fromLuna.fallbackModels).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6.1-sol"]);
 
 		const fromTurbo = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "zai/glm-5-turbo" });
 		expect(fromTurbo.task.model).toBe("openai-codex/gpt-6-astra");
-		expect(fromTurbo.fallbackModels).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
+		expect(fromTurbo.fallbackModels).toEqual(["openai-codex/gpt-6.1-sol", "zai/glm-5.3"]);
 		expect(() => resolveAgentTaskConfig(task("oracle"), config)).toThrow(/parent model/i);
 	});
 

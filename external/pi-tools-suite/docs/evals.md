@@ -442,7 +442,7 @@ Multiple models are comma-, semicolon-, or newline-separated:
 ```bash
 MODELS='zai/glm-5.3,'\
 'openai-codex/gpt-6-luna,'\
-'openai-codex/gpt-6-sol'
+'openai-codex/gpt-6.1-sol'
 PI_TOOLS_SUITE_EVAL_MODELS="$MODELS" \
   npm run test:evals:live
 ```
@@ -460,7 +460,7 @@ For model comparison, prefer the report runner:
 ```bash
 MODELS='zai/glm-5.3,'\
 'openai-codex/gpt-6-luna,'\
-'openai-codex/gpt-6-sol'
+'openai-codex/gpt-6.1-sol'
 PI_TOOLS_SUITE_EVAL_MODELS="$MODELS" \
   npm run evals:report
 ```
@@ -487,7 +487,7 @@ negative
 ### Run named cases
 
 ```bash
-PI_TOOLS_SUITE_EVAL_MODELS='openai-codex/gpt-6-sol' \
+PI_TOOLS_SUITE_EVAL_MODELS='openai-codex/gpt-6.1-sol' \
 CASES='orchestration.sol-delegates-substantial,'\
 'orchestration.sol-keeps-tiny-edit'
 PI_TOOLS_SUITE_EVAL_CASES="$CASES" \
@@ -534,7 +534,7 @@ For changes to model discipline or orchestration, the useful comparison set is:
 ```text
 zai/glm-5.3
 openai-codex/gpt-6-luna
-openai-codex/gpt-6-sol
+openai-codex/gpt-6.1-sol
 ```
 
 This matrix exposes several important regressions:

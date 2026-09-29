@@ -207,6 +207,7 @@ export interface DesktopDcpStatsResponse {
 }
 
 export interface DesktopSessionUsageTotals {
+	readonly costEstimated?: boolean;
 	readonly input: number;
 	readonly output: number;
 	readonly cacheRead: number;

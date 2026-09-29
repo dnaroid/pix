@@ -29,7 +29,7 @@ describe("built-in delivery-review role", () => {
 		expect(role.models).toBeUndefined();
 		expect(role.modelSelection).toBe("frontier");
 		const resolved = resolveAgentTaskConfig({ id: "d", task: "review", subagentType: "delivery-review" }, config);
-		expect(resolved.task.model).toBe("openai-codex/gpt-6-sol");
+		expect(resolved.task.model).toBe("openai-codex/gpt-6.1-sol");
 		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
 		expect(role.thinking).toBe("high");
 		expect(role.tools).toEqual(["read", "grep", "bash"]);
@@ -47,7 +47,7 @@ describe("built-in delivery-review role", () => {
 
 	test("survives filtering/catalog for strong parent models and preserves role-owned model order", () => {
 		const config = loadSubagentConfig(tempDir(), {});
-		for (const parentModel of ["openai-codex/gpt-6-sol", "zai/glm-5.3", "zai/glm-5-turbo"]) {
+		for (const parentModel of ["openai-codex/gpt-6.1-sol", "zai/glm-5.3", "zai/glm-5-turbo"]) {
 			const effective = filterSubagentConfigForParentModel(config, parentModel);
 			expect(effective.types["delivery-review"]).toBeDefined();
 			expect(buildSubagentCatalogPrompt(config, parentModel)).toContain("- delivery-review:");
@@ -55,9 +55,9 @@ describe("built-in delivery-review role", () => {
 		const resolved = resolveAgentTaskConfig(
 			{ id: "review", task: "Assess residual delivery risk", subagentType: "delivery-review" },
 			config,
-			{ parentModel: "openai-codex/gpt-6-sol" },
+			{ parentModel: "openai-codex/gpt-6.1-sol" },
 		);
-		expect(resolved.task.model).toBe("openai-codex/gpt-6-sol");
+		expect(resolved.task.model).toBe("openai-codex/gpt-6.1-sol");
 		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
 		expect(resolved.task.thinking).toBe("high");
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);

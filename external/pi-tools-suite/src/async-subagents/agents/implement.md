@@ -1,7 +1,7 @@
 ---
 description: Make bounded changes to code, docs, tests, or UI using the parent's requirements and acceptance criteria. Follow local conventions and verify the change. Task-specific discipline belongs in the brief, not a separate role.
 icon: code
-models: [zai/glm-5.3, openai-codex/gpt-6-sol]
+models: [zai/glm-5.3, openai-codex/gpt-6.1-sol]
 thinking: high
 ---
 

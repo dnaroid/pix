@@ -71,7 +71,7 @@ describe("settings JSONC helpers", () => {
         },
       },
     }, ["autocomplete", "debounceMs"])).toEqual({ exists: true, value: 350 });
-    expect(settingsDefaultValue("desktop", schema, ["defaultModel", "modelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6-sol" });
+    expect(settingsDefaultValue("desktop", schema, ["defaultModel", "modelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6.1-sol" });
     expect(settingsDefaultValue("desktop", schema, ["promptEnhancer", "modelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6-luna" });
     expect(settingsDefaultValue("desktop", schema, ["sessionTitle", "modelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6-luna" });
     expect(settingsDefaultValue("desktop", schema, ["desktop", "git", "reviewModelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6-luna:medium" });

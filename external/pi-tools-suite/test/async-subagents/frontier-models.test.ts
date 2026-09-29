@@ -12,6 +12,7 @@ import {
 import {
 	defaultFrontierConfig,
 	frontierOracleCandidates,
+	isFrontierModel,
 	isSameModel,
 	modelVendor,
 	normalizeFrontierModels,
@@ -47,6 +48,13 @@ afterEach(() => {
 });
 
 describe("model identity", () => {
+	test("the Sol successor is frontier without treating the old release as an alias", () => {
+		const frontier = defaultFrontierConfig();
+		expect(isFrontierModel("openai-codex/gpt-6.1-sol", frontier)).toBe(true);
+		expect(isFrontierModel("openai-codex/gpt-6-sol", frontier)).toBe(false);
+		expect(isSameModel("openai-codex/gpt-6-sol", "openai-codex/gpt-6.1-sol", frontier)).toBe(false);
+	});
+
 	test("vendor comes from the model family, not the serving provider", () => {
 		expect(modelVendor("openai-codex/gpt-6-astra")).toBe("openai");
 		expect(modelVendor("openai/gpt-6-astra")).toBe("openai");
@@ -81,15 +89,15 @@ describe("model identity", () => {
 describe("oracle frontier selection", () => {
 	test("frontier GLM parent gets frontier GPT only", () => {
 		const config = configWith();
-		expect(oracle(config, "zai/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol"]);
-		expect(oracle(config, "zai-coding/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol"]);
+		expect(oracle(config, "zai/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6.1-sol"]);
+		expect(oracle(config, "zai-coding/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6.1-sol"]);
 	});
 
 	test("frontier non-GLM parent gets frontier GLM, whatever provider serves the parent", () => {
 		const config = configWith();
 		for (const parent of [
 			"openai-codex/gpt-6-astra",
-			"openai-codex/gpt-6-sol",
+			"openai-codex/gpt-6.1-sol",
 			"openai/gpt-6-astra",
 			"github-copilot/gpt-6-astra",
 			"openrouter/~openai/gpt-astra-latest",
@@ -100,9 +108,9 @@ describe("oracle frontier selection", () => {
 
 	test("non-frontier parent gets any frontier with other vendors first", () => {
 		const config = configWith();
-		expect(oracle(config, "zai/glm-5.3-flash")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol", "zai/glm-5.3"]);
-		expect(oracle(config, "openai-codex/gpt-6-luna")).toEqual(["zai/glm-5.3", "openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol"]);
-		expect(oracle(config, "anthropic/claude-haiku-5")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol", "zai/glm-5.3"]);
+		expect(oracle(config, "zai/glm-5.3-flash")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6.1-sol", "zai/glm-5.3"]);
+		expect(oracle(config, "openai-codex/gpt-6-luna")).toEqual(["zai/glm-5.3", "openai-codex/gpt-6-astra", "openai-codex/gpt-6.1-sol"]);
+		expect(oracle(config, "anthropic/claude-haiku-5")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6.1-sol", "zai/glm-5.3"]);
 	});
 
 	test("a third-vendor frontier parent follows list order among the other vendors", () => {
@@ -134,7 +142,7 @@ describe("oracle frontier selection", () => {
 	test("disabled and role-restricted entries are not selected but stay frontier for parent detection", () => {
 		const config = configWith({ frontierModels: [
 			{ model: "openai-codex/gpt-6-astra", enabled: false },
-			{ model: "openai-codex/gpt-6-sol", roles: ["frontier-review"] },
+			{ model: "openai-codex/gpt-6.1-sol", roles: ["frontier-review"] },
 			{ model: "zai/glm-5.3" },
 		] });
 		expect(() => oracle(config, "zai/glm-5.3")).toThrow(/vendor other than the parent's \(zai\)/);
@@ -144,10 +152,10 @@ describe("oracle frontier selection", () => {
 
 	test("explicit overrides and --provider cannot bypass the vendor boundary", () => {
 		const config = configWith();
-		expect(() => oracle(config, "openai-codex/gpt-6-astra", { extraArgs: ["--model", "openai/gpt-6-sol"] })).toThrow(/shares the parent's vendor/);
-		expect(() => resolveAgentTaskConfig({ id: "o", task: "x", subagentType: "oracle", model: "github-copilot/gpt-6-sol" }, config, { parentModel: "openai-codex/gpt-6-astra" })).toThrow(/cross-vendor/);
+		expect(() => oracle(config, "openai-codex/gpt-6-astra", { extraArgs: ["--model", "openai/gpt-6.1-sol"] })).toThrow(/shares the parent's vendor/);
+		expect(() => resolveAgentTaskConfig({ id: "o", task: "x", subagentType: "oracle", model: "github-copilot/gpt-6.1-sol" }, config, { parentModel: "openai-codex/gpt-6-astra" })).toThrow(/cross-vendor/);
 		expect(() => oracle(config, "zai/glm-5.3", { extraArgs: ["--provider=zai"] })).toThrow(/--provider/);
-		expect(oracle(config, "zai/glm-5.3", { extraArgs: ["--model", "openai/gpt-6-sol"] })).toEqual(["openai/gpt-6-sol"]);
+		expect(oracle(config, "zai/glm-5.3", { extraArgs: ["--model", "openai/gpt-6.1-sol"] })).toEqual(["openai/gpt-6.1-sol"]);
 	});
 
 	test("a project oracle with explicit models replaces frontier selection", () => {
@@ -186,7 +194,7 @@ describe("frontierOracleCandidates", () => {
 	test("matches the resolver's oracle chain for every parent class and economy state", () => {
 		for (const economy of [false, true]) {
 			const config = configWith({ economy });
-			for (const parent of ["zai/glm-5.3", "openai-codex/gpt-6-sol", "openai/gpt-6-astra", "zai/glm-5.3-flash", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5"]) {
+			for (const parent of ["zai/glm-5.3", "openai-codex/gpt-6.1-sol", "openai/gpt-6-astra", "zai/glm-5.3-flash", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5"]) {
 				const expected = frontierOracleCandidates(parent, config.frontier!);
 				if (expected.length === 0) expect(() => oracle(config, parent)).toThrow();
 				else expect(oracle(config, parent)).toEqual(expected);
@@ -207,19 +215,19 @@ describe("economy mode", () => {
 
 	test("reports economy as the reason when nothing remains, and hides the oracle", () => {
 		const config = configWith({ economy: true });
-		expect(() => oracle(config, "zai/glm-5.3")).toThrow(/economy mode excluded openai-codex\/gpt-6-astra, openai-codex\/gpt-6-sol/);
+		expect(() => oracle(config, "zai/glm-5.3")).toThrow(/economy mode excluded openai-codex\/gpt-6-astra, openai-codex\/gpt-6.1-sol/);
 		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- oracle:");
-		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-sol")).toContain("- oracle:");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6.1-sol")).toContain("- oracle:");
 	});
 
 	test("blocks an explicit expensive override but not the forced current model", () => {
 		const config = configWith({ economy: true });
-		expect(() => resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement", model: "openai/gpt-6-sol" }, config)).toThrow(/economy mode is on/);
-		expect(resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement" }, config, { forcedModel: "openai-codex/gpt-6-sol" }).task.model).toBe("openai-codex/gpt-6-sol");
+		expect(() => resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement", model: "openai/gpt-6.1-sol" }, config)).toThrow(/economy mode is on/);
+		expect(resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement" }, config, { forcedModel: "openai-codex/gpt-6.1-sol" }).task.model).toBe("openai-codex/gpt-6.1-sol");
 	});
 
 	test("env toggle overrides the file and is read fresh on every load", () => {
-		expect(oracle(configWith({ economy: true }, { PI_TOOLS_SUITE_ECONOMY: "0" }), "zai/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6-sol"]);
+		expect(oracle(configWith({ economy: true }, { PI_TOOLS_SUITE_ECONOMY: "0" }), "zai/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "openai-codex/gpt-6.1-sol"]);
 		const home = temp();
 		const cwd = temp();
 		const file = path.join(home, ".config", "pi", "pi-tools-suite.jsonc");
@@ -234,12 +242,12 @@ describe("economy mode", () => {
 describe("review roles share the frontier list", () => {
 	test("frontier-review is hidden for every frontier parent and uses non-oracle entries", () => {
 		const config = configWith();
-		for (const parent of ["openai-codex/gpt-6-sol", "openai-codex/gpt-6-astra", "zai/glm-5.3", "openrouter/~openai/gpt-astra-latest"]) {
+		for (const parent of ["openai-codex/gpt-6.1-sol", "openai-codex/gpt-6-astra", "zai/glm-5.3", "openrouter/~openai/gpt-astra-latest"]) {
 			expect(filterSubagentConfigForParentModel(config, parent).types["frontier-review"]).toBeUndefined();
 		}
 		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3-flash").types["frontier-review"]).toBeDefined();
 		const review = resolveAgentTaskConfig({ id: "f", task: "x", subagentType: "frontier-review" }, config, { parentModel: "zai/glm-5.3-flash" });
-		expect([review.task.model, ...review.fallbackModels]).toEqual(["openai-codex/gpt-6-sol", "zai/glm-5.3"]);
+		expect([review.task.model, ...review.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol", "zai/glm-5.3"]);
 	});
 });
 

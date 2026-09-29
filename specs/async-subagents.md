@@ -84,6 +84,11 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    entire initial/fallback chain excludes the parent's vendor; for other parents
    other vendors are preferred. A new frontier model is a `frontierModels` config
    entry, not an oracle edit. `[confirmed by oracle.md and frontier-models.test.ts]`
+   The shipped Sol entry is `openai-codex/gpt-6.1-sol`, with alias
+   `*gpt-6.1-sol*`; the `implement` role uses it after `zai/glm-5.3`.
+   GPT-6 Sol is not an alias for GPT-6.1 Sol. Existing user/project model
+   lists still override defaults and are not rewritten by this rollover.
+   `[confirmed by frontier-models.ts and agents/implement.md]`
 8. **Role router / auto-ultrawork classifier**: the role router and the
    `ULTRAWORK_AUTO` classifier both try `routing.model`, then
    `routing.fallbackModels`, then the current parent model, de-duplicating refs

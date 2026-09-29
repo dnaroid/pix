@@ -81,7 +81,7 @@ describe("config helpers", () => {
 		};
 		assert.equal(parsedCreated.$schema, PIX_SCHEMA_URL);
 		assert.deepEqual(parsedCreated.defaultModel, {
-			modelRef: "openai-codex/gpt-6-sol",
+			modelRef: "openai-codex/gpt-6.1-sol",
 			fallbackModels: [],
 			thinking: "medium",
 		});
@@ -143,7 +143,7 @@ describe("config helpers", () => {
 		assert.equal(config.autocomplete.maxTokens, 48);
 		assert.equal(config.autocomplete.maxPromptTokens, 1200);
 		assert.equal(config.autocomplete.includeRecentMessages, 0);
-		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-6-sol:medium");
+		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-6.1-sol:medium");
 		assert.equal(config.modelRouting.enabled, false);
 		assert.equal(config.modelRouting.default, false);
 		assert.equal(config.modelRouting.modelRef, "openrouter/~typesafe/jev-latest");

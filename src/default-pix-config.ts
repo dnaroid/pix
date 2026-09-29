@@ -1,7 +1,7 @@
 export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   // pix renderer configuration
-  "defaultModel": { "modelRef": "openai-codex/gpt-6-sol", "fallbackModels": [], "thinking": "medium" },
+  "defaultModel": { "modelRef": "openai-codex/gpt-6.1-sol", "fallbackModels": [], "thinking": "medium" },
   "modelRouting": {
     "enabled": false,
     "default": false,
@@ -16,9 +16,9 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
     ]
   },
   // Optional TUI model-picker whitelist. Desktop keeps an independent whitelist in pix-desktop.jsonc.
-  // "visibleModels": ["openai-codex/gpt-6-sol", "zai/glm-5-turbo"],
+  // "visibleModels": ["openai-codex/gpt-6.1-sol", "zai/glm-5-turbo"],
   // Last applied thinking level per model for TUI. Desktop keeps independent preferences.
-  // "thinkingByModel": { "openai-codex/gpt-6-sol": "high", "zai/glm-5-turbo": "max" },
+  // "thinkingByModel": { "openai-codex/gpt-6.1-sol": "high", "zai/glm-5-turbo": "max" },
   // Disable AGENTS.md / CLAUDE.md discovery for this project when set in <cwd>/.pi/pix.jsonc.
   "ignoreContextFiles": false,
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.

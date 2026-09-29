@@ -123,6 +123,7 @@ function parseSessionUsageTotals(value: unknown): SessionUsageTotals {
   return {
     input: Number(value.input), output: Number(value.output), cacheRead: Number(value.cacheRead),
     cacheWrite: Number(value.cacheWrite), totalTokens: Number(value.totalTokens), cost: Number(value.cost),
+    ...(value.costEstimated === true ? { costEstimated: true } : {}),
   };
 }
 

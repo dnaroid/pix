@@ -1,5 +1,14 @@
 import type { SessionUsageReport, SessionUsageTotals } from "./acp-client-types";
 
+export function providerUsageUrl(provider: string): string | undefined {
+  switch (provider) {
+    case "pi-claude-code-provider": return "https://claude.ai/code#settings/usage";
+    case "openai-codex": return "https://chatgpt.com/codex/cloud/settings/analytics#usage";
+    case "zai": return "https://z.ai/manage-apikey/coding-plan/personal/usage";
+    default: return undefined;
+  }
+}
+
 export function sessionUsageHasValue(value: SessionUsageTotals | undefined): boolean {
   return Boolean(value && (value.cost > 0 || value.totalTokens > 0));
 }

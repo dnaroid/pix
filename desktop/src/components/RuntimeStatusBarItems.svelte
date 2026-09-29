@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Hourglass from "@lucide/svelte/icons/hourglass";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -27,7 +28,9 @@
     formatSessionUsageCost,
     formatSessionUsageTokens,
     sessionUsageHasValue,
+    providerUsageUrl,
   } from "../lib/session-usage";
+  import { openExternalHref } from "../lib/external-links";
   import { modelDisplayToneClass, modelProviderBrand, modelRefTone } from "../lib/model-display";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
 
@@ -62,6 +65,8 @@
   let contextOpen = $state(false);
   let usageOpen = $state(false);
   let now = $state(Date.now());
+  let usageLinkFailed = $state(false);
+  let usageLinkRequest = 0;
   const WEEKLY_DAY_SEGMENTS = 7;
   const contextPercent = $derived(status?.context?.percent);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
@@ -100,11 +105,26 @@
   }
 
   function toggleUsage(): void {
+    usageLinkRequest += 1;
     const opening = !usageOpen;
     usageOpen = opening;
     if (opening) {
+      usageLinkFailed = false;
       contextOpen = false;
       onOpenSessionUsage();
+    }
+  }
+
+  async function openProviderUsage(url: string): Promise<void> {
+    const request = ++usageLinkRequest;
+    const openedForUsage = sessionUsage;
+    usageLinkFailed = false;
+    try {
+      await openExternalHref(url);
+    } catch {
+      if (usageOpen && request === usageLinkRequest && sessionUsage === openedForUsage) {
+        usageLinkFailed = true;
+      }
     }
   }
 
@@ -390,12 +410,22 @@
                     <p class="text-muted-foreground">No billable usage has been recorded for this session yet.</p>
                   {:else}
                     {#each sessionUsage.providers as provider (provider.provider)}
+                      {@const usageUrl = providerUsageUrl(provider.provider)}
                       <div>
                         <div class="mb-1 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
                           {#if modelProviderBrand(provider.provider)}
                             <ModelProviderIcon provider={provider.provider} />
                           {/if}
                           <span class="min-w-0 truncate">{provider.provider}</span>
+                          {#if usageUrl}
+                            <button
+                              type="button"
+                              class="grid h-5 w-5 shrink-0 place-items-center rounded-sm hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                              title="Open provider usage limits in browser"
+                              aria-label={`Open ${provider.provider} usage limits in browser`}
+                              onclick={() => void openProviderUsage(usageUrl)}
+                            ><ExternalLink class="h-3 w-3" aria-hidden="true" /></button>
+                          {/if}
                         </div>
                         <div class="space-y-1">
                           {#each provider.models as model (`${provider.provider}/${model.model}`)}
@@ -404,7 +434,7 @@
                                 class={["min-w-0 truncate font-medium", modelDisplayToneClass(modelRefTone(`${provider.provider}/${model.model}`))]}
                                 title={`${provider.provider}/${model.model}`}
                               >{model.model}</span>
-                              <span class="shrink-0 text-foreground">{formatSessionUsageTokens(model.totals.totalTokens)} · {formatSessionUsageCost(model.totals.cost)}</span>
+                              <span class="shrink-0 text-foreground" title={model.totals.costEstimated ? "Estimated at original model API rates, not subscription charges" : undefined}>{formatSessionUsageTokens(model.totals.totalTokens)} · {formatSessionUsageCost(model.totals.cost)}</span>
                             </div>
                           {/each}
                         </div>
@@ -420,6 +450,9 @@
                 </section>
               {/if}
             </div>
+            {#if usageLinkFailed}
+              <p class="px-3 pb-2 text-xs text-destructive" role="alert">Could not open provider usage page. Try again.</p>
+            {/if}
             {#if claudeCodeRoute && sessionUsageAvailable}
               <div class="border-t border-border px-3 py-2 text-xs">
                 <div class="flex items-center justify-between gap-3">

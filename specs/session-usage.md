@@ -27,9 +27,19 @@ percentages with spend attributable to one conversation.
   present. Provider/model attribution comes from assistant or explicit usage
   records; usage without that identity remains `Unattributed` rather than being
   guessed.
-- Exact totals expose input/output/cache token counters, total tokens, and the
-  provider-reported monetary `cost.total` already stored by Pi.
-- The breakdown groups exact recorded spend first by provider and then by model.
+- Totals expose recorded input/output/cache token counters and total tokens.
+  Monetary totals normally use the recorded `cost.total` already stored by Pi.
+  For `pi-claude-code-provider` calls with zero/missing cost, known original
+  Anthropic model tariffs estimate API-equivalent spend from separate input,
+  output, cache-read and cache-write counters (including one-hour cache writes).
+  Positive recorded cost is never replaced. Other providers, unknown models and
+  total-token-only records are not repriced; persisted entries are not modified.
+  Explicit original model IDs use their exact SDK catalog entry. Subscription
+  aliases use the bridge's current defaults: `opus` → `claude-opus-5-5`,
+  `sonnet` → `claude-sonnet-5`, `fable` → `claude-fable-5-1`, and
+  `haiku` → `claude-haiku-4-5`. Historical alias calls cannot prove their served
+  version and therefore remain estimates using these defaults.
+- The breakdown groups recorded/estimated spend first by provider and then by model.
   Each model row owns its combined token/cost totals regardless of whether a
   call came from the parent agent, an async sub-agent, a retry, or a fallback.
 
@@ -55,6 +65,16 @@ percentages with spend attributable to one conversation.
   Desktop keeps recorded cost in its on-demand detail popover, but does not show a
   dollar amount inline in the status bar. TUI shows token totals only and does not
   render monetary prices.
+  Desktop displays monetary values without an approximation prefix; estimated
+  model values explain in a tooltip that these are original-model API rates, not
+  subscription charges. `costEstimated` propagates from calls to model, provider
+  and session totals through ACP.
+  Known subscription provider headings offer an accessible external-link icon:
+  Claude Code opens `https://claude.ai/code#settings/usage`; OpenAI Codex opens
+  `https://chatgpt.com/codex/cloud/settings/analytics#usage`; z.ai (`zai`) opens
+  `https://z.ai/manage-apikey/coding-plan/personal/usage`. Unknown providers get no guessed URL.
+  The native external opener launches the page in the system browser, without
+  refreshing quota or making a model call. Failed opening shows a retryable error.
 - Model labels use the same model-color conventions as the rest of Pix. TUI
   honors configured `modelColors` rules with the normal provider-palette
   fallback; Desktop uses its matching model-ref tone mapping and shows the
@@ -84,7 +104,8 @@ percentages with spend attributable to one conversation.
   identify which concurrent session consumed those points.
 - The session-spend popup therefore shows **no account quota block and no quota
   percentages**. It also shows no synthetic provider/session-share percentage.
-  Exact session-attributed values are the recorded model token/cost totals.
+  Session-attributed values are recorded token totals and recorded/estimated
+  model costs, not an allocation of subscription quota or payment.
 - Existing hourly/weekly account quota polling and status-bar indicators remain
   independent runtime chrome; opening the session-spend popup never refreshes
   them and the popup does not repeat them.
@@ -116,6 +137,7 @@ percentages with spend attributable to one conversation.
 ## Related files
 
 - `src/app/session/session-usage.ts`
+- `src/app/session/session-usage-pricing.ts`
 - `src/app/screen/mouse-controller.ts`
 - `src/app/model/model-usage-controller.ts`
 - `external/pi-tools-suite/src/async-subagents/core/usage.ts`
@@ -133,6 +155,9 @@ percentages with spend attributable to one conversation.
 
 - Shared unit tests cover provider/model grouping, merging parent and async-agent
   calls into one model total, unattributed usage, and the compact formatter.
+  `tests/session-usage.test.ts` also covers proxy aliases, explicit original IDs,
+  separate cache tariffs, one-hour writes, estimate propagation, preservation of
+  positive cost/unknown models/other providers, and immutable persisted records.
 - TUI mouse tests assert that Usage opens the compact colored token breakdown and
   contains no monetary price, agent/subagent split, session-share percentage, or
   quota block.
@@ -149,5 +174,6 @@ percentages with spend attributable to one conversation.
   exact historical child-agent cost unless that usage was already persisted by
   another mechanism. Pix reports what is recorded; it does not invent missing
   historical spend.
-- Providers may report zero monetary cost while still reporting tokens; accounting
-  keeps that recorded cost even though TUI presentation is token-only.
+- Providers may report zero monetary cost while still reporting tokens. Only the
+  known Claude Code proxy uses the documented API-equivalent estimate fallback;
+  it is not the actual subscription bill. TUI presentation remains token-only.

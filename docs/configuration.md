@@ -31,7 +31,7 @@ Example:
 {
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   "defaultModel": {
-    "modelRef": "openai-codex/gpt-6-sol",
+    "modelRef": "openai-codex/gpt-6.1-sol",
     "fallbackModels": [],
     "thinking": "medium"
   },

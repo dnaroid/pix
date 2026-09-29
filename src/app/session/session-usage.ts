@@ -1,4 +1,5 @@
 import type { AgentSession, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { estimateClaudeCodeCost } from "./session-usage-pricing.js";
 
 export type SessionUsageTotals = {
 	input: number;
@@ -7,6 +8,7 @@ export type SessionUsageTotals = {
 	cacheWrite: number;
 	totalTokens: number;
 	cost: number;
+	costEstimated?: boolean;
 };
 
 export type SessionUsageProviderBreakdown = {
@@ -39,6 +41,7 @@ type UsageLike = {
 	output?: unknown;
 	cacheRead?: unknown;
 	cacheWrite?: unknown;
+	cacheWrite1h?: unknown;
 	totalTokens?: unknown;
 	cost?: { total?: unknown };
 };
@@ -68,7 +71,7 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 		if (rawEntry.type === "usage") {
 			const provider = stringValue(rawEntry.provider);
 			const model = stringValue(rawEntry.model);
-			const usage = usageValue(rawEntry.usage);
+			const usage = usageValue(rawEntry.usage, provider, model);
 			if (!usage) continue;
 			addAttributedUsage(provider, model, usage, totals, unattributed, providers);
 			continue;
@@ -77,7 +80,9 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 		if (rawEntry.type === "message") {
 			const message = isRecord(rawEntry.message) ? rawEntry.message : undefined;
 			if (!message) continue;
-			const usage = usageValue(message.usage);
+			const usage = usageValue(message.usage,
+				message.role === "assistant" ? stringValue(message.provider) : undefined,
+				message.role === "assistant" ? stringValue(message.model) : undefined);
 			if (!usage) continue;
 			if (message.role === "assistant") {
 				addAttributedUsage(stringValue(message.provider), stringValue(message.model), usage, totals, unattributed, providers);
@@ -165,7 +170,7 @@ function addAttributedUsage(
 	addUsage(modelTotals, usage);
 }
 
-function usageValue(value: unknown): SessionUsageTotals | undefined {
+function usageValue(value: unknown, provider?: string, model?: string): SessionUsageTotals | undefined {
 	if (!isRecord(value)) return undefined;
 	const input = nonNegativeNumber(value.input);
 	const output = nonNegativeNumber(value.output);
@@ -175,7 +180,15 @@ function usageValue(value: unknown): SessionUsageTotals | undefined {
 	const summedTokens = input + output + cacheRead + cacheWrite;
 	const totalTokens = nonNegativeNumber(value.totalTokens) || summedTokens;
 	if (summedTokens === 0 && totalTokens === 0 && cost === 0) return { ...ZERO_USAGE };
-	return { input, output, cacheRead, cacheWrite, totalTokens, cost };
+	const usage: SessionUsageTotals = { input, output, cacheRead, cacheWrite, totalTokens, cost };
+	if (cost === 0) {
+		const estimate = estimateClaudeCodeCost(provider, model, usage, nonNegativeNumber(value.cacheWrite1h));
+		if (estimate !== undefined) {
+			usage.cost = estimate;
+			usage.costEstimated = true;
+		}
+	}
+	return usage;
 }
 
 function addUsage(target: SessionUsageTotals, value: SessionUsageTotals): void {
@@ -185,6 +198,7 @@ function addUsage(target: SessionUsageTotals, value: SessionUsageTotals): void {
 	target.cacheWrite += value.cacheWrite;
 	target.totalTokens += value.totalTokens;
 	target.cost += value.cost;
+	if (value.costEstimated) target.costEstimated = true;
 }
 
 function hasUsage(value: SessionUsageTotals): boolean {

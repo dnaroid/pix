@@ -536,7 +536,7 @@ describe.serial("subagent type config", () => {
 		expect(config.types["frontier-review"].forParentTier).toBe("non-frontier");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-astra")).not.toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- frontier-review:");
-		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-sol")).not.toContain("- frontier-review:");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6.1-sol")).not.toContain("- frontier-review:");
 		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- frontier-review:");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
 	});
@@ -581,7 +581,7 @@ Research only this project.
 
 		const config = loadSubagentConfig(tempDir(), {});
 		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6-luna").types["frontier-review"]).toBeDefined();
-		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6-sol").types["frontier-review"]).toBeUndefined();
+		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6.1-sol").types["frontier-review"]).toBeUndefined();
 		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3").types["frontier-review"]).toBeUndefined();
 	});
 
@@ -598,7 +598,7 @@ Research only this project.
 		});
 		for (const [subagentType, model, fallbackModels] of [
 			["research", "zai/glm-5.3-flash", ["openai-codex/gpt-6-luna"]],
-			["implement", "zai/glm-5.3", ["openai-codex/gpt-6-sol"]],
+			["implement", "zai/glm-5.3", ["openai-codex/gpt-6.1-sol"]],
 			["verify", "zai/glm-5.3-flash", ["openai-codex/gpt-6-luna"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);

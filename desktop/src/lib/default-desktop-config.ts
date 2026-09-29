@@ -1,6 +1,6 @@
 export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json",
-  "defaultModel": { "modelRef": "openai-codex/gpt-6-sol", "fallbackModels": [], "thinking": "medium" },
+  "defaultModel": { "modelRef": "openai-codex/gpt-6.1-sol", "fallbackModels": [], "thinking": "medium" },
   "modelRouting": {
     "enabled": false,
     "default": false,

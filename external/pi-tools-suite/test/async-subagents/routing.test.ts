@@ -121,10 +121,10 @@ describe("parent-first sub-agent routing", () => {
 		expect(routed.tasks[0]?.subagentType).toBe("frontier-review");
 
 		const frontier = context(async () => { throw new Error("must not call the router"); });
-		frontier.ctx.model = { provider: "openai-codex", id: "gpt-6-sol" };
+		frontier.ctx.model = { provider: "openai-codex", id: "gpt-6.1-sol" };
 		await expect(routeSubagentTasks([
 			{ id: "review", task: "Review the implementation", subagentType: "frontier-review" },
-		], cfg, frontier.ctx)).rejects.toThrow(/subagentType unavailable for parent model openai-codex\/gpt-6-sol/);
+		], cfg, frontier.ctx)).rejects.toThrow(/subagentType unavailable for parent model openai-codex\/gpt-6.1-sol/);
 		expect(frontier.complete).not.toHaveBeenCalled();
 	});
 

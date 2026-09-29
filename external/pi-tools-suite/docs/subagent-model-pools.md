@@ -33,7 +33,7 @@ shell access is not a read-only filesystem sandbox.
 `delivery-review` reviews the actual diff, surrounding code, and completed
 verification to assess residual delivery risk. Its bundled profile is
 self-contained: it does not require project skills or their discovery in the
-child. It uses GPT-6-Sol followed by GLM-5.3, `high` thinking, and the inspection
+child. It uses GPT-6.1-Sol followed by GLM-5.3, `high` thinking, and the inspection
 tools `read`, `grep`, and `bash`, subject to runtime availability. It remains
 available even when the parent is a frontier model.
 
@@ -61,7 +61,7 @@ fallbacks:
 description: Make bounded implementation changes.
 models:
   - zai/glm-5.3
-  - openai-codex/gpt-6-sol
+  - openai-codex/gpt-6.1-sol
 thinking: high
 ---
 ```
@@ -120,7 +120,7 @@ usable candidate among the remaining vendors.
 ```jsonc
 "frontierModels": [
   { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-  { "model": "openai-codex/gpt-6-sol", "expensive": true, "aliases": ["*gpt-6-sol*"] },
+  { "model": "openai-codex/gpt-6.1-sol", "expensive": true, "aliases": ["*gpt-6.1-sol*"] },
   { "model": "zai/glm-5.3" }
 ],
 "economy": false
@@ -137,7 +137,7 @@ The bundled roles use it as follows:
 
 | Role | Selection | Result with the default list |
 |---|---|---|
-| `oracle` | `require-other-if-frontier` | GLM-5.3 parent → Astra, Sol; GPT-6 Sol/Astra parent → GLM-5.3; non-frontier parent → every frontier, other vendors first |
+| `oracle` | `require-other-if-frontier` | GLM-5.3 parent → Astra, Sol; GPT-6.1 Sol / GPT-6 Astra parent → GLM-5.3; non-frontier parent → every frontier, other vendors first |
 | `frontier-review` | `forParentTier: non-frontier` | Sol, GLM-5.3; hidden for frontier parents |
 | `delivery-review` | list order | Sol, GLM-5.3; available to all parents |
 

@@ -824,7 +824,7 @@ release is a config edit:
 {
   "frontierModels": [
     { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-    { "model": "openai-codex/gpt-6-sol", "expensive": true, "aliases": ["*gpt-6-sol*"] },
+    { "model": "openai-codex/gpt-6.1-sol", "expensive": true, "aliases": ["*gpt-6.1-sol*"] },
     { "model": "zai/glm-5.3" }
   ],
   "economy": false
@@ -1027,11 +1027,11 @@ tool calls, changed files, and elapsed time.
 npm run test:evals:contracts
 
 # Live matrix as Bun tests. Models are comma/semicolon separated.
-PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-6-luna,openai-codex/gpt-6-sol' \
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-6-luna,openai-codex/gpt-6.1-sol' \
   npm run test:evals:live
 
 # Produce JSON + Markdown comparison artifacts.
-PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-6-luna,openai-codex/gpt-6-sol' \
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-6-luna,openai-codex/gpt-6.1-sol' \
   npm run evals:report
 
 # Focus the report runner when iterating

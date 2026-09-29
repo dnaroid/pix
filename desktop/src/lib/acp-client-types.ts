@@ -164,6 +164,7 @@ export interface ModelUsageStatus {
 export type ModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
 
 export interface SessionUsageTotals {
+  readonly costEstimated?: boolean;
   readonly input: number;
   readonly output: number;
   readonly cacheRead: number;

@@ -16,7 +16,7 @@ have genuine `node --test` output generated before review. Fixture paths are
 retained in artifacts for independent inspection; remove those temporary
 directories manually when no longer needed. Set `DELIVERY_REVIEW_OUTPUT` to a
 unique path to choose the report directory. Live runs require configured Pi auth
-for GPT-6-Sol; the gate checks actual assistant model metadata, not just CLI args.
+for GPT-6.1-Sol; the gate checks actual assistant model metadata, not just CLI args.
 
 Automatic gates check unchanged working-tree content (excluding Git internals),
 tool actions, conservative shell-command allowlisting, an explicit confidence

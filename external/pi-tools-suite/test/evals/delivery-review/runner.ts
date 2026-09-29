@@ -16,10 +16,10 @@ function profileHash(): string {
 
 function resolve(project: string, task: string) {
 	const resolved = resolveAgentTaskConfig({ id: "delivery-review", task, subagentType: "delivery-review" },
-		loadSubagentConfig(project, {}), { parentModel: "openai-codex/gpt-6-sol" });
-	if (resolved.task.model !== "openai-codex/gpt-6-sol" || resolved.task.thinking !== "high"
+		loadSubagentConfig(project, {}), { parentModel: "openai-codex/gpt-6.1-sol" });
+	if (resolved.task.model !== "openai-codex/gpt-6.1-sol" || resolved.task.thinking !== "high"
 		|| JSON.stringify(resolved.task.tools) !== JSON.stringify(["read", "grep", "bash"])) {
-		throw new Error("delivery-review did not resolve to GPT-6 Sol/high with inspection tools");
+		throw new Error("delivery-review did not resolve to GPT-6.1 Sol/high with inspection tools");
 	}
 	return resolved;
 }
@@ -70,7 +70,7 @@ export async function runCase(id: typeof CASES[number]["id"], artifactDir: strin
 	if (profileHash() !== sha256) issues.push("profile changed during run");
 	if (!hasConfidence(parsed.text)) issues.push("missing explicit confidence");
 	if (!parsed.actions.length) issues.push("no inspection actions");
-	if (!parsed.models.length || parsed.models.some(model => model !== "gpt-6-sol")) issues.push(`unexpected actual model: ${parsed.models}`);
+	if (!parsed.models.length || parsed.models.some(model => model !== "gpt-6.1-sol")) issues.push(`unexpected actual model: ${parsed.models}`);
 	const status = execution.timedOut || execution.exitCode !== 0 || !parsed.text ? "incomplete" : issues.length ? "failed" : "passed";
 	fs.mkdirSync(artifactDir, { recursive: true });
 	const artifact = path.join(artifactDir, `${id}.json`);

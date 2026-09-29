@@ -506,13 +506,13 @@ describe("ACP JSON-RPC client", () => {
     const result = {
       sessionId: "session-1",
       usage: {
-        totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05 },
+        totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05, costEstimated: true },
         providers: [{
           provider: "openai-codex",
-          totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05 },
+          totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05, costEstimated: true },
           models: [{
             model: "gpt-5.6-sol",
-            totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05 },
+            totals: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: 0.05, costEstimated: true },
           }],
         }],
         unattributed: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 },

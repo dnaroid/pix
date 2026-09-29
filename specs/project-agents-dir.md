@@ -54,10 +54,10 @@ fallbackModels:
 modelByParent:
   zai/*: zai/glm-5.3
   openai-codex/*:
-    model: openai-codex/gpt-6-sol
+    model: openai-codex/gpt-6.1-sol
     fallbackModels: [zai/glm-5.3]
 forParentModels: [zai/*, openai-codex/*]
-notForParentModels: [openai-codex/gpt-6-sol*]
+notForParentModels: [openai-codex/gpt-6.1-sol*]
 forParentTier: non-frontier # frontier | non-frontier
 requiresIndexedProject: true
 parentProviderPolicy: require-other # any | prefer-other | require-other | require-other-if-frontier
