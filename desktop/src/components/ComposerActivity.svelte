@@ -9,21 +9,32 @@
   $effect(() => hold.update(activity));
   onDestroy(() => hold.dispose());
   const visible = $derived(displayed ?? activity);
+
+  function constantSpeedSweep(node: HTMLElement) {
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0) {
+        // Travel the visible width plus 12px beyond each edge, at 90px/s.
+        node.style.setProperty("--sweep-duration", `${(entry.contentRect.width + 24) / 90}s`);
+      }
+    });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  }
 </script>
 
 <div data-composer-activity role="status" class="mb-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-  <span class="activity-label min-w-0 truncate">{visible.action}</span>
+  <span use:constantSpeedSweep class="activity-label min-w-0 truncate">{visible.action}</span>
   {#if visible.moreCount > 0}<span class="shrink-0">+{visible.moreCount} more</span>{/if}
 </div>
 
 <style>
   @media (prefers-reduced-motion: no-preference) {
     .activity-label {
-      background: linear-gradient(100deg, var(--muted-foreground) 45%, var(--foreground) 50%, var(--muted-foreground) 55%);
-      background-size: 220% 100%;
+      background: linear-gradient(90deg, var(--muted-foreground) calc(50% - 12px), var(--foreground) 50%, var(--muted-foreground) calc(50% + 12px));
+      background-size: calc(200% + 24px) 100%;
       background-clip: text;
       -webkit-text-fill-color: transparent;
-      animation: activity-sweep 1.8s linear infinite;
+      animation: activity-sweep var(--sweep-duration, 1.8s) linear infinite;
     }
   }
 

@@ -224,6 +224,13 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
   real terminal window. If exact visual terminal evidence is required and that
   capability is unavailable, the result is `BLOCKED`; a headless replay cannot
   substitute for pixel evidence.
+- Desktop QA discovers the documented launch contract, including any frontend
+  server needed by a development binary. Native window discovery is not UI
+  readiness: the agent must wait for and assert an application-content marker
+  before checking the requested behavior. A title-only runner pass cannot be
+  reported as product verification. Blank/unloaded content and rendered content
+  with an empty accessibility tree are distinguished using retained screenshot
+  and accessibility evidence; missing launch prerequisites are `BLOCKED`.
 - The actual requested target is tested; static checks or invented mock pages
   cannot substitute for requested UI QA.
 - Public QA does not require credentials or create an auth file.

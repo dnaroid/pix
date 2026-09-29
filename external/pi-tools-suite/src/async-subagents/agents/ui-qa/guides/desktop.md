@@ -48,6 +48,29 @@ the documented safe environment subset plus `PI_UI_QA_*` bootstrap variables
 and injects `PI_UI_QA=1`. Do not daemonize the app or deliberately move it
 outside the ownership boundary.
 
+## Launch and readiness
+
+Discover the application's documented launch contract before selecting an
+executable. A development binary may depend on a separate frontend server or
+other startup services; its existence does not make it a standalone build.
+Prefer the documented project launch command that owns those dependencies, or
+attach to an already running requested application. Do not launch a raw debug
+binary unless its required services are confirmed ready. Missing prerequisites
+are `BLOCKED`, not a reason to test an empty shell or substitute another surface.
+
+`waitForWindow` proves only that a native window exists. Before testing the
+requested behavior, wait for and assert an application-content readiness marker
+from the real UI (for example a known editor, navigation control, or loaded
+screen label). A window title, process name, or empty WebView is not a readiness
+oracle. Keep readiness assertions separate from the requested behavior's
+postcondition; a runner `PASSED` for window existence/title alone is not product
+verification.
+
+If content never becomes ready, retain a screenshot and accessibility snapshot
+and distinguish a visually blank/unloaded window from a rendered UI whose
+accessibility tree is empty. Report the unmet marker and the discovered launch
+dependencies. Do not turn either case into a pass by asserting the window title.
+
 ## Oracles, evidence, cleanup
 
 Prefer accessibility/app-driver state, window/dialog state, visible copy, and

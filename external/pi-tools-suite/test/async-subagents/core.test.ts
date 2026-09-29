@@ -715,6 +715,17 @@ Research only this project.
 		expect(Object.keys(definitions).sort()).not.toContain("desktop");
 	});
 
+	test.serial("desktop QA guide separates native window discovery from application readiness", () => {
+		const guide = fs.readFileSync(path.join(getBuiltinSubagentDefinitionsDir(), "ui-qa", "guides", "desktop.md"), "utf8");
+		expect(guide).toContain("documented launch contract");
+		expect(guide).toContain("separate frontend server");
+		expect(guide).toContain("Do not launch a raw debug");
+		expect(guide).toContain("application-content readiness marker");
+		expect(guide).toContain("window title, process name, or empty WebView is not a readiness");
+		expect(guide).toContain("visually blank/unloaded window");
+		expect(guide).toContain("accessibility tree is empty");
+	});
+
 	test.serial("treats project browser-qa as an ordinary independent role, not a ui-qa alias", () => {
 		const cwd = tempDir();
 		writeFile(path.join(cwd, ".pi", "agents", "browser-qa.md"), `---
