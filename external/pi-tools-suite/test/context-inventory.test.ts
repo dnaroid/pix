@@ -41,7 +41,7 @@ describe("context inventory", () => {
 		const state = createContextInventoryState({
 			getActiveTools: () => ["read", "subagents"],
 			getCommands: () => [] as any,
-		} as any, context(cwd, "openai-codex", "gpt-6-sol"));
+		} as any, context(cwd, "openai-codex", "gpt-6.1-sol"));
 
 		expect(state.agents).not.toContain("frontier-review");
 		expect(state.agents).toContain("research");
