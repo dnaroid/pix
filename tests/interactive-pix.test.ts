@@ -31,10 +31,8 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
-
 			const statusRow = pix.rows;
-			const statusLine = pix.screen.line(statusRow);
+			const statusLine = await pix.waitForLine(statusRow, mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 			const modelColumn = statusLine.indexOf(mockModel.openaiModelRef) + 1;
 			assert.ok(modelColumn > 0, statusLine);
 			const selectionEnd = modelColumn + mockModel.openaiModelRef.length;
@@ -599,6 +597,21 @@ class PixPty {
 
 	async waitForText(text: string | RegExp, label: string, timeoutMs = 10_000): Promise<void> {
 		await waitFor(() => this.screen.includes(text), () => `${label}\n\n${this.screen.snapshot()}`, timeoutMs);
+	}
+
+	/**
+	 * Wait until a specific screen row contains the text and return that row.
+	 * Whole-screen waits can match transient boot frames elsewhere while the
+	 * target row still holds its placeholder, so row-scoped waits are required
+	 * before reading coordinates from a single row.
+	 */
+	async waitForLine(row: number, text: string | RegExp, label: string, timeoutMs = 10_000): Promise<string> {
+		let line = this.screen.line(row);
+		await waitFor(() => {
+			line = this.screen.line(row);
+			return typeof text === "string" ? line.includes(text) : text.test(line);
+		}, () => `${label}\n\n${this.screen.snapshot()}`, timeoutMs);
+		return line;
 	}
 
 	/**

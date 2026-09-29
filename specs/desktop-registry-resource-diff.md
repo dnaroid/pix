@@ -31,7 +31,10 @@ comparison never pushes, pulls, installs or overwrites resources.
 Diff requests identify one validated resource type and name within a workspace;
 the backend resolves only that resource's known local and registry paths.
 Traversal rejects links and unsupported filesystem entries rather than
-following them. Content and response sizes are bounded. Missing copies,
+following them. The registry cache checkout stays byte-faithful on every
+platform: the cache repository pins `core.autocrlf=false` so platform git
+configuration cannot smudge line endings into the old-side text. Content and
+response sizes are bounded. Missing copies,
 unavailable registry data and read errors surface as visible errors instead
 of a misleading empty diff. Loading/failed/empty states are distinct, and
 late responses from a closed view, previous selection or previous workspace

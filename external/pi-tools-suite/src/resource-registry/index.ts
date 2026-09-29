@@ -513,8 +513,22 @@ async function ensureRegistryCache(pi: ExtensionAPI, runtime: RegistryRuntime): 
 
 	if (!(await pathExists(gitDir))) {
 		await fs.mkdir(dirname(runtime.cacheDir), { recursive: true });
-		await runGit(pi, dirname(runtime.cacheDir), ["clone", "--origin", "origin", runtime.remote, runtime.cacheDir], { timeout: 180_000 });
+		// --config applies during the clone's own initial checkout and persists in
+		// the new repository, keeping the cache working tree byte-faithful on
+		// platforms whose global git config enables core.autocrlf (e.g. Windows).
+		await runGit(pi, dirname(runtime.cacheDir), [
+			"clone",
+			"--origin",
+			"origin",
+			"--config",
+			"core.autocrlf=false",
+			runtime.remote,
+			runtime.cacheDir,
+		], { timeout: 180_000 });
 	}
+	// Caches cloned by older versions lack the local override; re-assert it so
+	// reset/checkout/add below never smudge line endings on such platforms.
+	await runGit(pi, runtime.cacheDir, ["config", "core.autocrlf", "false"]);
 
 	await runGit(pi, runtime.cacheDir, ["reset", "--hard"], { allowFailure: true });
 	await runGit(pi, runtime.cacheDir, ["clean", "-fd"]);
