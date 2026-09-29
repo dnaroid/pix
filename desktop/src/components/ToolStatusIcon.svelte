@@ -27,17 +27,16 @@
 {:else if lifecycleOnly}
   <CircleCheck class={`${className} text-muted-foreground`} aria-hidden="true" />
 {:else if status === "failed"}
-  <CircleX class={`${className} text-destructive`} aria-hidden="true" />
+  <CircleX class={`${className} text-tool-error`} aria-hidden="true" />
 {:else if status === "in_progress"}
   <LoaderCircle class={`${className} animate-spin text-primary motion-reduce:animate-none`} aria-hidden="true" />
 {:else if status === "completed" && attention}
   <TriangleAlert
-    class={className}
-    style={`color: var(${attention === "error" ? "--tool-error" : "--tool-warning"})`}
+    class={`${className} ${attention === "error" ? "text-tool-error" : "text-tool-warning"}`}
     aria-hidden="true"
   />
 {:else if status === "completed"}
-  <CircleCheck class={`${className} text-status`} aria-hidden="true" />
+  <CircleCheck class={`${className} text-tool-success`} aria-hidden="true" />
 {:else}
   <Circle class={`${className} text-muted-foreground`} aria-hidden="true" />
 {/if}

@@ -189,7 +189,7 @@ try {
   await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "running-read",
     name: "read", title: "Read /repo/skills/demo/SKILL.md", status: "in_progress" }));
   const skillListName = page.locator('[data-activity-name="skill demo"]');
-  assert.equal(await skillListName.getAttribute("data-tool-tone"), "context");
+  assert.equal(await skillListName.getAttribute("data-tool-tone"), "skill");
   await outerSummary.click();
   const skillRow = page.locator('[data-activity-entry-id="tool:running-read"]');
   assert.equal(await skillRow.locator('.tool-name').textContent(), "skill");
@@ -210,6 +210,17 @@ try {
   await outerSummary.click();
   assert.equal(await grepListName.evaluate((node) => getComputedStyle(node).color), grepToneColor,
     "the parallel tool's list name keeps its own native tone");
+  await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "compression",
+    name: "compress", title: "Compress", status: "completed" }));
+  const compressListName = page.locator('[data-activity-name="compress"]');
+  assert.equal(await compressListName.getAttribute("data-tool-tone"), "compress");
+  await outerSummary.click();
+  const compressToneColor = await page.locator('[data-activity-entry-id="tool:compression"] .tool-name')
+    .evaluate((node) => getComputedStyle(node).color);
+  await outerSummary.click();
+  assert.equal(await compressListName.evaluate((node) => getComputedStyle(node).color), compressToneColor,
+    "compression keeps its distinct native tone in the collapsed list");
+  assert.notEqual(compressToneColor, skillToneColor, "compression and skill use distinct tones");
   assert.equal(await outer.count(), 1);
   await page.evaluate(() => window.activitySmoke.advanceClock(700));
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "2.0s");
@@ -234,9 +245,9 @@ try {
   await outerSummary.click();
   await page.waitForFunction(() => {
     const row = document.querySelector('[data-activity-entry-id="tool:parallel-grep"]');
-    return row !== null && row.querySelector("svg.text-destructive") !== null;
+    return row !== null && row.querySelector("svg.text-tool-error") !== null;
   });
-  assert.equal(await page.locator('[data-activity-entry-id="tool:parallel-grep"] svg.text-destructive').count(), 1,
+  assert.equal(await page.locator('[data-activity-entry-id="tool:parallel-grep"] svg.text-tool-error').count(), 1,
     "the failed child keeps its failed icon on its own row");
   await outerSummary.click();
 

@@ -1,6 +1,6 @@
 import type { ToolItem } from "./transcript";
 
-export type ToolTone = "agent" | "context" | "execute" | "inspect" | "interact" | "mutation" | "neutral" | "search";
+export type ToolTone = "agent" | "compress" | "context" | "execute" | "inspect" | "interact" | "mutation" | "neutral" | "search" | "skill";
 
 export interface ToolPresentation {
   readonly name: string;
@@ -53,7 +53,8 @@ export function isUserBashTool(tool: ToolHeaderSource): boolean {
 export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown): ToolTone {
   const name = normalizedName(toolName);
   const kind = normalizedName(toolKind ?? "");
-  if (name === "skill") return "context";
+  if (name === "skill") return "skill";
+  if (name === "compress") return "compress";
   if (name === "repo_knowledge") {
     const input = asRecord(rawInput);
     const action = input ? stringValue(input, ["action"]) : undefined;
@@ -61,8 +62,8 @@ export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown
     if (action === "search") return "search";
     return "inspect";
   }
-  if (name === "repo_ask") return "search";
-  if (name === "repo_context" || name === "repo_audit") return "inspect";
+  if (name === "repo_ask" || name === "repo_context") return "search";
+  if (name === "repo_audit") return "inspect";
   if (
     ["apply_patch", "edit", "multiedit", "write", "ast_apply", "create_file", "update_file", "delete_file", "remove_file", "move_file", "rename_file"].includes(name)
     || ["edit", "mutation", "write"].includes(kind)
@@ -79,7 +80,9 @@ export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown
     || ["read", "fetch"].includes(kind)
   ) return "inspect";
   if (["question"].includes(name)) return "interact";
-  if (["compress", "todo", "get_plan", "update_plan", "project", "projects", "skill", "skills"].includes(name)) return "context";
+  if (
+    ["todo", "get_plan", "update_plan", "project", "projects", "skills", "session_name", "session_overview", "session_read_section", "session_search", "session_recovery_context", "multi_tool_use", "parallel"].includes(name)
+  ) return "context";
   if (["subagent", "subagents", "agent", "agents", "task"].includes(name)) return "agent";
   return "neutral";
 }

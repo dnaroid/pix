@@ -208,7 +208,12 @@ describe("mixed transcript activity regressions", () => {
       title: "Read .pi/skills/demo/SKILL.md",
       status: "completed",
     };
-    expect(activityGroupPresentationLabels([skillRead])).toEqual([{ name: "skill demo", tone: "context" }]);
+    expect(activityGroupPresentationLabels([skillRead])).toEqual([{ name: "skill demo", tone: "skill" }]);
+    const compress = { ...tool("compress"), name: "compress", status: "completed" } as const;
+    expect(activityGroupPresentationLabels([skillRead, compress])).toEqual([
+      { name: "skill demo", tone: "skill" },
+      { name: "compress", tone: "compress" },
+    ]);
     const unknown = { ...tool("odd"), name: "orchestrate", kind: "unknown", status: "completed" } as const;
     expect(activityGroupPresentationLabels([unknown])).toEqual([{ name: "orchestrate", tone: "neutral" }]);
   });

@@ -19,7 +19,9 @@ describe("toolPresentation", () => {
     expect(toolPresentation({
       name: "read", kind: "read", title: "Read SKILL.md",
       rawInput: { path: "/repo/skills/simplify/SKILL.md", offset: 1, limit: 100 }, skillName: "simplify",
-    })).toEqual({ name: "skill", args: "simplify", tone: "context" });
+    })).toEqual({ name: "skill", args: "simplify", tone: "skill" });
+    expect(toolTone("skill")).toBe("skill");
+    expect(toolTone("skills")).toBe("context");
     expect(toolPresentation({
       name: "read", kind: "read", title: "Read README.md", rawInput: { path: "README.md" },
     })).toEqual({ name: "read", args: "README.md", tone: "inspect" });
@@ -32,6 +34,13 @@ describe("toolPresentation", () => {
       title: "Bash: npm test",
       rawInput: { command: "npm test\n  -- --run" },
     })).toEqual({ name: "bash", args: "npm test -- --run", tone: "execute" });
+  });
+
+  it("keeps compression distinct from planning and session context", () => {
+    expect(toolPresentation({ name: "compress", kind: "other", title: "Compress" })).toMatchObject({
+      name: "compress", tone: "compress",
+    });
+    expect(toolTone("todo")).toBe("context");
   });
 
   it("formats repository tool arguments in TUI order", () => {
@@ -58,7 +67,7 @@ describe("toolPresentation", () => {
       name: "repo_context", kind: "other", title: "Repo Context",
       rawInput: { maxTests: 4, pathPrefix: "desktop/src", query: "tool row contract", budget: 1400 },
     })).toEqual({
-      name: "repo_context", args: "query: tool row contract · pathPrefix: desktop/src · budget: 1400 · maxTests: 4", tone: "inspect",
+      name: "repo_context", args: "query: tool row contract · pathPrefix: desktop/src · budget: 1400 · maxTests: 4", tone: "search",
     });
     expect(toolPresentation({
       name: "repo_audit", kind: "other", title: "Repo Audit",
@@ -128,7 +137,9 @@ describe("toolTone", () => {
     expect(toolTone("read_file")).toBe("inspect");
     expect(toolTone("web_search")).toBe("search");
     expect(toolTone("shell")).toBe("execute");
-    expect(toolTone("compress")).toBe("context");
+    expect(toolTone("compress")).toBe("compress");
+    expect(toolTone("session_search")).toBe("context");
+    expect(toolTone("parallel")).toBe("context");
     expect(toolTone("question")).toBe("interact");
     expect(toolTone("subagents")).toBe("agent");
     expect(toolTone("custom_tool")).toBe("neutral");
@@ -145,5 +156,7 @@ describe("toolTone", () => {
     expect(toolTone("repo_knowledge", "other", { action: "search" })).toBe("search");
     expect(toolTone("repo_knowledge", "other", { action: "record" })).toBe("mutation");
     expect(toolTone("repo_knowledge", "other", { action: "remove" })).toBe("mutation");
+    expect(toolTone("repo_context")).toBe("search");
+    expect(toolTone("repo_audit")).toBe("inspect");
   });
 });

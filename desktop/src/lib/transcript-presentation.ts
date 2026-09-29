@@ -188,7 +188,7 @@ export interface ActivityGroupPresentationLabel {
  * Collapsed comma-list labels for an activity group: every distinct name in
  * first-seen order (deduplicated), each carrying its native semantic tone
  * regardless of liveness. SKILL.md reads label as `skill <name>` with the
- * context tone, matching the expanded row.
+ * skill tone, matching the expanded row.
  */
 export function activityGroupPresentationLabels(
   entries: readonly ActivityEntry[],

@@ -144,6 +144,7 @@
 <style>
   .transcript-entry { content-visibility: auto; contain-intrinsic-size: auto 120px; }
   .tool-name[data-tool-tone="agent"] { color: var(--tool-agent); }
+  .tool-name[data-tool-tone="compress"] { color: var(--tool-compress); }
   .tool-name[data-tool-tone="context"] { color: var(--tool-context); }
   .tool-name[data-tool-tone="execute"] { color: var(--tool-execute); }
   .tool-name[data-tool-tone="inspect"] { color: var(--tool-inspect); }
@@ -151,4 +152,5 @@
   .tool-name[data-tool-tone="mutation"] { color: var(--tool-mutation); }
   .tool-name[data-tool-tone="neutral"] { color: var(--tool-neutral); }
   .tool-name[data-tool-tone="search"] { color: var(--tool-search); }
+  .tool-name[data-tool-tone="skill"] { color: var(--tool-skill); }
 </style>
