@@ -16,7 +16,7 @@ describe("pinned composer activity wiring", () => {
   it("announces changes neutrally and respects reduced motion", () => {
     expect(activity).toContain('role="status"');
     expect(activity).toContain("onDestroy(() => hold.dispose())");
-    expect(activity).toContain("motion-reduce:animate-none");
+    expect(activity).toMatch(/@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.activity-label\s*\{[^}]*animation: activity-sweep/);
     expect(activity).not.toMatch(/Completed|Failed|text-destructive/);
   });
 });

@@ -23,13 +23,18 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-function fixture() {
+async function fixture() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "shell-workdir-")));
   roots.push(root);
-  const workspace = path.join(root, "workspace");
-  const extra = path.join(root, "extra");
-  const other = path.join(root, "other");
-  for (const dir of [workspace, extra, other, path.join(extra, "nested"), path.join(extra, "..notes")]) fs.mkdirSync(dir);
+  const workspacePath = path.join(root, "workspace");
+  const extraPath = path.join(root, "extra");
+  const otherPath = path.join(root, "other");
+  for (const dir of [workspacePath, extraPath, otherPath, path.join(extraPath, "nested"), path.join(extraPath, "..notes")]) fs.mkdirSync(dir);
+  // Use the same async realpath as the permission resolver: on Windows it can
+  // expand an 8.3 temp alias that the sync realpath above retains.
+  const workspace = await fs.promises.realpath(workspacePath);
+  const extra = await fs.promises.realpath(extraPath);
+  const other = await fs.promises.realpath(otherPath);
   const executed: string[] = [];
   const pi = new FakePi();
   registerModelTools(pi as any, {
@@ -57,7 +62,7 @@ async function denied(run: Promise<unknown>) {
 
 describe("session shell workdir permissions", () => {
   test("allows only canonical granted directory and its descendants, then revokes", async () => {
-    const { root, workspace, extra, other, pi, notices, executed, context, command, shell } = fixture();
+    const { root, workspace, extra, other, pi, notices, executed, context, command, shell } = await fixture();
     const ctx = context({});
     pi.emit("session_start", ctx);
     await shell(workspace, ctx);
@@ -84,7 +89,7 @@ describe("session shell workdir permissions", () => {
   });
 
   test("session replacement, reload, separate tabs, and child runtimes never inherit grants", async () => {
-    const { extra, pi, context, command, shell } = fixture();
+    const { extra, pi, context, command, shell } = await fixture();
     const first = context({});
     const second = context({});
     pi.emit("session_start", first);
@@ -100,14 +105,14 @@ describe("session shell workdir permissions", () => {
     pi.emit("session_start", second, { reason: "reload" });
     await denied(shell(extra, second));
 
-    const child = fixture();
+    const child = await fixture();
     const childCtx = child.context({});
     child.pi.emit("session_start", childCtx);
     await denied(child.shell(extra, childCtx));
   });
 
   test("realpath prevents traversal and changed symlink targets from using a grant", async () => {
-    const { workspace, extra, other, context, command, shell, notices, executed } = fixture();
+    const { workspace, extra, other, context, command, shell, notices, executed } = await fixture();
     const ctx = context({});
     const escape = path.join(workspace, "escape");
     fs.symlinkSync(extra, escape);
@@ -133,7 +138,7 @@ describe("session shell workdir permissions", () => {
   });
 
   test("revokes a removed canonical directory and reports invalid commands", async () => {
-    const { extra, context, command, notices } = fixture();
+    const { extra, context, command, notices } = await fixture();
     const ctx = context({});
     await command(`allow ${extra}`, ctx);
     fs.rmSync(extra, { recursive: true });
@@ -146,7 +151,7 @@ describe("session shell workdir permissions", () => {
   });
 
   test("an allow awaiting the filesystem cannot grant a replacement session", async () => {
-    const { extra, context, notices } = fixture();
+    const { extra, context, notices } = await fixture();
     const pi = new FakePi();
     let release!: (value: boolean) => void;
     let started!: () => void;

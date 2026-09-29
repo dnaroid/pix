@@ -47,6 +47,7 @@ Make collapsed Desktop activity rows compactly show the full thinking/tool flow 
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/TranscriptActivityGroup.svelte`
 - `desktop/src/components/ComposerActivity.svelte`
+- `desktop/src/components/ComposerActivity.test.ts`
 - `desktop/src/lib/composer-activity.ts`
 - `desktop/src/components/PromptComposer.svelte`
 - `desktop/src/lib/transcript-activity.test.ts`
@@ -56,7 +57,7 @@ Make collapsed Desktop activity rows compactly show the full thinking/tool flow 
 
 ## Verification
 
-- ACP history tests cover preservation and propagation of persisted timing metadata. Transcript tests cover live thought boundaries, prompt-end finalization, replayed timing metadata, mixed thinking/tool grouping, the deterministic live-action headings retained in `activityGroupHeading` for the delegated composer status, first-seen name-list deduplication (including skill reads), controllable live-clock sampling/final-duration freezing, parallel wall-clock span, and duration formatting. Desktop visual regression tests cover the neutral collapsed header and natively-toned expanded rows; tool-presentation tests cover the expanded rows' tone mapping.
+- ACP history tests cover preservation and propagation of persisted timing metadata. Transcript tests cover live thought boundaries, prompt-end finalization, replayed timing metadata, mixed thinking/tool grouping, the deterministic live-action headings retained in `activityGroupHeading` for the delegated composer status, first-seen name-list deduplication (including skill reads), controllable live-clock sampling/final-duration freezing, parallel wall-clock span, and duration formatting. Desktop visual regression tests cover the neutral collapsed header and natively-toned expanded rows; tool-presentation tests cover the expanded rows' tone mapping. `ComposerActivity.test.ts` source checks verify the pinned status mounts inside the composer dock before its form, and that the sweep animation is nested under a `prefers-reduced-motion: no-preference` media query so reduced motion renders static text.
 - `npm --prefix desktop test -- transcript.test.ts transcript-activity.test.ts session-history-concurrency.test.ts`
 - `npm --prefix desktop run test:transcript-activity` exercises native disclosure events, lazy mounting/hydration, late completions, session replacement, the one-line collapsed header (chevron, neutral comma list, elapsed time — no status icons or action text) with failure kept on child rows, controllable live-duration updates/freezing and timer teardown, keyboard toggles, and a large collapsed transcript in Chromium with stubbed backend calls.
 - `npm --prefix desktop run check` and `npm --prefix desktop run build:web` check types and production compilation. Browser smoke is not an end-to-end native Tauri or arbitrary-size frame-budget guarantee.
