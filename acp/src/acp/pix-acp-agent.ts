@@ -313,6 +313,8 @@ type WorkspaceUndoBridgeResult = {
 interface ActiveRun {
 	/** Whether the client requested cancellation before pi reported its reason. */
 	cancelled: boolean;
+	/** Extension slash commands report their result through ctx.ui.notify. */
+	slashPrompt: boolean;
 	/** Whether pi emitted agent_start for this run. */
 	started: boolean;
 	/** Stop reason captured from `agent_end`, pending `agent_settled`. */
@@ -2202,6 +2204,13 @@ export class PixAcpAgent {
 			await this.syncLiveSessionRecord(session);
 			return;
 		}
+		if (request.method === "notify" && session.activeRun?.slashPrompt) {
+			// Pi RPC sends extension command feedback as a fire-and-forget UI
+			// notification. ACP has no equivalent, so put it in the command's
+			// visible transcript instead of silently dropping the result.
+			await this.notifyAgentMessage(session, request.message);
+			return;
+		}
 		const elicitation = toElicitationRequest(request, {
 			sessionId: session.acpSessionId,
 			elicitationId: randomUUID(),
@@ -2336,6 +2345,7 @@ export class PixAcpAgent {
 		await this.setAgentControlState(session, "resuming");
 		const run: ActiveRun = {
 			cancelled: false,
+			slashPrompt: false,
 			// Keep the normal agent_start guard so a late duplicate settlement from
 			// the prior paused/limited run cannot resolve this continuation.
 			started: false,
@@ -2766,6 +2776,7 @@ export class PixAcpAgent {
 		}
 		const run: ActiveRun = {
 			cancelled: false,
+			slashPrompt: isSlashPrompt,
 			started: false,
 			stopReason: undefined,
 			resolve: () => {},

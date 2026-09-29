@@ -2535,6 +2535,32 @@ test("fire-and-forget extension UI requests produce no response and no elicitati
 	assert.deepEqual(clients[0]!.uiResponses, []);
 });
 
+test("extension slash command notifications are visible as transcript feedback", async () => {
+	const { adapter, clients } = createTestAdapter();
+	const updates: SessionNotification[] = [];
+	await connect(adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const pi = clients[0]!;
+		pi.promptHandledWithoutRun = true;
+		pi.promptHook = (message) => {
+			if (message === "/shell-workdir list") {
+				pi.emit({ type: "extension_ui_request", id: "list", method: "notify", message: "No extra shell working directories allowed (this session only).", notifyType: "info" });
+			} else {
+				pi.emit({ type: "extension_ui_request", id: "other", method: "notify", message: "Background notice", notifyType: "info" });
+			}
+		};
+		assert.equal((await cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "/shell-workdir list" }] }) as { stopReason: string }).stopReason, "end_turn");
+		await cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "hello" }] });
+	}, (app) => {
+		app.onNotification("session/update", (ctx) => { updates.push(ctx.params); });
+	});
+	const feedback = updates.filter((item) => item.update.sessionUpdate === "agent_message_chunk")
+		.map((item) => (item.update as { content: { text: string } }).content.text);
+	assert.deepEqual(feedback, ["No extra shell working directories allowed (this session only)."]);
+	assert.deepEqual(clients[0]!.uiResponses, []);
+});
+
 /** Text of a replayed update: plain text content or tool content blocks. */
 function replayText(update: Record<string, unknown>): string | undefined {
 	const content = update.content;

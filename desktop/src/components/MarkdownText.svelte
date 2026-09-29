@@ -68,8 +68,10 @@
   .markdown-text.dense { line-height: 1.5; }
   .markdown-text.compact.dense { line-height: 1.35; }
 
-  :global(.markdown-text > :first-child) { margin-top: 0; }
-  :global(.markdown-text > :last-child) { margin-bottom: 0; }
+  .markdown-text > :global(:first-child),
+  .markdown-text.compact > :global(:first-child) { margin-top: 0; }
+  .markdown-text > :global(:last-child),
+  .markdown-text.compact > :global(:last-child) { margin-bottom: 0; }
   .markdown-text :global(p) { margin: 0 0 0.75rem; }
   .markdown-text.compact :global(p) { margin-bottom: 0.35rem; }
   .markdown-text :global(strong) { font-weight: 600; }
