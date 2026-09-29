@@ -259,13 +259,13 @@
 {#if status || showSkeletons}
   <div
     bind:this={root}
-    class="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-1 max-[900px]:flex"
+    class="flex min-w-0 flex-1 items-center justify-between gap-1"
     data-runtime-status
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
-      <div class="relative col-start-1 shrink-0 justify-self-start" data-runtime-context>
+      <div class="relative min-w-0" data-runtime-context>
         <button
-          class="flex h-6 items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          class="flex h-6 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [&>span]:shrink-0"
           type="button"
           aria-label={contextTitle()}
           aria-haspopup="dialog"
@@ -273,7 +273,7 @@
           aria-controls="runtime-context-popover"
           onclick={toggleContext}
         >
-          <span class="font-sans text-xs text-muted-foreground max-[860px]:hidden">Context</span>
+          <span class="font-sans text-xs text-muted-foreground">ctx</span>
           <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
           {@render contextScale("compact")}
           {#if status?.dcpTokensSaved !== undefined}
@@ -296,11 +296,11 @@
       </div>
     {:else if showSkeletons}
       <div
-        class="col-start-1 flex h-6 shrink-0 items-center gap-1.5 justify-self-start px-1.5"
+        class="flex h-6 min-w-0 items-center gap-1.5 overflow-hidden px-1.5 [&>span]:shrink-0"
         data-runtime-context-skeleton
         aria-hidden="true"
       >
-        <span class="font-sans text-xs text-muted-foreground max-[860px]:hidden">Context</span>
+        <span class="font-sans text-xs text-muted-foreground">ctx</span>
         <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
         <span class="h-1.5 w-16 rounded-sm bg-border"></span>
         <span class="h-3 w-14 rounded-sm bg-muted-foreground/15"></span>
@@ -308,9 +308,9 @@
     {/if}
 
     {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage}
-      <div class="relative col-start-2 shrink-0 justify-self-end">
+      <div class="relative ml-auto min-w-0 shrink-0 max-w-full">
         <button
-          class="flex h-6 min-w-0 items-center gap-1.5 rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          class="flex h-6 min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [&>span]:shrink-0"
           type="button"
           title="Session usage and cost"
           aria-label="Session usage and cost"
@@ -336,7 +336,7 @@
               {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
               <span class="flex items-center gap-1" title={limitTitle(label, window)}>
-                {#if label === "R" || usageWindowItems.length > 1}
+                {#if label === "R"}
                   <span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
                 {/if}
                 <span
@@ -360,7 +360,7 @@
                   <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
                 {/if}
                 {#if label !== "R" || window.resetAt > now}
-                  <span class="text-muted-foreground max-[980px]:hidden">resets {formatResetDuration(window.resetAt, now)}</span>
+                  <span class="text-muted-foreground max-[980px]:hidden">{formatResetDuration(window.resetAt, now)}</span>
                 {/if}
               </span>
           {/each}
@@ -484,7 +484,7 @@
       </div>
     {:else if showSkeletons}
       <div
-        class="col-start-2 flex h-6 shrink-0 items-center gap-1.5 justify-self-end px-1.5 font-mono text-xs"
+        class="ml-auto flex h-6 min-w-0 max-w-full shrink-0 items-center gap-1.5 overflow-hidden px-1.5 font-mono text-xs [&>span]:shrink-0"
         data-runtime-usage-skeleton
         aria-hidden="true"
       >

@@ -3,7 +3,7 @@ import type {
   SessionConfigSelectGroup,
   SessionConfigSelectOption,
 } from "@agentclientprotocol/sdk";
-import { modelRefTone, type ModelDisplayTone } from "./model-display";
+import { modelDisplayName, modelRefTone, type ModelDisplayTone } from "./model-display";
 
 export const CANONICAL_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export const AUTO_MODEL_REF = "pix:auto";
@@ -56,7 +56,7 @@ export function modelThinkingConfigState(configOptions: readonly SessionConfigOp
             : ["off"];
         models.push({
           ref,
-          name: option.name,
+          name: modelDisplayName(provider, option.name),
           provider,
           modelId,
           thinkingLevels,

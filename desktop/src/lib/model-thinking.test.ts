@@ -43,6 +43,18 @@ const configOptions: SessionConfigOption[] = [
 ];
 
 describe("model + thinking config", () => {
+  it("shortens Claude Code names without changing model identity or source options", () => {
+    const ref = "pi-claude-code-provider/opus";
+    const options: SessionConfigOption[] = [{
+      id: "model", name: "Model", type: "select", currentValue: ref,
+      options: [{ value: ref, name: "Claude Code Opus" }],
+    }];
+    const original = structuredClone(options);
+    expect(modelThinkingConfigState(options).currentModel).toMatchObject({
+      name: "Opus", ref, provider: "pi-claude-code-provider", modelId: "opus",
+    });
+    expect(options).toEqual(original);
+  });
   it("extracts per-model thinking levels and keeps the current model first", () => {
     const state = modelThinkingConfigState(configOptions);
     expect(state.currentModel?.ref).toBe("openai-codex/gpt-5.6-sol");

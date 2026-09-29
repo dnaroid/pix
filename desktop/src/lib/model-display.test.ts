@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { modelProviderBrand, modelRefTone, thinkingLevelTone } from "./model-display";
+import { modelDisplayName, modelProviderBrand, modelRefTone, thinkingLevelTone } from "./model-display";
 
 describe("model/thinking display tones", () => {
+  it("shortens only Claude Code provider display names", () => {
+    expect(modelDisplayName("pi-claude-code-provider", "Claude Code Opus")).toBe("Opus");
+    expect(modelDisplayName("pi-claude-code-provider", "Claude Code Sonnet")).toBe("Sonnet");
+    expect(modelDisplayName("pi-claude-code-provider", "Opus")).toBe("Opus");
+    expect(modelDisplayName("anthropic", "Claude Code Opus")).toBe("Claude Code Opus");
+  });
   it("uses distinct desktop colors for known AI providers", () => {
     expect(modelRefTone("anthropic/claude-4")).toBe("model-anthropic");
     expect(modelRefTone("openai-codex/gpt-5.6-sol")).toBe("model-openai");

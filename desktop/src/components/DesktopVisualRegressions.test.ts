@@ -43,6 +43,15 @@ import transcriptActivityGroupSource from "./TranscriptActivityGroup.svelte?raw"
 import transcriptSource from "./TranscriptPane.svelte?raw";
 
 describe("desktop visual regressions", () => {
+  it("keeps compact context and quota controls from painting over one another", () => {
+    expect(runtimeStatusSource).toContain('class="flex min-w-0 flex-1 items-center justify-between gap-1"');
+    expect(runtimeStatusSource).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
+    expect(runtimeStatusSource).toContain('class="relative min-w-0" data-runtime-context');
+    expect(runtimeStatusSource).toContain("overflow-hidden whitespace-nowrap");
+    expect(runtimeStatusSource).toContain('class="relative ml-auto min-w-0 shrink-0 max-w-full"');
+    expect(runtimeStatusSource.match(/>ctx<\/span>/g)).toHaveLength(2);
+    expect(runtimeStatusSource).not.toContain(">resets {formatResetDuration");
+  });
   it("keeps the composer placeholder on one visual line", () => {
     expect(composerSource).toContain('"Ask Pix anything…"');
     expect(composerSource).toContain("[&::placeholder]:whitespace-nowrap");
@@ -457,7 +466,7 @@ describe("desktop visual regressions", () => {
     // label even as the only indicator; OAuth H/W labels stay as they were.
     expect(runtimeStatusSource).toContain("displayModelUsage(status)");
     expect(runtimeStatusSource).toContain("limitingRateWindow(modelUsage)");
-    expect(runtimeStatusSource).toContain('{#if label === "R" || usageWindowItems.length > 1}');
+    expect(runtimeStatusSource).toContain('{#if label === "R"}');
     expect(runtimeStatusSource).toContain('<span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>');
   });
 

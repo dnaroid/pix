@@ -16,6 +16,13 @@ export type ModelDisplayTone =
 
 export type ModelProviderBrand = "anthropic" | "google" | "ollama" | "openai" | "openrouter" | "zai";
 
+/** Presentation only: preserve the provider/ref used for routing. */
+export function modelDisplayName(provider: string, name: string): string {
+  return provider === "pi-claude-code-provider"
+    ? name.replace(/^Claude Code\s+/u, "") || name
+    : name;
+}
+
 export function modelDisplayToneClass(tone: ModelDisplayTone | undefined): string {
   switch (tone) {
     case "accent": return "text-tool-accent";
