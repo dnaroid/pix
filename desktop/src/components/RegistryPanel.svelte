@@ -159,14 +159,6 @@
     return "border-border bg-muted/20 text-muted-foreground";
   }
 
-  function statusBorderTone(status: RegistryStatus): string {
-    if (status === "up-to-date" || status === "not-installed") return "border-l-transparent";
-    if (status === "update-available" || status === "missing-local") return "border-l-tool-warning/60";
-    if (status === "diverged" || status === "registry-changed" || status === "removed-remote") return "border-l-tool-error/60";
-    if (status === "local-changes" || status === "local-only" || status === "untracked-local") return "border-l-tool-info/60";
-    return "border-l-border";
-  }
-
   function requestFor(item: RegistryItem, action: RegistryItemAction): RegistryActionRequest | undefined {
     if (item.type === "project") {
       if (!item.artifact || (action !== "push" && action !== "pull")) return undefined;
@@ -485,44 +477,46 @@
         {#if visibleItems.length === 0}
           <div class="px-3 py-8 text-center text-xs text-muted-foreground">{emptyCatalogLabel()}</div>
         {:else}
-          <div class="min-w-0 space-y-0.5">
+          <div class="min-w-0 space-y-2">
             {#each visibleItems as item (item.id)}
-            <article class={["relative min-w-0 rounded-md border-l-2 p-2 transition-colors hover:bg-panel-hover", statusBorderTone(item.status)]}>
-              <div class="flex min-w-0 items-start gap-2">
-                <span
-                  class={["mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-panel-hover", iconTone(item.status)]}
-                  title={statusTitle(item)}
-                  aria-label={statusTitle(item)}
-                  role="img"
-                >
-                  {#if item.status === "up-to-date"}<CheckCircle2 class="h-4 w-4" aria-hidden="true" />
-                  {:else if item.status === "update-available" || item.status === "missing-local" || item.status === "not-installed"}<CircleArrowDown class="h-4 w-4" aria-hidden="true" />
-                  {:else if item.status === "local-changes" || item.status === "local-only"}<CircleArrowUp class="h-4 w-4" aria-hidden="true" />
-                  {:else if item.status === "diverged"}<TriangleAlert class="h-4 w-4" aria-hidden="true" />
-                  {:else if item.status === "untracked-local"}<GitCompareArrows class="h-4 w-4" aria-hidden="true" />
-                  {:else if item.status === "removed-remote"}<CloudOff class="h-4 w-4" aria-hidden="true" />
-                  {:else if item.status === "registry-changed"}<Link2Off class="h-4 w-4" aria-hidden="true" />
-                  {:else}<CircleX class="h-4 w-4" aria-hidden="true" />{/if}
-                </span>
-                <div class="min-w-0 flex-1">
-                  <div class="flex min-w-0 items-center gap-1.5">
-                    <strong class="min-w-0 max-w-full truncate text-xs font-medium text-foreground" title={item.name}>{item.name}</strong>
-                    <span class={[
-                      "whitespace-nowrap rounded border px-1 py-px font-mono text-xs font-semibold tracking-wide",
-                      typeTone(item.type),
-                    ]}>{typeLabel(item.type)}</span>
-                  </div>
-                  <p class={["mt-0.5 text-xs font-semibold leading-3.5", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</p>
-                  {#if item.description}<p class="line-clamp-1 text-xs leading-3.5 text-muted-foreground/80" title={item.description}>{item.description}</p>{/if}
-                  <span class="mt-1 inline-block rounded border border-border bg-muted/20 px-1 py-px text-xs text-muted-foreground" title={item.remote ? "Published to the shared Git registry" : "Only in this project"}>{item.remote ? "Published" : "Local"}</span>
-                  {#if item.tags?.length}<p class="mt-0.5 truncate text-xs text-muted-foreground" title={item.tags.join(", ")}>{item.tags.map((tag) => `#${tag}`).join(" ")}</p>{/if}
+            <article class="min-w-0 space-y-1 rounded-md p-2 transition-colors hover:bg-panel-hover">
+              <div class="flex min-w-0 items-center gap-1.5" data-registry-row="title">
+                <strong class="min-w-0 truncate text-xs font-medium text-foreground" title={item.name}>{item.name}</strong>
+                <span class={[
+                  "shrink-0 whitespace-nowrap rounded border px-1 py-px font-mono text-xs font-semibold tracking-wide",
+                  typeTone(item.type),
+                ]}>{typeLabel(item.type)}</span>
+              </div>
+              <p class="flex min-h-3.5 min-w-0 items-center gap-1.5 text-xs leading-3.5 text-muted-foreground/80" data-registry-row="description">
+                {#if item.description}<span class="min-w-0 flex-1 truncate" title={item.description}>{item.description}</span>{/if}
+                {#if item.tags?.length}<span class={["min-w-0 truncate", item.description ? "max-w-1/2" : ""]} title={item.tags.join(", ")}>{item.tags.map((tag) => `#${tag}`).join(" ")}</span>{/if}
+              </p>
+              <div class="flex min-w-0 items-center justify-between gap-2" data-registry-row="footer">
+                <div class="flex min-w-0 items-center gap-1.5">
+                  <span
+                    class={["grid h-3.5 w-3.5 shrink-0 place-items-center", iconTone(item.status)]}
+                    title={statusTitle(item)}
+                    aria-label={statusTitle(item)}
+                    role="img"
+                  >
+                    {#if item.status === "up-to-date"}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else if item.status === "update-available" || item.status === "missing-local" || item.status === "not-installed"}<CircleArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else if item.status === "local-changes" || item.status === "local-only"}<CircleArrowUp class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else if item.status === "diverged"}<TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else if item.status === "untracked-local"}<GitCompareArrows class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else if item.status === "removed-remote"}<CloudOff class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else if item.status === "registry-changed"}<Link2Off class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else}<CircleX class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+                  </span>
+                  <span class={["min-w-0 truncate text-xs font-semibold", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</span>
+                  <span class="shrink-0 rounded border border-border bg-muted/20 px-1 py-px text-xs text-muted-foreground" title={item.remote ? "Published to the shared Git registry" : "Only in this project"}>{item.remote ? "Published" : "Local"}</span>
                 </div>
                 {#if registryDiffAvailable(item) || item.actions.length > 0}
                   <div class="flex shrink-0 items-center gap-0.5">
                     {#if registryDiffAvailable(item)}
                       {@const diffBusy = diffLoadingFor(item)}
                       <button
-                        class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+                        class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
                         type="button"
                         disabled={remoteDisabled || diffBusy}
                         title={`Compare registry and local copies: ${item.name}`}
@@ -542,7 +536,7 @@
                       {@const actionLabel = registryFriendlyActionLabel(item, action)}
                       <button
                         class={[
-                          "grid h-7 w-7 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40",
+                          "grid h-6 w-6 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40",
                           actionTone(item, action),
                         ]}
                         type="button"

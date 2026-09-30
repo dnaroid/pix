@@ -238,6 +238,80 @@ describe("watch:all Desktop restart handoff", () => {
 		assert.equal(rescheduled, true);
 	});
 
+	it("waits for clean Desktop exit instead of signalling a slow shutdown", async () => {
+		const supervisor = new WatchAllSupervisor();
+		const process = { pid: 123, exitCode: null, signalCode: null };
+		supervisor.desktopProcess = process;
+		supervisor.desktopAppPid = 456;
+		supervisor.desktopRunningExecutable = "/tmp/old-desktop";
+		supervisor.desktopExecutable = "/tmp/new-desktop";
+		let finishExit!: () => void;
+		const exited = new Promise<void>((resolve) => { finishExit = resolve; });
+		let waiting = false;
+		let pruned = false;
+		supervisor.waitForDesktopRestartExit = async (instance: unknown) => {
+			assert.deepEqual(instance, { process, appPid: 456, executable: "/tmp/old-desktop" });
+			waiting = true;
+			await exited;
+		};
+		supervisor.stopDesktopInstance = async () => { assert.fail("restart must not signal Desktop"); };
+		supervisor.spawnDesktopCandidate = () => { throw new Error("newer queued changes must defer launch"); };
+		supervisor.pruneDesktopArtifacts = async () => { pruned = true; };
+
+		const restart = supervisor.restartDesktop();
+		await Promise.resolve();
+		assert.equal(waiting, true);
+		assert.equal(pruned, false);
+		assert.equal(supervisor.desktopProcess, process);
+		// A build can arrive while the old shutdown worker is still saving/cleaning up.
+		supervisor.building = true;
+		finishExit();
+		assert.equal(await restart, false);
+		assert.equal(pruned, true);
+		assert.equal(supervisor.desktopProcess, undefined);
+	});
+
+	it("preserves the old Desktop when clean restart exit times out", async () => {
+		const supervisor = new WatchAllSupervisor();
+		const process = { pid: 123, exitCode: null, signalCode: null };
+		supervisor.desktopProcess = process;
+		supervisor.desktopAppPid = 456;
+		supervisor.desktopRunningExecutable = "/tmp/old-desktop";
+		supervisor.desktopExecutable = "/tmp/new-desktop";
+		supervisor.waitForDesktopRestartExit = async () => { throw new Error("clean exit timeout"); };
+		supervisor.stopDesktopInstance = async () => { assert.fail("timed-out app must not be killed"); };
+		supervisor.spawnDesktopCandidate = () => { throw new Error("must not launch a competing instance"); };
+		await assert.rejects(supervisor.restartDesktop(), /clean exit timeout/);
+		assert.equal(supervisor.desktopProcess, process);
+		assert.equal(supervisor.desktopAppPid, 456);
+		assert.equal(supervisor.desktopRunningExecutable, "/tmp/old-desktop");
+	});
+
+	it("launches the replacement only after the prior Desktop finishes its clean exit", async () => {
+		const supervisor = new WatchAllSupervisor();
+		supervisor.desktopProcess = { pid: 123, exitCode: null, signalCode: null };
+		supervisor.desktopAppPid = 456;
+		supervisor.desktopExecutable = "/tmp/new-desktop";
+		let finishExit!: () => void;
+		const exited = new Promise<void>((resolve) => { finishExit = resolve; });
+		let launchAttempted = false;
+		supervisor.waitForDesktopRestartExit = async () => { await exited; };
+		supervisor.stopDesktopInstance = async () => { assert.fail("restart must not signal Desktop"); };
+		supervisor.pruneDesktopArtifacts = async () => {};
+		supervisor.spawnDesktopCandidate = () => {
+			launchAttempted = true;
+			assert.equal(supervisor.desktopProcess, undefined);
+			throw new Error("reached replacement launch");
+		};
+		const restart = supervisor.restartDesktop();
+		const result = assert.rejects(restart, /reached replacement launch/);
+		await Promise.resolve();
+		assert.equal(launchAttempted, false);
+		finishExit();
+		await result;
+		assert.equal(launchAttempted, true);
+	});
+
 	it("does not spin after a restart failure", async () => {
 		const supervisor = new WatchAllSupervisor();
 		let rescheduled = false;

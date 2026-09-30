@@ -81,6 +81,48 @@ describe("RegistryPanel refresh lifecycle", () => {
   });
 });
 
+describe("RegistryPanel catalog row layout", () => {
+  const catalogRow = panelSource.match(/<article\b[\s\S]*?<\/article>/)?.[0] ?? "";
+  const titleRow = catalogRow.split('data-registry-row="title"')[1]?.split('data-registry-row="description"')[0] ?? "";
+  const descriptionRow = catalogRow.split('data-registry-row="description"')[1]?.split('data-registry-row="footer"')[0] ?? "";
+  const footerRow = catalogRow.split('data-registry-row="footer"')[1] ?? "";
+
+  it("orders title/type, description, and status/actions into three rows", () => {
+    expect(catalogRow).toBeTruthy();
+    expect(catalogRow.match(/data-registry-row="[^"]+"/g)).toEqual([
+      'data-registry-row="title"',
+      'data-registry-row="description"',
+      'data-registry-row="footer"',
+    ]);
+    expect(titleRow).toContain("{item.name}");
+    expect(titleRow).toContain("{typeLabel(item.type)}");
+    expect(titleRow).not.toContain("registryFriendlyStatusLabel");
+    expect(titleRow).not.toContain("<button");
+    expect(descriptionRow).toContain("{item.description}");
+    expect(descriptionRow).toContain("item.tags.map");
+    expect(footerRow).toContain("{registryFriendlyStatusLabel(item)}");
+    expect(footerRow).toContain('item.remote ? "Published" : "Local"');
+    expect(footerRow).toContain("onclick={() => openItemDiff(item)}");
+    expect(footerRow).toContain("onclick={() => runItemAction(item, action)}");
+  });
+
+  it("uses item spacing rather than status-colored divider lines", () => {
+    expect(panelSource).toContain('<div class="min-w-0 space-y-2">');
+    expect(catalogRow).not.toContain("border-l-");
+    expect(panelSource).not.toContain("statusBorderTone");
+  });
+
+  it("reserves the description row and keeps labels truncatable beside fixed controls", () => {
+    expect(catalogRow).toContain("min-h-3.5 min-w-0");
+    expect(descriptionRow).toContain('class="min-w-0 flex-1 truncate"');
+    expect(descriptionRow).toContain('title={item.tags.join(", ")}');
+    expect(footerRow).toContain("min-w-0 truncate text-xs font-semibold");
+    expect(footerRow).toContain('title={statusTitle(item)}');
+    expect(footerRow).toContain('class="flex shrink-0 items-center gap-0.5"');
+    expect(footerRow).toContain("aria-label={`${actionLabel}: ${item.name}`}");
+  });
+});
+
 describe("RegistryPanel resource diff", () => {
   it("offers Diff beside item actions only for changed resources with both copies", () => {
     expect(panelSource).toContain("registryDiffAvailable(item) || item.actions.length > 0");

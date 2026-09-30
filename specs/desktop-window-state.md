@@ -42,6 +42,9 @@ is still available at its saved desktop coordinates.
   Closing the last window exits the app and retains that last window for relaunch.
 - Explicit application Quit freezes window membership/workspaces before background
   resource cleanup; destruction and late workspace updates cannot erase that snapshot.
+- The development Restart button uses the same clean exit. `watch:all` waits for
+  the old process to exit before launching its replacement, so shutdown persistence
+  is not interrupted by SIGTERM/SIGKILL. A timed-out handoff leaves the old process alone.
 - After a clean application exit, the next launch restores the last non-minimized size and position.
 - Desktop coordinates restore the window onto the same available display.
 - If the saved display is unavailable or the saved rectangle no longer intersects any display, the operating system chooses a safe position instead of restoring the window off-screen.

@@ -15,6 +15,11 @@ status: active
 - Desktop displays **Installed** (all project copies, published or not) and
   **Available** (remote copies absent locally) tabs. Cards independently show
   **Local** / **Published** badges and synchronization/conflict state.
+- Catalog entries use three rows: name and **SKILL** / **AGENT** type, description
+  with optional tags, then status and **Local** / **Published** on the left with
+  action buttons on the right. Missing descriptions still reserve the second
+  row; long text truncates with full-value tooltips. Entries are separated by
+  spacing, not colored divider lines. Project-sync rows are unchanged.
 - Only project artifacts sync automatically in the background; resource
   publication remains explicit.
 - Make global uses registry push, retaining the project copy and complete skill

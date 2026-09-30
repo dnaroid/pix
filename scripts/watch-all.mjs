@@ -27,6 +27,7 @@ const APP_PID_TIMEOUT_MS = 10_000;
 const APP_PID_CLEANUP_TIMEOUT_MS = 1_000;
 const APP_EXIT_WAIT_MS = 2_000;
 const APP_KILL_WAIT_MS = 500;
+const APP_RESTART_EXIT_WAIT_MS = 30_000;
 const DEBOUNCE_MS = 200;
 const RESTART_DEBOUNCE_MS = 750;
 const STARTUP_GRACE_MS = 800;
@@ -1059,18 +1060,34 @@ export class WatchAllSupervisor {
 		await stopProcessTree(instance.process);
 	}
 
+	/** Restart is requested by Desktop's own app.exit(): let its save/cleanup finish, never signal it. */
+	async waitForDesktopRestartExit(instance) {
+		if (usesDesktopAppBundle() && instance.appPid === undefined && instance.executable) {
+			instance.appPid = await findDesktopAppPid(
+				instance.executable,
+				() => instance.process.exitCode !== null || instance.process.signalCode !== null,
+				undefined,
+				APP_PID_CLEANUP_TIMEOUT_MS,
+			);
+		}
+		const pid = instance.appPid ?? instance.process.pid;
+		if (pid === undefined || !(await waitForProcessExit(pid, APP_RESTART_EXIT_WAIT_MS))) {
+			throw new Error("Desktop did not finish its clean exit; keeping it alive instead of interrupting window-state persistence");
+		}
+	}
+
 	async restartDesktop(expectedRevision = this.desktopRevision) {
 		if (!this.desktopExecutable) throw new Error("no successfully built desktop executable is available");
 		const previous = this.desktopProcess
 			? { process: this.desktopProcess, appPid: this.desktopAppPid, executable: this.desktopRunningExecutable }
 			: undefined;
 		if (previous) {
-			console.error("[watch:all] stopping the previous desktop before starting the newly built desktop");
-			// Clear the tracked instance before signalling it so its exit listener cannot race with
-			// assignment of the replacement process and clear the newly accepted instance.
+			console.error("[watch:all] waiting for the previous desktop to finish saving and exiting");
+			await this.waitForDesktopRestartExit(previous);
+			// Natural exit may already have cleared this instance. Clear tracking before
+			// launching the replacement; no signal may interrupt the old shutdown worker.
 			this.desktopProcess = undefined;
 			this.desktopAppPid = undefined;
-			await this.stopDesktopInstance(previous);
 			this.desktopRunningExecutable = undefined;
 			await this.pruneDesktopArtifacts();
 			if (this.stopping || this.building || this.pendingParts.size > 0 || expectedRevision !== this.desktopRevision) {
