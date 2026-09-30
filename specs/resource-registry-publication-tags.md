@@ -8,18 +8,23 @@ status: active
 ## Behavior
 
 - Skills and agents share the same publication model. **Local** means a project
-  copy not published in the configured Git registry. **Global** means published
-  in that shared registry, whether or not installed in this project. Global is
+  copy not published in the configured Git registry. **Published** means published
+  in that shared registry, whether or not installed in this project. Publication is
   not a machine-wide automatically loaded resource: other projects explicitly
   install it. Project artifacts remain in the separate project-sync section.
-- Desktop displays Local and Global tabs, installation state independently,
-  and the existing synchronization/conflict state without collapsing either.
+- Desktop displays **Installed** (all project copies, published or not) and
+  **Available** (remote copies absent locally) tabs. Cards independently show
+  **Local** / **Published** badges and synchronization/conflict state.
+- Only project artifacts sync automatically in the background; resource
+  publication remains explicit.
 - Make global uses registry push, retaining the project copy and complete skill
   trees or agent companions. Existing collision/conflict protection applies.
 - Make local confirms unpublication. It installs a copy first if absent, then
   removes the shared definition and companions, retaining this project's copy
   and copies already installed in other projects. An existing modified local
-  copy is not overwritten. Failed installation never removes publication.
+  copy is not overwritten. Failed installation, an existing skill copy missing
+  SKILL.md, or an invalid local agent definition never removes publication;
+  existing local work must be repaired explicitly, not overwritten implicitly.
   Ordinary uninstall removes only the project copy; remove from registry is
   still available as a separate explicit deletion, not a conversion.
 - Optional `tags` is a YAML string array in SKILL.md or agent frontmatter.
@@ -59,7 +64,7 @@ status: active
 - `skills/skill-creator/SKILL.md`
 - `skills/skill-creator/scripts/quick_validate.py`
 - `.pi/skills/project-agent-creator/SKILL.md`
-- `.pi/skills/project-agent-creator/scripts/validate-project-agents.mjs`
+- `.pi/skills/project-agent-creator/scripts/validate-agents.ts`
 
 ## Tests
 

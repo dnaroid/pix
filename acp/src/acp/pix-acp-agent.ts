@@ -3991,7 +3991,8 @@ function registryRpcCommand(params: DesktopRegistryActionRequest): string {
 	if (params.action === "configure") return "/registry rpc configure";
 	if (params.action === "project-key") return "/registry rpc project-key";
 	if ("scope" in params) {
-		return `/registry rpc ${params.action === "push-project" ? "push" : "pull"} ${params.scope}`;
+		const action = params.action === "sync-project" ? "sync" : params.action === "push-project" ? "push" : "pull";
+		return `/registry rpc ${action} ${params.scope}`;
 	}
 	if (!("type" in params) || !("name" in params)) {
 		throw new RequestError(ERROR_SERVER, "invalid registry action request");

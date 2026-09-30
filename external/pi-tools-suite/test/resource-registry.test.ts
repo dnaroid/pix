@@ -154,6 +154,60 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<voi
 }
 
 describe("resource registry", () => {
+  test("background project sync is silent, excludes skills/agents, and refuses untracked overwrite", async () => {
+    const root = tempRoot();
+    process.env.HOME = path.join(root, "home");
+    process.env.XDG_CACHE_HOME = path.join(root, "cache");
+    process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+    process.env.PIX_ACP_REGISTRY_WORKSPACE_RPC = "1";
+    const { remote } = createRegistry(root);
+    const project = path.join(root, "project");
+    fs.mkdirSync(path.join(project, ".pi", "plans"), { recursive: true });
+    fs.mkdirSync(path.join(project, ".pi", "skills", "draft"), { recursive: true });
+    fs.mkdirSync(path.join(project, ".pi", "agents"), { recursive: true });
+    fs.writeFileSync(path.join(project, ".pi", "tasks.jsonc"), '{"version":1,"tasks":[]}\n');
+    fs.writeFileSync(path.join(project, ".pi", "workspace.jsonc"), '{"version":1}\n');
+    fs.writeFileSync(path.join(project, ".pi", "TODO.md"), "Task list\n");
+    fs.writeFileSync(path.join(project, ".pi", "plans", "plan.md"), "Plan\n");
+    fs.writeFileSync(path.join(project, ".pi", "skills", "draft", "SKILL.md"), "---\ndescription: Draft\n---\nDraft\n");
+    fs.writeFileSync(path.join(project, ".pi", "agents", "draft.md"), "---\ndescription: Draft\nmodels: [test/model]\n---\nDraft\n");
+    const h = harness(project);
+    const command = h.commands.get("registry");
+    await command.handler(`config ${remote} main`, h.ctx);
+    await command.handler("project-key background-project", h.ctx);
+    h.notices.length = 0;
+    let confirmations = 0;
+    h.ctx.ui.confirm = async () => { confirmations += 1; return true; };
+    await command.handler("rpc sync project", h.ctx);
+    const snapshot = JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+    expect(snapshot.error).toBeUndefined();
+    expect(snapshot.items.filter((item: any) => item.type === "project").every((item: any) => item.status === "up-to-date")).toBe(true);
+    const files = git(root, ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"]);
+    for (const file of ["tasks.jsonc", "workspace.jsonc", "TODO.md", "plans/plan.md"]) {
+      expect(files).toContain(`projects/background-project/${file}`);
+    }
+    expect(files).not.toContain("skills/draft");
+    expect(files).not.toContain("agents/draft");
+    expect(h.notices).toEqual([]);
+    expect(confirmations).toBe(0);
+
+    const other = path.join(root, "other");
+    fs.mkdirSync(path.join(other, ".pi"), { recursive: true });
+    fs.writeFileSync(path.join(other, ".pi", "TODO.md"), "Unrelated local TODO\n");
+    const second = harness(other);
+    const secondCommand = second.commands.get("registry");
+    await secondCommand.handler("project-key background-project", second.ctx);
+    second.notices.length = 0;
+    second.ctx.ui.confirm = async () => { confirmations += 1; return true; };
+    await secondCommand.handler("rpc sync todo", second.ctx);
+    expect(JSON.parse(second.widgets.at(-1)?.lines?.[1] ?? "null").error).toContain("untracked remote state");
+    expect(second.notices).toEqual([]);
+    expect(confirmations).toBe(0);
+    expect(git(root, ["--git-dir", remote, "show", "main:projects/background-project/TODO.md"])).toBe("Task list");
+    await secondCommand.handler("rpc sync skill draft", second.ctx);
+    expect(JSON.parse(second.widgets.at(-1)?.lines?.[1] ?? "null").error).toContain("Invalid background project sync scope");
+  }, GIT_INTEGRATION_TIMEOUT_MS);
+
 	test("skills and agents publish tags and convert back to local without losing companions or other project copies", async () => {
 		const root = tempRoot();
 		const home = path.join(root, "home");
@@ -227,6 +281,39 @@ describe("resource registry", () => {
 		git(seed, ["pull", "--ff-only"]);
 		expect(fs.existsSync(path.join(seed, "agents", "reviewer.md"))).toBe(true);
 		expect(fs.existsSync(path.join(project, ".pi", "agents", "reviewer.md"))).toBe(false);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
+	test("make-local preserves publication and local work when an existing project copy is incomplete or invalid", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home); fs.mkdirSync(project);
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		const { remote, seed } = createRegistry(root);
+		const skill = path.join(project, ".pi", "skills", "demo");
+		const agent = path.join(project, ".pi", "agents", "reviewer.md");
+		fs.mkdirSync(skill, { recursive: true });
+		fs.writeFileSync(path.join(skill, "local-work.txt"), "Keep incomplete skill work");
+		fs.mkdirSync(path.dirname(agent), { recursive: true });
+		const invalidAgent = "---\nunknownSetting: true\n---\nKeep invalid agent work";
+		fs.writeFileSync(agent, invalidAgent);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		await command.handler(`configure ${remote} main`, h.ctx);
+		for (const [type, name, relativeFile] of [
+			["skill", "demo", "skills/demo/SKILL.md"],
+			["agent", "reviewer", "agents/reviewer.md"],
+		]) {
+			const remoteSource = fs.readFileSync(path.join(seed, relativeFile), "utf8");
+			await command.handler(`make-local ${type} ${name}`, h.ctx);
+			expect(h.notices.at(-1)?.type).toBe("error");
+			git(seed, ["pull", "--ff-only"]);
+			expect(fs.readFileSync(path.join(seed, relativeFile), "utf8")).toBe(remoteSource);
+		}
+		expect(fs.existsSync(path.join(skill, "SKILL.md"))).toBe(false);
+		expect(fs.readFileSync(path.join(skill, "local-work.txt"), "utf8")).toBe("Keep incomplete skill work");
+		expect(fs.readFileSync(agent, "utf8")).toBe(invalidAgent);
 	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("derives the same project key from SSH and HTTPS GitHub remotes", () => {

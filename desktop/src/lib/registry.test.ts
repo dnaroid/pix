@@ -196,13 +196,13 @@ describe("registry session state", () => {
     };
 
     const localOnly = { ...installed, remote: false, status: "local-only" as const };
-    expect(registryCatalogSection(localOnly)).toBe("local");
-    expect(registryCatalogSection(installed)).toBe("global");
-    expect(registryCatalogSection(available)).toBe("global");
+    expect(registryCatalogSection(localOnly)).toBe("installed");
+    expect(registryCatalogSection(installed)).toBe("installed");
+    expect(registryCatalogSection(available)).toBe("available");
     expect(registryCatalogSection(project)).toBeUndefined();
     expect(registryCatalogSection(stale)).toBeUndefined();
-    expect(registryCatalogItems([available, localOnly, project, stale, installed], "local")).toEqual([localOnly]);
-    expect(registryCatalogItems([available, localOnly, project, stale, installed], "global")).toEqual([available, installed]);
+    expect(registryCatalogItems([available, localOnly, project, stale, installed], "installed")).toEqual([localOnly, installed]);
+    expect(registryCatalogItems([available, localOnly, project, stale, installed], "available")).toEqual([available]);
   });
 
   it("uses user-facing sync labels", () => {

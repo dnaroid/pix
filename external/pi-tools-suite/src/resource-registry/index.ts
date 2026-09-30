@@ -1819,7 +1819,14 @@ async function makeResourceLocal(pi: ExtensionAPI, ctx: ExtensionCommandContext,
 	const confirmed = await confirmOverwrite(ctx, "Make resource local", `Unpublish ${type} "${name}" from the shared Git registry? A copy will be kept in this project. Other project copies are unchanged.`);
 	if (!confirmed) throw new Error("Make local cancelled.");
 	// Never remove the last copy: install first if this project has none.
-	if (!(await pathExists(projectResourcePath(ctx, type, name)))) await installResourceWithRuntime(pi, ctx, runtime, type, name);
+	const local = projectResourcePath(ctx, type, name);
+	if (!(await pathExists(local))) await installResourceWithRuntime(pi, ctx, runtime, type, name);
+	// An existing broken copy must not cause the usable registry copy to be lost.
+	// Refuse rather than repairing it implicitly and overwriting local work.
+	if (type === "skill" && !(await pathExists(join(local, SKILL_FILE)))) {
+		throw new Error(`Project skill "${name}" is missing ${SKILL_FILE}; publication was kept. Repair the local copy before making it local.`);
+	}
+	if (type === "agent") await assertValidAgentDefinition(local, name);
 	await removeResourceWithRuntime(pi, ctx, runtime, type, name, { confirm: false });
 	await clearResourceProvenance(ctx, type, name);
 	notify(ctx, `Made ${type} "${name}" local. Project copies were kept.`);
@@ -1859,7 +1866,7 @@ async function uninstallResource(
 	await reloadAfterResourceChange(ctx);
 }
 
-async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: ProjectScope): Promise<void> {
+async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: ProjectScope, silent = false): Promise<void> {
 	const runtime = loadRuntimeConfig(ctx.cwd);
 	await ensureRegistryCache(pi, runtime);
 	const projectKey = await resolveProjectKey(pi, ctx.cwd);
@@ -1889,6 +1896,7 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	}
 	if (targets.length === 0) {
 		await clearProjectProvenanceEntries(ctx, alreadyAbsent);
+		if (silent) return;
 		if (scope === "plans" && alreadyAbsent.includes("plans")) {
 			notify(ctx, `Project registry already has no ${PROJECT_PLANS_DIR}/ state for ${projectKey}.`);
 		} else {
@@ -1922,6 +1930,7 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 
 	if (overwriteConflicts.length > 0) {
 		const names = overwriteConflicts.join(", ");
+		if (silent) throw new Error(`Project state needs review: untracked remote state exists for ${names}. Pull or resolve it before syncing.`);
 		const confirmed = await confirmOverwrite(
 			ctx,
 			"Project state already exists in registry",
@@ -1961,7 +1970,7 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	}
 	await clearProjectProvenanceEntries(ctx, removedArtifacts);
 	const targetNames = targets.map(({ artifact }) => artifact);
-	notify(ctx, `${changed ? "Pushed" : "Project registry already matches"} ${targetNames.join(" + ")} for ${projectKey}.`);
+	if (!silent) notify(ctx, `${changed ? "Pushed" : "Project registry already matches"} ${targetNames.join(" + ")} for ${projectKey}.`);
 }
 
 async function pullProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: ProjectScope): Promise<void> {
@@ -2550,13 +2559,19 @@ async function handleRpcCommand(
 		await handleRpcDiffCommand(pi, parts.slice(1), ctx);
 		return;
 	}
-	if (!["install", "update", "push", "pull", "remove", "uninstall", "configure", "project-key", "make-local", "tags"].includes(action)) {
+	if (!["install", "update", "push", "pull", "sync", "remove", "uninstall", "configure", "project-key", "make-local", "tags"].includes(action)) {
 		await publishRegistryUiSnapshot(pi, ctx, `Unsupported registry GUI action: ${action}`);
 		return;
 	}
 	let error: string | undefined;
 	try {
-		if (action === "project-key" && parts.length === 1) await configureProjectKeyInteractive(pi, ctx);
+		if (action === "sync") {
+			const scope = parts[1];
+			if (parts.length !== 2 || !["tasks", "plans", "todo", "workspace", "project"].includes(scope ?? "")) {
+				throw new Error("Invalid background project sync scope.");
+			}
+			await pushProjectState(pi, ctx, scope as ProjectScope, true);
+		} else if (action === "project-key" && parts.length === 1) await configureProjectKeyInteractive(pi, ctx);
 		else await handleCommand(pi, parts.join(" "), ctx);
 	} catch (actionError) {
 		const message = actionError instanceof Error ? actionError.message : String(actionError);

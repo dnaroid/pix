@@ -75,7 +75,15 @@ Those portable markers are not written to the local project task file.
    workspace changed before it is applied.
 9. Dirty project-state writes are debounced for approximately 900 ms. Repeated
    writes to one artifact collapse into one push, while more than one dirty
-   artifact collapses into one `push project` operation.
+   artifact collapses into one project operation. The automatic request is
+   `sync-project`, mapped to private `registry rpc sync <scope>`; it never
+   opens confirmation dialogs or emits successful-push notifications. It syncs
+   only tasks/plans/TODO/workspace, never automatically publishes skills/agents.
+   Untracked remote collisions and changed tracked revisions return actionable
+   errors without overwrite; explicit foreground push retains confirmation.
+   Initial/refresh snapshots seed safe local-only/local-changes project artifacts.
+   Persistent poll observations neither restart debounce nor clear terminal
+   errors, and different artifacts are retained while pending or in flight.
 10. Background sync never takes the Desktop foreground-operation lock. Registry
     actions are workspace-scoped: Desktop sends the workspace cwd to ACP, and
     ACP executes the private Registry command in a disposable `--no-session` Pi
@@ -92,7 +100,8 @@ Those portable markers are not written to the local project task file.
     response from the previous workspace cannot clear or overwrite the new
     workspace's pending/sync UI state.
 13. A retryable ACP busy race returns to `pending`. Other thrown background-sync
-    failures become an `error` state and retain the dirty artifacts. A later
+    failures, including authoritative snapshot errors, become an `error` state
+    and retain the dirty artifacts. A later
     local edit or foreground Registry action can retry that retained state.
 14. Pix Desktop checks local `.pi` initialization independently from remote
     Registry configuration and ACP session readiness. When `.pi` is absent, the
@@ -110,7 +119,7 @@ Those portable markers are not written to the local project task file.
     pulled launch commands. The whole file is synchronized without redaction:
     do not put credentials or private shell arguments in it unless the private
     Registry remote is trusted to hold them. The Desktop ACP Registry request
-    validator accepts `workspace` for both `push-project` and `pull-project`,
+    validator accepts `workspace` for `push-project`, `pull-project` and `sync-project`,
     while still rejecting unknown project scopes.
 17. A workspace Git repository is optional. When `resourceRegistry.projectKey`
     is not configured, Registry may derive a stable project key from Git
@@ -125,18 +134,24 @@ Those portable markers are not written to the local project task file.
     rather than presenting an example repository as a usable value.
 18. Pix Desktop presents reusable Registry resources as an IDE-style catalog.
     Project artifacts stay in the dedicated project-sync review surface and do
-    not appear in the reusable-resource browser. Reusable resources with a local
-    copy appear under **Installed**; remote-only reusable resources appear under
-    **Marketplace**. Stale provenance entries with neither a local nor a current
-    remote copy do not masquerade as Marketplace entries. Search and resource-
+    not appear in the reusable-resource browser. Reusable resources that exist
+    in this project appear under **Installed**, regardless of publication;
+    remote resources without a local copy appear under **Available**.
+    Each card separately shows a **Local** or **Published** badge, with
+    synchronization/conflict state shown independently.
+    Stale provenance entries with neither a local nor a current
+    remote copy do not masquerade as Available entries. Search and resource-
     type filtering apply only within the active catalog section, while existing
     install/update/push/uninstall/remove actions keep their current Registry
-    semantics. **Installed** is local-first and remains available when no remote
-    is configured; in that state the snapshot scans local skills/agents and
-    exposes only local actions. **Marketplace** is the remote Git registry and
+    semantics. **Installed** shows project resources and remains available when no
+    remote is configured; in that state the snapshot scans local skills/agents
+    and exposes only local actions. **Available** is the uninstalled remote catalog and
     prompts for connection when no remote is configured. Project-state
     initialization is likewise independent: an uninitialized tasks/plans
     scaffold does not hide the reusable-resource catalog.
+    Routine local project changes display automatic background sync rather
+    than a manual review/push prompt; actual conflicts, missing keys, remote
+    changes and errors retain review actions and diagnostics.
 19. Foreground Registry actions (refresh/install/update/push/pull/uninstall/
     remove) use Registry-local busy state and do not take Pix Desktop's global
     operation-running lock. The rest of the workbench remains interactive while
@@ -257,6 +272,8 @@ Those portable markers are not written to the local project task file.
 - `desktop/src/app/registry-store.test.ts`
 - `desktop/src/lib/registry.ts`
 - `desktop/src/lib/registry-background-sync.ts`
+- `desktop/src/lib/registry-project-sync.ts`
+- `desktop/src/lib/registry-project-sync.test.ts`
 - `desktop/src/components/RegistryPanel.svelte`
 - `docs/desktop-task-manager.md`
 - `specs/desktop-attachments.md`
@@ -279,7 +296,7 @@ Those portable markers are not written to the local project task file.
 - Registry store/panel tests cover local initialization without a ready ACP
   session, local `.pi` size/reclaimable-byte reporting and allowlist-based
   garbage cleanup, background TTL cleanup, stale-workspace lifecycle guards, and
-  the Installed/Marketplace separation for reusable Registry resources.
+  the Installed/Available separation and Local/Published badges for reusable resources.
   Sidebar tests cover
   pending/syncing/error presentation, initialization/storage wiring and the
   shared animated indicator. Rust coverage verifies that storage

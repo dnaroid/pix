@@ -66,12 +66,15 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       const workspace = options.workspace();
       const requestGeneration = lifecycleGeneration;
       if (!requestClient || !workspace) throw new Error("Registry background sync has no active workspace.");
-      const next = await requestClient.registryAction(workspace, { action: "push-project", scope });
+      const next = await requestClient.registryAction(workspace, { action: "sync-project", scope });
       if (
         requestGeneration === lifecycleGeneration
         && options.workspace() === workspace
         && options.client() === requestClient
-      ) snapshot = next;
+      ) {
+        snapshot = next;
+        if (next.error) throw new Error(next.error);
+      }
     },
     onChange: (state) => { backgroundSyncState = state; },
     shouldRetryError: registryActionBusyError,
@@ -83,8 +86,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     const sourceWorkspace = options.sessionWorkspace(notification.sessionId);
     if (sourceWorkspace && sourceWorkspace !== options.workspace()) return true;
     snapshot = next;
-    if (next.configured) backgroundSync.retry();
-    else backgroundSync.reset();
+    seedProjectSync();
     return true;
   }
 
@@ -157,6 +159,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     } finally {
       if (current()) {
         actionId = null;
+        seedProjectSync();
         backgroundSync.retry();
         if (initialized) refresh();
       }
@@ -298,7 +301,21 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     const workspace = options.workspace();
     if (!workspace) return;
     reloadLocalProjectState(scope, workspace);
-    if (backgroundSyncState.phase === "idle") scheduleProjectSync(scope);
+    backgroundSync.observe(scope);
+  }
+
+  function seedProjectSync(): void {
+    if (!snapshot?.configured) {
+      backgroundSync.reset();
+      return;
+    }
+    if (backgroundSyncState.phase === "syncing" || backgroundSyncState.phase === "error") return;
+    for (const item of snapshot.items) {
+      if (item.type === "project" && item.artifact && item.local
+        && (item.status === "local-only" || item.status === "local-changes")) {
+        backgroundSync.observe(item.artifact);
+      }
+    }
   }
 
   function reset(): void {

@@ -43,6 +43,18 @@ describe("RegistryBackgroundSyncCoordinator", () => {
     expect(sync).toHaveBeenCalledWith("project");
   });
 
+  it("deduplicates repeated observations without starving the debounce", async () => {
+    vi.useFakeTimers();
+    const sync = vi.fn(async () => {});
+    const coordinator = new RegistryBackgroundSyncCoordinator({ canSync: () => true, sync, onChange: () => {}, debounceMs: 100 });
+    coordinator.observe("workspace");
+    await vi.advanceTimersByTimeAsync(50);
+    coordinator.observe("workspace");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(sync).toHaveBeenCalledExactlyOnceWith("workspace");
+    coordinator.destroy();
+  });
+
   it("runs another debounced push when state changes during an in-flight sync", async () => {
     vi.useFakeTimers();
     let resolveFirst!: () => void;

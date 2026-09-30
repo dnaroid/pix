@@ -391,7 +391,7 @@ export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 		readonly name: string;
 	}
 	| {
-		readonly action: "push-project" | "pull-project";
+		readonly action: "push-project" | "pull-project" | "sync-project";
 		readonly scope: DesktopRegistryProjectScope;
 	}
 );
@@ -665,7 +665,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 			name: value.name,
 		};
 	}
-	if (value.action === "push-project" || value.action === "pull-project") {
+	if (value.action === "push-project" || value.action === "pull-project" || value.action === "sync-project") {
 		if (!["tasks", "plans", "todo", "workspace", "project"].includes(String(value.scope))) {
 			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry project scope");
 		}

@@ -37,6 +37,7 @@ mod native_process;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
 mod startup_theme;
+mod window_restore;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -4483,7 +4484,7 @@ fn sidebar_registry_indicator_state_inner(
     }
 
     let mut project_changes = Vec::new();
-    for artifact in ["tasks", "plans", "todo"] {
+    for artifact in ["tasks", "plans", "todo", "workspace"] {
         let tracked = provenance.project_resources.get(artifact);
         let path = sidebar_registry_project_artifact_path(root, artifact);
         let exists = sidebar_registry_project_artifact_exists(&path, artifact, tracked.is_some())?;
@@ -4730,6 +4731,7 @@ fn sidebar_registry_project_artifact_path(root: &Path, artifact: &str) -> PathBu
         "tasks" => root.join(".pi/tasks.jsonc"),
         "plans" => root.join(".pi/plans"),
         "todo" => root.join(".pi/TODO.md"),
+        "workspace" => root.join(".pi/workspace.jsonc"),
         _ => root.join(".pi"),
     }
 }
@@ -9873,27 +9875,29 @@ pub fn run() {
         .manage(SidebarIndicatorState::default())
         .manage(IdxOperationState::default())
         .manage(git_ci::GitCiProcessState::default())
+        .manage(window_restore::WindowRestoreState::default())
         .setup(|app| {
-            if let Some(main_window) = app.get_webview_window("main") {
-                startup_theme::apply_to(&main_window);
-            }
+            let restored_windows = window_restore::setup(app)?;
             app.manage(AttachmentPathState::new(app.handle()));
             #[cfg(feature = "bundled-runtime")]
             release_smoke::start_if_requested(app).map_err(std::io::Error::other)?;
-            if let Some(workspace) =
-                ui_qa_workspace_from_environment().map_err(std::io::Error::other)?
-            {
-                let main_window = app
-                    .get_webview_window("main")
-                    .ok_or_else(|| std::io::Error::other("failed to find the main Pix window"))?;
-                let url = main_window.url()?;
-                let url = ui_qa_workspace_url(&url, &workspace).map_err(std::io::Error::other)?;
-                main_window.navigate(url)?;
+            if !restored_windows {
+                if let Some(workspace) =
+                    ui_qa_workspace_from_environment().map_err(std::io::Error::other)?
+                {
+                    let main_window = app
+                        .get_webview_window("main")
+                        .ok_or_else(|| std::io::Error::other("failed to find the main Pix window"))?;
+                    let url = main_window.url()?;
+                    let url = ui_qa_workspace_url(&url, &workspace).map_err(std::io::Error::other)?;
+                    main_window.navigate(url)?;
+                }
             }
             Ok(())
         })
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                .with_filename(window_restore::geometry_file())
                 .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
                 .build(),
         )
@@ -9906,6 +9910,8 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
         .invoke_handler(tauri::generate_handler![
+            window_restore::desktop_window_workspace,
+            window_restore::desktop_open_project_window,
             desktop_context_menu::desktop_edit,
             desktop_bootstrap::desktop_bootstrap_inspect,
             desktop_bootstrap::desktop_bootstrap_import_opencode,
@@ -10007,6 +10013,7 @@ pub fn run() {
             ..
         } = &event
         {
+            window_restore::destroyed(handle, label);
             handle
                 .state::<git_ci::GitCiProcessState>()
                 .cancel_window(label);
@@ -10034,9 +10041,13 @@ pub fn run() {
             let state = handle.state::<AcpProcessState>();
             if !state.exiting.swap(true, Ordering::AcqRel) {
                 api.prevent_exit();
+                let windows = window_restore::freeze(handle);
                 handle.state::<git_ci::GitCiProcessState>().cancel_all();
                 let handle = handle.clone();
                 thread::spawn(move || {
+                    if let Err(error) = window_restore::save(&handle, windows) {
+                        eprintln!("failed to save open windows: {error}");
+                    }
                     let state = handle.state::<AcpProcessState>();
                     let window_labels = state
                         .slots
@@ -11462,6 +11473,35 @@ mod tests {
         assert!(changed.stable);
         assert!(changed.local_changes);
 
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn sidebar_registry_indicator_detects_external_workspace_settings_edits() {
+        let workspace = temporary_workspace("sidebar-registry-workspace");
+        let home = temporary_workspace("sidebar-registry-workspace-home");
+        fs::create_dir_all(workspace.join(".pi")).expect("create pi directory");
+        let settings = workspace.join(".pi/workspace.jsonc");
+        fs::write(&settings, "{\"version\":1}\n").expect("write workspace settings");
+        let hash = sidebar_registry_hash_path(&settings).expect("hash workspace settings");
+        fs::write(
+            workspace.join(".pi/registry.json"),
+            format!("{{\"version\":1,\"resources\":{{}},\"projectResources\":{{\"workspace\":{{\"hash\":\"{hash}\"}}}}}}\n"),
+        )
+        .expect("write workspace provenance");
+        let state = SidebarIndicatorState::default();
+        let clean = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(clean.stable);
+        assert!(!clean.local_changes);
+        assert!(clean.project_changes.is_empty());
+
+        fs::write(&settings, "{\"version\":1,\"updated\":true}\n").expect("external settings edit");
+        let changed = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(changed.stable);
+        assert!(changed.local_changes);
+        assert_eq!(changed.project_changes, vec!["workspace".to_owned()]);
+        assert!(changed.error.is_none());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(home).expect("remove temporary home");
     }

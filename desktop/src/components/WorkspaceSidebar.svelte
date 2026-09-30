@@ -744,6 +744,7 @@
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
           <RegistryPanel
             snapshot={registrySnapshot}
+            backgroundSync={registryBackgroundSync}
             projectInitialized={registryProjectInitialized}
             projectPiSizeBytes={registryProjectPiSizeBytes}
             projectPiCleanupBytes={registryProjectPiCleanupBytes}

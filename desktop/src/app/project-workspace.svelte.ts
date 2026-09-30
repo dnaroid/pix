@@ -41,9 +41,11 @@ export function restoreProjectWorkspace(
 ): WorkspaceRestore {
   const windowWorkspace = workspaceFromLocation(locationUrl);
   try {
+    const query = new URL(locationUrl).searchParams;
+    const restoredEmptyWindow = query.get("restoreWindow") === "1" && query.get("workspace") === "";
     const saved = storage.getItem(WORKSPACE_STORAGE_KEY);
     const validSaved = saved && isAbsoluteProjectPath(saved) ? saved : undefined;
-    const initialWorkspace = windowWorkspace ?? validSaved;
+    const initialWorkspace = restoredEmptyWindow ? "" : windowWorkspace ?? validSaved;
     return {
       workspace: initialWorkspace ?? "",
       recentProjects: parseRecentProjects(
@@ -89,6 +91,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     sessionTabIds: Map<string, string[]>;
   } {
     const restored = restoreProjectWorkspace(window.location.href, localStorage);
+    void invoke("desktop_window_workspace", { workspace: restored.workspace }).catch(options.reportError);
     recentProjects = restored.recentProjects;
     return restored;
   }

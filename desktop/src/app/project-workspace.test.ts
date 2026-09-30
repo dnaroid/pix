@@ -13,6 +13,24 @@ import { createProjectWorkspaceStore, restoreProjectWorkspace } from "./project-
 beforeEach(() => tauri.invoke.mockReset());
 
 describe("project workspace startup restore", () => {
+  it("keeps an explicitly restored empty window empty instead of opening another window's last project", () => {
+    const restored = restoreProjectWorkspace("http://localhost/?restoreWindow=1&workspace=", {
+      getItem: (key) => key === WORKSPACE_STORAGE_KEY ? "/another-window" : null,
+    });
+    expect(restored.workspace).toBe("");
+  });
+
+  it("registers the restored workspace with the native window owner", () => {
+    vi.stubGlobal("window", { location: { href: "http://localhost/?workspace=%2Fwindow-project" } });
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    tauri.invoke.mockResolvedValue(undefined);
+    try {
+      const store = createProjectWorkspaceStore({ workspace: () => "", reportError: vi.fn() });
+      expect(store.restore().workspace).toBe("/window-project");
+      expect(tauri.invoke).toHaveBeenCalledWith("desktop_window_workspace", { workspace: "/window-project" });
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it("gives an encoded URL workspace precedence over stale localStorage", () => {
     const restored = restoreProjectWorkspace(
       "http://127.0.0.1:1420/?workspace=%2Fqa%2Fproject%20with%20spaces",

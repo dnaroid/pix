@@ -42,32 +42,42 @@ describe("RegistryPanel refresh lifecycle", () => {
   });
 
   it("treats a missing project key as a non-Git project-sync setup state", () => {
-    expect(panelSource).toContain("Project sync needs a key");
-    expect(panelSource).toContain("Set a project key; Git is optional");
+    expect(panelSource).toContain("registryProjectSyncPresentation(");
+    expect(panelSource).toContain("{projectSync.title}");
+    expect(panelSource).toContain("{projectSync.description}");
   });
 
-  it("separates reusable resources into Local and Global publication views", () => {
-    expect(panelSource).toContain('let catalogSection = $state<RegistryCatalogSection>("local")');
-    expect(panelSource).toContain('aria-label="Local resources"');
-    expect(panelSource).toContain('aria-label="Global resources"');
+  it("separates reusable resources into Installed and Available views", () => {
+    expect(panelSource).toContain('let catalogSection = $state<RegistryCatalogSection>("installed")');
+    expect(panelSource).toContain('aria-label="Installed resources"');
+    expect(panelSource).toContain('aria-label="Available resources"');
     expect(panelSource).toContain("registryCatalogItems(catalogItems, catalogSection)");
     expect(panelSource).toContain('.filter((item) => item.type !== "project")');
     expect(panelSource).not.toContain('<option value="project">Project</option>');
     expect(panelSource).toContain("onclick={() => item.artifact && onOpenProjectArtifact(item.artifact)}");
   });
 
-  it("keeps Local usable without a Global registry or project-sync initialization", () => {
-    expect(panelSource).toContain('!snapshot.configured && catalogSection === "global"');
-    expect(panelSource).toContain("Global registry is not connected");
+  it("keeps Installed usable without a shared registry or project-sync initialization", () => {
+    expect(panelSource).toContain('!snapshot.configured && catalogSection === "available"');
+    expect(panelSource).toContain("Shared registry is not connected");
     expect(panelSource).toContain("Project sync is not initialized");
     expect(panelSource).not.toContain('{#if projectInitialized === false}\n      <div class="px-3 py-6 text-center">');
   });
 
   it("displays tags and installation separately from publication", () => {
     expect(panelSource).toContain("item.tags?.length");
-    expect(panelSource).toContain('item.local ? "Installed here" : "Not installed here"');
+    expect(panelSource).toContain('item.remote ? "Published" : "Local"');
     expect(panelSource).toContain('action === "tags"');
     expect(panelSource).toContain('action === "make-local"');
+  });
+
+  it("shows routine project changes as automatic sync but preserves review actions on errors", () => {
+    expect(sidebarSource).toContain("backgroundSync={registryBackgroundSync}");
+    expect(panelSource).toContain("registryProjectSyncPresentation(projectItems, backgroundSync, snapshot?.error, projectKeyRequired)");
+    expect(panelSource).toContain("{projectSync.title}");
+    expect(panelSource).toContain("!projectSync.needsReview");
+    expect(panelSource).toContain("automaticPush ? undefined : registryPrimaryAction(item)");
+    expect(panelSource).toContain("Auto sync");
   });
 });
 

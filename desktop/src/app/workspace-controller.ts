@@ -1,12 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   isAbsoluteProjectPath,
-  projectName,
-  projectWindowRoute,
   projectWindowUrl,
   workspaceFromLocation,
   WORKSPACE_STORAGE_KEY,
@@ -55,7 +51,8 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
     openInNewWindow(selected);
   }
 
-  function persist(selected: string): void {
+  async function persist(selected: string): Promise<void> {
+    await invoke("desktop_window_workspace", { workspace: selected }).catch(options.reportError);
     try {
       if (workspaceFromLocation(window.location.href)) {
         window.history.replaceState(null, "", projectWindowUrl(window.location.href, selected));
@@ -71,25 +68,7 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
     if (!isAbsoluteProjectPath(selected)) return;
     options.rememberProject(selected);
     const label = `project-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    try {
-      const projectWindow = new WebviewWindow(label, {
-        url: projectWindowRoute(window.location.href, selected),
-        title: `Pix Desktop — ${projectName(selected)}`,
-        width: 1240,
-        height: 820,
-        minWidth: 860,
-        minHeight: 620,
-        resizable: true,
-        titleBarStyle: "overlay",
-        hiddenTitle: true,
-        trafficLightPosition: new LogicalPosition(8, 16),
-      });
-      void projectWindow.once("tauri://error", (event: { payload: unknown }) => {
-        options.reportError(new Error(`Could not open project window: ${String(event.payload)}`));
-      }).catch(options.reportError);
-    } catch (error) {
-      options.reportError(error);
-    }
+    void invoke("desktop_open_project_window", { label, workspace: selected }).catch(options.reportError);
   }
 
   async function select(selected: string): Promise<void> {
@@ -122,9 +101,9 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
         });
       }
       await options.closeWorkspaceSessions();
+      await persist(selected);
       options.resetForWorkspace(selected);
       options.rememberProject(selected);
-      persist(selected);
       await options.loadWorkspace(selected);
     } catch (error) {
       options.reportError(error);

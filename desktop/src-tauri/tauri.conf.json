@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "create": false,
         "title": "Pix Desktop",
         "width": 1240,
         "height": 820,

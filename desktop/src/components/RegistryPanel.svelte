@@ -42,11 +42,14 @@
     type RegistryStatus,
   } from "../lib/registry";
   import RegistryDiffPanel from "./RegistryDiffPanel.svelte";
+  import type { RegistryBackgroundSyncState } from "../lib/registry-background-sync";
+  import { registryProjectSyncPresentation } from "../lib/registry-project-sync";
 
   type RegistryFilter = "all" | Exclude<RegistryResourceType, "project">;
 
   let {
     snapshot,
+    backgroundSync,
     projectInitialized,
     projectPiSizeBytes,
     projectPiCleanupBytes,
@@ -66,6 +69,7 @@
     onCloseDiff,
   }: {
     snapshot: RegistrySnapshot | undefined;
+    backgroundSync: RegistryBackgroundSyncState;
     projectInitialized: boolean | undefined;
     projectPiSizeBytes: number | null | undefined;
     projectPiCleanupBytes: number | undefined;
@@ -86,7 +90,7 @@
   } = $props();
 
   let filter = $state<RegistryFilter>("all");
-  let catalogSection = $state<RegistryCatalogSection>("local");
+  let catalogSection = $state<RegistryCatalogSection>("installed");
   let query = $state("");
   let projectReviewOpen = $state(false);
   let panelRoot = $state<HTMLElement | null>(null);
@@ -108,8 +112,9 @@
   const projectConflictCount = $derived(projectItems.filter((item) => item.status === "diverged" || item.status === "registry-changed" || item.status === "untracked-local").length);
   const projectKeyRequired = $derived(Boolean(snapshot?.projectIssue && !snapshot?.projectKey));
   const catalogItems = $derived((snapshot?.items ?? []).filter((item) => item.type !== "project"));
-  const localCount = $derived(registryCatalogItems(catalogItems, "local").length);
-  const globalCount = $derived(registryCatalogItems(catalogItems, "global").length);
+  const installedCount = $derived(registryCatalogItems(catalogItems, "installed").length);
+  const availableCount = $derived(registryCatalogItems(catalogItems, "available").length);
+  const projectSync = $derived(registryProjectSyncPresentation(projectItems, backgroundSync, snapshot?.error, projectKeyRequired));
   const visibleItems = $derived.by(() => {
     const filtered = registryCatalogItems(catalogItems, catalogSection)
       .filter((item) => filter === "all" || item.type === filter);
@@ -232,9 +237,9 @@
     let noun = "resources";
     if (filter === "skill") noun = "skills";
     else if (filter === "agent") noun = "agents";
-    return catalogSection === "local"
-      ? `No unpublished local ${noun}.`
-      : `No shared ${noun} in the Git registry.`;
+    return catalogSection === "installed"
+      ? `No installed ${noun} in this project.`
+      : `No available ${noun} to install from the Git registry.`;
   }
 
   function cleanProjectPi(): void {
@@ -326,8 +331,8 @@
             {projectConflictCount > 0 || projectKeyRequired ? "!" : projectPendingItems.length}
           </span>
           <span class="min-w-0 flex-1">
-            <span class="block truncate text-xs font-semibold text-foreground">{projectKeyRequired ? "Project sync needs a key" : projectPendingItems.length === 0 ? "Project synced" : "Review project sync"}</span>
-            <span class="block truncate text-xs text-muted-foreground">{projectKeyRequired ? "Set a project key; Git is optional" : projectConflictCount > 0 ? `${projectConflictCount} ${projectConflictCount === 1 ? "item needs" : "items need"} review` : projectPendingItems.length > 0 ? `${projectPendingItems.length} ${projectPendingItems.length === 1 ? "change" : "changes"} to sync` : "Tasks, plans, TODO and workspace are up to date"}</span>
+            <span class="block truncate text-xs font-semibold text-foreground">{projectSync.title}</span>
+            <span class="block truncate text-xs text-muted-foreground">{projectSync.description}</span>
           </span>
           <ChevronDown class={["h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", projectReviewOpen ? "rotate-180" : ""]} aria-hidden="true" />
         </button>
@@ -335,7 +340,8 @@
         {#if projectReviewOpen}
           <div class="mt-1 space-y-0.5 border-t border-sidebar-border/70 pt-1.5">
             {#each projectItems as item (item.id)}
-              {@const projectPrimary = registryPrimaryAction(item)}
+              {@const automaticPush = !projectSync.needsReview && (item.status === "local-only" || item.status === "local-changes")}
+              {@const projectPrimary = automaticPush ? undefined : registryPrimaryAction(item)}
               <div class="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5">
                 <span class={["grid h-5 w-5 shrink-0 place-items-center", iconTone(item.status)]} title={statusTitle(item)} aria-label={statusTitle(item)} role="img">
                   {#if item.status === "up-to-date"}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
@@ -380,6 +386,8 @@
                       <Upload class="h-3.5 w-3.5" aria-hidden="true" />
                     {/if}
                   </button>
+                {:else if automaticPush}
+                  <span class="shrink-0 text-xs text-muted-foreground">Auto sync</span>
                 {:else if item.status !== "up-to-date"}
                   <span class="shrink-0 text-xs font-medium text-tool-warning">Review</span>
                 {/if}
@@ -394,30 +402,30 @@
       <button
         class={[
           "flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-          catalogSection === "local" ? "bg-panel-selected text-foreground" : "text-muted-foreground hover:bg-panel-hover hover:text-foreground",
+          catalogSection === "installed" ? "bg-panel-selected text-foreground" : "text-muted-foreground hover:bg-panel-hover hover:text-foreground",
         ]}
         type="button"
-        aria-label="Local resources"
-        title="Project resources not published to the shared Git registry"
-        aria-pressed={catalogSection === "local"}
-        onclick={() => catalogSection = "local"}
+        aria-label="Installed resources"
+        title="Skills and agents installed in this project, whether local or published"
+        aria-pressed={catalogSection === "installed"}
+        onclick={() => catalogSection = "installed"}
       >
-        <span class="truncate">Local</span>
-        <span class="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{localCount}</span>
+        <span class="truncate">Installed</span>
+        <span class="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{installedCount}</span>
       </button>
       <button
         class={[
           "flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-          catalogSection === "global" ? "bg-panel-selected text-foreground" : "text-muted-foreground hover:bg-panel-hover hover:text-foreground",
+          catalogSection === "available" ? "bg-panel-selected text-foreground" : "text-muted-foreground hover:bg-panel-hover hover:text-foreground",
         ]}
         type="button"
-        aria-label="Global resources"
-        title="Published to the shared Git registry; install explicitly in each project"
-        aria-pressed={catalogSection === "global"}
-        onclick={() => catalogSection = "global"}
+        aria-label="Available resources"
+        title="Published skills and agents not yet installed in this project"
+        aria-pressed={catalogSection === "available"}
+        onclick={() => catalogSection = "available"}
       >
-        <span class="truncate">Global</span>
-        <span class="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{globalCount}</span>
+        <span class="truncate">Available</span>
+        <span class="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{availableCount}</span>
       </button>
     </div>
 
@@ -460,10 +468,10 @@
       {#if snapshot.error}
         <div class="mb-2 flex items-start gap-2 rounded-md border border-tool-error/30 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
       {/if}
-      {#if !snapshot.configured && catalogSection === "global"}
+      {#if !snapshot.configured && catalogSection === "available"}
         <div class="px-3 py-6 text-center">
           <Database class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
-          <p class="text-xs font-medium text-foreground">Global registry is not connected</p>
+          <p class="text-xs font-medium text-foreground">Shared registry is not connected</p>
           <p class="mt-1 text-xs leading-4 text-muted-foreground">Connect the private Git registry to browse and install shared skills and agents.</p>
           <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={remoteBusy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Connect registry</button>
         </div>
@@ -506,7 +514,7 @@
                   </div>
                   <p class={["mt-0.5 text-xs font-semibold leading-3.5", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</p>
                   {#if item.description}<p class="line-clamp-1 text-xs leading-3.5 text-muted-foreground/80" title={item.description}>{item.description}</p>{/if}
-                  <p class="mt-0.5 text-xs text-muted-foreground">{item.remote ? "Global · shared Git registry" : "Local · this project"}{item.remote ? (item.local ? " · installed here" : " · not installed here") : ""}</p>
+                  <span class="mt-1 inline-block rounded border border-border bg-muted/20 px-1 py-px text-xs text-muted-foreground" title={item.remote ? "Published to the shared Git registry" : "Only in this project"}>{item.remote ? "Published" : "Local"}</span>
                   {#if item.tags?.length}<p class="mt-0.5 truncate text-xs text-muted-foreground" title={item.tags.join(", ")}>{item.tags.map((tag) => `#${tag}`).join(" ")}</p>{/if}
                 </div>
                 {#if registryDiffAvailable(item) || item.actions.length > 0}

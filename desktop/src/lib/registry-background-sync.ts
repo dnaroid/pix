@@ -62,6 +62,21 @@ export class RegistryBackgroundSyncCoordinator {
     if (this.phase !== "syncing") this.schedule(0, true);
   }
 
+  /** A poll reports persistent dirtiness, not a new write. Preserve debounce and terminal errors. */
+  observe(scope: RegistryProjectSyncScope): void {
+    if (this.destroyed) return;
+    const scopes = scope === "project" ? PROJECT_SCOPES : [scope];
+    for (const artifact of scopes) {
+      if (this.dirty.has(artifact)) continue;
+      if (this.phase === "error") {
+        this.dirty.add(artifact);
+        this.publish();
+      } else {
+        this.mark(artifact);
+      }
+    }
+  }
+
   reset(): void {
     this.generation += 1;
     this.clearTimer();
