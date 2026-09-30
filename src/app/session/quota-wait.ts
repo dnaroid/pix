@@ -185,8 +185,8 @@ export class QuotaWaitController {
 
 	private nextCheck(check: QuotaCheck, attempt: number): number {
 		const now = this.host.now();
-		return check.kind === "exhausted" && check.resetAt && check.resetAt > now
-			? check.resetAt + 1000 : now + quotaRetryDelay(attempt);
+		return check.kind === "exhausted" && check.resetAt && check.resetAt + 60_000 > now
+			? check.resetAt + 60_000 : now + quotaRetryDelay(attempt);
 	}
 	private publish(): void { if (!this.disposed) this.host.changed(this.state ? { ...this.state } : undefined); }
 }

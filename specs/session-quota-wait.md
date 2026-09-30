@@ -52,7 +52,10 @@ continuation, but keeps the task available for a manual probe. Desktop hides the
 status indicator after cancellation; `/wait` can still reopen the retained wait.
 
 At the deadline a fresh provider quota query precedes continuation. Both hourly
-and weekly windows must permit work; the later exhausted reset wins. Without a
+and weekly windows must permit work; the later exhausted reset wins. Scheduled
+checks for a known exhausted reset run one minute after that reset, allowing
+provider quota data to settle; the countdown includes this margin. Explicit
+duration/date timers and unknown-reset backoff are unchanged. Without a
 supported quota endpoint, a hidden continuation of the same task acts as the
 probe. Unknown reset times use exponential backoff from one minute, capped at
 15 minutes. A failed quota API request defers the automatic probe rather than

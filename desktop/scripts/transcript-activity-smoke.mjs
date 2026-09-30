@@ -72,6 +72,25 @@ const server = await createServer({
                   deferredResult: true, startedAtMs: i * 10, endedAtMs: i * 10 + 5 });
             state.setTranscript({ items }); await tick();
           },
+          async setInterleaved() {
+            history.cancel(); state.setSessionId("interleaved");
+            const message = (id, role, text) => ({ type: "message", id, role, text, attachments: [] });
+            const tool = id => ({ type: "tool", id, toolCallId: id, name: "read", title: "Read",
+              kind: "read", status: "completed", content: "", attachments: [], diffs: [] });
+            state.setTranscript({ items: [
+              message("user", "user", "Inspect the project"),
+              message("intro", "assistant", "I will inspect it."),
+              tool("read-first"), tool("read-second"),
+              message("commentary", "assistant", "One more thing to check."),
+              tool("read-third"),
+              message("answer", "assistant", "Here is the result."),
+              message("continuation", "assistant", "Additional detail."),
+              tool("read-fourth"), message("system", "system", "System notice"),
+              message("after-system", "assistant", "After the notice."),
+              tool("read-fifth"), message("next-user", "user", "Next request"),
+              tool("trailing"),
+            ] }); await tick();
+          },
           async finish(toolCallId, text) {
             const index = pending.findIndex(request => request.toolCallId === toolCallId);
             if (index < 0) throw new Error("No pending tool " + toolCallId);
@@ -264,10 +283,40 @@ try {
   assert.equal(stress.mountedActivityRows, 0);
   assert(stress.mountedElements < 80, "collapsed DOM size must not grow with tool count");
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 2);
+
+  await page.evaluate(() => window.activitySmoke.setInterleaved());
+  page.setDefaultTimeout(10_000);
+  for (const colorScheme of ["dark", "light"]) {
+    await page.emulateMedia({ colorScheme });
+    const borders = await page.locator("article[data-transcript-entry-id]").evaluateAll(nodes => nodes
+      .filter(node => getComputedStyle(node).borderTopStyle === "solid"
+        && parseFloat(getComputedStyle(node).borderTopWidth) > 0)
+      .map(node => node.dataset.transcriptEntryId));
+    assert.deepEqual(borders, ["commentary", "answer"], "only prose immediately after activity gets a divider");
+    const answer = page.locator('[data-transcript-entry-id="answer"]');
+    const style = await answer.evaluate(node => {
+      const css = getComputedStyle(node);
+      return { width: css.borderTopWidth, color: css.borderTopColor, padding: css.paddingTop,
+        semanticColor: getComputedStyle(document.documentElement).getPropertyValue("--border").trim() };
+    });
+    assert.equal(style.width, "1px");
+    assert.equal(style.padding, "12px");
+    assert.equal(style.color, await page.evaluate(color => {
+      const node = document.createElement("div"); node.style.color = color;
+      document.body.append(node); const resolved = getComputedStyle(node).color; node.remove(); return resolved;
+    }, style.semanticColor), "divider uses the current theme border");
+    const before = await answer.boundingBox();
+    const precedingGroup = page.locator('[data-transcript-entry-id="activity-group:read-third"]');
+    await precedingGroup.locator(":scope > summary").click();
+    assert.equal(await answer.evaluate(node => getComputedStyle(node).borderTopWidth), "1px",
+      "expanding activity preserves its following divider");
+    assert.equal((await answer.boundingBox()).width, before.width);
+    await precedingGroup.locator(":scope > summary").click();
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: "passed", scenarios: ["lazy DOM", "per-tool hydration", "duplicate toggles",
     "click/keyboard gutter collapse and preserved disclosure", "late result after collapse", "session replacement", "one-line header: chevron, neutral comma list, elapsed time, no status icons, failure stays on child rows", "duration freeze and timer teardown",
-    "keyboard disclosure", "large collapsed history"], stress }, null, 2));
+    "keyboard disclosure", "large collapsed history", "interleaved prose dividers in both themes"], stress }, null, 2));
 } finally {
   await browser?.close();
   await server.close();

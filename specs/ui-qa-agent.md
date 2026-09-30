@@ -181,7 +181,12 @@ actual GUI descendant before interaction, and cleanup stays scoped to the
 launcher plus that correlated GUI root. Launch environments allow bounded
 `PI_UI_QA_*` bootstrap
 variables in addition to the generic environment allowlist; the runner always
-supplies `PI_UI_QA=1`. TUI targets may use their ordinary explicit project and
+supplies `PI_UI_QA=1`. Both TUI presentations preserve inherited `USER` and
+`LOGNAME` alongside `HOME` so subscription CLIs can locate existing OS
+credential-store entries. Absent identity variables remain absent; arbitrary
+ambient variables, API keys and OAuth tokens are not forwarded. This does not
+expand the flow-authored environment override allowlist.
+TUI targets may use their ordinary explicit project and
 session arguments to open deterministic state inside the real PTY before
 assertions. Because PTY input and application rendering are asynchronous, TUI
 flows wait for the expected text or a stable frame after input before asserting
@@ -267,6 +272,7 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-tui-environment.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-macos-helper-cache.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-macos-release-helper.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-desktop.e2e.test.ts`

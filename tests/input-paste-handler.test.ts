@@ -23,6 +23,33 @@ function createHandler(cwd: string): { editor: InputEditor; handler: InputPasteH
 }
 
 describe("InputPasteHandler file paths", () => {
+	for (const command of ["/model", "/pi-claude-code-provider-doctor", "/pi-claude-code-provider-doctor report", "/skill:review /tmp/input.txt"]) {
+		it(`leaves plain command input synchronous and unquoted: ${command}`, () => {
+			const { editor, handler } = createHandler("/tmp");
+			assert.equal(handler.handlePlainData(command), false);
+			assert.equal(editor.text, "");
+		});
+
+		it(`preserves bracketed command paste verbatim: ${command}`, () => {
+			const { editor, handler } = createHandler("/tmp");
+			handler.beginBracketedPaste();
+			handler.appendBracketedPasteText(command);
+			handler.endBracketedPaste();
+			assert.equal(editor.text, command);
+			assert.equal(editor.attachments.length, 0);
+		});
+	}
+
+	it("still treats explicit paths and paths inside a prompt as file pastes", () => {
+		for (const value of ["/tmp/input.txt", '"/model"', "file:///model", "/input.txt"]) {
+			const { handler } = createHandler("/tmp");
+			assert.equal(handler.handlePlainData(value), true);
+		}
+		const { editor, handler } = createHandler("/tmp");
+		editor.insert("Read ");
+		assert.equal(handler.handlePlainData("/model"), true);
+	});
+
 	it("inserts a quoted relative path for files inside the workspace", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "pix-cwd-"));
 		const filePath = join(cwd, "nested file.txt");

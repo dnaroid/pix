@@ -135,7 +135,7 @@
             "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full",
             complete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
           ]}>{#if complete}<Check class="size-2.5" strokeWidth={2.4} />{:else}<span class="text-xs leading-none">!</span>{/if}</span>
-          <span class="min-w-0 flex-1">
+          <span class="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
             <span class="block text-xs font-semibold text-foreground">{question.label}</span>
             <span class={[
               "mt-0.5 block text-xs whitespace-pre-wrap break-words",
@@ -151,7 +151,7 @@
     {@const atSelectionLimit = currentQuestion.multiple && currentSelectionCount >= maxSelections}
     <div class="mb-3 flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <p class="text-sm leading-relaxed font-medium whitespace-pre-wrap text-foreground">{currentQuestion.prompt}</p>
+        <p class="text-sm leading-relaxed font-medium whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground">{currentQuestion.prompt}</p>
         {#if currentQuestion.multiple}
           <p id="question-selection-hint" class="mt-1 text-xs text-muted-foreground" aria-live="polite">
             Select {currentQuestion.minSelections ?? 1}–{maxSelections} answers · {currentSelectionCount} selected
@@ -189,7 +189,7 @@
             currentQuestion.multiple ? "rounded-sm" : "rounded-full",
             selected ? "border-primary" : "border-muted-foreground/50",
           ]}>{#if selected}{#if currentQuestion.multiple}<Check class="size-3 text-primary" strokeWidth={2.4} />{:else}<span class="size-2 rounded-full bg-primary"></span>{/if}{/if}</span>
-          <span class="min-w-0">
+          <span class="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
             <span class="block text-xs font-medium text-foreground">{choice.label}</span>
             {#if choice.description}<span class="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{choice.description}</span>{/if}
           </span>

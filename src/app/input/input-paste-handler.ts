@@ -80,6 +80,9 @@ export class InputPasteHandler {
 		if (data.length <= 1) return null;
 		if (data.includes("\x1b")) return null;
 		if (data.includes("\n") || data.includes("\r")) return null;
+		// A bare /name at the start of a prompt is command syntax, not a
+		// dropped root-level file. Explicit quotes or file:// still select a path.
+		if (!this.host.inputEditor.text && /^\/[a-zA-Z][\w:-]*(?:[ \t].*)?$/.test(data)) return null;
 		return looksLikeFilePath(data);
 	}
 

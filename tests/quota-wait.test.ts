@@ -45,7 +45,7 @@ describe("quota wait", () => {
 	it("timer expiry remains waiting if quota is still exhausted, Try now overrides deadline", async () => {
 		const f = fixture(async () => ({ kind: "exhausted", window: "weekly", resetAt: 10_000_000 }));
 		f.controller.manual("p/m", 1000); f.setNow(1_001_000); f.controller.tick(); await flush();
-		assert.equal(f.resumes, 0); assert.equal(f.controller.state?.nextCheckAt, 10_001_000);
+		assert.equal(f.resumes, 0); assert.equal(f.controller.state?.nextCheckAt, 10_060_000);
 		await f.controller.check(true); assert.equal(f.resumes, 1);
 	});
 	it("separates subscription exhaustion from ordinary errors and billing", () => {
@@ -66,7 +66,8 @@ describe("quota wait", () => {
 		const f = fixture(async () => { checks++; return { kind: "available" }; });
 		f.controller.wait("p/m", "weekly", { kind: "exhausted", window: "weekly", resetAt: 2_000_000 });
 		f.setNow(2_000_000); f.controller.tick(); assert.equal(checks, 0);
-		f.setNow(2_001_000); f.controller.tick(); f.controller.tick(); await flush();
+		f.setNow(2_059_999); f.controller.tick(); assert.equal(checks, 0);
+		f.setNow(2_060_000); f.controller.tick(); f.controller.tick(); await flush();
 		assert.equal(checks, 1); assert.equal(f.resumes, 1);
 		f.controller.tick(); await flush(); assert.equal(f.resumes, 1);
 	});
@@ -127,6 +128,6 @@ describe("quota wait", () => {
 		const f = fixture(); f.controller.wait("p/m", "limit", { kind: "unknown" });
 		assert.equal(parseQuotaWait({ ...f.controller.state, phase: "checking" })?.phase, "waiting");
 		for (const malformed of [null, {}, { ...f.controller.state, attempt: -1 }, { ...f.controller.state, resetAt: Infinity }]) assert.equal(parseQuotaWait(malformed), undefined);
-		assert.match(quotaWaitLabel({ ...f.controller.state!, nextCheckAt: 604800000, window: "weekly" }, 0), /168h 0m 0s/);
+		assert.match(quotaWaitLabel({ ...f.controller.state!, nextCheckAt: 604800000, window: "weekly" }, 0), /168h 0m$/);
 	});
 });

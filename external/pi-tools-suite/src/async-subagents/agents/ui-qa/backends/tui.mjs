@@ -458,10 +458,11 @@ function validateEnv(value) {
 	return result;
 }
 
-function launchEnvironment(extra) {
+export function launchEnvironment(extra, inherited = process.env) {
 	const result = {};
-	for (const key of ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SystemRoot", "WINDIR", "USERPROFILE", "ComSpec"]) {
-		if (process.env[key] !== undefined) result[key] = process.env[key];
+	// Subscription CLIs can use USER to locate the existing OS credential-store entry.
+	for (const key of ["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TEMP", "TMP", "SystemRoot", "WINDIR", "USERPROFILE", "ComSpec"]) {
+		if (inherited[key] !== undefined) result[key] = inherited[key];
 	}
 	return { ...result, TERM: "xterm-256color", PI_UI_QA: "1", ...extra };
 }

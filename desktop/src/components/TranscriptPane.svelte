@@ -326,7 +326,11 @@
               {#if item.text}<MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {:else}
-            <article class={["transcript-entry w-full min-w-0 text-foreground", gapClass]} data-transcript-entry-id={item.id}>
+            <article
+              class={["transcript-entry w-full min-w-0 text-foreground", gapClass,
+                displayItems[index - 1]?.type === "activity-group" && "border-t border-border pt-3"]}
+              data-transcript-entry-id={item.id}
+            >
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
               {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>

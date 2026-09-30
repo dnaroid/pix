@@ -32,6 +32,14 @@ unrelated settings and other resource filters. It is idempotent and supports
 refuses unmigrated personal settings. No npm uninstall is performed. Restart
 all hosts after migration/sync; an already running session keeps its loaded code.
 
+Provider availability and picker visibility are separate. If the doctor command
+reports the models but `/model` does not show them, inspect the frontend's
+`visibleModels` whitelist (see [model visibility](model-visibility-whitelist.md)).
+An existing explicit whitelist does not automatically include the provider's
+`pi-claude-code-provider/{sonnet,fable,opus,haiku}` refs. Enable the desired models
+in the picker's management mode or explicitly add those refs to the corresponding
+user config; migration itself preserves visibility preferences.
+
 ## Constraints and failure cases
 
 Disable legacy declarations in every settings scope you use (including trusted

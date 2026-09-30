@@ -40,6 +40,7 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 8. A session-scoped elicitation belongs to the `sessionId` carried by ACP. If that session becomes inactive, its questionnaire/form UI is hidden without resolving or moving the request; the owning session's top-tab activity remains in warning state. Activating the owning session restores the pending UI. Another active tab keeps its ordinary composer/drop behavior instead of inheriting the inactive session's question state.
 9. Different sessions may each hold one pending session-scoped elicitation at the same time, so an inactive session waiting for input does not cancel or globally lock an elicitation requested by another running session. A second elicitation for the same session is still canceled while that session already owns one. Request-scoped/unscoped elicitation remains exclusive because it has no session tab that can own its UI.
 10. Closing/forgetting the owning runtime cancels its pending elicitation. Notifications or requests from a superseded ACP client are ignored after reconnect so old client callbacks cannot recreate UI state in the replacement connection.
+11. Question prompts, choice labels/descriptions, and preview answers wrap within the available composer width, including long unbroken paths or URLs. Choice text must not inherit the global button no-wrap style or introduce horizontal scrolling in the question content; question tabs may scroll horizontally.
 
 ## Contracts
 
