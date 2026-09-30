@@ -44,6 +44,11 @@ roles and lifecycle are defined in `specs/desktop-context-menus.md`.
 - The Project switcher is a command menu. ArrowDown/ArrowUp from its trigger opens
   it and focuses the first/last enabled command, and menu navigation skips disabled
   current-window project actions while leaving new-window actions available.
+- Registry resource-card overflow menus open from `⋯` or ArrowDown/ArrowUp with
+  first/last enabled-command focus. They reuse disabled-skipping, wrap, Home/End,
+  type-ahead, Escape and Tab behavior; action execution remains in the Registry
+  panel/store. Menus escape catalog clipping and dismiss on scrolling/resize or
+  changed snapshot/availability.
 
 ## Non-goals
 
@@ -61,12 +66,16 @@ roles and lifecycle are defined in `specs/desktop-context-menus.md`.
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/workspace-sidebar-status-menu-controller.svelte.ts`
 - `desktop/src/components/ProjectSwitcher.svelte`
+- `desktop/src/components/RegistryItemActions.svelte`
+- `desktop/src/lib/registry-card-actions.ts`
 
 ## Verification
 
 - `desktop/src/lib/keyboard-navigation.test.ts` covers disabled-item skipping,
   wrapping, Home/End, and type-ahead matching.
 - Project switcher/sidebar source tests cover menu wiring.
+- Registry source tests cover overflow keyboard/lifecycle wiring; card-action
+  tests cover routine/secondary partitioning and viewport positioning.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

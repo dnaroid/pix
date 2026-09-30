@@ -2,6 +2,7 @@
   import Activity from "@lucide/svelte/icons/activity";
   import X from "@lucide/svelte/icons/x";
   import { onMount } from "svelte";
+  import { windowLayoutKey } from "../lib/window-layout-storage";
   import type { SessionActivitySummary } from "../lib/session-activity";
   import type { SessionSubagentSnapshot } from "../lib/session-subagents";
   import type { SessionTodoSnapshot } from "../lib/session-todos";
@@ -28,7 +29,7 @@
     onClose: () => void;
   } = $props();
 
-  const WIDTH_KEY = "pix.desktop.sessionInspectorWidth";
+  const WIDTH_KEY = windowLayoutKey("sessionInspectorWidth");
   const DEFAULT_WIDTH = 320;
   const MIN_WIDTH = 280;
   const MAX_WIDTH = 480;

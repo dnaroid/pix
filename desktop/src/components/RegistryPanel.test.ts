@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import panelSource from "./RegistryPanel.svelte?raw";
+import actionsSource from "./RegistryItemActions.svelte?raw";
 import diffPanelSource from "./RegistryDiffPanel.svelte?raw";
 import sidebarSource from "./WorkspaceSidebar.svelte?raw";
 import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?raw";
@@ -79,8 +80,8 @@ describe("RegistryPanel refresh lifecycle", () => {
   it("displays tags and installation separately from publication", () => {
     expect(panelSource).toContain("item.tags?.length");
     expect(panelSource).toContain("{registryPublicationBadge(item)}");
-    expect(panelSource).toContain('action === "tags"');
-    expect(panelSource).toContain('action === "make-local"');
+    expect(panelSource).toContain("<RegistryItemActions");
+    expect(actionsSource).toContain("{#each actions.secondary as action}");
   });
 
   it("shows routine project changes as automatic sync but preserves review actions on errors", () => {
@@ -117,8 +118,8 @@ describe("RegistryPanel catalog row layout", () => {
     expect(footerRow).toContain("{registryFriendlyStatusLabel(item)}");
     expect(footerRow).toContain("{registryPublicationBadge(item)}");
     expect(footerRow).toContain('title={publicationTitle(item)}');
-    expect(footerRow).toContain("onclick={() => openItemDiff(item)}");
-    expect(footerRow).toContain("onclick={() => runItemAction(item, action)}");
+    expect(footerRow).toContain("onDiff={() => openItemDiff(item)}");
+    expect(footerRow).toContain("onAction={(action) => runItemAction(item, action)}");
   });
 
   it("uses item spacing rather than status-colored divider lines", () => {
@@ -133,8 +134,9 @@ describe("RegistryPanel catalog row layout", () => {
     expect(titleRow).toContain('title={item.tags.join(", ")}');
     expect(footerRow).toContain("min-w-0 truncate text-xs font-semibold");
     expect(footerRow).toContain('title={statusTitle(item)}');
-    expect(footerRow).toContain('class="flex shrink-0 items-center gap-0.5"');
-    expect(footerRow).toContain("aria-label={`${scopeSetupRequired ? PROJECT_SCOPE_SETUP_HINT : actionLabel}: ${item.name}`}");
+    expect(footerRow).toContain("<RegistryItemActions");
+    expect(actionsSource).toContain('class="flex shrink-0 items-center gap-0.5"');
+    expect(actionsSource).toContain("aria-label={`More actions: ${item.name}`}");
   });
 });
 
@@ -146,19 +148,17 @@ describe("RegistryPanel publication scope toggle", () => {
     expect(panelSource).toContain('"Published to the shared Git registry for every project"');
   });
 
-  it("offers the backend-provided toggle-scope action with destination-aware icon", () => {
-    expect(panelSource).toContain('action === "toggle-scope"');
-    expect(panelSource).toContain("registryScopeToggleDestination(item)");
-    expect(panelSource).toContain('<Globe class="h-3.5 w-3.5" aria-hidden="true" />');
-    expect(panelSource).toContain('<FolderGit2 class="h-3.5 w-3.5" aria-hidden="true" />');
+  it("offers the backend-provided visibility toggle in the labeled overflow menu", () => {
+    expect(actionsSource).toContain('action === "toggle-scope"');
+    expect(actionsSource).toContain("registryScopeToggleDestination(item)");
+    expect(actionsSource).toContain("{registryFriendlyActionLabel(item, action)}");
   });
 
   it("blocks moving a publication to project scope until a project key exists", () => {
-    expect(panelSource).toContain("scopeToggleBlocked(item, action)");
-    expect(panelSource).toContain("!snapshot?.projectKey");
-    expect(panelSource).toContain("disabled={remoteBusy || scopeSetupRequired}");
-    expect(panelSource).toContain("PROJECT_SCOPE_SETUP_HINT");
-    expect(panelSource).toContain('set one with "Set project key" in the Project sync section');
+    expect(panelSource).toContain("projectKey={snapshot.projectKey}");
+    expect(actionsSource).toContain("!projectKey");
+    expect(actionsSource).toContain("disabled={busy || blocked(action)}");
+    expect(actionsSource).toContain('set one with "Set project key" in the Project sync section');
   });
 
   it("sends the toggle through the shared per-item action request", () => {
@@ -170,9 +170,9 @@ describe("RegistryPanel resource diff", () => {
   it("offers Diff beside item actions only for changed resources with both copies", () => {
     expect(panelSource).toContain("registryDiffAvailable(item) || item.actions.length > 0");
     expect(panelSource).toContain("registryDiffAvailable(item)");
-    expect(panelSource).toContain("Compare registry and local copies: ${item.name}");
-    expect(panelSource).toContain("onclick={() => openItemDiff(item)}");
-    expect(panelSource).toContain("data-registry-diff-trigger={item.id}");
+    expect(actionsSource).toContain("Compare registry and local copies: ${item.name}");
+    expect(panelSource).toContain("onDiff={() => openItemDiff(item)}");
+    expect(actionsSource).toContain("data-registry-diff-trigger={item.id}");
   });
 
   it("swaps the catalog for an in-panel diff view with close and retry wiring", () => {
@@ -231,5 +231,36 @@ describe("RegistryPanel resource diff", () => {
     expect(sidebarViewModelSource).toContain("registryDiff: options.registry.diff,");
     expect(sidebarViewModelSource).toContain("onRegistryDiff: options.registry.openDiff,");
     expect(sidebarViewModelSource).toContain("onRegistryCloseDiff: options.registry.closeDiff,");
+  });
+});
+
+describe("Registry resource-card overflow", () => {
+  it("renders only the selected primary plus Compare outside the labeled menu", () => {
+    const direct = actionsSource.split("{#if open}")[0]!;
+    expect(direct).toContain("{#if actions.primary}");
+    expect(direct).toContain("registryDiffAvailable(item)");
+    expect(direct).not.toContain("{#each item.actions");
+    expect(actionsSource).toContain('aria-haspopup="menu" aria-expanded={open}');
+    expect(actionsSource).toContain('role="menuitem" tabindex="-1"');
+    expect(actionsSource).toContain("{#each actions.secondary as action}");
+    expect(actionsSource).toContain("close(true); onAction(action);");
+  });
+  it("uses shared menu navigation and restores invoker focus without trapping Tab", () => {
+    expect(actionsSource).toContain("menuFocusIndex(navigationItems()");
+    expect(actionsSource).toContain("menuTypeaheadFocusIndex(navigationItems()");
+    expect(actionsSource).toContain('if (event.key === "Escape")');
+    expect(actionsSource).toContain('if (event.key === "Tab") { close(true); return; }');
+    expect(actionsSource).toContain('void show(event.key === "ArrowUp")');
+    expect(actionsSource).toContain("if (restoreFocus) trigger?.focus()");
+  });
+  it("escapes scroll clipping, cleans listeners/portal, and cancels deferred opening", () => {
+    expect(actionsSource).toContain("document.body.appendChild(node)");
+    expect(actionsSource).toContain("destroy: () => node.remove()");
+    expect(actionsSource).toContain("registryMenuPosition(trigger.getBoundingClientRect()");
+    expect(actionsSource).toContain("request !== generation");
+    for (const event of ["pointerdown", "focusin", "scroll", "resize"]) {
+      expect(actionsSource).toContain(`addEventListener("${event}"`);
+      expect(actionsSource).toContain(`removeEventListener("${event}"`);
+    }
   });
 });

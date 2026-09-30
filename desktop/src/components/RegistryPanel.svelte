@@ -7,14 +7,9 @@
   import CircleX from "@lucide/svelte/icons/circle-x";
   import CloudOff from "@lucide/svelte/icons/cloud-off";
   import Download from "@lucide/svelte/icons/download";
-  import FileDiff from "@lucide/svelte/icons/file-diff";
-  import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
-  import Globe from "@lucide/svelte/icons/globe";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2Off from "@lucide/svelte/icons/link-2-off";
-  import PackageMinus from "@lucide/svelte/icons/package-minus";
-  import PackagePlus from "@lucide/svelte/icons/package-plus";
   import Pencil from "@lucide/svelte/icons/pencil";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Search from "@lucide/svelte/icons/search";
@@ -33,7 +28,6 @@
     registryPrimaryAction,
     registryPublicationBadge,
     registryPublicationScope,
-    registryScopeToggleDestination,
     searchRegistryItems,
     type RegistryActionRequest,
     type RegistryCatalogSection,
@@ -47,6 +41,7 @@
     type RegistryStatus,
   } from "../lib/registry";
   import RegistryDiffPanel from "./RegistryDiffPanel.svelte";
+  import RegistryItemActions from "./RegistryItemActions.svelte";
   import type { RegistryBackgroundSyncState } from "../lib/registry-background-sync";
   import { registryProjectSyncPresentation } from "../lib/registry-project-sync";
   import { registryItemsWithContext } from "../lib/registry";
@@ -216,16 +211,6 @@
     return registryPublicationScope(item) === "project"
       ? "Published to the shared Git registry for this project only"
       : "Published to the shared Git registry for every project";
-  }
-
-  const PROJECT_SCOPE_SETUP_HINT = 'Project visibility needs a project key first — set one with "Set project key" in the Project sync section.';
-
-  function scopeToggleBlocked(item: RegistryItem, action: RegistryItemAction): boolean {
-    // Narrowing visibility to this project needs a destination project key;
-    // widening back to global visibility never does.
-    return action === "toggle-scope"
-      && registryScopeToggleDestination(item) === "project"
-      && !snapshot?.projectKey;
   }
 
   function projectEditTitle(item: RegistryItem): string {
@@ -541,66 +526,9 @@
                   <span class="shrink-0 rounded border border-border bg-muted/20 px-1 py-px text-xs text-muted-foreground" title={publicationTitle(item)}>{registryPublicationBadge(item)}</span>
                 </div>
                 {#if registryDiffAvailable(item) || item.actions.length > 0}
-                  <div class="flex shrink-0 items-center gap-0.5">
-                    {#if registryDiffAvailable(item)}
-                      {@const diffBusy = diffLoadingFor(item)}
-                      <button
-                        class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
-                        type="button"
-                        disabled={remoteDisabled || diffBusy}
-                        title={`Compare registry and local copies: ${item.name}`}
-                        aria-label={`Compare registry and local copies: ${item.name}`}
-                        data-registry-diff-trigger={item.id}
-                        onclick={() => openItemDiff(item)}
-                      >
-                        {#if diffBusy}
-                          <RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                        {:else}
-                          <FileDiff class="h-3.5 w-3.5" aria-hidden="true" />
-                        {/if}
-                      </button>
-                    {/if}
-                    {#each item.actions as action}
-                      {@const actionBusy = actionId === `${item.id}:${action}`}
-                      {@const actionLabel = registryFriendlyActionLabel(item, action)}
-                      {@const scopeSetupRequired = scopeToggleBlocked(item, action)}
-                      <button
-                        class={[
-                          "grid h-6 w-6 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40",
-                          actionTone(item, action),
-                        ]}
-                        type="button"
-                        disabled={remoteBusy || scopeSetupRequired}
-                        title={scopeSetupRequired ? PROJECT_SCOPE_SETUP_HINT : actionLabel}
-                        aria-label={`${scopeSetupRequired ? PROJECT_SCOPE_SETUP_HINT : actionLabel}: ${item.name}`}
-                        onclick={() => runItemAction(item, action)}
-                      >
-                        {#if actionBusy}
-                          <RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                        {:else if action === "install"}
-                          <PackagePlus class="h-3.5 w-3.5" aria-hidden="true" />
-                        {:else if action === "pull" || action === "update"}
-                          <Download class="h-3.5 w-3.5" aria-hidden="true" />
-                        {:else if action === "push"}
-                          <Upload class="h-3.5 w-3.5" aria-hidden="true" />
-                        {:else if action === "uninstall"}
-                          <PackageMinus class="h-3.5 w-3.5" aria-hidden="true" />
-                        {:else if action === "tags"}
-                          <Pencil class="h-3.5 w-3.5" aria-hidden="true" />
-                        {:else if action === "make-local"}
-                          <CloudOff class="h-3.5 w-3.5" aria-hidden="true" />
-                        {:else if action === "toggle-scope"}
-                          {#if registryScopeToggleDestination(item) === "global"}
-                            <Globe class="h-3.5 w-3.5" aria-hidden="true" />
-                          {:else}
-                            <FolderGit2 class="h-3.5 w-3.5" aria-hidden="true" />
-                          {/if}
-                        {:else}
-                          <Trash2 class="h-3.5 w-3.5" aria-hidden="true" />
-                        {/if}
-                      </button>
-                    {/each}
-                  </div>
+                  <RegistryItemActions {item} {remoteDisabled} {actionId} projectKey={snapshot.projectKey}
+                    diffBusy={diffLoadingFor(item)} onAction={(action) => runItemAction(item, action)}
+                    onDiff={() => openItemDiff(item)} />
                 {/if}
               </div>
             </article>

@@ -1,11 +1,12 @@
-const STORAGE_KEY = "pix.desktop.sessionInspectorOpen";
+import { windowLayoutKey } from "../lib/window-layout-storage";
 
 export function createSessionInspectorPreference() {
+  const storageKey = windowLayoutKey("sessionInspectorOpen");
   let open = $state(false);
 
   function restore(): void {
     try {
-      open = localStorage.getItem(STORAGE_KEY) === "true";
+      open = localStorage.getItem(storageKey) === "true";
     } catch {
       open = false;
     }
@@ -14,7 +15,7 @@ export function createSessionInspectorPreference() {
   function setOpen(next: boolean): void {
     open = next;
     try {
-      localStorage.setItem(STORAGE_KEY, String(next));
+      localStorage.setItem(storageKey, String(next));
     } catch {
       // Persistence is a convenience; keep the in-memory preference.
     }

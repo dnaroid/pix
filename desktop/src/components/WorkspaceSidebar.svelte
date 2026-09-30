@@ -11,6 +11,7 @@
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import X from "@lucide/svelte/icons/x";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { windowLayoutKey } from "../lib/window-layout-storage";
   import { onMount, tick } from "svelte";
   import {
     extractAttachmentMarkers,
@@ -254,7 +255,7 @@
     onRefreshKnowledge: () => void;
   } = $props();
 
-  const ACTIVE_TAB_KEY = "pix.desktop.workspaceSidebarTab";
+  const ACTIVE_TAB_KEY = windowLayoutKey("workspaceSidebarTab");
 
   let sidebarElement = $state<HTMLElement | null>(null);
   let packageScriptsPanel = $state<PackageScriptsPanelHandle | null>(null);

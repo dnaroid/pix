@@ -20,6 +20,18 @@ status: active
   action buttons on the right. Missing descriptions still reserve the second
   row; long text truncates with full-value tooltips. Entries are separated by
   spacing, not colored divider lines. Project-sync rows are unchanged.
+- Resource cards keep at most two direct commands: the routine Install / Update /
+  Push / Pull action, plus Compare when a two-sided diff is available. Other
+  commands are in a labeled **More actions** (`⋯`) menu: alternate conflict
+  resolution, tags, Global/Project visibility, unpublication and deletion.
+  Synced/context-only rows can therefore show only `⋯`. Menu commands retain
+  existing busy/setup guards and confirmations; a missing project key disables
+  **Make project** with a setup hint. The menu is not clipped by the catalog's
+  scrolling container, flips/clamps within the viewport, and dismisses on outside
+  interaction, catalog scroll, resize, refreshed items or changed availability.
+  Keyboard traversal uses the shared menu contract; Escape and Tab return focus
+  to the invoker (Tab then proceeds normally). Pending open/focus work is canceled
+  by dismissal or teardown.
 - Skills exposed by the ready active session's skill commands are marked
   **In context** and included in Installed even without a project copy (for
   example, globally loaded skills). Matching uses exact skill names and the
@@ -116,6 +128,8 @@ status: active
 - `desktop/src/lib/registry.ts`
 - `desktop/src/app/registry.svelte.ts`
 - `desktop/src/components/RegistryPanel.svelte`
+- `desktop/src/components/RegistryItemActions.svelte`
+- `desktop/src/lib/registry-card-actions.ts`
 - `skills/skill-creator/SKILL.md`
 - `skills/skill-creator/scripts/quick_validate.py`
 - `.pi/skills/project-agent-creator/SKILL.md`
@@ -130,6 +144,7 @@ status: active
 - `desktop/src/lib/registry.test.ts`
 - `desktop/src/app/registry-store.test.ts`
 - `desktop/src/components/RegistryPanel.test.ts`
+- `desktop/src/lib/registry-card-actions.test.ts`
 
 ## Verification
 

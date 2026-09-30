@@ -22,6 +22,8 @@ is still available at its saved desktop coordinates.
 - Persist the set of open window labels and their current workspace paths.
 - Restore the persisted geometry on the next launch.
 - Preserve whether the window was maximized.
+- Persist the selected sidebar panel, sidebar collapsed state/width and session
+  inspector open state/width independently for each stable window label.
 
 ## Non-goals
 
@@ -76,6 +78,15 @@ is still available at its saved desktop coordinates.
 - Geometry is keyed by stable window label. Membership/workspaces/logical geometry use a versioned,
   bounded `open-windows.json` in the same application configuration directory,
   atomically replaced during clean exit on the existing shutdown worker.
+- Frontend pane layout uses localStorage keys under
+  `pix.desktop.windowLayout.<encoded-window-label>.<preference>`. Windows sharing
+  a project or webview origin cannot overwrite each other's layout. Reload and
+  relaunch retain layout when the native label is retained; switching projects
+  within a window keeps that window's layout. Browser preview has its own namespace.
+- Legacy shared pane keys are not imported: their last writer cannot identify
+  the owning window. Each window starts with default panes once, then remembers
+  its own choices. This does not change per-project session/tab persistence,
+  shared recent projects, or transient menus/dialogs.
 - Native move/resize/close callbacks cache only normal logical geometry, with no
   disk IO. Explicit Quit captures live normal geometry and freezes it with the
   membership snapshot before background teardown; late events cannot mutate it.
@@ -91,6 +102,11 @@ is still available at its saved desktop coordinates.
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/app/project-workspace.svelte.ts`
 - `desktop/src/app/workspace-controller.ts`
+- `desktop/src/lib/window-layout-storage.ts`
+- `desktop/src/app/session-inspector-preference.svelte.ts`
+- `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
+- `desktop/src/components/SessionInspector.svelte`
 
 ## Tests
 
@@ -98,6 +114,7 @@ is still available at its saved desktop coordinates.
 - `desktop/src-tauri/src/window_geometry.rs`
 - `desktop/src/app/project-workspace.test.ts`
 - `desktop/src/app/workspace-controller.test.ts`
+- `desktop/src/lib/window-layout-storage.test.ts`
 
 ## Verification
 

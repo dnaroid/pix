@@ -1,4 +1,5 @@
 import type { SidebarIndicatorTab } from "../lib/sidebar-indicators";
+import { windowLayoutKey } from "../lib/window-layout-storage";
 
 const ACTIVITY_BAR_WIDTH = 40;
 const DEFAULT_WIDTH = 296;
@@ -9,14 +10,14 @@ const SETTINGS_MIN_WIDTH = 360;
 const SCRIPTS_MIN_WIDTH = 400;
 const IDX_MIN_WIDTH = 420;
 const MIN_MAIN_WORKSPACE_WIDTH = 280;
-const WIDTH_KEY = "pix.desktop.taskSidebarWidth";
-const COLLAPSED_KEY = "pix.desktop.taskSidebarCollapsed";
 
 interface WorkspaceSidebarLayoutControllerOptions {
   readonly activeTab: () => SidebarIndicatorTab;
 }
 
 export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebarLayoutControllerOptions) {
+  const WIDTH_KEY = windowLayoutKey("taskSidebarWidth");
+  const COLLAPSED_KEY = windowLayoutKey("taskSidebarCollapsed");
   let collapsed = $state(false);
   let projectSwitcherMinimumWidth = $state(MIN_WIDTH);
   let sidebarWidth = $state(DEFAULT_WIDTH);
