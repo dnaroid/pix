@@ -35,7 +35,7 @@ describe("built-in knowledge-auditor role", () => {
 
 		expect(role).toBeDefined();
 		expect(role.requiresIndexedProject).toBe(true);
-		expect(role.models).toEqual(["zai/glm-5.3-flash", "openai-codex/gpt-6-luna"]);
+		expect(role.models).toEqual(["openai-codex/gpt-6-luna", "zai/glm-5.3-flash"]);
 		expect(role.thinking).toBe("low");
 		expect(role.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
 		expect(role.timeoutMs).toBe(300_000);

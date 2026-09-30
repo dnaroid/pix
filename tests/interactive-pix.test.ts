@@ -391,7 +391,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		// Detaching from the bottom during a stream (wheelUp) must show older lines
 		// rather than forcing stick-to-bottom. Covers scroll-controller.ts detached
 		// scroll path that unit tests with a fake session cannot reach.
-		const response = Array.from({ length: 60 }, (_, index) => `PIX-SCROLL-LINE-${index}`).join("\n");
+		const response = Array.from({ length: 120 }, (_, index) => `PIX-SCROLL-LINE-${index}`).join("\n");
 		// First lines carry a distinct early marker for a deterministic assertion.
 		const earlyResponse = response.replace("PIX-SCROLL-LINE-0", "PIX-SCROLL-EARLY");
 		const mockModel = await MockModel.start([earlyResponse], { chunkSize: 12, chunkDelayMs: 20 });
@@ -403,9 +403,11 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 			pix.write("produce many lines");
 			pix.enter();
 			await pix.waitForText("PIX-SCROLL-EARLY", "first lines rendered before scroll");
+			await pix.waitForText("PIX-SCROLL-LINE-40", "content exceeds the viewport while streaming");
 
 			// Detach from the bottom while content is still streaming.
 			for (let index = 0; index < 12; index += 1) pix.wheelUp(10, 6);
+			await pix.waitForText("PIX-SCROLL-EARLY", "older content visible after scrolling up");
 			await sleep(300);
 			// The early line must remain on screen after detaching upward.
 			assert.ok(
@@ -523,6 +525,13 @@ class PixPty {
 		mkdirSync(workspace, { recursive: true });
 		installFakeClipboardCommands(fakeBinDir);
 		writeFileSync(join(agentDir, "models.json"), JSON.stringify(mockModel.modelsJson(), null, 2));
+		// The screen parser does not render fonts. Mark the font as present so
+		// unrelated installation/network notifications cannot obscure assertions.
+		const fontDir = process.platform === "darwin"
+			? join(tempDir, "Library", "Fonts")
+			: join(tempDir, ".local", "share", "fonts");
+		mkdirSync(fontDir, { recursive: true });
+		writeFileSync(join(fontDir, "JetBrainsMonoNerdFontMono-Regular.ttf"), "PTY font fixture");
 
 		const child = spawn("python3", [
 			PTY_DRIVER,
@@ -545,6 +554,10 @@ class PixPty {
 				PI_CODING_AGENT_DIR: agentDir,
 				PATH: `${fakeBinDir}${delimiter}${process.env.PATH ?? ""}`,
 				PIX_TEST_CLIPBOARD_CAPTURE: clipboardCapturePath,
+				// Startup update checks and an unavailable optional provider are not
+				// part of these interactions; both can create overlapping toasts.
+				PI_OFFLINE: "1",
+				PI_TOOLS_SUITE_DISABLED_MODULES: "claude-code-provider",
 				// Disable the bundled terminal-bell extension so it never writes \x07
 				// or spawns terminal-notifier/osascript during tests.
 				PI_TERMINAL_BELL_DISABLED: "1",

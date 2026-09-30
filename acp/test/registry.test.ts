@@ -30,6 +30,7 @@ const ENV_KEYS = [
 	"GIT_AUTHOR_EMAIL",
 	"GIT_COMMITTER_NAME",
 	"GIT_COMMITTER_EMAIL",
+	"GIT_CONFIG_GLOBAL",
 ] as const;
 
 const originalEnv: Record<string, string | undefined> = {};
@@ -92,6 +93,11 @@ function isolate(root: string): { home: string; cache: string } {
 	const cache = path.join(root, "cache");
 	fs.mkdirSync(home, { recursive: true });
 	fs.mkdirSync(cache, { recursive: true });
+	// Ignore the runner's global checkout conversion policy (notably Windows
+	// core.autocrlf=true): these fixtures assert exact resource bytes.
+	const gitConfig = path.join(home, ".gitconfig");
+	fs.writeFileSync(gitConfig, "[core]\n\tautocrlf = false\n");
+	process.env.GIT_CONFIG_GLOBAL = gitConfig;
 	process.env.HOME = home;
 	process.env.XDG_CACHE_HOME = cache;
 	delete process.env.PI_CONFIG_DIR;
@@ -281,7 +287,7 @@ test("moves agent companions atomically and routes scoped install/update/diff/ma
 	assert.equal(localized.error, undefined);
 	assert.equal(item(localized, "agent:reviewer").remote, false);
 	assert.equal(item(localized, "agent:reviewer").local, true);
-	assert.equal(item(localized, "agent:reviewer").status, "local-only");
+	assert.equal(item(localized, "agent:reviewer").status, "removed-remote");
 	assert.equal(fs.readFileSync(localAsset, "utf8"), "Private rules\n");
 	git(seed, ["pull", "--ff-only", "origin", "main"]);
 	assert.equal(fs.existsSync(remoteAsset), false);
@@ -337,7 +343,10 @@ test("refuses global/project name collisions and global promotion or creation ov
 	fs.mkdirSync(local, { recursive: true });
 	fs.writeFileSync(path.join(local, "SKILL.md"), "---\ndescription: private\n---\nLocal\n");
 	const creation = await act(project, { action: "push", type: "skill", name: "demo" }, h.ctx);
-	assert.match(creation.error ?? "", /collision/i);
+	assert.equal(creation.error, undefined);
+	assert.equal(item(creation, "skill:demo").publicationScope, "project");
+	const globalCreation = await act(project, { action: "toggle-scope", type: "skill", name: "demo" }, h.ctx);
+	assert.match(globalCreation.error ?? "", /collision/i);
 	assert.equal(fs.existsSync(path.join(seed, "skills", "demo")), false);
 });
 
@@ -361,7 +370,7 @@ test("scope toggle requires a project identity, supports cancel and rejects syml
 	assert.equal(fs.existsSync(path.join(seed, "skills", "demo", "SKILL.md")), true);
 });
 
-test("background project sync is silent, excludes skills/agents, and refuses untracked overwrite", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+test("background project sync silently saves Local-only skills/agents under the project and refuses untracked overwrite", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const root = tempRoot();
 	isolate(root);
 	const { remote } = createRegistry(root);
@@ -388,8 +397,11 @@ test("background project sync is silent, excludes skills/agents, and refuses unt
 	for (const file of ["tasks.jsonc", "workspace.jsonc", "TODO.md", "plans/plan.md"]) {
 		assert.ok(files.includes(`projects/background-project/${file}`), `registry tracks ${file}`);
 	}
-	assert.equal(files.includes("skills/draft"), false);
-	assert.equal(files.includes("agents/draft"), false);
+	assert.ok(files.includes("projects/background-project/skills/draft/SKILL.md"));
+	assert.ok(files.includes("projects/background-project/agents/draft.md"));
+	assert.equal(files.split("\n").some((file) => file.startsWith("skills/draft") || file.startsWith("agents/draft")), false);
+	assert.equal(item(snapshot, "skill:draft").publicationScope, "project");
+	assert.equal(item(snapshot, "agent:draft").status, "up-to-date");
 	assert.deepEqual(h.notices, []);
 	assert.equal(h.confirmations.length, 0);
 
@@ -409,6 +421,73 @@ test("background project sync is silent, excludes skills/agents, and refuses unt
 	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/background-project/TODO.md"]), "Task list");
 });
 
+test("resource background saving preserves companions, private edits, scope toggle, explicit removal and concurrent calls", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, remote, seed, h } = await scopeFixture();
+	const localSkill = path.join(project, ".pi", "skills", "draft");
+	const localAgent = path.join(project, ".pi", "agents", "author");
+	fs.mkdirSync(localSkill, { recursive: true });
+	fs.mkdirSync(localAgent, { recursive: true });
+	fs.writeFileSync(path.join(localSkill, "SKILL.md"), "---\ndescription: Draft\n---\nProject draft\n");
+	fs.writeFileSync(path.join(localSkill, "example.txt"), "Skill asset\n");
+	fs.writeFileSync(`${localAgent}.md`, "---\ndescription: Author\nmodels: [test/model]\n---\nAuthor\n");
+	fs.writeFileSync(path.join(localAgent, "rules.md"), "Agent asset\n");
+	const snapshots = await Promise.all([
+		act(project, { action: "sync-project", scope: "project" }, h.ctx),
+		act(project, { action: "sync-project", scope: "project" }, h.ctx),
+	]);
+	assert.ok(snapshots.every((snapshot) => snapshot.error === undefined));
+	assert.deepEqual(h.notices, []);
+	assert.deepEqual(h.confirmations, []);
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/alpha/skills/draft/example.txt"]), "Skill asset");
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/alpha/agents/author/rules.md"]), "Agent asset");
+	const before = git(root, ["--git-dir", remote, "rev-parse", "main"]);
+	fs.appendFileSync(path.join(localSkill, "SKILL.md"), "Unpublished edit\n");
+	assert.equal((await act(project, { action: "sync-project", scope: "project" }, h.ctx)).error, undefined);
+	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
+	const promoted = await act(project, { action: "toggle-scope", type: "skill", name: "draft" }, h.ctx);
+	assert.equal(promoted.error, undefined);
+	assert.equal(item(promoted, "skill:draft").publicationScope, "global");
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:skills/draft/SKILL.md"]).includes("Unpublished edit"), false);
+	const demoted = await act(project, { action: "toggle-scope", type: "skill", name: "draft" }, h.ctx);
+	assert.equal(demoted.error, undefined);
+	assert.equal((await act(project, { action: "sync-project", scope: "project" }, h.ctx)).error, undefined);
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/alpha/skills/draft/SKILL.md"]).includes("Unpublished edit"), false);
+	assert.equal((await act(project, { action: "make-local", type: "skill", name: "draft" }, h.ctx)).error, undefined);
+	assert.equal((await act(project, { action: "remove", type: "agent", name: "author" }, h.ctx)).error, undefined);
+	const removed = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
+	assert.equal(removed.error, undefined);
+	assert.equal(item(removed, "skill:draft").remote, false);
+	assert.equal(item(removed, "agent:author").remote, false);
+	assert.match(fs.readFileSync(path.join(localSkill, "SKILL.md"), "utf8"), /Unpublished edit/);
+	git(seed, ["pull", "--ff-only", "origin", "main"]);
+	assert.equal(fs.existsSync(path.join(seed, "projects", "alpha", "skills", "draft")), false);
+	assert.equal(fs.existsSync(path.join(seed, "projects", "alpha", "agents", "author.md")), false);
+});
+
+test("Local-only resource publication needs a project key and skips untracked Global collisions", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, remote, h } = await scopeFixture();
+	const local = path.join(project, ".pi", "skills", "draft");
+	fs.mkdirSync(local, { recursive: true });
+	fs.writeFileSync(path.join(local, "SKILL.md"), "---\ndescription: Draft\n---\nDraft\n");
+	delete process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY;
+	fs.writeFileSync(path.join(project, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({ resourceRegistry: { projectKey: null } }));
+	const before = git(root, ["--git-dir", remote, "rev-parse", "main"]);
+	const missing = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
+	assert.match(missing.error ?? missing.projectIssue ?? "", /project key/i);
+	assert.match((await act(project, { action: "push", type: "skill", name: "draft" }, h.ctx)).error ?? "", /project key/i);
+	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
+	fs.rmSync(local, { recursive: true });
+	const collision = path.join(project, ".pi", "skills", "demo");
+	fs.mkdirSync(collision, { recursive: true });
+	fs.writeFileSync(path.join(collision, "SKILL.md"), "---\ndescription: Private\n---\nPrivate\n");
+	const skipped = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
+	assert.equal(skipped.error, undefined);
+	assert.equal(item(skipped, "skill:demo").status, "untracked-local");
+	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
+	assert.deepEqual(h.confirmations, []);
+});
+
 test("skills and agents publish tags and convert back to local without losing companions or other project copies", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const root = tempRoot();
 	const { home } = isolate(root);
@@ -416,6 +495,7 @@ test("skills and agents publish tags and convert back to local without losing co
 	const other = path.join(root, "other-project");
 	for (const dir of [home, project, other]) fs.mkdirSync(dir, { recursive: true });
 	const { remote, seed } = createRegistry(root);
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	fs.mkdirSync(path.join(seed, "agents", "reviewer"), { recursive: true });
 	fs.writeFileSync(path.join(seed, "agents", "reviewer", "guide.md"), "Companion");
 	fs.writeFileSync(path.join(seed, "skills", "demo", "example.txt"), "Skill companion");
@@ -452,16 +532,16 @@ test("skills and agents publish tags and convert back to local without losing co
 		assert.deepEqual(item(tagged, `${type}:${name}`).tags, ["quality", "security"]);
 		await act(project, { action: "push", type, name }, h.ctx);
 		git(seed, ["pull", "--ff-only"]);
-		assert.match(fs.readFileSync(path.join(seed, relativeFile), "utf8"), /tags: \["quality","security"\]/);
-		assert.equal(fs.existsSync(path.join(seed, companion)), true);
+		assert.match(fs.readFileSync(path.join(seed, "projects", "alpha", relativeFile), "utf8"), /tags: \["quality","security"\]/);
+		assert.equal(fs.existsSync(path.join(seed, "projects", "alpha", companion)), true);
 		const localFile = path.join(project, ".pi", relativeFile);
 		fs.appendFileSync(localFile, "\nLocal work preserved\n");
 		const madeLocalAgain = await act(project, { action: "make-local", type, name }, h.ctx);
 		assert.equal(madeLocalAgain.error, undefined);
 		assert.match(fs.readFileSync(localFile, "utf8"), /Local work preserved/);
 		git(seed, ["pull", "--ff-only"]);
-		assert.equal(fs.existsSync(path.join(seed, relativeFile)), false);
-		assert.equal(fs.existsSync(path.join(seed, companion)), false);
+		assert.equal(fs.existsSync(path.join(seed, "projects", "alpha", relativeFile)), false);
+		assert.equal(fs.existsSync(path.join(seed, "projects", "alpha", companion)), false);
 	}
 });
 
@@ -624,6 +704,7 @@ test("reports an actionable error for a configured local registry that no longer
 test("publishes structured registry snapshots for the Desktop manager", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const root = tempRoot();
 	const { home } = isolate(root);
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	const project = path.join(root, "project");
 	fs.mkdirSync(home, { recursive: true });
 	fs.mkdirSync(project, { recursive: true });
@@ -659,7 +740,7 @@ test("publishes structured registry snapshots for the Desktop manager", { timeou
 	const pushed = await act(project, { action: "push", type: "agent", name: "architect" }, h.ctx);
 	assert.equal(item(pushed, "agent:architect").status, "up-to-date");
 	git(seed, ["pull", "--ff-only", "origin", "main"]);
-	assert.match(fs.readFileSync(path.join(seed, "agents", "architect.md"), "utf8"), /Architecture review/);
+	assert.match(fs.readFileSync(path.join(seed, "projects", "alpha", "agents", "architect.md"), "utf8"), /Architecture review/);
 });
 
 test("serializes concurrent service calls on the shared checkout cache", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
@@ -894,9 +975,10 @@ test("installs, detects updates, updates, and pushes skills/agents through Git",
 		path.join(project, ".pi", "agents", "architect.md"),
 		"---\ndescription: Architecture review\nmodels: [test/model]\n---\n\nReview architecture.\n",
 	);
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	await act(project, { action: "push", type: "agent", name: "architect" }, h.ctx);
 	assert.match(git(seed, ["pull", "--ff-only", "origin", "main"]), /Updating/);
-	assert.match(fs.readFileSync(path.join(seed, "agents", "architect.md"), "utf8"), /Architecture review/);
+	assert.match(fs.readFileSync(path.join(seed, "projects", "alpha", "agents", "architect.md"), "utf8"), /Architecture review/);
 	assert.match(h.notices.at(-1)?.message ?? "", /Pushed agent "architect"/);
 });
 
@@ -1192,12 +1274,13 @@ test("bootstraps the configured branch when the private registry repository is e
 		"---\ndescription: First resource\n---\n\nBootstrap.\n",
 	);
 	git(root, ["init", "--bare", remote]);
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	const h = harness(project);
 	h.setInput(async (title) => (title === "Registry Git remote" ? remote : "main"));
 	await act(project, { action: "configure" }, h.ctx);
 	const snapshot = await act(project, { action: "push", type: "skill", name: "first" }, h.ctx);
 	assert.equal(snapshot.error, undefined);
-	assert.match(git(root, ["--git-dir", remote, "show", "main:skills/first/SKILL.md"]), /Bootstrap/);
+	assert.match(git(root, ["--git-dir", remote, "show", "main:projects/alpha/skills/first/SKILL.md"]), /Bootstrap/);
 	assert.match(h.notices.at(-1)?.message ?? "", /Pushed skill "first"/);
 });
 
