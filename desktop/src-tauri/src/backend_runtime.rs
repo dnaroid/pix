@@ -260,7 +260,7 @@ mod tests {
             command.get_args().next().unwrap(),
             fixture.0.join("app/acp/dist/main.js")
         );
-        assert_eq!(runtime.extensions.len(), 4);
+        assert_eq!(runtime.extensions.len(), 5);
         for (_, path) in runtime.extensions {
             assert!(path.starts_with(&fixture.0));
         }
