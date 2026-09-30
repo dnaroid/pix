@@ -21,7 +21,8 @@
     "smoke:auto": "PI_OFFLINE=1 pi --no-session --no-tools -p \"ping\"",
     "smoke:tools": "PI_OFFLINE=1 pi --no-session -p \"ping\"",
     "smoke": "npm run smoke:explicit && npm run smoke:auto && npm run smoke:tools",
-    "test": "bun test test",
+    "test": "bun test test && node --import tsx --test --test-concurrency=1 test/claude-code-provider/upstream/unit/*.case.js",
+    "test:claude-provider-upstream": "node --import tsx --test --test-concurrency=1 test/claude-code-provider/upstream/unit/*.case.js",
     "test:dcp-session-sim": "bun test test/dcp-session-sim-e2e.test.ts",
     "test:dcp-reminder-e2e": "DCP_REMINDER_E2E=1 bun test test/prompt-evals/dcp-reminder-e2e.test.ts",
     "test:browser-qa-e2e": "BROWSER_QA_RUNNER_E2E=1 bun test test/async-subagents/browser-qa-runner.e2e.test.ts",
@@ -63,6 +64,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "tsx": "4.23.13",
     "typescript": "^6"
   }
 }

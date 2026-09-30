@@ -20,6 +20,7 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "session-recovery", defaultEnabled: true, description: "Provides bounded search and recovery tools over branch- and compaction-aware session history." },
 	{ name: "repo-discovery", defaultEnabled: true, description: "Adds idx-backed repository context, search, audit, structure, architecture, and setup commands when available." },
 	{ name: "antigravity-auth", defaultEnabled: true, description: "Adds Google Antigravity authentication, account rotation, model registration, and provider streaming support." },
+	{ name: "claude-code-provider", defaultEnabled: true, description: "Provides Claude Code subscription models through the maintained local adapter." },
 	{ name: "opencode-import", defaultEnabled: true, description: "Imports supported OpenCode provider credentials into Pi without overwriting existing entries by default." },
 	{ name: "question", defaultEnabled: true, description: "Registers the native clean-Pi questionnaire tool; Pix skips its runtime UI because Pix owns question rendering.", cleanPiOnly: true },
 	{ name: "todo", defaultEnabled: true, description: "Adds session todo planning with hierarchy, blockers, persistence, import/export, and plan commands." },

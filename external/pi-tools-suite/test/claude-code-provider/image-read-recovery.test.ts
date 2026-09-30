@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "bun:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
-import { onlyAttachedImageReads, PRIVATE_TRANSPORT_ERROR, recoverImageRead } from "../patches/claude-image-read/image-read-recovery.ts";
+import { onlyAttachedImageReads, PRIVATE_TRANSPORT_ERROR, recoverImageRead } from "../../src/claude-code-provider/src/image-read-recovery.ts";
 
 const image = "/private/tmp/pi-claude-code-provider-images-test/image-a.png";
 function call(path = image, name = "Read", id = "denied"): ToolCall {

@@ -1,0 +1,364 @@
+import { execFile, type ChildProcess } from "node:child_process";
+import { constants } from "node:fs";
+import { access } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
+
+export interface ProcessResult {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  terminationSignals?: readonly NodeJS.Signals[];
+  error?: Error;
+}
+
+export interface ProcessSupervisorOptions {
+  idleTimeoutMs: number;
+  totalTimeoutMs: number;
+  onFailure: (error: Error) => void;
+  terminate?: (child: ChildProcess) => Promise<void>;
+}
+
+export interface ProcessSupervisor {
+  touch(): void;
+  wait(): Promise<ProcessResult>;
+  terminate(): Promise<void>;
+  dispose(): void;
+}
+
+type ProcessKiller = (pid: number, signal?: NodeJS.Signals | number) => true;
+
+export class ProcessTerminationError extends Error {
+  readonly livenessUnknown = true;
+
+  constructor(cause: unknown) {
+    super(`Claude Code process cleanup failed; process liveness is unknown: ${errorMessage(cause)}`, { cause });
+    this.name = "ProcessTerminationError";
+  }
+}
+
+export function superviseProcess(child: ChildProcess, options: ProcessSupervisorOptions): ProcessSupervisor {
+  let idleTimer: NodeJS.Timeout | undefined;
+  let totalTimer: NodeJS.Timeout | undefined;
+  let disposed = false;
+  let settled = false;
+  let failed = false;
+  let terminationPromise: Promise<void> | undefined;
+  const terminationSignals: NodeJS.Signals[] = [];
+  let resolveResult: ((result: ProcessResult) => void) | undefined;
+  let rejectResult: ((error: Error) => void) | undefined;
+  const result = new Promise<ProcessResult>((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
+  });
+  // Supervision starts before callers can always attach wait(); keep that brief
+  // window from turning a real, still-observable rejection into an unhandled one.
+  void result.catch(() => {});
+
+  const clearTimers = (): void => {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (totalTimer) clearTimeout(totalTimer);
+  };
+
+  const terminateOwnedProcess = (ownedChild: ChildProcess): Promise<void> =>
+    terminateProcessGroup(ownedChild, undefined, (pid, signal) => {
+      const sent = process.kill(pid, signal);
+      if (signal === "SIGTERM" || signal === "SIGKILL") terminationSignals.push(signal);
+      return sent;
+    });
+
+  const terminate = (): Promise<void> => {
+    terminationPromise ??= (options.terminate ?? terminateOwnedProcess)(child).catch((cause: unknown) => {
+      // A leader can exit while descendants still own its process group or
+      // inherited pipes. Only successful tree termination establishes cleanup;
+      // an exit code cannot make a rejected terminator safe.
+      const failure = cause instanceof ProcessTerminationError ? cause : new ProcessTerminationError(cause);
+      if (!settled) {
+        settled = true;
+        clearTimers();
+        quiesceChild(child);
+        rejectResult?.(failure);
+      }
+      throw failure;
+    });
+    return terminationPromise;
+  };
+
+  const fail = (error: Error): void => {
+    if (disposed || failed) return;
+    failed = true;
+    options.onFailure(error);
+    // A timeout or pipe error has already established the primary failure, but
+    // platform process cleanup must still be observed to avoid an unhandled rejection.
+    void terminate().catch((terminationError: unknown) => {
+      options.onFailure(terminationError instanceof Error ? terminationError : new Error(String(terminationError)));
+    });
+  };
+  const onChildError = (error: Error): void => {
+    fail(error);
+    if (!settled) {
+      settled = true;
+      clearTimers();
+      resolveResult?.({ code: child.exitCode, signal: child.signalCode, error });
+    }
+  };
+  const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+    if (settled) return;
+    settled = true;
+    clearTimers();
+    resolveResult?.({
+      code,
+      signal,
+      ...(terminationSignals.length > 0 ? { terminationSignals: [...terminationSignals] } : {}),
+    });
+  };
+  const onStdinError = (error: Error): void => fail(new Error(`Claude Code stdin failed: ${error.message}`));
+  const onStdoutError = (error: Error): void => fail(new Error(`Claude Code stdout failed: ${error.message}`));
+  const onStderrError = (error: Error): void => fail(new Error(`Claude Code stderr failed: ${error.message}`));
+
+  const armIdle = (): void => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      fail(new Error(`Claude Code produced no protocol activity for ${options.idleTimeoutMs}ms`));
+    }, options.idleTimeoutMs);
+    idleTimer.unref();
+  };
+
+  child.once("error", onChildError);
+  child.once("close", onClose);
+  child.stdin?.on("error", onStdinError);
+  child.stdout?.on("error", onStdoutError);
+  child.stderr?.on("error", onStderrError);
+  armIdle();
+  totalTimer = setTimeout(() => {
+    fail(new Error(`Claude Code request exceeded ${options.totalTimeoutMs}ms`));
+  }, options.totalTimeoutMs);
+  totalTimer.unref();
+
+  return {
+    touch: armIdle,
+    wait: () => result,
+    terminate,
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      clearTimers();
+      child.removeListener("error", onChildError);
+      child.removeListener("close", onClose);
+      child.stdin?.removeListener("error", onStdinError);
+      child.stdout?.removeListener("error", onStdoutError);
+      child.stderr?.removeListener("error", onStderrError);
+    },
+  };
+}
+
+function quiesceChild(child: ChildProcess): void {
+  child.stdin?.removeAllListeners();
+  child.stdout?.removeAllListeners();
+  child.stderr?.removeAllListeners();
+  child.removeAllListeners("error");
+  child.removeAllListeners("close");
+  // A retained process or stream can still report a late handle error. Install
+  // closure-free sinks before destroy so quiescing cannot make it uncaught.
+  child.stdin?.on("error", ignoreRetainedChildError);
+  child.stdout?.on("error", ignoreRetainedChildError);
+  child.stderr?.on("error", ignoreRetainedChildError);
+  child.on("error", ignoreRetainedChildError);
+  child.stdin?.destroy();
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+}
+
+function ignoreRetainedChildError(): void {}
+
+export async function terminateProcessGroup(
+  child: ChildProcess,
+  graceMs = 500,
+  killProcess: ProcessKiller = process.kill,
+): Promise<void> {
+  const pid = child.pid;
+  if (!pid) return;
+
+  if (process.platform === "win32") {
+    await terminateWindowsProcessTree(child, pid, graceMs);
+    return;
+  }
+
+  try {
+    killProcess(-pid, "SIGTERM");
+  } catch (error) {
+    if (isMissingProcess(error)) {
+      await terminateDirectChild(child, graceMs);
+      return;
+    }
+    throw processGroupCleanupError(pid, "SIGTERM", child, error);
+  }
+
+  if (await waitForProcessGroupExit(pid, graceMs, killProcess)) return;
+  try {
+    killProcess(-pid, "SIGKILL");
+  } catch (error) {
+    if (isMissingProcess(error)) return;
+    throw processGroupCleanupError(pid, "SIGKILL", child, error);
+  }
+  if (!(await waitForProcessGroupExit(pid, graceMs, killProcess))) {
+    throw new Error(
+      `Process group ${pid} did not terminate after SIGKILL ` +
+      `(child exitCode=${String(child.exitCode)}, signalCode=${String(child.signalCode)})`,
+    );
+  }
+}
+
+export function windowsTaskkillExecutable(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const systemRoot = environment.SystemRoot?.trim() || environment.WINDIR?.trim();
+  if (!systemRoot || !isAbsolute(systemRoot)) {
+    throw new Error("Windows SystemRoot is unavailable; cannot locate taskkill.exe");
+  }
+  return join(systemRoot, "System32", "taskkill.exe");
+}
+
+export async function validateProcessTerminationCapability(
+  platform: NodeJS.Platform = process.platform,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (platform !== "win32") return;
+  const executable = windowsTaskkillExecutable(environment);
+  try {
+    await access(executable, constants.F_OK);
+  } catch {
+    throw new Error(`Windows process-tree cleanup is unavailable: ${executable} is not accessible`);
+  }
+}
+
+async function terminateWindowsProcessTree(child: ChildProcess, pid: number, graceMs: number): Promise<void> {
+  if (!validPid(pid)) throw new Error("Claude Code child process has no valid process ID");
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  let taskkillFailure: unknown;
+  try {
+    // Never terminate by image name or process enumeration: other terminals may
+    // be running unrelated Claude instances. /T is rooted only at this child.pid.
+    await runTaskkill(windowsTaskkillExecutable(), pid);
+  } catch (error) {
+    taskkillFailure = error;
+  }
+
+  await waitForChildClose(child, graceMs);
+  if (taskkillFailure) {
+    if (isTaskkillMissingProcess(taskkillFailure) && (child.exitCode !== null || child.signalCode !== null)) return;
+    if (child.exitCode === null && child.signalCode === null) {
+      // This retained ChildProcess handle still identifies only our direct child.
+      // Best effort reduces leakage, but tree-cleanup failure remains an error.
+      child.kill("SIGKILL");
+      await waitForChildClose(child, graceMs);
+    }
+    throw new Error(`Process tree ${pid} cleanup failed: ${errorMessage(taskkillFailure)}`);
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await waitForChildClose(child, graceMs);
+    throw new Error(`Process tree ${pid} did not terminate after taskkill`);
+  }
+}
+
+async function runTaskkill(executable: string, pid: number): Promise<void> {
+  // Invoke taskkill directly: a shell is unnecessary, and avoiding one prevents
+  // Git Bash/MSYS from rewriting native arguments such as /PID.
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      executable,
+      ["/PID", String(pid), "/T", "/F"],
+      { windowsHide: true, timeout: 5_000, maxBuffer: 64 * 1024 },
+      (error) => error ? reject(error) : resolve(),
+    );
+  });
+}
+
+async function waitForProcessGroupExit(
+  pid: number,
+  timeoutMs: number,
+  killProcess: ProcessKiller,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      killProcess(-pid, 0);
+    } catch (error) {
+      if (isMissingProcess(error)) return true;
+      // POSIX signal 0 performs an existence/permission probe. EPERM therefore
+      // means the group may still exist, not that cleanup itself was denied.
+      // Keep polling; actual SIGTERM/SIGKILL permission failures remain fatal.
+      if (!isPermissionDenied(error)) throw processGroupProbeError(pid, error);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
+async function terminateDirectChild(child: ChildProcess, graceMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!child.kill("SIGTERM")) return;
+  await waitForChildClose(child, graceMs);
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await waitForChildClose(child, graceMs);
+  }
+}
+
+async function waitForChildClose(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    child.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+function isTaskkillMissingProcess(error: unknown): boolean {
+  // taskkill uses status 128 when the exact PID disappeared before it acted.
+  // Avoid localized stderr parsing and accept it only after our child closed.
+  return error instanceof Error && "code" in error && error.code === 128;
+}
+
+export function validPid(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isMissingProcess(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ESRCH";
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EPERM";
+}
+
+function processGroupCleanupError(
+  pid: number,
+  phase: "SIGTERM" | "SIGKILL",
+  child: ChildProcess,
+  error: unknown,
+): Error {
+  return new Error(
+    `Process group ${pid} cleanup failed during ${phase} ` +
+    `(child exitCode=${String(child.exitCode)}, signalCode=${String(child.signalCode)}): ${errorDetails(error)}`,
+    { cause: error },
+  );
+}
+
+function processGroupProbeError(pid: number, error: unknown): Error {
+  return new Error(`Process group ${pid} status probe failed: ${errorDetails(error)}`, { cause: error });
+}
+
+function errorDetails(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const fields = ["code", "errno", "syscall"]
+    .filter((field) => field in error)
+    .map((field) => `${field}=${String((error as unknown as Record<string, unknown>)[field])}`);
+  return fields.length > 0 ? `${error.message} [${fields.join(" ")}]` : error.message;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

@@ -6,12 +6,11 @@ export function quotaWaitLabel(state: QuotaWaitState, now = Date.now()): string 
 	if (!state.autoResume) return "Quota wait · auto-resume cancelled";
 	if (state.phase === "checking") return "Quota wait · checking availability…";
 	if (state.phase === "resuming") return "Quota wait · trying to continue…";
-	const seconds = Math.max(0, Math.ceil((state.nextCheckAt - now) / 1000));
-	const h = Math.floor(seconds / 3600);
-	const m = Math.floor(seconds % 3600 / 60);
-	const s = seconds % 60;
+	const minutes = Math.max(0, Math.ceil((state.nextCheckAt - now) / 60_000));
+	const h = Math.floor(minutes / 60);
+	const m = minutes % 60;
 	const label = state.mode === "timer" && state.notBefore && now < state.notBefore ? "Scheduled continuation" : `${state.window === "unknown" ? "Usage" : state.window === "weekly" ? "Weekly" : "Hourly"} limit`;
-	return `${label} · ${state.resetAt ? "reset check" : "next check"} in ${h ? `${h}h ` : ""}${m}m ${s}s`;
+	return `${label} · ${state.resetAt ? "reset check" : "next check"} in ${h ? `${h}h ` : ""}${m}m`;
 }
 
 /** Uses Pix's scoped native menu: switching tabs dismisses, never cancels the wait. */

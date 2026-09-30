@@ -1,8 +1,8 @@
 // T2: child isolation and the ACTUAL post-session_start tool inventory of a
-// Claude-provider child (opt-in: PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT). The
+// Claude-provider child (default: the vendored local provider module). The
 // child is built by the real spawnAgent (argument construction + provider
-// dependency resolution) and runs as real Pi 0.99.0 with the unchanged
-// provider and the offline protocol peer. Only the launchd boundary is
+// dependency resolution through the default local-module path) and runs as
+// real Pi 0.99.0 with the offline protocol peer. Only the launchd boundary is
 // replaced by a plain spawn; nothing is signaled except that direct child.
 // The inventory is what Pi hands the provider on the first request.
 import { afterAll, expect, test } from "bun:test";
@@ -12,13 +12,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
+import { localClaudeProviderModule } from "../../src/async-subagents/core/provider-extensions.js";
 import { SUBAGENT_DENIED_TOOLS } from "../../src/async-subagents/core/tool-guard.js";
 import type { OwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
-import { stageSnapshot } from "./provider-offline-harness.ts";
+import { localProviderAvailable } from "./provider-offline-harness.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const offline = snapshot === undefined || process.platform !== "darwin" ? test.skip : test;
+const offline = process.platform !== "darwin" || !localProviderAvailable() ? test.skip : test;
 const suite = fileURLToPath(new URL("../..", import.meta.url));
 const cli = join(resolve(suite, "../.."), "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const fakeCli = fileURLToPath(new URL("./fixtures/provider-offline-cli.mjs", import.meta.url));
@@ -43,7 +43,6 @@ afterAll(async () => {
 async function inventory(tools: string[] | undefined): Promise<{ tools: string[]; all: string[]; piArgs: string[] }> {
 	const work = mkdtempSync(join(tmpdir(), "pi-provider-t2-"));
 	works.push(work);
-	const extension = stageSnapshot(snapshot!, work);
 	const home = join(work, "home"), agent = join(work, "agent"), cwd = join(work, "cwd");
 	for (const dir of [home, agent, cwd]) mkdirSync(dir);
 	writeFileSync(join(home, "fake-exit-code"), "0");
@@ -60,7 +59,6 @@ async function inventory(tools: string[] | undefined): Promise<{ tools: string[]
 	const spawned = spawnAgent(runDir, { id: "child", task: "offline inventory probe", model: "pi-claude-code-provider/sonnet", ...(tools ? { tools } : {}) }, cwd,
 		["--offline", "--no-approve", "--no-prompt-templates", "--no-themes", "--no-context-files", "--extension", probe], undefined, undefined, {
 			ownedBinaries: FAKE_BINARIES,
-			locateProviderPackagesForTest: () => [dirname(dirname(extension))],
 			ownedLaunchForTest: (request) => {
 				child = spawn(node, [cli, ...request.args], { cwd: request.cwd, stdio: ["pipe", "pipe", "pipe"], env: {
 					HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
@@ -84,8 +82,11 @@ async function inventory(tools: string[] | undefined): Promise<{ tools: string[]
 
 const SUITE_ONLY = /^(compress|dcp_|todo|plan_|async_subagents|subagents$|repo_knowledge|question$)/;
 
-offline("default role: provider web search and every denied/suite tool are absent after session_start", async () => {
+offline("default role: local provider entry injected once; provider web search and every denied/suite tool are absent after session_start", async () => {
 	const { tools, all, piArgs } = await inventory(undefined);
+	// The production default path injected the vendored module's standalone entry.
+	const standalone = localClaudeProviderModule("pi-claude-code-provider/sonnet").standalone;
+	expect(piArgs.filter((arg) => arg === standalone)).toHaveLength(1);
 	expect(all).toContain(WEB_SEARCH); // registered by the provider...
 	expect(tools).not.toContain(WEB_SEARCH); // ...but never active in a child
 	expect(tools.length).toBeGreaterThan(0);

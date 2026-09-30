@@ -5,12 +5,12 @@ import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { stageSnapshot } from "./provider-offline-harness.ts";
+import { providerSnapshotSource, stageSnapshot } from "./provider-offline-harness.ts";
 import { applyNativeProviderPatch } from "./provider-native-patch.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const offline = snapshot && process.platform === "darwin" ? test : test.skip;
+const snapshotSource = providerSnapshotSource();
+const offline = snapshotSource && process.platform === "darwin" ? test : test.skip;
 const source = fileURLToPath(new URL("./fixtures/provider-native-relay.c", import.meta.url));
 const cli = fileURLToPath(new URL("./fixtures/provider-boundary-cli.mjs", import.meta.url));
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -44,7 +44,7 @@ for (const topology of ["joint", "escape"] as const) {
 		const socketPath = join(work, "release.sock");
 		try {
 			await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
-			stageSnapshot(snapshot!, work);
+			stageSnapshot(snapshotSource!.snapshot, work, snapshotSource!.pinned);
 			applyNativeProviderPatch(join(work, "provider"));
 			const binary = join(work, "relay");
 			let relay = readFileSync(source, "utf8");

@@ -2,12 +2,13 @@
 // core/spawnAgent through the production native owned-launch route (never the
 // ownedLaunchForTest unit boundary) plus stop/state/cleanup integration, for a
 // selected pi-claude-code-provider model. Runs the real installed Pi SDK
-// 0.99.0 under the real local Node, and the hash-verified UNMODIFIED provider
-// 0.5.0 snapshot staged by stageSnapshot (default native=false), reusing the
-// offline fixture protocol from the launcher acceptance suite. No auth, no provider
-// install, no live inference. Every kill action addresses only an owned direct
-// bridge, its exact UUID launchctl jobs, or this test's own control process;
-// fixture PIDs are used only for read-only ps observations.
+// 0.99.1 under the real local Node, with the vendored patched local provider
+// module loaded through the production default resolution (no explicit
+// --extension, no user/project package lookup), reusing the offline fixture
+// protocol from the launcher acceptance suite. No auth, no provider install,
+// no live inference. Every kill action addresses only an owned direct bridge,
+// its exact UUID launchctl jobs, or this test's own control process; fixture
+// PIDs are used only for read-only ps observations.
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -17,15 +18,16 @@ import { fileURLToPath, URL } from "node:url";
 import { deleteRunDirs, findCleanupCandidates } from "../../src/async-subagents/core/cleanup.js";
 import { readOwnedMetadata, requestOwnedCancel, verifiedOwnedDrainSync } from "../../src/async-subagents/core/owned-launch-integration.js";
 import { ensureOwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
+import { localClaudeProviderModule } from "../../src/async-subagents/core/provider-extensions.js";
 import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
 import { getAgentState, getRunState } from "../../src/async-subagents/core/state.js";
 import { stopAgents } from "../../src/async-subagents/core/stop.js";
-import { stageSnapshot } from "./provider-offline-harness.ts";
+import { localProviderAvailable } from "./provider-offline-harness.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const enabled = process.platform === "darwin" && process.env.PI_OFFLINE_COALITION_PROBE === "1" && snapshot !== undefined;
+const enabled = process.platform === "darwin" && process.env.PI_OFFLINE_COALITION_PROBE === "1" && localProviderAvailable();
 const offline = enabled ? test : test.skip;
+const localProviderEntry = () => localClaudeProviderModule("pi-claude-code-provider/sonnet").standalone;
 const root = join(fileURLToPath(new URL("../..", import.meta.url)), "../..");
 const piCli = join(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const fixture = fileURLToPath(new URL("./provider-owned-runtime-cli.mjs", import.meta.url));
@@ -79,7 +81,7 @@ interface Run {
 	spawned: ReturnType<typeof spawnAgent>;
 	meta(): ReturnType<typeof readOwnedMetadata>;
 }
-interface Context { work: string; extension: string; node: string; binaries: Awaited<ReturnType<typeof ensureOwnedLaunchBinaries>>; runs: Run[] }
+interface Context { work: string; node: string; binaries: Awaited<ReturnType<typeof ensureOwnedLaunchBinaries>>; runs: Run[] }
 
 // getPiInvocation resolves the payload command for a generic test runtime as
 // the bare name "pi". The native worker resolves an executable shim in a
@@ -123,8 +125,10 @@ function start(ctx: Context, options: { id: string; mode: "hold" | "exit0" | "ex
 	const events: EventRecord[] = [];
 	const completions: CompletionRecord[] = [];
 	const agentDir = join(runDir, id);
+	// No locateProviderPackagesForTest seam and no explicit --extension: the
+	// production default resolution injects the vendored local module entry.
 	const spawned = withIsolatedEnv(env, () => spawnAgent(runDir, { id, task: "offline containment probe", model: "pi-claude-code-provider/sonnet" }, cwd, [
-		"--offline", "--no-approve", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-tools", "--extension", ctx.extension,
+		"--offline", "--no-approve", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-tools",
 	], (event) => { events.push(event); }, (completion) => {
 		completions.push({ exitCode: completion.exitCode, status: String(completion.state?.status ?? "?"), at: Date.now(),
 			drainValid: verifiedOwnedDrainSync(agentDir), leafGone: !leafAlive(markers(home, "leaf")[0]) });
@@ -193,8 +197,8 @@ async function scenario(name: string, body: (ctx: Context) => Promise<void>): Pr
 	let passed = false;
 	try {
 		const installed = JSON.parse(readFileSync(join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"), "utf8"));
-		if (installed.version !== "0.99.0") throw new Error(`Expected installed Pi SDK 0.99.0, found ${installed.version}`);
-		const ctx: Context = { work, extension: stageSnapshot(snapshot!, work), node: localNode(),
+		if (installed.version !== "0.99.1") throw new Error(`Expected installed Pi SDK 0.99.1, found ${installed.version}`);
+		const ctx: Context = { work, node: localNode(),
 			binaries: await ensureOwnedLaunchBinaries({ cacheRoot: join(work, "cache") }), runs };
 		await body(ctx);
 		passed = true;
@@ -225,6 +229,9 @@ async function scenario(name: string, body: (ctx: Context) => Promise<void>): Pr
 async function requestedLeaf(run: Run) {
 	await until(() => markers(run.home, "request").length === 1 && markers(run.home, "leaf").length === 1,
 		25000, () => `real provider request and detached leaf ${diag(run)}`);
+	// The production default resolution injected the vendored module exactly once.
+	const piArgs = readFileSync(join(run.agentDir, "pi_args"), "utf8").split("\n");
+	expect(piArgs.filter((arg) => arg === localProviderEntry())).toHaveLength(1);
 	const request = markers(run.home, "request")[0], leaf = markers(run.home, "leaf")[0];
 	expect(request.leafPid).toBe(leaf.pid);
 	expect(request.env.ANTHROPIC_API_KEY).toBeNull();

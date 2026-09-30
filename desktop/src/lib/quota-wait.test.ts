@@ -96,11 +96,12 @@ describe("quotaWaitCountdownSeconds", () => {
 });
 
 describe("formatQuotaWaitCountdown", () => {
-  it("formats hours, minutes, and seconds compactly", () => {
-    expect(formatQuotaWaitCountdown(4320)).toBe("1h 12m 0s");
-    expect(formatQuotaWaitCountdown(75)).toBe("1m 15s");
-    expect(formatQuotaWaitCountdown(9)).toBe("9s");
-    expect(formatQuotaWaitCountdown(0)).toBe("0s");
+  it("formats hours and rounded-up minutes without seconds", () => {
+    expect(formatQuotaWaitCountdown(4320)).toBe("1h 12m");
+    expect(formatQuotaWaitCountdown(75)).toBe("2m");
+    expect(formatQuotaWaitCountdown(9)).toBe("1m");
+    expect(formatQuotaWaitCountdown(0)).toBe("0m");
+    expect(formatQuotaWaitCountdown(3599)).toBe("1h 0m");
   });
 });
 
@@ -124,8 +125,8 @@ describe("quotaWaitHeadline", () => {
 describe("quotaWaitStatusLabel", () => {
   it("keeps the countdown for active waits", () => {
     const state = waitState({ mode: "timer", notBefore: 160_000 });
-    expect(quotaWaitStatusLabel(state, 100_000)).toBe("Scheduled continuation · 1m 0s");
-    expect(quotaWaitStatusLabel(state, 101_000)).toBe("Scheduled continuation · 59s");
+    expect(quotaWaitStatusLabel(state, 100_000)).toBe("Scheduled continuation · 1m");
+    expect(quotaWaitStatusLabel(state, 101_000)).toBe("Scheduled continuation · 1m");
   });
 
   it("omits the countdown after cancellation even as time advances past the deadline", () => {

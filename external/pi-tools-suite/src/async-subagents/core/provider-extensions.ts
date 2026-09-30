@@ -2,22 +2,27 @@
 // with `--no-extensions`, so a selected model whose provider is implemented by
 // an extension must have exactly that extension injected — and nothing else.
 // The catalog is an explicit allowlist: a model string can never become a
-// generic code-loading primitive. Resolution happens before any child
-// artifact or process exists; failures are typed and permanent (a
-// synchronous spawnAgent throw is already non-retryable and never falls back).
+// generic code-loading primitive. The Claude provider is the patched 0.5.0
+// module vendored inside the tools suite (`src/claude-code-provider/`); its
+// public standalone entrypoint is a fixed, trusted suite-relative path. No
+// user or project Pi package configuration is ever consulted for it. All
+// resolution happens before any child artifact or process exists; failures
+// are typed and permanent (a synchronous spawnAgent throw is already
+// non-retryable and never falls back).
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DefaultPackageManager, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 export const CLAUDE_PROVIDER = "pi-claude-code-provider";
 const CLAUDE_PACKAGE = "pi-claude-code-provider";
 /** Exactly characterized provider versions (offline lifecycle matrix, serializer/evidence gates). */
 export const SUPPORTED_CLAUDE_PROVIDER_VERSIONS: readonly string[] = ["0.5.0"];
-/** Only a user-scope npm source of the provider package is ever resolved (never project/local/git). */
-const CLAUDE_SOURCE_RE = /^npm:pi-claude-code-provider(?:@[0-9A-Za-z.+-]+)?$/;
 const PACKAGE_SEARCH_DEPTH = 6;
 const MANIFEST_MAX_BYTES = 256 * 1024;
+/** Trusted vendored module root: `<suite>/src/claude-code-provider`. */
+const CLAUDE_LOCAL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "claude-code-provider");
+/** Public standalone entry file inside the vendored module (reexports `extensions/index.ts`). */
+const CLAUDE_STANDALONE_ENTRY = "index.ts";
 
 export type ProviderExtensionErrorCode = "provider_not_installed" | "provider_metadata_invalid" | "provider_version_unsupported";
 
@@ -108,6 +113,7 @@ function readManifest(root: string): Record<string, unknown> | undefined {
 /** Nearest enclosing package root of an explicit `--extension` path (bounded walk). */
 function enclosingPackage(entry: string): PackageRoot | undefined {
 	let dir = path.dirname(entry);
+	try { if (fs.statSync(entry).isDirectory()) dir = entry; } catch { /* inspect the nearest existing parent */ }
 	for (let depth = 0; depth < PACKAGE_SEARCH_DEPTH; depth++) {
 		if (fs.existsSync(path.join(dir, "package.json"))) {
 			const manifest = readManifest(dir);
@@ -129,48 +135,63 @@ function explicitExtensions(args: readonly string[], cwd: string): string[] {
 	return out;
 }
 
+/** Vendored suite-local Claude provider module root (trusted path; validated during resolution). */
+export function claudeProviderLocalRoot(): string {
+	return CLAUDE_LOCAL_ROOT;
+}
+
+export interface ClaudeProviderModule {
+	/** Realpath of the vendored module root. */
+	root: string;
+	/** Manifest-declared Pi extension entrypoint (realpath, inside the module). */
+	entry: string;
+	/** Public standalone entrypoint (realpath, inside the module). */
+	standalone: string;
+}
+
 /**
- * Locate installed copies of the provider package. The default uses Pi's
- * public package manager for the USER scope only, and only an npm source of
- * this exact package: project settings are never consulted (an untrusted
- * repository must not be able to supply "the provider"), and no local/git
- * source is ever accepted.
+ * Resolve and validate the vendored Claude provider module and its public
+ * standalone entrypoint. This is a fixed suite-relative path, never a
+ * package-manager lookup: user or project package sources cannot influence
+ * which provider code children load.
  */
-export type InstalledPackageLocator = (packageName: string, cwd: string) => string[];
+export function localClaudeProviderModule(model: string): ClaudeProviderModule {
+	const fail = (code: ProviderExtensionErrorCode, detail: string, hint: string) =>
+		new ProviderExtensionError(code, model, CLAUDE_PROVIDER, CLAUDE_PACKAGE, detail, hint);
+	const manifest = readManifest(CLAUDE_LOCAL_ROOT);
+	if (!manifest) {
+		throw fail("provider_not_installed", "vendored provider module missing or unreadable under src/claude-code-provider",
+			"Restore the vendored provider module in the tools suite.");
+	}
+	const entry = claudeEntrypoint({ root: CLAUDE_LOCAL_ROOT, manifest }, model);
+	const root = fs.realpathSync(CLAUDE_LOCAL_ROOT);
+	let standalone: string;
+	try {
+		standalone = fs.realpathSync(path.join(CLAUDE_LOCAL_ROOT, CLAUDE_STANDALONE_ENTRY));
+	} catch {
+		throw fail("provider_metadata_invalid", "standalone entrypoint is missing", "Restore the vendored provider module in the tools suite.");
+	}
+	if (!standalone.startsWith(`${root}${path.sep}`) || !fs.statSync(standalone).isFile()) {
+		throw fail("provider_metadata_invalid", "standalone entrypoint escapes the module or is not a file", "Restore the vendored provider module in the tools suite.");
+	}
+	return { root, entry, standalone };
+}
 
-let locatorCache: { agentDir: string; settingsMtimeMs: number; roots: string[] } | undefined;
-
-export const defaultInstalledPackageLocator: InstalledPackageLocator = (packageName, cwd) => {
-	const agentDir = getAgentDir();
-	const settingsMtimeMs = fs.statSync(path.join(agentDir, "settings.json"), { throwIfNoEntry: false })?.mtimeMs ?? -1;
-	// Pi's npm lookup may shell out (`npm root -g`) synchronously: reuse the
-	// answer until the user settings change or a cached install disappears.
-	if (locatorCache && locatorCache.agentDir === agentDir && locatorCache.settingsMtimeMs === settingsMtimeMs &&
-		locatorCache.roots.every((root) => fs.existsSync(root))) return [...locatorCache.roots];
-	const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-	const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
-	const roots = (settingsManager.getGlobalSettings().packages ?? [])
-		.map((pkg) => (typeof pkg === "string" ? pkg : pkg.source))
-		.filter((source) => CLAUDE_SOURCE_RE.test(source))
-		.map((source) => manager.getInstalledPath(source, "user"))
-		.filter((root): root is string => typeof root === "string" && readManifest(root)?.name === packageName);
-	locatorCache = { agentDir, settingsMtimeMs, roots };
-	return [...roots];
-};
-
-/** Validate the package manifest and return its single declared Pi extension entrypoint. */
+/**
+ * Validate the package manifest and return its single declared Pi extension entrypoint.
+ */
 function claudeEntrypoint(pkg: PackageRoot, model: string): string {
 	const fail = (code: ProviderExtensionErrorCode, detail: string, hint: string) =>
 		new ProviderExtensionError(code, model, CLAUDE_PROVIDER, CLAUDE_PACKAGE, detail, hint);
-	if (pkg.manifest.name !== CLAUDE_PACKAGE) throw fail("provider_metadata_invalid", "package name mismatch", "Reinstall the provider package.");
+	if (pkg.manifest.name !== CLAUDE_PACKAGE) throw fail("provider_metadata_invalid", "package name mismatch", "Restore the suite-local Claude provider module.");
 	const version = pkg.manifest.version;
 	if (typeof version !== "string" || !SUPPORTED_CLAUDE_PROVIDER_VERSIONS.includes(version)) {
 		throw fail("provider_version_unsupported", `installed version ${String(version).slice(0, 40)}`,
-			`Install exactly ${SUPPORTED_CLAUDE_PROVIDER_VERSIONS.join(" or ")}.`);
+			`Restore the suite-local module based on ${SUPPORTED_CLAUDE_PROVIDER_VERSIONS.join(" or ")}.`);
 	}
 	const extensions = (pkg.manifest.pi as { extensions?: unknown } | undefined)?.extensions;
 	if (!Array.isArray(extensions) || extensions.length !== 1 || typeof extensions[0] !== "string") {
-		throw fail("provider_metadata_invalid", "pi.extensions must declare exactly one entrypoint", "Reinstall the provider package.");
+		throw fail("provider_metadata_invalid", "pi.extensions must declare exactly one entrypoint", "Restore the suite-local Claude provider module.");
 	}
 	const root = fs.realpathSync(pkg.root);
 	const entry = path.resolve(root, extensions[0]);
@@ -178,13 +199,19 @@ function claudeEntrypoint(pkg: PackageRoot, model: string): string {
 	try {
 		real = fs.realpathSync(entry);
 	} catch {
-		throw fail("provider_metadata_invalid", "declared entrypoint is missing", "Reinstall the provider package.");
+		throw fail("provider_metadata_invalid", "declared entrypoint is missing", "Restore the suite-local Claude provider module.");
 	}
 	if (!real.startsWith(`${root}${path.sep}`) || !fs.statSync(real).isFile()) {
-		throw fail("provider_metadata_invalid", "declared entrypoint escapes the package or is not a file", "Reinstall the provider package.");
+		throw fail("provider_metadata_invalid", "declared entrypoint escapes the package or is not a file", "Restore the suite-local Claude provider module.");
 	}
 	return real;
 }
+
+/**
+ * Test seam replacing the trusted local module with explicit package roots
+ * (staged copies/stubs). Production code never supplies it.
+ */
+export type InstalledPackageLocator = (packageName: string, cwd: string) => string[];
 
 export interface ProviderExtensionRequest {
 	/** Final model the child will run (task/env model, then CLI overrides). */
@@ -208,39 +235,76 @@ export function resolveProviderExtensions(request: ProviderExtensionRequest): st
 	if (explicit?.startsWith("antigravity/") && explicit.length > "antigravity/".length) out.push(antigravityEntrypoint());
 	if (request.claudeSelected) {
 		const model = request.selectedModel ?? CLAUDE_PROVIDER;
-		// Already supplied explicitly: it must be exactly the package's declared
-		// entrypoint (validated), and is never duplicated.
+		const seam = request.locateInstalled;
+		let suppliedEntry: string | undefined;
+		// Already supplied explicitly: the vendored module accepts exactly its
+		// public standalone entry (or the declared entrypoint it reexports) and
+		// never duplicates it.
 		for (const extension of explicitExtensions(request.forwardedArgs, request.cwd)) {
-			let located = extension;
-			try { located = fs.realpathSync(extension); } catch { /* validated below */ }
-			const pkg = enclosingPackage(located);
-			if (pkg?.manifest.name !== CLAUDE_PACKAGE) continue;
-			const entry = claudeEntrypoint(pkg, model);
 			let real: string | undefined;
-			try { real = fs.realpathSync(extension); } catch { /* missing */ }
-			if (real !== entry) {
-				throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
-					"explicit --extension is not the package's declared entrypoint", "Pass the declared entrypoint or omit it.");
+			try { real = fs.realpathSync(extension); } catch { /* validated below */ }
+			const pkg = enclosingPackage(real ?? extension);
+			if (pkg?.manifest.name !== CLAUDE_PACKAGE) continue;
+			if (seam) {
+				// Seam-provided packages (staged copies/stubs) keep the historical
+				// contract: the explicit path must be exactly the package's
+				// declared entrypoint.
+				const entry = claudeEntrypoint(pkg, model);
+				if (real !== entry) {
+					throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
+						"explicit --extension is not the package's declared entrypoint", "Pass the declared entrypoint or omit it.");
+				}
+				if (suppliedEntry && suppliedEntry !== entry) {
+					throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
+						"multiple explicit provider entrypoints", "Pass only one provider extension.");
+				}
+				suppliedEntry = entry;
+				continue;
 			}
+			let localRoot: string | undefined;
+			try { localRoot = fs.realpathSync(CLAUDE_LOCAL_ROOT); } catch { /* missing module: the typed error below still identifies the path */ }
+			if (localRoot && real?.startsWith(`${localRoot}${path.sep}`)) {
+				const local = localClaudeProviderModule(model);
+				if (real === local.standalone || real === local.entry) {
+					if (suppliedEntry && suppliedEntry !== real) {
+						throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
+							"multiple explicit provider entrypoints", "Pass only one provider extension.");
+					}
+					suppliedEntry = real;
+					continue;
+				}
+				throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
+					"explicit --extension is not the module's standalone entrypoint", `Pass ${CLAUDE_STANDALONE_ENTRY} of the vendored module or omit it.`);
+			}
+			// Any other copy of the provider package (e.g. an old npm install)
+			// would register the provider a second time next to the injected
+			// vendored module, or silently downgrade to the unpatched release.
+			throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
+				"explicit --extension names another pi-claude-code-provider package; the vendored local module is injected instead",
+				"Remove the explicit --extension.");
+		}
+		if (suppliedEntry) return out;
+		if (seam) {
+			let roots: string[];
+			try {
+				roots = seam(CLAUDE_PACKAGE, request.cwd);
+			} catch (error) {
+				throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
+					`installed-package lookup failed: ${String(error).slice(0, 200)}`, "Check the Pi package configuration.");
+			}
+			if (roots.length === 0) {
+				throw new ProviderExtensionError("provider_not_installed", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE, "no user-scope npm install configured in Pi",
+					"Provide a valid test fixture or restore the suite-local Claude provider module.");
+			}
+			const manifest = readManifest(roots[0]);
+			if (!manifest) {
+				throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE, "unreadable package.json",
+					"Provide a valid provider test fixture.");
+			}
+			out.push(claudeEntrypoint({ root: roots[0], manifest }, model));
 			return out;
 		}
-		let roots: string[];
-		try {
-			roots = (request.locateInstalled ?? defaultInstalledPackageLocator)(CLAUDE_PACKAGE, request.cwd);
-		} catch (error) {
-			throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE,
-				`installed-package lookup failed: ${String(error).slice(0, 200)}`, "Check the Pi package configuration.");
-		}
-		if (roots.length === 0) {
-			throw new ProviderExtensionError("provider_not_installed", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE, "no user-scope npm install configured in Pi",
-				`Install it with \`pi install npm:${CLAUDE_PACKAGE}@${SUPPORTED_CLAUDE_PROVIDER_VERSIONS[0]}\`.`);
-		}
-		const manifest = readManifest(roots[0]);
-		if (!manifest) {
-			throw new ProviderExtensionError("provider_metadata_invalid", model, CLAUDE_PROVIDER, CLAUDE_PACKAGE, "unreadable package.json",
-				"Reinstall the provider package.");
-		}
-		out.push(claudeEntrypoint({ root: roots[0], manifest }, model));
+		out.push(localClaudeProviderModule(model).standalone);
 	}
 	return out;
 }

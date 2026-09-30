@@ -1,20 +1,25 @@
 import { expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ChildProcess } from "node:child_process";
-import { runOffline, stageSnapshot } from "./provider-offline-harness.ts";
+import { providerSnapshotSource, runOffline, stageSnapshot } from "./provider-offline-harness.ts";
 
-// Opt in with a local, non-installed snapshot: no default CI dependency or account.
-// An explicitly requested missing/invalid snapshot must FAIL, not silently skip.
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const offline = snapshot === undefined ? test.skip : test;
+// Default provider source: the vendored local module (no install, no account,
+// no live Claude). An explicit external snapshot still works for the
+// unmodified-release characterization. A requested missing/invalid external
+// snapshot must FAIL, not silently skip.
+const source = providerSnapshotSource();
+const offline = source === undefined ? test.skip : test;
+const pinnedOnly = source?.pinned === true ? test : test.skip;
+const localOnly = source?.pinned === false ? test : test.skip;
 const response = (records: Record<string, any>[], id: string) => records.find((record) => record.id === id);
 
 for (const code of [0, 7] as const) {
-	offline(`real Pi + unchanged local provider: fake Claude exit ${code}`, async () => {
-		const { rpc, calls } = await runOffline(snapshot!, code);
+	offline(`real Pi + local provider: fake Claude exit ${code}`, async () => {
+		const { rpc, calls } = await runOffline(source!, code);
 		expect(calls).toHaveLength(4);
 		expect(calls.filter((call) => JSON.stringify(call.args) === '["--version"]')).toHaveLength(1);
 		expect(calls.filter((call) => JSON.stringify(call.args) === '["auth","status"]')).toHaveLength(1);
@@ -58,7 +63,7 @@ for (const code of [0, 7] as const) {
 offline("real provider terminateProcessGroup may signal an exited child's negative PGID (spy only)", async () => {
 	const work = mkdtempSync(join(tmpdir(), "provider-process-spy-"));
 	try {
-		stageSnapshot(snapshot!, work);
+		stageSnapshot(source!.snapshot, work, source!.pinned);
 		const { terminateProcessGroup } = await import(pathToFileURL(join(work, "provider/src/process-utils.ts")).href);
 		const observed: Array<[number, string | number | undefined]> = [];
 		const pid = 24681357; // deliberately no real child, no real process.kill
@@ -72,13 +77,25 @@ offline("real provider terminateProcessGroup may signal an exited child's negati
 	} finally { rmSync(work, { recursive: true, force: true }); }
 }, 10_000);
 
-offline("explicitly requested snapshot with modified anchored source fails closed", () => {
+pinnedOnly("explicitly requested snapshot with modified anchored source fails closed", () => {
 	const work = mkdtempSync(join(tmpdir(), "provider-bad-snapshot-"));
 	try {
 		const altered = join(work, "altered");
 		mkdirSync(join(altered, "src"), { recursive: true });
-		cpSync(join(snapshot!, "package.json"), join(altered, "package.json"));
+		cpSync(join(source!.snapshot, "package.json"), join(altered, "package.json"));
 		writeFileSync(join(altered, "src/claude-process.ts"), "// not the investigated provider\n");
 		expect(() => stageSnapshot(altered, work)).toThrow("Provider snapshot hash mismatch: src/claude-process.ts");
+	} finally { rmSync(work, { recursive: true, force: true }); }
+});
+
+localOnly("staged vendored module carries its public standalone entry and matches its recorded source hashes", () => {
+	const work = mkdtempSync(join(tmpdir(), "provider-local-stage-"));
+	try {
+		const extension = stageSnapshot(source!.snapshot, work, source!.pinned);
+		expect(extension.endsWith(join("provider", "index.ts"))).toBe(true);
+		const hashes = JSON.parse(readFileSync(join(work, "snapshot-manifest.json"), "utf8")).hashes as Record<string, string>;
+		for (const [file, expected] of Object.entries(hashes)) {
+			expect(createHash("sha256").update(readFileSync(join(work, "provider", file))).digest("hex")).toBe(expected);
+		}
 	} finally { rmSync(work, { recursive: true, force: true }); }
 });

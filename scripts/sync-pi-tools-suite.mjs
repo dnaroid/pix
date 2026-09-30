@@ -19,6 +19,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { migrateSettingsFile } from "./migrate-claude-provider.mjs";
 import {
 	ensurePiToolsSuiteDependencies,
 	piToolsSuiteDependenciesCurrent,
@@ -161,6 +162,15 @@ async function mirrorEntry(sourceEntry, targetRoot) {
 
 async function main() {
 	const options = parseArgs(process.argv.slice(2));
+	// A post-factory extension filter is too late: both providers would already
+	// have registered. Require explicit settings migration before publishing to
+	// the conventional personal extension directory. Keep the npm files intact.
+	if (options.target === DEFAULT_TARGET && await migrateSettingsFile(join(dirname(dirname(options.target)), "settings.json"), true)) {
+		throw new Error("Disable the legacy Claude provider first: npm run migrate:claude-provider (does not uninstall npm files)");
+	}
+	if (options.target === DEFAULT_TARGET && await migrateSettingsFile(resolve(".pi/settings.json"), true)) {
+		throw new Error("Disable the project's legacy Claude provider first: npm run migrate:claude-provider -- --project-settings .pi/settings.json");
+	}
 
 	if (!existsSync(options.source)) {
 		console.error(`[sync-pi-tools-suite] source missing: ${options.source}`);

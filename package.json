@@ -75,6 +75,7 @@
     "test:browser-qa-e2e": "npm --prefix external/pi-tools-suite run test:browser-qa-e2e",
     "sync:pi-tools-suite": "node scripts/sync-pi-tools-suite.mjs",
     "sync:pi-tools-suite:check": "node scripts/sync-pi-tools-suite.mjs --check",
+    "migrate:claude-provider": "node scripts/migrate-claude-provider.mjs",
     "sync:sdk-pin": "node scripts/sync-sdk-pin.mjs",
     "sync:sdk-pin:check": "node scripts/sync-sdk-pin.mjs --check",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-exclude=src/main.ts --test-coverage-lines=94 --test-coverage-branches=80 --test-coverage-functions=94 \"tests/**/*.test.ts\"",

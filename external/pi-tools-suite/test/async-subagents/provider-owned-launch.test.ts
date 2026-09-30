@@ -1,5 +1,7 @@
-// Opt-in G1/T3 candidate launcher acceptance, against installed Pi SDK and
-// hash-verified UNMODIFIED provider 0.5.0. Never the native-patched provider.
+// Opt-in G1/T3 candidate launcher acceptance, against installed Pi SDK and a
+// hash-verified provider module (default: the vendored patched local copy;
+// opt-in external unmodified 0.5.0 snapshot via
+// PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT). Never the native-patched provider.
 // All kill actions address either an owned direct bridge or its exact UUID
 // launchctl job. Fixture PIDs are used only for read-only ps observations.
 import { expect, test } from "bun:test";
@@ -10,11 +12,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureOwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
 import { launchOwnedAgent, type OwnedLaunchHandle } from "../../src/async-subagents/core/owned-launch/index.js";
-import { stageSnapshot } from "./provider-offline-harness.ts";
+import { providerSnapshotSource, stageSnapshot } from "./provider-offline-harness.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const enabled = process.platform === "darwin" && process.env.PI_OFFLINE_COALITION_PROBE === "1" && snapshot !== undefined;
+const source = providerSnapshotSource();
+const enabled = process.platform === "darwin" && process.env.PI_OFFLINE_COALITION_PROBE === "1" && source !== undefined;
 const offline = enabled ? test : test.skip;
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)), "../..");
 const pi = join(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
@@ -58,8 +60,8 @@ async function setup(): Promise<Context> {
 	const work = mkdtempSync(join(tmpdir(), "provider-owned-"));
 	try {
 		const installed = JSON.parse(readFileSync(join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"), "utf8"));
-		if (installed.version !== "0.99.0") throw new Error(`Expected installed Pi SDK 0.99.0, found ${installed.version}`);
-		const extension = stageSnapshot(snapshot!, work);
+		if (installed.version !== "0.99.1") throw new Error(`Expected installed Pi SDK 0.99.1, found ${installed.version}`);
+		const extension = stageSnapshot(source!.snapshot, work, source!.pinned);
 		return { work, extension, node: localNode(), binaries: await ensureOwnedLaunchBinaries({ cacheRoot: join(work, "cache") }), runs: [], nextId: 0 };
 	} catch (error) { console.error(`Provider-owned setup retained: ${work}`); throw error; }
 }

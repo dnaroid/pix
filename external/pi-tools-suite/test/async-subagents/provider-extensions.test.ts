@@ -1,6 +1,8 @@
 // Provider dependency injection for isolated children (plan P2–P6, T1).
-// Offline and deterministic: Pi's installed-package lookup is injected, the
-// Claude path stops at the (mocked) owned-launch boundary, and non-Claude
+// Offline and deterministic: the Claude provider is the vendored local module
+// (trusted suite-relative entrypoint, no user/project package lookup); the
+// installed-package locator remains a pure test seam for staged copies/stubs,
+// the Claude path stops at the (mocked) owned-launch boundary, and non-Claude
 // children are a tiny fake `pi` script.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
@@ -13,7 +15,8 @@ import { spawnAgentWithRetry } from "../../src/async-subagents/core/retry.js";
 import { resetSessionModelFallbacks } from "../../src/async-subagents/core/model-fallback.js";
 import {
 	antigravityEntrypoint,
-	defaultInstalledPackageLocator,
+	claudeProviderLocalRoot,
+	localClaudeProviderModule,
 	normalizeProviderArgs,
 	selectsClaudeProvider,
 	ProviderExtensionError,
@@ -25,6 +28,7 @@ const STUB = fileURLToPath(new URL("./fixtures/claude-provider-stub", import.met
 const STUB_ENTRY = fs.realpathSync(path.join(STUB, "extensions", "index.ts"));
 const FAKE_BINARIES: OwnedLaunchBinaries = { bridge: "/nonexistent/bridge", gate: "/nonexistent/gate", supervisor: "/nonexistent/supervisor" };
 const CLAUDE = "pi-claude-code-provider/sonnet";
+const localOnly = test;
 
 const roots: string[] = [];
 const originalPlatform = process.platform;
@@ -59,15 +63,18 @@ function fakePackage(manifest: Record<string, unknown>, entry = "extensions/inde
 const claudeManifest = (overrides: Record<string, unknown> = {}) => ({
 	name: "pi-claude-code-provider", version: "0.5.0", pi: { extensions: ["./extensions/index.ts"] }, ...overrides,
 });
-const resolveClaude = (locate: () => string[], forwardedArgs: string[] = []) =>
-	resolveProviderExtensions({ selectedModel: CLAUDE, explicitModel: CLAUDE, claudeSelected: true, forwardedArgs, cwd: tempDir(), locateInstalled: locate });
+const resolveClaude = (locate: () => string[], forwardedArgs: string[] = [], cwd: string = tempDir()) =>
+	resolveProviderExtensions({ selectedModel: CLAUDE, explicitModel: CLAUDE, claudeSelected: true, forwardedArgs, cwd, locateInstalled: locate });
+/** Default (production) resolution: no seam, no explicit args. */
+const resolveLocalClaude = (forwardedArgs: string[] = [], cwd?: string, explicitModel?: string) =>
+	resolveProviderExtensions({ selectedModel: explicitModel ?? CLAUDE, explicitModel, claudeSelected: true, forwardedArgs, cwd: cwd ?? tempDir() });
 const code = (fn: () => unknown) => {
 	try { fn(); } catch (error) { return error instanceof ProviderExtensionError ? error.code : `other:${String(error)}`; }
 	return "no-error";
 };
 
 describe("provider dependency resolver", () => {
-	test("Claude resolves exactly one validated entrypoint through the installed-package lookup", () => {
+	test("Claude resolves exactly one validated entrypoint through the test-seam lookup", () => {
 		expect(resolveClaude(() => [STUB])).toEqual([STUB_ENTRY]);
 		// Aliases under the same provider reuse the same entrypoint.
 		const opus = resolveProviderExtensions({ selectedModel: "pi-claude-code-provider/opus", explicitModel: undefined,
@@ -86,7 +93,7 @@ describe("provider dependency resolver", () => {
 		expect(none("antigravity/gemini-explicit", "antigravity/gemini-explicit")).toEqual([antigravityEntrypoint()]);
 	});
 
-	test("an explicitly supplied provider extension is validated and never duplicated", () => {
+	test("an explicitly supplied seam package extension is validated and never duplicated", () => {
 		expect(resolveClaude(() => { throw new Error("must not look up packages"); }, ["--extension", STUB_ENTRY])).toEqual([]);
 		const bad = fakePackage(claudeManifest({ version: "0.6.0" }));
 		expect(code(() => resolveClaude(() => [], ["--extension", path.join(bad, "extensions", "index.ts")]))).toBe("provider_version_unsupported");
@@ -103,7 +110,6 @@ describe("provider dependency resolver", () => {
 		const error = (() => { try { resolveClaude(() => []); } catch (e) { return e as ProviderExtensionError; } })()!;
 		expect(error.permanent).toBe(true);
 		expect(error.message).toContain(CLAUDE);
-		expect(error.message).toContain("pi install npm:pi-claude-code-provider@0.5.0");
 		expect(error.message.length).toBeLessThanOrEqual(1_000);
 	});
 
@@ -112,76 +118,91 @@ describe("provider dependency resolver", () => {
 			.toEqual(["--model", "a/b", "--model", "c/d", "--provider", "p", "--thinking", "high"]);
 		expect(normalizeProviderArgs(["--models", "x/*"])).toEqual(["--models", "x/*"]);
 	});
-});
 
-describe("installed-package lookup trust boundary", () => {
-	const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
-	afterEach(() => {
-		if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
-	});
-	/** An isolated Pi agent dir whose user settings list the given package sources. */
-	function agentDirWith(packages: unknown[]): string {
-		const agentDir = tempDir();
-		fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ packages }));
-		process.env.PI_CODING_AGENT_DIR = agentDir;
-		return agentDir;
-	}
-	/** A managed user-scope npm install of a package with this manifest. */
-	function installManaged(agentDir: string, manifest: Record<string, unknown>): string {
-		const root = path.join(agentDir, "npm", "node_modules", "pi-claude-code-provider");
-		fs.mkdirSync(path.join(root, "extensions"), { recursive: true });
-		fs.writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
-		fs.writeFileSync(path.join(root, "extensions", "index.ts"), "export default function () {}\n");
-		return root;
-	}
-
-	test("a user-scope npm install is found", () => {
-		const agentDir = agentDirWith(["npm:pi-claude-code-provider@0.5.0"]);
-		const root = installManaged(agentDir, claudeManifest());
-		expect(defaultInstalledPackageLocator("pi-claude-code-provider", tempDir())).toEqual([root]);
-		expect(resolveProviderExtensions({ selectedModel: CLAUDE, explicitModel: CLAUDE, claudeSelected: true, forwardedArgs: [], cwd: tempDir() }))
-			.toEqual([fs.realpathSync(path.join(root, "extensions", "index.ts"))]);
-	});
-
-	test("an untrusted project cannot supply the provider (project settings are never read)", () => {
-		agentDirWith([]);
-		const repo = tempDir();
-		const evil = fakePackage(claudeManifest());
-		fs.mkdirSync(path.join(repo, ".pi"), { recursive: true });
-		fs.writeFileSync(path.join(repo, ".pi", "settings.json"), JSON.stringify({ packages: [evil, "npm:pi-claude-code-provider@0.5.0"] }));
-		fs.mkdirSync(path.join(repo, ".pi", "npm", "node_modules"), { recursive: true });
-		fs.symlinkSync(evil, path.join(repo, ".pi", "npm", "node_modules", "pi-claude-code-provider"));
-		expect(defaultInstalledPackageLocator("pi-claude-code-provider", repo)).toEqual([]);
-		expect(code(() => resolveProviderExtensions({ selectedModel: CLAUDE, explicitModel: CLAUDE, claudeSelected: true, forwardedArgs: [], cwd: repo })))
-			.toBe("provider_not_installed");
-	});
-
-	test("user-scope local/git sources or other package names are never accepted", () => {
-		const local = fakePackage(claudeManifest());
-		agentDirWith([local, "git:github.com/evil/pi-claude-code-provider", "npm:pi-claude-code-provider-evil@0.5.0",
-			{ source: "./pi-claude-code-provider" }]);
-		expect(defaultInstalledPackageLocator("pi-claude-code-provider", tempDir())).toEqual([]);
-	});
-
-	test("lookup failures become typed permanent errors", () => {
-		expect(code(() => resolveClaude(() => { throw new Error("npm root failed"); }))).toBe("provider_metadata_invalid");
-	});
-});
-
-describe("explicit --extension handling", () => {
-	test("relative paths resolve against the child cwd and must be the declared entrypoint", () => {
+	test("seam packages resolve explicit --extension against the child cwd; only the declared entrypoint is accepted", () => {
 		const cwd = path.dirname(STUB);
 		const relative = path.join(path.basename(STUB), "extensions", "index.ts");
-		const resolveWith = (args: string[], at = cwd) => resolveProviderExtensions({ selectedModel: CLAUDE, explicitModel: CLAUDE,
-			claudeSelected: true, forwardedArgs: args, cwd: at, locateInstalled: () => { throw new Error("no lookup"); } });
-		expect(resolveWith(["--extension", relative])).toEqual([]);
-		expect(resolveWith(["-e", relative])).toEqual([]);
-		// The same relative path from another cwd names nothing: normal lookup happens instead.
-		expect(code(() => resolveWith(["-e", relative], tempDir()))).toBe("provider_metadata_invalid");
+		const thrower = () => { throw new Error("no lookup"); };
+		expect(resolveClaude(thrower, ["--extension", relative], cwd)).toEqual([]);
+		expect(resolveClaude(thrower, ["-e", relative], cwd)).toEqual([]);
+		// The same relative path from another cwd names nothing: the lookup runs instead.
+		expect(code(() => resolveClaude(thrower, ["-e", relative]))).toBe("provider_metadata_invalid");
 		const other = fakePackage(claudeManifest(), "extensions/index.ts");
 		fs.writeFileSync(path.join(other, "extensions", "other.ts"), "export default function () {}\n");
-		expect(code(() => resolveWith(["--extension", path.join(other, "extensions", "other.ts")]))).toBe("provider_metadata_invalid");
+		expect(code(() => resolveClaude(thrower, ["--extension", path.join(other, "extensions", "other.ts")], cwd))).toBe("provider_metadata_invalid");
+	});
+});
+
+describe("vendored local module resolution (default)", () => {
+	localOnly("Claude resolves the module's public standalone entrypoint (index.ts), including env-model selection", () => {
+		const local = localClaudeProviderModule(CLAUDE);
+		expect(path.basename(local.standalone)).toBe("index.ts");
+		expect(local.standalone.startsWith(`${local.root}${path.sep}`)).toBe(true);
+		expect(resolveLocalClaude()).toEqual([local.standalone]);
+		// A model sourced only from the environment still selects the provider.
+		const envModel = resolveProviderExtensions({ selectedModel: CLAUDE, explicitModel: undefined,
+			claudeSelected: true, forwardedArgs: [], cwd: tempDir() });
+		expect(envModel).toEqual([local.standalone]);
+		expect(resolveProviderExtensions({ selectedModel: "pi-claude-code-provider/opus", explicitModel: undefined,
+			claudeSelected: true, forwardedArgs: [], cwd: tempDir() })).toEqual([local.standalone]);
+	});
+
+	localOnly("explicit local entries are deduped, never injected twice", () => {
+		const local = localClaudeProviderModule(CLAUDE);
+		expect(resolveLocalClaude(["--extension", local.standalone])).toEqual([]);
+		expect(resolveLocalClaude(["--extension", local.entry])).toEqual([]);
+		expect(resolveLocalClaude(["-e", "index.ts"], local.root)).toEqual([]);
+		// Any other file of the vendored package is not the public entrypoint.
+		expect(code(() => resolveLocalClaude(["--extension", path.join(claudeProviderLocalRoot(), "package.json")])))
+			.toBe("provider_metadata_invalid");
+	});
+
+	localOnly("checks every explicit entry, including directories and both local aliases", () => {
+		const local = localClaudeProviderModule(CLAUDE);
+		const old = fakePackage(claudeManifest());
+		for (const entries of [
+			[local.standalone, path.join(old, "extensions/index.ts")],
+			[path.join(old, "extensions/index.ts"), local.standalone],
+			[local.standalone, local.entry],
+			[old],
+		]) {
+			expect(code(() => resolveLocalClaude(entries.flatMap(entry => ["--extension", entry]))))
+				.toBe("provider_metadata_invalid");
+		}
+	});
+
+	test("an explicit old npm provider extension is rejected (no double registration)", () => {
+		const npmCopy = fakePackage(claudeManifest());
+		const error = (() => { try { resolveLocalClaude(["--extension", path.join(npmCopy, "extensions", "index.ts")]); } catch (e) { return e as ProviderExtensionError; } })()!;
+		expect(error).toBeInstanceOf(ProviderExtensionError);
+		expect(error.code).toBe("provider_metadata_invalid");
+		expect(error.permanent).toBe(true);
+		expect(error.message).toContain("vendored local module is injected instead");
+		// The rejection does not depend on the local module being present.
+		const nested = fakePackage(claudeManifest());
+		expect(code(() => resolveLocalClaude(["-e", path.join(nested, "extensions", "index.ts")], tempDir()))).toBe("provider_metadata_invalid");
+	});
+
+	localOnly("no user/project package lookup: Pi package sources cannot supply the provider", () => {
+		const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+		const agentDir = tempDir();
+		const evil = fakePackage(claudeManifest());
+		fs.mkdirSync(path.join(agentDir, "npm", "node_modules"), { recursive: true });
+		fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-claude-code-provider@0.5.0"] }));
+		fs.symlinkSync(evil, path.join(agentDir, "npm", "node_modules", "pi-claude-code-provider"));
+		// A repository cwd with project package settings is equally ignored.
+		const repo = tempDir();
+		fs.mkdirSync(path.join(repo, ".pi"), { recursive: true });
+		fs.writeFileSync(path.join(repo, ".pi", "settings.json"), JSON.stringify({ packages: [evil, "npm:pi-claude-code-provider@0.5.0"] }));
+		try {
+			process.env.PI_CODING_AGENT_DIR = agentDir;
+			const local = localClaudeProviderModule(CLAUDE);
+			expect(resolveLocalClaude([], repo)).toEqual([local.standalone]);
+			expect(resolveLocalClaude([], repo)[0]).not.toContain("provider-ext-");
+		} finally {
+			if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+		}
 	});
 });
 

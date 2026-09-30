@@ -4,12 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { runOffline, stageSnapshot } from "./provider-offline-harness.ts";
+import { providerSnapshotSource, runOffline, stageSnapshot } from "./provider-offline-harness.ts";
 import { applyNativeProviderPatch } from "./provider-native-patch.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const offline = snapshot === undefined || process.platform !== "darwin" ? test.skip : test;
+const snapshotSource = providerSnapshotSource();
+const offline = snapshotSource === undefined || process.platform !== "darwin" ? test.skip : test;
 const source = fileURLToPath(new URL("./fixtures/provider-native-relay.c", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/provider-relay-cli.mjs", import.meta.url));
 const fd = (child: ChildProcess, index: number) => (child.stdio as unknown as Array<NodeJS.ReadableStream & NodeJS.WritableStream>)[index]!;
@@ -24,7 +24,7 @@ const alive = (pid: number) => {
 };
 for (const code of [0, 7] as const) {
 	offline(`installed Pi RPC + actual patched provider A/B/C exit ${code}`, async () => {
-		const { rpc, calls } = await runOffline(snapshot!, code, true);
+		const { rpc, calls } = await runOffline(snapshotSource!, code, true);
 		expect(calls).toHaveLength(4);
 		expect(calls.filter((call) => call.args.includes("--input-format"))).toHaveLength(1);
 		const answer = rpc.findLast((record) => record.type === "message_end" && record.message?.role === "assistant");
@@ -61,7 +61,7 @@ offline("patched spawnClaudeProcess: real A/B/C, natural 0 and 7, resistant leaf
 	const actors: ChildProcess[] = [];
 	let completed = false;
 	try {
-		stageSnapshot(snapshot!, work);
+		stageSnapshot(snapshotSource!.snapshot, work, snapshotSource!.pinned);
 		applyNativeProviderPatch(join(work, "provider"));
 		const binary = join(work, "relay");
 		execFileSync("clang", ["-std=c11", "-D_DARWIN_C_SOURCE", "-Wall", "-Wextra", "-Werror", "-O2", source, "-o", binary], { timeout: 10_000 });

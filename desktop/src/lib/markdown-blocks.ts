@@ -34,13 +34,13 @@ export function renderBlocks(lines: readonly string[], depth: number, context: M
         output.push(
           `<figure class="mermaid-diagram" data-mermaid-source="${escapeAttribute(source)}">`
           + '<div class="mermaid-canvas" role="img" aria-label="Mermaid diagram" aria-busy="true"></div>'
-          + `<pre class="mermaid-fallback"><code>${escapedSource}</code></pre>`
+          + `<pre class="mermaid-fallback" data-code-source="${escapeAttribute(source)}"><code>${escapedSource}</code></pre>`
           + "</figure>",
         );
         continue;
       }
       const highlighted = highlightCode(source, fence.language);
-      output.push(`<pre><code class="highlighted-code" data-language="${highlighted.language}">${highlighted.html}</code></pre>`);
+      output.push(`<pre data-code-source="${escapeAttribute(source)}"><code class="highlighted-code" data-language="${highlighted.language}">${highlighted.html}</code></pre>`);
       continue;
     }
 

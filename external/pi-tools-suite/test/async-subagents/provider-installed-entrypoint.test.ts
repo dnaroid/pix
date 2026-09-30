@@ -1,35 +1,41 @@
-// G4: the ACTUAL installed provider entrypoint loads in an isolated child of
-// the ACTUAL personal Pi installation (opt-in: PI_CLAUDE_PROVIDER_INSTALLED=1).
-// Supported mode: Pi's user-scope managed npm install of the exactly pinned
-// provider, launched by the `pi` executable on PATH. No inference, no auth:
+// G4: the vendored local provider module entrypoint loads in an isolated child
+// of the ACTUAL personal Pi installation (opt-in: PI_CLAUDE_PROVIDER_INSTALLED=1).
+// The provider is resolved from the trusted suite-relative module — Pi package
+// configuration and npm installs are never consulted. No inference, no auth:
 // the child receives no prompt, runs with an isolated agent dir/HOME, and the
 // provider's CLI boundary is the offline protocol peer (never real Claude).
 import { expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	defaultInstalledPackageLocator,
+	claudeProviderLocalRoot,
+	localClaudeProviderModule,
 	resolveProviderExtensions,
 	SUPPORTED_CLAUDE_PROVIDER_VERSIONS,
 } from "../../src/async-subagents/core/provider-extensions.js";
 import { localNode } from "./provider-offline-rpc.ts";
 
-const enabled = process.env.PI_CLAUDE_PROVIDER_INSTALLED === "1";
-const installed = enabled ? test : test.skip;
+const localAvailable = existsSync(join(claudeProviderLocalRoot(), "package.json"));
+const resolution = localAvailable ? test : test.skip;
+const installed = localAvailable && process.env.PI_CLAUDE_PROVIDER_INSTALLED === "1" ? test : test.skip;
 const fakeCli = fileURLToPath(new URL("./fixtures/provider-offline-cli.mjs", import.meta.url));
 
-installed("personal Pi user-scope install resolves and loads the pinned provider in an isolated child", async () => {
-	// Resolution through Pi's public package manager against the real user settings.
-	const roots = defaultInstalledPackageLocator("pi-claude-code-provider", process.cwd());
-	expect(roots.length).toBe(1);
-	const manifest = JSON.parse(readFileSync(join(roots[0], "package.json"), "utf8"));
+resolution("resolution uses the vendored local module and its public standalone entry (no package lookup)", () => {
+	const local = localClaudeProviderModule("pi-claude-code-provider/sonnet");
+	const manifest = JSON.parse(readFileSync(join(local.root, "package.json"), "utf8"));
 	expect(SUPPORTED_CLAUDE_PROVIDER_VERSIONS).toContain(manifest.version);
 	const [entry] = resolveProviderExtensions({ selectedModel: "pi-claude-code-provider/sonnet", explicitModel: undefined,
 		claudeSelected: true, forwardedArgs: [], cwd: process.cwd() });
-	expect(entry).toBe(realpathSync(join(roots[0], "extensions", "index.ts")));
+	expect(entry).toBe(local.standalone);
+	expect(entry).toBe(join(local.root, "index.ts"));
+});
+
+installed("personal Pi loads the vendored local provider entry in an isolated child", async () => {
+	// Resolution through the trusted suite-relative module, exactly as spawnAgent does.
+	const entry = localClaudeProviderModule("pi-claude-code-provider/sonnet").standalone;
 
 	// The personal Pi executable (not the repository's SDK copy).
 	const piBin = realpathSync(execFileSync("/usr/bin/which", ["pi"], { encoding: "utf8" }).trim());

@@ -40,6 +40,9 @@ Stop, a new prompt, or a model change supersedes the scheduled action. Only an
 error/completed assistant tail that cannot be resumed through `Agent.continue()`
 uses the hidden continuation-message fallback.
 
+Countdowns in Desktop and TUI show hours and minutes, rounded up to the next
+minute, without seconds (zero minutes once due).
+
 The centered popup shows
 the exhausted window and a live countdown to the reset check, or to the next
 availability check when reset time is unknown. It offers **Try now**, **Cancel

@@ -35,7 +35,8 @@ describe("renderMarkdown", () => {
     const complete = renderMarkdown("```ts\nconst tag = '<script>';\n```");
     const streaming = renderMarkdown("```ts\nconst tag = '<script>';\n");
 
-    expect(complete).toContain('<pre><code class="highlighted-code" data-language="typescript">');
+    expect(complete).toContain('<code class="highlighted-code" data-language="typescript">');
+    expect(complete).toContain('data-code-source="const tag = &#39;&lt;script&gt;&#39;;"');
     expect(complete).toContain('class="sh__token--keyword"');
     expect(complete).toContain("&lt;script&gt;");
     expect(complete).not.toContain("<script>");
@@ -84,13 +85,23 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain("<tag>");
   });
 
+  it("retains escaped raw bodies for copying tilde, empty, and streaming fences only", () => {
+    expect(renderMarkdown('~~~text\n  a & "b"\n\nlast\n~~~')).toContain(
+      'data-code-source="  a &amp; &quot;b&quot;\n\nlast"',
+    );
+    expect(renderMarkdown("```\n``` ")).toContain('data-code-source=""');
+    expect(renderMarkdown("```text\nfirst\n")).toContain('data-code-source="first\n"');
+    expect(renderMarkdown("Prose and `inline code`")).not.toContain("data-code-source");
+  });
+
   it("emits safe Mermaid render targets with a readable source fallback", () => {
     const html = renderMarkdown('```mermaid\nflowchart LR\n  A["<Start>"] --> B\n```');
 
     expect(html).toContain('class="mermaid-diagram"');
     expect(html).toContain('data-mermaid-source="flowchart LR\n  A[&quot;&lt;Start&gt;&quot;] --&gt; B"');
     expect(html).toContain('class="mermaid-canvas"');
-    expect(html).toContain('<pre class="mermaid-fallback"><code>flowchart LR\n  A[&quot;&lt;Start&gt;&quot;] --&gt; B</code></pre>');
+    expect(html).toContain('<code>flowchart LR\n  A[&quot;&lt;Start&gt;&quot;] --&gt; B</code></pre>');
+    expect(html).toContain('class="mermaid-fallback" data-code-source="flowchart LR\n  A[&quot;&lt;Start&gt;&quot;] --&gt; B"');
     expect(html).not.toContain("highlighted-code");
     expect(html).not.toContain("<Start>");
   });

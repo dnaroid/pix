@@ -142,7 +142,7 @@
         onclick={() => quotaWaitIndicator.onReopen()}
       >
         <Hourglass class="h-3 w-3 shrink-0" aria-hidden="true" />
-        <span class="max-w-[240px] truncate">{quotaWaitIndicator.label}</span>
+        <span class="max-w-[240px] truncate font-mono tabular-nums">{quotaWaitIndicator.label}</span>
       </button>
     {/if}
     <RuntimeStatusBarItems

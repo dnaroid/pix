@@ -78,15 +78,12 @@ export function quotaWaitCountdownSeconds(state: QuotaWaitState, now: number): n
   return Math.max(0, Math.ceil((target - now) / 1000));
 }
 
-/** `1h 12m 30s`-style compact countdown; mirrors the TUI wait label. */
+/** Minute-resolution countdown, rounded up; mirrors the TUI wait label. */
 export function formatQuotaWaitCountdown(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const rest = total % 60;
-  return [hours > 0 ? `${hours}h` : "", minutes > 0 || hours > 0 ? `${minutes}m` : "", `${rest}s`]
-    .filter(Boolean)
-    .join(" ");
+  const totalMinutes = Math.max(0, Math.ceil(seconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours > 0 ? `${hours}h ` : ""}${minutes}m`;
 }
 
 /** Popup headline for the current wait phase. */

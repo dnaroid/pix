@@ -1,5 +1,6 @@
-// G3: real serializer and completion-evidence boundary of the unchanged
-// pinned provider (opt-in: PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT). No account,
+// G3: real serializer and completion-evidence boundary of the local provider
+// module (default: the vendored patched copy; opt-in external snapshot for the
+// unmodified release via PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT). No account,
 // no inference: the provider's own context serializer runs in-process on
 // DCP-shaped logical payloads, and a real Pi RPC process drives the provider
 // against the offline protocol peer to observe hook order and final stop
@@ -17,11 +18,11 @@ import {
 	providerPayloadRevision,
 	ProviderEvidenceTracker,
 } from "../../src/dcp/provider-tool-results.ts";
-import { stageSnapshot } from "./provider-offline-harness.ts";
+import { providerSnapshotSource, stageSnapshot } from "./provider-offline-harness.ts";
 import { localNode, stopAndConfirm } from "./provider-offline-rpc.ts";
 
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const offline = snapshot === undefined ? test.skip : test;
+const source = providerSnapshotSource();
+const offline = source === undefined ? test.skip : test;
 const suite = fileURLToPath(new URL("../..", import.meta.url));
 const cli = join(resolve(suite, "../.."), "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const fakeCli = fileURLToPath(new URL("./fixtures/provider-offline-cli.mjs", import.meta.url));
@@ -31,7 +32,7 @@ afterAll(() => { for (const work of works.splice(0)) rmSync(work, { recursive: t
 function stage(): { work: string; extension: string; provider: string } {
 	const work = mkdtempSync(join(tmpdir(), "pi-provider-g3-"));
 	works.push(work);
-	const extension = stageSnapshot(snapshot!, work);
+	const extension = stageSnapshot(source!.snapshot, work, source!.pinned);
 	return { work, extension, provider: join(work, "provider") };
 }
 

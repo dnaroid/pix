@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import markdownTextSource from "./MarkdownText.svelte?raw";
 
 describe("MarkdownText fenced code layout", () => {
+  it("keeps the copy button square with centered icon and out-of-flow feedback", () => {
+    expect(markdownTextSource).toMatch(
+      /:global\(\.markdown-code-copy\)\s*\{[^}]*justify-content: center;[^}]*width: 1\.5rem;[^}]*height: 1\.5rem;[^}]*padding: 0;/,
+    );
+    expect(markdownTextSource).toMatch(
+      /:global\(\.markdown-code-copy > span\)\s*\{[^}]*position: absolute;/,
+    );
+  });
   it("keeps short blocks intrinsic and wraps long plaintext and Sugar High lines", () => {
     expect(markdownTextSource).toMatch(
       /:global\(pre\)\s*\{[^}]*width: fit-content;[^}]*max-width: 100%;[^}]*overflow: hidden;[^}]*\}/,

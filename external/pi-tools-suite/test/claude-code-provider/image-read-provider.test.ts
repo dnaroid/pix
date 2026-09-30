@@ -3,14 +3,13 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import test from "node:test";
+import { test } from "bun:test";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { applyClaudeImageReadPatch, patchedProvider } from "../scripts/claude-image-read-patch.mjs";
 
-// Opt in against a pristine/patched upstream checkout; no Claude subscription,
-// credentials, UI, network, or actual Pi tool execution is involved.
-const directory = process.env.PIX_CLAUDE_PROVIDER_TEST_DIR;
+
+// Real local adapter with fake Claude CLI; no service, credentials or Pi tools.
+const directory = new URL("../../src/claude-code-provider/", import.meta.url).pathname;
 const model = { id: "opus", name: "Opus", api: "pi-claude-code-provider-headless" as Api,
   provider: "pi-claude-code-provider", baseUrl: "pi-claude-code-provider://local", reasoning: true,
   input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -25,7 +24,7 @@ const toolContext = normalizeContext({ tools, messages });
 
 const scenarios = ["normal", "recover", "safe-tool", "repeat", "transport", "mixed", "mcp-violation", "cleanup", "bad-exit", "abort", "close", "payload-hook"];
 for (const scenario of scenarios) {
-  test(`patched real provider subprocess simulation: ${scenario}`, { skip: !directory, timeout: 15000 }, async () => {
+  test(`patched real provider subprocess simulation: ${scenario}`, { timeout: 15000 }, async () => {
     const { createClaudeStream } = await import(pathToFileURL(join(directory!, "src/provider.ts")).href);
     const { SessionImageStore } = await import(pathToFileURL(join(directory!, "src/session-image-store.ts")).href);
     const root = await mkdtemp(join(tmpdir(), "pix-image-read-simulation-"));
@@ -119,33 +118,3 @@ process.stdin.on("end", () => {
   });
 }
 
-test("patch installer is idempotent, exact-version/source gated and preserves unrelated modifications", { skip: !directory }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "pix-provider-patch-installer-"));
-  try {
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir(join(root, "src"));
-    const baseline = await readFile(join(directory!, "src/.pix-original-provider.ts"), "utf8");
-    await writeFile(join(root, "package.json"), JSON.stringify({ name: "pi-claude-code-provider", version: "0.5.0" }));
-    await writeFile(join(root, "src/provider.ts"), baseline);
-    assert.equal(await applyClaudeImageReadPatch(root), "installed");
-    assert.equal(await applyClaudeImageReadPatch(root), "installed");
-    assert.equal(await applyClaudeImageReadPatch(root, { check: true }), "current");
-    assert.equal(await readFile(join(root, "src/provider.ts"), "utf8"), patchedProvider(baseline));
-    await writeFile(join(root, "src/image-read-recovery.ts"), "// unrelated module change");
-    await assert.rejects(applyClaudeImageReadPatch(root), /unrelated modifications/);
-    await rm(join(root, "src/image-read-recovery.ts"));
-    assert.equal(await applyClaudeImageReadPatch(root), "installed", "recover interrupted module installation");
-    await writeFile(join(root, "src/.pix-image-read-patch.lock"), "synthetic owner");
-    await assert.rejects(applyClaudeImageReadPatch(root), /already locked/);
-    await rm(join(root, "src/.pix-image-read-patch.lock"));
-    await writeFile(join(root, "src/provider.ts"), "// unrelated local change\n" + patchedProvider(baseline));
-    await assert.rejects(applyClaudeImageReadPatch(root), /unrelated modifications/);
-    await rm(join(root, "src/.pix-original-provider.ts"));
-    await assert.rejects(applyClaudeImageReadPatch(root), /no original backup/);
-    assert.throws(() => patchedProvider(baseline + "\n"), /Unsupported provider/);
-    await writeFile(join(root, "package.json"), JSON.stringify({ name: "pi-claude-code-provider", version: "0.6.0" }));
-    await assert.rejects(applyClaudeImageReadPatch(root), /Expected.*0.5.0/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});

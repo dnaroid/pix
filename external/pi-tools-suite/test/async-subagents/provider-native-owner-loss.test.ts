@@ -4,12 +4,12 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stageSnapshot } from "./provider-offline-harness.ts";
+import { providerSnapshotSource, stageSnapshot } from "./provider-offline-harness.ts";
 import { applyNativeProviderPatch } from "./provider-native-patch.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
-const snapshot = process.env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
-const offline = snapshot === undefined ? test.skip : test;
+const source = providerSnapshotSource();
+const offline = source === undefined ? test.skip : test;
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)), "../..");
 const pi = join(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const fixture = fileURLToPath(new URL("./fixtures/provider-owner-loss-cli.mjs", import.meta.url));
@@ -43,7 +43,7 @@ offline("installed Pi RPC: SIGKILL of owned Pi ends active native provider CLI a
 	let streamError: Error | undefined;
 	const records: Record<string, any>[] = [];
 	try {
-		const extension = stageSnapshot(snapshot!, work);
+		const extension = stageSnapshot(source!.snapshot, work, source!.pinned);
 		applyNativeProviderPatch(join(work, "provider"));
 		const binary = join(work, "relay");
 		execFileSync("clang", ["-std=c11", "-D_DARWIN_C_SOURCE", "-Wall", "-Wextra", "-Werror", "-O2", relay, "-o", binary], { timeout: 10_000 });

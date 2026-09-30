@@ -1,9 +1,11 @@
 <script lang="ts">
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import Copy from "@lucide/svelte/icons/copy";
   import type { Attachment } from "../lib/attachments";
   import { renderMarkdown } from "../lib/markdown";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { createMarkdownContentAction } from "./markdown-content-action";
+  import { createMarkdownCodeCopyAction } from "./markdown-code-copy-action";
   import { createMarkdownLinkAction } from "./markdown-link-action";
 
   let {
@@ -35,6 +37,8 @@
   } = $props();
   let html = $derived(renderMarkdown(text, { remoteImages, headingAnchors }));
   let externalLinkIconTemplate: HTMLSpanElement | undefined;
+  let copyIconTemplate: HTMLSpanElement | undefined;
+  const codeCopy = createMarkdownCodeCopyAction(() => copyIconTemplate);
   const markdownContent = createMarkdownContentAction({
     externalLinkIconTemplate: () => externalLinkIconTemplate,
     onValidateProjectFile: () => onValidateProjectFile,
@@ -51,10 +55,14 @@
 <span class="external-link-icon-template" aria-hidden="true" bind:this={externalLinkIconTemplate}>
   <ExternalLink size={14} strokeWidth={2} />
 </span>
+<span class="external-link-icon-template" aria-hidden="true" bind:this={copyIconTemplate}>
+  <Copy size={14} strokeWidth={2} />
+</span>
 <div
   class={["markdown-text", compact && "compact", dense && "dense", fitTables && "fit-tables"]}
   use:linkClicks
   use:markdownContent={html}
+  use:codeCopy={html}
 >
   {@html html}
 </div>
@@ -282,6 +290,40 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  .markdown-text :global(pre[data-code-source]) {
+    position: relative;
+    min-width: min(7rem, 100%);
+    padding-top: 2.5rem;
+  }
+  .markdown-text :global(.markdown-code-copy) {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--radius-sm);
+    padding: 0;
+    color: var(--muted-foreground);
+    background: var(--code);
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 0.75rem;
+    line-height: 1;
+  }
+  .markdown-text :global(.markdown-code-copy > span) {
+    position: absolute;
+    right: calc(100% + 0.25rem);
+    white-space: nowrap;
+  }
+  .markdown-text :global(.markdown-code-copy:hover) {
+    background: var(--panel-hover);
+    color: var(--foreground);
+  }
+  .markdown-text :global(.markdown-code-copy:disabled) { opacity: 0.6; }
+  .markdown-text :global(.markdown-code-copy[data-state="copied"]) { color: var(--tool-success); }
+  .markdown-text :global(.markdown-code-copy[data-state="error"]) { color: var(--destructive); }
   .markdown-text :global(pre code.highlighted-code) {
     /* Sugar High emits block line spans separated by literal newlines. */
     white-space: normal;

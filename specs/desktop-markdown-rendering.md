@@ -79,7 +79,11 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Same-document hash links in a Markdown preview scroll to stable, deduplicated heading anchors.
 - Unvalidated raw absolute prose, URL-like destinations other than the supported local-file flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
 - An unclosed fenced code block remains visible while the message streams.
-- Fenced code keeps its intrinsic width for short content and is capped at the
+- Every fenced code block has a keyboard-accessible Copy code button in its top-right corner, including visible Mermaid source fallbacks. It copies only the raw code body (no fences, language label, or highlighting markup), preserving indentation and line breaks. The button briefly shows Copied after success or Copy failed on clipboard errors. Rerenders and teardown cancel feedback timers and ignore stale clipboard completions. Inline code and prose do not gain buttons.
+- The copy control is a fixed 24×24 px square with a centered icon; feedback is
+  positioned beside it without changing the button size.
+- Fenced code keeps its intrinsic width for short content (with a compact minimum
+  reserving room for the copy control and adjacent feedback, never wider than the container) and is capped at the
   available content width. Long logical lines visually wrap without horizontal
   scrolling while preserving whitespace, source line breaks, and syntax
   highlighting. Tables retain their existing horizontal scrolling behavior
@@ -107,6 +111,8 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/external-links.test.ts`
 - `desktop/src/components/MarkdownText.svelte`
 - `desktop/src/components/markdown-content-action.ts`
+- `desktop/src/components/markdown-code-copy-action.ts`
+- `desktop/src/components/markdown-code-copy-action.test.ts`
 - `desktop/src/components/markdown-link-action.ts`
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/PreviewPane.svelte`

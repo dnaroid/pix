@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { claudeProviderLocalRoot } from "../../src/async-subagents/core/provider-extensions.js";
 import { localNode, rpcProbe, stopAndConfirm } from "./provider-offline-rpc.ts";
 import { applyNativeProviderPatch } from "./provider-native-patch.ts";
 
@@ -11,6 +12,7 @@ const suite = fileURLToPath(new URL("../..", import.meta.url));
 const root = resolve(suite, "../..");
 const cli = join(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const fixture = fileURLToPath(new URL("./fixtures/provider-offline-cli.mjs", import.meta.url));
+/** Anchors pin the characterized UNMODIFIED 0.5.0 release (external snapshots only). */
 const anchors = {
 	"src/claude-process.ts": "57b18c7c2f8d6a2c41747f2a1aa6e0762375e4003cf7386db87eb690c2c23fd7",
 	"src/process-utils.ts": "20937a411fd3223f19061f6fc65573e19e1d16bf9401cdd79f1d5bcd61a34ed0",
@@ -24,21 +26,54 @@ function files(dir: string, prefix = ""): string[] {
 	}).sort();
 }
 
-export function stageSnapshot(snapshot: string, work: string): string {
+/** The vendored patched provider module inside the tools suite (default source). */
+export const localProviderRoot = claudeProviderLocalRoot();
+export function localProviderAvailable(): boolean {
+	if (!existsSync(join(localProviderRoot, "package.json"))) throw new Error("Required vendored Claude provider is missing");
+	return true;
+}
+
+export interface ProviderSnapshotSource {
+	/** Absolute provider package root to stage. */
+	snapshot: string;
+	/** External snapshot of the characterized unmodified release (hash-anchored). */
+	pinned: boolean;
+}
+
+/**
+ * Default provider source: the vendored local module, unless an explicit
+ * external snapshot is requested for the unmodified-release characterization.
+ * The local module is required: a missing source is a regression, not a skip.
+ */
+export function providerSnapshotSource(env: NodeJS.ProcessEnv = process.env): ProviderSnapshotSource {
+	const external = env.PI_CLAUDE_PROVIDER_OFFLINE_SNAPSHOT;
+	if (external !== undefined) return { snapshot: external, pinned: true };
+	localProviderAvailable();
+	return { snapshot: localProviderRoot, pinned: false };
+}
+
+export function stageSnapshot(snapshot: string, work: string, pinned = true): string {
 	const manifest = JSON.parse(readFileSync(join(snapshot, "package.json"), "utf8"));
 	if (manifest.name !== "pi-claude-code-provider" || manifest.version !== "0.5.0" ||
 		JSON.stringify(manifest.pi?.extensions) !== JSON.stringify(["./extensions/index.ts"])) {
-		throw new Error("Unrecognized provider snapshot metadata; only the investigated offline baseline is characterized");
+		throw new Error("Unrecognized provider snapshot metadata; only the characterized offline baseline is characterized");
 	}
-	for (const [path, expected] of Object.entries(anchors)) {
-		if (hash(join(snapshot, path)) !== expected) throw new Error(`Provider snapshot hash mismatch: ${path}`);
+	// The vendored module is intentionally patched; only an external snapshot of
+	// the investigated release is hash-pinned. Local staging still verifies the
+	// copy byte-for-byte below: the repository is the trust boundary.
+	if (pinned) {
+		for (const [path, expected] of Object.entries(anchors)) {
+			if (hash(join(snapshot, path)) !== expected) throw new Error(`Provider snapshot hash mismatch: ${path}`);
+		}
 	}
+	const standalone = existsSync(join(snapshot, "index.ts"));
 	const target = join(work, "provider");
 	mkdirSync(target);
-	for (const entry of ["package.json", "src", "extensions", "bridge"]) cpSync(join(snapshot, entry), join(target, entry), { recursive: true, dereference: false });
-	const sourceHashes = Object.fromEntries(["package.json", ...files(snapshot, "src"), ...files(snapshot, "extensions"), ...files(snapshot, "bridge")]
-		.map((path) => [path, hash(join(snapshot, path))]));
-	const targetFiles = ["package.json", ...files(target, "src"), ...files(target, "extensions"), ...files(target, "bridge")];
+	const entries = ["package.json", ...(standalone ? ["index.ts"] : []), "src", "extensions", "bridge"];
+	for (const entry of entries) cpSync(join(snapshot, entry), join(target, entry), { recursive: true, dereference: false });
+	const listed = ["package.json", ...(standalone ? ["index.ts"] : []), ...files(snapshot, "src"), ...files(snapshot, "extensions"), ...files(snapshot, "bridge")];
+	const sourceHashes = Object.fromEntries(listed.map((path) => [path, hash(join(snapshot, path))]));
+	const targetFiles = ["package.json", ...(standalone ? ["index.ts"] : []), ...files(target, "src"), ...files(target, "extensions"), ...files(target, "bridge")];
 	if (JSON.stringify(Object.keys(sourceHashes)) !== JSON.stringify(targetFiles) ||
 		targetFiles.some((path) => hash(join(target, path)) !== sourceHashes[path])) throw new Error("Provider staged source differs from snapshot");
 	writeFileSync(join(work, "snapshot-manifest.json"), JSON.stringify({ name: manifest.name, version: manifest.version, hashes: sourceHashes }, null, 2), { mode: 0o600 });
@@ -51,18 +86,20 @@ export function stageSnapshot(snapshot: string, work: string): string {
 		mkdirSync(dirname(link), { recursive: true });
 		symlinkSync(installed, link, "dir");
 	}
-	return join(target, "extensions/index.ts");
+	// The public standalone entry is what production children load; fall back to
+	// the declared entrypoint only for snapshots without one.
+	return standalone ? join(target, "index.ts") : join(target, "extensions/index.ts");
 }
 
 type RecordLine = Record<string, any>;
-export async function runOffline(snapshot: string, code: 0 | 7, native = false): Promise<{ rpc: RecordLine[]; calls: RecordLine[] }> {
+export async function runOffline(source: ProviderSnapshotSource, code: 0 | 7, native = false): Promise<{ rpc: RecordLine[]; calls: RecordLine[] }> {
 	const work = mkdtempSync(join(tmpdir(), "pi-provider-offline-"));
 	let child: ChildProcess | undefined;
 	let closed: Promise<void> | undefined;
 	let result: { rpc: RecordLine[]; calls: RecordLine[] } | undefined;
 	let problem: unknown;
 	try {
-		const extension = stageSnapshot(snapshot, work);
+		const extension = stageSnapshot(source.snapshot, work, source.pinned);
 		let nativeBinary: string | undefined;
 		if (native) {
 			if (process.platform !== "darwin") throw new Error("Native provider test only supports macOS");

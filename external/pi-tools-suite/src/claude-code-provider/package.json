@@ -1,0 +1,47 @@
+{
+  "name": "pi-claude-code-provider",
+  "version": "0.5.0",
+  "type": "module",
+  "description": "The convenience of your Claude subscription in Pi, with the fewest possible surprises. Uses Claude Code's CLI under the hood.",
+  "author": "chem <sineverbisnon@gmail.com>",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "claude-code",
+    "subscription"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chem/pi-claude-code-provider.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chem/pi-claude-code-provider/issues"
+  },
+  "homepage": "https://github.com/chem/pi-claude-code-provider#readme",
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "private": true
+}
