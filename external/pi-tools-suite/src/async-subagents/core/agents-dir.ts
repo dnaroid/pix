@@ -41,6 +41,7 @@ export type ProjectAgentDefinition = AgentDefinition;
 const KNOWN_FRONTMATTER_KEYS = new Set([
 	"name",
 	"description",
+	"tags",
 	"icon",
 	"models",
 	"modelSelection",
@@ -239,6 +240,9 @@ function parseFrontmatter(lines: string[], file: string): Record<string, unknown
 				`Unknown agent frontmatter key "${key}": ${file}. Known keys: ${[...KNOWN_FRONTMATTER_KEYS].sort().join(", ")}.`,
 			);
 		}
+	}
+	if (value.tags !== undefined && (!Array.isArray(value.tags) || value.tags.some((tag) => typeof tag !== "string"))) {
+		throw new Error(`Agent tags must be an array of strings: ${file}`);
 	}
 	return value;
 }

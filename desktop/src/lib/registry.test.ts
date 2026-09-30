@@ -148,7 +148,7 @@ describe("registry session state", () => {
     ]);
   });
 
-  it("separates installed resources from Marketplace and excludes project artifacts", () => {
+  it("separates publication from installation and excludes project artifacts", () => {
     const installed: RegistryItem = {
       id: "skill:installed",
       type: "skill",
@@ -195,12 +195,14 @@ describe("registry session state", () => {
       actions: [],
     };
 
-    expect(registryCatalogSection(installed)).toBe("installed");
-    expect(registryCatalogSection(available)).toBe("marketplace");
+    const localOnly = { ...installed, remote: false, status: "local-only" as const };
+    expect(registryCatalogSection(localOnly)).toBe("local");
+    expect(registryCatalogSection(installed)).toBe("global");
+    expect(registryCatalogSection(available)).toBe("global");
     expect(registryCatalogSection(project)).toBeUndefined();
     expect(registryCatalogSection(stale)).toBeUndefined();
-    expect(registryCatalogItems([available, project, stale, installed], "installed")).toEqual([installed]);
-    expect(registryCatalogItems([available, project, stale, installed], "marketplace")).toEqual([available]);
+    expect(registryCatalogItems([available, localOnly, project, stale, installed], "local")).toEqual([localOnly]);
+    expect(registryCatalogItems([available, localOnly, project, stale, installed], "global")).toEqual([available, installed]);
   });
 
   it("uses user-facing sync labels", () => {
@@ -218,7 +220,7 @@ describe("registry session state", () => {
     const untracked = { ...localOnly, status: "untracked-local" as const, remote: true, actions: ["push" as const, "pull" as const] };
     expect(registryFriendlyStatusLabel(localOnly)).toBe("Local only");
     expect(registryFriendlyStatusDescription(localOnly)).toContain("Only in this project");
-    expect(registryFriendlyActionLabel(localOnly, "push")).toBe("Add to registry");
+    expect(registryFriendlyActionLabel(localOnly, "push")).toBe("Make global (publish)");
     expect(registryFriendlyStatusLabel(untracked)).toBe("Needs review");
     expect(registryFriendlyActionLabel(untracked, "push")).toBe("Keep local version");
     expect(registryFriendlyActionLabel(untracked, "pull")).toBe("Keep registry version");
@@ -267,6 +269,20 @@ describe("registry session state", () => {
     expect(searchRegistryItems(items, "todo").map((item) => item.id)).toEqual(["project:todo"]);
     expect(searchRegistryItems(items, "plan").map((item) => item.id)).toEqual(["project:plans"]);
     expect(searchRegistryItems(items, "task").map((item) => item.id)).toEqual(["project:tasks"]);
+  });
+
+  it("parses optional tags, searches them, and rejects malformed metadata", () => {
+    const raw = { version: 1, configured: false, branch: "main", checkedAt: "now", items: [{
+      id: "agent:reviewer", type: "agent", name: "reviewer", status: "local-only", statusLabel: "LOCAL ONLY",
+      icon: "+", local: true, remote: false, tags: ["quality", "security"], actions: ["tags", "make-local"],
+    }] };
+    const event = { sessionId: "s", channel: REGISTRY_STATE_CHANNEL, data: raw };
+    const snapshot = registrySnapshotFromSessionState(event)!;
+    expect(snapshot.items[0]!.tags).toEqual(["quality", "security"]);
+    expect(searchRegistryItems(snapshot.items, "security")).toHaveLength(1);
+    expect(searchRegistryItems(snapshot.items, "unrelated")).toHaveLength(0);
+    expect(registryPrimaryAction(snapshot.items[0]!)).toBeUndefined();
+    expect(registrySnapshotFromSessionState({ ...event, data: { ...raw, items: [{ ...raw.items[0], tags: [7] }] } })).toBeUndefined();
   });
 });
 

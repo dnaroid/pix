@@ -73,6 +73,7 @@ Based on the user interview, fill in these components:
 - **name**: Skill identifier (lowercase, hyphens, a-z0-9 — see pi's skill validation rules)
 - **description**: When to trigger, what it does. This is the primary triggering mechanism - include both what the skill does AND specific contexts for when to use it. All "when to use" info goes here, not in the body. Note: currently models have a tendency to "undertrigger" skills -- to not use them when they'd be useful. To combat this, please make the skill descriptions a little bit "pushy". So for instance, instead of "How to build a simple fast dashboard to display internal Anthropic data.", you might write "How to build a simple fast dashboard to display internal Anthropic data. Make sure to use this skill whenever the user mentions dashboards, data visualization, internal metrics, or wants to display any kind of company data, even if they don't explicitly ask for a 'dashboard.'"
 - **compatibility**: Required tools, dependencies (optional, rarely needed)
+- **tags** (optional): String array for registry discoverability — inline `tags: [code-review, rust]` or a block list; omit the key or use `[]` for none. Tags are searchable and editable in the Registry. Do not invent a `scope` flag: whether a skill is shared is determined by whether it's published, not by frontmatter.
 - **the rest of the skill :)**
 
 ### Skill Writing Guide
@@ -120,8 +121,19 @@ The agent reads only the relevant reference file.
 This matters both for writing skills and for testing them. Pi scans skill locations at startup (`~/.pi/agent/skills/`, `~/.agents/skills/`, project `.pi/skills/` and `.agents/skills/`, settings `skills` arrays, and the `--skill <path>` CLI flag). It extracts each skill's `name` + `description` and lists them in the system prompt as `available_skills`. When a task matches a skill, the agent uses the `read` tool to load the full `SKILL.md` on demand — that's progressive disclosure. Skills also register as `/skill:name` commands the user can invoke directly to force-load them.
 
 Two practical consequences for this skill:
-- **Where to install a finished skill**: global skills go in `~/.pi/agent/skills/<skill-name>/`; project skills go in `.pi/skills/<skill-name>/` (only loaded once the project is trusted).
+- **Where to install a finished skill**: skills are local resources — the project home is `.pi/skills/<skill-name>/` (only loaded once the project is trusted). There is no auto-loaded global install: to make a skill available to other projects, publish it to the common registry (see "Publishing to the skill registry" below), and other projects install it explicitly.
 - **How triggering is measured**: the eval scripts in `scripts/` test triggering by watching whether pi actually performs that `read` on the skill's `SKILL.md`. They invoke `pi -p --mode json --skill <temp-skill-dir>` so the description under test is evaluated in isolation (with `--no-skills` to suppress all other discovered skills).
+
+#### Publishing to the skill registry
+
+A finished skill lives locally until someone deliberately shares it. Sharing goes through the common Git registry:
+
+- `/registry push skill <name>` publishes the skill. The **full skill tree travels** — SKILL.md plus everything bundled with it (`scripts/`, `references/`, `assets/`, eval files), so check the tree for stray or private content before pushing.
+- Publishing does not auto-load the skill anywhere. Other projects get it only when someone there installs it explicitly from the registry.
+- `/registry remove <name>` removes the publication only; project copies are retained.
+- If `<name>` collides with an entry already in the registry, the collision requires review before pushing — check whether the existing entry is yours or someone else's, and rename or coordinate rather than blindly overwriting.
+- The optional `tags` frontmatter is what makes the skill findable once published: tags are searchable and editable in the Registry.
+- Don't add a `scope` frontmatter key — there is no such field. Scope is determined by publication presence, nothing else.
 
 #### Principle of Lack of Surprise
 

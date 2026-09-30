@@ -4,7 +4,7 @@ import { fuzzySearch } from "./fuzzy";
 export const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
 
 export type RegistryResourceType = "skill" | "agent" | "project";
-export type RegistryCatalogSection = "installed" | "marketplace";
+export type RegistryCatalogSection = "local" | "global";
 export type RegistryProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
 export type RegistryStatus =
   | "up-to-date"
@@ -18,7 +18,7 @@ export type RegistryStatus =
   | "removed-remote"
   | "registry-changed";
 
-export type RegistryItemAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove";
+export type RegistryItemAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags";
 
 export interface RegistryItem {
   readonly id: string;
@@ -29,6 +29,7 @@ export interface RegistryItem {
   readonly statusLabel: string;
   readonly icon: string;
   readonly description?: string;
+  readonly tags?: readonly string[];
   readonly local: boolean;
   readonly remote: boolean;
   readonly actions: RegistryItemAction[];
@@ -70,7 +71,7 @@ export type RegistryDiffState =
 export type RegistryActionRequest =
   | { readonly action: "refresh" | "configure" | "project-key" }
   | {
-      readonly action: "install" | "update" | "push" | "uninstall" | "remove";
+      readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags";
       readonly type: "skill" | "agent";
       readonly name: string;
     }
@@ -93,7 +94,7 @@ const STATUSES = new Set<RegistryStatus>([
   "removed-remote",
   "registry-changed",
 ]);
-const ACTIONS = new Set<RegistryItemAction>(["install", "update", "push", "pull", "uninstall", "remove"]);
+const ACTIONS = new Set<RegistryItemAction>(["install", "update", "push", "pull", "uninstall", "remove", "make-local", "tags"]);
 const DIFFABLE_STATUSES = new Set<RegistryStatus>([
   "local-changes",
   "update-available",
@@ -121,8 +122,8 @@ export function registryHasAttention(snapshot: RegistrySnapshot | undefined): bo
 
 export function registryCatalogSection(item: RegistryItem): RegistryCatalogSection | undefined {
   if (item.type === "project") return undefined;
-  if (item.local) return "installed";
-  if (item.remote) return "marketplace";
+  if (item.remote) return "global";
+  if (item.local) return "local";
   return undefined;
 }
 
@@ -134,7 +135,7 @@ export function registryCatalogItems(
 }
 
 export function registryPrimaryAction(item: RegistryItem): RegistryItemAction | undefined {
-  return item.actions.find((action) => action !== "uninstall" && action !== "remove");
+  return item.actions.find((action) => action !== "uninstall" && action !== "remove" && action !== "tags" && action !== "make-local");
 }
 
 /**
@@ -157,6 +158,8 @@ export function registryActionLabel(action: RegistryItemAction): string {
     case "pull": return "Pull";
     case "uninstall": return "Uninstall local";
     case "remove": return "Remove from registry";
+    case "make-local": return "Make local (unpublish)";
+    case "tags": return "Edit tags";
   }
 }
 
@@ -193,6 +196,7 @@ export function registryFriendlyStatusDescription(item: RegistryItem): string {
 }
 
 export function registryFriendlyActionLabel(item: RegistryItem, action: RegistryItemAction): string {
+  if (item.type !== "project" && action === "push" && !item.remote) return "Make global (publish)";
   if (item.status === "untracked-local" && action === "push") return "Keep local version";
   if (item.status === "untracked-local" && action === "pull") return "Keep registry version";
   if (item.status === "removed-remote" && action === "push") return "Restore in registry";
@@ -224,7 +228,7 @@ export function searchRegistryItems(items: readonly RegistryItem[], query: strin
     ordered.map((item) => ({
       value: item,
       label: item.name,
-      ...(item.description ? { aliases: [item.description] } : {}),
+      aliases: [...(item.description ? [item.description] : []), ...(item.tags ?? [])],
     })),
     query,
     {
@@ -305,6 +309,7 @@ function parseRegistryItem(value: unknown): RegistryItem | undefined {
   if (typeof value.statusLabel !== "string" || typeof value.icon !== "string") return undefined;
   if (typeof value.local !== "boolean" || typeof value.remote !== "boolean" || !Array.isArray(value.actions)) return undefined;
   if (value.description !== undefined && typeof value.description !== "string") return undefined;
+  if (value.tags !== undefined && (!Array.isArray(value.tags) || value.tags.some((tag) => typeof tag !== "string"))) return undefined;
   if (value.artifact !== undefined && (typeof value.artifact !== "string" || !PROJECT_ARTIFACTS.has(value.artifact as RegistryProjectArtifact))) {
     return undefined;
   }
@@ -322,6 +327,7 @@ function parseRegistryItem(value: unknown): RegistryItem | undefined {
     statusLabel: value.statusLabel,
     icon: value.icon,
     ...(typeof value.description === "string" ? { description: value.description } : {}),
+    ...(Array.isArray(value.tags) ? { tags: value.tags as string[] } : {}),
     local: value.local,
     remote: value.remote,
     actions,

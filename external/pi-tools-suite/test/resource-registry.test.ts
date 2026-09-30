@@ -138,6 +138,7 @@ function harness(project: string) {
 			confirm: async () => true,
 			select: async () => undefined,
 			input: async () => undefined,
+			editor: async () => undefined,
 		},
 		reload: async () => { reloads += 1; },
 	} as any;
@@ -153,6 +154,81 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<voi
 }
 
 describe("resource registry", () => {
+	test("skills and agents publish tags and convert back to local without losing companions or other project copies", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		const other = path.join(root, "other-project");
+		for (const dir of [home, project, other]) fs.mkdirSync(dir, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		process.env.PIX_ACP_REGISTRY_WORKSPACE_RPC = "1";
+		const { remote, seed } = createRegistry(root);
+		fs.mkdirSync(path.join(seed, "agents", "reviewer"), { recursive: true });
+		fs.writeFileSync(path.join(seed, "agents", "reviewer", "guide.md"), "Companion");
+		fs.writeFileSync(path.join(seed, "skills", "demo", "example.txt"), "Skill companion");
+		git(seed, ["add", "."]); git(seed, ["commit", "-m", "Companions"]); git(seed, ["push"]);
+		const h = harness(project);
+		const second = harness(other);
+		const command = h.commands.get("registry");
+		await command.handler(`configure ${remote} main`, h.ctx);
+		for (const [type, name, relativeFile, companion] of [
+			["skill", "demo", "skills/demo/SKILL.md", "skills/demo/example.txt"],
+			["agent", "reviewer", "agents/reviewer.md", "agents/reviewer/guide.md"],
+		]) {
+			await second.commands.get("registry").handler(`install ${type} ${name}`, second.ctx);
+			const otherSource = fs.readFileSync(path.join(other, ".pi", relativeFile), "utf8");
+			const remoteSource = fs.readFileSync(path.join(seed, relativeFile), "utf8");
+			h.ctx.ui.confirm = async () => false;
+			await command.handler(`rpc make-local ${type} ${name}`, h.ctx);
+			expect(fs.existsSync(path.join(project, ".pi", relativeFile))).toBe(false);
+			git(seed, ["pull", "--ff-only"]);
+			expect(fs.readFileSync(path.join(seed, relativeFile), "utf8")).toBe(remoteSource);
+			h.ctx.ui.confirm = async () => true;
+			await command.handler(`rpc make-local ${type} ${name}`, h.ctx);
+			expect(fs.readFileSync(path.join(project, ".pi", relativeFile), "utf8")).toBe(remoteSource);
+			expect(fs.existsSync(path.join(project, ".pi", companion))).toBe(true);
+			expect(fs.readFileSync(path.join(other, ".pi", relativeFile), "utf8")).toBe(otherSource);
+			const localSnapshot = JSON.parse(h.widgets.at(-1)!.lines![1]);
+			expect(localSnapshot.items.find((item: any) => item.id === `${type}:${name}`)).toMatchObject({ local: true, remote: false });
+			h.ctx.ui.editor = async () => "quality, security";
+			await command.handler(`rpc tags ${type} ${name}`, h.ctx);
+			const tagged = JSON.parse(h.widgets.at(-1)!.lines![1]);
+			expect(tagged.items.find((item: any) => item.id === `${type}:${name}`).tags).toEqual(["quality", "security"]);
+			await command.handler(`rpc push ${type} ${name}`, h.ctx);
+			git(seed, ["pull", "--ff-only"]);
+			expect(fs.readFileSync(path.join(seed, relativeFile), "utf8")).toContain('tags: ["quality","security"]');
+			expect(fs.existsSync(path.join(seed, companion))).toBe(true);
+			const localFile = path.join(project, ".pi", relativeFile);
+			fs.appendFileSync(localFile, "\nLocal work preserved\n");
+			await command.handler(`rpc make-local ${type} ${name}`, h.ctx);
+			expect(fs.readFileSync(localFile, "utf8")).toContain("Local work preserved");
+			git(seed, ["pull", "--ff-only"]);
+			expect(fs.existsSync(path.join(seed, relativeFile))).toBe(false);
+			expect(fs.existsSync(path.join(seed, companion))).toBe(false);
+		}
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
+	test("make-local refuses to unpublish when the remote-only agent cannot be installed", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home); fs.mkdirSync(project);
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		const { remote, seed } = createRegistry(root);
+		fs.writeFileSync(path.join(seed, "agents", "reviewer.md"), "---\nunknownSetting: true\n---\nInvalid");
+		git(seed, ["add", "."]); git(seed, ["commit", "-m", "Invalid agent"]); git(seed, ["push"]);
+		const h = harness(project);
+		await h.commands.get("registry").handler(`configure ${remote} main`, h.ctx);
+		await h.commands.get("registry").handler("make-local agent reviewer", h.ctx);
+		expect(h.notices.at(-1)?.type).toBe("error");
+		git(seed, ["pull", "--ff-only"]);
+		expect(fs.existsSync(path.join(seed, "agents", "reviewer.md"))).toBe(true);
+		expect(fs.existsSync(path.join(project, ".pi", "agents", "reviewer.md"))).toBe(false);
+	}, GIT_INTEGRATION_TIMEOUT_MS);
+
 	test("derives the same project key from SSH and HTTPS GitHub remotes", () => {
 		expect(__test.projectKeyFromGitRemote("git@github.com:dnaroid/pi-ui-extend.git")).toBe("github.com__dnaroid__pi-ui-extend");
 		expect(__test.projectKeyFromGitRemote("https://github.com/dnaroid/pi-ui-extend.git")).toBe("github.com__dnaroid__pi-ui-extend");
@@ -188,7 +264,7 @@ describe("resource registry", () => {
 				status: "local-only",
 				local: true,
 				remote: false,
-				actions: ["uninstall"],
+				actions: ["tags", "uninstall"],
 			}),
 			expect.objectContaining({
 				id: "skill:local-skill",
@@ -196,7 +272,7 @@ describe("resource registry", () => {
 				status: "local-only",
 				local: true,
 				remote: false,
-				actions: ["uninstall"],
+				actions: ["tags", "uninstall"],
 			}),
 		]);
 	});
@@ -313,7 +389,7 @@ describe("resource registry", () => {
 			statusLabel: "NOT INSTALLED",
 			local: false,
 			remote: true,
-			actions: ["install", "remove"],
+			actions: ["install", "make-local", "remove"],
 		});
 
 		await command.handler("rpc install skill demo", h.ctx);
@@ -323,7 +399,7 @@ describe("resource registry", () => {
 			statusLabel: "UP TO DATE",
 			local: true,
 			remote: true,
-			actions: ["uninstall", "remove"],
+			actions: ["tags", "uninstall", "make-local", "remove"],
 		});
 		expect(h.reloads).toBe(0);
 
@@ -338,7 +414,7 @@ describe("resource registry", () => {
 			status: "up-to-date",
 			local: true,
 			remote: true,
-			actions: ["uninstall", "remove"],
+			actions: ["tags", "uninstall", "make-local", "remove"],
 		});
 		expect(h.reloads).toBe(0);
 		git(seed, ["pull", "--ff-only", "origin", "main"]);

@@ -46,21 +46,28 @@ describe("RegistryPanel refresh lifecycle", () => {
     expect(panelSource).toContain("Set a project key; Git is optional");
   });
 
-  it("separates reusable resources into Installed and Marketplace views", () => {
-    expect(panelSource).toContain('let catalogSection = $state<RegistryCatalogSection>("installed")');
-    expect(panelSource).toContain('aria-label="Installed resources"');
-    expect(panelSource).toContain('aria-label="Marketplace resources"');
+  it("separates reusable resources into Local and Global publication views", () => {
+    expect(panelSource).toContain('let catalogSection = $state<RegistryCatalogSection>("local")');
+    expect(panelSource).toContain('aria-label="Local resources"');
+    expect(panelSource).toContain('aria-label="Global resources"');
     expect(panelSource).toContain("registryCatalogItems(catalogItems, catalogSection)");
     expect(panelSource).toContain('.filter((item) => item.type !== "project")');
     expect(panelSource).not.toContain('<option value="project">Project</option>');
     expect(panelSource).toContain("onclick={() => item.artifact && onOpenProjectArtifact(item.artifact)}");
   });
 
-  it("keeps Installed usable without Marketplace or project-sync initialization", () => {
-    expect(panelSource).toContain('!snapshot.configured && catalogSection === "marketplace"');
-    expect(panelSource).toContain("Marketplace is not connected");
+  it("keeps Local usable without a Global registry or project-sync initialization", () => {
+    expect(panelSource).toContain('!snapshot.configured && catalogSection === "global"');
+    expect(panelSource).toContain("Global registry is not connected");
     expect(panelSource).toContain("Project sync is not initialized");
     expect(panelSource).not.toContain('{#if projectInitialized === false}\n      <div class="px-3 py-6 text-center">');
+  });
+
+  it("displays tags and installation separately from publication", () => {
+    expect(panelSource).toContain("item.tags?.length");
+    expect(panelSource).toContain('item.local ? "Installed here" : "Not installed here"');
+    expect(panelSource).toContain('action === "tags"');
+    expect(panelSource).toContain('action === "make-local"');
   });
 });
 

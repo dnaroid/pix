@@ -11,6 +11,7 @@ import { getPiToolsSuiteUserConfigPath, loadPiToolsSuiteConfig, type ResourceReg
 import { ignoreStaleExtensionContextError, isStaleExtensionContextError } from "../context-usage.js";
 import { publishRpcSessionState, RPC_SESSION_STATE_ENV } from "../lib/rpc-session-state.js";
 import { collectRegistryFileDiff, REGISTRY_DIFF_EVENT, type RegistryDiffPayload } from "./diff.js";
+import { editResourceTags, readResourceTagsFile } from "./metadata.js";
 
 const COMMAND = "registry";
 const PROJECT_DIR = ".pi";
@@ -41,13 +42,14 @@ export type ResourceType = "skill" | "agent";
 type ResourceScope = ResourceType | "all";
 export type ProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
 type ProjectScope = ProjectArtifact | "project";
-type RegistryAction = "install" | "push" | "pull" | "remove" | "uninstall" | "status" | "update" | "configure" | "remote" | "project-key";
+type RegistryAction = "install" | "push" | "pull" | "remove" | "uninstall" | "status" | "update" | "configure" | "remote" | "project-key" | "make-local" | "tags";
 
 type ResourceEntry = {
 	type: ResourceType;
 	name: string;
 	path: string;
 	description: string;
+	tags: string[];
 };
 
 type ProvenanceEntry = {
@@ -117,7 +119,7 @@ type ProjectStatusBundle = {
 	issue?: string;
 };
 
-export type RegistryUiAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove";
+export type RegistryUiAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags";
 
 export interface RegistryUiItem {
 	readonly id: string;
@@ -128,6 +130,7 @@ export interface RegistryUiItem {
 	readonly statusLabel: string;
 	readonly icon: string;
 	readonly description?: string;
+	readonly tags?: readonly string[];
 	readonly local: boolean;
 	readonly remote: boolean;
 	readonly actions: readonly RegistryUiAction[];
@@ -648,7 +651,7 @@ async function scanSkills(dir: string): Promise<ResourceEntry[]> {
 		const skillPath = join(dir, entry.name);
 		const skillFile = join(skillPath, SKILL_FILE);
 		if (!(await pathExists(skillFile))) continue;
-		resources.push({ type: "skill", name: entry.name, path: skillPath, description: await readDescription(skillFile) });
+		resources.push({ type: "skill", name: entry.name, path: skillPath, description: await readDescription(skillFile), tags: await readResourceTagsFile(skillFile) });
 	}
 	return resources.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -668,7 +671,7 @@ async function scanAgents(dir: string): Promise<ResourceEntry[]> {
 		if (!SAFE_NAME.test(name) || name.includes("..")) continue;
 		const filePath = join(dir, entry.name);
 		if (!(await validAgentDefinition(filePath, name))) continue;
-		resources.push({ type: "agent", name, path: filePath, description: await readDescription(filePath) });
+		resources.push({ type: "agent", name, path: filePath, description: await readDescription(filePath), tags: await readResourceTagsFile(filePath) });
 	}
 	return resources.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -1294,8 +1297,8 @@ function reusableUiActions(status: RegistryStatus, remoteConfigured = true): Reg
 				break;
 		}
 	}
-	if (status.local) actions.push("uninstall");
-	if (remoteConfigured && status.remote) actions.push("remove");
+	if (status.local) actions.push("tags", "uninstall");
+	if (remoteConfigured && status.remote) actions.push("make-local", "remove");
 	return actions;
 }
 
@@ -1336,6 +1339,7 @@ function registryUiItems(
 				: {}),
 			local: Boolean(status.local),
 			remote: Boolean(status.remote),
+			tags: (status.local ?? status.remote)?.tags ?? [],
 			actions: reusableUiActions(status, remoteConfigured),
 		})),
 		...(projectStatus?.statuses ?? []).map((status): RegistryUiItem => ({
@@ -1717,7 +1721,7 @@ async function pushResourceWithRuntime(
 	}
 
 	const localHash = await hashResource(type, source);
-	if (!tracked && remoteExists) {
+	if ((!tracked || tracked.remote !== runtime.remote || tracked.branch !== runtime.branch) && remoteExists) {
 		const remoteHash = await hashResource(type, destination);
 		if (remoteHash !== localHash) {
 			const confirmed = await confirmOverwrite(ctx, "Registry resource already exists", `Overwrite registry ${type} "${name}" with this project's untracked copy?`);
@@ -1804,6 +1808,30 @@ async function removeResource(pi: ExtensionAPI, ctx: ExtensionCommandContext, ty
 	await ensureRegistryCache(pi, runtime);
 	const revision = await removeResourceWithRuntime(pi, ctx, runtime, type, name);
 	notify(ctx, `Removed ${type} "${name}" from ${runtime.remote} (${runtime.branch}) at ${revision.slice(0, 8)}. Project copies were kept. Reloading resources…`);
+	await reloadAfterResourceChange(ctx);
+}
+
+async function makeResourceLocal(pi: ExtensionAPI, ctx: ExtensionCommandContext, type: ResourceType, name: string): Promise<void> {
+	validateName(name);
+	const runtime = loadRuntimeConfig(ctx.cwd);
+	await ensureRegistryCache(pi, runtime);
+	if (!(await pathExists(registryResourcePath(runtime.cacheDir, type, name)))) throw new Error(`${type} "${name}" is not published.`);
+	const confirmed = await confirmOverwrite(ctx, "Make resource local", `Unpublish ${type} "${name}" from the shared Git registry? A copy will be kept in this project. Other project copies are unchanged.`);
+	if (!confirmed) throw new Error("Make local cancelled.");
+	// Never remove the last copy: install first if this project has none.
+	if (!(await pathExists(projectResourcePath(ctx, type, name)))) await installResourceWithRuntime(pi, ctx, runtime, type, name);
+	await removeResourceWithRuntime(pi, ctx, runtime, type, name, { confirm: false });
+	await clearResourceProvenance(ctx, type, name);
+	notify(ctx, `Made ${type} "${name}" local. Project copies were kept.`);
+	await reloadAfterResourceChange(ctx);
+}
+
+async function editLocalTags(ctx: ExtensionCommandContext, type: ResourceType, name: string): Promise<void> {
+	validateName(name);
+	const resource = projectResourcePath(ctx, type, name);
+	const file = type === "skill" ? join(resource, SKILL_FILE) : resource;
+	if (!(await editResourceTags(ctx, file, `Tags for ${type} ${name}`))) return;
+	notify(ctx, `Saved local tags for ${type} "${name}". Publish/sync to share them.`);
 	await reloadAfterResourceChange(ctx);
 }
 
@@ -2401,6 +2429,8 @@ function registryUsage(): string {
 		`/${COMMAND} update agents all       safely update all non-conflicting agents`,
 		`/${COMMAND} push skill <name>       commit and push project skill to registry`,
 		`/${COMMAND} push agent <name>       commit and push project agent to registry`,
+		`/${COMMAND} make-local <skill|agent> <name>  unpublish, retaining/installing a project copy`,
+		`/${COMMAND} tags <skill|agent> <name>        edit local tags (publish/sync to share)`,
 		`/${COMMAND} push all                push all project skills and agents`,
 		`/${COMMAND} push skills all         push all project skills`,
 		`/${COMMAND} push agents all         push all project agents`,
@@ -2435,7 +2465,7 @@ function parseAction(value: string | undefined): RegistryAction | undefined {
 	if (value === "config") return "configure";
 	if (value === "delete" || value === "rm") return "remove";
 	if (value === "remove-local" || value === "local-remove") return "uninstall";
-	if (["install", "push", "pull", "remove", "uninstall", "status", "update", "configure", "remote", "project-key"].includes(value ?? "")) return value as RegistryAction;
+	if (["install", "push", "pull", "remove", "uninstall", "status", "update", "configure", "remote", "project-key", "make-local", "tags"].includes(value ?? "")) return value as RegistryAction;
 	return undefined;
 }
 
@@ -2520,7 +2550,7 @@ async function handleRpcCommand(
 		await handleRpcDiffCommand(pi, parts.slice(1), ctx);
 		return;
 	}
-	if (!["install", "update", "push", "pull", "remove", "uninstall", "configure", "project-key"].includes(action)) {
+	if (!["install", "update", "push", "pull", "remove", "uninstall", "configure", "project-key", "make-local", "tags"].includes(action)) {
 		await publishRegistryUiSnapshot(pi, ctx, `Unsupported registry GUI action: ${action}`);
 		return;
 	}
@@ -2669,6 +2699,14 @@ async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionComma
 
 	if (action === "install") {
 		await installResource(pi, ctx, type, name);
+		return;
+	}
+	if (action === "make-local") {
+		await makeResourceLocal(pi, ctx, type, name);
+		return;
+	}
+	if (action === "tags") {
+		await editLocalTags(ctx, type, name);
 		return;
 	}
 	if (action === "push") {

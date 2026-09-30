@@ -39,7 +39,7 @@ def validate_skill(skill_path):
         return False, f"Invalid YAML in frontmatter: {e}"
 
     # Define allowed properties
-    ALLOWED_PROPERTIES = {'name', 'description', 'license', 'allowed-tools', 'metadata', 'compatibility'}
+    ALLOWED_PROPERTIES = {'name', 'description', 'license', 'allowed-tools', 'metadata', 'compatibility', 'tags'}
 
     # Check for unexpected properties (excluding nested keys under metadata)
     unexpected_keys = set(frontmatter.keys()) - ALLOWED_PROPERTIES
@@ -90,6 +90,18 @@ def validate_skill(skill_path):
             return False, f"Compatibility must be a string, got {type(compatibility).__name__}"
         if len(compatibility) > 500:
             return False, f"Compatibility is too long ({len(compatibility)} characters). Maximum is 500 characters."
+
+    # Validate tags field if present (optional): a string array for registry
+    # discoverability (inline `tags: [a, b]` or a block list; both parse to a
+    # list here). Omit the key or use [] for no tags. There is no 'scope' key —
+    # sharing is determined by publication, not frontmatter.
+    tags = frontmatter.get('tags')
+    if tags is not None:
+        if not isinstance(tags, list):
+            return False, f"Tags must be a list of strings, got {type(tags).__name__}. Use a YAML list (e.g. tags: [a, b]), or omit the key / use [] for no tags"
+        for tag in tags:
+            if not isinstance(tag, str) or not tag.strip():
+                return False, "Tags must be a list of non-empty strings (omit the key or use [] for no tags)"
 
     return True, "Skill is valid!"
 
