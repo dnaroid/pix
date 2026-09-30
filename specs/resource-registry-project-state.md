@@ -85,10 +85,14 @@ Those portable markers are not written to the local project task file.
    artifact collapses into one project operation. The automatic request is
    `sync-project`, handled directly by the ACP Registry service; it never
    opens confirmation dialogs or emits successful-push notifications. It syncs
-   only tasks/plans/TODO/workspace, never automatically publishes skills/agents.
+   tasks/plans/TODO/workspace and also saves newly discovered Local-only project
+   skills/agents under `projects/<key>/skills|agents`. Published resource edits
+   and unsafe/conflict/removal states are not automatically pushed. It never
+   promotes a resource to Global (see publication/tags spec).
    Untracked remote collisions and changed tracked revisions return actionable
    errors without overwrite; explicit foreground push retains confirmation.
-   Initial/refresh snapshots seed safe local-only/local-changes project artifacts.
+   Initial/refresh snapshots seed safe local-only/local-changes project artifacts
+   and Local-only project resources.
    Persistent poll observations neither restart debounce nor clear terminal
    errors, and different artifacts are retained while pending or in flight.
 10. Background sync never takes the Desktop foreground-operation lock. Registry

@@ -311,6 +311,9 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     }
     if (backgroundSyncState.phase === "syncing" || backgroundSyncState.phase === "error") return;
     for (const item of snapshot.items) {
+      if (item.type !== "project" && item.local && item.status === "local-only") {
+        backgroundSync.observe("project");
+      }
       if (item.type === "project" && item.artifact && item.local
         && (item.status === "local-only" || item.status === "local-changes")) {
         backgroundSync.observe(item.artifact);

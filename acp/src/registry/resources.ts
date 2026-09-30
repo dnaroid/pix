@@ -140,7 +140,7 @@ export async function pushResourceWithRuntime(
 export async function pushResource(executor: RegistryExecutor, ctx: RegistryContext, type: ResourceType, name: string): Promise<void> {
 	let runtime = loadRuntimeConfig(ctx.cwd);
 	await ensureRegistryCache(executor, runtime);
-	runtime = await selectPublicationRuntime(executor, ctx, runtime, type, name);
+	runtime = await selectPublicationRuntime(executor, ctx, runtime, type, name, "project");
 	const result = await pushResourceWithRuntime(executor, ctx, runtime, type, name);
 	if (!result.changed) {
 		notify(ctx, `${type} "${name}" already matches the registry.`);
@@ -212,8 +212,9 @@ export async function makeResourceLocal(executor: RegistryExecutor, ctx: Registr
 		throw new Error(`Project skill "${name}" is missing ${SKILL_FILE}; publication was kept. Repair the local copy before making it local.`);
 	}
 	if (type === "agent") await assertValidAgentDefinition(local, name);
-	await removeResourceWithRuntime(executor, ctx, runtime, type, name, { confirm: false });
-	await clearResourceProvenance(ctx, type, name);
+	const revision = await removeResourceWithRuntime(executor, ctx, runtime, type, name, { confirm: false });
+	// Retain an explicit removal marker so background sync cannot republish it.
+	await recordProvenance(ctx, runtime, type, name, revision, await hashResource(type, local));
 	notify(ctx, `Made ${type} "${name}" local. Project copies were kept.`);
 }
 

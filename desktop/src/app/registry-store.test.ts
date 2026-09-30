@@ -199,7 +199,7 @@ function syncFixture(registryAction: ReturnType<typeof vi.fn>) {
 }
 
 describe("automatic project sync recovery", () => {
-  it("seeds existing dirty workspace state on snapshot ingestion without publishing resources", async () => {
+  it("coalesces dirty workspace state and Local-only project resources on snapshot ingestion", async () => {
     vi.useFakeTimers();
     const registryAction = vi.fn(async () => fixture.snapshot);
     const fixture = syncFixture(registryAction);
@@ -211,7 +211,7 @@ describe("automatic project sync recovery", () => {
     await vi.advanceTimersByTimeAsync(899);
     expect(registryAction).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(registryAction).toHaveBeenCalledExactlyOnceWith("/project", { action: "sync-project", scope: "workspace" });
+    expect(registryAction).toHaveBeenCalledExactlyOnceWith("/project", { action: "sync-project", scope: "project" });
     fixture.store.reset();
   });
 

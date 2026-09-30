@@ -251,7 +251,7 @@ describe("registry session state", () => {
     const untracked = { ...localOnly, status: "untracked-local" as const, remote: true, actions: ["push" as const, "pull" as const] };
     expect(registryFriendlyStatusLabel(localOnly)).toBe("Local only");
     expect(registryFriendlyStatusDescription(localOnly)).toContain("Only in this project");
-    expect(registryFriendlyActionLabel(localOnly, "push")).toBe("Make global (publish)");
+    expect(registryFriendlyActionLabel(localOnly, "push")).toBe("Save to project registry");
     expect(registryFriendlyStatusLabel(untracked)).toBe("Needs review");
     expect(registryFriendlyActionLabel(untracked, "push")).toBe("Keep local version");
     expect(registryFriendlyActionLabel(untracked, "pull")).toBe("Keep registry version");

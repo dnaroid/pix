@@ -52,6 +52,7 @@ export async function resolvePublicationProjectKey(executor: RegistryExecutor, p
 /** Select the one visible publication, never silently shadow same-named resources. */
 export async function selectPublicationRuntime(
 	executor: RegistryExecutor, project: ProjectContext, runtime: RegistryRuntime, type: ResourceType, name: string,
+	newPublicationScope: "global" | "project" = "global",
 ): Promise<RegistryRuntime> {
 	const projectKey = await resolvePublicationProjectKey(executor, project);
 	const global: RegistryRuntime = { ...runtime, publicationScope: "global", ...(projectKey ? { projectKey } : {}) };
@@ -60,6 +61,10 @@ export async function selectPublicationRuntime(
 	const globalExists = await pathExists(registryResourcePath(runtime.cacheDir, type, name, global));
 	const projectExists = Boolean(projectKey) && await pathExists(registryResourcePath(runtime.cacheDir, type, name, scoped));
 	if (globalExists && projectExists) throw new Error(`Publication name collision: ${type} "${name}" exists in both Global and Project scopes. Resolve the collision without overwriting either copy.`);
+	if (!globalExists && !projectExists && newPublicationScope === "project") {
+		if (!projectKey) throw new Error("Project publication requires a project key. Set a key in Registry; Git is optional.");
+		return scoped;
+	}
 	return projectExists ? scoped : global;
 }
 

@@ -233,7 +233,7 @@ export function registryFriendlyStatusDescription(item: RegistryItem): string {
     case "not-installed": return item.type === "project"
       ? "Exists in the registry, but not in this project."
       : "Available in the registry, but not installed in this project.";
-    case "local-only": return "Only in this project; it has not been added to the registry.";
+    case "local-only": return "Only in this project; pending project-scoped registry sync.";
     case "untracked-local": return "Exists both here and in the registry, but the copies are not linked.";
     case "missing-local": return "Tracked for this project, but the local copy is missing.";
     case "removed-remote": return "Installed here, but its registry copy was removed.";
@@ -242,7 +242,7 @@ export function registryFriendlyStatusDescription(item: RegistryItem): string {
 }
 
 export function registryFriendlyActionLabel(item: RegistryItem, action: RegistryItemAction): string {
-  if (item.type !== "project" && action === "push" && !item.remote) return "Make global (publish)";
+  if (item.type !== "project" && action === "push" && !item.remote) return "Save to project registry";
   if (action === "toggle-scope") {
     return registryPublicationScope(item) === "project" ? "Make global" : "Make project";
   }

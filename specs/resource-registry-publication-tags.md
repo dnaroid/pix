@@ -32,16 +32,23 @@ status: active
 - Registry is Desktop-only. ACP handles filesystem/Git operations directly,
   without loading tools-suite, starting a Pi runtime, or creating a session.
   There is no `/registry` command or TUI Registry UI.
-- Only project artifacts sync automatically in the background; initial resource
-  publication remains explicit.
-- Make global uses registry push, retaining the project copy and complete skill
-  trees or agent companions. Existing collision/conflict protection applies.
+- Newly discovered Local-only project skills and agents are saved automatically
+  to the Project registry namespace through background `sync-project`. This
+  requires a configured registry and project key. Full skill trees and agent
+  companions are retained; globally/context-loaded skills without project copies
+  are never published automatically. Existing published edits and unsafe states
+  (untracked collisions, diverged, registry-changed or removed-remote) are not
+  automatic publication targets. Later body/asset edits still require explicit push.
+- **Save to project registry** explicitly publishes an unpublished project copy
+  in the Project namespace. Pushes to existing publications retain their scope.
+  Existing collision/conflict protection applies.
 - Published resources have a **Make project** / **Make global** visibility
   toggle. Global definitions live in `skills/<name>` or `agents/<name>.md`;
   Project definitions live in `projects/<projectKey>/skills/<name>` or
   `projects/<projectKey>/agents/<name>.md`, including same-named agent companions.
   Project definitions appear only for the matching project key; Global remains
-  visible everywhere. Initial explicit publication remains Global.
+  visible everywhere. Initial publication is Project-scoped; Global requires
+  the visibility toggle.
   The toggle requires a project key and confirmation, moves published bytes in
   one Git commit/push, and never changes or republishes local copies/edits.
   Provenance moves with the publication while retaining the local baseline and
@@ -58,7 +65,9 @@ status: active
   SKILL.md, or an invalid local agent definition never removes publication;
   existing local work must be repaired explicitly, not overwritten implicitly.
   Ordinary uninstall removes only the project copy; remove from registry is
-  still available as a separate explicit deletion, not a conversion.
+  still available as a separate explicit deletion, not a conversion. Make local
+  retains removal provenance so background sync does not undo explicit
+  unpublication. An explicit push can republish the retained copy.
 - Optional `tags` is a YAML string array in SKILL.md or agent frontmatter.
   Existing resources without tags remain valid. Tags travel with the resource
   through install/push/update. Tags are metadata, not runtime discovery/prompt
@@ -66,7 +75,9 @@ status: active
   metadata even when the local tags are empty.
 - Installed resources offer a prefilled tag editor. Comma-separated entries
   are trimmed and deduplicated; blank explicitly saves an empty array. Cancel
-  changes nothing. **Local** resources stay local after editing tags. For an
+  changes nothing. Tag editing itself does not publish **Local** resources;
+  never-published copies remain eligible for normal Project background saving.
+  Explicitly unpublished copies stay local. For an
   already **Published** resource, tag saves automatically synchronize with the
   configured registry using the existing collision/provenance safeguards.
   A failed sync leaves the saved local edit intact and reports the error;
@@ -97,11 +108,13 @@ status: active
 - `acp/src/registry/resources.ts`
 - `acp/src/registry/publication-location.ts`
 - `acp/src/registry/publication-scope.ts`
+- `acp/src/registry/project-resource-sync.ts`
 - `acp/src/registry/metadata.ts`
 - `acp/src/registry/agent-markdown.ts`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `desktop/src/lib/registry.ts`
+- `desktop/src/app/registry.svelte.ts`
 - `desktop/src/components/RegistryPanel.svelte`
 - `skills/skill-creator/SKILL.md`
 - `skills/skill-creator/scripts/quick_validate.py`
@@ -115,6 +128,7 @@ status: active
 - `acp/test/agent.test.ts`
 - `acp/test/desktop-commands.test.ts`
 - `desktop/src/lib/registry.test.ts`
+- `desktop/src/app/registry-store.test.ts`
 - `desktop/src/components/RegistryPanel.test.ts`
 
 ## Verification

@@ -15,6 +15,7 @@ import { collectRegistryUiSnapshot } from "./status.js";
 import { publishResourceTags } from "./tag-publication.js";
 import { selectPublicationRuntime } from "./publication-location.js";
 import { togglePublicationScope } from "./publication-scope.js";
+import { syncProjectResources } from "./project-resource-sync.js";
 
 const queues = new Map<string, Promise<void>>();
 
@@ -113,7 +114,10 @@ export class DesktopRegistryService {
 					case "toggle-scope": await togglePublicationScope(this.executor, ctx, request.type, request.name); break;
 					case "push-project": await pushProjectState(this.executor, ctx, request.scope); break;
 					case "pull-project": await pullProjectState(this.executor, ctx, request.scope); break;
-					case "sync-project": await pushProjectState(this.executor, ctx, request.scope, true); break;
+					case "sync-project":
+						await syncProjectResources(this.executor, ctx);
+						await pushProjectState(this.executor, ctx, request.scope, true);
+						break;
 				}
 			} catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
 			try { return await collectRegistryUiSnapshot(this.executor, ctx.cwd, error); }
