@@ -8,6 +8,7 @@ import {
   quotaWaitDataFromSessionState,
   quotaWaitDatetimeDeadline,
   quotaWaitHeadline,
+  quotaWaitStatusLabel,
   quotaWaitTimezoneLabel,
   quotaWaitUntilCommand,
   QUOTA_WAIT_MAX_SCHEDULE_MS,
@@ -117,6 +118,23 @@ describe("quotaWaitHeadline", () => {
     const state = waitState({ mode: "timer", notBefore: 200_000 });
     expect(quotaWaitHeadline(state, 100_000)).toBe("Scheduled continuation");
     expect(quotaWaitHeadline(state, 300_000)).toBe("Usage limit reached");
+  });
+});
+
+describe("quotaWaitStatusLabel", () => {
+  it("keeps the countdown for active waits", () => {
+    const state = waitState({ mode: "timer", notBefore: 160_000 });
+    expect(quotaWaitStatusLabel(state, 100_000)).toBe("Scheduled continuation · 1m 0s");
+    expect(quotaWaitStatusLabel(state, 101_000)).toBe("Scheduled continuation · 59s");
+  });
+
+  it("omits the countdown after cancellation even as time advances past the deadline", () => {
+    for (const mode of ["timer", "quota"] as const) {
+      const state = waitState({ mode, autoResume: false, notBefore: 160_000 });
+      for (const now of [100_000, 101_000, 200_000]) {
+        expect(quotaWaitStatusLabel(state, now)).toBe("Auto-resume cancelled");
+      }
+    }
   });
 });
 

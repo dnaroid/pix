@@ -45,7 +45,8 @@ the exhausted window and a live countdown to the reset check, or to the next
 availability check when reset time is unknown. It offers **Try now**, **Cancel
 auto-resume**, and **Hide**. Hiding only dismisses the popup; the status indicator
 and `/wait` (also `/quota-wait`) can reopen it. Cancelling disables automatic checks and
-continuation, but keeps the task available for a manual probe.
+continuation, but keeps the task available for a manual probe. Desktop's cancelled
+status indicator has no countdown, matching the cancelled popup.
 
 At the deadline a fresh provider quota query precedes continuation. Both hourly
 and weekly windows must permit work; the later exhausted reset wins. Without a
@@ -103,6 +104,7 @@ returns to waiting without losing the task or replaying completed tool calls.
 - `desktop/src-tauri/src/backend_runtime.rs`
 - `desktop/src/app/quota-wait.svelte.ts`
 - `desktop/src/lib/quota-wait.ts`
+- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
 - `desktop/src/components/QuotaWaitPopup.svelte`
 - `desktop/src/components/QuotaWaitSchedulePopup.svelte`
 - `desktop/src/components/DesktopOverlays.svelte`
@@ -113,6 +115,7 @@ returns to waiting without losing the task or replaying completed tool calls.
 
 ## Tests
 
+- `desktop/src/lib/quota-wait.test.ts`
 - `tests/quota-wait.test.ts`
 - `tests/quota-wait-extension.test.ts`
 - `tests/quota-wait-sdk.test.ts`

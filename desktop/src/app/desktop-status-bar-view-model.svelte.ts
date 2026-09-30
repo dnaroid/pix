@@ -7,9 +7,7 @@ import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
 import { shouldShowStatusBarSkeletons, type StatusBarConnectionStatus } from "./status-bar-skeleton";
 import {
-  formatQuotaWaitCountdown,
-  quotaWaitCountdownSeconds,
-  quotaWaitHeadline,
+  quotaWaitStatusLabel,
 } from "../lib/quota-wait";
 import { modelThinkingConfigState } from "../lib/model-thinking";
 
@@ -71,7 +69,7 @@ export function createDesktopStatusBarViewModel(options: {
       changingConfig,
       promptRunning,
       quotaWaitIndicator: sessionId && waitState ? {
-        label: `${quotaWaitHeadline(waitState, nowMs)} · ${formatQuotaWaitCountdown(quotaWaitCountdownSeconds(waitState, nowMs))}`,
+        label: quotaWaitStatusLabel(waitState, nowMs),
         onReopen: () => options.quotaWait.reopen(sessionId),
       } : null,
       canConfigure: options.canUseSession()

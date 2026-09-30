@@ -101,6 +101,13 @@ export function quotaWaitHeadline(state: QuotaWaitState, now: number): string {
   return `${scope} limit reached`;
 }
 
+export function quotaWaitStatusLabel(state: QuotaWaitState, now: number): string {
+  const headline = quotaWaitHeadline(state, now);
+  return state.autoResume
+    ? `${headline} · ${formatQuotaWaitCountdown(quotaWaitCountdownSeconds(state, now))}`
+    : headline;
+}
+
 /** Longest schedulable continuation horizon; matches the `/wait` timer limit. */
 export const QUOTA_WAIT_MAX_SCHEDULE_MS = 32 * 86_400_000;
 
