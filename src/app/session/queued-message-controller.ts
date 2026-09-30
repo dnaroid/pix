@@ -7,6 +7,7 @@ import { autoQueuedMessageEntries, cloneSubmittedUserMessage, deferredQueuedMess
 
 export type AppQueuedMessageControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
+	isWaitingForQuota?(session: AgentSession): boolean;
 	requireRuntime(): AgentSessionRuntime;
 	awaitCurrentSessionExtensions(runtime: AgentSessionRuntime): Promise<void>;
 	visibleEntries(): readonly Entry[];
@@ -123,7 +124,7 @@ export class AppQueuedMessageController {
 
 		const session = this.host.runtime()?.session;
 		if (expectedSession && session !== expectedSession) return;
-		if (!session || session.isStreaming || session.isCompacting || this.promptSubmissionsInFlight.has(session)) return;
+		if (!session || session.isStreaming || session.isCompacting || this.host.isWaitingForQuota?.(session) || this.promptSubmissionsInFlight.has(session)) return;
 
 		const message = this.autoUserMessages.shift();
 		if (!message) return;

@@ -258,8 +258,10 @@ export class AppRenderController {
 			appendFrameOutput(voiceProgressOverlay.row, this.renderFrameRow(voiceProgressOverlay.row, voiceProgressOverlay.output));
 		}
 
-		if (defaultOverlayLines.length > 0 && popupMenuPlacement === "default") {
-			const overlayStartRow = Math.max(1, inputSeparatorRow - defaultOverlayLines.length);
+		if (defaultOverlayLines.length > 0 && (popupMenuPlacement === "default" || popupMenuPlacement === "center")) {
+			const overlayStartRow = popupMenuPlacement === "center"
+				? Math.max(1, Math.floor((layoutRows - defaultOverlayLines.length) / 2))
+				: Math.max(1, inputSeparatorRow - defaultOverlayLines.length);
 			const activeMenu = this.deps.popupMenus.getActivePopupMenu(activePopupMenu ?? this.deps.popupMenus.syncActivePopupMenu() ?? "slash");
 			for (let index = 0; index < defaultOverlayLines.length; index += 1) {
 				const line = defaultOverlayLines[index];

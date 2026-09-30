@@ -433,6 +433,7 @@ export type PixMenuItem<T = string> = {
 
 export type PixMenuOptions = {
 	title: string;
+	placement?: "center";
 	placeholder?: string;
 	emptyText?: string;
 	searchable?: boolean;
@@ -603,7 +604,7 @@ export type QueueMessageMenuValue = "cancel" | "edit" | "send-now";
 export type ResumeMenuValue = { kind: "new" } | { kind: "session"; session: SessionInfo };
 
 export type ActivePopupMenu = "slash" | "model" | "thinking" | "resume" | "user-message" | "user-message-jump" | "queue-message" | "sdk-menu";
-export type PopupMenuPlacement = "default" | "under-tabs" | "draft-surface";
+export type PopupMenuPlacement = "default" | "under-tabs" | "draft-surface" | "center";
 
 export type StatusThinkingTarget = {
 	row: number;

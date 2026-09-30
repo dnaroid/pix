@@ -393,6 +393,26 @@ DCP reads its supported configuration from `dcp` in the canonical
   `defaults.ts`;
 - exact/wildcard model overrides where defined by the current schema.
 
+Claude-family omission defaults and the generated starter config use bare-model
+globs `*claude*sonnet*` (22%/40%), `*claude*opus*` (26%/44%), and
+`*claude*haiku*` (20%/38%) for routine/strong-reminder pressure thresholds. Candidate
+and message suggestions use the matching routine fraction. Provider-specific
+and exact overrides retain precedence; other families retain their existing
+policies. The thresholds scale with the runtime context capacity, not a fixed
+token budget, including on large-window variants.
+
+These are local engineering starting points, not Anthropic-certified optima or
+the Anthropic API compaction trigger. They extend the existing Sonnet/Opus
+policies to direct Anthropic and other Claude aliases without changing automatic
+compression opt-in, summarizer selection, or pruning protections. The rationale
+is [Anthropic's context engineering guidance](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents):
+retain high-signal context and summarize stale tool output while preserving
+decisions, unresolved issues, and continuation state. Anthropic's
+[API threshold compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-threshold)
+is a separate mechanism; its absolute-token trigger is not a DCP configuration
+recommendation. Profile parity and provider/exact precedence are covered in
+`external/pi-tools-suite/test/dcp-config.test.ts`.
+
 The omission defaults above are owned by the browser-safe
 `external/pi-tools-suite/src/dcp/defaults.ts`. TUI `loadConfig()` clones those
 defaults and then merges the user `dcp` object on top. The generated starter

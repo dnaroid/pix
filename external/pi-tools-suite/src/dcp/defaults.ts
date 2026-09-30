@@ -55,7 +55,32 @@ export const DEFAULT_DCP_CONFIG = {
     },
   },
   protectedFilePatterns: [],
-  modelOverrides: {},
+  modelOverrides: {
+    "*claude*sonnet*": {
+      compress: {
+        minContextPercent: "22%",
+        maxContextPercent: "40%",
+        autoCandidates: { minContextPercent: 0.22 },
+        messageMode: { minContextPercent: 0.22 },
+      },
+    },
+    "*claude*opus*": {
+      compress: {
+        minContextPercent: "26%",
+        maxContextPercent: "44%",
+        autoCandidates: { minContextPercent: 0.26 },
+        messageMode: { minContextPercent: 0.26 },
+      },
+    },
+    "*claude*haiku*": {
+      compress: {
+        minContextPercent: "20%",
+        maxContextPercent: "38%",
+        autoCandidates: { minContextPercent: 0.20 },
+        messageMode: { minContextPercent: 0.20 },
+      },
+    },
+  },
 }
 
 export const DEFAULT_DCP_DEBUG_LOG_MAX_BYTES = 5 * 1024 * 1024

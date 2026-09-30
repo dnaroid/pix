@@ -5,12 +5,54 @@ import { describe, expect, test } from "bun:test";
 
 import { loadConfig, modelKeysFromContext, resolveModelConfig, summarizerModelRefs } from "../src/dcp/config.js";
 import { DEFAULT_DCP_CONFIG } from "../src/dcp/defaults.js";
+import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "../src/default-pi-tools-suite-config.js";
+import { parse } from "jsonc-parser";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-tools-suite-dcp-config-"));
 }
 
 describe("DCP config", () => {
+  test("keeps Claude family policies aligned in omission defaults and starter config", () => {
+    const homeDir = tempDir();
+    mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+    writeFileSync(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"), DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC);
+    const starter = loadConfig({ homeDir });
+    const omitted = loadConfig({ homeDir: tempDir() });
+    for (const [id, min, max] of [
+      ["claude-sonnet-4-6", 22, 40],
+      ["claude-opus-4-6", 26, 44],
+      ["claude-haiku-4-5-20251001", 20, 38],
+      ["antigravity-claude-opus-4-6-thinking", 26, 44],
+    ] as const) {
+      for (const provider of ["anthropic", "claude-code", "amazon-bedrock", "antigravity"]) {
+        const keys = modelKeysFromContext({ model: { provider, id } });
+        for (const config of [omitted, starter]) {
+          const resolved = resolveModelConfig(config, keys);
+          expect(resolved.compress.minContextPercent).toBe(`${min}%`);
+          expect(resolved.compress.maxContextPercent).toBe(`${max}%`);
+          expect(resolved.compress.autoCandidates.minContextPercent).toBe(min / 100);
+          expect(resolved.compress.messageMode.minContextPercent).toBe(min / 100);
+          expect(resolved.compress.autoCompress.enabled).toBe(false);
+        }
+      }
+    }
+    for (const [key, value] of Object.entries(DEFAULT_DCP_CONFIG.modelOverrides)) {
+      expect(parse(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC).dcp.modelOverrides[key]).toEqual(value);
+    }
+    expect(resolveModelConfig(omitted, ["openai/gpt-5", "gpt-5"]).compress.minContextPercent).toBe(0.40);
+  });
+
+  test("lets provider-specific and exact Claude settings override family defaults", () => {
+    const config = loadConfig({ homeDir: tempDir() });
+    config.modelOverrides["anthropic/*"] = { compress: { minContextPercent: "30%" } };
+    config.modelOverrides["anthropic/claude-sonnet-4-6"] = { compress: { minContextPercent: "35%" } };
+    const resolved = resolveModelConfig(config, ["anthropic/claude-sonnet-4-6", "claude-sonnet-4-6"]);
+    expect(resolved.compress.minContextPercent).toBe("35%");
+    expect(resolved.compress.maxContextPercent).toBe("40%");
+    expect(resolveModelConfig(config, ["anthropic/claude-opus-4-6", "claude-opus-4-6"]).compress.minContextPercent).toBe("30%");
+  });
+
 	test("uses context-pressure DCP cleanup defaults", () => {
 		const homeDir = tempDir();
 		const config = loadConfig({ homeDir });

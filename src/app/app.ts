@@ -109,6 +109,7 @@ type AppSessionView = {
 type AppRuntimeCreationOptions = Partial<Pick<CreatePixRuntimeOptions, "reuseServicesFrom">>;
 
 export class PiUiExtendApp {
+	private readonly quotaWaitingSessionIds = new Set<string>();
 	private readonly entries: Entry[] = [];
 	private readonly options: AppOptions;
 	private readonly theme: Theme;
@@ -547,6 +548,7 @@ export class PiUiExtendApp {
 			showToast: (message, kind) => this.showToast(message, kind),
 		});
 		this.queuedMessages = new AppQueuedMessageController({
+			isWaitingForQuota: (session) => this.quotaWaitingSessionIds.has(session.sessionManager.getSessionId()),
 			runtime: () => this.runtime,
 			requireRuntime: () => this.requireRuntime(),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
@@ -1338,6 +1340,10 @@ export class PiUiExtendApp {
 
 	private createExtensionEventBus(): EventBus {
 		return createIsolatedExtensionEventBus((channel, data) => {
+			if (channel === "pix:quota-wait" && isRecord(data) && typeof data.sessionId === "string") {
+				if (data.state) this.quotaWaitingSessionIds.add(data.sessionId);
+				else this.quotaWaitingSessionIds.delete(data.sessionId);
+			}
 			if (channel === TERMINAL_BELL_ATTENTION_EVENT) this.handleTerminalBellAttention(data);
 			if (channel === SUBAGENTS_LIVE_STATE_EVENT) this.subagentsWidgetController.observeLiveState(data);
 			if (channel === SUBAGENTS_CATALOG_STATE_EVENT) {

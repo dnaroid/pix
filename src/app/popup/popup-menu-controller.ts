@@ -209,7 +209,8 @@ export class AppPopupMenuController {
 			};
 			this.openDirectPopupMenu(
 				"sdk-menu",
-				options.preserveStatus === undefined ? {} : { preserveStatus: options.preserveStatus },
+				{ ...(options.preserveStatus === undefined ? {} : { preserveStatus: options.preserveStatus }),
+					...(options.placement ? { placement: options.placement } : {}) },
 			);
 			this.host.render();
 		});

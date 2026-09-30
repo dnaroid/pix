@@ -118,6 +118,32 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       }
     },
     "modelOverrides": {
+      // Claude family policies also apply to provider-prefixed aliases.
+      // These are local DCP heuristics, not Anthropic API compaction triggers.
+      "*claude*sonnet*": {
+        "compress": {
+          "minContextPercent": "22%",
+          "maxContextPercent": "40%",
+          "autoCandidates": { "minContextPercent": 0.22 },
+          "messageMode": { "minContextPercent": 0.22 }
+        }
+      },
+      "*claude*opus*": {
+        "compress": {
+          "minContextPercent": "26%",
+          "maxContextPercent": "44%",
+          "autoCandidates": { "minContextPercent": 0.26 },
+          "messageMode": { "minContextPercent": 0.26 }
+        }
+      },
+      "*claude*haiku*": {
+        "compress": {
+          "minContextPercent": "20%",
+          "maxContextPercent": "38%",
+          "autoCandidates": { "minContextPercent": 0.20 },
+          "messageMode": { "minContextPercent": 0.20 }
+        }
+      },
       // DCP policy reviewed 2026-09-14. Engineering starting points, not
       // provider-certified optima. Keep candidate/message availability aligned
       // with each model's routine compression threshold.

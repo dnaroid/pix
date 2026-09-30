@@ -38,6 +38,7 @@ const BUNDLED_QUESTION_EXTENSION_DIR = resolve(
 const BUNDLED_SESSION_TITLE_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "session-title");
 const BUNDLED_TERMINAL_BELL_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "terminal-bell");
 const BUNDLED_MODEL_USAGE_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "model-usage");
+const BUNDLED_QUOTA_WAIT_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "quota-wait");
 const PI_TOOLS_SUITE_SOURCE_DIR = resolve(
 	dirname(fileURLToPath(import.meta.url)),
 	"../..",
@@ -198,6 +199,7 @@ export function getBundledExtensionPaths(): string[] {
 		bundledSessionTitleExtensionPath(),
 		bundledTerminalBellExtensionPath(),
 		bundledModelUsageExtensionPath(),
+		BUNDLED_QUOTA_WAIT_EXTENSION_DIR,
 	].filter(extensionEntryExists);
 }
 
@@ -207,6 +209,7 @@ export async function getBundledExtensionPathsAsync(): Promise<string[]> {
 		bundledSessionTitleExtensionPath(),
 		bundledTerminalBellExtensionPath(),
 		bundledModelUsageExtensionPath(),
+		BUNDLED_QUOTA_WAIT_EXTENSION_DIR,
 	].map(async (extensionPath) => await extensionEntryExistsAsync(extensionPath) ? extensionPath : undefined));
 	return paths.filter((path): path is string => path !== undefined);
 }
