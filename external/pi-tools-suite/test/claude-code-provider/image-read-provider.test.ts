@@ -29,7 +29,7 @@ for (const scenario of scenarios) {
     const { createClaudeStream } = await import(pathToFileURL(join(directory!, "src/provider.ts")).href);
     const { SessionImageStore } = await import(pathToFileURL(join(directory!, "src/session-image-store.ts")).href);
     const root = await mkdtemp(join(tmpdir(), "pix-image-read-simulation-"));
-    const executable = join(root, "claude");
+    const executable = join(root, process.platform === "win32" ? "claude.cjs" : "claude");
     const store = new SessionImageStore();
     store.open();
     const controller = new AbortController();
@@ -67,19 +67,23 @@ process.stdin.on("end", () => {
     oldRequestExists:previous.length > 0 && fs.existsSync(previous[0].privateDir),
     imageExists:!!attachment && fs.existsSync(attachment),cwd:process.cwd()}) + "\\n");
   emit({type:"system",subtype:"init",tools:["mcp__pi__Read"],mcp_servers:[{name:"pi",status:"connected"}],model:"claude-opus-5-5",permissionMode:"dontAsk",slash_commands:[],skills:[],plugins:[],apiKeySource:"none"});
-  emit({type:"stream_event",event:{type:"message_start",message:{id:"msg_"+attempt,model:"claude-opus-5-5",usage:{}}}});
+  emit({type:"stream_event",event:{type:"message_start",message:{id:"msg_"+attempt,model:"claude-opus-5-5",usage:{input_tokens:4,output_tokens:2}}}});
   if (["normal", "large-image"].includes(scenario) || (attempt > 0 && !["repeat","safe-tool"].includes(scenario))) {
     emit({type:"result",is_error:false,result:"continued using attachments",usage:{input_tokens:4,output_tokens:2}});
     return;
   }
   const target = attempt > 0 && scenario === "safe-tool" ? "README.md" : scenario === "transport" ? path.join(privateDir,"request.json") : attachment;
   const targets = scenario === "mixed" ? [target, "README.md"] : [target];
+  // Windows taskkill /F cannot run SIGTERM handlers. Publish the violation
+  // before the proposal and usage at message_start so both platforms observe it.
+  if (process.platform === "win32" && scenario === "mcp-violation") fs.writeFileSync(mcp.PI_CLAUDE_TOOL_VIOLATION, "attempt\\n", {flag:"wx"});
   targets.forEach((file_path, index) => {
     emit({type:"stream_event",event:{type:"content_block_start",index,content_block:{type:"tool_use",id:(file_path === "README.md" ? "safe_" : "denied_")+attempt+index,name:"mcp__pi__Read",input:{}}}});
     emit({type:"stream_event",event:{type:"content_block_delta",index,delta:{type:"input_json_delta",partial_json:JSON.stringify({file_path})}}});
     emit({type:"stream_event",event:{type:"content_block_stop",index}});
   });
   emit({type:"stream_event",event:{type:"message_delta",delta:{stop_reason:"tool_use"}}});
+  if (process.platform === "win32" && scenario === "bad-exit") process.exit(7);
   setInterval(() => {}, 1000);
 });
 `);

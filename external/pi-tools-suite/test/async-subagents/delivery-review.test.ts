@@ -29,8 +29,8 @@ describe("built-in delivery-review role", () => {
 		expect(role.models).toBeUndefined();
 		expect(role.modelSelection).toBe("frontier");
 		const resolved = resolveAgentTaskConfig({ id: "d", task: "review", subagentType: "delivery-review" }, config);
-		expect(resolved.task.model).toBe("openai-codex/gpt-6.1-sol");
-		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
+		expect(resolved.task.model).toBe("zai/glm-5.3");
+		expect(resolved.fallbackModels).toEqual(["anthropic/claude-opus-5-5"]);
 		expect(role.thinking).toBe("high");
 		expect(role.tools).toEqual(["read", "grep", "bash"]);
 		expect(role.forParentModels).toBeUndefined();
@@ -57,8 +57,8 @@ describe("built-in delivery-review role", () => {
 			config,
 			{ parentModel: "openai-codex/gpt-6.1-sol" },
 		);
-		expect(resolved.task.model).toBe("openai-codex/gpt-6.1-sol");
-		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
+		expect(resolved.task.model).toBe("zai/glm-5.3");
+		expect(resolved.fallbackModels).toEqual(["anthropic/claude-opus-5-5"]);
 		expect(resolved.task.thinking).toBe("high");
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 	});

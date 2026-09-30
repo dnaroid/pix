@@ -4,30 +4,43 @@ import { delimiter, join, basename, dirname } from "node:path";
 
 type RecordLine = Record<string, any>;
 
+let verifiedNode: string | undefined;
+
 export function localNode(): string {
+	// Reuse the already verified executable rather than repeatedly starting Node
+	// under load (particularly expensive on Windows CI).
+	if (verifiedNode && existsSync(verifiedNode)) return verifiedNode;
 	// Bun runs the tests; PATH is used only to locate an executable, never to run a shell.
 	// Resolve links before probing; the probe has no inherited NODE_OPTIONS/preloads.
 	const nodeNames = process.platform === "win32" ? ["node.exe", "node"] : ["node"];
 	const candidates = [
 		process.execPath,
-		...(process.env.PATH ?? "").split(delimiter).filter(Boolean).flatMap((dir) => nodeNames.map((name) => join(dir, name))),
+		// npm supplies a stable Node path even while another test isolates PATH.
+		process.env.npm_node_execpath ?? "",
+		...(process.env.PATH ?? process.env.Path ?? "").split(delimiter).filter(Boolean).flatMap((dir) => nodeNames.map((name) => join(dir, name))),
 	];
+	const failures: string[] = [];
 	for (const candidate of candidates) {
 		if (!nodeNames.includes(basename(candidate).toLowerCase()) || !existsSync(candidate)) continue;
 		const node = realpathSync(candidate);
 		if (!statSync(node).isFile()) continue;
 		try {
 			const reported = execFileSync(node, ["-p", "process.execPath"], {
-				env: { PATH: dirname(node), LANG: "C" }, timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
+				env: { PATH: dirname(node), LANG: "C", ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT } : {}) },
+				timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
 			}).toString().trim();
-			if (!existsSync(reported)) continue;
+			if (!existsSync(reported)) {
+				failures.push(`${node}: reported executable does not exist`);
+				continue;
+			}
 			const resolvedReported = realpathSync(reported);
 			if (process.platform === "win32"
 				? resolvedReported.toLowerCase() === node.toLowerCase()
-				: resolvedReported === node) return node;
-		} catch { /* try the next local candidate */ }
+				: resolvedReported === node) return verifiedNode = node;
+			failures.push(`${node}: reported a different executable`);
+		} catch (error) { failures.push(`${node}: ${(error as Error).message}`); }
 	}
-	throw new Error("No local Node executable found for the offline Pi fixture");
+	throw new Error(`No local Node executable found for the offline Pi fixture; ${failures.join("; ")}`);
 }
 
 export async function rpcProbe(child: ChildProcess, deadlineMs = 12_000): Promise<RecordLine[]> {

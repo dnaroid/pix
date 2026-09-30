@@ -120,8 +120,8 @@ usable candidate among the remaining vendors.
 ```jsonc
 "frontierModels": [
   { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-  { "model": "openai-codex/gpt-6.1-sol", "expensive": true, "aliases": ["*gpt-6.1-sol*"] },
-  { "model": "zai/glm-5.3" }
+  { "model": "zai/glm-5.3" },
+  { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
 ],
 "economy": false
 ```
@@ -137,9 +137,9 @@ The bundled roles use it as follows:
 
 | Role | Selection | Result with the default list |
 |---|---|---|
-| `oracle` | `require-other-if-frontier` | GLM-5.3 parent → Astra, Sol; GPT-6.1 Sol / GPT-6 Astra parent → GLM-5.3; non-frontier parent → every frontier, other vendors first |
-| `frontier-review` | `forParentTier: non-frontier` | Sol, GLM-5.3; hidden for frontier parents |
-| `delivery-review` | list order | Sol, GLM-5.3; available to all parents |
+| `oracle` | `require-other-if-frontier` | GLM-5.3 parent → Astra, Opus; Astra parent → GLM-5.3, Opus; Opus parent → Astra, GLM-5.3; non-frontier parent → every frontier, other vendors first |
+| `frontier-review` | `forParentTier: non-frontier` | GLM-5.3, Opus; hidden for frontier parents and explicitly excluded for `*gpt-6.1-sol*` parents (Sol is not frontier) |
+| `delivery-review` | list order | GLM-5.3, Opus; available to all parents |
 
 `economy: true` (or `PI_TOOLS_SUITE_ECONOMY=1`) excludes `expensive` frontier
 models from every role's automatic chain (including roles with their own

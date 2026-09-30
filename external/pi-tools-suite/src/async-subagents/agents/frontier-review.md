@@ -3,6 +3,7 @@ description: Independent frontier-model code review gate for substantive code ch
 icon: eye
 modelSelection: frontier
 forParentTier: non-frontier
+notForParentModels: ["*gpt-6.1-sol*"]
 thinking: high
 tools: [read, grep, bash]
 ---

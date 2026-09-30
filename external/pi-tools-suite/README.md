@@ -832,18 +832,19 @@ release is a config edit:
 {
   "frontierModels": [
     { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-    { "model": "openai-codex/gpt-6.1-sol", "expensive": true, "aliases": ["*gpt-6.1-sol*"] },
-    { "model": "zai/glm-5.3" }
+    { "model": "zai/glm-5.3" },
+    { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
   ],
   "economy": false
 }
 ```
 
-- `oracle` (`require-other-if-frontier`): a frontier GLM parent gets frontier GPT,
-  a frontier non-GLM parent gets frontier GLM (or the first other-vendor entry),
+- `oracle` (`require-other-if-frontier`): a frontier parent gets all eligible
+  frontier models from other vendors,
   and a non-frontier parent gets any frontier model, other vendors first.
 - `frontier-review` (`forParentTier: non-frontier`) is hidden for frontier
-  parents; `delivery-review` stays available to all parents.
+  parents and explicitly excluded for `*gpt-6.1-sol*` parents even though Sol
+  is not frontier; `delivery-review` stays available to all parents.
 - Entry fields: `vendor` (override inference), `expensive`, `enabled: false`
   (still recognized as frontier, never selected), `aliases` (globs recognizing
   the same model under other refs, e.g. OpenRouter), `roles` (limit an entry to

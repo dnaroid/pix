@@ -75,8 +75,8 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // refs), and "roles" (limit the entry to listed roles).
   "frontierModels": [
     { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-    { "model": "openai-codex/gpt-6.1-sol", "expensive": true, "aliases": ["*gpt-6.1-sol*"] },
-    { "model": "zai/glm-5.3" }
+    { "model": "zai/glm-5.3" },
+    { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
   ],
   // Economy mode: no sub-agent role selects an "expensive" frontier model.
   // Also toggled by PI_TOOLS_SUITE_ECONOMY=1/0.

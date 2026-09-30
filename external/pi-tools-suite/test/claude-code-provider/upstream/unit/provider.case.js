@@ -1288,6 +1288,10 @@ test("provider enforces the idle limit", async () => {
     try {
         const result = await createClaudeStream({ executable: idle.executable, version: "test", subscriptionType: "pro" })(model, context, { reasoning: "medium" }).result();
         assert.match(result.errorMessage ?? "", /no protocol activity for 30ms/);
+        // The terminal stream precedes process teardown and metrics publication.
+        // Drain this request before another test can publish global metrics.
+        const metrics = await waitForRequestMetrics((entry) => entry.errorCategory === "process" && entry.cleanupComplete === true);
+        assert.equal(metrics.lastPhase, "process_exited");
     }
     finally {
         if (originalIdle === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_IDLE_TIMEOUT_MS; else process.env.PI_CLAUDE_CODE_PROVIDER_IDLE_TIMEOUT_MS = originalIdle;
