@@ -1415,6 +1415,36 @@ test("Pix Desktop pause stops at the turn boundary and exposes a paused continua
 	assert.deepEqual(states.map((state) => state.state), ["pause-requested", "paused"]);
 });
 
+test("wait commands preserve paused state and do not replace an active run", async () => {
+	const pi = new FakePiClient();
+	pi.commands.push({ name: "wait", source: "extension", sourceInfo: {}, description: "Schedule continuation" });
+	pi.promptHandledWithoutRun = true;
+	const options: PiRpcClientOptions[] = [];
+	const { adapter } = createTestAdapter({ quotaWaitExtensionPath: "/test/quota-wait.js",
+		createPiClient: (opts) => { options.push(opts); return pi; } });
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/wait-control").start();
+		const runtime = adapter.getSession(session.sessionId)!;
+		await waitFor(() => runtime.runtimeExtensionCommands.has("wait"));
+		runtime.agentControlState = "paused";
+		pi.promptHandledWithoutRun = true;
+		await session.prompt("/wait 1h20m");
+		assert.equal(runtime.agentControlState, "paused");
+		assert.equal(runtime.activeRun, undefined);
+		pi.promptHandledWithoutRun = false;
+		const pending = session.prompt("work");
+		await waitFor(() => pi.promptCalls.some((call) => call.message === "work"));
+		pi.emit({ type: "agent_start" });
+		const run = runtime.activeRun;
+		assert.ok(run);
+		await session.prompt("/wait usage-reset");
+		assert.equal(runtime.activeRun, run);
+		pi.emit({ type: "agent_settled" });
+		await pending;
+	});
+	assert.ok(options[0]?.args?.includes("/test/quota-wait.js"));
+});
+
 const preparedDcpMapFixture = { revision: 1, sessionEpoch: 0, generatedAt: 100,
 	tokenEstimates: { candidate: 1000, protected: 0, compressed: 100, retained: 2000 } };
 

@@ -55,6 +55,7 @@
     onSubmit,
     onDefer,
     onCreateTask,
+    onScheduleContinuation,
     onPause = () => {},
     onContinue = () => {},
     onCancel,
@@ -86,6 +87,7 @@
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
     onCreateTask?: () => void | Promise<void>;
+    onScheduleContinuation?: () => void | Promise<void>;
     onPause?: () => void | Promise<void>;
     onContinue?: () => void | Promise<void>;
     onCancel: () => void | Promise<void>;
@@ -99,6 +101,7 @@
   const enhanceCommand = desktopCommandDefinition("composer.enhance");
   const createTaskCommand = desktopCommandDefinition("composer.createTask");
   const deferCommand = desktopCommandDefinition("composer.defer");
+  const scheduleContinuationCommand = desktopCommandDefinition("composer.scheduleContinuation");
 
   let composerForm = $state<HTMLFormElement | undefined>();
   let textarea = $state<HTMLTextAreaElement | undefined>();
@@ -202,6 +205,13 @@
       && ready
       && !promptRunning
       && promptText.trim().length >= 3,
+  );
+  const canScheduleContinuation = $derived(
+    !editorMode
+      && !questionMode
+      && !!onScheduleContinuation
+      && !!activeSessionId
+      && ready,
   );
   const promptAssistiveStatus = $derived.by(() => {
     if (slashController.open) {
@@ -319,6 +329,13 @@
     await focus();
   }
 
+  /** Opens the schedule popup; the composer draft stays untouched. */
+  function scheduleContinuation(): void {
+    composerMenuOpen = false;
+    if (!canScheduleContinuation || !onScheduleContinuation) return;
+    void onScheduleContinuation();
+  }
+
   async function openPromptHistory(): Promise<void> {
     composerMenuOpen = false;
     if (!canOpenPromptHistory || !onOpenHistory) return;
@@ -346,6 +363,7 @@
       { label: enhanceCommand.label, disabled: !canEnhancePrompt },
       { label: createTaskCommand.label, disabled: !canCreateTask },
       { label: deferCommand.label, disabled: !activeSessionId || !ready || !hasQueueableDraft },
+      { label: scheduleContinuationCommand.label, disabled: !canScheduleContinuation },
     ];
   }
 
@@ -533,10 +551,13 @@
     canEnhance={canEnhancePrompt}
     {canCreateTask}
     canDefer={!!activeSessionId && ready && hasQueueableDraft}
+    scheduleContinuationLabel={scheduleContinuationCommand.label}
+    canScheduleContinuation={canScheduleContinuation}
     onOpenHistory={() => void openPromptHistory()}
     onEnhance={() => void enhanceWithVoiceStop()}
     onCreateTask={() => void createTaskWithVoiceStop()}
     onDefer={() => void deferWithVoiceStop()}
+    onScheduleContinuation={scheduleContinuation}
     onKeydown={handleComposerMenuKeydown}
   />
 {/if}

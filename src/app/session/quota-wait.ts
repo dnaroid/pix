@@ -9,6 +9,8 @@ export type QuotaWaitState = {
 	autoResume: boolean;
 	phase: "waiting" | "checking" | "resuming";
 	attempt: number;
+	mode?: "quota" | "timer";
+	notBefore?: number;
 };
 
 export type QuotaCheck =
@@ -20,7 +22,7 @@ export type QuotaWaitHost = {
 	now(): number;
 	check(): Promise<QuotaCheck>;
 	canResume(): boolean;
-	resume(): void;
+	resume(): void | Promise<void>;
 	changed(state: QuotaWaitState | undefined): void;
 };
 
@@ -31,7 +33,9 @@ export function parseQuotaWait(value: unknown): QuotaWaitState | undefined {
 		|| typeof s.reason !== "string" || !["hourly", "weekly", "unknown"].includes(s.window ?? "")
 		|| typeof s.autoResume !== "boolean" || !Number.isFinite(s.nextCheckAt)
 		|| !Number.isSafeInteger(s.attempt) || s.attempt! < 0
-		|| (s.resetAt !== undefined && !Number.isFinite(s.resetAt))) return undefined;
+		|| (s.resetAt !== undefined && !Number.isFinite(s.resetAt))
+		|| (s.mode !== undefined && s.mode !== "quota" && s.mode !== "timer")
+		|| (s.notBefore !== undefined && !Number.isFinite(s.notBefore))) return undefined;
 	return { ...s, phase: "waiting" } as QuotaWaitState;
 }
 
@@ -63,6 +67,23 @@ export function quotaRetryDelay(attempt: number): number {
 	return Math.min(15 * 60_000, 60_000 * 2 ** Math.min(attempt, 4));
 }
 
+/** Strict, additive units; rejects partial matches, zero and unreasonable timers. */
+export function parseWaitDuration(input: string): number | undefined {
+	if (!/^(?:\d+(?:\.\d+)?[dhms])+$/i.test(input)) return undefined;
+	const units: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000 };
+	let duration = 0;
+	for (const match of input.matchAll(/(\d+(?:\.\d+)?)([dhms])/gi)) duration += Number(match[1]) * units[match[2]!.toLowerCase()]!;
+	return duration >= 1000 && duration <= 32 * 86_400_000 ? duration : undefined;
+}
+
+export function parseWaitDeadline(input: string, now: number): number | undefined {
+	if (!/^until \d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/i.test(input)) return undefined;
+	const deadline = Date.parse(input.slice(6));
+	if (!Number.isFinite(deadline) || deadline <= now || deadline - now > 32 * 86_400_000) return undefined;
+	const date = input.slice(6, 16);
+	return new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date ? deadline : undefined;
+}
+
 export class QuotaWaitController {
 	state: QuotaWaitState | undefined;
 	private generation = 0;
@@ -88,6 +109,20 @@ export class QuotaWaitController {
 			nextCheckAt: this.nextCheck(check, attempt),
 			autoResume: previous?.autoResume ?? true, phase: "waiting", attempt,
 		};
+		this.publish();
+	}
+
+	manual(modelKey: string, delay?: number): void {
+		this.schedule(modelKey, delay === undefined ? undefined : this.host.now() + delay);
+	}
+
+	schedule(modelKey: string, notBefore?: number): void {
+		this.generation++;
+		const now = this.host.now();
+		this.state = { version: 1, modelKey, reason: notBefore === undefined ? "Waiting for usage reset" : "Scheduled continuation",
+			window: "unknown", mode: notBefore === undefined ? "quota" : "timer",
+			...(notBefore === undefined ? {} : { notBefore }), nextCheckAt: notBefore ?? now,
+			autoResume: true, phase: "waiting", attempt: 0 };
 		this.publish();
 	}
 
@@ -119,11 +154,17 @@ export class QuotaWaitController {
 		try {
 			const result = await this.host.check().catch((): QuotaCheck => ({ kind: "failed" }));
 			if (this.disposed || generation !== this.generation || !this.state) return;
+			if (!force && this.state.notBefore && this.host.now() < this.state.notBefore) {
+				this.state = { ...this.state, phase: "waiting", nextCheckAt: this.state.notBefore };
+				this.publish();
+				return;
+			}
 			const canTry = force || result.kind === "available" || result.kind === "unknown";
 			if (canTry && (force || this.state.autoResume) && this.host.canResume()) {
 				this.state = { ...this.state, phase: "resuming" };
 				this.publish();
-				try { this.host.resume(); } catch { this.defer(result); }
+				try { await this.host.resume(); }
+				catch { if (generation === this.generation && !this.disposed) this.defer(result); }
 			} else if (restoring && result.kind === "available" && !this.state.autoResume) {
 				this.clear();
 			} else {

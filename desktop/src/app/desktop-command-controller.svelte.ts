@@ -108,6 +108,7 @@ export function createDesktopCommandController(options: DesktopCommandController
       case "composer.enhance":
       case "composer.createTask":
       case "composer.defer":
+      case "composer.scheduleContinuation":
       case "message.copy":
       case "message.fork":
       case "message.forkNewTab":
@@ -187,6 +188,7 @@ export function createDesktopCommandController(options: DesktopCommandController
       case "composer.enhance":
       case "composer.createTask":
       case "composer.defer":
+      case "composer.scheduleContinuation":
       case "message.copy":
       case "message.fork":
       case "message.forkNewTab":

@@ -15,10 +15,12 @@ export function createDesktopShellViewModelServices(
     draftSessionTabActive: () => options.transitions.draft.active,
     draftConfigAvailable: () => options.model.config.draftConfigOptions.length > 0,
     activeSessionRuntimeReady: () => options.state.runtimeReady,
+    activeSessionId: () => options.state.sessionId,
     elicitation: options.interactions.elicitation,
     commands: options.commands.controller,
     modelConfig: options.model.config,
     preferences: options.model.preferences,
+    quotaWait: options.quotaWait,
   });
 
   const statusBar = createDesktopStatusBarViewModel({
@@ -44,6 +46,7 @@ export function createDesktopShellViewModelServices(
     modelConfig: options.model.config,
     sessionCoordinator: options.orchestration.coordinator,
     inspectorPreference: options.sessions.inspectorPreference,
+    quotaWait: options.quotaWait,
   });
 
   return { overlays, statusBar };

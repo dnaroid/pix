@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isQuotaCandidate, isQuotaExhaustion, parseQuotaWait, quotaFromError, quotaRetryDelay, QuotaWaitController, type QuotaCheck, type QuotaWaitState } from "../src/app/session/quota-wait.js";
+import { isQuotaCandidate, isQuotaExhaustion, parseQuotaWait, parseWaitDuration, parseWaitDeadline, quotaFromError, quotaRetryDelay, QuotaWaitController, type QuotaCheck, type QuotaWaitState } from "../src/app/session/quota-wait.js";
 import { quotaWaitLabel } from "../src/bundled-extensions/quota-wait/popup.js";
 
 function fixture(check: () => Promise<QuotaCheck> = async () => ({ kind: "unknown" })) {
@@ -15,6 +15,39 @@ function fixture(check: () => Promise<QuotaCheck> = async () => ({ kind: "unknow
 const flush = async () => { await new Promise<void>((resolve) => setImmediate(resolve)); };
 
 describe("quota wait", () => {
+	it("accepts future zoned timestamps without shifting the absolute deadline", () => {
+		const now = Date.parse("2026-02-01T00:00:00Z");
+		assert.equal(parseWaitDeadline("until 2026-02-01T03:20:00+03:00", now), now + 1_200_000);
+		for (const value of ["2026-02-02T00:00:00Z", "until 2026-02-02T00:00", "until 2026-02-01T00:00:00Z", "until 2026-02-30T00:00:00Z", "until 2026-02-02T24:00:00Z", "until 2026-04-01T00:00:00Z"]) {
+			assert.equal(parseWaitDeadline(value, now), undefined, value);
+		}
+		const f = fixture();
+		f.controller.schedule("p/m", now + 1_200_000);
+		assert.equal(f.controller.state?.notBefore, now + 1_200_000);
+		assert.equal(f.controller.state?.nextCheckAt, now + 1_200_000);
+	});
+	it("accepts complete compound durations and rejects invalid or excessive waits", () => {
+		assert.equal(parseWaitDuration("1h20m"), 4_800_000);
+		assert.equal(parseWaitDuration("1D2H30M"), 95_400_000);
+		assert.equal(parseWaitDuration("1.5h"), 5_400_000);
+		for (const text of ["", "0s", "0.1s", "-1h", "1h garbage", "1h 20m", "100d", "Infinityh"]) assert.equal(parseWaitDuration(text), undefined, text);
+	});
+	it("manual timers preserve their deadline on restore, then check before resuming", async () => {
+		let checks = 0;
+		const f = fixture(async () => { checks++; return { kind: "available" }; });
+		f.controller.manual("p/m", 4_800_000);
+		const saved = f.controller.state!;
+		f.setNow(2_000_000); f.controller.restore(saved); await flush();
+		assert.equal(checks, 1); assert.equal(f.resumes, 0); assert.equal(f.controller.state?.nextCheckAt, 5_800_000);
+		f.setNow(5_800_000); f.controller.tick(); await flush();
+		assert.equal(checks, 2); assert.equal(f.resumes, 1);
+	});
+	it("timer expiry remains waiting if quota is still exhausted, Try now overrides deadline", async () => {
+		const f = fixture(async () => ({ kind: "exhausted", window: "weekly", resetAt: 10_000_000 }));
+		f.controller.manual("p/m", 1000); f.setNow(1_001_000); f.controller.tick(); await flush();
+		assert.equal(f.resumes, 0); assert.equal(f.controller.state?.nextCheckAt, 10_001_000);
+		await f.controller.check(true); assert.equal(f.resumes, 1);
+	});
 	it("separates subscription exhaustion from ordinary errors and billing", () => {
 		for (const text of ["usage_limit_reached", "You've hit your limit · resets 2am", "You have hit your ChatGPT usage limit. Try again in ~10 min.", "Weekly limit exceeded", "5-hour limit reached"]) assert.equal(isQuotaExhaustion(text), true, text);
 		for (const text of ["429 Too many requests", "rate limit exceeded", "insufficient_quota", "weekly quota exceeded: billing required", "maximum context length", "401 unauthorized", "503 overloaded", "fetch failed"]) assert.equal(isQuotaExhaustion(text), false, text);

@@ -15,10 +15,11 @@ pub struct BackendRuntime {
     bundled_root: Option<PathBuf>,
 }
 
-const EXTENSIONS: [(&str, &str); 3] = [
+const EXTENSIONS: [(&str, &str); 4] = [
     ("PIX_ACP_QUESTION_EXTENSION", "question"),
     ("PIX_ACP_SESSION_TITLE_EXTENSION", "session-title"),
     ("PIX_ACP_WORKSPACE_UNDO_EXTENSION", "workspace-undo"),
+    ("PIX_ACP_QUOTA_WAIT_EXTENSION", "quota-wait"),
 ];
 
 impl BackendRuntime {

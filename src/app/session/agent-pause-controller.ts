@@ -1,5 +1,6 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { APP_ICONS } from "../icons.js";
+import { installQuotaWaitControl, type QuotaWaitAction } from "./quota-wait-control.js";
 
 export type AgentPauseState = "idle" | "pause-requested" | "paused" | "resuming";
 
@@ -138,6 +139,40 @@ export class AgentPauseController {
 			}
 			return false;
 		};
+
+		// The bundled quota-wait extension schedules pause/continue through a
+		// hidden control message intercepted before transcript persistence.
+		// Continue reuses this controller's resume lifecycle so a timed /wait
+		// behaves exactly like the Continue button on any resumable boundary.
+		installQuotaWaitControl(session, (action, isCurrent) => this.handleQuotaWaitControl(session, record, action, isCurrent));
+	}
+
+	/**
+	 * Hidden quota-wait control: `pause` requests a safe turn-boundary pause
+	 * only while busy (idle/paused is a no-op success); `continue` resumes any
+	 * continuable transcript through {@link resume}, or reports `false` so the
+	 * extension can fall back to its hidden continuation message.
+	 */
+	private async handleQuotaWaitControl(
+		session: AgentSession,
+		record: SessionPauseRecord,
+		action: QuotaWaitAction,
+		isCurrent: () => boolean,
+	): Promise<boolean> {
+		if (action === "pause") {
+			if (record.state === "pause-requested" || record.state === "resuming") return true;
+			if (session.isStreaming || session.agent.state.isStreaming) {
+				this.setState(record, "pause-requested");
+			}
+			return true;
+		}
+		if (session.isStreaming || session.agent.state.isStreaming) {
+			throw new Error("Agent is already running");
+		}
+		if (record.state === "resuming") throw new Error("Agent continuation is already in progress");
+		if (!this.canContinue(session)) return false;
+		await this.resume(session, record, isCurrent);
+		return true;
 	}
 
 	state(session: AgentSession | undefined): AgentPauseState {
@@ -163,7 +198,11 @@ export class AgentPauseController {
 		this.bind(session);
 		const record = this.records.get(session)!;
 		if (record.state === "paused") {
-			await this.resume(session, record);
+			try {
+				await this.resume(session, record);
+			} catch (error) {
+				this.host.showToast(`Could not continue agent: ${errorMessage(error)}`, "error");
+			}
 			return;
 		}
 		if (record.state === "pause-requested" || record.state === "resuming") return;
@@ -177,7 +216,12 @@ export class AgentPauseController {
 		this.host.showToast("Pause requested; waiting for the current turn to finish", "info");
 	}
 
-	private async resume(session: AgentSession, record: SessionPauseRecord): Promise<void> {
+	/**
+	 * Continue exactly as AgentSession._runAgentPrompt would. Throws on failure
+	 * so both the Continue button (via {@link toggle}) and the hidden quota
+	 * wait control (via {@link handleQuotaWaitControl}) observe it.
+	 */
+	private async resume(session: AgentSession, record: SessionPauseRecord, isCurrent = () => true): Promise<void> {
 		this.setState(record, "resuming");
 		this.host.showToast("Continuing agent", "info");
 
@@ -185,6 +229,10 @@ export class AgentPauseController {
 			// isIdle becomes true before async agent_settled extension handlers finish,
 			// so wait for the event itself rather than relying on waitForIdle().
 			await record.pauseSettled;
+			if (!isCurrent()) {
+				this.setState(record, "paused");
+				return;
+			}
 			if (!this.host.isCurrentSession(session)) {
 				throw new Error("agent session changed before it could continue");
 			}
@@ -212,8 +260,7 @@ export class AgentPauseController {
 			}
 		} catch (error) {
 			this.setState(record, "paused");
-			this.host.showToast(`Could not continue agent: ${errorMessage(error)}`, "error");
-			return;
+			throw error instanceof Error ? error : new Error(errorMessage(error));
 		}
 		if (record.state === "resuming") this.setState(record, "idle");
 	}

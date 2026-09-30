@@ -341,10 +341,14 @@ function assertCanContinue(session) {
 }
 
 /** @param {AgentSession} session */
-async function continueSession(session, record) {
+async function continueSession(session, record, isCurrent = () => true) {
 
 	record.state = "resuming";
 	await record.pauseSettled;
+	if (!isCurrent()) {
+		record.state = "paused";
+		return;
+	}
 	const internals = sessionInternals(session);
 	internals._isAgentRunActive = true;
 	internals._agentRunAbortRequested = false;
@@ -367,6 +371,82 @@ async function continueSession(session, record) {
 		await internals._emitAgentSettled();
 	}
 	if (record.state === "resuming") record.state = "idle";
+}
+
+// --- Quota-wait hidden control messages -----------------------------------
+//
+// The bundled quota-wait extension asks its host to pause at a safe turn
+// boundary, or to continue a paused/resumable transcript, through a hidden
+// control message that must never reach the transcript. The root TUI host
+// installs the same interception via src/app/session/quota-wait-control.ts;
+// this RPC-side twin keeps pi RPC sessions (Desktop ACP) identical without
+// importing compiled app code into pi's RPC entry.
+
+const PIX_QUOTA_CONTROL_CUSTOM_TYPE = "pix-quota-control";
+
+const originalSendCustomMessage = AgentSession.prototype.sendCustomMessage;
+AgentSession.prototype.sendCustomMessage = async function pixQuotaControlSend(message, options) {
+	if (!message || message.customType !== PIX_QUOTA_CONTROL_CUSTOM_TYPE) {
+		return originalSendCustomMessage.call(this, message, options);
+	}
+	const data = message.details;
+	const settle = typeof data?.settle === "function" ? data.settle : undefined;
+	if (
+		!data || (data.action !== "pause" && data.action !== "continue")
+		|| typeof data.accepted !== "function" || !settle
+	) {
+		settle?.(new Error("Invalid quota control envelope"));
+		return;
+	}
+	// Acknowledge host support immediately so the sender's timeout clears.
+	data.accepted();
+	let outcome;
+	try {
+		outcome = { ok: true, value: await handleQuotaControl(this, data.action, data.isCurrent ?? (() => true)) };
+	} catch (error) {
+		outcome = { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
+	}
+	try {
+		if (outcome.ok) settle(outcome.value);
+		else settle(outcome.error);
+	} catch {
+		// The extension owns the callback; a failing one must not break the send.
+	}
+};
+
+/**
+ * Pause: request a safe turn-boundary pause only while the agent is busy;
+ * idle or already-paused sessions are a no-op success.
+ * Continue: resume through the same lifecycle as the RPC continue control
+ * prompt; return false when the transcript has no resumable boundary so the
+ * extension can fall back to its hidden continuation message.
+ *
+ * @param {AgentSession} session
+ * @param {"pause" | "continue"} action
+ * @returns {Promise<boolean>}
+ */
+async function handleQuotaControl(session, action, isCurrent) {
+	const record = bindPause(session);
+	if (action === "pause") {
+		if (record.state === "pause-requested" || record.state === "resuming") return true;
+		if (session.isStreaming || session.agent.state.isStreaming) {
+			try {
+				requestPause(session);
+			} catch (error) {
+				// The run can end between the check and the request; treat that
+				// as the idle no-op instead of failing the scheduled wait.
+				if (session.isStreaming || session.agent.state.isStreaming) throw error;
+			}
+		}
+		return true;
+	}
+	if (session.isStreaming || session.agent.state.isStreaming) {
+		throw new Error("Agent is already running");
+	}
+	if (record.state === "resuming") throw new Error("Agent continuation is already in progress");
+	if (!canContinue(session)) return false;
+	await continueSession(session, record, isCurrent);
+	return true;
 }
 
 const originalPrompt = AgentSession.prototype.prompt;

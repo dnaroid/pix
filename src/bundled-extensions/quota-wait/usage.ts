@@ -7,7 +7,7 @@ export async function checkQuota(model: SessionModel | undefined, thinkingLevel?
 	const descriptor = modelUsageDescriptor(model, thinkingLevel);
 	if (!descriptor) return { kind: "unknown" };
 	try {
-		const status = await queryModelUsageStatus(descriptor);
+		const status = await queryModelUsageStatus(descriptor, { freshOnly: true });
 		if (!status || status.stale || status.modelKey !== descriptor.modelKey) return { kind: "unknown" };
 		const windows = (["hourly", "weekly"] as const).flatMap((window) => {
 			const value = status[window];

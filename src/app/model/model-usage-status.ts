@@ -327,7 +327,7 @@ export function modelUsageDescriptor(model: SessionModel | undefined, thinkingLe
  */
 export { claudeCodeCredentialAvailable } from "./claude-code-usage-auth.js";
 
-export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor): Promise<ModelUsageStatus | undefined> {
+export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor, options: { freshOnly?: boolean } = {}): Promise<ModelUsageStatus | undefined> {
 	switch (descriptor.kind) {
 		case "openai":
 			return await queryOpenAIModelUsage(descriptor.modelKey);
@@ -341,7 +341,7 @@ export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor): P
 			return anthropicUsageStatusFromResponse(await fetchAnthropicUsage(accessToken), descriptor.modelKey);
 		}
 		case "google-antigravity":
-			return await queryGoogleAntigravityModelUsage(descriptor);
+			return await queryGoogleAntigravityModelUsage(descriptor, options.freshOnly);
 	}
 }
 
@@ -1111,6 +1111,7 @@ function aggregateGoogleAntigravityWindows(windows: readonly ModelUsageLimitWind
 
 async function queryGoogleAntigravityModelUsage(
 	descriptor: Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>,
+	freshOnly = false,
 ): Promise<ModelUsageStatus | undefined> {
 	const now = Date.now();
 	const accounts = await readAllAntigravityQuotaAccounts(descriptor.modelKey);
@@ -1129,6 +1130,7 @@ async function queryGoogleAntigravityModelUsage(
 
 		try {
 			const response = await fetchGoogleAntigravityQuotaForAccount(account, now);
+			if (freshOnly && response.source === "cached") return undefined;
 			const liveWindow = googleAntigravityWindowFromResponse(
 				response,
 				descriptor.quotaModelKey,
@@ -1136,6 +1138,7 @@ async function queryGoogleAntigravityModelUsage(
 				descriptor.quotaModelCandidates,
 			);
 			if (liveWindow) return { legacy: liveWindow };
+			if (freshOnly) return undefined;
 
 			// Google may successfully return fetchAvailableModels while omitting
 			// the quotaInfo bucket for a current versioned Flash route. Antigravity
@@ -1160,7 +1163,10 @@ async function queryGoogleAntigravityModelUsage(
 			return undefined;
 		}
 	}))).filter((windows): windows is GoogleAntigravityModelWindows => windows !== undefined);
-	if (accountWindows.length === 0) return undefined;
+	if (accountWindows.length === 0) {
+		if (freshOnly) throw new Error("Live quota availability could not be checked");
+		return undefined;
+	}
 
 	let hourly = aggregateGoogleAntigravityWindows(accountWindows.map((windows) => windows.hourly).filter((window): window is ModelUsageLimitWindow => window !== undefined));
 	let weekly = aggregateGoogleAntigravityWindows(accountWindows.map((windows) => windows.weekly).filter((window): window is ModelUsageLimitWindow => window !== undefined));

@@ -50,6 +50,8 @@ type PromptSubmitOptions = {
   applyThinkingSlashCommand: (level: string) => void | Promise<void>;
   setCommandPicker: (picker: CommandPickerState | null) => void;
   displayedConfigOptions: () => readonly SessionConfigOption[];
+  /** Whether a slash prompt names a runtime extension command (for example /wait). */
+  runtimeExtensionCommand: (sessionId: string, text: string) => boolean;
   queueDraftForCurrentRun: (
     text: string,
     attachments: readonly Attachment[],
@@ -246,6 +248,22 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
           text,
         );
         void options.refreshSessions();
+      } catch (error) {
+        options.reportError(error);
+      }
+      return;
+    }
+
+    // Wait controls do not create a transcript message or reset paused state.
+    if (attachments.length === 0 && options.runtimeExtensionCommand(sessionId, text)) {
+      const requestClient = options.client();
+      if (!requestClient) return;
+      options.setErrorMessage(null);
+      options.setPromptText("");
+      options.invalidateAttachmentDraft();
+      try {
+        await requestClient.prompt(sessionId, [{ type: "text", text }]);
+        void options.refreshAutocompleteSettings(sessionId);
       } catch (error) {
         options.reportError(error);
       }

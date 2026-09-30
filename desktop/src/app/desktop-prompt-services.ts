@@ -33,6 +33,8 @@ type DesktopPromptServicesOptions = {
   onAgentPaused?: (sessionId: string) => void;
   onSessionCleared?: (sessionId: string) => void;
   onReset?: () => void;
+  /** True while a quota wait holds the session and must not auto-drain. */
+  suppressAutoQueue?: (sessionId: string) => boolean;
 };
 
 export function createDesktopPromptServices(options: DesktopPromptServicesOptions) {
@@ -59,6 +61,7 @@ export function createDesktopPromptServices(options: DesktopPromptServicesOption
     onAgentPaused: options.onAgentPaused,
     onSessionCleared: options.onSessionCleared,
     onReset: options.onReset,
+    ...(options.suppressAutoQueue ? { suppressAutoQueue: options.suppressAutoQueue } : {}),
     appendQueuedMessage: queue.appendToTranscript,
     bindPromptSessionEntry: (sessionId, transcriptMessageId, sessionEntryId) => {
       const current = options.state.transcriptFor(sessionId);

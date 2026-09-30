@@ -4,7 +4,13 @@ import type { createModelConfig } from "./model-config.svelte";
 import type { createSessionCoordinator } from "./session-coordinator";
 import type { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
+import type { QuotaWaitStore } from "./quota-wait.svelte";
 import { shouldShowStatusBarSkeletons, type StatusBarConnectionStatus } from "./status-bar-skeleton";
+import {
+  formatQuotaWaitCountdown,
+  quotaWaitCountdownSeconds,
+  quotaWaitHeadline,
+} from "../lib/quota-wait";
 import { modelThinkingConfigState } from "../lib/model-thinking";
 
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
@@ -30,6 +36,7 @@ export function createDesktopStatusBarViewModel(options: {
   modelConfig: ReturnType<typeof createModelConfig>;
   sessionCoordinator: ReturnType<typeof createSessionCoordinator>;
   inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
+  quotaWait: QuotaWaitStore;
 }) {
   const props = $derived.by<StatusBarProps>(() => {
     const sessionId = options.activeSessionId();
@@ -55,12 +62,18 @@ export function createDesktopStatusBarViewModel(options: {
     });
 
     const sessionActivity = options.sessionActivity();
+    const waitState = options.quotaWait.indicator(sessionId);
+    const nowMs = options.quotaWait.nowMs;
 
     return {
       showSkeletons,
       configOptions: options.displayedConfigOptions(),
       changingConfig,
       promptRunning,
+      quotaWaitIndicator: sessionId && waitState ? {
+        label: `${quotaWaitHeadline(waitState, nowMs)} · ${formatQuotaWaitCountdown(quotaWaitCountdownSeconds(waitState, nowMs))}`,
+        onReopen: () => options.quotaWait.reopen(sessionId),
+      } : null,
       canConfigure: options.canUseSession()
         && !historyLoading
         && (draft ? options.draftConfigAvailable() : runtimeReady),

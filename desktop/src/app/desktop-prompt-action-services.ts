@@ -80,6 +80,14 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     reportError: options.reportError,
   });
 
+  const runtimeExtensionCommand = (sessionId: string, text: string): boolean => {
+    const name = /^\/(\S+)/.exec(text.trim())?.[1]?.toLowerCase();
+    if (name !== "wait" && name !== "quota-wait") return false;
+    const commands = options.sessions.metadata.slashCommandsBySession.get(sessionId) ?? [];
+    return commands.some((command) => command.name.toLowerCase() === name
+      && command._meta?.["pix.commandSource"] === "extension");
+  };
+
   const submit = createPromptSubmit({
     client: options.client,
     sessionMutationRunning: options.sessionMutationRunning,
@@ -116,6 +124,7 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     applyThinkingSlashCommand: options.applyThinkingSlashCommand,
     setCommandPicker: options.setCommandPicker,
     displayedConfigOptions: options.displayedConfigOptions,
+    runtimeExtensionCommand,
     queueDraftForCurrentRun: queue.queueDraftForCurrentRun,
     imagePromptSupported: options.imagePromptSupported,
     invalidateAttachmentDraft: options.attachments.invalidate,

@@ -22,4 +22,6 @@ export type PromptRuntimeOptions = {
   onAgentPaused?: (sessionId: string) => void;
   onSessionCleared?: (sessionId: string) => void;
   onReset?: () => void;
+  /** True while a quota wait holds the session and must not auto-drain. */
+  suppressAutoQueue?: (sessionId: string) => boolean;
 };

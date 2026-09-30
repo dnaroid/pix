@@ -24,6 +24,8 @@ type PromptQueueRuntimeOptions = Pick<
   hasPromptRun: (sessionId: string) => boolean;
   runPromptRequest: RunPromptRequest;
   agentState: (sessionId: string) => AgentControlState;
+  /** True while a quota wait holds the session and must not auto-drain. */
+  suppressAutoQueue?: (sessionId: string) => boolean;
 };
 
 export function queuedMessageBlocks(message: QueuedUserMessage): ContentBlock[] {
@@ -64,6 +66,11 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
     }
   }
 
+  function autoQueueSuppressed(sessionId: string): boolean {
+    return options.suppressAutoQueue?.(sessionId) === true
+      || !agentControlAllowsAutoQueue(options.agentState(sessionId));
+  }
+
   async function flushAutoQueue(sessionId: string): Promise<void> {
     const requestClient = options.client();
     if (
@@ -72,7 +79,7 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
       || options.isRunning(sessionId)
       || options.hasPromptRun(sessionId)
       || autoFlushInProgress.has(sessionId)
-      || !agentControlAllowsAutoQueue(options.agentState(sessionId))
+      || autoQueueSuppressed(sessionId)
     ) return;
 
     autoFlushInProgress.add(sessionId);
@@ -81,7 +88,7 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
         requestClient === options.client()
         && options.runtimeReady(sessionId)
         && !options.isRunning(sessionId)
-        && agentControlAllowsAutoQueue(options.agentState(sessionId))
+        && !autoQueueSuppressed(sessionId)
       ) {
         const message = await requestClient.takeAutoMessage(sessionId);
         if (!message) return;

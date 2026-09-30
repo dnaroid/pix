@@ -1,5 +1,6 @@
 <script lang="ts">
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Hourglass from "@lucide/svelte/icons/hourglass";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { modelDisplayToneClass, modelProviderBrand, thinkingLevelTone } from "../lib/model-display";
@@ -18,6 +19,7 @@
     configOptions,
     changingConfig,
     promptRunning,
+    quotaWaitIndicator = null,
     canConfigure,
     modelThinkingOpen,
     runtimeStatus,
@@ -45,6 +47,7 @@
     configOptions: SessionConfigOption[];
     changingConfig: string | null;
     promptRunning: boolean;
+    quotaWaitIndicator?: { label: string; onReopen: () => void } | null;
     canConfigure: boolean;
     modelThinkingOpen: boolean;
     runtimeStatus?: RuntimeStatus;
@@ -128,6 +131,19 @@
         <span class="h-3 w-10 rounded-sm bg-muted-foreground/15"></span>
         <span class="h-3 w-3 rounded-sm bg-muted-foreground/15"></span>
       </div>
+    {/if}
+    {#if quotaWaitIndicator}
+      <button
+        class="flex h-6 min-w-0 items-center gap-1.5 rounded-sm bg-transparent px-1.5 text-primary transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        type="button"
+        aria-label={quotaWaitIndicator.label}
+        title={`${quotaWaitIndicator.label} · click to reopen`}
+        data-quota-wait-indicator
+        onclick={() => quotaWaitIndicator.onReopen()}
+      >
+        <Hourglass class="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span class="max-w-[240px] truncate">{quotaWaitIndicator.label}</span>
+      </button>
     {/if}
     <RuntimeStatusBarItems
       status={runtimeStatus}

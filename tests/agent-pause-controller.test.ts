@@ -6,6 +6,26 @@ import { APP_ICONS } from "../src/app/icons.js";
 import { AgentPauseController } from "../src/app/session/agent-pause-controller.js";
 
 describe("AgentPauseController", () => {
+	it("cancels scheduled Continue while waiting for pause settlement", async () => {
+		const f = pauseFixture();
+		f.controller.bind(f.session);
+		await f.controller.toggle(f.session);
+		await f.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
+		await f.internals._handlePostAgentRun();
+		await f.internals._runBeforeSettleBoundary();
+		(f.agent.state as { isStreaming: boolean }).isStreaming = false;
+		let current = true;
+		let result: unknown;
+		const pending = f.session.sendCustomMessage({ customType: "pix-quota-control", content: "", display: false,
+			details: { action: "continue", accepted() {}, isCurrent: () => current, settle: (value: unknown) => { result = value; } } });
+		await Promise.resolve();
+		current = false;
+		await f.internals._emitAgentSettled();
+		await pending;
+		assert.equal(result, true);
+		assert.equal(f.continueCalls(), 0);
+		assert.equal(f.controller.state(f.session), "paused");
+	});
 	it("requests an end only after a completed turn and pauses after before-settle", async () => {
 		const fixture = pauseFixture();
 		fixture.controller.bind(fixture.session);

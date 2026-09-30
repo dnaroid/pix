@@ -1,23 +1,97 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildWorkbenchEditorProps, buildWorkbenchInspectorProps } from "./desktop-workbench-prop-builders";
+import {
+  buildWorkbenchConversationProps,
+  buildWorkbenchEditorProps,
+  buildWorkbenchInspectorProps,
+} from "./desktop-workbench-prop-builders";
+import { createQuotaWaitStore } from "./quota-wait.svelte";
 
-function inspectorOptions(sessionId: string | null, open = true) {
+function conversationOptions(sessionId: string | null, quotaWait = createQuotaWaitStore({
+  client: () => null,
+  runtimeReady: () => true,
+  reportError: () => {},
+})) {
   return {
+    transcript: () => [],
     activeSessionId: () => sessionId,
-    activeTitle: () => "Session",
-    activeSessionActivity: () => undefined,
-    activeTodoSnapshot: () => undefined,
-    activeSubagentSnapshot: () => undefined,
-    canClearTodos: () => false,
-    clearSessionTodos: vi.fn(async () => true),
-    inspectorPreference: {
-      open,
-      setOpen: vi.fn(),
+    workspace: () => "/workspace",
+    promptRunning: () => false,
+    operationRunning: () => false,
+    sessionHistoryLoading: () => false,
+    promptText: () => "",
+    promptAttachments: () => [],
+    statusReady: () => true,
+    activeSessionRuntimeReady: () => true,
+    sessionMutationRunning: () => false,
+    dragActive: () => false,
+    activeAgentControlState: () => undefined,
+    activeSlashCommands: () => [],
+    pendingElicitation: () => null,
+    questionImageAdding: () => false,
+    transcriptScroll: { followsLatest: true, handleScroll: vi.fn(), jumpToLatest: vi.fn() },
+    workspaceController: {},
+    preview: { active: undefined, canGoBack: false, canGoForward: false, move: vi.fn() },
+    transcriptAttachments: { prepare: vi.fn() },
+    branchActions: { runUserMessageContextAction: vi.fn() },
+    history: { loading: false },
+    promptQueue: { deferCurrentDraft: vi.fn(), actionRunning: false, actOnQueuedMessage: vi.fn() },
+    promptRuntime: {
+      queueItemsBySession: new Map(),
+      pauseActiveAgent: vi.fn(),
+      continueActiveAgent: vi.fn(),
+      cancelActivePrompt: vi.fn(),
     },
+    autocomplete: { enabled: false, debounceMs: 0, complete: vi.fn() },
+    draft: { active: false, promote: vi.fn() },
+    conversationActions: { enhancePromptDraft: vi.fn() },
+    openHistoryPicker: vi.fn(),
+    promptSubmit: { submit: vi.fn() },
+    projectActions: { createTaskFromComposer: vi.fn() },
+    attachments: { chooseAttachments: vi.fn(), addPastedAttachments: vi.fn(), removeAttachment: vi.fn() },
+    elicitation: {},
+    questionImages: {},
+    lspOnboarding: { activeSuggestion: () => undefined },
+    quotaWait,
   } as any;
 }
 
+describe("workbench composer props", () => {
+  it("opens the quota-wait schedule popup for the active session", () => {
+    const quotaWait = createQuotaWaitStore({
+      client: () => null,
+      runtimeReady: () => true,
+      reportError: () => {},
+    });
+    const props = buildWorkbenchConversationProps(conversationOptions("session-1", quotaWait));
+    expect(typeof props.composer.onScheduleContinuation).toBe("function");
+    props.composer.onScheduleContinuation?.();
+    expect(quotaWait.scheduleVisible("session-1")).toBe(true);
+    expect(quotaWait.scheduleVisible("session-2")).toBe(false);
+  });
+
+  it("omits schedule continuation without an active session", () => {
+    const props = buildWorkbenchConversationProps(conversationOptions(null));
+    expect(props.composer.onScheduleContinuation).toBeUndefined();
+  });
+});
+
 describe("workbench inspector props", () => {
+  function inspectorOptions(sessionId: string | null, open = true) {
+    return {
+      activeSessionId: () => sessionId,
+      activeTitle: () => "Session",
+      activeSessionActivity: () => undefined,
+      activeTodoSnapshot: () => undefined,
+      activeSubagentSnapshot: () => undefined,
+      canClearTodos: () => false,
+      clearSessionTodos: vi.fn(async () => true),
+      inspectorPreference: {
+        open,
+        setOpen: vi.fn(),
+      },
+    } as any;
+  }
+
   it("does not render the Session inspector for a UI-only draft", () => {
     expect(buildWorkbenchInspectorProps(inspectorOptions(null)).inspector).toBeNull();
   });

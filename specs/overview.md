@@ -68,6 +68,7 @@ not duplicate those; IDX document retrieval can find them independently.
 | [retry-toast-action](./retry-toast-action.md) | Retry action on the exhausted-retries toast |
 | [session-extension-bind-before-prompt](./session-extension-bind-before-prompt.md) | Bind session extensions before the first prompt |
 | [session-title-after-resource-command](./session-title-after-resource-command.md) | Session title after a leading resource command |
+| [session-quota-wait](./session-quota-wait.md) | Session quota wait with automatic/manual scheduled continuation |
 | [idx-startup-update](./idx-startup-update.md) | Keep `idx` current at pix startup |
 | [reload-context-inventory](./reload-context-inventory.md) | Reload/resource context inventory and tool-alias capability checks |
 | [clickable-markdown-links](./clickable-markdown-links.md) | Clickable wrapped markdown links |

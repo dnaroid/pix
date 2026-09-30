@@ -18,6 +18,7 @@ export type DesktopCommandId =
   | "composer.enhance"
   | "composer.createTask"
   | "composer.defer"
+  | "composer.scheduleContinuation"
   | "message.copy"
   | "message.fork"
   | "message.forkNewTab"
@@ -162,6 +163,13 @@ const DEFINITIONS: Record<DesktopCommandId, DesktopCommandDefinition> = {
     description: "Move the current draft to the queued-message panel",
     scope: "composer",
     keywords: ["queue", "defer", "pause", "later"],
+  },
+  "composer.scheduleContinuation": {
+    id: "composer.scheduleContinuation",
+    label: "Schedule continuation…",
+    description: "Pause the session and continue it automatically later",
+    scope: "composer",
+    keywords: ["wait", "timer", "quota", "resume", "schedule", "later"],
   },
   "message.copy": {
     id: "message.copy",

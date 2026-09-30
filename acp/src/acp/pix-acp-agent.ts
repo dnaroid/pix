@@ -360,6 +360,12 @@ interface AgentSessionState {
 	headerUsage: DesktopModelUsageStatus | undefined;
 	/** Guards model-usage pushes against session replacement and bursts. */
 	modelUsagePushGeneration: number;
+	/** Runtime extension slash command names (without slash), lower-cased. */
+	runtimeExtensionCommands: Set<string>;
+	/** An extension slash command is executing outside the run lifecycle. */
+	extensionCommandRunning: boolean;
+	/** `/wait state` was already requested once for this runtime. */
+	quotaWaitStateRequested: boolean;
 }
 
 interface PendingDesktopNewSession {
@@ -395,6 +401,8 @@ export interface PixAcpAgentOptions {
 	readonly workspaceUndoExtensionPath?: string;
 	/** Bundled pi-tools-suite extension, including Antigravity model providers. */
 	readonly toolsSuiteExtensionPath?: string;
+	/** Bundled quota-wait extension providing scheduled continuation. */
+	readonly quotaWaitExtensionPath?: string;
 	/** Agent resource directory override for hermetic draft-catalog tests. */
 	readonly agentDir?: string;
 	readonly logger: Logger;
@@ -1770,6 +1778,7 @@ export class PixAcpAgent {
 			this.options.sessionTitleExtensionPath,
 			this.options.workspaceUndoExtensionPath,
 			toolsSuiteExtensionPath,
+			this.options.quotaWaitExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
 		));
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
@@ -1802,6 +1811,9 @@ export class PixAcpAgent {
 			configOptionsPushGeneration: 0,
 			headerUsage: undefined,
 			modelUsagePushGeneration: 0,
+			runtimeExtensionCommands: new Set(),
+			extensionCommandRunning: false,
+			quotaWaitStateRequested: false,
 		};
 		// Register routing before start so session_start extension state emitted
 		// during RPC startup is delivered instead of being dropped.
@@ -2204,7 +2216,7 @@ export class PixAcpAgent {
 			await this.syncLiveSessionRecord(session);
 			return;
 		}
-		if (request.method === "notify" && session.activeRun?.slashPrompt) {
+		if (request.method === "notify" && (session.activeRun?.slashPrompt || session.extensionCommandRunning)) {
 			// Pi RPC sends extension command feedback as a fire-and-forget UI
 			// notification. ACP has no equivalent, so put it in the command's
 			// visible transcript instead of silently dropping the result.
@@ -2257,6 +2269,56 @@ export class PixAcpAgent {
 		}
 	}
 
+	/** Only the bundled wait controls are safe out-of-band commands. */
+	private runtimeExtensionCommandMatches(session: AgentSessionState, text: string): boolean {
+		const name = /^\/(\S+)/.exec(text.trim())?.[1]?.toLowerCase();
+		return (name === "wait" || name === "quota-wait") && session.runtimeExtensionCommands.has(name);
+	}
+
+	/**
+	 * Execute a runtime extension slash command without creating an ActiveRun.
+	 *
+	 * pi dispatches extension commands in prompt preflight even while the
+	 * agent is streaming, so this stays safe mid-run; the command result
+	 * reaches the transcript through the `notify` UI bridge.
+	 */
+	private async runExtensionSlashCommand(session: AgentSessionState, text: string): Promise<PromptResponse> {
+		session.extensionCommandRunning = true;
+		try {
+			await session.pi.prompt(text);
+		} catch (error) {
+			throw new RequestError(ERROR_SERVER, `extension command failed: ${stringifyUnknown(error)}`);
+		} finally {
+			session.extensionCommandRunning = false;
+		}
+		return { stopReason: "end_turn" };
+	}
+
+	/**
+	 * Adopt an agent run the extension started itself (for example the
+	 * quota-wait continuation). Without an ActiveRun, Stop/cancel requests
+	 * and post-settle agent-control state would have nothing to act on.
+	 */
+	private beginExtensionRun(session: AgentSessionState): void {
+		const run: ActiveRun = {
+			cancelled: false,
+			slashPrompt: false,
+			started: true,
+			stopReason: undefined,
+			resolve: () => {},
+			reject: () => {},
+		};
+		session.activeRun = run;
+		const settled = new Promise<StopReason>((resolve, reject) => {
+			run.resolve = resolve;
+			run.reject = reject;
+		});
+		void settled.catch(() => {});
+		if (session.agentControlState !== "resuming") {
+			void this.setAgentControlState(session, "resuming");
+		}
+	}
+
 	private dispatchSessionEvent(session: AgentSessionState, event: JsonAgentSessionEvent): void {
 		for (const notification of session.translator.translate(event)) {
 			void session.client.notify("session/update", notification).catch((error: unknown) => {
@@ -2265,7 +2327,14 @@ export class PixAcpAgent {
 		}
 
 		const run = session.activeRun;
-		if (!run) return;
+		if (!run) {
+			// The extension itself started an agent run (for example the
+			// quota-wait hidden continuation). Adopt it so runtime run
+			// ownership, stop reasons, and post-settle agent-control state
+			// behave like any Desktop-initiated run.
+			if (event.type === "agent_start" && !session.builtinRunning) this.beginExtensionRun(session);
+			return;
+		}
 		switch (event.type) {
 			case "agent_start":
 				run.started = true;
@@ -2726,16 +2795,23 @@ export class PixAcpAgent {
 		if (!session) {
 			throw new RequestError(ERROR_SERVER, `session ${params.sessionId} not found`);
 		}
-		if (session.activeRun || session.builtinRunning) {
-			throw new RequestError(ERROR_SERVER, "a prompt is already in progress for this session");
-		}
-
 		const fileImages = desktopPromptFileImages(params);
 		if (fileImages.length > 0 && this.clientName !== "pix-desktop") {
 			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} is reserved for Pix Desktop`);
 		}
 		const input = await collectPromptInput(params.prompt, fileImages);
 		const isSlashPrompt = input.images.length === 0 && /^\/\S/.test(input.text);
+
+		// Wait controls must not reset an existing paused state or acquire the
+		// active run; they also remain available while that run is streaming.
+		if (!session.builtinRunning && isSlashPrompt
+			&& this.runtimeExtensionCommandMatches(session, input.text)) {
+			return await this.runExtensionSlashCommand(session, input.text);
+		}
+
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "a prompt is already in progress for this session");
+		}
 
 		// pi TUI built-ins (/compact, /name, /model, ...) have no RPC-side
 		// handling; intercept them here. Everything else starting with "/"
@@ -3195,6 +3271,7 @@ export class PixAcpAgent {
 				.map((name) => name.toLocaleLowerCase()),
 		);
 
+		const runtimeExtensionCommands = new Set<string>();
 		try {
 			for (const command of await session.pi.getCommands()) {
 				if (this.sessions.get(session.acpSessionId) !== session) return;
@@ -3207,6 +3284,7 @@ export class PixAcpAgent {
 					|| normalizedRuntimeCommandName(name) === WORKSPACE_UNDO_RPC_COMMAND
 				) continue;
 				names.add(key);
+				if (command.source === "extension") runtimeExtensionCommands.add(key);
 				availableCommands.push({
 					name,
 					description: command.description ?? runtimeCommandDescription(command.source),
@@ -3217,6 +3295,7 @@ export class PixAcpAgent {
 			this.options.logger.warn(`failed to discover slash commands: ${stringifyUnknown(error)}`);
 		}
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		session.runtimeExtensionCommands = runtimeExtensionCommands;
 
 		const notification: SessionNotification = {
 			sessionId: session.acpSessionId,
@@ -3225,6 +3304,28 @@ export class PixAcpAgent {
 		await session.client.notify("session/update", notification).catch((error: unknown) => {
 			this.options.logger.warn(`session/update failed: ${stringifyUnknown(error)}`);
 		});
+		this.scheduleQuotaWaitStateRefresh(session);
+	}
+
+	/**
+	 * Ask the quota-wait extension to republish its state once per runtime.
+	 *
+	 * The extension already publishes on session_start, but the Desktop
+	 * frontend can attach after that moment (startup, load, reload); `/wait
+	 * state` re-emits the widget channel so the popup never depends on push
+	 * timing.
+	 */
+	private scheduleQuotaWaitStateRefresh(session: AgentSessionState): void {
+		if (session.quotaWaitStateRequested || !session.runtimeExtensionCommands.has("wait")) return;
+		session.quotaWaitStateRequested = true;
+		setTimeout(() => {
+			if (this.sessions.get(session.acpSessionId) !== session) return;
+			void this.runExtensionSlashCommand(session, "/wait state")
+				.catch((error: unknown) => {
+					if (this.sessions.get(session.acpSessionId) !== session) return;
+					this.options.logger.debug(`quota wait state refresh failed: ${stringifyUnknown(error)}`);
+				});
+		}, 0);
 	}
 
 	/** Emit one agent_message_chunk update (used for built-in feedback). */
@@ -3404,6 +3505,7 @@ function piClientOptions(
 	sessionTitleExtensionPath?: string,
 	workspaceUndoExtensionPath?: string,
 	toolsSuiteExtensionPath?: string,
+	quotaWaitExtensionPath?: string,
 	ignoreContextFiles = false,
 ): PiRpcClientOptions {
 	const args = [
@@ -3411,6 +3513,7 @@ function piClientOptions(
 		...(sessionTitleExtensionPath ? ["--extension", sessionTitleExtensionPath] : []),
 		...(workspaceUndoExtensionPath ? ["--extension", workspaceUndoExtensionPath] : []),
 		...(toolsSuiteExtensionPath ? ["--extension", toolsSuiteExtensionPath] : []),
+		...(quotaWaitExtensionPath ? ["--extension", quotaWaitExtensionPath] : []),
 		...(ignoreContextFiles ? ["--no-context-files"] : []),
 	];
 	const base = {

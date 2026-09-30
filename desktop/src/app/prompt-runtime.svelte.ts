@@ -31,6 +31,7 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     hasPromptRun: runs.hasPromptRun,
     runPromptRequest: runs.runPromptRequest,
     agentState: (sessionId) => agent.agentState(sessionId),
+    ...(options.suppressAutoQueue ? { suppressAutoQueue: options.suppressAutoQueue } : {}),
   });
 
   agent = createPromptAgentControl({
@@ -64,6 +65,7 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     isRunning: runs.isRunning,
     agentState: agent.agentState,
     setAgentState: agent.setAgentState,
+    handleAgentControlStatePush: agent.handleAgentControlStatePush,
     handleQueueState: queue.handleQueueState,
     handleQueueConsumed: queue.handleQueueConsumed,
     refreshQueueState: queue.refreshQueueState,

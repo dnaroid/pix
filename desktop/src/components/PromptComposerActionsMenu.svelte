@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CalendarClock from "@lucide/svelte/icons/calendar-clock";
   import History from "@lucide/svelte/icons/history";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Pause from "@lucide/svelte/icons/pause";
@@ -10,14 +11,17 @@
     enhanceLabel,
     createTaskLabel,
     deferLabel,
+    scheduleContinuationLabel,
     canOpenHistory,
     canEnhance,
     canCreateTask,
     canDefer,
+    canScheduleContinuation,
     onOpenHistory,
     onEnhance,
     onCreateTask,
     onDefer,
+    onScheduleContinuation,
     onKeydown,
   }: {
     menu: HTMLDivElement | null;
@@ -25,14 +29,17 @@
     enhanceLabel: string;
     createTaskLabel: string;
     deferLabel: string;
+    scheduleContinuationLabel: string;
     canOpenHistory: boolean;
     canEnhance: boolean;
     canCreateTask: boolean;
     canDefer: boolean;
+    canScheduleContinuation: boolean;
     onOpenHistory: () => void;
     onEnhance: () => void;
     onCreateTask: () => void;
     onDefer: () => void;
+    onScheduleContinuation: () => void;
     onKeydown: (event: KeyboardEvent) => void;
   } = $props();
 </script>
@@ -90,5 +97,17 @@
   >
     <Pause class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
     <span>{deferLabel}</span>
+  </button>
+  <button
+    class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    type="button"
+    role="menuitem"
+    tabindex="-1"
+    disabled={!canScheduleContinuation}
+    data-composer-menu-schedule-continuation
+    onclick={onScheduleContinuation}
+  >
+    <CalendarClock class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <span>{scheduleContinuationLabel}</span>
   </button>
 </div>

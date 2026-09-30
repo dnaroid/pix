@@ -24,6 +24,7 @@ import type { createSessionInspectorPreference } from "./session-inspector-prefe
 import type { createSessionTabController } from "./session-tab-controller";
 import type { createTranscriptAttachmentController } from "./transcript-attachments";
 import type { createTranscriptScrollController } from "./transcript-scroll.svelte";
+import type { QuotaWaitStore } from "./quota-wait.svelte";
 import type { createWorkspaceController } from "./workspace-controller";
 
 export type DesktopWorkbenchSurfaceViewProps = Omit<
@@ -79,6 +80,7 @@ export type WorkbenchConversationBuilderOptions = {
   elicitation: ReturnType<typeof createElicitationStore>;
   questionImages: ReturnType<typeof createQuestionImageController>;
   lspOnboarding: LspOnboardingStore;
+  quotaWait: QuotaWaitStore;
 };
 
 export type WorkbenchEditorBuilderOptions = {
@@ -213,6 +215,7 @@ export function buildWorkbenchConversationProps(
       onSubmit: options.promptSubmit.submit,
       onDefer: options.promptQueue.deferCurrentDraft,
       onCreateTask: options.projectActions.createTaskFromComposer,
+      onScheduleContinuation: sessionId ? () => options.quotaWait.openSchedule(sessionId) : undefined,
       onPause: options.promptRuntime.pauseActiveAgent,
       onContinue: options.promptRuntime.continueActiveAgent,
       onCancel: options.promptRuntime.cancelActivePrompt,

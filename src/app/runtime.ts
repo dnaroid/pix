@@ -97,6 +97,10 @@ export function bundledModelUsageExtensionPath(): string {
 	return BUNDLED_MODEL_USAGE_EXTENSION_DIR;
 }
 
+export function bundledQuotaWaitExtensionPath(): string {
+	return BUNDLED_QUOTA_WAIT_EXTENSION_DIR;
+}
+
 export function piToolsSuiteExtensionSourcePath(): string {
 	return PI_TOOLS_SUITE_SOURCE_DIR;
 }

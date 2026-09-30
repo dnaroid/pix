@@ -5,6 +5,17 @@ import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-codin
 import { AppQueuedMessageController, type AppQueuedMessageControllerHost } from "../src/app/session/queued-message-controller.js";
 
 describe("AppQueuedMessageController", () => {
+	it("retains automatic messages while a scheduled quota wait owns the session", async () => {
+		const calls: string[] = [];
+		const session = fakeSession({ steering: [], followUp: [] }, { calls });
+		let waiting = true;
+		const controller = new AppQueuedMessageController({ ...createHost(session, createHostState("")), isWaitingForQuota: () => waiting });
+		controller.autoUserMessages.push({ id: "auto-1", promptText: "later", displayText: "later", images: [] });
+		await controller.flushAutoUserMessages();
+		assert.equal(controller.autoUserMessages.length, 1); assert.deepEqual(calls, []);
+		waiting = false; await controller.flushAutoUserMessages();
+		assert.equal(controller.autoUserMessages.length, 0); assert.deepEqual(calls, ["prompt:later"]);
+	});
 	it("captures deferred messages as deep clones", () => {
 		const controller = new AppQueuedMessageController(createHost(fakeSession({ steering: [], followUp: [] }), createHostState("")));
 		controller.deferredUserMessages.push({

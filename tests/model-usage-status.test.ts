@@ -857,6 +857,7 @@ describe("model usage status", () => {
 			assert.equal(status?.accountEmail, "Σ");
 			assert.equal(status?.hourly?.remainingPercent, 73);
 			assert.equal(status?.weekly, undefined);
+			await assert.rejects(queryModelUsageStatus(descriptor, { freshOnly: true }), /Live quota availability/u);
 		});
 	});
 

@@ -3,6 +3,41 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
+test("Pix RPC wait control resumes a paused transcript without persisting the envelope", async () => {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	const patch = source.slice(source.indexOf('const PIX_QUOTA_CONTROL_CUSTOM_TYPE ='), source.indexOf("const originalPrompt ="));
+	let resumed = 0;
+	let pauses = 0;
+	let forwarded = 0;
+	const record = { state: "paused" };
+	class Session {
+		isStreaming = false;
+		agent = { state: { isStreaming: false } };
+		async sendCustomMessage(_message: unknown) { forwarded++; }
+	}
+	runInNewContext(patch, { AgentSession: Session, bindPause: () => record,
+		canContinue: () => true, requestPause: () => { pauses++; },
+		continueSession: async (_session: unknown, _record: unknown, isCurrent: () => boolean) => { if (isCurrent()) resumed++; },
+	});
+	const session = new Session();
+	const values: unknown[] = [];
+	const details = { action: "continue", isCurrent: () => true, accepted() {}, settle: (value: unknown) => values.push(value) };
+	await session.sendCustomMessage({ customType: "pix-quota-control", details });
+	assert.equal(resumed, 1);
+	assert.equal(forwarded, 0);
+	assert.deepEqual(values, [true]);
+	details.isCurrent = () => false;
+	await session.sendCustomMessage({ customType: "pix-quota-control", details });
+	assert.equal(resumed, 1);
+	record.state = "idle";
+	session.isStreaming = true;
+	details.action = "pause";
+	await session.sendCustomMessage({ customType: "pix-quota-control", details });
+	assert.equal(pauses, 1);
+	await session.sendCustomMessage({ customType: "ordinary" });
+	assert.equal(forwarded, 1);
+});
+
 test("Pix RPC installs the finishTurn pause hook before starting a normal prompt", async () => {
 	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
 	const promptPatchStart = source.indexOf("AgentSession.prototype.prompt =");

@@ -58,6 +58,7 @@ export function createDesktopWorkbenchViewModelServices(
       elicitation: options.interactions.elicitation,
       questionImages: options.interactions.questionImages,
       lspOnboarding: options.lspOnboarding,
+      quotaWait: options.quotaWait,
     },
     editor: {
       workspace: options.workspace,

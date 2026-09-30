@@ -44,6 +44,7 @@
   import { createDesktopUpdater } from "./app/desktop-updater.svelte";
   import { createDesktopWatchRestart } from "./app/desktop-watch-restart.svelte";
   import { createLspOnboardingStore } from "./app/lsp-onboarding.svelte";
+  import { createQuotaWaitStore } from "./app/quota-wait.svelte";
   import { createWorkbenchTerminalState } from "./app/workbench-terminal.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
@@ -112,6 +113,11 @@
   const imagePromptSupported = $derived(connection.imagePromptSupported);
   const reconnect = connection.reconnect;
 
+  const quotaWait = createQuotaWaitStore({
+    client: () => client,
+    runtimeReady: (sessionId) => sessionServices.runtime.isReady(sessionId),
+    reportError,
+  });
   const sessionServices = createDesktopSessionServices({
     client: () => client,
     workspace: () => workspace,
@@ -220,6 +226,7 @@
       sessionTabAttention.reset();
       agentNotifications.reset();
     },
+    suppressAutoQueue: (sessionId) => quotaWait.waiting(sessionId),
   });
   const promptRuntime = promptServices.runtime;
   const queuedMessages = promptServices.queue;
@@ -616,6 +623,7 @@
     projectServices,
     promptServices,
     lspOnboarding,
+    quotaWait,
     reportError,
   });
   const sessionCoordinator = sessionOrchestration.coordinator;
@@ -674,6 +682,7 @@
     transcriptAttachments,
     orchestration: sessionOrchestration,
     lspOnboarding,
+    quotaWait,
   });
   const titlebarViewModel = viewModels.titlebar;
   const sidebarViewModel = viewModels.sidebar;

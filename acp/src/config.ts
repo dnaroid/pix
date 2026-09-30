@@ -12,6 +12,7 @@
  *   PIX_ACP_SESSION_TITLE_EXTENSION  bundled session-title extension path
  *   PIX_ACP_WORKSPACE_UNDO_EXTENSION  bundled session-scoped workspace-undo bridge
  *   PIX_ACP_TOOLS_SUITE_EXTENSION  bundled pi-tools-suite extension path
+ *   PIX_ACP_QUOTA_WAIT_EXTENSION  bundled quota-wait extension path
  */
 
 import { homedir } from "node:os";
@@ -35,6 +36,7 @@ export interface AdapterConfig {
 	readonly sessionTitleExtensionPath?: string;
 	readonly workspaceUndoExtensionPath?: string;
 	readonly toolsSuiteExtensionPath?: string;
+	readonly quotaWaitExtensionPath?: string;
 }
 
 export interface AdapterConfigInput {
@@ -45,6 +47,7 @@ export interface AdapterConfigInput {
 	readonly sessionTitleExtensionPath?: string | undefined;
 	readonly workspaceUndoExtensionPath?: string | undefined;
 	readonly toolsSuiteExtensionPath?: string | undefined;
+	readonly quotaWaitExtensionPath?: string | undefined;
 }
 
 export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterConfig {
@@ -52,6 +55,7 @@ export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterCon
 	const sessionTitleExtensionPath = input.sessionTitleExtensionPath?.trim();
 	const workspaceUndoExtensionPath = input.workspaceUndoExtensionPath?.trim();
 	const toolsSuiteExtensionPath = input.toolsSuiteExtensionPath?.trim();
+	const quotaWaitExtensionPath = input.quotaWaitExtensionPath?.trim();
 	return {
 		piEntry: input.piEntry?.trim() ? input.piEntry.trim() : defaultPiEntryPath(),
 		logLevel: parseLogLevel(input.logLevel),
@@ -60,6 +64,7 @@ export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterCon
 		...(sessionTitleExtensionPath ? { sessionTitleExtensionPath } : {}),
 		...(workspaceUndoExtensionPath ? { workspaceUndoExtensionPath } : {}),
 		...(toolsSuiteExtensionPath ? { toolsSuiteExtensionPath } : {}),
+		...(quotaWaitExtensionPath ? { quotaWaitExtensionPath } : {}),
 	};
 }
 
@@ -72,5 +77,6 @@ export function adapterConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Adap
 		sessionTitleExtensionPath: env["PIX_ACP_SESSION_TITLE_EXTENSION"],
 		workspaceUndoExtensionPath: env["PIX_ACP_WORKSPACE_UNDO_EXTENSION"],
 		toolsSuiteExtensionPath: env["PIX_ACP_TOOLS_SUITE_EXTENSION"],
+		quotaWaitExtensionPath: env["PIX_ACP_QUOTA_WAIT_EXTENSION"],
 	});
 }

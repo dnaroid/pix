@@ -4,6 +4,26 @@ import { createPromptAgentControl } from "./prompt-agent-control.svelte";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 
 describe("prompt agent control notifications", () => {
+  it("keeps an adopted scheduled run active until pause settles", async () => {
+    const client = { agentControl: vi.fn() } as unknown as AcpClient;
+    const flushAutoQueue = vi.fn(async () => {});
+    const runs = createPromptRunLifecycle({
+      client: () => client, activeSessionId: () => "session-1", reportError: vi.fn(),
+      bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue,
+    });
+    const control = createPromptAgentControl({
+      client: () => client, activeSessionId: () => "session-1", runtimeReady: () => true,
+      operationRunning: () => false, setErrorMessage: vi.fn(), reportError: vi.fn(), runs,
+    });
+    control.handleAgentControlStatePush("session-1", "resuming");
+    expect(runs.isRunning("session-1")).toBe(true);
+    control.handleAgentControlStatePush("session-1", "pause-requested");
+    expect(runs.isRunning("session-1")).toBe(true);
+    control.handleAgentControlStatePush("session-1", "paused");
+    expect(runs.isRunning("session-1")).toBe(false);
+    await vi.waitFor(() => expect(flushAutoQueue).toHaveBeenCalledTimes(1));
+  });
+
   it("emits pause attention only for a live transition into paused", () => {
     const client = {} as AcpClient;
     const onAgentPaused = vi.fn();

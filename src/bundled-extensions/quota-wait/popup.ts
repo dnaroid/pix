@@ -10,7 +10,8 @@ export function quotaWaitLabel(state: QuotaWaitState, now = Date.now()): string 
 	const h = Math.floor(seconds / 3600);
 	const m = Math.floor(seconds % 3600 / 60);
 	const s = seconds % 60;
-	return `${state.window === "unknown" ? "Usage" : state.window === "weekly" ? "Weekly" : "Hourly"} limit · ${state.resetAt ? "reset check" : "next check"} in ${h ? `${h}h ` : ""}${m}m ${s}s`;
+	const label = state.mode === "timer" && state.notBefore && now < state.notBefore ? "Scheduled continuation" : `${state.window === "unknown" ? "Usage" : state.window === "weekly" ? "Weekly" : "Hourly"} limit`;
+	return `${label} · ${state.resetAt ? "reset check" : "next check"} in ${h ? `${h}h ` : ""}${m}m ${s}s`;
 }
 
 /** Uses Pix's scoped native menu: switching tabs dismisses, never cancels the wait. */
@@ -21,7 +22,7 @@ export class QuotaWaitPopup {
 		this.ctx = ctx;
 		if (this.options && !state) this.close();
 		if (this.options && state) this.options.title = quotaWaitLabel(state);
-		ctx.ui.setStatus("quota-wait", state ? `${quotaWaitLabel(state)} · /quota-wait` : undefined);
+		ctx.ui.setStatus("quota-wait", state ? `${quotaWaitLabel(state)} · /wait` : undefined);
 	}
 	async show(ctx: ExtensionContext, state: QuotaWaitState, action: (value: string) => void): Promise<void> {
 		if (this.options || ctx.mode !== "tui" || !ctx.hasUI) return;

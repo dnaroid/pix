@@ -13,11 +13,38 @@ alone is insufficient: a fresh quota query must corroborate exhaustion. Billing,
 authentication, context-size, network and ordinary server errors keep their
 existing error/retry behavior.
 
-Waiting is distinct from manual turn-boundary pause. The centered popup shows
+Waiting can start automatically after exhaustion or be scheduled manually with
+`/wait usage-reset` (wait for available quota) or `/wait 1h20m` (compound duration
+using days, hours, minutes, seconds; one second to 32 days), or
+`/wait until <ISO timestamp with timezone>` (a future instant within 32 days).
+The duration is saved
+as an absolute deadline, so restarting does not restart the clock. A future
+deadline is not shortened by a successful quota check on reopening. At expiry,
+quota still must permit work; exhausted quota extends the wait.
+
+Desktop's composer menu offers **Schedule continuation…**. Its centered setup
+dialog selects a duration, a specific local date/time (with timezone shown), or
+usage reset. Opening or cancelling the dialog leaves both execution and the
+composer draft unchanged. Confirmation sends the corresponding wait command,
+not a new user message; the draft remains untouched. Invalid, past, or more than
+32-day timestamps cannot be submitted. The selected local time is converted to
+an absolute ISO timestamp, preserving the exact deadline through the host bridge
+and across restart. Setup and progress dialogs belong to the selected session;
+background sessions cannot steal focus.
+
+On a session already paused with the ordinary Pause button, scheduled
+continuation invokes the same **Continue** lifecycle, without inserting another
+user or custom message. On a running session the command requests a safe
+turn-boundary pause; it never aborts an in-flight tool batch. Explicit Continue,
+Stop, a new prompt, or a model change supersedes the scheduled action. Only an
+error/completed assistant tail that cannot be resumed through `Agent.continue()`
+uses the hidden continuation-message fallback.
+
+The centered popup shows
 the exhausted window and a live countdown to the reset check, or to the next
 availability check when reset time is unknown. It offers **Try now**, **Cancel
 auto-resume**, and **Hide**. Hiding only dismisses the popup; the status indicator
-and `/quota-wait` can reopen it. Cancelling disables automatic checks and
+and `/wait` (also `/quota-wait`) can reopen it. Cancelling disables automatic checks and
 continuation, but keeps the task available for a manual probe.
 
 At the deadline a fresh provider quota query precedes continuation. Both hourly
@@ -38,11 +65,16 @@ returns to waiting without losing the task or replaying completed tool calls.
 
 ## Constraints and failure cases
 
-- Only failed provider turns start a wait; quota display forecasts alone do not.
+- Only failed provider turns start an automatic wait; quota display forecasts
+  alone do not. Explicit `/wait` scheduling does not require a failed turn.
 - Session shutdown/replacement invalidates timers and in-flight quota checks.
 - Repeated timer ticks/actions coalesce; stale completions cannot restart another
   session or undo cancellation. Network work is asynchronous.
 - Host automatic message queues do not drain while a quota wait is present.
+- ACP wait controls bypass ordinary prompt ownership, including while paused or
+  streaming; other extension commands keep their existing busy-session behavior.
+  Extension-triggered continuation acquires normal active-run ownership so Stop
+  and settled-state reporting remain available.
 - Short-lived SDK retries are stopped at the completed agent-run boundary when
   subscription exhaustion is identified; no tool batch is interrupted.
 - Reset data depends on provider availability. Unknown or unparseable reset
@@ -52,6 +84,9 @@ returns to waiting without losing the task or replaying completed tool calls.
 ## Implementation
 
 - `src/app/session/quota-wait.ts`
+- `src/app/session/quota-wait-control.ts`
+- `src/app/session/agent-pause-controller.ts`
+- `src/app/model/model-usage-status.ts`
 - `src/bundled-extensions/quota-wait/index.ts`
 - `src/bundled-extensions/quota-wait/usage.ts`
 - `src/bundled-extensions/quota-wait/popup.ts`
@@ -61,11 +96,32 @@ returns to waiting without losing the task or replaying completed tool calls.
 - `src/app/types.ts`
 - `src/app/popup/popup-menu-controller.ts`
 - `src/app/rendering/render-controller.ts`
+- `acp/src/acp/pix-acp-agent.ts`
+- `acp/src/pi/pix-rpc-entry.js`
+- `acp/src/config.ts`
+- `acp/src/main.ts`
+- `desktop/src-tauri/src/backend_runtime.rs`
+- `desktop/src/app/quota-wait.svelte.ts`
+- `desktop/src/lib/quota-wait.ts`
+- `desktop/src/components/QuotaWaitPopup.svelte`
+- `desktop/src/components/QuotaWaitSchedulePopup.svelte`
+- `desktop/src/components/DesktopOverlays.svelte`
+- `desktop/src/app/session-coordinator.ts`
+- `desktop/src/app/prompt-agent-control.svelte.ts`
+- `desktop/src/app/prompt-submit.ts`
+- `desktop/src/app/prompt-queue-runtime.svelte.ts`
 
 ## Tests
 
 - `tests/quota-wait.test.ts`
 - `tests/quota-wait-extension.test.ts`
+- `tests/quota-wait-sdk.test.ts`
+- `tests/quota-wait-control.test.ts`
+- `tests/model-usage-status.test.ts`
+- `tests/queued-message-controller.test.ts`
+- `tests/agent-pause-controller.test.ts`
+- `acp/test/agent.test.ts`
+- `acp/test/pix-rpc-entry.test.ts`
 
 ## Verification
 

@@ -12,6 +12,7 @@ import type { createSessionMetadataStore } from "./session-metadata.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createSessionUpdateBatcher } from "./session-update-batcher";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
+import type { QuotaWaitStore } from "./quota-wait.svelte";
 
 type DcpCompression = ReturnType<typeof createDcpCompression>;
 type GitWorkspace = ReturnType<typeof createGitWorkspaceStore>;
@@ -40,6 +41,7 @@ type SessionCoordinatorOptions = {
   lspOnboarding: LspOnboardingStore;
   dcp: DcpCompression;
   updates: SessionUpdates;
+  quotaWait: QuotaWaitStore;
 };
 
 export function createSessionCoordinator(options: SessionCoordinatorOptions) {
@@ -60,6 +62,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     options.prompts.reset();
     options.lspOnboarding.reset();
     options.dcp.reset();
+    options.quotaWait.reset();
     options.state.resetContent();
     options.setOperationRunning(false);
   }
@@ -70,10 +73,11 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
   }
 
   function handleState(notification: SessionStateNotification): void {
+    if (options.quotaWait.handleSessionState(notification)) return;
     if (options.runtime.handleSessionState(notification)) return;
     const agentControlState = agentControlStateFromSessionState(notification);
     if (agentControlState) {
-      options.prompts.setAgentState(notification.sessionId, agentControlState);
+      options.prompts.handleAgentControlStatePush(notification.sessionId, agentControlState);
       return;
     }
     if (options.registry.handleSessionState(notification)) return;
@@ -115,6 +119,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     options.cancelPendingElicitationForSession(sessionId);
     options.runtime.forget(sessionId);
     options.dcp.clear(sessionId);
+    options.quotaWait.clearSession(sessionId);
   }
 
   return {
