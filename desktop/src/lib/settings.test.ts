@@ -150,7 +150,35 @@ describe("settings JSONC helpers", () => {
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "messageMode", "highTokens"])).toEqual({ exists: true, value: 5000 });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "messageMode", "maxSuggestions"])).toEqual({ exists: true, value: 5 });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCompress", "summarizerFallbackModels"])).toEqual({ exists: true, value: [] });
-    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "modelOverrides"])).toEqual({ exists: true, value: {} });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "modelOverrides"])).toEqual({
+      exists: true,
+      value: {
+        "*claude*sonnet*": {
+          compress: {
+            minContextPercent: "22%",
+            maxContextPercent: "40%",
+            autoCandidates: { minContextPercent: 0.22 },
+            messageMode: { minContextPercent: 0.22 },
+          },
+        },
+        "*claude*opus*": {
+          compress: {
+            minContextPercent: "26%",
+            maxContextPercent: "44%",
+            autoCandidates: { minContextPercent: 0.26 },
+            messageMode: { minContextPercent: 0.26 },
+          },
+        },
+        "*claude*haiku*": {
+          compress: {
+            minContextPercent: "20%",
+            maxContextPercent: "38%",
+            autoCandidates: { minContextPercent: 0.20 },
+            messageMode: { minContextPercent: 0.20 },
+          },
+        },
+      },
+    });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "debugLog", "maxBytes"])).toEqual({ exists: true, value: 5 * 1024 * 1024 });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "debugLog", "maxBackups"])).toEqual({ exists: true, value: 3 });
   });
