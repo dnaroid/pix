@@ -68,7 +68,7 @@ export function createDesktopStatusBarViewModel(options: {
       configOptions: options.displayedConfigOptions(),
       changingConfig,
       promptRunning,
-      quotaWaitIndicator: sessionId && waitState ? {
+      quotaWaitIndicator: sessionId && waitState?.autoResume ? {
         label: quotaWaitStatusLabel(waitState, nowMs),
         onReopen: () => options.quotaWait.reopen(sessionId),
       } : null,

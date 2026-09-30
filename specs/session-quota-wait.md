@@ -45,8 +45,8 @@ the exhausted window and a live countdown to the reset check, or to the next
 availability check when reset time is unknown. It offers **Try now**, **Cancel
 auto-resume**, and **Hide**. Hiding only dismisses the popup; the status indicator
 and `/wait` (also `/quota-wait`) can reopen it. Cancelling disables automatic checks and
-continuation, but keeps the task available for a manual probe. Desktop's cancelled
-status indicator has no countdown, matching the cancelled popup.
+continuation, but keeps the task available for a manual probe. Desktop hides the
+status indicator after cancellation; `/wait` can still reopen the retained wait.
 
 At the deadline a fresh provider quota query precedes continuation. Both hourly
 and weekly windows must permit work; the later exhausted reset wins. Without a
