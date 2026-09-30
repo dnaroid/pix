@@ -57,7 +57,7 @@
         <p class="mt-1.5 text-xs text-muted-foreground">
           {#if wait.autoResume}
             {wait.mode === "timer" ? "Continuation" : `${scopeLabel} limit check`} in
-            <span class="font-medium text-foreground" role="timer" aria-live="off" aria-atomic="true" data-quota-wait-countdown>{countdown}</span>
+            <span class="font-mono font-medium tabular-nums text-foreground" role="timer" aria-live="off" aria-atomic="true" data-quota-wait-countdown>{countdown}</span>
             {#if wait.attempt > 0}<span> · attempt {wait.attempt + 1}</span>{/if}
           {:else}
             Auto-resume is cancelled; the task stays paused.
