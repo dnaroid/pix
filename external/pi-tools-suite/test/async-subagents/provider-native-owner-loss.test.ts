@@ -9,7 +9,7 @@ import { applyNativeProviderPatch } from "./provider-native-patch.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
 const source = providerSnapshotSource();
-const offline = source === undefined ? test.skip : test;
+const offline = source === undefined || process.platform !== "darwin" ? test.skip : test;
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)), "../..");
 const pi = join(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const fixture = fileURLToPath(new URL("./fixtures/provider-owner-loss-cli.mjs", import.meta.url));
@@ -33,7 +33,6 @@ const group = (pid: number): number => Number(execFileSync("/bin/ps", ["-o", "pg
 const alive = (pid: number) => { const state = status(pid); return state !== undefined && !state.startsWith("Z"); };
 
 offline("installed Pi RPC: SIGKILL of owned Pi ends active native provider CLI and resistant B-group leaf", async () => {
-	if (process.platform !== "darwin") throw new Error("Native ownership test requires macOS");
 	const work = mkdtempSync(join(tmpdir(), "provider-owner-loss-"));
 	const home = join(work, "home"), agent = join(work, "agent"), cwd = join(work, "cwd");
 	let child: ChildProcess | undefined;

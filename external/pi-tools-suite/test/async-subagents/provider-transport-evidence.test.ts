@@ -231,7 +231,14 @@ offline("validated-init response precedes content; only a finalized success is p
 	expect(replay(events)).toEqual(["promote"]);
 }, 60_000);
 
-for (const mode of ["error", "truncated", "hang"] as const) {
+// The hang actor proves its clean exit through a handled SIGTERM before the
+// harness confirms it. Windows process-tree cleanup force-terminates without
+// running exit handlers, so that confirmation is fail-closed by design there;
+// abort/evidence behavior stays covered by the error and truncated modes.
+const modes = process.platform === "win32"
+	? (["error", "truncated"] as const)
+	: (["error", "truncated", "hang"] as const);
+for (const mode of modes) {
 	offline(`${mode} response is never promoted even after the synthetic 200`, async () => {
 		const { events } = await drive(mode, `offline ${mode} probe`);
 		expect(events.some((e) => e.ev === "after" && e.status === 200)).toBe(true);

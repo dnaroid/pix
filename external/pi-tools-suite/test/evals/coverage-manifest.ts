@@ -26,6 +26,13 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"resource-registry": { deterministic: ["test/resource-registry.test.ts", "test/evals/extension-contracts.test.ts"] },
 	"credential-firewall": { deterministic: ["test/credential-firewall.test.ts"] },
 	"codex-reasoning-fix": { deterministic: ["test/codex-reasoning-fix.test.ts"] },
+	"claude-code-provider": {
+		deterministic: [
+			"test/claude-code-provider/image-count.test.ts",
+			"test/claude-code-provider/image-read-provider.test.ts",
+			"test/claude-code-provider/image-read-recovery.test.ts",
+		],
+	},
 };
 
 export const TOOL_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {

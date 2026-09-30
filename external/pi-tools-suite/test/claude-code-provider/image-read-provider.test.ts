@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "bun:test";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 
 // Real local adapter with fake Claude CLI; no service, credentials or Pi tools.
-const directory = new URL("../../src/claude-code-provider/", import.meta.url).pathname;
+const directory = fileURLToPath(new URL("../../src/claude-code-provider/", import.meta.url));
 const model = { id: "opus", name: "Opus", api: "pi-claude-code-provider-headless" as Api,
   provider: "pi-claude-code-provider", baseUrl: "pi-claude-code-provider://local", reasoning: true,
   input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

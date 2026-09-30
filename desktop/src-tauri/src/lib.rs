@@ -9885,11 +9885,12 @@ pub fn run() {
                 if let Some(workspace) =
                     ui_qa_workspace_from_environment().map_err(std::io::Error::other)?
                 {
-                    let main_window = app
-                        .get_webview_window("main")
-                        .ok_or_else(|| std::io::Error::other("failed to find the main Pix window"))?;
+                    let main_window = app.get_webview_window("main").ok_or_else(|| {
+                        std::io::Error::other("failed to find the main Pix window")
+                    })?;
                     let url = main_window.url()?;
-                    let url = ui_qa_workspace_url(&url, &workspace).map_err(std::io::Error::other)?;
+                    let url =
+                        ui_qa_workspace_url(&url, &workspace).map_err(std::io::Error::other)?;
                     main_window.navigate(url)?;
                 }
             }

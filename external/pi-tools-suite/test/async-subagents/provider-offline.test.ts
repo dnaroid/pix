@@ -13,6 +13,9 @@ import { providerSnapshotSource, runOffline, stageSnapshot } from "./provider-of
 // snapshot must FAIL, not silently skip.
 const source = providerSnapshotSource();
 const offline = source === undefined ? test.skip : test;
+// Negative-PGID signaling is POSIX-only; the provider's Windows cleanup path is
+// taskkill-based and never signals a process group.
+const posixOffline = source === undefined || process.platform === "win32" ? test.skip : test;
 const pinnedOnly = source?.pinned === true ? test : test.skip;
 const localOnly = source?.pinned === false ? test : test.skip;
 const response = (records: Record<string, any>[], id: string) => records.find((record) => record.id === id);
@@ -60,7 +63,7 @@ for (const code of [0, 7] as const) {
 	}, 25_000);
 }
 
-offline("real provider terminateProcessGroup may signal an exited child's negative PGID (spy only)", async () => {
+posixOffline("real provider terminateProcessGroup may signal an exited child's negative PGID (spy only)", async () => {
 	const work = mkdtempSync(join(tmpdir(), "provider-process-spy-"));
 	try {
 		stageSnapshot(source!.snapshot, work, source!.pinned);
