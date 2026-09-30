@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
@@ -480,6 +480,7 @@
   const taskActionId = $derived(projectActions.actionId);
 
   const promptActionServices = createDesktopPromptActionServices({
+    workspace: () => workspace,
     client: () => client,
     state: activeSessionState,
     sessions: sessionServices,
@@ -605,6 +606,14 @@
   });
   const workbenchTabs = $derived(presentationState.workbenchTabs);
   const activeWorkbenchTab = $derived(presentationState.activeWorkbenchTab);
+  $effect.pre(() => {
+    const sessionId = activeSessionId;
+    const visible = activeWorkbenchTab?.kind === "session";
+    untrack(() => {
+      transcriptScroll.setVisible(visible);
+      transcriptScroll.activateSession(sessionId);
+    });
+  });
   const dcpCompressionAvailable = $derived(presentationState.dcpCompressionAvailable);
   const sessionOrchestration = createDesktopSessionOrchestration({
     client: () => client,
@@ -630,6 +639,14 @@
   const displayedConfigOptions = $derived(draftSessionTabActive ? draftConfigOptions : configOptions);
   const rootEffects = createDesktopRootEffects({
     statusReady: () => status === "ready",
+    registryStartupState: () => ({
+      ready: status === "ready",
+      client,
+      workspace,
+      blocked: operationRunning || projectServices.registry.actionId !== null
+        || projectServices.registry.backgroundSyncState.phase === "syncing",
+    }),
+    refreshRegistry: () => void projectServices.registry.refresh(),
     activeSessionId: () => activeSessionId,
     activeSessionRuntimeReady: () => activeSessionRuntimeReady,
     configOptions: () => configOptions,
@@ -637,6 +654,7 @@
     attachmentDraftKey: () => attachmentDraftKey,
     workspace: () => workspace,
     invalidateAttachmentDraft,
+    bumpAttachmentGeneration: attachmentDrafts.bumpGeneration,
     invalidatePreviewFileLoads: previewStore.invalidateFileLoads,
     resetPreviewForWorkspaceChange: previewStore.resetForWorkspaceChange,
     activeConversationWorkbenchTabId: () => activeConversationWorkbenchTabId,

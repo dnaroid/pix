@@ -9,6 +9,10 @@ import { Type, Static } from "typebox";
 // ---------------------------------------------------------------------------
 // Shared primitives
 // ---------------------------------------------------------------------------
+const TodoThinkingLevel = Type.Union([
+	Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"),
+	Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max"),
+]);
 
 // ---------------------------------------------------------------------------
 // Frontier models (sub-agent oracle/review selection)
@@ -327,16 +331,10 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		todoThinkingOverrides: Type.Optional(Type.Record(
 			Type.String(),
 			Type.Union([
-				Type.Literal("off"),
-				Type.Literal("minimal"),
-				Type.Literal("low"),
-				Type.Literal("medium"),
-				Type.Literal("high"),
-				Type.Literal("xhigh"),
-				Type.Literal("max"),
+				Type.Object({ min: TodoThinkingLevel, max: TodoThinkingLevel }, { description: "Inclusive thinking bounds; min must not exceed max. Equal bounds force a level." }),
 				Type.Null(),
 			]),
-			{ description: "Force per-todo thinking for matching provider/model or bare-model keys. Keys support * and ? wildcards; null removes an inherited override." },
+			{ description: "Limit per-todo thinking with {min,max}. Keys support provider/model, bare-model, and * / ? wildcards; null removes an inherited policy. Invalid ranges and string values are ignored." },
 		)),
 		lookupModel: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup." })),
 		lookupFallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered lookup model fallbacks tried after lookupModel." })),

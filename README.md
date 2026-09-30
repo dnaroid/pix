@@ -50,7 +50,7 @@ Manual install/update/legacy cleanup:
 | Project files | file links and agent tools | dedicated Project Explorer + Preview |
 | Git | `/code-review`, `/commit-message` | full Source Control panel |
 | Tasks | durable suite todos | project task manager + session links |
-| Registry | `/registry` commands | dedicated Registry panel |
+| Registry | — | dedicated Registry panel (Desktop only) |
 | IDX | repository tools / commands | IDX status, install/init, queries and Spec Wiki UI |
 | Shell | inline `!` and raw `!!` terminal | package scripts + interactive terminals |
 | Configuration | `pix.jsonc` | independent `pix-desktop.jsonc` |

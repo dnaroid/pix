@@ -23,6 +23,7 @@ export function createDesktopSidebarViewModel(options: {
   configOptions: () => SessionConfigOption[];
   canUseSession: () => boolean;
   registryReady: () => boolean;
+  contextCommands?: () => readonly import("@agentclientprotocol/sdk").AvailableCommand[];
   gitAssistantReady: () => boolean;
   anyPromptRunning: () => boolean;
   sessionMutationRunning: () => boolean;
@@ -79,6 +80,7 @@ export function createDesktopSidebarViewModel(options: {
     registryReady: options.registryReady(),
     gitAssistantReady: options.gitAssistantReady(),
     registrySnapshot: options.registry.snapshot,
+    registryContextCommands: options.contextCommands?.() ?? [],
     registryProjectInitialized: options.registry.projectInitialized,
     registryProjectPiSizeBytes: options.registry.projectPiSizeBytes,
     registryProjectPiCleanupBytes: options.registry.projectPiCleanupBytes,

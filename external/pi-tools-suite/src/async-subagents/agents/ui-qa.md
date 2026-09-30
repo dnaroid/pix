@@ -1,9 +1,9 @@
 ---
 description: Use for real UI QA across browsers, terminal/TUI apps, and desktop GUIs - reproduce user-visible bugs and verify fixes with deterministic assertions and inspectable evidence.
 icon: bug
-models: [zai/glm-5.3-flash, openai-codex/gpt-6-luna]
+models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash]
 thinking: medium
-timeoutMs: 300000
+timeoutMs: 600000
 tools: [read, grep, bash]
 ---
 

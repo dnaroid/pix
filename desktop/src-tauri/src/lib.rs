@@ -37,6 +37,7 @@ mod native_process;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
 mod startup_theme;
+mod window_geometry;
 mod window_restore;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
@@ -9899,7 +9900,9 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_filename(window_restore::geometry_file())
-                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+                // Logical geometry is applied by window_restore at creation.
+                // The plugin only owns maximization, not physical-pixel resize.
+                .with_state_flags(StateFlags::MAXIMIZED)
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())

@@ -29,6 +29,7 @@ type ConversationNavigationRef = {
 
 type DesktopPromptActionServicesOptions = {
   client: () => AcpClient | null;
+  workspace: () => string;
   state: ActiveSessionState;
   sessions: DesktopSessionServices;
   transitions: DesktopSessionTransitionServices;
@@ -103,6 +104,14 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     beginOptimisticDraftSubmit: options.transitions.draft.beginOptimisticSubmit,
     materializeDraftSession: options.transitions.draft.materialize,
     sessionRuntimeReady: options.sessions.runtime.isReady,
+    waitForSessionReady: async (client, sessionId) => {
+      const workspace = options.workspace();
+      const ready = options.sessions.runtime.ensure(client, sessionId, workspace);
+      const ownsRuntime = options.sessions.runtime.captureOwnership(sessionId);
+      await Promise.all([ready, options.sessions.history.waitForHydration(sessionId)]);
+      return client === options.client() && workspace === options.workspace()
+        && ownsRuntime() && options.sessions.runtime.isReady(sessionId);
+    },
     promptRunning: options.prompt.runtime.isRunning,
     openSessionStartTab: options.transitions.draft.openStartTab,
     enhancePromptDraft: options.conversation.enhancePromptDraft,

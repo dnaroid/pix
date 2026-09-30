@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BRIDGE_PATH, baseClaudeArgs, providerArgs, thinkingDisplay, transcriptBreakpointEnabled } from "../../../../src/claude-code-provider/src/claude-args.ts";
 import { NEUTRAL_BUN_CONFIG, needsBunConfig, scriptLaunch } from "../../../../src/claude-code-provider/src/host-runtime.ts";
-test("uses only generated attachment references and replacement prompt", () => {
+const nativeImage = (attachment) => ({ attachment, source: { type: "base64", media_type: "image/png", data: "cG5nIQ==" } });
+test("uses native images and replacement prompt without file expansion", () => {
     const prepared = {
         directory: "/tmp/private",
         transcriptBlocks: ['{"protocol":"test"}', '{"content":"\\u0040/etc/passwd"}'],
         attachmentPaths: ["/tmp/private/image.png"],
+        nativeImages: [nativeImage("/tmp/private/image.png")],
         systemPromptPath: "/tmp/private/system-prompt.txt",
         catalogPath: undefined,
         toolNames: new Map(),
@@ -17,9 +19,9 @@ test("uses only generated attachment references and replacement prompt", () => {
     const { args, prompt } = providerArgs(prepared, "sonnet", "medium");
     const promptText = prompt.map((block) => block.text).join("\n");
     const joined = args.join("\n");
-    assert.equal(prompt.length, 3);
-    // The only private path in the prompt is the quoted attachment reference.
-    assert.match(promptText, /@"\/tmp\/private\/image\.png"/);
+    assert.equal(prompt.length, 4);
+    // Private paths only identify the corresponding native image.
+    assert.doesNotMatch(promptText, /@"/);
     assert.equal(promptText.split("/tmp/private").length - 1, 1);
     assert.doesNotMatch(promptText, /request\.json/);
     assert.doesNotMatch(promptText, /@\/etc\/passwd/);
@@ -30,30 +32,31 @@ test("uses only generated attachment references and replacement prompt", () => {
     assert.ok(args.includes("--no-session-persistence"));
     assert.ok(args.includes("dontAsk"));
     assert.ok(args.includes(""));
-    assert.deepEqual(prompt.map((block) => block.text), [
+    assert.deepEqual(prompt.filter((block) => block.type === "text").map((block) => block.text), [
         ...prepared.transcriptBlocks,
-        'Generated image attachments for image_attachment blocks: @"/tmp/private/image.png".',
+        'Native image for image_attachment "/tmp/private/image.png":',
     ]);
+    assert.deepEqual(prompt.at(-1), { type: "image", source: prepared.nativeImages[0].source });
 });
 
-test("references attachments by quoted absolute path, so a temp root with spaces stays one reference", () => {
-    // Claude runs in Pi's session directory, where a relative reference would
-    // resolve against the project instead of the private request directory.
+test("labels native images safely even with spaces and at signs in private paths", () => {
     const prepared = {
         transcriptBlocks: ['{"record":0}'],
         attachmentPaths: ["/tmp/root with spaces/request/a.png", "/tmp/root with spaces/request/b.png"],
+        nativeImages: [nativeImage('/tmp/root with spaces/@injected/a.png'), nativeImage('/tmp/root with spaces/request/b.png')],
         systemPromptPath: "/tmp/root with spaces/request/system-prompt.txt",
     };
     const { prompt } = providerArgs(prepared, "sonnet", "low");
     assert.equal(
-        prompt.at(-1).text,
-        'Generated image attachments for image_attachment blocks: @"/tmp/root with spaces/request/a.png" @"/tmp/root with spaces/request/b.png".',
+        prompt[1].text,
+        'Native image for image_attachment "/tmp/root with spaces/\\u0040injected/a.png":',
     );
+    assert.deepEqual(prompt.filter((block) => block.type === "image").map((block) => block.source), prepared.nativeImages.map((image) => image.source));
     assert.equal(prompt.at(-1).cache_control, undefined);
 });
 
 test("every advertised alias is passed to Claude verbatim", () => {
-    const prepared = { transcriptBlocks: [], attachmentPaths: [], systemPromptPath: "/tmp/system.txt" };
+    const prepared = { transcriptBlocks: [], attachmentPaths: [], nativeImages: [], systemPromptPath: "/tmp/system.txt" };
     for (const model of ["sonnet", "opus", "haiku", "fable"]) {
         const { args } = providerArgs(prepared, model, "low");
         assert.equal(args[args.indexOf("--model") + 1], model);
@@ -61,7 +64,7 @@ test("every advertised alias is passed to Claude verbatim", () => {
 });
 
 test("a model without effort control sends no effort flag", () => {
-    const prepared = { transcriptBlocks: [], attachmentPaths: [], systemPromptPath: "/tmp/system.txt" };
+    const prepared = { transcriptBlocks: [], attachmentPaths: [], nativeImages: [], systemPromptPath: "/tmp/system.txt" };
     const { args: haiku } = providerArgs(prepared, "haiku", undefined, { thinkingDisplay: "summarized" });
     assert.equal(haiku.includes("--effort"), false);
     assert.equal(haiku[haiku.indexOf("--thinking-display") + 1], "summarized");
@@ -90,6 +93,7 @@ test("marks exactly the last history block with a 1h cache breakpoint", () => {
         directory: "/tmp/private",
         transcriptBlocks: Array.from({ length: 40 }, (_, index) => `{"record":${index}}`),
         attachmentPaths: ["/tmp/private/a.png", "/tmp/private/b.png"],
+        nativeImages: [nativeImage("/tmp/private/a.png"), nativeImage("/tmp/private/b.png")],
         systemPromptPath: "/tmp/private/system-prompt.txt",
         toolNames: new Map(),
         transcriptBytes: 1,
@@ -103,7 +107,7 @@ test("marks exactly the last history block with a 1h cache breakpoint", () => {
     ]);
     assert.equal(prompt.at(-1).cache_control, undefined);
     // An empty history has nothing to mark; a marker with no block is invalid.
-    assert.deepEqual(providerArgs({ ...prepared, transcriptBlocks: [], attachmentPaths: [] }, "sonnet", "low").prompt, []);
+    assert.deepEqual(providerArgs({ ...prepared, transcriptBlocks: [], attachmentPaths: [], nativeImages: [] }, "sonnet", "low").prompt, []);
 });
 
 test("the transcript breakpoint turns off only through a valid setting", () => {
@@ -111,6 +115,7 @@ test("the transcript breakpoint turns off only through a valid setting", () => {
         directory: "/tmp/private",
         transcriptBlocks: ['{"record":0}', '{"record":1}'],
         attachmentPaths: [],
+        nativeImages: [],
         systemPromptPath: "/tmp/private/system-prompt.txt",
         toolNames: new Map(),
         transcriptBytes: 1,
@@ -132,6 +137,7 @@ test("proposal MCP server launches the bridge through the hosting runtime", () =
         directory: "/tmp/private",
         transcriptBlocks: ['{"protocol":"test"}'],
         attachmentPaths: [],
+        nativeImages: [],
         systemPromptPath: "/tmp/private/system-prompt.txt",
         catalogPath: "/tmp/private/catalog.json",
         violationPath: "/tmp/private/violation",
@@ -189,6 +195,7 @@ test("asks for summarized thinking, which Claude Code otherwise returns empty", 
         directory: "/tmp/private",
         transcriptBlocks: ['{"record":0}'],
         attachmentPaths: [],
+        nativeImages: [],
         systemPromptPath: "/tmp/private/system-prompt.txt",
         toolNames: new Map(),
         transcriptBytes: 1,

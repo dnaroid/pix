@@ -26,6 +26,9 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
   });
 
   const sidebar = createDesktopSidebarViewModel({
+    contextCommands: () => options.state.runtimeReady && options.state.sessionId
+      ? options.sessions.metadata.slashCommandsBySession.get(options.state.sessionId) ?? []
+      : [],
     workspace: options.workspace,
     configOptions: options.displayedConfigOptions,
     canUseSession: () => options.presentation.canUseSession,

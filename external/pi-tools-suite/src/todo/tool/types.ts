@@ -1,5 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
+import { TODO_THINKING_LEVELS } from "../thinking-policy.js";
 
 // ---------------------------------------------------------------------------
 // Tool / command identity — verbatim string boundaries.
@@ -24,7 +25,7 @@ export const MSG_NO_TODOS = "No todos yet. Ask the agent to add some!";
 // ---------------------------------------------------------------------------
 
 export type TaskStatus = "pending" | "in_progress" | "deferred" | "completed" | "deleted";
-export const TODO_THINKING_LEVEL_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const TODO_THINKING_LEVEL_VALUES = TODO_THINKING_LEVELS;
 export type TodoThinkingLevel = (typeof TODO_THINKING_LEVEL_VALUES)[number];
 
 export type TaskAction = "create" | "update" | "batch_create" | "batch_update" | "list" | "get" | "delete" | "clear" | "export" | "import";

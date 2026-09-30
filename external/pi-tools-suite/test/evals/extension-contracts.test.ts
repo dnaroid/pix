@@ -78,17 +78,8 @@ describe("previously uncovered extension contracts", () => {
 		expect(commands.get("usage")?.description).toContain("quota usage");
 	});
 
-	test("resource-registry registers one management command without touching the project", async () => {
-		const commands = new Map<string, any>();
-		const { default: register } = await import("../../src/resource-registry/index.js");
-		register({
-			on: () => {},
-			registerCommand: (name: string, command: any) => commands.set(name, command),
-		} as any);
-		expect([...commands.keys()]).toEqual(["registry"]);
-		expect(commands.get("registry")?.description).toContain("private Git registry");
-		expect(commands.get("registry")?.description).toContain("remove");
-		expect(commands.get("registry")?.description).toContain("tasks/plans");
+	test("Registry is Desktop-only and is not an extension module", () => {
+		expect(MODULES.some((module) => module.name === "resource-registry")).toBe(false);
 	});
 
 	test("prompt-commands registers its management command with an isolated home", async () => {

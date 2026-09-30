@@ -137,8 +137,8 @@ Parallel sub-agents report live status without taking over the main session:
 
 Useful suite commands include `/todos`, `/sub-status`, `/sub-stop`,
 `/ultrawork`, `/hyperplan`, `/usage`, `/dcp`, `/idx-init`,
-`/idx-update`, `/opencode-import`, `/antigravity-add-account`, and
-`/registry`.
+`/idx-update`, `/opencode-import`, and `/antigravity-add-account`.
+The Git-backed resource Registry is available only in Pix Desktop.
 
 ## Command map
 

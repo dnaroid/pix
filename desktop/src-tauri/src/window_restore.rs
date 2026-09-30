@@ -1,5 +1,6 @@
-//! Membership/workspace persistence. Geometry stays owned by the window-state plugin,
-//! keyed by the same stable labels when windows are recreated.
+//! Membership, workspace and logical normal-geometry persistence. The plugin
+//! only owns maximization, keyed by the same stable labels.
+use crate::window_geometry::{self, Geometry};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io::Read, path::Path, sync::Mutex};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -40,6 +41,8 @@ pub(crate) fn geometry_file() -> &'static str {
 pub(crate) struct SavedWindow {
     label: String,
     workspace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    geometry: Option<Geometry>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -50,14 +53,31 @@ struct Snapshot {
 
 #[derive(Default)]
 struct Registry {
-    windows: BTreeMap<String, String>,
+    windows: BTreeMap<String, SavedWindow>,
     exiting: bool,
 }
 
 impl Registry {
     fn update(&mut self, label: &str, workspace: String) {
         if !self.exiting {
-            self.windows.insert(label.into(), workspace);
+            self.windows
+                .entry(label.into())
+                .and_modify(|window| {
+                    window.workspace = workspace.clone();
+                })
+                .or_insert(SavedWindow {
+                    label: label.into(),
+                    workspace,
+                    geometry: None,
+                });
+        }
+    }
+
+    fn geometry(&mut self, label: &str, geometry: Geometry) {
+        if !self.exiting {
+            if let Some(window) = self.windows.get_mut(label) {
+                window.geometry = Some(geometry);
+            }
         }
     }
 
@@ -69,13 +89,7 @@ impl Registry {
 
     fn freeze(&mut self) -> Vec<SavedWindow> {
         self.exiting = true;
-        self.windows
-            .iter()
-            .map(|(label, workspace)| SavedWindow {
-                label: label.clone(),
-                workspace: workspace.clone(),
-            })
-            .collect()
+        self.windows.values().cloned().collect()
     }
 }
 
@@ -147,24 +161,25 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Er
     let fallback = SavedWindow {
         label: "main".into(),
         workspace: String::new(),
+        geometry: None,
     };
     let windows = if restoring { saved } else { vec![fallback] };
-    let state = app.state::<WindowRestoreState>();
+    let monitors: Vec<_> = app
+        .available_monitors()?
+        .iter()
+        .map(window_geometry::logical_monitor)
+        .collect();
     for window in &windows {
         let mut config = app.config().app.windows[0].clone();
         config.label = window.label.clone();
         if restoring {
             config.url = route(&window.workspace);
         }
+        window_geometry::apply(&mut config, window.geometry, &monitors);
         match WebviewWindowBuilder::from_config(app, &config)?.build() {
             Ok(created) => {
                 crate::startup_theme::apply_to(&created);
-                state
-                    .0
-                    .lock()
-                    .unwrap()
-                    .windows
-                    .insert(window.label.clone(), window.workspace.clone());
+                track(&created, window.workspace.clone(), window.geometry);
             }
             Err(error) => eprintln!("could not restore window {}: {error}", window.label),
         }
@@ -173,14 +188,44 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Er
         let created =
             WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
         crate::startup_theme::apply_to(&created);
-        state
+        track(&created, String::new(), None);
+    }
+    Ok(restoring)
+}
+
+fn record_geometry(window: &WebviewWindow) {
+    if let Some(geometry) = window_geometry::capture(window) {
+        window
+            .state::<WindowRestoreState>()
             .0
             .lock()
             .unwrap()
-            .windows
-            .insert("main".into(), String::new());
+            .geometry(window.label(), geometry);
     }
-    Ok(restoring)
+}
+
+fn track(window: &WebviewWindow, workspace: String, saved: Option<Geometry>) {
+    let geometry = window_geometry::capture(window).or(saved);
+    {
+        let state = window.state::<WindowRestoreState>();
+        let mut registry = state.0.lock().unwrap();
+        registry.update(window.label(), workspace);
+        if let Some(geometry) = geometry {
+            registry.geometry(window.label(), geometry);
+        }
+    }
+    let tracked = window.clone();
+    window.on_window_event(move |event| {
+        if matches!(
+            event,
+            tauri::WindowEvent::Moved(_)
+                | tauri::WindowEvent::Resized(_)
+                | tauri::WindowEvent::CloseRequested { .. }
+        ) {
+            // Native getters only; disk persistence remains on the exit worker.
+            record_geometry(&tracked);
+        }
+    });
 }
 
 #[tauri::command]
@@ -233,9 +278,8 @@ pub(crate) fn desktop_open_project_window(
         .build()
         .map_err(|e| e.to_string())?;
     crate::startup_theme::apply_to(&window);
-    let mut registry = state.0.lock().map_err(|e| e.to_string())?;
     if app.get_webview_window(&label).is_some() {
-        registry.update(&label, workspace);
+        track(&window, workspace, None);
     }
     Ok(())
 }
@@ -249,6 +293,9 @@ pub(crate) fn destroyed(app: &AppHandle, label: &str) {
 }
 
 pub(crate) fn freeze(app: &AppHandle) -> Vec<SavedWindow> {
+    for window in app.webview_windows().values() {
+        record_geometry(window);
+    }
     app.state::<WindowRestoreState>().0.lock().unwrap().freeze()
 }
 
@@ -302,7 +349,8 @@ mod tests {
             snapshot,
             vec![SavedWindow {
                 label: "project-1".into(),
-                workspace: "/b".into()
+                workspace: "/b".into(),
+                geometry: None,
             }]
         );
     }
@@ -312,12 +360,51 @@ mod tests {
         let mut registry = Registry::default();
         registry.update("main", "/a".into());
         registry.update("project-1", "/b".into());
+        let geometry = Geometry {
+            width: 1100.0,
+            height: 750.0,
+            x: 40.0,
+            y: -900.0,
+        };
+        registry.geometry("project-1", geometry);
         let snapshot = registry.freeze();
         registry.destroyed("main", true);
         registry.update("project-1", "/stale".into());
         registry.update("project-late", "/late".into());
+        registry.geometry(
+            "project-1",
+            Geometry {
+                width: 430.0,
+                ..geometry
+            },
+        );
         assert_eq!(registry.freeze(), snapshot);
         assert_eq!(snapshot.len(), 2);
+        assert_eq!(snapshot[1].geometry, Some(geometry));
+    }
+
+    #[test]
+    fn workspace_update_preserves_normal_geometry_and_last_close_keeps_it() {
+        let mut registry = Registry::default();
+        registry.update("main", "/a".into());
+        let geometry = Geometry {
+            width: 1100.0,
+            height: 750.0,
+            x: 40.0,
+            y: -900.0,
+        };
+        registry.geometry("main", geometry);
+        registry.update("main", "/b".into());
+        registry.destroyed("main", false);
+        let snapshot = registry.freeze();
+        assert_eq!(snapshot[0].geometry, Some(geometry));
+        assert_eq!(snapshot[0].workspace, "/b");
+        let bytes = serde_json::to_vec(&Snapshot {
+            version: 1,
+            windows: snapshot.clone(),
+        })
+        .unwrap();
+        assert_eq!(parse(&bytes).unwrap(), snapshot);
     }
 
     #[test]

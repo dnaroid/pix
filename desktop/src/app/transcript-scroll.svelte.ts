@@ -14,6 +14,9 @@ export function reconcileTranscriptResize(
   followsLatest: boolean,
   pane: ScrollMetrics,
 ): { followsLatest: boolean; scrollToLatest: boolean } {
+  // display:none has no useful scroll geometry. In particular, a hidden pane
+  // must not make a reader who scrolled up appear to be at the bottom.
+  if (pane.clientHeight === 0) return { followsLatest, scrollToLatest: false };
   // Preserve follow mode across content growth: the resize has already moved
   // the bottom, so recomputing from the old scrollTop would turn it off before
   // the scheduled scroll can catch up.
@@ -28,6 +31,10 @@ export function reconcileTranscriptResize(
 export function createTranscriptScrollController(options: TranscriptScrollOptions) {
   let followsLatest = $state(true);
   let frame = 0;
+  let visible = true;
+  let restorePending = false;
+  let savedScrollTop = 0;
+  let activatedSessionId: string | null | undefined;
 
   function isNearBottom(): boolean {
     const pane = options.pane();
@@ -36,7 +43,35 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   }
 
   function handleScroll(): void {
+    if (!visible || restorePending || !options.pane()?.clientHeight) return;
     followsLatest = isNearBottom();
+  }
+
+  // Called before the workbench changes display:none, while the old pane still
+  // has valid geometry. Ignore hide/show scroll events until restoration runs.
+  function setVisible(nextVisible: boolean): void {
+    if (visible === nextVisible) return;
+    if (!nextVisible) {
+      const pane = options.pane();
+      if (!restorePending && pane?.clientHeight) savedScrollTop = pane.scrollTop;
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    }
+    visible = nextVisible;
+    restorePending = true;
+    if (visible) scheduleScrollToLatest();
+  }
+
+  // Session tabs share one pane. Arm restoration before replacing its content,
+  // so scroll events caused by the outgoing transcript cannot stop following.
+  function activateSession(sessionId: string | null): void {
+    if (activatedSessionId === sessionId) return;
+    activatedSessionId = sessionId;
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    followsLatest = true;
+    restorePending = true;
+    scheduleScrollToLatest();
   }
 
   function jumpToLatest(): void {
@@ -45,13 +80,19 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   }
 
   function scheduleScrollToLatest(): void {
-    if (!followsLatest) return;
-    if (frame) cancelAnimationFrame(frame);
+    // Coalesce stream/resize notifications without moving a pending scroll to
+    // the next frame. Otherwise continuous updates can starve the live edge.
+    if (!visible || (!followsLatest && !restorePending) || frame) return;
+    const sessionId = options.activeSessionId();
     frame = requestAnimationFrame(() => {
       frame = 0;
-      if (!followsLatest) return;
+      if (sessionId !== options.activeSessionId()) return;
+      if (!visible || (!followsLatest && !restorePending)) return;
       const pane = options.pane();
-      if (pane) pane.scrollTop = pane.scrollHeight;
+      // A show frame can run before layout is usable; ResizeObserver retries.
+      if (!pane?.clientHeight) return;
+      pane.scrollTop = followsLatest ? pane.scrollHeight : savedScrollTop;
+      restorePending = false;
     });
   }
 
@@ -62,7 +103,10 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     followsLatest = true;
     await tick();
     const pane = options.pane();
-    if (pane) pane.scrollTop = pane.scrollHeight;
+    if (visible && pane?.clientHeight) {
+      pane.scrollTop = pane.scrollHeight;
+      restorePending = false;
+    }
   }
 
   function scrollToEntry(entryId: string): void {
@@ -71,6 +115,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     );
     if (!target) return;
     followsLatest = false;
+    restorePending = false;
     if (frame) {
       cancelAnimationFrame(frame);
       frame = 0;
@@ -79,22 +124,16 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   }
 
   $effect(() => {
-    const sessionId = options.activeSessionId();
-    const activeFrame = requestAnimationFrame(() => {
-      if (sessionId !== options.activeSessionId()) return;
-      followsLatest = true;
-      scheduleScrollToLatest();
-    });
-    return () => cancelAnimationFrame(activeFrame);
-  });
-
-  $effect(() => {
     const pane = options.pane();
     const content = options.content();
     if (!pane || typeof ResizeObserver === "undefined") return;
     let connected = true;
     const observer = new ResizeObserver(() => {
-      if (!connected || pane !== options.pane()) return;
+      if (!connected || !visible || pane !== options.pane() || !pane.clientHeight) return;
+      if (restorePending) {
+        scheduleScrollToLatest();
+        return;
+      }
       const reconciliation = reconcileTranscriptResize(followsLatest, pane);
       followsLatest = reconciliation.followsLatest;
       if (reconciliation.scrollToLatest) scheduleScrollToLatest();
@@ -115,6 +154,8 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
 
   return {
     get followsLatest() { return followsLatest; },
+    activateSession,
+    setVisible,
     handleScroll,
     jumpToLatest,
     scheduleScrollToLatest,

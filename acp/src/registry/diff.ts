@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 /** Structured Desktop channel carrying on-demand Registry resource diffs. */
-export const REGISTRY_DIFF_EVENT = "pi-tools-suite:resource-registry:diff";
+
 
 /** Per-file ceiling; larger files are reported as a notice instead of text. */
 const MAX_FILE_BYTES = 1_000_000;

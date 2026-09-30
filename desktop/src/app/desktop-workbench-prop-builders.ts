@@ -200,8 +200,7 @@ export function buildWorkbenchConversationProps(
       draftSession: options.draft.active,
       ready: options.statusReady()
         && !options.sessionMutationRunning()
-        && !options.sessionHistoryLoading()
-        && (options.draft.active || options.activeSessionRuntimeReady()),
+        && (options.draft.active || sessionId !== null),
       promptRunning: options.promptRunning(),
       agentControlState: options.activeAgentControlState(),
       dragActive: options.dragActive(),

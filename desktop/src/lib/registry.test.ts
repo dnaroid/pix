@@ -6,19 +6,50 @@ import {
   registryActionLabel,
   registryCatalogItems,
   registryCatalogSection,
+  registryItemsWithContext,
   registryDiffAvailable,
   registryFriendlyActionLabel,
   registryFriendlyStatusDescription,
   registryFriendlyStatusLabel,
   registryHasAttention,
   registryPrimaryAction,
+  registryPublicationBadge,
+  registryPublicationScope,
+  registryScopeToggleDestination,
   searchRegistryItems,
   registrySnapshotFromSessionState,
+  type RegistryActionRequest,
   type RegistryItem,
   type RegistryStatus,
 } from "./registry";
 
 describe("registry session state", () => {
+  it("marks only exact active skill commands and suppresses duplicate project installation", () => {
+    const skill: RegistryItem = {
+      id: "skill:pdf", type: "skill", name: "pdf", status: "not-installed",
+      statusLabel: "NOT INSTALLED", icon: "·", local: false, remote: true,
+      actions: ["install", "update", "make-local", "toggle-scope", "remove"],
+    };
+    const commands = [{ name: "skill:pdf", description: "PDF", _meta: { "pix.commandSource": "skill" } }];
+    const marked = registryItemsWithContext([skill], commands)[0]!;
+    expect(marked.inContext).toBe(true);
+    expect(marked.local).toBe(false);
+    expect(marked.actions).toEqual(["toggle-scope", "remove"]);
+    expect(registryCatalogSection(marked)).toBe("installed");
+    expect(registryFriendlyStatusLabel(marked)).toBe("In context");
+    expect(skill.actions).toContain("install"); // Never mutate the cached snapshot.
+    expect(registryItemsWithContext([skill], [
+      { ...commands[0]!, name: "skill:pdf-extra" },
+      { ...commands[0]!, _meta: { "pix.commandSource": "extension" } },
+    ])[0]!.inContext).toBe(false);
+    expect(registryItemsWithContext([{ ...skill, type: "agent" }], commands)[0]!.inContext).toBe(false);
+    const projectCopy = registryItemsWithContext([{ ...skill, local: true, actions: ["update", "tags", "uninstall"] }], commands)[0]!;
+    expect(projectCopy.actions).toEqual(["update", "tags", "uninstall"]);
+    const cleared = registryItemsWithContext([skill], [])[0]!;
+    expect(cleared.inContext).toBe(false);
+    expect(cleared.actions).toEqual(skill.actions);
+    expect(registryCatalogSection(cleared)).toBe("available");
+  });
   it("parses a structured resource snapshot", () => {
     const snapshot = registrySnapshotFromSessionState({
       sessionId: "session-1",
@@ -283,6 +314,75 @@ describe("registry session state", () => {
     expect(searchRegistryItems(snapshot.items, "unrelated")).toHaveLength(0);
     expect(registryPrimaryAction(snapshot.items[0]!)).toBeUndefined();
     expect(registrySnapshotFromSessionState({ ...event, data: { ...raw, items: [{ ...raw.items[0], tags: [7] }] } })).toBeUndefined();
+  });
+});
+
+describe("registry publication scope", () => {
+  function scopeItem(overrides: Partial<RegistryItem> = {}): RegistryItem {
+    return {
+      id: "skill:shared",
+      type: "skill",
+      name: "shared",
+      status: "up-to-date",
+      statusLabel: "UP TO DATE",
+      icon: "✓",
+      local: true,
+      remote: true,
+      actions: ["toggle-scope"],
+      ...overrides,
+    };
+  }
+
+  function snapshotWith(item: RegistryItem, projectKey?: string) {
+    return registrySnapshotFromSessionState({
+      sessionId: "s",
+      channel: REGISTRY_STATE_CHANNEL,
+      data: {
+        version: 1,
+        configured: true,
+        branch: "main",
+        ...(projectKey ? { projectKey } : {}),
+        checkedAt: "now",
+        items: [item],
+      },
+    });
+  }
+
+  it("parses the publication scope and defaults missing scopes to global", () => {
+    const globalSnapshot = snapshotWith(scopeItem());
+    expect(globalSnapshot?.items[0]?.publicationScope).toBeUndefined();
+    expect(registryPublicationScope(globalSnapshot!.items[0]!)).toBe("global");
+
+    const projectSnapshot = snapshotWith(scopeItem({ publicationScope: "project" }), "project-alpha");
+    expect(projectSnapshot?.projectKey).toBe("project-alpha");
+    expect(projectSnapshot?.items[0]?.publicationScope).toBe("project");
+    expect(registryPublicationScope(projectSnapshot!.items[0]!)).toBe("project");
+  });
+
+  it("rejects malformed publication scope metadata", () => {
+    expect(snapshotWith(scopeItem({ publicationScope: "team" as never }))).toBeUndefined();
+  });
+
+  it("moves the toggle destination to the opposite scope", () => {
+    expect(registryScopeToggleDestination(scopeItem())).toBe("project");
+    expect(registryScopeToggleDestination(scopeItem({ publicationScope: "project" }))).toBe("global");
+  });
+
+  it("labels the toggle by its destination and badges published rows with scope", () => {
+    expect(registryActionLabel("toggle-scope")).toBe("Change visibility");
+    expect(registryFriendlyActionLabel(scopeItem(), "toggle-scope")).toBe("Make project");
+    expect(registryFriendlyActionLabel(scopeItem({ publicationScope: "project" }), "toggle-scope")).toBe("Make global");
+
+    expect(registryPublicationBadge(scopeItem())).toBe("Published · Global");
+    expect(registryPublicationBadge(scopeItem({ publicationScope: "project" }))).toBe("Published · Project");
+    expect(registryPublicationBadge(scopeItem({ remote: false, status: "local-only" }))).toBe("Local");
+  });
+
+  it("keeps visibility changes out of primary actions and issues a scoped toggle request", () => {
+    expect(registryPrimaryAction(scopeItem({ actions: ["toggle-scope", "uninstall"] }))).toBeUndefined();
+
+    const request: RegistryActionRequest = { action: "toggle-scope", type: "skill", name: "shared" };
+    expect(request).toEqual({ action: "toggle-scope", type: "skill", name: "shared" });
   });
 });
 

@@ -42,8 +42,9 @@ must not replace the current view.
 
 ## Implementation
 
-- `external/pi-tools-suite/src/resource-registry/index.ts`
-- `external/pi-tools-suite/src/resource-registry/diff.ts`
+- `acp/src/registry/service.ts`
+- `acp/src/registry/diff-service.ts`
+- `acp/src/registry/diff.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 - `desktop/src/lib/registry.ts`
@@ -57,7 +58,7 @@ must not replace the current view.
 
 ## Tests
 
-- `external/pi-tools-suite/test/resource-registry.test.ts`
+- `acp/test/registry.test.ts`
 - `acp/test/desktop-commands.test.ts`
 - `acp/test/agent.test.ts`
 - `desktop/src/lib/acp-client.test.ts`

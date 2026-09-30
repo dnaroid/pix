@@ -128,9 +128,9 @@ Two practical consequences for this skill:
 
 A finished skill lives locally until someone deliberately shares it. Sharing goes through the common Git registry:
 
-- `/registry push skill <name>` publishes the skill. The **full skill tree travels** — SKILL.md plus everything bundled with it (`scripts/`, `references/`, `assets/`, eval files), so check the tree for stray or private content before pushing.
+- In Pix Desktop's Registry, **Make global** publishes the skill. The **full skill tree travels** — SKILL.md plus everything bundled with it (`scripts/`, `references/`, `assets/`, eval files), so check the tree for stray or private content before publishing. There is no TUI Registry command.
 - Publishing does not auto-load the skill anywhere. Other projects get it only when someone there installs it explicitly from the registry.
-- `/registry remove <name>` removes the publication only; project copies are retained.
+- **Make local** removes the publication while retaining the project copy.
 - If `<name>` collides with an entry already in the registry, the collision requires review before pushing — check whether the existing entry is yours or someone else's, and rename or coordinate rather than blindly overwriting.
 - The optional `tags` frontmatter is what makes the skill findable once published: tags are searchable and editable in the Registry.
 - Don't add a `scope` frontmatter key — there is no such field. Scope is determined by publication presence, nothing else.

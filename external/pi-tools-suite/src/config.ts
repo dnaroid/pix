@@ -6,13 +6,15 @@ import { parse as parseJsonc } from "jsonc-parser";
 import { defaultFrontierConfig, normalizeFrontierModels, type FrontierModelEntry } from "./async-subagents/core/frontier-models.js";
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "./default-pi-tools-suite-config.js";
 import { PI_TOOLS_SUITE_MODULE_CATALOG } from "./module-catalog.js";
+import { isTodoThinkingPolicy, type TodoThinkingPolicy } from "./todo/thinking-policy.js";
+export type { TodoThinkingLevel, TodoThinkingPolicy } from "./todo/thinking-policy.js";
 
 export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
 	disabledBuiltinAgents: string[];
 	todoThinking: boolean;
-	todoThinkingOverrides: Record<string, TodoThinkingLevel>;
+	todoThinkingOverrides: Record<string, TodoThinkingPolicy>;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
 	lookupModel?: string;
 	/** Ordered lookup fallbacks tried after lookupModel. Always present, even when empty. */
@@ -38,17 +40,13 @@ type MutableConfig = {
 	disabledModules: Set<string>;
 	disabledBuiltinAgents: Set<string>;
 	todoThinking: boolean;
-	todoThinkingOverrides: Map<string, TodoThinkingLevel>;
+	todoThinkingOverrides: Map<string, TodoThinkingPolicy>;
 	lookupModel: string | undefined;
 	lookupFallbackModels: string[];
 	frontierModels: FrontierModelEntry[];
 	economy: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 };
-
-const TODO_THINKING_OVERRIDE_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-export type TodoThinkingLevel = (typeof TODO_THINKING_OVERRIDE_LEVELS)[number];
-
 type Env = Record<string, string | undefined>;
 
 export interface LoadPiToolsSuiteConfigOptions {
@@ -72,7 +70,7 @@ const ENABLED_BUILTIN_AGENT_LIST_KEYS = ["enabledBuiltinAgents"];
 const DEFAULT_DISABLED_MODULES = new Set<string>(
 	PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name),
 );
-const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingLevel>([["zai/glm-5.3", "max"]]);
+const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingPolicy>([["zai/glm-5.3", { min: "max", max: "max" }]]);
 const DEFAULT_RESOURCE_REGISTRY_BRANCH = "main";
 
 export function getPiToolsSuiteUserConfigPath(homeDir = process.env.HOME?.trim() || homedir()): string {
@@ -133,10 +131,6 @@ function mergeResourceRegistry(config: MutableConfig, raw: unknown): void {
 	}
 }
 
-function isTodoThinkingLevel(raw: unknown): raw is TodoThinkingLevel {
-	return TODO_THINKING_OVERRIDE_LEVELS.includes(raw as TodoThinkingLevel);
-}
-
 function mergeTodoThinkingOverrides(config: MutableConfig, raw: unknown): void {
 	if (!isRecord(raw)) return;
 	for (const [rawPattern, value] of Object.entries(raw)) {
@@ -146,7 +140,7 @@ function mergeTodoThinkingOverrides(config: MutableConfig, raw: unknown): void {
 			config.todoThinkingOverrides.delete(pattern);
 			continue;
 		}
-		if (isTodoThinkingLevel(value)) config.todoThinkingOverrides.set(pattern, value);
+		if (isTodoThinkingPolicy(value)) config.todoThinkingOverrides.set(pattern, value);
 	}
 }
 
@@ -302,7 +296,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
 		disabledBuiltinAgents: new Set(),
 		todoThinking: false,
-		todoThinkingOverrides: new Map(DEFAULT_TODO_THINKING_OVERRIDES),
+		todoThinkingOverrides: new Map([...DEFAULT_TODO_THINKING_OVERRIDES].map(([key, range]) => [key, { ...range }])),
 		lookupModel: undefined,
 		lookupFallbackModels: [],
 		frontierModels: defaultFrontierConfig().models,

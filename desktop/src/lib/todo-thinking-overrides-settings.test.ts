@@ -5,19 +5,36 @@ import {
   setTodoThinkingOverrideInSource,
   todoThinkingOverridePatternKey,
   todoThinkingOverrideRows,
+  todoThinkingRangeError,
 } from "./todo-thinking-overrides-settings";
 import { parseSettingsSource } from "./settings";
 
 describe("todo thinking override settings", () => {
+  it("validates ranges", () => {
+    expect(todoThinkingRangeError({ min: "low", max: "medium" })).toBeUndefined();
+    expect(todoThinkingRangeError({ min: "high", max: "low" })).toContain("Min");
+    expect(todoThinkingRangeError({ min: "future", max: "max" })).toBeDefined();
+  });
+
+  it("merges ranges atomically and saves both bounds while preserving JSONC", () => {
+    const range = { min: "low", max: "medium" };
+    expect(todoThinkingOverrideRows({ "opus/*": { min: "high", max: "high" } }, { "opus/*": range })[0]).toEqual({
+      pattern: "opus/*", level: range, inherited: true, explicit: true,
+    });
+    const source = '{ // preserve\n "todoThinkingOverrides": { "other": { "min": "high", "max": "high" } } }';
+    const saved = setTodoThinkingOverrideInSource(source, "opus/*", range);
+    expect(saved).toContain("// preserve");
+    expect(parseSettingsSource(saved).value.todoThinkingOverrides).toEqual({ other: { min: "high", max: "high" }, "opus/*": range });
+  });
   it("merges inherited defaults with explicit values and removal markers", () => {
     expect(todoThinkingOverrideRows(
       {
-        "zai/glm-5.3": "max",
-        "cheap-provider/*": "high",
+        "zai/glm-5.3": { min: "max", max: "max" },
+        "cheap-provider/*": { min: "low", max: "high" },
       },
       {
         "ZAI/GLM-5.3": null,
-        "openai-codex/gpt-*": "medium",
+        "openai-codex/gpt-*": { min: "low", max: "medium" },
       },
     )).toEqual([
       {
@@ -28,27 +45,28 @@ describe("todo thinking override settings", () => {
       },
       {
         pattern: "cheap-provider/*",
-        level: "high",
+        level: { min: "low", max: "high" },
         inherited: true,
         explicit: false,
       },
       {
         pattern: "openai-codex/gpt-*",
-        level: "medium",
+        level: { min: "low", max: "medium" },
         inherited: false,
         explicit: true,
       },
     ]);
   });
 
-  it("preserves configured string values so the structured UI can repair them", () => {
+  it("ignores strings and preserves configured range values so the UI can repair them", () => {
     expect(todoThinkingOverrideRows({}, {
-      "provider/model": "future-level",
+      "old/model": "max",
+      "provider/model": { min: "future-level", max: "max" },
       ignored: 42,
     })).toEqual([
       {
         pattern: "provider/model",
-        level: "future-level",
+        level: { min: "future-level", max: "max" },
         inherited: false,
         explicit: true,
       },
@@ -65,41 +83,41 @@ describe("todo thinking override settings", () => {
       "  // Keep surrounding JSONC comments.",
       '  "todoThinking": true,',
       '  "todoThinkingOverrides": {',
-      '    "zai/glm-5.3": "max",',
-      '    "old/*": "high"',
+      '    "zai/glm-5.3": { "min": "max", "max": "max" },',
+      '    "old/*": { "min": "high", "max": "high" }',
       "  }",
       "}",
     ].join("\n");
 
-    const added = setTodoThinkingOverrideInSource(source, "openai-codex/gpt-*", "medium");
+    const added = setTodoThinkingOverrideInSource(source, "openai-codex/gpt-*", { min: "low", max: "medium" });
     expect(added).toContain("// Keep surrounding JSONC comments.");
     expect(parseSettingsSource(added).value.todoThinkingOverrides).toMatchObject({
-      "zai/glm-5.3": "max",
-      "old/*": "high",
-      "openai-codex/gpt-*": "medium",
+      "zai/glm-5.3": { min: "max", max: "max" },
+      "old/*": { min: "high", max: "high" },
+      "openai-codex/gpt-*": { min: "low", max: "medium" },
     });
 
     const renamed = renameTodoThinkingOverrideInSource(added, {
       pattern: "old/*",
-      level: "high",
+      level: { min: "high", max: "high" },
       inherited: false,
       explicit: true,
     }, "cheap/*");
     expect(parseSettingsSource(renamed).value.todoThinkingOverrides).toMatchObject({
-      "zai/glm-5.3": "max",
-      "cheap/*": "high",
-      "openai-codex/gpt-*": "medium",
+      "zai/glm-5.3": { min: "max", max: "max" },
+      "cheap/*": { min: "high", max: "high" },
+      "openai-codex/gpt-*": { min: "low", max: "medium" },
     });
 
     const removed = removeTodoThinkingOverrideFromSource(renamed, {
       pattern: "openai-codex/gpt-*",
-      level: "medium",
+      level: { min: "low", max: "medium" },
       inherited: false,
       explicit: true,
     });
     expect(parseSettingsSource(removed).value.todoThinkingOverrides).toEqual({
-      "zai/glm-5.3": "max",
-      "cheap/*": "high",
+      "zai/glm-5.3": { min: "max", max: "max" },
+      "cheap/*": { min: "high", max: "high" },
     });
   });
 });

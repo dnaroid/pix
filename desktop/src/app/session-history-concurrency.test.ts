@@ -2,7 +2,7 @@ import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import type { LazySessionHistory } from "../lib/acp-client-types";
-import { type ToolItem } from "../lib/transcript";
+import { appendLocalUserMessage, emptyTranscript, type ToolItem } from "../lib/transcript";
 import { createActiveSessionState } from "./active-session-state.svelte";
 import { createSessionHistory } from "./session-history.svelte";
 
@@ -35,6 +35,56 @@ function harness() {
 }
 
 describe("lazy history request ownership", () => {
+  it.each(["switch", "forget", "reset", "replacement"])(
+    "retains submit-owned background hydration only while its session is valid: %s", async (action) => {
+      const h = harness();
+      h.state.setTranscriptFor("session-1", appendLocalUserMessage(emptyTranscript, "optimistic", "local:1"));
+      const old = deferred<LazySessionHistory>();
+      h.sessionHistory.mockReturnValueOnce(old.promise);
+      const pending = h.history.hydrate(h.client, "session-1", "/project", h.history.begin());
+      const wait = h.history.waitForHydration("session-1");
+      h.history.cancel();
+      h.state.setSessionId("other");
+      h.state.setTranscriptFor("other", appendLocalUserMessage(emptyTranscript, "other tab", "local:other"));
+      if (action === "forget") {
+        h.history.forget("session-1");
+        h.state.deleteSessionTranscript("session-1");
+      }
+      if (action === "reset") {
+        h.history.reset();
+        h.state.clearSessionTranscripts();
+      }
+      if (action === "replacement") {
+        h.state.setSessionId("session-1");
+        h.state.setTranscript(emptyTranscript);
+        h.sessionHistory.mockResolvedValueOnce({ updates: [], deferredToolCallIds: [], cursor: "replacement" });
+        await h.history.hydrate(h.client, "session-1", "/project", h.history.begin());
+        h.state.setSessionId("other");
+        h.state.setTranscript(h.state.sessionTranscript("other")!);
+      }
+      old.resolve({ updates: [{ sessionUpdate: "user_message_chunk", messageId: "persisted",
+        content: { type: "text", text: "persisted" } }], deferredToolCallIds: [], cursor: "older" });
+      await pending;
+      await wait;
+      expect(h.state.transcript.items[0]).toMatchObject({ text: "other tab" });
+      if (action === "switch") {
+        expect(h.state.sessionTranscript("session-1")?.items).toMatchObject([
+          { text: "persisted" }, { text: "optimistic" },
+        ]);
+        h.state.setSessionId("session-1");
+        h.state.setTranscript(h.state.sessionTranscript("session-1")!);
+        h.history.cancel();
+        h.sessionHistory.mockResolvedValueOnce({ updates: [], deferredToolCallIds: [] });
+        await h.history.loadOlder();
+        expect(h.sessionHistory).toHaveBeenLastCalledWith("session-1", false, "older");
+      } else if (action === "replacement") {
+        expect(h.state.sessionTranscript("session-1")?.items).toEqual([]);
+      } else {
+        expect(h.state.sessionTranscript("session-1")).toBeUndefined();
+        expect(h.history.olderCursorCount).toBe(0);
+      }
+    },
+  );
   it("coalesces duplicate tool requests and does not request an already hydrated body", async () => {
     const h = harness();
     const response = deferred<SessionUpdate>();

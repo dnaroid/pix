@@ -58,7 +58,7 @@ describe("draft-session concurrency guards", () => {
   });
 
   it("does not delete an unavailable-history session until its concurrent runtime load also fails", () => {
-    const historyStart = historySource.indexOf("async function hydrate(");
+    const historyStart = historySource.indexOf("async function hydrateRequest(");
     const historyEnd = historySource.indexOf("async function loadDeferredToolResult", historyStart);
     const history = historySource.slice(historyStart, historyEnd);
     const unavailable = history.indexOf("session history ${sessionId} is unavailable");

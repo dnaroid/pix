@@ -63,6 +63,8 @@ import {
 	type SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { Logger } from "../logging.js";
+import { DesktopRegistryService } from "../registry/service.js";
+import type { RegistryContext } from "../registry/context.js";
 import { stringifyUnknown } from "../stringify-unknown.js";
 import {
 	createAutocompleteCompleter,
@@ -82,10 +84,6 @@ const PIX_FILE_IMAGES_META_KEY = "pix.fileImages";
 const MAX_PROMPT_FILE_IMAGE_COUNT = 10;
 const MAX_PROMPT_FILE_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_PROMPT_FILE_IMAGES_TOTAL_BYTES = 50 * 1024 * 1024;
-const REGISTRY_SNAPSHOT_TIMEOUT_MS = 5_000;
-/** Structured-state channels published by the pi-tools-suite registry extension. */
-const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
-const REGISTRY_DIFF_CHANNEL = "pi-tools-suite:resource-registry:diff";
 import {
 	isExtensionUiRequest,
 	type PiClient,
@@ -418,6 +416,8 @@ export interface PixAcpAgentOptions {
 	readonly enhancePrompt?: PromptEnhancer;
 	/** One-shot Git review/commit-message backend (overridable for hermetic tests). */
 	readonly gitAssistant?: GitAssistant;
+	/** Direct workspace Registry backend (overridable for transport tests). */
+	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff">;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
 	readonly queryModelUsage?: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
 	/**
@@ -480,6 +480,7 @@ export class PixAcpAgent {
 	private readonly loadDesktopQueues: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
 	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
+	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff">;
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
@@ -497,6 +498,7 @@ export class PixAcpAgent {
 		this.loadDesktopQueues = options.loadDesktopQueues ?? ((cwd, sessionPath) => loadDesktopQueues(cwd, sessionPath));
 		this.saveDesktopQueues = options.saveDesktopQueues ?? ((cwd, sessionPath, queues) => saveDesktopQueues(cwd, sessionPath, queues));
 		this.copyText = options.copyText ?? copyTextToClipboard;
+		this.registryService = options.registryService ?? new DesktopRegistryService();
 		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
 			logger: options.logger,
 			loadConfig: this.loadAutocompleteConfig,
@@ -617,7 +619,7 @@ export class PixAcpAgent {
 				this.desktopRegistryAction(ctx.params, ctx.client),
 			)
 			.onRequest(PIX_REGISTRY_DIFF_METHOD, parseDesktopRegistryDiffRequest, (ctx) =>
-				this.desktopRegistryDiff(ctx.params, ctx.client),
+				this.desktopRegistryDiff(ctx.params),
 			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopTakeAutoMessage(ctx.params),
@@ -731,140 +733,47 @@ export class PixAcpAgent {
 	}
 
 	/**
-	 * Run one `/registry rpc` command in a disposable, non-persisted workspace
-	 * runtime and return the structured payload it publishes on `channel`.
-	 *
-	 * Registry is workspace-scoped; its private command runs in its own pi RPC
-	 * runtime instead of borrowing a conversation session. This keeps Registry
-	 * usable before the first chat tab exists and avoids coupling project
-	 * synchronization to an agent's streaming state.
+	 * Bridge direct workspace Registry dialogs to Desktop elicitation without
+	 * creating or borrowing a conversation/Pi runtime.
 	 */
-	private async runWorkspaceRegistryCommand(
-		cwd: string,
-		command: string,
-		channel: string,
-		payloadLabel: string,
-		client: ClientCaller,
-	): Promise<unknown> {
-		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
-			...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
-			...(this.options.toolsSuiteExtensionPath
-				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
-				: {}),
-		});
-
-		const pi = this.options.createPiClient(registryPiClientOptions(
-			this.options.piEntry,
-			cwd,
-			toolsSuiteExtensionPath,
-		));
-		let payload: unknown;
-		let resolvePayload: ((value: unknown) => void) | undefined;
-		const unsubscribe = pi.onEvent((event) => {
-			if (!isExtensionUiRequest(event)) return;
-			const state = sessionStateEnvelopeFromUiRequest(event);
-			if (state?.channel === channel) {
-				payload = state.data;
-				resolvePayload?.(state.data);
-				resolvePayload = undefined;
-				return;
+	private registryContext(cwd: string, client: ClientCaller): RegistryContext {
+		const ask = async (request: RpcExtensionUIRequest): Promise<{ value?: string; confirmed?: boolean }> => {
+			const elicitation = toElicitationRequest(request, { elicitationId: randomUUID() });
+			if (!elicitation || this.clientCapabilities?.elicitation?.form == null) return {};
+			try {
+				const response = fromElicitationResponse(await client.request("elicitation/create", elicitation), request);
+				return "value" in response ? { value: response.value } : "confirmed" in response ? { confirmed: response.confirmed } : {};
 			}
-			void this.handleWorkspaceRegistryUiRequest(pi, event, client);
-		});
-
-		try {
-			await pi.start();
-			const commands = await pi.getCommands();
-			if (!commands.some((registered) => registered.name.replace(/^\/+/, "") === "registry")) {
-				throw new RequestError(ERROR_SERVER, "resource registry extension is unavailable");
+			catch (error) {
+				this.options.logger.warn(`registry elicitation failed: ${stringifyUnknown(error)}`);
+				return {};
 			}
-			// Ignore any advisory startup publication; the command below publishes
-			// the authoritative payload after its filesystem/Git work.
-			payload = undefined;
-			const payloadEvent = new Promise<unknown>((resolve) => { resolvePayload = resolve; });
-			await pi.prompt(command);
-			if (payload === undefined) {
-				let timeout: ReturnType<typeof setTimeout> | undefined;
-				try {
-					payload = await Promise.race([
-						payloadEvent,
-						new Promise<never>((_resolve, reject) => {
-							timeout = setTimeout(() => {
-								reject(new RequestError(
-									ERROR_SERVER,
-									`resource registry did not publish a ${payloadLabel}`,
-								));
-							}, REGISTRY_SNAPSHOT_TIMEOUT_MS);
-							timeout.unref?.();
-						}),
-					]);
-				} finally {
-					if (timeout !== undefined) clearTimeout(timeout);
-				}
-			}
-			if (payload === undefined) {
-				throw new RequestError(ERROR_SERVER, `resource registry published an empty ${payloadLabel}`);
-			}
-			return payload;
-		} finally {
-			resolvePayload = undefined;
-			unsubscribe();
-			await pi.stop().catch(() => undefined);
-		}
+		};
+		return {
+			cwd, hasUI: this.clientCapabilities?.elicitation?.form != null,
+			ui: {
+				confirm: async (title, message) => (await ask({ type: "extension_ui_request", id: randomUUID(), method: "confirm", title, message })).confirmed === true,
+				input: async (title, placeholder) => (await ask({ type: "extension_ui_request", id: randomUUID(), method: "input", title, ...(placeholder === undefined ? {} : { placeholder }) })).value,
+				editor: async (title, prefill) => (await ask({ type: "extension_ui_request", id: randomUUID(), method: "editor", title, ...(prefill === undefined ? {} : { prefill }) })).value,
+				notify: (message, type) => { if (type === "error" || type === "warning") this.options.logger.warn(message); },
+			},
+		};
 	}
 
 	private async desktopRegistryAction(
 		params: DesktopRegistryActionRequest,
 		client: ClientCaller,
 	): Promise<DesktopRegistryActionResponse> {
-		const snapshot = await this.runWorkspaceRegistryCommand(
-			params.cwd,
-			registryRpcCommand(params),
-			REGISTRY_STATE_CHANNEL,
-			"workspace snapshot",
-			client,
-		);
+		const snapshot = await this.registryService.action(params, this.registryContext(params.cwd, client));
 		return { snapshot };
 	}
 
 	/** Read-only diff between one resource's registry and project-local copies. */
 	private async desktopRegistryDiff(
 		params: DesktopRegistryDiffRequest,
-		client: ClientCaller,
 	): Promise<DesktopRegistryDiffResponse> {
-		const payload = await this.runWorkspaceRegistryCommand(
-			params.cwd,
-			registryDiffRpcCommand(params),
-			REGISTRY_DIFF_CHANNEL,
-			"workspace diff",
-			client,
-		);
+		const payload = await this.registryService.diff(params);
 		return { files: desktopRegistryDiffFiles(payload) };
-	}
-
-	private async handleWorkspaceRegistryUiRequest(
-		pi: PiClient,
-		request: RpcExtensionUIRequest,
-		client: ClientCaller,
-	): Promise<void> {
-		const elicitation = toElicitationRequest(request, { elicitationId: randomUUID() });
-		if (!elicitation) {
-			if (request.method === "select" || request.method === "confirm" || request.method === "input" || request.method === "editor") {
-				this.safeRespond(pi, cancelledResponse(request.id));
-			}
-			return;
-		}
-		if (this.clientCapabilities?.elicitation?.form == null) {
-			this.safeRespond(pi, cancelledResponse(request.id));
-			return;
-		}
-		try {
-			const answer = await client.request("elicitation/create", elicitation);
-			this.safeRespond(pi, fromElicitationResponse(answer, request));
-		} catch (error) {
-			this.options.logger.warn(`workspace registry elicitation/create failed: ${stringifyUnknown(error)}`);
-			this.safeRespond(pi, cancelledResponse(request.id));
-		}
 	}
 
 	private async forkMessages(params: DesktopSessionRequest): Promise<ForkMessagesResponse> {
@@ -2909,7 +2818,7 @@ export class PixAcpAgent {
 		// stale path just because the post-settle write was still in flight.
 		await this.syncLiveSessionRecord(session);
 		if (isSlashPrompt) {
-			// Extension commands such as /registry can reload the Pi runtime from
+			// Extension commands can reload the Pi runtime from
 			// inside the RPC process. Their context-inventory event arrives during
 			// the command; consume it only after the prompt has settled so resource
 			// discovery and skill command registration are final.
@@ -3536,29 +3445,7 @@ function piClientOptions(
 	return { ...selected, args: [...(base.args ?? []), "--thinking", defaultModel.thinkingLevel] };
 }
 
-function registryPiClientOptions(
-	piEntry: string,
-	cwd: string,
-	toolsSuiteExtensionPath?: string,
-): PiRpcClientOptions {
-	return {
-		piEntry,
-		cwd,
-		env: {
-			PIX_ACP_SESSION_STATE_BRIDGE: "1",
-			PIX_ACP_REGISTRY_WORKSPACE_RPC: "1",
-		},
-		args: [
-			...(toolsSuiteExtensionPath ? ["--extension", toolsSuiteExtensionPath] : []),
-			"--no-session",
-			"--no-context-files",
-			"--no-skills",
-			"--no-prompt-templates",
-			"--no-themes",
-			"--no-tools",
-		],
-	};
-}
+
 
 function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): SessionMapRecord | undefined {
 	const cwd = requestedCwd ?? session.cwd;
@@ -3986,23 +3873,9 @@ function commandPathArgument(value: string | undefined): string | undefined {
 	return trimmed.split(/\s+/u)[0];
 }
 
-function registryRpcCommand(params: DesktopRegistryActionRequest): string {
-	if (params.action === "refresh") return "/registry rpc refresh";
-	if (params.action === "configure") return "/registry rpc configure";
-	if (params.action === "project-key") return "/registry rpc project-key";
-	if ("scope" in params) {
-		const action = params.action === "sync-project" ? "sync" : params.action === "push-project" ? "push" : "pull";
-		return `/registry rpc ${action} ${params.scope}`;
-	}
-	if (!("type" in params) || !("name" in params)) {
-		throw new RequestError(ERROR_SERVER, "invalid registry action request");
-	}
-	return `/registry rpc ${params.action} ${params.type} ${params.name}`;
-}
 
-function registryDiffRpcCommand(params: DesktopRegistryDiffRequest): string {
-	return `/registry rpc diff ${params.type} ${params.name}`;
-}
+
+
 
 /** Validate the registry extension's structured diff payload into ACP files. */
 function desktopRegistryDiffFiles(payload: unknown): DesktopRegistryDiffFile[] {

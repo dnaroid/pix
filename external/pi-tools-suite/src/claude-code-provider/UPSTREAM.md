@@ -47,6 +47,12 @@ Maintained differences:
    them. Test imports/fixture paths target this module; obsolete count-cap
    expectations use the explicit limit seam. Upstream release/paid-runner and
    repository-policy tests are not Pix runtime contracts.
+7. `src/context-serializer.ts`, `src/claude-args.ts`, `src/types.ts`: native
+   stream-json base64 image blocks replace generated `@file` mentions, avoiding
+   CLI 2.1.283's silent 256 KiB file-mention filter. Validated bytes are not
+   recompressed. Stable private files/labels, deduplication, byte limits,
+   transcript cache breakpoint and attachment-read recovery remain intact.
+   Native transport tests include a valid >256 KiB PNG through subprocess stdin.
 
 `DESIGN.md`, `SECURITY.md` and `CHANGELOG.md` are retained upstream reference
 documents, **not** current Pix contracts. Upstream command/install instructions

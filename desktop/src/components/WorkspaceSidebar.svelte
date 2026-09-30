@@ -100,6 +100,7 @@
     registryReady,
     gitAssistantReady,
     registrySnapshot,
+    registryContextCommands = [],
     registryProjectInitialized,
     registryProjectPiSizeBytes,
     registryProjectPiCleanupBytes,
@@ -179,6 +180,7 @@
     registryReady: boolean;
     gitAssistantReady: boolean;
     registrySnapshot: RegistrySnapshot | undefined;
+    registryContextCommands?: readonly import("@agentclientprotocol/sdk").AvailableCommand[];
     registryProjectInitialized: boolean | undefined;
     registryProjectPiSizeBytes: number | null | undefined;
     registryProjectPiCleanupBytes: number | undefined;
@@ -743,6 +745,7 @@
       {:else if activeTab === "registry"}
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
           <RegistryPanel
+            contextCommands={registryContextCommands}
             snapshot={registrySnapshot}
             backgroundSync={registryBackgroundSync}
             projectInitialized={registryProjectInitialized}

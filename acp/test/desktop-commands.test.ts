@@ -125,7 +125,7 @@ test("desktop registry actions are workspace-scoped and validate resource/projec
 		});
 	}
 	assert.throws(() => parseDesktopRegistryActionRequest({ action: "refresh" }));
-	for (const action of ["tags", "make-local"] as const) {
+	for (const action of ["tags", "make-local", "toggle-scope"] as const) {
 		for (const type of ["skill", "agent"] as const) {
 			assert.deepEqual(parseDesktopRegistryActionRequest({ cwd: "/workspace", action, type, name: "demo" }), {
 				cwd: "/workspace", action, type, name: "demo",

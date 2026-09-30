@@ -16,11 +16,18 @@ export interface ClaudeAuthStatus {
   subscriptionType?: string;
 }
 
+export interface NativeImageAttachment {
+  /** Correlation with image_attachment records; not an @file reference. */
+  attachment: string;
+  source: { type: "base64"; media_type: string; data: string };
+}
+
 export interface PreparedRequest {
   directory: string;
   imageStoreDirectory?: string;
   transcriptBlocks: string[];
   attachmentPaths: string[];
+  nativeImages: NativeImageAttachment[];
   systemPromptPath: string;
   catalogPath?: string;
   violationPath?: string;

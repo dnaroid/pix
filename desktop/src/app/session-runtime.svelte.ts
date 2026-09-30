@@ -40,6 +40,7 @@ export function createSessionRuntimeStore(options: SessionRuntimeStoreOptions) {
     getConfigOptions: loading.getConfigOptions,
     setConfigOptions: loading.setConfigOptions,
     ensure: loading.ensure,
+    captureOwnership: loading.captureOwnership,
     markReady: loading.markReady,
     forget,
     invalidatePrewarm: loading.invalidatePrewarm,

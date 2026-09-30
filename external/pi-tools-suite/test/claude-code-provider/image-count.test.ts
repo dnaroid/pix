@@ -18,6 +18,8 @@ test("real serializer accepts 21 and 100 images, retains byte and content guards
     try {
       assert.equal(prepared.imageCount, count);
       assert.equal(prepared.attachmentPaths.length, 1);
+      assert.equal(prepared.nativeImages.length, 1);
+      assert.equal(prepared.nativeImages[0].source.data, png);
       assert.equal(prepared.imageBytes, Buffer.from(png, "base64").length);
       assert.equal(prepared.transcriptBlocks.join("\n").match(/image_attachment/g).length, count + 1);
     } finally {

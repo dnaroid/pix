@@ -40,8 +40,16 @@ export function nativeSupervisor(child: ChildProcess, options: ProcessSupervisor
 	// The provider's normal stdin.close must NOT cancel this separate liveness pipe.
 	const terminate = async (): Promise<void> => {
 		let endError: Error | undefined;
-		if (!(control as NodeJS.WritableStream & { writableEnded?: boolean }).writableEnded) {
-			try { control.end((error?: Error) => { if (error) endError = error; }); }
+		const socket = control as NodeJS.WritableStream & { writableEnded?: boolean; destroyed?: boolean; destroy?: () => void };
+		if (!socket.writableEnded && !socket.destroyed) {
+			// Graceful half-close first; its completion is irrelevant because the
+			// forced close below is what must deliver the EOF to the native relay.
+			try { control.end(); } catch { /* already tearing down; the destroy still closes */ }
+		}
+		// Bun can drop the fd close when end() races spawn setup, leaving the
+		// native relay unaware of the control EOF; force the socket closed.
+		if (!socket.destroyed && socket.destroy) {
+			try { socket.destroy(); }
 			catch (error) { endError = error as Error; }
 		}
 		let timer: ReturnType<typeof setTimeout> | undefined;

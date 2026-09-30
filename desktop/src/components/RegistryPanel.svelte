@@ -8,7 +8,9 @@
   import CloudOff from "@lucide/svelte/icons/cloud-off";
   import Download from "@lucide/svelte/icons/download";
   import FileDiff from "@lucide/svelte/icons/file-diff";
+  import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
+  import Globe from "@lucide/svelte/icons/globe";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2Off from "@lucide/svelte/icons/link-2-off";
   import PackageMinus from "@lucide/svelte/icons/package-minus";
@@ -29,6 +31,9 @@
     registryFriendlyStatusDescription,
     registryFriendlyStatusLabel,
     registryPrimaryAction,
+    registryPublicationBadge,
+    registryPublicationScope,
+    registryScopeToggleDestination,
     searchRegistryItems,
     type RegistryActionRequest,
     type RegistryCatalogSection,
@@ -44,11 +49,14 @@
   import RegistryDiffPanel from "./RegistryDiffPanel.svelte";
   import type { RegistryBackgroundSyncState } from "../lib/registry-background-sync";
   import { registryProjectSyncPresentation } from "../lib/registry-project-sync";
+  import { registryItemsWithContext } from "../lib/registry";
+  import type { AvailableCommand } from "@agentclientprotocol/sdk";
 
   type RegistryFilter = "all" | Exclude<RegistryResourceType, "project">;
 
   let {
     snapshot,
+    contextCommands = [],
     backgroundSync,
     projectInitialized,
     projectPiSizeBytes,
@@ -69,6 +77,7 @@
     onCloseDiff,
   }: {
     snapshot: RegistrySnapshot | undefined;
+    contextCommands?: readonly AvailableCommand[];
     backgroundSync: RegistryBackgroundSyncState;
     projectInitialized: boolean | undefined;
     projectPiSizeBytes: number | null | undefined;
@@ -111,7 +120,7 @@
   const projectPendingItems = $derived(projectItems.filter((item) => item.status !== "up-to-date"));
   const projectConflictCount = $derived(projectItems.filter((item) => item.status === "diverged" || item.status === "registry-changed" || item.status === "untracked-local").length);
   const projectKeyRequired = $derived(Boolean(snapshot?.projectIssue && !snapshot?.projectKey));
-  const catalogItems = $derived((snapshot?.items ?? []).filter((item) => item.type !== "project"));
+  const catalogItems = $derived(registryItemsWithContext((snapshot?.items ?? []).filter((item) => item.type !== "project"), contextCommands));
   const installedCount = $derived(registryCatalogItems(catalogItems, "installed").length);
   const availableCount = $derived(registryCatalogItems(catalogItems, "available").length);
   const projectSync = $derived(registryProjectSyncPresentation(projectItems, backgroundSync, snapshot?.error, projectKeyRequired));
@@ -200,6 +209,23 @@
 
   function statusTitle(item: RegistryItem): string {
     return `${registryFriendlyStatusLabel(item)} — ${registryFriendlyStatusDescription(item)}`;
+  }
+
+  function publicationTitle(item: RegistryItem): string {
+    if (!item.remote) return "Only in this project";
+    return registryPublicationScope(item) === "project"
+      ? "Published to the shared Git registry for this project only"
+      : "Published to the shared Git registry for every project";
+  }
+
+  const PROJECT_SCOPE_SETUP_HINT = 'Project visibility needs a project key first — set one with "Set project key" in the Project sync section.';
+
+  function scopeToggleBlocked(item: RegistryItem, action: RegistryItemAction): boolean {
+    // Narrowing visibility to this project needs a destination project key;
+    // widening back to global visibility never does.
+    return action === "toggle-scope"
+      && registryScopeToggleDestination(item) === "project"
+      && !snapshot?.projectKey;
   }
 
   function projectEditTitle(item: RegistryItem): string {
@@ -398,7 +424,7 @@
         ]}
         type="button"
         aria-label="Installed resources"
-        title="Skills and agents installed in this project, whether local or published"
+        title="Project copies and skills already available to the active session"
         aria-pressed={catalogSection === "installed"}
         onclick={() => catalogSection = "installed"}
       >
@@ -486,20 +512,20 @@
                   "shrink-0 whitespace-nowrap rounded border px-1 py-px font-mono text-xs font-semibold tracking-wide",
                   typeTone(item.type),
                 ]}>{typeLabel(item.type)}</span>
+                {#if item.tags?.length}<span class="min-w-0 max-w-1/2 truncate text-xs text-muted-foreground" title={item.tags.join(", ")}>{item.tags.map((tag) => `#${tag}`).join(" ")}</span>{/if}
               </div>
               <p class="flex min-h-3.5 min-w-0 items-center gap-1.5 text-xs leading-3.5 text-muted-foreground/80" data-registry-row="description">
                 {#if item.description}<span class="min-w-0 flex-1 truncate" title={item.description}>{item.description}</span>{/if}
-                {#if item.tags?.length}<span class={["min-w-0 truncate", item.description ? "max-w-1/2" : ""]} title={item.tags.join(", ")}>{item.tags.map((tag) => `#${tag}`).join(" ")}</span>{/if}
               </p>
               <div class="flex min-w-0 items-center justify-between gap-2" data-registry-row="footer">
                 <div class="flex min-w-0 items-center gap-1.5">
                   <span
-                    class={["grid h-3.5 w-3.5 shrink-0 place-items-center", iconTone(item.status)]}
+                    class={["grid h-3.5 w-3.5 shrink-0 place-items-center", item.inContext && !item.local ? "text-tool-success" : iconTone(item.status)]}
                     title={statusTitle(item)}
                     aria-label={statusTitle(item)}
                     role="img"
                   >
-                    {#if item.status === "up-to-date"}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
+                    {#if item.status === "up-to-date" || (item.inContext && !item.local)}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
                     {:else if item.status === "update-available" || item.status === "missing-local" || item.status === "not-installed"}<CircleArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
                     {:else if item.status === "local-changes" || item.status === "local-only"}<CircleArrowUp class="h-3.5 w-3.5" aria-hidden="true" />
                     {:else if item.status === "diverged"}<TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
@@ -508,8 +534,11 @@
                     {:else if item.status === "registry-changed"}<Link2Off class="h-3.5 w-3.5" aria-hidden="true" />
                     {:else}<CircleX class="h-3.5 w-3.5" aria-hidden="true" />{/if}
                   </span>
-                  <span class={["min-w-0 truncate text-xs font-semibold", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</span>
-                  <span class="shrink-0 rounded border border-border bg-muted/20 px-1 py-px text-xs text-muted-foreground" title={item.remote ? "Published to the shared Git registry" : "Only in this project"}>{item.remote ? "Published" : "Local"}</span>
+                  <span class={["min-w-0 truncate text-xs font-semibold", item.inContext && !item.local ? "text-tool-success" : iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</span>
+                  {#if item.inContext && item.local}
+                    <span class="shrink-0 text-xs font-medium text-tool-success" title="Available to the active session">In context</span>
+                  {/if}
+                  <span class="shrink-0 rounded border border-border bg-muted/20 px-1 py-px text-xs text-muted-foreground" title={publicationTitle(item)}>{registryPublicationBadge(item)}</span>
                 </div>
                 {#if registryDiffAvailable(item) || item.actions.length > 0}
                   <div class="flex shrink-0 items-center gap-0.5">
@@ -534,15 +563,16 @@
                     {#each item.actions as action}
                       {@const actionBusy = actionId === `${item.id}:${action}`}
                       {@const actionLabel = registryFriendlyActionLabel(item, action)}
+                      {@const scopeSetupRequired = scopeToggleBlocked(item, action)}
                       <button
                         class={[
                           "grid h-6 w-6 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40",
                           actionTone(item, action),
                         ]}
                         type="button"
-                        disabled={remoteBusy}
-                        title={actionLabel}
-                        aria-label={`${actionLabel}: ${item.name}`}
+                        disabled={remoteBusy || scopeSetupRequired}
+                        title={scopeSetupRequired ? PROJECT_SCOPE_SETUP_HINT : actionLabel}
+                        aria-label={`${scopeSetupRequired ? PROJECT_SCOPE_SETUP_HINT : actionLabel}: ${item.name}`}
                         onclick={() => runItemAction(item, action)}
                       >
                         {#if actionBusy}
@@ -559,6 +589,12 @@
                           <Pencil class="h-3.5 w-3.5" aria-hidden="true" />
                         {:else if action === "make-local"}
                           <CloudOff class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else if action === "toggle-scope"}
+                          {#if registryScopeToggleDestination(item) === "global"}
+                            <Globe class="h-3.5 w-3.5" aria-hidden="true" />
+                          {:else}
+                            <FolderGit2 class="h-3.5 w-3.5" aria-hidden="true" />
+                          {/if}
                         {:else}
                           <Trash2 class="h-3.5 w-3.5" aria-hidden="true" />
                         {/if}

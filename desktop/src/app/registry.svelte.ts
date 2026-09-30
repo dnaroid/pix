@@ -231,7 +231,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     ) return;
 
     actionId = nextActionId;
-    // Registry RPC runs in its own workspace-scoped disposable Pi runtime.
+    // Registry RPC uses the standalone workspace-scoped ACP service.
     // Keep exclusivity local to Registry; the global Desktop operation lock
     // would unnecessarily disable unrelated workbench UI while Git is running.
     options.setErrorMessage(null);

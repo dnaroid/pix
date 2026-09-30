@@ -1,11 +1,13 @@
 import type { SessionStateNotification } from "./session-state";
 import { fuzzySearch } from "./fuzzy";
+import type { AvailableCommand } from "@agentclientprotocol/sdk";
 
 export const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
 
 export type RegistryResourceType = "skill" | "agent" | "project";
 export type RegistryCatalogSection = "installed" | "available";
 export type RegistryProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
+export type RegistryPublicationScope = "global" | "project";
 export type RegistryStatus =
   | "up-to-date"
   | "update-available"
@@ -18,7 +20,7 @@ export type RegistryStatus =
   | "removed-remote"
   | "registry-changed";
 
-export type RegistryItemAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags";
+export type RegistryItemAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
 
 export interface RegistryItem {
   readonly id: string;
@@ -31,7 +33,9 @@ export interface RegistryItem {
   readonly description?: string;
   readonly tags?: readonly string[];
   readonly local: boolean;
+  readonly inContext?: boolean;
   readonly remote: boolean;
+  readonly publicationScope?: RegistryPublicationScope;
   readonly actions: RegistryItemAction[];
 }
 
@@ -71,7 +75,7 @@ export type RegistryDiffState =
 export type RegistryActionRequest =
   | { readonly action: "refresh" | "configure" | "project-key" }
   | {
-      readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags";
+      readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
       readonly type: "skill" | "agent";
       readonly name: string;
     }
@@ -82,6 +86,7 @@ export type RegistryActionRequest =
 
 const RESOURCE_TYPES = new Set<RegistryResourceType>(["skill", "agent", "project"]);
 const PROJECT_ARTIFACTS = new Set<RegistryProjectArtifact>(["tasks", "plans", "todo", "workspace"]);
+const PUBLICATION_SCOPES = new Set<RegistryPublicationScope>(["global", "project"]);
 const STATUSES = new Set<RegistryStatus>([
   "up-to-date",
   "update-available",
@@ -94,7 +99,7 @@ const STATUSES = new Set<RegistryStatus>([
   "removed-remote",
   "registry-changed",
 ]);
-const ACTIONS = new Set<RegistryItemAction>(["install", "update", "push", "pull", "uninstall", "remove", "make-local", "tags"]);
+const ACTIONS = new Set<RegistryItemAction>(["install", "update", "push", "pull", "uninstall", "remove", "make-local", "tags", "toggle-scope"]);
 const DIFFABLE_STATUSES = new Set<RegistryStatus>([
   "local-changes",
   "update-available",
@@ -122,9 +127,29 @@ export function registryHasAttention(snapshot: RegistrySnapshot | undefined): bo
 
 export function registryCatalogSection(item: RegistryItem): RegistryCatalogSection | undefined {
   if (item.type === "project") return undefined;
-  if (item.local) return "installed";
+  if (item.local || item.inContext) return "installed";
   if (item.remote) return "available";
   return undefined;
+}
+
+/** Session availability is independent of a Registry-managed project copy. */
+export function registryItemsWithContext(
+  items: readonly RegistryItem[],
+  commands: readonly AvailableCommand[],
+): RegistryItem[] {
+  const skills = new Set(commands
+    .filter((command) => command._meta?.["pix.commandSource"] === "skill")
+    .map((command) => command.name.replace(/^\/+/, "").replace(/^skill:/, "")));
+  return items.map((item) => {
+    const inContext = item.type === "skill" && skills.has(item.name);
+    return {
+      ...item,
+      inContext,
+      actions: inContext ? item.actions.filter((action) =>
+        action !== "install" && (item.local || (action !== "update" && action !== "make-local"))
+      ) : item.actions,
+    };
+  });
 }
 
 export function registryCatalogItems(
@@ -135,7 +160,25 @@ export function registryCatalogItems(
 }
 
 export function registryPrimaryAction(item: RegistryItem): RegistryItemAction | undefined {
-  return item.actions.find((action) => action !== "uninstall" && action !== "remove" && action !== "tags" && action !== "make-local");
+  return item.actions.find((action) =>
+    action !== "uninstall" && action !== "remove" && action !== "tags" && action !== "make-local" && action !== "toggle-scope"
+  );
+}
+
+/** Published resources default to global visibility when the backend omits the scope. */
+export function registryPublicationScope(item: RegistryItem): RegistryPublicationScope {
+  return item.publicationScope === "project" ? "project" : "global";
+}
+
+/** The visibility toggle always moves the publication to the opposite scope. */
+export function registryScopeToggleDestination(item: RegistryItem): RegistryPublicationScope {
+  return registryPublicationScope(item) === "project" ? "global" : "project";
+}
+
+/** Footer badge text: publication plus its visibility scope for published rows. */
+export function registryPublicationBadge(item: RegistryItem): string {
+  if (!item.remote) return "Local";
+  return registryPublicationScope(item) === "project" ? "Published · Project" : "Published · Global";
 }
 
 /**
@@ -160,10 +203,12 @@ export function registryActionLabel(action: RegistryItemAction): string {
     case "remove": return "Remove from registry";
     case "make-local": return "Make local (unpublish)";
     case "tags": return "Edit tags";
+    case "toggle-scope": return "Change visibility";
   }
 }
 
 export function registryFriendlyStatusLabel(item: RegistryItem): string {
+  if (item.inContext && !item.local) return "In context";
   switch (item.status) {
     case "up-to-date": return "Synced";
     case "update-available": return "Update available";
@@ -179,6 +224,7 @@ export function registryFriendlyStatusLabel(item: RegistryItem): string {
 }
 
 export function registryFriendlyStatusDescription(item: RegistryItem): string {
+  if (item.inContext && !item.local) return "Available to the active session; no project installation is needed.";
   switch (item.status) {
     case "up-to-date": return "Installed here and matches the registry.";
     case "update-available": return "Installed here; a newer registry version is available.";
@@ -197,6 +243,9 @@ export function registryFriendlyStatusDescription(item: RegistryItem): string {
 
 export function registryFriendlyActionLabel(item: RegistryItem, action: RegistryItemAction): string {
   if (item.type !== "project" && action === "push" && !item.remote) return "Make global (publish)";
+  if (action === "toggle-scope") {
+    return registryPublicationScope(item) === "project" ? "Make global" : "Make project";
+  }
   if (item.status === "untracked-local" && action === "push") return "Keep local version";
   if (item.status === "untracked-local" && action === "pull") return "Keep registry version";
   if (item.status === "removed-remote" && action === "push") return "Restore in registry";
@@ -310,6 +359,10 @@ function parseRegistryItem(value: unknown): RegistryItem | undefined {
   if (typeof value.local !== "boolean" || typeof value.remote !== "boolean" || !Array.isArray(value.actions)) return undefined;
   if (value.description !== undefined && typeof value.description !== "string") return undefined;
   if (value.tags !== undefined && (!Array.isArray(value.tags) || value.tags.some((tag) => typeof tag !== "string"))) return undefined;
+  if (value.publicationScope !== undefined
+    && (typeof value.publicationScope !== "string" || !PUBLICATION_SCOPES.has(value.publicationScope as RegistryPublicationScope))) {
+    return undefined;
+  }
   if (value.artifact !== undefined && (typeof value.artifact !== "string" || !PROJECT_ARTIFACTS.has(value.artifact as RegistryProjectArtifact))) {
     return undefined;
   }
@@ -330,6 +383,7 @@ function parseRegistryItem(value: unknown): RegistryItem | undefined {
     ...(Array.isArray(value.tags) ? { tags: value.tags as string[] } : {}),
     local: value.local,
     remote: value.remote,
+    ...(typeof value.publicationScope === "string" ? { publicationScope: value.publicationScope as RegistryPublicationScope } : {}),
     actions,
   };
 }

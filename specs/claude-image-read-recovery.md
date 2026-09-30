@@ -14,6 +14,9 @@ effective payload**, the adapter rejects the proposal internally and retries
 once with a system instruction to inspect already attached images directly.
 No Pi tool executes during recovery. Historical images still present in the
 effective context qualify; images introduced by `onPayload` qualify too.
+Images themselves travel as native base64 blocks. Retained private attachment
+paths are correlation/recovery identifiers, not CLI `@file` inputs; see
+[native transport](claude-code-provider.md#native-image-transport).
 
 Image-bearing attempts buffer their stream until validation and finalization;
 rejected proposals and first-attempt text never reach Pi's transcript. Text-only

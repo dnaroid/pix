@@ -20,6 +20,7 @@
     ariaLabel = "Model",
     emptyLabel,
     disabled = false,
+    allowCustom = false,
   }: {
     value: string;
     models?: readonly ModelThinkingModel[];
@@ -28,7 +29,11 @@
     ariaLabel?: string;
     emptyLabel?: string;
     disabled?: boolean;
+    allowCustom?: boolean;
   } = $props();
+
+  const componentId = $props.id();
+  const optionsId = componentId + "-model-options";
 
   let root = $state<HTMLDivElement | null>(null);
   let trigger = $state<HTMLButtonElement | null>(null);
@@ -46,9 +51,9 @@
     next.push(...catalogOptions);
     return next;
   });
-  const filteredOptions = $derived(searchSettingsModelOptions(choices, query));
+  const filteredOptions = $derived(searchSettingsModelOptions(choices, query, allowCustom));
   const currentOption = $derived(choices.find((option) => option.value === value));
-  const unavailable = $derived(catalogOptions.length === 0 && !value && !emptyLabel);
+  const unavailable = $derived(!allowCustom && catalogOptions.length === 0 && !value && !emptyLabel);
   const triggerDisabled = $derived(disabled || unavailable);
   const triggerLabel = $derived(currentOption?.label ?? (value || emptyLabel || "Model catalog unavailable"));
 
@@ -125,7 +130,7 @@
     aria-label={ariaLabel}
     aria-haspopup="listbox"
     aria-expanded={open}
-    aria-controls={open ? "settings-model-options" : undefined}
+    aria-controls={open ? optionsId : undefined}
     disabled={triggerDisabled}
     onclick={() => open ? close() : show()}
     onkeydown={handleTriggerKeydown}
@@ -147,9 +152,9 @@
           aria-label={`Search ${ariaLabel.toLowerCase()}`}
           aria-autocomplete="list"
           aria-expanded="true"
-          aria-controls="settings-model-options"
-          aria-activedescendant={filteredOptions[selectedIndex] ? `settings-model-option-${selectedIndex}` : undefined}
-          placeholder="Filter models…"
+          aria-controls={optionsId}
+          aria-activedescendant={filteredOptions[selectedIndex] ? `${optionsId}-${selectedIndex}` : undefined}
+          placeholder={allowCustom ? "provider/model or wildcard" : "Filter models…"}
           autocomplete="off"
           spellcheck="false"
           bind:value={query}
@@ -157,7 +162,7 @@
           onkeydown={handleSearchKeydown}
         />
       </div>
-      <div id="settings-model-options" class="max-h-56 overflow-y-auto p-1" role="listbox" aria-label={ariaLabel}>
+      <div id={optionsId} class="max-h-56 overflow-y-auto p-1" role="listbox" aria-label={ariaLabel}>
         {#each filteredOptions as option, index (option.value)}
           <button
             class={[
@@ -166,7 +171,7 @@
             ]}
             type="button"
             role="option"
-            id={`settings-model-option-${index}`}
+            id={`${optionsId}-${index}`}
             aria-selected={option.value === value}
             tabindex="-1"
             onmouseenter={() => selectedIndex = index}

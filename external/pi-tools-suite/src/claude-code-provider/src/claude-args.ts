@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { ClaudeCodeError } from "./errors.ts";
 import { scriptLaunch, type ScriptLaunch } from "./host-runtime.ts";
-import type { PreparedRequest } from "./types.ts";
+import type { NativeImageAttachment, PreparedRequest } from "./types.ts";
 
 // Empty setting sources plus explicit settings preserve subscription authentication
 // while suppressing user and project customizations. --bare would disable OAuth,
@@ -57,11 +57,13 @@ export function thinkingDisplay(environment: NodeJS.ProcessEnv = process.env): "
   throw new ClaudeCodeError("thinking_display_config", `${THINKING_DISPLAY_ENV} must be "summarized", "omitted", or "off"`);
 }
 
-interface PromptBlock {
+interface TextPromptBlock {
   type: "text";
   text: string;
   cache_control?: typeof TRANSCRIPT_CACHE_CONTROL;
 }
+
+type PromptBlock = TextPromptBlock | { type: "image"; source: NativeImageAttachment["source"] };
 
 /** The single owner of how the proposal bridge is launched on either Pi distribution. */
 export function bridgeLaunch(bunConfigPath?: string): ScriptLaunch {
@@ -103,16 +105,9 @@ export function providerArgs(
   effort: string | undefined,
   options: { transcriptBreakpoint?: boolean; thinkingDisplay?: "summarized" | "omitted" } = {},
 ): { args: string[]; prompt: PromptBlock[] } {
-  // Quoted absolute references: Claude runs in Pi's session directory, where a
-  // relative reference would resolve against the project, and the quotes keep a
-  // temporary root containing spaces in one reference.
-  const imageRefs = prepared.attachmentPaths.map((path) => `@"${path}"`).join(" ");
-  const imageInstruction = imageRefs
-    ? ` Generated image attachments for image_attachment blocks: ${imageRefs}.`
-    : "";
-  // Keep the attachment list after unchanged history and outside the breakpoint.
-  // Claude Code narrates image reads ahead of the transcript, so the paths must
-  // also stay stable across requests for that earlier prefix to be reusable.
+  // Native blocks bypass Claude Code's silent 256 KiB @file attachment limit.
+  // Keep images after history and outside its breakpoint. Labels correlate each
+  // unique image with all its transcript occurrences, without triggering reads.
   const markedBlock = options.transcriptBreakpoint === false ? -1 : prepared.transcriptBlocks.length - 1;
   const prompt: PromptBlock[] = [
     ...prepared.transcriptBlocks.map((text, index) => ({
@@ -120,7 +115,13 @@ export function providerArgs(
       text,
       ...(index === markedBlock ? { cache_control: TRANSCRIPT_CACHE_CONTROL } : {}),
     })),
-    ...(imageInstruction ? [{ type: "text" as const, text: imageInstruction.trim() }] : []),
+    ...prepared.nativeImages.flatMap<PromptBlock>((image) => [
+      {
+        type: "text",
+        text: `Native image for image_attachment ${JSON.stringify(image.attachment).replaceAll("@", "\\u0040")}:`,
+      },
+      { type: "image", source: image.source },
+    ]),
   ];
   const bridge = bridgeLaunch(prepared.bunConfigPath);
   const mcpConfig = prepared.catalogPath

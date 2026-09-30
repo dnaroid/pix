@@ -158,7 +158,7 @@
     onChange(updateToolsSuiteModuleSource(source, parsed, name, enabled));
   }
 
-  function addTodoThinkingOverride(pattern: string, level: string): void {
+  function addTodoThinkingOverride(pattern: string, level: TodoThinkingOverrideValue): void {
     onChange(setTodoThinkingOverrideInSource(source, pattern, level));
   }
 
@@ -234,7 +234,7 @@
     <SettingsFieldRow label="Todo thinking" description="Allow todo items to switch and restore model thinking levels as work moves in progress." explicit={has(["todoThinking"])} defaultLabel={defaultLabel(["todoThinking"])} onReset={() => reset(["todoThinking"])}>
       <SettingsSwitch value={bool(["todoThinking"])} onChange={(value) => set(["todoThinking"], value)} />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Todo thinking overrides" description="Choose a forced thinking level for exact models or wildcard patterns. Use No override to clear inherited policy." explicit={has(["todoThinkingOverrides"])} defaultLabel={defaultLabel(["todoThinkingOverrides"])} onReset={() => reset(["todoThinkingOverrides"])}>
+    <SettingsFieldRow label="Todo thinking limits" explicit={has(["todoThinkingOverrides"])} defaultLabel={defaultLabel(["todoThinkingOverrides"])} onReset={() => reset(["todoThinkingOverrides"])}>
       <SettingsTodoThinkingOverrides
         rows={todoThinkingRows}
         {models}

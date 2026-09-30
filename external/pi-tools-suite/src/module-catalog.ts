@@ -38,7 +38,6 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "truncation-metadata-normalizer", defaultEnabled: true, description: "Removes redundant truncation metadata text when it duplicates content already visible in the tool result." },
 	{ name: "dcp", defaultEnabled: true, description: "Provides Dynamic Context Pruning, manual/automatic compression, context statistics, and recoverable summaries." },
 	{ name: "prompt-commands", defaultEnabled: true, description: "Lets users create and manage saved prompt-backed slash commands from pi-tools-suite config." },
-	{ name: "resource-registry", defaultEnabled: true, description: "Synchronizes reusable skills, agents, tasks, plans, and TODO state through a private Git registry." },
 	// Secret firewall is intentionally opt-in. Keep it after payload-shaping modules.
 	{ name: "credential-firewall", defaultEnabled: false, description: "Redacts high-confidence secrets from outbound payloads and optionally from persisted session content." },
 	// Keep this last within the suite, after its other payload modifiers. Other

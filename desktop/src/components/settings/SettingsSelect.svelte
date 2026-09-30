@@ -11,7 +11,8 @@
   }: {
     value: string;
     options: readonly SettingsSelectOption[];
-    onChange: (value: string) => void;
+    // Returning false rejects the native selection without moving keyboard focus.
+    onChange: (value: string) => unknown;
     ariaLabel?: string;
   } = $props();
 
@@ -23,7 +24,11 @@
     class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong py-0 pr-7 pl-2 text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30"
     {value}
     aria-label={ariaLabel}
-    onchange={(event) => onChange((event.currentTarget as HTMLSelectElement).value)}
+    onchange={(event) => {
+      const select = event.currentTarget as HTMLSelectElement;
+      const previousValue = value;
+      if (onChange(select.value) === false) select.value = previousValue;
+    }}
   >
     {#if configuredOnly}<option value={value}>{value} · Configured</option>{/if}
     {#each options as option (option.value)}

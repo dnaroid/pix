@@ -45,27 +45,40 @@ is still available at its saved desktop coordinates.
 - The development Restart button uses the same clean exit. `watch:all` waits for
   the old process to exit before launching its replacement, so shutdown persistence
   is not interrupted by SIGTERM/SIGKILL. A timed-out handoff leaves the old process alone.
-- After a clean application exit, the next launch restores the last non-minimized size and position.
+- After a clean application exit, the next launch restores the last normal size and position (excluding minimized, maximized and fullscreen rectangles).
+- Normal geometry is stored in macOS logical points, not unqualified physical
+  pixels. It is applied to the window configuration before creation, so moving
+  between screens with different backing scales does not repeatedly shrink it.
+- Membership snapshots from before logical geometry was introduced still restore
+  every project. Their unqualified plugin pixel rectangles are not migrated:
+  the first launch uses configured dimensions/OS placement, then records the
+  new normal geometry. Restored sizes respect configured logical minimums.
 - Desktop coordinates restore the window onto the same available display.
 - If the saved display is unavailable or the saved rectangle no longer intersects any display, the operating system chooses a safe position instead of restoring the window off-screen.
 - A maximized window reopens maximized while retaining its previous normal geometry for a later unmaximize.
 - Missing, unreadable, or malformed persisted state falls back to the configured defaults.
 - UI-QA (`PI_UI_QA=1`) and release smoke (`PIX_RELEASE_SMOKE=1`) launches use one
   main window and do not read/write the user's open-window membership snapshot.
-  The existing geometry plugin still operates in those launches.
+  The maximization plugin still operates in those launches; logical geometry is
+  not persisted unless the native restore QA opt-in below is enabled.
 - Native restore QA can explicitly set `PI_UI_QA_WINDOW_RESTORE=1` alongside
   `PI_UI_QA=1`: membership uses `qa-open-windows.json` and geometry uses
-  `.qa-restore-window-state.json`, never the user's snapshots. The initial QA
+  `.qa-restore-window-state.json` for maximization, never the user's snapshots. The initial QA
   workspace override applies only when no windows were restored. Smoke still
   disables membership restoration even if the QA restore opt-in is set.
 
 ## Contracts
 
-- Window state is stored in Tauri's application configuration directory by the official window-state plugin.
-- For geometry, only size, position, and maximized state are persisted.
-- Geometry is keyed by stable window label. Membership/workspaces use a versioned,
+- Window state is stored in Tauri's application configuration directory.
+- Normal size/position are owned by `window_geometry`/`window_restore`; the
+  official window-state plugin persists/restores **only maximization**. It must
+  not independently apply physical size/position after logical builder geometry.
+- Geometry is keyed by stable window label. Membership/workspaces/logical geometry use a versioned,
   bounded `open-windows.json` in the same application configuration directory,
   atomically replaced during clean exit on the existing shutdown worker.
+- Native move/resize/close callbacks cache only normal logical geometry, with no
+  disk IO. Explicit Quit captures live normal geometry and freezes it with the
+  membership snapshot before background teardown; late events cannot mutate it.
 - Configured automatic main-window creation is disabled; native startup creates
   either the saved window set or one default main window.
 
@@ -74,6 +87,7 @@ is still available at its saved desktop coordinates.
 - `desktop/src-tauri/Cargo.toml`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/src/window_restore.rs`
+- `desktop/src-tauri/src/window_geometry.rs`
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/app/project-workspace.svelte.ts`
 - `desktop/src/app/workspace-controller.ts`
@@ -81,6 +95,7 @@ is still available at its saved desktop coordinates.
 ## Tests
 
 - `desktop/src-tauri/src/window_restore.rs`
+- `desktop/src-tauri/src/window_geometry.rs`
 - `desktop/src/app/project-workspace.test.ts`
 - `desktop/src/app/workspace-controller.test.ts`
 
@@ -90,6 +105,8 @@ is still available at its saved desktop coordinates.
 - Run the desktop checks and tests.
 - Run Rust `window_restore::tests` for snapshot validation, stable labels,
   encoded workspace routes, last-window close and frozen teardown ordering.
+- Run Rust `window_geometry::tests` for mixed-scale round trips/repeated
+  restarts, legacy fallback, logical minimums and unavailable-screen placement.
 - In the native application, give multiple project windows distinct geometry,
   quit/relaunch and confirm all return; close one before Quit and confirm it does
   not return. Repeat after closing the main window, leaving only project windows.
@@ -106,4 +123,6 @@ is still available at its saved desktop coordinates.
 ## Evidence
 
 - Confirmed by code: the main window has stable label `main` and configured fallback dimensions.
-- Confirmed by Tauri documentation: the official window-state plugin automatically saves state on exit, restores it when a window is ready, and avoids applying a saved position that does not intersect an available monitor.
+- Confirmed by code: native startup applies normal geometry in logical points
+  before creating each window, checking logical display intersection. The official
+  window-state plugin saves on exit and restores only maximization when ready.

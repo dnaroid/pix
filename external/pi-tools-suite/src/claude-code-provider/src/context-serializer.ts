@@ -151,6 +151,7 @@ export async function prepareRequestWithLimits(
     const systemPromptPath = join(directory, "system-prompt.txt");
     await writeFile(systemPromptPath, context.systemPrompt ?? "", { mode: 0o600, flag: "wx" });
     const attachmentPaths: string[] = [];
+    const nativeImages: PreparedRequest["nativeImages"] = [];
     const writtenImages = new Set<string>();
     let imageCount = 0;
     let imageBytes = 0;
@@ -228,11 +229,15 @@ export async function prepareRequestWithLimits(
                 throw new ClaudeCodeError("image_total_size", `Aggregate image size exceeds ${limits.totalImageBytes} bytes`);
               }
               const path = imageStore ? await imageStore.put(name, validated.bytes) : join(directory, name);
-              // Claude Code's quoted @-reference cannot contain a double quote.
+              // Retain the private-store path policy across transport versions.
               if (path.includes('"')) throw new ClaudeCodeError("image_path", `Images cannot be attached from a temporary directory containing a double quote: ${path}; choose a temporary directory without one (TMPDIR, or TEMP on Windows)`);
               if (!imageStore) await writeFile(path, validated.bytes, { mode: 0o600, flag: "wx" });
               writtenImages.add(name);
               attachmentPaths.push(path);
+              nativeImages.push({
+                attachment: path,
+                source: { type: "base64", media_type: image.mimeType, data: validated.bytes.toString("base64") },
+              });
             }
             output.push({ type: "image_attachment", attachment: name, mimeType: image.mimeType } satisfies SerializedImage);
             break;
@@ -317,6 +322,7 @@ export async function prepareRequestWithLimits(
       imageStoreDirectory: imageStore?.directory,
       transcriptBlocks,
       attachmentPaths,
+      nativeImages,
       systemPromptPath,
       catalogPath,
       violationPath,

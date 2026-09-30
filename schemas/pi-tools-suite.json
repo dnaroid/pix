@@ -56,32 +56,78 @@
         "^.*$": {
           "anyOf": [
             {
-              "type": "string",
-              "const": "off"
-            },
-            {
-              "type": "string",
-              "const": "minimal"
-            },
-            {
-              "type": "string",
-              "const": "low"
-            },
-            {
-              "type": "string",
-              "const": "medium"
-            },
-            {
-              "type": "string",
-              "const": "high"
-            },
-            {
-              "type": "string",
-              "const": "xhigh"
-            },
-            {
-              "type": "string",
-              "const": "max"
+              "type": "object",
+              "required": [
+                "min",
+                "max"
+              ],
+              "properties": {
+                "min": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "off"
+                    },
+                    {
+                      "type": "string",
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
+                    }
+                  ]
+                },
+                "max": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "off"
+                    },
+                    {
+                      "type": "string",
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
+                    }
+                  ]
+                }
+              },
+              "description": "Inclusive thinking bounds; min must not exceed max. Equal bounds force a level."
             },
             {
               "type": "null"
@@ -89,7 +135,7 @@
           ]
         }
       },
-      "description": "Force per-todo thinking for matching provider/model or bare-model keys. Keys support * and ? wildcards; null removes an inherited override."
+      "description": "Limit per-todo thinking with {min,max}. Keys support provider/model, bare-model, and * / ? wildcards; null removes an inherited policy. Invalid ranges and string values are ignored."
     },
     "lookupModel": {
       "anyOf": [

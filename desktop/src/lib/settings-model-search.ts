@@ -33,8 +33,9 @@ export function settingsModelLabel(model: Pick<ModelThinkingModel, "name" | "mod
 export function searchSettingsModelOptions(
   options: readonly SettingsModelSearchOption[],
   query: string,
+  allowCustom = false,
 ): SettingsModelSearchOption[] {
-  return fuzzySearch(
+  const matches = fuzzySearch(
     options.map((option) => ({
       value: option,
       label: option.label,
@@ -43,6 +44,11 @@ export function searchSettingsModelOptions(
     })),
     query,
   ).map((match) => match.value);
+  const customValue = query.trim();
+  if (allowCustom && customValue && !options.some((option) => option.value === customValue)) {
+    matches.unshift({ value: customValue, label: `Use “${customValue}”`, description: "Custom model or pattern" });
+  }
+  return matches;
 }
 
 export function searchSettingsModels(

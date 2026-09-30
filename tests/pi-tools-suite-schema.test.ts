@@ -45,6 +45,15 @@ describe("pi-tools-suite config schema", () => {
 		assertTemplateKeysAreModeled(template, PiToolsSuiteConfigSchema);
 	});
 
+	it("accepts todo thinking ranges and null but rejects single-level strings", () => {
+		assert.equal(Value.Check(PiToolsSuiteConfigSchema, {
+			todoThinkingOverrides: { "opus/*": { min: "low", max: "medium" }, "glm-*": { min: "max", max: "max" }, "inherited/*": null },
+		}), true);
+		for (const policy of ["max", { min: "low" }, { min: "low", max: "turbo" }]) {
+			assert.equal(Value.Check(PiToolsSuiteConfigSchema, { todoThinkingOverrides: { "model/*": policy } }), false);
+		}
+	});
+
 	it("accepts current DCP model overrides and percent-string thresholds", () => {
 		assert.equal(Value.Check(PiToolsSuiteConfigSchema, {
 			dcp: {

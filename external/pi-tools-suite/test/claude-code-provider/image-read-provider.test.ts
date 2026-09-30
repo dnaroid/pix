@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "bun:test";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { largePng } from "./support/large-png.ts";
 
 
 // Real local adapter with fake Claude CLI; no service, credentials or Pi tools.
@@ -22,7 +23,7 @@ const messages = [
 ];
 const toolContext = normalizeContext({ tools, messages });
 
-const scenarios = ["normal", "recover", "safe-tool", "repeat", "transport", "mixed", "mcp-violation", "cleanup", "bad-exit", "abort", "close", "payload-hook"];
+const scenarios = ["normal", "large-image", "recover", "safe-tool", "repeat", "transport", "mixed", "mcp-violation", "cleanup", "bad-exit", "abort", "close", "payload-hook"];
 for (const scenario of scenarios) {
   test(`patched real provider subprocess simulation: ${scenario}`, { timeout: 15000 }, async () => {
     const { createClaudeStream } = await import(pathToFileURL(join(directory!, "src/provider.ts")).href);
@@ -53,13 +54,21 @@ process.on("SIGTERM", () => {
 });
 process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => prompt += chunk);
 process.stdin.on("end", () => {
-  const attachment = /@"([^"\\n]+\\.png)"/.exec(JSON.parse(prompt).message.content.map(block => block.text).join("\\n"))?.[1];
+  const blocks = JSON.parse(prompt).message.content;
+  const label = blocks.find(block => block.type === "text" && block.text.startsWith("Native image for image_attachment "));
+  const attachment = label && JSON.parse(label.text.slice("Native image for image_attachment ".length, -1));
+  const images = blocks.filter(block => block.type === "image");
+  if (images.length !== 1 || images[0].source.type !== "base64" || images[0].source.media_type !== "image/png") throw Error("native image missing");
+  const bytes = Buffer.from(images[0].source.data, "base64");
+  if (!bytes.equals(fs.readFileSync(attachment))) throw Error("image bytes changed");
+  if (blocks.some(block => block.type === "text" && block.text.includes('@"'))) throw Error("unexpected file expansion");
+  if (scenario === "large-image" && bytes.length <= 262144) throw Error("fixture must exceed @file limit");
   fs.appendFileSync(log, JSON.stringify({pid:process.pid,privateDir,attachment,correction:system.includes("Provider transport correction:"),
     oldRequestExists:previous.length > 0 && fs.existsSync(previous[0].privateDir),
     imageExists:!!attachment && fs.existsSync(attachment),cwd:process.cwd()}) + "\\n");
   emit({type:"system",subtype:"init",tools:["mcp__pi__Read"],mcp_servers:[{name:"pi",status:"connected"}],model:"claude-opus-5-5",permissionMode:"dontAsk",slash_commands:[],skills:[],plugins:[],apiKeySource:"none"});
   emit({type:"stream_event",event:{type:"message_start",message:{id:"msg_"+attempt,model:"claude-opus-5-5",usage:{}}}});
-  if (scenario === "normal" || (attempt > 0 && !["repeat","safe-tool"].includes(scenario))) {
+  if (["normal", "large-image"].includes(scenario) || (attempt > 0 && !["repeat","safe-tool"].includes(scenario))) {
     emit({type:"result",is_error:false,result:"continued using attachments",usage:{input_tokens:4,output_tokens:2}});
     return;
   }
@@ -76,6 +85,13 @@ process.stdin.on("end", () => {
 `);
     await chmod(executable, 0o700);
     try {
+      let requestContext = toolContext;
+      if (scenario === "payload-hook") requestContext = normalizeContext({ tools, messages: [] });
+      if (scenario === "large-image") {
+        requestContext = normalizeContext({ tools, messages: [{ role: "user", content: [
+          { type: "image", data: largePng.toString("base64"), mimeType: "image/png" },
+        ], timestamp: 1 }] });
+      }
       const stream = createClaudeStream({ executable, version: "2.1.281", subscriptionType: "pro" }, {
         resolveSession: () => { resolutions++; return { cwd: root, imageStore: store }; },
         cleanupDirectory: async (privateDir: string) => {
@@ -85,7 +101,7 @@ process.stdin.on("end", () => {
           if (scenario === "close") await store.close();
           await rm(privateDir, { recursive: true, force: true });
         },
-      })(model, scenario === "payload-hook" ? normalizeContext({ tools, messages: [] }) : toolContext,
+      })(model, requestContext,
         { signal: controller.signal, timeoutMs: 5000,
           ...(scenario === "payload-hook" ? { onPayload: () => ({ systemPrompt: "hook replacement", tools, messages }) } : {}) });
       const events = [];
@@ -95,7 +111,7 @@ process.stdin.on("end", () => {
       const recovered = ["recover", "safe-tool", "repeat", "payload-hook"].includes(scenario);
       assert.equal(attempts.length, recovered ? 2 : 1, result.errorMessage ?? JSON.stringify(result));
       assert.equal(resolutions, 1, "retry must not resolve a different Pi session");
-      assert.equal(result.stopReason, scenario === "safe-tool" ? "toolUse" : ["normal", "recover", "payload-hook"].includes(scenario) ? "stop" : scenario === "abort" ? "aborted" : "error", result.errorMessage ?? JSON.stringify(result));
+      assert.equal(result.stopReason, scenario === "safe-tool" ? "toolUse" : ["normal", "large-image", "recover", "payload-hook"].includes(scenario) ? "stop" : scenario === "abort" ? "aborted" : "error", result.errorMessage ?? JSON.stringify(result));
       assert.doesNotMatch(JSON.stringify(events), /denied_/);
       assert.doesNotMatch(JSON.stringify(result.content), /pi-claude-code-provider-(images|request)/);
       assert.equal(events.filter((event: { type: string }) => event.type === "done" || event.type === "error").length, 1);
@@ -117,4 +133,3 @@ process.stdin.on("end", () => {
     }
   });
 }
-

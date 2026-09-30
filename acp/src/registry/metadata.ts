@@ -1,7 +1,7 @@
 import { constants, promises as fs } from "node:fs";
 import { dirname } from "node:path";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { parseAgentMarkdown } from "../async-subagents/core/agents-dir.js";
+import type { RegistryContext } from "./context.js";
+import { parseAgentMarkdown } from "./agent-markdown.js";
 
 /** Edit only the tags field, preserving resource-specific YAML, comments and body. */
 function tagField(source: string): { start: number; end: number; newline: string; lines: string[] } {
@@ -16,7 +16,7 @@ function tagField(source: string): { start: number; end: number; newline: string
 	let end = start;
 	if (start < closing) {
 		end++;
-		while (end < closing && /^(?:\s+\S|-\s|\s*$)/.test(lines[end])) end++;
+		while (end < closing && /^(?:\s+\S|-\s|\s*$)/.test(lines[end]!)) end++;
 	}
 	return { start, end, newline, lines };
 }
@@ -52,12 +52,12 @@ export async function readResourceTagsFile(file: string): Promise<string[]> {
 	catch { return []; }
 }
 
-/** Prefilled editor works consistently in terminal and Desktop extension UI. */
-export async function editResourceTags(ctx: ExtensionCommandContext, file: string, title: string): Promise<boolean> {
-	if (!ctx.hasUI) throw new Error("Editing tags requires an interactive UI.");
+async function updateTags(
+	cwd: string, file: string, selectTags: (source: string) => Promise<string[]>,
+): Promise<string[] | undefined> {
 	const parents = [file];
 	let parent = dirname(file);
-	while (parent !== ctx.cwd && parent !== dirname(parent)) {
+	while (parent !== cwd && parent !== dirname(parent)) {
 		parents.push(parent);
 		parent = dirname(parent);
 	}
@@ -68,10 +68,9 @@ export async function editResourceTags(ctx: ExtensionCommandContext, file: strin
 	}
 	await checkLinks();
 	const source = await fs.readFile(file, "utf8");
-	const input = await ctx.ui.editor(`${title} (comma-separated; blank clears)`, readResourceTags(source).join(", "));
-	if (input === undefined) throw new Error("Tag edit cancelled.");
-	const updated = writeResourceTags(source, input.split(","));
-	if (updated === source) return false;
+	const tags = normalizeTags(await selectTags(source));
+	const updated = writeResourceTags(source, tags);
+	if (updated === source) return undefined;
 	await checkLinks();
 	const handle = await fs.open(file, constants.O_RDWR | constants.O_NOFOLLOW);
 	try {
@@ -80,5 +79,24 @@ export async function editResourceTags(ctx: ExtensionCommandContext, file: strin
 		await handle.write(updated, 0, "utf8");
 		await handle.truncate(Buffer.byteLength(updated));
 	} finally { await handle.close(); }
+	return tags;
+}
+
+/** Prefilled Desktop editor; expose only tags that were actually written safely. */
+export async function editResourceTags(
+	ctx: RegistryContext, file: string, title: string, onSaved?: (tags: string[]) => void,
+): Promise<boolean> {
+	if (!ctx.hasUI) throw new Error("Editing tags requires an interactive UI.");
+	const tags = await updateTags(ctx.cwd, file, async (source) => {
+		const input = await ctx.ui.editor(`${title} (comma-separated; blank clears)`, readResourceTags(source).join(", "));
+		if (input === undefined) throw new Error("Tag edit cancelled.");
+		return input.split(",");
+	});
+	if (tags === undefined) return false;
+	onSaved?.(tags);
 	return true;
+}
+
+export async function saveResourceTags(cwd: string, file: string, tags: readonly string[]): Promise<boolean> {
+	return await updateTags(cwd, file, async () => [...tags]) !== undefined;
 }

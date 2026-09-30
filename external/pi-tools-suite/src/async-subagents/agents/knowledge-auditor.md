@@ -1,7 +1,7 @@
 ---
 description: Use at the end of an implementation task to run a task-scoped knowledge audit. Cheap docs-only auditor: fix small, unambiguous documentation drift supported by final code/tests; escalate substantial, ambiguous, or contract-changing drift to the parent. Never change product code or tests.
 icon: book-open
-models: [zai/glm-5.3-flash, openai-codex/gpt-6-luna]
+models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash]
 thinking: low
 tools: [read, grep, bash, edit, write]
 timeoutMs: 300000

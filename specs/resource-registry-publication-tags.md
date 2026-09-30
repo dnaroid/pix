@@ -15,15 +15,42 @@ status: active
 - Desktop displays **Installed** (all project copies, published or not) and
   **Available** (remote copies absent locally) tabs. Cards independently show
   **Local** / **Published** badges and synchronization/conflict state.
-- Catalog entries use three rows: name and **SKILL** / **AGENT** type, description
-  with optional tags, then status and **Local** / **Published** on the left with
+- Catalog entries use three rows: name, **SKILL** / **AGENT** type badge and
+  optional tags after the badge; description; then status and **Local** / **Published** on the left with
   action buttons on the right. Missing descriptions still reserve the second
   row; long text truncates with full-value tooltips. Entries are separated by
   spacing, not colored divider lines. Project-sync rows are unchanged.
-- Only project artifacts sync automatically in the background; resource
+- Skills exposed by the ready active session's skill commands are marked
+  **In context** and included in Installed even without a project copy (for
+  example, globally loaded skills). Matching uses exact skill names and the
+  command source, not descriptions or ordinary same-named commands. These
+  skills offer no Install or missing-copy Update / Make local action. Updates
+  to an existing project copy remain available. Context availability never
+  implies project ownership: tags, uninstall and diff still require a local
+  project copy. Switching sessions, reload or loss of readiness recomputes the
+  marks; without a ready session the ordinary Registry catalog is unchanged.
+- Registry is Desktop-only. ACP handles filesystem/Git operations directly,
+  without loading tools-suite, starting a Pi runtime, or creating a session.
+  There is no `/registry` command or TUI Registry UI.
+- Only project artifacts sync automatically in the background; initial resource
   publication remains explicit.
 - Make global uses registry push, retaining the project copy and complete skill
   trees or agent companions. Existing collision/conflict protection applies.
+- Published resources have a **Make project** / **Make global** visibility
+  toggle. Global definitions live in `skills/<name>` or `agents/<name>.md`;
+  Project definitions live in `projects/<projectKey>/skills/<name>` or
+  `projects/<projectKey>/agents/<name>.md`, including same-named agent companions.
+  Project definitions appear only for the matching project key; Global remains
+  visible everywhere. Initial explicit publication remains Global.
+  The toggle requires a project key and confirmation, moves published bytes in
+  one Git commit/push, and never changes or republishes local copies/edits.
+  Provenance moves with the publication while retaining the local baseline and
+  any pending remote update. Legacy provenance without a scope means Global.
+- Global/Project name collisions are refused rather than shadowed or overwritten.
+  Global promotion and a new Global publication also refuse a same-named
+  definition in another project. Scoped install/update/push, diff, tags and
+  unpublication target only the visible namespace. A scope/key change during
+  asynchronous tag editing saves local tags but refuses automatic publication.
 - Make local confirms unpublication. It installs a copy first if absent, then
   removes the shared definition and companions, retaining this project's copy
   and copies already installed in other projects. An existing modified local
@@ -39,8 +66,14 @@ status: active
   metadata even when the local tags are empty.
 - Installed resources offer a prefilled tag editor. Comma-separated entries
   are trimmed and deduplicated; blank explicitly saves an empty array. Cancel
-  changes nothing. Editing modifies only local metadata; explicit publish/sync
-  shares the edit. Desktop displays tags and includes them in resource search.
+  changes nothing. **Local** resources stay local after editing tags. For an
+  already **Published** resource, tag saves automatically synchronize with the
+  configured registry using the existing collision/provenance safeguards.
+  A failed sync leaves the saved local edit intact and reports the error;
+  automatic tag sync modifies remote tags only: unrelated local body, companion,
+  or asset changes remain unpublished and still show as local changes.
+  a changed remote revision or configuration during editing is never overwritten.
+  Desktop displays tags and includes them in resource search.
 
 ## Constraints and failure cases
 
@@ -56,12 +89,16 @@ status: active
   frontmatter and symlinked paths, and refuses stale file contents after an
   asynchronous dialog. Cancellation and failures must not overwrite newer work.
 - Actions remain workspace-scoped and validate resource type and safe name.
-  Source/live tools-suite synchronization is required before live verification.
+  The ACP build must include the standalone Registry service for live verification.
 
 ## Implementation
 
-- `external/pi-tools-suite/src/resource-registry/index.ts`
-- `external/pi-tools-suite/src/resource-registry/metadata.ts`
+- `acp/src/registry/service.ts`
+- `acp/src/registry/resources.ts`
+- `acp/src/registry/publication-location.ts`
+- `acp/src/registry/publication-scope.ts`
+- `acp/src/registry/metadata.ts`
+- `acp/src/registry/agent-markdown.ts`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `desktop/src/lib/registry.ts`
@@ -73,8 +110,9 @@ status: active
 
 ## Tests
 
-- `external/pi-tools-suite/test/resource-registry.test.ts`
-- `external/pi-tools-suite/test/resource-registry-metadata.test.ts`
+- `acp/test/registry.test.ts`
+- `acp/test/registry-metadata.test.ts`
+- `acp/test/agent.test.ts`
 - `acp/test/desktop-commands.test.ts`
 - `desktop/src/lib/registry.test.ts`
 - `desktop/src/components/RegistryPanel.test.ts`

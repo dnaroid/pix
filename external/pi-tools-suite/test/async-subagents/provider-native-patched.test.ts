@@ -130,14 +130,15 @@ offline("patched spawnClaudeProcess: real A/B/C, natural 0 and 7, resistant leaf
 			expect((await settleFailure(run, failure, failure.message, "retained")).livenessUnknown).toBe(true);
 			await gone(leaf); run.dispose();
 		}
-		// Cancellation before either actor reports ready (no PID from disk).
+		// Cancellation before either actor reports ready (no PID from disk): the
+		// relay must still prove its whole subtree dead — synthetic exit 90 with
+		// a matching CLEAN receipt — before termination may resolve.
 		{
 			const abort = new AbortController();
 			const { run } = await start(0, { signal: abort.signal, beforeReady: () => abort.abort() });
 			await run.supervisor.wait().catch(() => undefined);
-			const failure = await run.terminate().catch((error: Error) => error);
-			expect(failure.name).toBe("ProcessTerminationError");
-			expect((await settleFailure(run, failure, failure.message, "retained")).livenessUnknown).toBe(true);
+			expect(run.child.exitCode).toBe(90);
+			await run.terminate();
 			run.dispose();
 		}
 		// A's private control EOF models abrupt P loss; no stdin dependency.

@@ -535,7 +535,8 @@ describe("desktop visual regressions", () => {
     expect(desktopSettingsEditorSource).not.toContain('label="Remembered thinking by model"');
     expect(settingsModelSelectSource).toContain("searchSettingsModelOptions");
     expect(settingsModelSelectSource).toContain('role="combobox"');
-    expect(settingsModelSelectSource).toContain('placeholder="Filter models…"');
+    expect(settingsModelSelectSource).toContain('allowCustom = false');
+    expect(settingsModelSelectSource).toContain('placeholder={allowCustom ? "provider/model or wildcard" : "Filter models…"}');
     expect(settingsModelListSource).toContain("availableToAdd");
     expect(settingsModelListSource).toContain("<SettingsModelSelect");
     expect(settingsModelListSource).not.toContain("<select");

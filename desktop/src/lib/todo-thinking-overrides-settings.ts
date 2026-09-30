@@ -1,7 +1,13 @@
 import { CANONICAL_THINKING_LEVELS } from "./model-thinking";
 import { removeSettingsValue, updateSettingsSource } from "./settings";
+import { isTodoThinkingPolicy } from "../../../external/pi-tools-suite/src/todo/thinking-policy";
 
-export type TodoThinkingOverrideValue = string | null;
+export type TodoThinkingOverrideRange = { min: string; max: string };
+export type TodoThinkingOverrideValue = TodoThinkingOverrideRange | null;
+
+export function todoThinkingRangeError(range: TodoThinkingOverrideRange): string | undefined {
+  return isTodoThinkingPolicy(range) ? undefined : "Choose valid levels with Min no higher than Max.";
+}
 
 export interface TodoThinkingOverrideRow {
   readonly pattern: string;
@@ -75,8 +81,12 @@ function todoThinkingOverrideEntries(value: unknown): Array<[string, TodoThinkin
   const entries: Array<[string, TodoThinkingOverrideValue]> = [];
   for (const [rawPattern, level] of Object.entries(value)) {
     const pattern = rawPattern.trim();
-    if (!pattern || (typeof level !== "string" && level !== null)) continue;
-    entries.push([pattern, level]);
+    if (!pattern) continue;
+    if (isRecord(level) && typeof level.min === "string" && typeof level.max === "string") {
+      entries.push([pattern, { min: level.min, max: level.max }]);
+      continue;
+    }
+    if (level === null) entries.push([pattern, null]);
   }
   return entries;
 }

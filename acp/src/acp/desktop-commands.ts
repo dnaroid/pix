@@ -386,7 +386,7 @@ export type DesktopRegistryProjectScope = "tasks" | "plans" | "todo" | "workspac
 export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 	| { readonly action: "refresh" | "configure" | "project-key" }
 	| {
-		readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags";
+		readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
 		readonly type: DesktopRegistryResourceType;
 		readonly name: string;
 	}
@@ -649,7 +649,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key") {
 		return { ...workspace, action: value.action };
 	}
-	if (["install", "update", "push", "uninstall", "remove", "make-local", "tags"].includes(value.action)) {
+	if (["install", "update", "push", "uninstall", "remove", "make-local", "tags", "toggle-scope"].includes(value.action)) {
 		if (
 			(value.type !== "skill" && value.type !== "agent")
 			|| typeof value.name !== "string"
@@ -660,7 +660,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		}
 		return {
 			...workspace,
-			action: value.action as "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags",
+			action: value.action as "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope",
 			type: value.type,
 			name: value.name,
 		};

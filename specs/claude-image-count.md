@@ -12,6 +12,8 @@ Pix's local suite Claude Code provider, derived from
 All image blocks in the effective context remain attached, including historical
 images. Counting for metrics and file deduplication are unchanged. Explicit
 count overrides in the upstream internal test seam still work.
+Deduplicated images are delivered as native base64 image blocks, not file
+mentions; see [native transport](claude-code-provider.md#native-image-transport).
 
 ## Constraints and failure cases
 

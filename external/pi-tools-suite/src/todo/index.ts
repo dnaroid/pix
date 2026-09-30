@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadPiToolsSuiteConfig, type TodoThinkingLevel as ConfigTodoThinkingLevel } from "../config.js";
+import { loadPiToolsSuiteConfig, type TodoThinkingPolicy } from "../config.js";
+import { clampTodoThinkingRange } from "./thinking-policy.js";
 import { isAgentBusyRaceError } from "../context-usage.js";
 import { hasIndexedProjectRoot } from "../lib/project.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
@@ -97,10 +98,10 @@ function modelKeys(model: unknown): { bare?: string; full?: string } {
 
 function resolveTodoThinkingOverride(
 	model: unknown,
-	overrides: Record<string, ConfigTodoThinkingLevel>,
-): TodoThinkingLevel | undefined {
+	overrides: Record<string, TodoThinkingPolicy>,
+): TodoThinkingPolicy | undefined {
 	const keys = modelKeys(model);
-	let best: { level: TodoThinkingLevel; score: number } | undefined;
+	let best: { level: TodoThinkingPolicy; score: number } | undefined;
 	for (const [rawPattern, level] of Object.entries(overrides)) {
 		const pattern = rawPattern.trim();
 		const isFull = pattern.includes("/");
@@ -358,18 +359,23 @@ export default function (pi: ExtensionAPI) {
 		else baselineThinkingByScope.delete(scopeKey);
 	}
 
+	function resolvePolicyThinking(level: TodoThinkingLevel | undefined): TodoThinkingLevel | undefined {
+		const policy = resolveTodoThinkingOverride(currentModel, todoThinkingOverrides);
+		if (policy === undefined) return undefined;
+		return clampTodoThinkingRange(getAvailableTodoThinkingLevels(currentModel), level ?? policy.min, policy);
+	}
+
 	function prepareTodoThinkingMutation(state: ReturnType<typeof getState>, ctx: ExtensionContext, params: TaskMutationParams): TaskMutationParams {
 		let nextParams = params;
-		const configuredOverride = resolveTodoThinkingOverride(currentModel, todoThinkingOverrides);
-		if (configuredOverride !== undefined) {
-			const forced = normalizeTodoThinkingLevelForModel(currentModel, configuredOverride);
-			nextParams = { ...nextParams, thinking: forced };
+		const current = params.id === undefined ? undefined : state.tasks.find((task) => task.id === params.id);
+		const policyThinking = resolvePolicyThinking(params.thinking ?? current?.thinking ?? getCurrentThinkingLevel());
+		if (policyThinking !== undefined) {
+			nextParams = { ...nextParams, thinking: policyThinking };
 		} else if (params.thinking !== undefined) {
 			const normalized = normalizeTodoThinkingLevelForModel(currentModel, params.thinking);
 			if (normalized !== params.thinking) nextParams = { ...nextParams, thinking: normalized };
 		}
 		if (nextParams.id === undefined) return nextParams;
-		const current = state.tasks.find((task) => task.id === nextParams.id);
 		if (!current) return nextParams;
 		const nextStatus = nextParams.status ?? current.status;
 		if (nextStatus === "in_progress" && nextParams.thinking === undefined && current.thinking !== undefined) {
@@ -392,6 +398,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function switchToTaskThinking(level: TodoThinkingLevel): void {
+		level = resolvePolicyThinking(level) ?? level;
 		if (!getAvailableTodoThinkingLevels(currentModel).includes(level)) return;
 		const current = getCurrentThinkingLevel();
 		if (!current) return;
@@ -573,9 +580,16 @@ export default function (pi: ExtensionAPI) {
 		clearTodoNativeWidget(ctx);
 	});
 
-	pi.on("model_select", async (event) => {
+	pi.on("model_select", async (event, ctx) => {
 		currentModel = event.model;
-		if (todoThinkingEnabled) registerTodoToolWithCurrentPrompt();
+		if (todoThinkingEnabled) {
+			registerTodoToolWithCurrentPrompt();
+			activateTodoStateScope(ctx);
+			const state = getState();
+			if (state.tasks.some((task) => task.status === "in_progress" && task.thinking !== undefined)) {
+				applyTodoThinkingAfterCommit(state, ctx, { action: "model_select", params: { action: "list" } });
+			}
+		}
 	});
 
 	// Reads getTodos() at render time; do NOT call replayFromBranch here

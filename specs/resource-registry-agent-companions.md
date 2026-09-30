@@ -17,8 +17,8 @@ Install and update replace both components, including removal of an obsolete
 local companion when the remote no longer has one. Push replaces both remote
 components, including deleting an obsolete remote companion. Remove deletes
 both remote components but retains the project copy; uninstall deletes both
-local components but retains the registry copy. Bulk actions use the same
-per-agent behavior.
+local components but retains the registry copy. Registry is available only in
+Pix Desktop; operations run directly in ACP without a Pi session.
 
 Status and provenance hash both components when the companion exists, detecting
 edits, additions, and deletion of local assets. Remote revisions follow both
@@ -37,14 +37,16 @@ an empty companion directory alone cannot be transported by Git.
 
 ## Implementation
 
-- `external/pi-tools-suite/src/resource-registry/index.ts`
+- `acp/src/registry/resource-files.ts`
+- `acp/src/registry/resources.ts`
+- `acp/src/registry/status.ts`
 
 ## Tests
 
-- `external/pi-tools-suite/test/resource-registry.test.ts`
+- `acp/test/registry.test.ts`
 
 ## Verification
 
-Run the resource registry tests and suite typecheck. Confirm companion-only
+Run the ACP resource registry tests and typecheck. Confirm companion-only
 edits and removals change status, transfer on push/update, and are removed by
 uninstall/remove without changing other agents.

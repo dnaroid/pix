@@ -60,7 +60,7 @@ describe("pi-tools-suite config", () => {
 		expect(config.enabled).toBe(true);
 		expect(config.disabledModules).toEqual(["ast-grep", "usage"]);
 		expect(config.todoThinking).toBe(false);
-		expect(config.todoThinkingOverrides).toEqual({ "zai/glm-5.3": "max" });
+		expect(config.todoThinkingOverrides).toEqual({ "zai/glm-5.3": { min: "max", max: "max" } });
 	});
 
 	test("merges bundled-agent disable and re-enable lists across config layers", () => {
@@ -141,16 +141,29 @@ describe("pi-tools-suite config", () => {
 		mkdirSync(join(cwd, ".pi"), { recursive: true });
 		writeFileSync(
 			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
-			`{ "todoThinkingOverrides": { "cheap/*": "high", "zai/glm-5.3": "low", "bad/*": "turbo" } }`,
+			`{ "todoThinkingOverrides": { "cheap/*": { "min": "low", "max": "high" }, "zai/glm-5.3": { "min": "low", "max": "low" }, "bad/*": "max" } }`,
 		);
 		writeFileSync(
 			join(cwd, ".pi", "pi-tools-suite.jsonc"),
-			`{ "todoThinkingOverrides": { "cheap/small": "max", "zai/glm-5.3": null } }`,
+			`{ "todoThinkingOverrides": { "cheap/small": { "min": "low", "max": "medium" }, "cheap/*": { "min": "high", "max": "low" }, "zai/glm-5.3": null, "bad/reversed": { "min": "high", "max": "low" }, "bad/missing": { "min": "low" }, "bad/unknown": { "min": "low", "max": "turbo" } } }`,
 		);
 
 		const config = loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} });
 
-		expect(config.todoThinkingOverrides).toEqual({ "cheap/*": "high", "cheap/small": "max" });
+		expect(config.todoThinkingOverrides).toEqual({ "cheap/*": { min: "low", max: "high" }, "cheap/small": { min: "low", max: "medium" } });
+	});
+
+	test("string policies are ignored and returned default ranges are isolated", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "pi-tools-suite.jsonc"),
+			`{ "todoThinkingOverrides": { "zai/glm-5.3": "low", "old/model": "max" } }`);
+		const config = loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} });
+		expect(config.todoThinkingOverrides).toEqual({ "zai/glm-5.3": { min: "max", max: "max" } });
+		config.todoThinkingOverrides["zai/glm-5.3"]!.min = "low";
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).todoThinkingOverrides)
+			.toEqual({ "zai/glm-5.3": { min: "max", max: "max" } });
 	});
 
 	test("project config can re-enable a globally disabled module", () => {
@@ -200,7 +213,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"disabledBuiltinAgents"');
 		expect(content).toContain('"todoThinking": true');
 		expect(content).toContain('"todoThinkingOverrides"');
-		expect(content).toContain('"zai/glm-5.3": "max"');
+		expect(content).toContain('"zai/glm-5.3": { "min": "max", "max": "max" }');
 		expect(content).toContain('"lookupModel": "zai/glm-5.3-flash"');
 		expect(content).toContain('"lookupFallbackModels": []');
 		expect(content).toContain('"summarizerModel": ["zai/glm-5-turbo"]');

@@ -944,9 +944,9 @@ describe.serial("todo extension lifecycle", () => {
 		writeFileSync(join(configDir, "pi-tools-suite.jsonc"), JSON.stringify({
 			todoThinking: true,
 			todoThinkingOverrides: {
-				"glm-*": "low",
-				"zai/*": "high",
-				"zai/glm-5.2": "max",
+				"glm-*": { min: "low", max: "low" },
+				"zai/*": { min: "high", max: "high" },
+				"zai/glm-5.2": { min: "max", max: "max" },
 			},
 		}));
 		process.env.PI_CONFIG_DIR = configDir;
@@ -974,6 +974,65 @@ describe.serial("todo extension lifecycle", () => {
 			await pi.emit("model_select", { model: otherModel }, { ...ctx, model: otherModel });
 			await pi.tools.get("todo").execute("todo-bare", { action: "create", subject: "Bare", thinking: "off" }, undefined, undefined, { ...ctx, model: otherModel });
 			expect(getTodos()[0]?.thinking).toBe("low");
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			if (previousConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
+			else process.env.PI_CONFIG_DIR = previousConfigDir;
+			rmSync(configDir, { recursive: true, force: true });
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("clamps todo ranges on all mutations, omitted values, and model changes without clamping restore", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		const previousConfigDir = process.env.PI_CONFIG_DIR;
+		const configDir = mkdtempSync(join(tmpdir(), "todo-thinking-ranges-"));
+		writeFileSync(join(configDir, "pi-tools-suite.jsonc"), JSON.stringify({
+			todoThinking: true,
+			todoThinkingOverrides: { "test/opus": { min: "low", max: "medium" } },
+		}));
+		process.env.PI_CONFIG_DIR = configDir;
+		delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		const extension = (await import("../src/todo/index.js")).default;
+		const { getTodos } = await import("../src/todo/todo.js");
+		const pi = new FakePi();
+		pi.thinkingLevel = "high";
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-ranges-state-")), hasUI: false,
+			model: { provider: "test", id: "opus", reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] }, isIdle: () => true, hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			let tool = pi.tools.get("todo");
+			await tool.execute("range-1", { action: "create", subject: "Omitted" }, undefined, undefined, ctx);
+			expect(getTodos()[0]?.thinking).toBe("medium");
+			await tool.execute("range-2", { action: "batch_create", items: [
+				{ subject: "Floor", thinking: "off" }, { subject: "Inside", thinking: "medium" }, { subject: "Ceiling", thinking: "high" },
+			] }, undefined, undefined, ctx);
+			expect(getTodos().map((task) => task.thinking)).toEqual(["medium", "low", "medium", "medium"]);
+			await tool.execute("range-3", { action: "update", id: 2, status: "in_progress" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("low");
+			await tool.execute("range-4", { action: "batch_update", items: [{ id: 2, thinking: "high" }] }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("medium");
+			await tool.execute("range-5", { action: "update", id: 2, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("high");
+			const otherCtx = { ...ctx, model: { ...ctx.model, id: "unrestricted" } };
+			await pi.emit("model_select", { model: otherCtx.model }, otherCtx);
+			tool = pi.tools.get("todo");
+			await tool.execute("range-6", { action: "update", id: 1, thinking: "high", status: "in_progress" }, undefined, undefined, otherCtx);
+			expect(pi.thinkingLevel).toBe("high");
+			await pi.emit("model_select", { model: ctx.model }, ctx);
+			expect(pi.thinkingLevel).toBe("medium");
+			// Selection limits active thinking without eagerly rewriting the saved plan.
+			expect(getTodos()[0]?.thinking).toBe("high");
+			tool = pi.tools.get("todo");
+			await tool.execute("range-7", { action: "update", id: 1, description: "Keep stored choice within policy" }, undefined, undefined, ctx);
+			expect(getTodos()[0]?.thinking).toBe("medium");
+			await tool.execute("range-8", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("high");
 		} finally {
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
 			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;

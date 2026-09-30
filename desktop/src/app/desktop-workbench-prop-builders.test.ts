@@ -56,6 +56,17 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
 }
 
 describe("workbench composer props", () => {
+  it("keeps input ready while the selected session runtime and history are opening", () => {
+    const options = conversationOptions("opening");
+    options.activeSessionRuntimeReady = () => false;
+    options.sessionHistoryLoading = () => true;
+    expect(buildWorkbenchConversationProps(options).composer.ready).toBe(true);
+    options.sessionMutationRunning = () => true;
+    expect(buildWorkbenchConversationProps(options).composer.ready).toBe(false);
+    options.sessionMutationRunning = () => false;
+    options.statusReady = () => false;
+    expect(buildWorkbenchConversationProps(options).composer.ready).toBe(false);
+  });
   it("opens the quota-wait schedule popup for the active session", () => {
     const quotaWait = createQuotaWaitStore({
       client: () => null,

@@ -6,6 +6,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
   const readySessionIds = new Set<string>();
   const loadsBySessionId = new Map<string, Promise<void>>();
   const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
+  const ownersBySessionId = new Map<string, object>();
   let prewarmGeneration = 0;
 
   function isReady(sessionId: string): boolean {
@@ -39,6 +40,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
     if (existing) return existing;
 
     options.onOpen?.(sessionId);
+    ownersBySessionId.set(sessionId, {});
 
     const pending = requestClient.loadSession(sessionId, requestWorkspace)
       .then((response) => {
@@ -79,6 +81,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
   function markReady(sessionId: string, configOptions: SessionConfigOption[]): void {
     // An externally ready runtime supersedes any outstanding load for this ID.
     loadsBySessionId.delete(sessionId);
+    if (!ownersBySessionId.has(sessionId)) ownersBySessionId.set(sessionId, {});
     options.onOpen?.(sessionId);
     readySessionIds.add(sessionId);
     configOptionsBySessionId.set(sessionId, configOptions);
@@ -87,6 +90,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
   }
 
   function forget(sessionId: string): void {
+    ownersBySessionId.delete(sessionId);
     readySessionIds.delete(sessionId);
     loadsBySessionId.delete(sessionId);
     configOptionsBySessionId.delete(sessionId);
@@ -124,6 +128,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
   function reset(): void {
     invalidatePrewarm();
     readySessionIds.clear();
+    ownersBySessionId.clear();
     loadsBySessionId.clear();
     configOptionsBySessionId.clear();
   }
@@ -135,6 +140,10 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
     getConfigOptions,
     setConfigOptions,
     ensure,
+    captureOwnership: (sessionId: string) => {
+      const owner = ownersBySessionId.get(sessionId);
+      return () => owner !== undefined && ownersBySessionId.get(sessionId) === owner;
+    },
     markReady,
     forget,
     invalidatePrewarm,

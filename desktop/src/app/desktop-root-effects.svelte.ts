@@ -6,6 +6,8 @@ import {
 } from "../lib/session-inspector-activity-policy";
 import type { SessionSubagentSnapshot } from "../lib/session-subagents";
 import type { SessionTodoSnapshot } from "../lib/session-todos";
+import { createAttachmentDraftOwnership } from "./attachment-draft-ownership";
+import { createRegistryStartupLoader, type RegistryStartupState } from "./registry-startup";
 import {
   normalizeWorkbenchTab,
   workbenchSessionId,
@@ -15,6 +17,8 @@ import {
 
 type DesktopRootEffectsOptions = {
   statusReady: () => boolean;
+  registryStartupState: () => RegistryStartupState;
+  refreshRegistry: () => void;
   activeSessionId: () => string | null;
   activeSessionRuntimeReady: () => boolean;
   configOptions: () => SessionConfigOption[];
@@ -22,6 +26,7 @@ type DesktopRootEffectsOptions = {
   attachmentDraftKey: () => string;
   workspace: () => string;
   invalidateAttachmentDraft: () => void;
+  bumpAttachmentGeneration: () => void;
   invalidatePreviewFileLoads: () => void;
   resetPreviewForWorkspaceChange: () => void;
   activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
@@ -36,8 +41,17 @@ type DesktopRootEffectsOptions = {
 };
 
 export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
+  const registryStartup = createRegistryStartupLoader({
+    state: options.registryStartupState,
+    refresh: options.refreshRegistry,
+  });
+  $effect(() => registryStartup.sync());
+  $effect(() => () => registryStartup.dispose());
   let runtimeStatusActivationKey = "";
-  let previousAttachmentDraftKey: string | null = null;
+  const attachmentOwnership = createAttachmentDraftOwnership({
+    invalidate: options.invalidateAttachmentDraft,
+    bumpGeneration: options.bumpAttachmentGeneration,
+  });
   let previousPreviewWorkspace: string | null = null;
   let previousConversationWorkbenchTabId: WorkbenchTabId | null = null;
   const inspectorActivityTracker = createSessionInspectorActivityTracker();
@@ -59,13 +73,11 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
 
   $effect(() => {
     const key = options.attachmentDraftKey();
-    if (previousAttachmentDraftKey !== null && previousAttachmentDraftKey !== key) {
-      options.invalidateAttachmentDraft();
+    const currentWorkspace = options.workspace();
+    if (attachmentOwnership.sync(key, currentWorkspace)) {
       options.invalidatePreviewFileLoads();
     }
-    previousAttachmentDraftKey = key;
 
-    const currentWorkspace = options.workspace();
     if (previousPreviewWorkspace !== null && previousPreviewWorkspace !== currentWorkspace) {
       options.resetPreviewForWorkspaceChange();
     }
@@ -107,7 +119,7 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
 
   return {
     retargetAttachmentDraftKey(workspace: string, sessionId: string): void {
-      previousAttachmentDraftKey = `${workspace}\0${sessionId}`;
+      attachmentOwnership.retarget(workspace, sessionId);
     },
     resetWorkbenchTracking(): void {
       previousConversationWorkbenchTabId = null;

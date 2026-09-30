@@ -2678,215 +2678,78 @@ test("session/load switches the pi session and replays history as chunk updates"
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
 });
 
-test("Pix Desktop registry actions run in a disposable workspace runtime without a conversation session", async () => {
-	const registryClients: FakePiClient[] = [];
-	const registryOptions: PiRpcClientOptions[] = [];
+test("Pix Desktop registry actions call the direct service without a Pi runtime or conversation", async () => {
+	const calls: string[] = [];
 	const elicitationParams: CreateElicitationRequest[] = [];
-	const extensionDir = mkdtempSync(join(tmpdir(), "registry-extension-"));
-	const extensionPath = join(extensionDir, "index.ts");
-	await writeFile(extensionPath, "// test registry extension\n");
-	const snapshot: {
-		version: number;
-		configured: boolean;
-		remote: string;
-		branch: string;
-		items: never[];
-		checkedAt: string;
-		projectKey?: string;
-	} = {
-		version: 1,
-		configured: true,
-		remote: "git@example.test:registry.git",
-		branch: "main",
-		items: [],
-		checkedAt: "2026-09-23T12:00:00Z",
-	};
+	const snapshot = { version: 1 as const, configured: false, branch: "main", items: [], checkedAt: "2026-09-23T12:00:00Z" };
 	const harness = createTestAdapter({
-		agentDir: join(extensionDir, "agent"),
-		toolsSuiteExtensionPath: extensionPath,
-		createPiClient: (options) => {
-			registryOptions.push(options);
-			const pi = new FakePiClient();
-			pi.commands.push({ name: "registry", description: "Manage registry", source: "extension", sourceInfo: {} });
-			pi.promptHandledWithoutRun = true;
-			pi.promptHook = async (message) => {
-				let finalSnapshot = snapshot;
-				if (message === "/registry rpc project-key") {
-					pi.emit({
-						type: "extension_ui_request",
-						id: "registry-project-key",
-						method: "input",
-						title: "Project registry key",
-						placeholder: "my-project",
-					});
-					await waitFor(() => pi.uiResponses.length === 1);
-					assert.deepEqual(pi.uiResponses[0], {
-						type: "extension_ui_response",
-						id: "registry-project-key",
-						value: "manual-key",
-					});
-					finalSnapshot = { ...snapshot, projectKey: "manual-key" };
+		createPiClient: () => { throw new Error("Registry must not create a Pi runtime"); },
+		registryService: {
+			action: async (request, ctx) => {
+				assert.equal(ctx.cwd, "/tmp/registry-gui");
+				calls.push(request.action);
+				if (request.action === "project-key") {
+					assert.equal(await ctx.ui.input("Project registry key", "my-project"), "manual-key");
+					return { ...snapshot, projectKey: "manual-key" };
 				}
-				const emitSnapshot = () => pi.emit({
-					type: "extension_ui_request",
-					id: `registry-state-${registryClients.length}`,
-					method: "setWidget",
-					widgetKey: "pix.session-state",
-					widgetLines: ["pi-tools-suite:resource-registry:state", JSON.stringify(finalSnapshot)],
-				});
-				if (message === "/registry rpc update skill pdf") {
-					// Real pi can acknowledge the extension-handled command before the
-					// corresponding UI event has crossed the RPC event stream.
-					setTimeout(emitSnapshot, 20);
-					return;
+				if (request.action === "tags") {
+					assert.equal(await ctx.ui.editor("Tags for skill pdf", "docs"), "docs, review");
 				}
-				emitSnapshot();
-			};
-			registryClients.push(pi);
-			return pi;
+				return snapshot;
+			},
+			diff: async () => { throw new Error("Unexpected diff"); },
 		},
 	});
-
-	try {
-		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
-			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
-			const refreshed = await cx.request(PIX_REGISTRY_ACTION_METHOD, { cwd: "/tmp/registry-gui", action: "refresh" });
-			const updated = await cx.request(PIX_REGISTRY_ACTION_METHOD, {
-				cwd: "/tmp/registry-gui",
-				action: "update",
-				type: "skill",
-				name: "pdf",
-			});
-			const pulled = await cx.request(PIX_REGISTRY_ACTION_METHOD, {
-				cwd: "/tmp/registry-gui",
-				action: "pull-project",
-				scope: "todo",
-			});
-			const keyed = await cx.request(PIX_REGISTRY_ACTION_METHOD, {
-				cwd: "/tmp/registry-gui",
-				action: "project-key",
-			});
-			for (const result of [refreshed, updated, pulled]) assert.deepEqual(result, { snapshot });
-			assert.deepEqual(keyed, { snapshot: { ...snapshot, projectKey: "manual-key" } });
-		}, (app) => {
-			app.onRequest("elicitation/create", (ctx) => {
-				elicitationParams.push(ctx.params);
-				return { action: "accept", content: { value: "manual-key" } } satisfies CreateElicitationResponse;
-			});
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+		for (const request of [
+			{ action: "refresh" }, { action: "update", type: "skill", name: "pdf" },
+			{ action: "pull-project", scope: "todo" }, { action: "tags", type: "skill", name: "pdf" },
+		]) assert.deepEqual(await cx.request(PIX_REGISTRY_ACTION_METHOD, { cwd: "/tmp/registry-gui", ...request }), { snapshot });
+		assert.deepEqual(await cx.request(PIX_REGISTRY_ACTION_METHOD, { cwd: "/tmp/registry-gui", action: "project-key" }), { snapshot: { ...snapshot, projectKey: "manual-key" } });
+	}, (app) => {
+		app.onRequest("elicitation/create", (ctx) => {
+			elicitationParams.push(ctx.params);
+			return { action: "accept", content: { value: ctx.params.message.startsWith("Tags") ? "docs, review" : "manual-key" } } satisfies CreateElicitationResponse;
 		});
-
-		assert.equal(harness.adapter.sessionCount, 0);
-		assert.deepEqual(registryClients.map((pi) => pi.promptCalls[0]?.message), [
-			"/registry rpc refresh",
-			"/registry rpc update skill pdf",
-			"/registry rpc pull todo",
-			"/registry rpc project-key",
-		]);
-		assert.equal(elicitationParams.length, 1);
-		assert.equal((elicitationParams[0] as { sessionId?: string }).sessionId, undefined);
-		assert.equal(typeof (elicitationParams[0] as { requestId?: string }).requestId, "string");
-		for (const options of registryOptions) {
-			assert.equal(options.cwd, "/tmp/registry-gui");
-			assert.equal(options.env?.PIX_ACP_REGISTRY_WORKSPACE_RPC, "1");
-			assert.ok(options.args?.includes("--no-session"));
-			assert.ok(options.args?.includes("--extension"));
-		}
-		assert.equal(registryClients.every((pi) => pi.started === false), true, "disposable Registry runtimes are stopped");
-	} finally {
-		await rm(extensionDir, { recursive: true, force: true });
+	});
+	assert.equal(harness.adapter.sessionCount, 0);
+	assert.deepEqual(calls, ["refresh", "update", "pull-project", "tags", "project-key"]);
+	assert.equal(elicitationParams.length, 2);
+	for (const params of elicitationParams) {
+		assert.equal((params as { sessionId?: string }).sessionId, undefined);
+		assert.equal(typeof (params as { requestId?: string }).requestId, "string");
 	}
 });
 
-test("Pix Desktop registry diff runs in a disposable workspace runtime and returns validated file texts", async () => {
-	const registryClients: FakePiClient[] = [];
-	const registryOptions: PiRpcClientOptions[] = [];
-	const extensionDir = mkdtempSync(join(tmpdir(), "registry-extension-"));
-	const extensionPath = join(extensionDir, "index.ts");
-	await writeFile(extensionPath, "// test registry extension\n");
-	const diffPayload = (files: unknown, error?: string) => ({
-		version: 1,
-		type: "skill",
-		name: "pdf",
-		files,
-		...(error ? { error } : {}),
-	});
+test("Pix Desktop registry diff calls the direct service and validates file texts without Pi", async () => {
+	let calls = 0;
+	const files = [
+		{ path: "skills/pdf/SKILL.md", oldText: "remote v1\n", newText: "local v2\n" },
+		{ path: "skills/pdf/removed.txt", oldText: "gone\n", newText: null },
+		{ path: "skills/pdf/added.bin", oldText: null, newText: null, notice: "Project copy is binary" },
+	];
 	const harness = createTestAdapter({
-		agentDir: join(extensionDir, "agent"),
-		toolsSuiteExtensionPath: extensionPath,
-		createPiClient: (options) => {
-			registryOptions.push(options);
-			const pi = new FakePiClient();
-			const index = registryClients.length;
-			pi.commands.push({ name: "registry", description: "Manage registry", source: "extension", sourceInfo: {} });
-			pi.promptHandledWithoutRun = true;
-			pi.promptHook = async (message) => {
-				assert.equal(message, "/registry rpc diff skill pdf");
-				pi.emit({
-					type: "extension_ui_request",
-					id: `registry-diff-${index}`,
-					method: "setWidget",
-					widgetKey: "pix.session-state",
-					widgetLines: ["pi-tools-suite:resource-registry:diff", JSON.stringify(
-						index === 0
-							? diffPayload([
-								{ path: "skills/pdf/SKILL.md", oldText: "remote v1\n", newText: "local v2\n" },
-								{ path: "skills/pdf/removed.txt", oldText: "gone\n", newText: null },
-								{ path: "skills/pdf/added.bin", oldText: null, newText: null, notice: "Project copy is binary" },
-							])
-							: index === 1
-								? diffPayload([], 'Project skill "pdf" does not exist.')
-								: diffPayload("not-an-array"),
-					)],
-				});
-			};
-			registryClients.push(pi);
-			return pi;
+		createPiClient: () => { throw new Error("Registry must not create a Pi runtime"); },
+		registryService: {
+			action: async () => { throw new Error("Unexpected action"); },
+			diff: async (request) => {
+				assert.deepEqual(request, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" });
+				calls += 1;
+				return { version: 1, type: "skill", name: "pdf", files: calls === 3 ? "not-an-array" as unknown as typeof files : calls === 2 ? [] : files, ...(calls === 2 ? { error: 'Project skill "pdf" does not exist.' } : {}) };
+			},
 		},
 	});
-
-	try {
-		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
-			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
-			const diffed = await cx.request(PIX_REGISTRY_DIFF_METHOD, {
-				cwd: "/tmp/registry-gui",
-				type: "skill",
-				name: "pdf",
-			});
-			assert.deepEqual(diffed, { files: [
-				{ path: "skills/pdf/SKILL.md", oldText: "remote v1\n", newText: "local v2\n" },
-				{ path: "skills/pdf/removed.txt", oldText: "gone\n", newText: null },
-				{ path: "skills/pdf/added.bin", oldText: null, newText: null, notice: "Project copy is binary" },
-			] });
-			await assert.rejects(
-				cx.request(PIX_REGISTRY_DIFF_METHOD, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" }),
-				/Project skill "pdf" does not exist\./,
-			);
-			await assert.rejects(
-				cx.request(PIX_REGISTRY_DIFF_METHOD, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" }),
-				/resource registry published an invalid diff payload/,
-			);
-			await assert.rejects(
-				cx.request(PIX_REGISTRY_DIFF_METHOD, { cwd: "/tmp/registry-gui", type: "tasks", name: "pdf" }),
-				/registry diff request requires cwd, type skill\|agent, and a valid resource name/,
-			);
-		});
-
-		assert.equal(harness.adapter.sessionCount, 0);
-		assert.deepEqual(registryClients.map((pi) => pi.promptCalls[0]?.message), [
-			"/registry rpc diff skill pdf",
-			"/registry rpc diff skill pdf",
-			"/registry rpc diff skill pdf",
-		]);
-		for (const options of registryOptions) {
-			assert.equal(options.cwd, "/tmp/registry-gui");
-			assert.equal(options.env?.PIX_ACP_REGISTRY_WORKSPACE_RPC, "1");
-			assert.ok(options.args?.includes("--no-session"));
-			assert.ok(options.args?.includes("--extension"));
-		}
-		assert.equal(registryClients.every((pi) => pi.started === false), true, "disposable Registry runtimes are stopped");
-	} finally {
-		await rm(extensionDir, { recursive: true, force: true });
-	}
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+		const request = { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" };
+		assert.deepEqual(await cx.request(PIX_REGISTRY_DIFF_METHOD, request), { files });
+		await assert.rejects(cx.request(PIX_REGISTRY_DIFF_METHOD, request), /Project skill "pdf" does not exist\./);
+		await assert.rejects(cx.request(PIX_REGISTRY_DIFF_METHOD, request), /resource registry published an invalid diff payload/);
+		await assert.rejects(cx.request(PIX_REGISTRY_DIFF_METHOD, { ...request, type: "tasks" }), /registry diff request requires cwd, type skill\|agent, and a valid resource name/);
+	});
+	assert.equal(harness.adapter.sessionCount, 0);
+	assert.equal(calls, 3);
 });
 
 test("desktop lazy session/load omits tool bodies and retrieves them on demand", async () => {

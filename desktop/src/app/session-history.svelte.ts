@@ -6,7 +6,6 @@ import {
   emptyTranscript,
   markDeferredToolResults,
   setToolResultLoading,
-  type TranscriptState,
 } from "../lib/transcript";
 import type { ActiveSessionState } from "./active-session-state.svelte";
 
@@ -33,6 +32,8 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   const loadingToolResults = new Map<string, HistoryRequestOwner>();
   const olderCursorBySessionId = new Map<string, string>();
   const loadingOlderSessionIds = new Map<string, HistoryRequestOwner>();
+  const hydrationBySessionId = new Map<string, { promise: Promise<void>; generation: number }>();
+  const retainedHydrationBySessionId = new Map<string, number>();
 
   function begin(): number {
     loading = true;
@@ -58,7 +59,46 @@ export function createSessionHistory(options: SessionHistoryOptions) {
       && requestGeneration === generation;
   }
 
-  async function hydrate(
+  function hydrate(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+    requestGeneration: number,
+  ): Promise<void> {
+    retainedHydrationBySessionId.delete(sessionId);
+    const pending = hydrateRequest(requestClient, sessionId, requestWorkspace, requestGeneration)
+      .finally(() => {
+        if (hydrationBySessionId.get(sessionId)?.promise !== pending) return;
+        hydrationBySessionId.delete(sessionId);
+        retainedHydrationBySessionId.delete(sessionId);
+      });
+    hydrationBySessionId.set(sessionId, { promise: pending, generation: requestGeneration });
+    return pending;
+  }
+
+  function isHydrationCurrent(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+    requestGeneration: number,
+  ): boolean {
+    if (isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return true;
+    return requestClient === options.client()
+      && requestWorkspace === options.workspace()
+      && retainedHydrationBySessionId.get(sessionId) === requestGeneration
+      && hydrationBySessionId.get(sessionId)?.generation === requestGeneration;
+  }
+
+  function waitForHydration(sessionId: string): Promise<void> {
+    const pending = hydrationBySessionId.get(sessionId);
+    if (!pending) return Promise.resolve();
+    // A captured submit owns this hydration even after another tab is selected.
+    // Close/reset/replacement still invalidate it; only selection may outlive it.
+    retainedHydrationBySessionId.set(sessionId, pending.generation);
+    return pending.promise;
+  }
+
+  async function hydrateRequest(
     requestClient: AcpClient,
     sessionId: string,
     requestWorkspace: string,
@@ -67,19 +107,18 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     olderCursorBySessionId.delete(sessionId);
     try {
       const history = await requestClient.sessionHistory(sessionId);
-      if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
+      if (!isHydrationCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
       let loadedTranscript = applySessionUpdates(emptyTranscript, history.updates);
       loadedTranscript = markDeferredToolResults(loadedTranscript, history.deferredToolCallIds);
       if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
       else olderCursorBySessionId.delete(sessionId);
 
-      const currentItems = options.state.transcript.items;
+      const currentItems = options.state.transcriptFor(sessionId)?.items ?? [];
       const nextTranscript = currentItems.length === 0
         ? loadedTranscript
         : { items: [...loadedTranscript.items, ...currentItems] };
-      options.state.setTranscript(nextTranscript);
-      options.state.setSessionTranscript(sessionId, nextTranscript);
-      options.scheduleScrollToLatest();
+      options.state.setTranscriptFor(sessionId, nextTranscript);
+      if (options.state.sessionId === sessionId) options.scheduleScrollToLatest();
     } catch (error) {
       if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
       const message = error instanceof Error ? error.message : String(error);
@@ -87,8 +126,9 @@ export function createSessionHistory(options: SessionHistoryOptions) {
         await options.ensureRuntime(requestClient, sessionId, requestWorkspace);
         if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
         if (options.runtimeReady(sessionId)) {
-          options.state.setTranscript(emptyTranscript);
-          options.state.setSessionTranscript(sessionId, emptyTranscript);
+          // Input accepted during startup is not history and must survive an
+          // empty/unavailable persisted history response.
+          options.state.setSessionTranscript(sessionId, options.state.transcript);
           loading = false;
           return;
         }
@@ -188,6 +228,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   }
 
   function forget(sessionId: string): void {
+    retainedHydrationBySessionId.delete(sessionId);
     olderCursorBySessionId.delete(sessionId);
     loadingOlderSessionIds.delete(sessionId);
     for (const key of loadingToolResults.keys()) {
@@ -200,6 +241,8 @@ export function createSessionHistory(options: SessionHistoryOptions) {
 
   function reset(): void {
     cancel();
+    retainedHydrationBySessionId.clear();
+    hydrationBySessionId.clear();
     olderCursorBySessionId.clear();
   }
 
@@ -211,6 +254,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     cancel,
     isCurrent,
     hydrate,
+    waitForHydration,
     loadOlder,
     loadDeferredToolResult,
     markFullyLoaded,

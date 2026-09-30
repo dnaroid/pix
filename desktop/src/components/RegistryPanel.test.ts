@@ -3,8 +3,20 @@ import panelSource from "./RegistryPanel.svelte?raw";
 import diffPanelSource from "./RegistryDiffPanel.svelte?raw";
 import sidebarSource from "./WorkspaceSidebar.svelte?raw";
 import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?raw";
+import navigationSource from "../app/desktop-navigation-view-model-services.ts?raw";
 
 describe("RegistryPanel refresh lifecycle", () => {
+  it("marks active session skills without treating availability as project ownership", () => {
+    expect(panelSource).toContain("registryItemsWithContext(");
+    expect(panelSource).toContain("contextCommands));");
+    expect(panelSource).toContain("item.inContext && !item.local");
+    expect(panelSource).toContain("item.inContext && item.local");
+    expect(panelSource).toContain('title="Available to the active session">In context</span>');
+    expect(sidebarSource).toContain("contextCommands={registryContextCommands}");
+    expect(sidebarViewModelSource).toContain("registryContextCommands: options.contextCommands?.() ?? []");
+    expect(navigationSource).toContain("options.state.runtimeReady && options.state.sessionId");
+    expect(navigationSource).toContain("slashCommandsBySession.get(options.state.sessionId)");
+  });
   it("refreshes only from an explicit user action", () => {
     expect(panelSource).not.toContain("onMount");
     expect(sidebarSource).toContain('title="Refresh registry"');
@@ -66,7 +78,7 @@ describe("RegistryPanel refresh lifecycle", () => {
 
   it("displays tags and installation separately from publication", () => {
     expect(panelSource).toContain("item.tags?.length");
-    expect(panelSource).toContain('item.remote ? "Published" : "Local"');
+    expect(panelSource).toContain("{registryPublicationBadge(item)}");
     expect(panelSource).toContain('action === "tags"');
     expect(panelSource).toContain('action === "make-local"');
   });
@@ -99,9 +111,12 @@ describe("RegistryPanel catalog row layout", () => {
     expect(titleRow).not.toContain("registryFriendlyStatusLabel");
     expect(titleRow).not.toContain("<button");
     expect(descriptionRow).toContain("{item.description}");
-    expect(descriptionRow).toContain("item.tags.map");
+    expect(titleRow).toContain("item.tags.map");
+    expect(titleRow.indexOf("{typeLabel(item.type)}")).toBeLessThan(titleRow.indexOf("item.tags.map"));
+    expect(descriptionRow).not.toContain("item.tags");
     expect(footerRow).toContain("{registryFriendlyStatusLabel(item)}");
-    expect(footerRow).toContain('item.remote ? "Published" : "Local"');
+    expect(footerRow).toContain("{registryPublicationBadge(item)}");
+    expect(footerRow).toContain('title={publicationTitle(item)}');
     expect(footerRow).toContain("onclick={() => openItemDiff(item)}");
     expect(footerRow).toContain("onclick={() => runItemAction(item, action)}");
   });
@@ -115,11 +130,39 @@ describe("RegistryPanel catalog row layout", () => {
   it("reserves the description row and keeps labels truncatable beside fixed controls", () => {
     expect(catalogRow).toContain("min-h-3.5 min-w-0");
     expect(descriptionRow).toContain('class="min-w-0 flex-1 truncate"');
-    expect(descriptionRow).toContain('title={item.tags.join(", ")}');
+    expect(titleRow).toContain('title={item.tags.join(", ")}');
     expect(footerRow).toContain("min-w-0 truncate text-xs font-semibold");
     expect(footerRow).toContain('title={statusTitle(item)}');
     expect(footerRow).toContain('class="flex shrink-0 items-center gap-0.5"');
-    expect(footerRow).toContain("aria-label={`${actionLabel}: ${item.name}`}");
+    expect(footerRow).toContain("aria-label={`${scopeSetupRequired ? PROJECT_SCOPE_SETUP_HINT : actionLabel}: ${item.name}`}");
+  });
+});
+
+describe("RegistryPanel publication scope toggle", () => {
+  it("badges published rows with their visibility scope", () => {
+    expect(panelSource).toContain("{registryPublicationBadge(item)}");
+    expect(panelSource).toContain('title={publicationTitle(item)}');
+    expect(panelSource).toContain('"Published to the shared Git registry for this project only"');
+    expect(panelSource).toContain('"Published to the shared Git registry for every project"');
+  });
+
+  it("offers the backend-provided toggle-scope action with destination-aware icon", () => {
+    expect(panelSource).toContain('action === "toggle-scope"');
+    expect(panelSource).toContain("registryScopeToggleDestination(item)");
+    expect(panelSource).toContain('<Globe class="h-3.5 w-3.5" aria-hidden="true" />');
+    expect(panelSource).toContain('<FolderGit2 class="h-3.5 w-3.5" aria-hidden="true" />');
+  });
+
+  it("blocks moving a publication to project scope until a project key exists", () => {
+    expect(panelSource).toContain("scopeToggleBlocked(item, action)");
+    expect(panelSource).toContain("!snapshot?.projectKey");
+    expect(panelSource).toContain("disabled={remoteBusy || scopeSetupRequired}");
+    expect(panelSource).toContain("PROJECT_SCOPE_SETUP_HINT");
+    expect(panelSource).toContain('set one with "Set project key" in the Project sync section');
+  });
+
+  it("sends the toggle through the shared per-item action request", () => {
+    expect(panelSource).toContain("return { action, type: item.type, name: item.name };");
   });
 });
 

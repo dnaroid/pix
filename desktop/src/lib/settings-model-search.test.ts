@@ -38,6 +38,28 @@ const models: ModelThinkingModel[] = [
 ];
 
 describe("settings model fuzzy search", () => {
+  it("offers trimmed wildcard and bare-model values only when custom entry is enabled", () => {
+    const options = settingsModelSearchOptions(models);
+    for (const pattern of ["anthropic/*", "glm-?", "my-model"]) {
+      expect(searchSettingsModelOptions(options, ` ${pattern} `, true)[0]).toMatchObject({
+        value: pattern,
+        description: "Custom model or pattern",
+      });
+      expect(searchSettingsModelOptions(options, pattern).some((option) => option.value === pattern)).toBe(false);
+    }
+    expect(searchSettingsModelOptions([], "zai/*", true)[0]?.value).toBe("zai/*");
+    expect(searchSettingsModelOptions(options, "   ", true)).toEqual(options);
+  });
+
+  it("does not duplicate exact catalog or configured patterns", () => {
+    const options = [...settingsModelSearchOptions(models), { value: "zai/*", label: "zai/* · Configured" }];
+    for (const value of ["openai-codex/gpt-5.6-sol", "zai/*"]) {
+      const matches = searchSettingsModelOptions(options, value, true);
+      expect(matches.filter((option) => option.value === value)).toHaveLength(1);
+      expect(matches.find((option) => option.value === value)?.description).not.toBe("Custom model or pattern");
+    }
+  });
+
   it("matches model ref, id, display name, and provider", () => {
     expect(searchSettingsModels(models, "g56")[0]?.ref).toBe("openai-codex/gpt-5.6-sol");
     expect(searchSettingsModels(models, "sonnet")[0]?.ref).toBe("anthropic/claude-sonnet-4-6");

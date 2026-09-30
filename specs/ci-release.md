@@ -103,7 +103,7 @@ remain true when CI or UI-QA tests change.
 - `acp/test/git-assistant.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
-- `external/pi-tools-suite/test/resource-registry.test.ts`
+- `acp/test/registry.test.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/tui.mjs`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
 

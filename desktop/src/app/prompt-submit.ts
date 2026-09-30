@@ -25,6 +25,7 @@ type PromptSubmitOptions = {
   beginOptimisticDraftSubmit: (text: string, attachments: readonly Attachment[]) => boolean;
   materializeDraftSession: (prompt?: string, attachmentCount?: number) => Promise<string | null>;
   sessionRuntimeReady: (sessionId: string) => boolean;
+  waitForSessionReady?: (client: AcpClient, sessionId: string) => Promise<boolean>;
   promptRunning: (sessionId: string) => boolean;
   openSessionStartTab: () => void | Promise<void>;
   enhancePromptDraft: (draft: string) => void | Promise<void>;
@@ -71,13 +72,14 @@ type PromptSubmitOptions = {
 };
 
 export function createPromptSubmit(options: PromptSubmitOptions) {
+  const pendingSessionSubmits = new Set<string>();
   type PreparedPrompt = ReturnType<typeof buildPromptPayload> & {
     transcriptMessageId: string;
     rollback?: () => void;
   };
 
   async function submit(): Promise<void> {
-    if (options.sessionMutationRunning() || options.sessionHistoryLoading()) return;
+    if (options.sessionMutationRunning()) return;
     const initialDraftKey = options.attachmentDraftKey();
     await options.waitForAttachmentDraftSettled(initialDraftKey);
     if (initialDraftKey !== options.attachmentDraftKey()) return;
@@ -90,7 +92,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     if (
       (!text && attachments.length === 0)
       || options.sessionMutationRunning()
-      || options.sessionHistoryLoading()
+      || (sessionId !== null && pendingSessionSubmits.has(sessionId))
     ) return;
 
     const terminalCommand = parseDesktopTerminalCommand(text);
@@ -114,6 +116,10 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     if (!options.client()) return;
 
     const desktopCommand = parseDesktopSlashCommand(text, attachments.length > 0);
+    // Runtime-dependent commands retain their readiness gates. Normal messages
+    // can be accepted before history/runtime startup finishes.
+    if (sessionId && (desktopCommand || terminalCommand || text.startsWith("/"))
+      && (options.sessionHistoryLoading() || !options.sessionRuntimeReady(sessionId))) return;
     if (desktopCommand) {
       switch (desktopCommand.kind) {
         case "new":
@@ -231,6 +237,44 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       }
       draftKey = options.attachmentDraftKey();
       draftGeneration = options.attachmentGeneration();
+    }
+    if (!preparedPrompt && !terminalCommand && !text.startsWith("/")
+      && (!options.sessionRuntimeReady(sessionId) || options.sessionHistoryLoading())) {
+      const requestClient = options.client();
+      if (!requestClient || !options.waitForSessionReady) return;
+      let pendingStartup = false;
+      const releaseStartup = () => {
+        if (!pendingStartup) return;
+        pendingStartup = false;
+        pendingSessionSubmits.delete(sessionId);
+      };
+      try {
+        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
+        pendingSessionSubmits.add(sessionId);
+        pendingStartup = true;
+        options.setErrorMessage(null);
+        options.setPromptText("");
+        options.invalidateAttachmentDraft();
+        const transcriptMessageId = options.nextLocalMessageId();
+        options.appendUserMessage(text, transcriptMessageId, attachments);
+        void options.scrollToLatest();
+        // Capture the target before awaiting: selection changes do not retarget
+        // an already accepted message or clear another conversation's input.
+        if (!await options.waitForSessionReady(requestClient, sessionId)
+          || requestClient !== options.client()) {
+          throw new Error("Could not complete session opening. The message was not sent.");
+        }
+        releaseStartup();
+        await options.prompts.runPromptRequest(
+          requestClient, sessionId, payload.blocks, payload.fileImages, transcriptMessageId,
+        );
+        void options.refreshSessions();
+      } catch (error) {
+        options.reportError(error);
+      } finally {
+        releaseStartup();
+      }
+      return;
     }
     if (!options.sessionRuntimeReady(sessionId)) return;
 

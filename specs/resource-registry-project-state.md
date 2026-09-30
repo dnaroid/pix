@@ -16,7 +16,7 @@ absolute paths.
 
 ## Scope
 
-- `/registry push|pull tasks|plans|todo|workspace|project`.
+- Desktop Registry push/pull/sync for tasks, plans, TODO, workspace and project.
 - Project provenance in `.pi/registry.json`.
 - Portable synchronization of `.pi/tasks.jsonc` together with the regular files
   referenced from `.pi/task-attachments`.
@@ -40,6 +40,13 @@ markers are rebased from local `file://` URIs to
 Those portable markers are not written to the local project task file.
 
 ## Behavior
+
+- Desktop schedules a background catalog refresh three seconds after ACP is
+  ready for the active workspace, without requiring the Registry panel to open.
+  Busy operations, Registry actions and project sync defer the request until a
+  new quiet three-second interval. Workspace/client changes, disconnection and
+  teardown cancel pending timers; reconnect schedules a new load. In-flight
+  responses retain the Registry store's workspace/lifecycle stale-response guards.
 
 1. `push tasks` reads `.pi/tasks.jsonc`, identifies attachment markers whose
    files resolve inside `.pi/task-attachments`, and normalizes those markers to
@@ -76,7 +83,7 @@ Those portable markers are not written to the local project task file.
 9. Dirty project-state writes are debounced for approximately 900 ms. Repeated
    writes to one artifact collapse into one push, while more than one dirty
    artifact collapses into one project operation. The automatic request is
-   `sync-project`, mapped to private `registry rpc sync <scope>`; it never
+   `sync-project`, handled directly by the ACP Registry service; it never
    opens confirmation dialogs or emits successful-push notifications. It syncs
    only tasks/plans/TODO/workspace, never automatically publishes skills/agents.
    Untracked remote collisions and changed tracked revisions return actionable
@@ -86,8 +93,8 @@ Those portable markers are not written to the local project task file.
    errors, and different artifacts are retained while pending or in flight.
 10. Background sync never takes the Desktop foreground-operation lock. Registry
     actions are workspace-scoped: Desktop sends the workspace cwd to ACP, and
-    ACP executes the private Registry command in a disposable `--no-session` Pi
-    RPC runtime. No conversation session is created, loaded, or required. A
+    ACP executes filesystem/Git operations directly in its Registry service.
+    No Pi runtime or conversation session is created, loaded, or required. A
     blocked sync remains pending and retries on a short idle cadence instead of
     dropping dirty state. While the actual background Registry RPC is in flight,
     Registry-panel actions are locally disabled so a manual Registry command
@@ -155,24 +162,19 @@ Those portable markers are not written to the local project task file.
 19. Foreground Registry actions (refresh/install/update/push/pull/uninstall/
     remove) use Registry-local busy state and do not take Pix Desktop's global
     operation-running lock. The rest of the workbench remains interactive while
-    Registry Git/filesystem work runs in its disposable workspace-scoped Pi
-    runtime. Workspace/client generation guards discard stale completions after
+    Registry Git/filesystem work runs asynchronously in ACP.
+    Workspace/client generation guards discard stale completions after
     a workspace switch or lifecycle reset. Registry-local controls may still be
     disabled while their own action is active. Local project initialization and
     reclaimable `.pi` cleanup follow the same rule: they use the Registry
     `actionId`, never the Desktop-global lock.
-20. Desktop workspace Registry actions execute in a disposable Pi RPC runtime
-    marked specifically for Registry ownership. Resource-changing commands in
-    that runtime invalidate Registry snapshot caches but do not call
-    `ctx.reload()`: reloading the disposable runtime would invalidate the
-    extension context before its authoritative post-action snapshot can be
-    published. Normal conversation/TUI Registry commands retain their live
-    context reload behavior. ACP treats the snapshot as a separate asynchronous
-    event and waits for it with a bounded timeout after the command
-    acknowledgement, rather than assuming one event-loop turn is sufficient.
-    Therefore a successful first push must not be reported as
-    `resource registry did not publish a workspace snapshot` merely because
-    snapshot delivery is delayed.
+20. The ACP service returns an authoritative post-action snapshot directly;
+    there is no extension widget event, runtime reload, or snapshot-event wait.
+    Actions, diffs and their snapshots serialize access to the shared per-process
+    disposable checkout and project provenance. Git runs in asynchronous child
+    processes without a shell. Registry configuration retains the existing
+    `resourceRegistry` JSONC layers and environment overrides for compatibility.
+    Registry has no TUI module or `/registry` command.
 
 ## Compatibility
 
@@ -263,12 +265,17 @@ Those portable markers are not written to the local project task file.
 
 ## Related files
 
-- `external/pi-tools-suite/src/resource-registry/index.ts`
-- `external/pi-tools-suite/test/resource-registry.test.ts`
+- `acp/src/registry/service.ts`
+- `acp/src/registry/projects.ts`
+- `acp/src/registry/task-bundle.ts`
+- `acp/test/registry.test.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/test/desktop-commands.test.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src/app/registry.svelte.ts`
+- `desktop/src/app/registry-startup.ts`
+- `desktop/src/app/registry-startup.test.ts`
+- `desktop/src/app/desktop-root-effects.svelte.ts`
 - `desktop/src/app/registry-store.test.ts`
 - `desktop/src/lib/registry.ts`
 - `desktop/src/lib/registry-background-sync.ts`
@@ -280,9 +287,9 @@ Those portable markers are not written to the local project task file.
 
 ## Verification
 
-- `bun test test/resource-registry.test.ts` covers project-state push/pull,
+- ACP `test/registry.test.ts` covers project-state push/pull,
   portable task attachments, attachment-only status changes, stale remote
-  attachment removal, conflicts, and existing project-state/TUI behavior.
+  attachment removal, conflicts, and direct workspace-scoped operations.
 - Desktop Rust task persistence tests cover reference-based local attachment
   pruning after successful task-document writes, idempotent `.pi` skeleton
   initialization without overwriting an existing task document, concurrent

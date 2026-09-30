@@ -58,6 +58,24 @@ function setup() {
 }
 
 describe("runtime loading ownership", () => {
+  it("invalidates a captured send owner on close and same-ID reopen", async () => {
+    const state = setup();
+    const old = state.store.ensure(state.client, "a", "/workspace");
+    const ownsOld = state.store.captureOwnership("a");
+    expect(ownsOld()).toBe(true);
+    state.store.forget("a");
+    const current = state.store.ensure(state.client, "a", "/workspace");
+    const ownsCurrent = state.store.captureOwnership("a");
+    state.succeed(1);
+    await current;
+    expect(ownsOld()).toBe(false);
+    expect(ownsCurrent()).toBe(true);
+    state.succeed(0);
+    await old;
+    expect(ownsOld()).toBe(false);
+    state.store.reset();
+    expect(ownsCurrent()).toBe(false);
+  });
   for (const invalidation of ["forget", "reset"] as const) {
     for (const outcome of ["success", "failure"] as const) {
       it(`ignores old ${outcome} after ${invalidation} and same-ID restart, preserving activity`, async () => {
