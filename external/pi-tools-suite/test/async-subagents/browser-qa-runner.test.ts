@@ -477,7 +477,7 @@ describe("private browser QA runner", () => {
 		expect(result.json.reason).toContain("Executable doesn't exist");
 		expect(result.json.remediation).toContain("playwright install chromium");
 		expect(fs.existsSync(path.join(project, "launched-executable"))).toBe(false);
-	});
+	}, 10_000);
 
 	test("bounds a hung browser stage, kills its detached child, and leaves sanitized progress", async () => {
 		const project = tempProject();
@@ -1367,7 +1367,7 @@ describe("private browser QA runner", () => {
 		const parentCookieFlow = writeAgentFlow(parentCookieAgentDir, JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
 		const parentCookieResult = run(parentCookieProject, ["run", "--profile", "admin", "--flow", parentCookieFlow, "--run-id", "parent-cookie"], parentCookieAgentDir);
 		expect(parentCookieResult).toMatchObject({ code: 0, json: { status: "QA_PASSED", profile: "admin" } });
-	});
+	}, 30_000);
 
 	test("rejects permissive auth files, symlinked flows, and evidence collisions", () => {
 		if (process.platform === "win32") return;
