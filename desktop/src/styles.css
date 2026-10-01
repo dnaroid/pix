@@ -1,4 +1,7 @@
-@import "tailwindcss";
+/* Scan frontend sources only, not native build caches or generated artifacts. */
+@import "tailwindcss" source(none);
+@source "./";
+@source "../index.html";
 
 @theme inline {
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;

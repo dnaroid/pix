@@ -52,6 +52,7 @@ must not replace the current view.
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/app/registry.svelte.ts`
 - `desktop/src/components/RegistryPanel.svelte`
+- `desktop/src/components/RegistryCatalog.svelte`
 - `desktop/src/components/RegistryDiffPanel.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`

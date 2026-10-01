@@ -99,7 +99,7 @@ export function nativeContextMenuItems(
   } else if (context.kind === "terminal") {
     edit("Copy");
     if (!context.readOnly) edit("Paste");
-  } else if (context.kind === "readonly") {
+  } else if (context.kind === "readonly" && !context.sourceReference) {
     edit("Copy");
     separator();
     edit("SelectAll");
@@ -107,6 +107,16 @@ export function nativeContextMenuItems(
     edit("SelectAll");
   } else if (context.hasSelection) {
     edit("Copy");
+  }
+
+  const sourceReference = context.sourceReference;
+  if (sourceReference) {
+    if (items.length) separator();
+    items.push({
+      id: "desktop.source.reference",
+      text: "Copy Relative Path with Line Number",
+      action: run(() => writeText(sourceReference)),
+    });
   }
 
   const url = context.linkUrl;

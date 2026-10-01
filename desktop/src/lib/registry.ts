@@ -152,6 +152,15 @@ export function registryItemsWithContext(
   });
 }
 
+/** Shared status→color mapping for both project-sync rows and catalog cards. */
+export function registryStatusTone(status: RegistryStatus, synced = false): string {
+  if (status === "up-to-date" || synced) return "text-tool-success";
+  if (status === "update-available" || status === "missing-local") return "text-tool-warning";
+  if (status === "diverged" || status === "registry-changed" || status === "removed-remote") return "text-tool-error";
+  if (status === "local-changes" || status === "local-only" || status === "untracked-local") return "text-tool-info";
+  return "text-muted-foreground";
+}
+
 export function registryCatalogItems(
   items: readonly RegistryItem[],
   section: RegistryCatalogSection,

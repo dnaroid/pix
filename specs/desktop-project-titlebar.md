@@ -98,6 +98,10 @@ without blocking desktop interactions.
   config path. Saving `Automatic` removes only the `color` property; saving a
   custom color updates only that property and preserves sibling JSONC settings
   and comments. A malformed `.pi/workspace.jsonc` is never overwritten.
+- Project settings remains open across background sidebar-prop updates for the
+  same workspace (including Git/Registry refreshes). Only an actual workspace
+  change resets its open, saving, and error state; explicit dismissal and a
+  successful save retain their existing close behavior.
 - Project-color saves are asynchronous and do not set the global workspace
   operation/busy state. The renderer reads the latest workspace config, applies
   the color edit, then uses a compare-and-swap Tauri write. If the file changed
@@ -190,6 +194,9 @@ without blocking desktop interactions.
 - `desktop/src/components/ProjectSettingsDialog.test.ts` covers the settings
   entry point, automatic/custom controls, native color picker, and presentation/
   persistence separation.
+- `desktop/src/components/workspace-sidebar-project-settings-controller.test.ts`
+  covers same-workspace refresh stability, saving/error retention, reset on a
+  real workspace change, and stale save completion after switching projects.
 - `desktop/src/components/WorkspaceSidebar.test.ts` verifies that the Activity
   Bar project icon stays neutral, `ProjectSwitcher.test.ts` verifies that the
   active Project-switcher row stays neutral, and

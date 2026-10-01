@@ -83,6 +83,22 @@ while project selection/open state remains separate from transient focus.
   selected/expanded state beneath the removed path from both memory and the
   sparse persisted preference.
 - Delete is destructive and requires confirmation before the filesystem mutation.
+- File/folder context menus expose **Add to .gitignore** only after a local Git
+  check confirms an exact workspace-root repository and a target not already
+  matching ignore rules, including tracked files and folders with tracked
+  descendants. Ignore matching is checked independently of the index. The backend
+  rechecks eligibility before writing; it never removes anything from the index,
+  so already tracked files retain their Git status after a rule is added. It appends
+  an anchored, escaped literal rule, with a trailing slash for folders, to the
+  nearest existing ancestor `.gitignore`, or creates the root `.gitignore`.
+  Existing rules/comments and newline style are preserved. Workspace escapes,
+  symlinks and Git metadata are rejected. Completion refreshes directory listings
+  and the shared Git snapshot, updating target/ancestor/`.gitignore` colors without
+  manual refresh. Menu checks and mutation completions cannot affect a replaced
+  workspace or closed menu/panel. Rechecking the same menu target after a Git
+  snapshot refresh preserves its confirmed eligibility while the read is pending,
+  so polling does not make the action blink. A fresh ineligible result or failed
+  check hides it; changing targets clears the previous target's eligibility.
 - Existing pointer drag/drop behavior and lazy directory loading remain unchanged.
 - Project Explorer keeps dotfiles and dotfolders in the normal tree. Entries whose basename starts with `.` use muted opacity by default so ordinary source files retain visual priority; hover, keyboard focus, and selected/open state restore normal readability.
 - Project Explorer colors changed file names from the shared workspace Git snapshot, without displaying status letters or badges. Added/untracked files use success, deleted files warning, conflicts error, and other changes info semantic colors. Working-tree status takes color precedence over staged status; tooltips and accessible row labels describe both scopes. Existing folders containing changed descendants use info-colored names, even when collapsed, with conflicts taking error-color priority. Renames color both source and destination ancestor folders; absent/deleted files are not invented in the filesystem tree. Clean files and unavailable/non-repository snapshots have no decorations.
@@ -117,10 +133,12 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/lib/project-tree.ts`
 - `desktop/src/lib/project-git-decorations.ts`
 - `desktop/src/lib/project-git-refresh.ts`
+- `desktop/src/lib/project-git-ignore.ts`
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
 - `desktop/src/lib/project-explorer-expansion.ts`
 - `desktop/src/lib/sidebar-indicators.ts`
 - `desktop/src-tauri/src/lib.rs`
+- `desktop/src-tauri/src/git_ignore.rs`
 
 ## Verification
 
@@ -131,6 +149,12 @@ while project selection/open state remains separate from transient focus.
   expansion persistence, malformed state rejection, and storage bounds.
 - `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the
   keyboard external-editor route.
+- Native `git_ignore` tests cover real Git eligibility, literal rules, nested
+  ignore files, append preservation, tracked files/folders with unchanged index
+  contents, and unsafe paths.
+- `desktop/src/lib/project-git-ignore.test.ts` covers stale menu/workspace/status
+  reads, teardown invalidation, stable visibility during repeated status refreshes
+  and non-repository failures.
 - `desktop/src/lib/project-git-decorations.test.ts` covers staged/working-tree status, conflicts, ancestor aggregation, rename/copy semantics, and clearing snapshots; `desktop/src/lib/project-git-refresh.test.ts` covers polling, request coalescing, failed reads, and in-flight teardown.
 - `desktop/src/components/WorkspaceSidebar.test.ts` covers Activity Bar composite
   wiring.

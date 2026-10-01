@@ -128,6 +128,7 @@ status: active
 - `desktop/src/lib/registry.ts`
 - `desktop/src/app/registry.svelte.ts`
 - `desktop/src/components/RegistryPanel.svelte`
+- `desktop/src/components/RegistryCatalog.svelte`
 - `desktop/src/components/RegistryItemActions.svelte`
 - `desktop/src/lib/registry-card-actions.ts`
 - `skills/skill-creator/SKILL.md`

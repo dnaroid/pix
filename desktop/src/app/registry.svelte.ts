@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { AcpClient } from "../lib/acp-client";
 import {
   registryDiffAvailable,
@@ -14,6 +13,7 @@ import {
   type RegistryBackgroundSyncState,
   type RegistryProjectSyncScope,
 } from "../lib/registry-background-sync";
+import { createRegistryProjectStorage } from "./registry-project-storage.svelte";
 
 type RegistryStoreOptions = {
   client: () => AcpClient | null;
@@ -27,26 +27,11 @@ type RegistryStoreOptions = {
   reportError: (error: unknown) => void;
 };
 
-type ProjectPiStorageSnapshot = {
-  totalBytes: number | null;
-  cleanupBytes: number;
-  cleanupAvailable: boolean;
-};
-
-const PROJECT_LOCAL_INSPECTION_TIMEOUT_MS = 5_000;
-
 export function createRegistryStore(options: RegistryStoreOptions) {
   let snapshot = $state<RegistrySnapshot | undefined>(undefined);
-  let projectInitialized = $state<boolean | undefined>(undefined);
-  let projectPiSizeBytes = $state<number | null | undefined>(undefined);
-  let projectPiCleanupBytes = $state<number | undefined>(undefined);
-  let projectPiCleanupAvailable = $state(false);
-  let projectPiStorageLoading = $state(false);
-  let projectPiStorageError = $state<string | null>(null);
   let actionId = $state<string | null>(null);
   let diff = $state<RegistryDiffState | undefined>(undefined);
   let diffGeneration = 0;
-  let projectStateLoadGeneration = 0;
   let lifecycleGeneration = 0;
   let backgroundSyncState = $state<RegistryBackgroundSyncState>({
     phase: "idle",
@@ -80,6 +65,19 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     shouldRetryError: registryActionBusyError,
   });
 
+  // Project-local disk housekeeping: independent of registry sync, but shares
+  // the panel's action mutex so init/clean cannot overlap a registry action.
+  const storage = createRegistryProjectStorage({
+    workspace: options.workspace,
+    busy: () => options.operationRunning() || actionId !== null || backgroundSyncState.phase === "syncing",
+    setActionId: (next) => { actionId = next; },
+    setErrorMessage: options.setErrorMessage,
+    loadProjectTasks: options.loadProjectTasks,
+    loadProjectDocuments: options.loadProjectDocuments,
+    reportError: options.reportError,
+    onChanged: () => { seedProjectSync(); backgroundSync.retry(); },
+  });
+
   function handleSessionState(notification: SessionStateNotification): boolean {
     const next = registrySnapshotFromSessionState(notification);
     if (!next) return false;
@@ -88,123 +86,6 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     snapshot = next;
     seedProjectSync();
     return true;
-  }
-
-  async function refreshProjectInitialization(): Promise<void> {
-    const workspace = options.workspace();
-    const requestGeneration = ++projectStateLoadGeneration;
-    if (!workspace) {
-      projectInitialized = undefined;
-      projectPiSizeBytes = undefined;
-      projectPiCleanupBytes = undefined;
-      projectPiCleanupAvailable = false;
-      projectPiStorageLoading = false;
-      projectPiStorageError = null;
-      return;
-    }
-    projectPiStorageLoading = true;
-    projectPiStorageError = null;
-    const [initializedResult, storageResult] = await Promise.allSettled([
-      withTimeout(
-        invoke<boolean>("project_pi_initialized", { workspace }),
-        "Project state inspection",
-      ),
-      withTimeout(
-        invoke<ProjectPiStorageSnapshot>("project_pi_storage", { workspace }),
-        ".pi storage inspection",
-      ),
-    ]);
-    if (requestGeneration !== projectStateLoadGeneration || options.workspace() !== workspace) return;
-    if (initializedResult.status === "fulfilled") projectInitialized = initializedResult.value;
-    else options.reportError(initializedResult.reason);
-    if (storageResult.status === "fulfilled") {
-      projectPiSizeBytes = storageResult.value.totalBytes;
-      projectPiCleanupBytes = storageResult.value.cleanupBytes;
-      projectPiCleanupAvailable = storageResult.value.cleanupAvailable;
-      projectPiStorageError = null;
-    } else {
-      projectPiCleanupAvailable = false;
-      projectPiStorageError = registryStorageErrorLabel(storageResult.reason);
-    }
-    projectPiStorageLoading = false;
-  }
-
-  async function initializeProject(): Promise<boolean> {
-    const workspace = options.workspace();
-    const requestGeneration = lifecycleGeneration;
-    const current = () => requestGeneration === lifecycleGeneration && options.workspace() === workspace;
-    if (
-      !workspace
-      || options.operationRunning()
-      || actionId !== null
-      || backgroundSyncState.phase === "syncing"
-    ) return false;
-
-    actionId = "initialize-project";
-    options.setErrorMessage(null);
-    let initialized = false;
-    try {
-      await invoke("initialize_project_pi", { workspace });
-      if (!current()) return false;
-      projectInitialized = true;
-      await Promise.all([
-        Promise.resolve(options.loadProjectTasks(workspace)),
-        Promise.resolve(options.loadProjectDocuments(workspace)),
-      ]);
-      initialized = current();
-      return initialized;
-    } catch (error) {
-      if (current()) options.reportError(error);
-      return false;
-    } finally {
-      if (current()) {
-        actionId = null;
-        seedProjectSync();
-        backgroundSync.retry();
-        if (initialized) refresh();
-      }
-    }
-  }
-
-  async function cleanProject(): Promise<boolean> {
-    const workspace = options.workspace();
-    const requestGeneration = lifecycleGeneration;
-    const current = () => requestGeneration === lifecycleGeneration && options.workspace() === workspace;
-    if (
-      !workspace
-      || options.operationRunning()
-      || actionId !== null
-      || backgroundSyncState.phase === "syncing"
-    ) return false;
-
-    actionId = "cleanup-project";
-    options.setErrorMessage(null);
-    try {
-      await invoke<number>("clean_project_pi", { workspace });
-      if (!current()) return false;
-      await refreshProjectInitialization();
-      return current();
-    } catch (error) {
-      if (current()) options.reportError(error);
-      return false;
-    } finally {
-      if (current()) {
-        actionId = null;
-        backgroundSync.retry();
-      }
-    }
-  }
-
-  async function autoCleanProject(workspace: string): Promise<void> {
-    if (!workspace) return;
-    const requestGeneration = lifecycleGeneration;
-    try {
-      await invoke<number>("auto_clean_project_pi", { workspace });
-    } catch {
-      return;
-    }
-    if (requestGeneration !== lifecycleGeneration || options.workspace() !== workspace) return;
-    await refreshProjectInitialization();
   }
 
   function reloadLocalProjectState(scope: RegistryProjectSyncScope, workspace: string): void {
@@ -293,7 +174,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   }
 
   function refresh(): void {
-    void refreshProjectInitialization();
+    void storage.refresh();
     void runAction({ action: "refresh" }, "refresh");
   }
 
@@ -323,18 +204,12 @@ export function createRegistryStore(options: RegistryStoreOptions) {
 
   function reset(): void {
     lifecycleGeneration += 1;
-    projectStateLoadGeneration += 1;
     diffGeneration += 1;
     snapshot = undefined;
-    projectInitialized = undefined;
-    projectPiSizeBytes = undefined;
-    projectPiCleanupBytes = undefined;
-    projectPiCleanupAvailable = false;
-    projectPiStorageLoading = false;
-    projectPiStorageError = null;
     actionId = null;
     diff = undefined;
     backgroundSync.reset();
+    storage.reset();
   }
 
   function scheduleProjectSync(scope: RegistryProjectSyncScope): void {
@@ -343,20 +218,20 @@ export function createRegistryStore(options: RegistryStoreOptions) {
 
   return {
     get snapshot() { return snapshot; },
-    get projectInitialized() { return projectInitialized; },
-    get projectPiSizeBytes() { return projectPiSizeBytes; },
-    get projectPiCleanupBytes() { return projectPiCleanupBytes; },
-    get projectPiCleanupAvailable() { return projectPiCleanupAvailable; },
-    get projectPiStorageLoading() { return projectPiStorageLoading; },
-    get projectPiStorageError() { return projectPiStorageError; },
+    get projectInitialized() { return storage.initialized; },
+    get projectPiSizeBytes() { return storage.sizeBytes; },
+    get projectPiCleanupBytes() { return storage.cleanupBytes; },
+    get projectPiCleanupAvailable() { return storage.cleanupAvailable; },
+    get projectPiStorageLoading() { return storage.loading; },
+    get projectPiStorageError() { return storage.error; },
     get actionId() { return actionId; },
     get backgroundSyncState() { return backgroundSyncState; },
     get diff() { return diff; },
     handleSessionState,
-    refreshProjectInitialization,
-    initializeProject,
-    cleanProject,
-    autoCleanProject,
+    refreshProjectInitialization: () => storage.refresh(),
+    initializeProject: () => storage.initializeProject(),
+    cleanProject: () => storage.cleanProject(),
+    autoCleanProject: (workspace: string) => storage.autoCleanProject(workspace),
     runAction,
     openDiff,
     closeDiff,
@@ -371,28 +246,4 @@ function registryActionBusyError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("registry actions are unavailable while the agent is running")
     || message.includes("registry actions are unavailable while the session is busy");
-}
-
-async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${label} timed out`)),
-          PROJECT_LOCAL_INSPECTION_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
-function registryStorageErrorLabel(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("timed out")
-    ? "Storage meter timed out"
-    : "Storage meter unavailable";
 }

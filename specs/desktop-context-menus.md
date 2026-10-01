@@ -31,6 +31,14 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   `normalizeExternalHref` protocol policy, so internal anchors, local files,
   javascript and other unsupported destinations are not passed to the URL opener.
   A selected link also offers selection Copy.
+- Right-clicking a source line or its line-number gutter in the built-in Preview
+  offers **Copy Relative Path with Line Number**, copying plain `path:line` text
+  relative to the project root (for example `src/main.ts:42`). The clicked logical
+  source line determines the one-based number, regardless of wrapping, scrolling,
+  or a highlighted navigation range. Selection Copy remains available alongside
+  this action. Rendered Markdown, the edit textarea, and blank Preview space do
+  not infer a source line. Absolute local-file previews use a workspace-relative
+  path, including `../` outside the project; without a workspace they omit the action.
 - Images in Markdown and the Preview tab offer Open Image in External App and
   Copy Image, taking precedence over a surrounding link. Local images use the
   backend-approved attachment path and the OS default application, not the text

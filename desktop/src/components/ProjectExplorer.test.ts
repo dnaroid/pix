@@ -4,6 +4,16 @@ import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?r
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
+  it("checks ignore eligibility asynchronously and refreshes Git after a guarded mutation", () => {
+    expect(explorerSource).toContain('invoke<boolean>("git_can_ignore"');
+    expect(explorerSource).toContain('return ignoreEligibility.invalidate');
+    expect(explorerSource).toContain('ignoreEligibility.request(workspace, menuState.entry?.path ?? "")');
+    expect(explorerSource).toContain('if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: operationBusy })');
+    expect(explorerSource).toContain('{#if canIgnoreEntry}');
+    expect(explorerSource).toContain('invoke("git_ignore_entry"');
+    expect(explorerSource).toContain('operation !== operationGeneration || workspace !== requestWorkspace');
+    expect(explorerSource).toContain('void gitRefresh.request()');
+  });
   it("uses shared Git snapshots for accessible decorations without changing tab stops", () => {
     expect(explorerSource).toContain("projectGitDecorations(gitSnapshot?.changes)");
     expect(explorerSource).toContain("gitDecorations.directories : gitDecorations.files");

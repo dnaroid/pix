@@ -30,6 +30,7 @@ mod desktop_bootstrap;
 mod desktop_context_menu;
 mod git_ci;
 mod git_operations;
+mod git_ignore;
 mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
@@ -10011,6 +10012,8 @@ pub fn run() {
             git_operations::git_stash_save,
             git_operations::git_stash_apply,
             git_operations::git_discard_file,
+            git_ignore::git_can_ignore,
+            git_ignore::git_ignore_entry,
             git_switch_branch,
             git_create_branch,
             list_project_documents,

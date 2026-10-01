@@ -10,11 +10,16 @@ export function createWorkspaceSidebarProjectSettingsController(
   let open = $state(false);
   let saving = $state(false);
   let error = $state<string | null>(null);
+  let observedWorkspace: string | undefined;
 
-  function reset(): void {
+  function syncWorkspace(): boolean {
+    const nextWorkspace = options.workspace();
+    if (nextWorkspace === observedWorkspace) return false;
+    observedWorkspace = nextWorkspace;
     open = false;
     saving = false;
     error = null;
+    return true;
   }
 
   function show(): void {
@@ -52,7 +57,7 @@ export function createWorkspaceSidebarProjectSettingsController(
     get open() { return open; },
     get saving() { return saving; },
     get error() { return error; },
-    reset,
+    syncWorkspace,
     show,
     save,
     close,

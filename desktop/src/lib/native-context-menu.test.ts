@@ -31,6 +31,22 @@ describe("native desktop context menu commands", () => {
   it("uses native editing roles instead of replacing values or synthesizing paste", () => {
     expect(labels({})).toEqual(["Undo", "Redo", "Separator", "Cut", "Copy", "Paste", "Separator", "SelectAll"]);
   });
+  it("offers source reference copy without requiring a text selection", () => {
+    expect(labels({ kind: "readonly", hasSelection: false, sourceReference: "src/main.ts:42" }))
+      .toEqual(["Copy Relative Path with Line Number"]);
+    expect(labels({ kind: "selection", hasSelection: true, sourceReference: "src/main.ts:42" }))
+      .toEqual(["Copy", "Separator", "Copy Relative Path with Line Number"]);
+  });
+  it("copies the captured source reference and ignores stale or detached callbacks", async () => {
+    for (const [active, connected] of [[true, true], [false, true], [true, false]]) {
+      const commands = items({ kind: "readonly", hasSelection: false, sourceReference: "src/my file.ts:42",
+        element: { isConnected: connected } as HTMLElement }, false, () => active!);
+      const command = commands.find((item) => "id" in item && item.id === "desktop.source.reference");
+      if (command && "action" in command) command.action?.("ignored");
+    }
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("src/my file.ts:42");
+  });
   it("prioritizes image commands over the surrounding link and selection", async () => {
     const image = {} as HTMLImageElement;
     const commands = items({ kind: "image", image, linkUrl: "https://example.com/" });

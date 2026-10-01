@@ -1,4 +1,5 @@
 import { normalizeExternalHref } from "./markdown-links";
+import { isWorkspaceProjectFilePath } from "./project-files";
 
 export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image";
 
@@ -10,6 +11,7 @@ export interface DesktopContextTarget {
   image?: HTMLImageElement;
   imagePath?: string;
   imageRelativePath?: string;
+  sourceReference?: string;
   hasSelection: boolean;
   readOnly: boolean;
 }
@@ -39,6 +41,20 @@ export function relativeImagePath(path: string, workspace: string): string | und
   let common = 0;
   while (common < base.length && common < destination.length && base[common] === destination[common]) common++;
   return [...base.slice(common).map(() => ".."), ...destination.slice(common)].join("/") || ".";
+}
+
+/** Source rows, including their generated line-number gutter, share one logical line. */
+export function previewSourceReference(element: HTMLElement, workspace: string): string | undefined {
+  const surface = element.closest<HTMLElement>("[data-preview-source-path]");
+  const row = element.closest<HTMLElement>(".sh__line");
+  const code = row?.parentElement;
+  if (!surface || !row || !code?.matches(".preview-code") || !surface.contains(code)) return undefined;
+  const path = surface.dataset.previewSourcePath;
+  if (!path) return undefined;
+  const relative = isWorkspaceProjectFilePath(path) ? path : relativeImagePath(path, workspace);
+  if (!relative) return undefined;
+  const index = Array.from(code.children).indexOf(row);
+  return index < 0 ? undefined : `${relative}:${index + 1}`;
 }
 
 export function desktopContextTarget(target: EventTarget | null, workspace = ""): DesktopContextTarget | null {
@@ -86,8 +102,12 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
   const href = element.closest("a[href]")?.getAttribute("href");
   const linkUrl = href ? normalizeExternalHref(href) : undefined;
   const hasSelection = hasContextSelection(element);
-  if (linkUrl || hasSelection) {
-    return { kind: hasSelection ? "selection" : "link", element, editor: null, linkUrl, hasSelection, readOnly: true };
+  const sourceReference = previewSourceReference(element, workspace);
+  if (linkUrl || hasSelection || sourceReference) {
+    let kind: DesktopContextKind = "readonly";
+    if (linkUrl) kind = "link";
+    if (hasSelection) kind = "selection";
+    return { kind, element, editor: null, linkUrl, sourceReference, hasSelection, readOnly: true };
   }
   return null;
 }

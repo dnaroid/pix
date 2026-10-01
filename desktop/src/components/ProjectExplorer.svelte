@@ -24,6 +24,7 @@
   import type { GitSnapshot } from "../lib/git";
   import { projectGitDecorations } from "../lib/project-git-decorations";
   import { createProjectGitRefresh } from "../lib/project-git-refresh";
+  import { createProjectGitIgnoreEligibility } from "../lib/project-git-ignore";
   import {
     projectExplorerExpandedDirectoriesFromWorkspaceConfig,
     workspaceConfigWithProjectExplorerExpandedDirectories,
@@ -62,6 +63,7 @@
   let nameInputElement = $state<HTMLInputElement | null>(null);
   let operationBusy = $state(false);
   let operationError = $state<string | null>(null);
+  let canIgnoreEntry = $state(false);
   let searchInputElement = $state<HTMLInputElement | null>(null);
   let searchQuery = $state("");
   let searchResults = $state<ProjectSearchMatch[]>([]);
@@ -114,8 +116,21 @@
     ? "Show in File Explorer" : "Show in File Manager";
   const menuController = createProjectExplorerMenuController({ items: menuNavigationItems });
   const menuState = menuController.state;
+  const ignoreEligibility = createProjectGitIgnoreEligibility(
+    (workspace, path) => invoke<boolean>("git_can_ignore", { workspace, path }),
+    (allowed) => { canIgnoreEntry = allowed; },
+  );
+
+  $effect(() => {
+    // A fresh snapshot may change tracked/ignored eligibility while the menu is open.
+    gitSnapshot;
+    void ignoreEligibility.request(workspace, menuState.entry?.path ?? "");
+    return ignoreEligibility.invalidate;
+  });
 
   onDestroy(() => {
+    operationGeneration += 1;
+    ignoreEligibility.invalidate();
     gitRefresh.dispose();
     treeController.dispose();
     dragController.clear();
@@ -302,8 +317,9 @@
         { label: "Duplicate" },
         { label: "Rename…" },
         { label: "Copy Relative Path" },
-        { label: "Delete" },
       );
+      if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: operationBusy });
+      items.push({ label: "Delete" });
     }
     return items;
   }
@@ -396,6 +412,28 @@
       if (workspace === requestWorkspace && generation === operationGeneration) clearOperationError();
     } catch (error) {
       if (workspace === requestWorkspace && generation === operationGeneration) operationError = errorMessage(error);
+    }
+  }
+
+  async function ignoreEntry(entry: ProjectTreeEntry): Promise<void> {
+    if (!entry.path || !canIgnoreEntry || operationBusy) return;
+    menuController.close(true);
+    const requestWorkspace = workspace;
+    const operation = beginOperation();
+    try {
+      await invoke("git_ignore_entry", { workspace: requestWorkspace, path: entry.path });
+      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      // A newly created .gitignore must appear without disturbing expansion/focus.
+      await treeController.refreshDirectory("");
+      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      const parent = parentDirectory(entry.path);
+      if (parent) await treeController.refreshDirectory(parent);
+      if (operation === operationGeneration && workspace === requestWorkspace) clearOperationError();
+    } catch (error) {
+      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+    } finally {
+      // The shared Git snapshot recolors the target, ancestors and .gitignore.
+      finishOperation(operation);
     }
   }
 
@@ -830,6 +868,11 @@
         <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyRelativePath(menuEntry)}>
           <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Relative Path</span>
         </button>
+        {#if canIgnoreEntry}
+          <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={operationBusy} onclick={() => void ignoreEntry(menuEntry)}>
+            <FileText class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Add to .gitignore</span>
+          </button>
+        {/if}
         <div class="my-1 h-px bg-border" role="separator"></div>
         <button class="project-file-menu-item text-destructive hover:bg-destructive/10" type="button" role="menuitem" tabindex="-1" onclick={() => void deleteEntry(menuEntry)}>
           <Trash2 class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Delete</span>

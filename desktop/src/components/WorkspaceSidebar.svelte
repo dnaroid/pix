@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -359,9 +360,11 @@
 
   $effect(() => {
     const requestWorkspace = workspace;
+    // DesktopSidebar spreads one reactive props object; background updates can
+    // invalidate this effect without changing the workspace identity.
+    if (!projectSettingsController.syncWorkspace()) return;
     observedGitRemoteTarget = "";
     projectPanelError = null;
-    projectSettingsController.reset();
     indicatorService?.setWorkspace(requestWorkspace);
   });
 
@@ -623,6 +626,14 @@
           </div>
         {:else if activeTab === "registry"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
+            <button
+              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              type="button"
+              title="Browse plans"
+              aria-label="Browse plans"
+              onclick={() => openRegistryProjectArtifact("plans")}
+              disabled={!workspace}
+            ><FileText class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
               class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"

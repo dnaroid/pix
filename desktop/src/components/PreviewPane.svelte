@@ -367,6 +367,7 @@
           class="preview-text-surface min-h-0 min-w-0 flex-1 overflow-auto bg-code outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           role="region"
           aria-label={`Source for ${file.path}`}
+          data-preview-source-path={file.path}
           tabindex="0"
           onscroll={rememberScroll}
         >

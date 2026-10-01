@@ -286,6 +286,10 @@ Those portable markers are not written to the local project task file.
 - `desktop/src/lib/registry-project-sync.ts`
 - `desktop/src/lib/registry-project-sync.test.ts`
 - `desktop/src/components/RegistryPanel.svelte`
+- `desktop/src/components/RegistryProjectStatus.svelte`
+- `desktop/src/components/RegistryCatalog.svelte`
+- `desktop/src/components/RegistryStatusIcon.svelte`
+- `desktop/src/app/registry-project-storage.svelte.ts`
 - `docs/desktop-task-manager.md`
 - `specs/desktop-attachments.md`
 
