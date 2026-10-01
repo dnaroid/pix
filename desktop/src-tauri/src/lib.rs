@@ -29,8 +29,8 @@ mod backend_runtime;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod git_ci;
-mod git_operations;
 mod git_ignore;
+mod git_operations;
 mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;

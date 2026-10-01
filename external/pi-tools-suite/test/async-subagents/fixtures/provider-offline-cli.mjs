@@ -11,9 +11,23 @@ const record = (value) => {
 	renameSync(`${marker}.tmp`, marker);
 };
 record(actor);
-process.on("exit", (code) => record({ ...actor, exited: true, code }));
+// The exit record must be durable before the provider can observe completion:
+// Windows taskkill /F and a default SIGTERM never run exit handlers, and provider
+// cleanup may race this process's own teardown. Each deliberate completion records
+// its exit before its final protocol action; the handler below remains the safety
+// net for natural exits and paths that never reach a deliberate completion.
+let exitRecorded = false;
+const recordExit = (code) => {
+	if (exitRecorded) return;
+	exitRecorded = true;
+	record({ ...actor, exited: true, code });
+};
+process.on("exit", recordExit);
 // Independent of Pi/provider's deadline, including while waiting for request stdin EOF.
-const watchdog = setTimeout(() => process.exit(124), Number(process.env.PI_OFFLINE_FAKE_WATCHDOG_MS ?? 8000));
+const watchdog = setTimeout(() => {
+	recordExit(124);
+	process.exit(124);
+}, Number(process.env.PI_OFFLINE_FAKE_WATCHDOG_MS ?? 8000));
 watchdog.unref();
 
 const args = process.argv.slice(2);
@@ -23,12 +37,15 @@ const capture = (stdin = "") => writeFileSync(join(process.env.HOME, `fake-cli-$
 }));
 if (args.length === 1 && args[0] === "--version") {
 	capture();
+	recordExit(0);
 	console.log("2.1.281 (offline fixture)");
 } else if (args.join(" ") === "auth status") {
 	capture();
+	recordExit(0);
 	console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "pro" }));
 } else if (args.length === 1 && args[0] === "--help") {
 	capture();
+	recordExit(0);
 	console.log([
 		"--print", "--setting-sources", "--settings", "--disable-slash-commands", "--permission-mode", "--no-chrome",
 		"--prompt-suggestions", "--output-format", "--input-format", "--include-partial-messages", "--verbose",
@@ -49,8 +66,12 @@ if (args.length === 1 && args[0] === "--version") {
 	event({ type: "message_start", message: { id: "offline-message", model: "offline-sonnet", usage: { input_tokens: 4 } } });
 	event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
 	event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "OFFLINE_PROVIDER_OK" } });
-	if (mode === "truncated") process.exit(0);
+	if (mode === "truncated") {
+		recordExit(0);
+		process.exit(0);
+	}
 	if (mode === "error") {
+		recordExit(1);
 		emit({ type: "result", subtype: "error_during_execution", is_error: true, result: "offline failure", usage: { input_tokens: 4, output_tokens: 1 } });
 		process.exit(1);
 	}
@@ -58,14 +79,19 @@ if (args.length === 1 && args[0] === "--version") {
 		// Wait for the provider's termination after a caller abort (the watchdog
 		// bounds it). A handled SIGTERM exits normally so the actor record is
 		// completed; SIGKILL would leave it unconfirmed and fail the test closed.
-		process.on("SIGTERM", () => process.exit(143));
+		process.on("SIGTERM", () => {
+			recordExit(143);
+			process.exit(143);
+		});
 		await new Promise(() => setInterval(() => {}, 1000));
 	}
 	event({ type: "content_block_stop", index: 0 });
 	event({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } });
 	event({ type: "message_stop" });
+	const code = readFileSync(join(process.env.HOME, "fake-exit-code"), "utf8").trim() === "7" ? 7 : 0;
+	recordExit(code);
 	emit({ type: "result", subtype: "success", is_error: false, result: "OFFLINE_PROVIDER_OK", usage: { input_tokens: 4, output_tokens: 3 } });
-	process.exitCode = readFileSync(join(process.env.HOME, "fake-exit-code"), "utf8").trim() === "7" ? 7 : 0;
+	process.exitCode = code;
 } else {
 	capture();
 	console.error("Unexpected fake CLI invocation");
