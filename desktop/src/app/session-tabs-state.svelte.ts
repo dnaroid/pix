@@ -1,16 +1,17 @@
 import {
-  ACTIVE_SESSIONS_STORAGE_KEY,
   mergeRestoredSessionTabs,
   replaceSessionTab,
   restoreDesktopSessionTabs,
   serializeActiveSessionIds,
   serializeSessionTabIds,
-  SESSION_TABS_STORAGE_KEY,
 } from "../lib/session-tabs";
+import { windowLayoutKey } from "../lib/window-layout-storage";
 
 export type SessionSelectorMode = "open" | "delete";
 
 export function createSessionTabsState() {
+  const activeStorageKey = windowLayoutKey("activeSessions");
+  const tabsStorageKey = windowLayoutKey("sessionTabs");
   let restoredIds = $state<string[] | null>(null);
   let locallyOpenedIds = $state<string[]>([]);
   let closedIds = $state<string[]>([]);
@@ -37,7 +38,7 @@ export function createSessionTabsState() {
 
   function persistActiveSessionIds(): void {
     try {
-      localStorage.setItem(ACTIVE_SESSIONS_STORAGE_KEY, serializeActiveSessionIds(activeSessionIds));
+      localStorage.setItem(activeStorageKey, serializeActiveSessionIds(activeSessionIds));
     } catch {
       // Persistence failure should not prevent sessions from working for this run.
     }
@@ -60,7 +61,7 @@ export function createSessionTabsState() {
 
   function persistSessionTabIds(): void {
     try {
-      localStorage.setItem(SESSION_TABS_STORAGE_KEY, serializeSessionTabIds(persistedSessionTabIds));
+      localStorage.setItem(tabsStorageKey, serializeSessionTabIds(persistedSessionTabIds));
     } catch {
       // Persistence failure should not prevent sessions from working for this run.
     }

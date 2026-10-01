@@ -36,6 +36,7 @@ type DesktopConversationServicesOptions = {
   promptText: () => string;
   setPromptText: (text: string) => void;
   setPromptAttachments: (attachments: Attachment[]) => void;
+  switchComposerDraft: (sourceSessionId: string, targetSessionId: string) => void;
   invalidateAttachmentDraft: () => void;
   nextLocalMessageId: () => string;
   scrollToLatest: () => Promise<void>;
@@ -98,6 +99,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
     nextLocalMessageId: options.nextLocalMessageId,
     setPromptText: options.setPromptText,
     setPromptAttachments: options.setPromptAttachments,
+    switchComposerDraft: options.switchComposerDraft,
     invalidateAttachmentDraft: options.invalidateAttachmentDraft,
     refreshSessions: options.sessions.catalog.refresh,
     scrollToLatest: options.scrollToLatest,

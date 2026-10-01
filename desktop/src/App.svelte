@@ -301,6 +301,7 @@
     promptText: () => promptText,
     setPromptText: (text) => promptText = text,
     setPromptAttachments: (attachments) => promptAttachments = attachments,
+    switchComposerDraft: (sourceId, targetId) => sessionTransitions.composerDrafts.switchTo(sourceId, targetId),
     invalidateAttachmentDraft: () => attachmentDrafts.invalidate(),
     nextLocalMessageId: () => `local:${++localMessageId}`,
     scrollToLatest,

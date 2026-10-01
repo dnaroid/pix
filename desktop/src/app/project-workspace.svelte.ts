@@ -1,10 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-  ACTIVE_SESSIONS_STORAGE_KEY,
   parseActiveSessionIds,
   parseSessionTabIds,
-  SESSION_TABS_STORAGE_KEY,
 } from "../lib/session-tabs";
+import { windowLayoutKey } from "../lib/window-layout-storage";
 import {
   buildRecentProjects,
   isAbsoluteProjectPath,
@@ -52,8 +51,8 @@ export function restoreProjectWorkspace(
         storage.getItem(RECENT_PROJECTS_STORAGE_KEY),
         initialWorkspace,
       ),
-      activeSessionIds: parseActiveSessionIds(storage.getItem(ACTIVE_SESSIONS_STORAGE_KEY)),
-      sessionTabIds: parseSessionTabIds(storage.getItem(SESSION_TABS_STORAGE_KEY)),
+      activeSessionIds: parseActiveSessionIds(storage.getItem(windowLayoutKey("activeSessions"))),
+      sessionTabIds: parseSessionTabIds(storage.getItem(windowLayoutKey("sessionTabs"))),
     };
   } catch {
     // The URL is independent of localStorage and must retain its startup precedence.

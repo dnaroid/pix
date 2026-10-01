@@ -20,7 +20,7 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 - Preserve existing ACP session IDs for already-mapped Pi session files.
 - Preserve whether a native session is a fork so Desktop can match the TUI tab marker.
 - Report the TUI tab snapshot through ACP metadata as a compatibility/reconciliation input.
-- Keep Desktop's saved-session chooser separate from restored/open tab membership, and persist Desktop's own ordered real-tab snapshot per workspace.
+- Keep Desktop's saved-session chooser separate from restored/open tab membership, and persist Desktop's own ordered real-tab snapshot per workspace within each stable native window label. Active-session pointers share that window scope; ambiguous legacy origin-wide snapshots are not imported.
 
 ## Non-goals
 

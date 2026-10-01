@@ -36,8 +36,8 @@ is still available at its saved desktop coordinates.
 - On first launch, the window uses the dimensions and placement from `tauri.conf.json` and the operating system.
 - On subsequent launches, recreate each saved window with its original stable
   label and workspace URL; do not add an extra main window when only project
-  windows were open. Existing per-project Desktop session/tab persistence applies
-  independently of the window geometry snapshot.
+  windows were open. Desktop session tabs and active-session pointers are scoped
+  by stable window label and project, independently of the geometry snapshot.
 - A project change updates the native window's workspace even if localStorage or
   browser history persistence fails. An explicitly saved empty window remains empty.
 - Closing a window while other windows remain excludes it from the next launch.
@@ -85,8 +85,11 @@ is still available at its saved desktop coordinates.
   within a window keeps that window's layout. Browser preview has its own namespace.
 - Legacy shared pane keys are not imported: their last writer cannot identify
   the owning window. Each window starts with default panes once, then remembers
-  its own choices. This does not change per-project session/tab persistence,
-  shared recent projects, or transient menus/dialogs.
+  its own choices. Session-tab snapshots and active-session pointers also use
+  this window namespace (`sessionTabs` / `activeSessions`), retaining per-project
+  maps within each window. Legacy shared session keys are not imported either;
+  windows start with a draft once, without deleting saved sessions. Shared recent
+  projects and transient menus/dialogs are unchanged.
 - Native move/resize/close callbacks cache only normal logical geometry, with no
   disk IO. Explicit Quit captures live normal geometry and freezes it with the
   membership snapshot before background teardown; late events cannot mutate it.

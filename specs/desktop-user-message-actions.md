@@ -18,7 +18,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 
 - A Desktop user message exposes exactly four actions: **Copy message**, **Fork**, **Fork in new tab**, and **Undo changes**. No additional message actions are part of this contract. `[confirmed by code: desktop/src/components/TranscriptPane.svelte, desktop/src/components/transcript-user-message-menu-controller.svelte.ts]`
 - The menu is available from the user bubble's context menu and from an ellipsis button shown on hover/focus. It renders as a viewport-fixed overlay outside transcript-entry paint containment, flips above the anchor when there is not enough room below, and stays above the composer/chrome instead of being clipped by transcript scrolling. Each of the four actions has a dedicated icon. Opening focuses the first enabled command; ArrowUp/ArrowDown, Home/End, and printable-key type-ahead navigate enabled commands; Escape closes the menu and restores its invoker when available. Tab, transcript scrolling/resizing, or an outside click dismisses it without trapping focus. `[confirmed by code: desktop/src/components/transcript-user-message-menu-controller.svelte.ts]`
-- Copy remains available for renderer-only user rows. Fork and Undo actions require a real Pi user session entry and are disabled while the active session is busy. `[confirmed by code]`
+- Copy remains available for renderer-only user rows. Both Fork actions and Undo require a real Pi user session entry. Fork (replace source) and Undo are idle-only; **Fork in new tab** remains available while the source prompt is running. History loading and active-session mutation still disable all three. `[confirmed by code]`
 - Right-click on selected text or an external link delegates to the text/link context menu instead of opening the four whole-message actions. The ellipsis always remains a route to those four actions, and right-click without a text/link context still opens them. This precedence is defined in `specs/desktop-context-menus.md` and exercised by `desktop/scripts/context-menu-smoke.mjs`.
 - Newly submitted Desktop rows are associated with Pi entries by comparing current-branch user entry IDs before and after the serialized prompt. Extension/builtin commands that create no Pi user entry are marked renderer-only. Historical rows resolve against the ordered current branch rather than by message text, so repeated identical prompts remain unambiguous. `[confirmed by code: desktop/src/app/prompt-run-lifecycle.svelte.ts, desktop/src/app/user-message-context-actions.ts, acp/src/acp/pix-acp-agent.ts]`
 
@@ -27,6 +27,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 - **Copy message** copies the full selected message. Session-backed rows use the existing ACP host clipboard path; renderer-only rows use the Desktop browser clipboard. `[confirmed by code]`
 - **Fork** forks at the selected Pi user entry and replaces the currently open source session, matching the existing Desktop `/fork` behavior. `[confirmed by code: desktop/src/app/conversation-fork-action.ts]`
 - **Fork in new tab** uses the same Pi `session/fork` primitive but keeps the source ACP session/tab open and activates the new fork. `[confirmed by code]`
+- Forking into a new tab does not cancel or forget the source run. It snapshots the latest source transcript and preserves the source composer text/attachments; the new composer receives the selected Pi user text without source attachments. Later source events remain scoped to the source tab. A stale fork response after client/workspace/session replacement discards the created fork without changing the new selection. Sessions share the project filesystem; this is not worktree isolation. `[confirmed by code]`
 
 ## Undo changes contract
 
@@ -87,6 +88,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 
 ## Verification
 
+- `desktop/src/app/conversation-fork-action.test.ts` covers running-source preservation, latest transcript/composer ownership, late source updates, stale fork cleanup, and unchanged replacement/history/mutation gates. `desktop/src/components/transcript-user-message-menu-controller.test.ts` covers running-session action permissions and renderer-only rejection.
 - `tests/workspace-undo-extension.test.ts` covers session mutation recording, tool-start ownership, conflict refusal against a later parallel edit, and legacy TUI index fallback.
 - `tests/workspace-undo.test.ts` covers patch/write rollback, changed-file refusal, path confinement, and transactional rollback after a later failure.
 - `tests/workspace-actions-controller.test.ts` verifies TUI mutations also append portable hidden session entries.

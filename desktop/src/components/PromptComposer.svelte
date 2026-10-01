@@ -569,6 +569,7 @@
   ]}
   bind:this={composerForm}
   data-pix-project-path-drop-target="true"
+  onkeydowncapture={questionnaireController.handleKeydown}
   onsubmit={handleSubmit}
 >
   {#if questionMode}

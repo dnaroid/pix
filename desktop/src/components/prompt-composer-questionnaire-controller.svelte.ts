@@ -180,6 +180,14 @@ export function createPromptComposerQuestionnaireController(
     return true;
   }
 
+  function handleKeydown(event: KeyboardEvent): void {
+    if (!options.mode() || event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    // Intercept before a focused button can turn Enter into a choice/edit/cancel click.
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) handleSubmit();
+  }
+
   function handleTabKeydown(event: KeyboardEvent, index: number): void {
     const mode = options.mode();
     if (!mode) return;
@@ -302,6 +310,7 @@ export function createPromptComposerQuestionnaireController(
     selectTab,
     editAnswer,
     handleEscape,
+    handleKeydown,
     handleTabKeydown,
     selectedChoiceIndex,
     handleChoiceKeydown,

@@ -122,6 +122,7 @@
   const activeUserMessageMenu = $derived(userMessageMenuState.activeId);
   const userMessageMenuPosition = $derived(userMessageMenuState.position);
   const canMutateUserMessages = $derived(userMessageMenuController.canMutate);
+  const canForkUserMessageNewTab = $derived(userMessageMenuController.canForkNewTab);
   const activeUserMessage = $derived(userMessageMenuController.activeMessage);
 
   onDestroy(userMessageMenuController.dispose);
@@ -412,7 +413,7 @@
         <GitFork class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{forkMessageCommand.label}</span>
       </button>
-      <button class="message-action-item" type="button" role="menuitem" tabindex="-1" disabled={!canMutateUserMessages || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork-new-tab")}>
+      <button class="message-action-item" type="button" role="menuitem" tabindex="-1" disabled={!canForkUserMessageNewTab || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork-new-tab")}>
         <PanelTopOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{forkNewTabCommand.label}</span>
       </button>

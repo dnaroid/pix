@@ -3,8 +3,6 @@ import type { ListSessionsResponse, SessionInfo } from "@agentclientprotocol/sdk
 const PIX_TABS_META_KEY = "pix.tabs";
 const PIX_IS_FORK_META_KEY = "pix.isFork";
 const PIX_PARENT_SESSION_ID_META_KEY = "pix.parentSessionId";
-export const ACTIVE_SESSIONS_STORAGE_KEY = "pix.desktop.activeSessions";
-export const SESSION_TABS_STORAGE_KEY = "pix.desktop.sessionTabs";
 
 /** Pix session-list metadata mirrors Pi's parent-session fork marker without exposing the parent path. */
 export function sessionIsFork(session: SessionInfo): boolean {

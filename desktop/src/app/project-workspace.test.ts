@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import lifecycleServicesSource from "./desktop-lifecycle-services.ts?raw";
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke, isTauri: () => false }));
 import {
   RECENT_PROJECTS_STORAGE_KEY,
   WORKSPACE_STORAGE_KEY,
 } from "../lib/recent-projects";
-import { SESSION_TABS_STORAGE_KEY } from "../lib/session-tabs";
+import { windowLayoutKey } from "../lib/window-layout-storage";
 import { createProjectWorkspaceStore, restoreProjectWorkspace } from "./project-workspace.svelte";
 
 beforeEach(() => tauri.invoke.mockReset());
@@ -63,7 +63,7 @@ describe("project workspace startup restore", () => {
   it("restores the Desktop-owned session-tab snapshot independently of the workspace URL", () => {
     const restored = restoreProjectWorkspace("http://127.0.0.1:1420/?workspace=%2Fqa%2Fproject", {
       getItem(key) {
-        if (key === SESSION_TABS_STORAGE_KEY) {
+        if (key === windowLayoutKey("sessionTabs")) {
           return JSON.stringify({ "/qa/project": ["session-b", "session-a"] });
         }
         return null;

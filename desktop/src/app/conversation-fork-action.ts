@@ -14,7 +14,7 @@ export function createForkConversation(options: ConversationBranchActionsOptions
       || !sourceSessionId
       || !options.state.runtimeReady
       || options.operationRunning()
-      || options.promptRunning()
+      || (options.promptRunning() && !config.keepSourceOpen)
       || options.sessionHistoryLoading()
     ) return;
     options.closeProjectSelector();
@@ -52,6 +52,7 @@ export function createForkConversation(options: ConversationBranchActionsOptions
         options.forgetRuntime(sourceSessionId);
         options.clearSessionActivity(sourceSessionId);
       }
+      if (config.keepSourceOpen) options.switchComposerDraft(sourceSessionId, forked.sessionId);
       options.state.setSessionId(forked.sessionId);
       options.state.setTranscript(emptyTranscript);
       options.state.setConfigOptions(forked.configOptions);

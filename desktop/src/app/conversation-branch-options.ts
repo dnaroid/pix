@@ -33,6 +33,7 @@ export type ConversationBranchActionsOptions = {
   rememberActiveSession: (workspace: string, sessionId: string) => void;
   nextLocalMessageId: () => string;
   setPromptText: (text: string) => void;
+  switchComposerDraft: (sourceSessionId: string, targetSessionId: string) => void;
   setPromptAttachments: (attachments: Attachment[]) => void;
   invalidateAttachmentDraft: () => void;
   refreshSessions: () => void | Promise<void>;

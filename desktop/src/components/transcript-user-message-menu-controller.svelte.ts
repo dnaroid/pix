@@ -44,8 +44,11 @@ export function createTranscriptUserMessageMenuController(options: TranscriptUse
   let typeaheadTimer: number | null = null;
 
   function canMutate(): boolean {
+    return canForkNewTab() && !options.promptRunning();
+  }
+
+  function canForkNewTab(): boolean {
     return Boolean(options.activeSessionId())
-      && !options.promptRunning()
       && !options.operationRunning()
       && !options.historyLoading();
   }
@@ -68,7 +71,7 @@ export function createTranscriptUserMessageMenuController(options: TranscriptUse
     return [
       { label: userMessageMenuCommands.copy.label },
       { label: userMessageMenuCommands.fork.label, disabled: mutationDisabled },
-      { label: userMessageMenuCommands.forkNewTab.label, disabled: mutationDisabled },
+      { label: userMessageMenuCommands.forkNewTab.label, disabled: !canForkNewTab() || Boolean(activeMessage()?.localOnly) },
       { label: userMessageMenuCommands.undo.label, disabled: mutationDisabled },
     ];
   }
@@ -200,7 +203,10 @@ export function createTranscriptUserMessageMenuController(options: TranscriptUse
   }
 
   async function runAction(message: MessageItem, action: UserMessageAction): Promise<void> {
-    if (action !== "copy" && !canMutate()) return;
+    if (action !== "copy") {
+      const allowed = action === "fork-new-tab" ? canForkNewTab() : canMutate();
+      if (message.localOnly || !allowed) return;
+    }
     close();
     await options.onAction(message, action);
   }
@@ -213,6 +219,7 @@ export function createTranscriptUserMessageMenuController(options: TranscriptUse
   return {
     state,
     get canMutate() { return canMutate(); },
+    get canForkNewTab() { return canForkNewTab(); },
     get activeMessage() { return activeMessage(); },
     toggle,
     openContextMenu,
