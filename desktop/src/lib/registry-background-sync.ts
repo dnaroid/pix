@@ -184,3 +184,177 @@ function syncScope(dirty: ReadonlySet<RegistryProjectArtifact>): RegistryProject
   if (dirty.size === 1) return dirty.values().next().value ?? "project";
   return "project";
 }
+
+export type RegistryResourceRef = { readonly type: "skill" | "agent"; readonly name: string };
+export type RegistryResourceAutoPushPhase = "idle" | "pending" | "syncing" | "error";
+
+export interface RegistryResourceAutoPushState {
+  readonly phase: RegistryResourceAutoPushPhase;
+  readonly dirtyCount: number;
+  readonly active?: RegistryResourceRef;
+  readonly error?: string;
+}
+
+type RegistryResourceAutoPushOptions = {
+  canSync: () => boolean;
+  push: (ref: RegistryResourceRef) => Promise<void>;
+  onChange: (state: RegistryResourceAutoPushState) => void;
+  shouldRetryError?: (error: unknown) => boolean;
+  debounceMs?: number;
+  retryMs?: number;
+};
+
+function resourceKey(ref: RegistryResourceRef): string {
+  return `${ref.type}:${ref.name}`;
+}
+
+/**
+ * Auto-pushes project-scope skill/agent local edits one resource at a time,
+ * mirroring RegistryBackgroundSyncCoordinator's debounce/retry shape. Kept
+ * separate because resource pushes are per-item RPCs, not coalesced like the
+ * project-artifact scopes above.
+ */
+export class RegistryResourceAutoPushCoordinator {
+  private readonly dirty = new Map<string, RegistryResourceRef>();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private destroyed = false;
+  private generation = 0;
+  private phase: RegistryResourceAutoPushPhase = "idle";
+  private active: RegistryResourceRef | undefined;
+  private error: string | undefined;
+
+  constructor(private readonly options: RegistryResourceAutoPushOptions) {
+    this.publish();
+  }
+
+  get state(): RegistryResourceAutoPushState {
+    return this.snapshot();
+  }
+
+  /** A poll reports a resource is still dirty; preserve debounce and terminal errors. */
+  observe(ref: RegistryResourceRef): void {
+    if (this.destroyed) return;
+    const key = resourceKey(ref);
+    if (this.dirty.has(key)) return;
+    this.dirty.set(key, ref);
+    if (this.phase === "error") {
+      this.publish();
+      return;
+    }
+    if (this.phase !== "syncing") this.phase = "pending";
+    this.error = undefined;
+    this.publish();
+    if (this.phase !== "syncing") this.schedule(this.options.debounceMs ?? DEFAULT_DEBOUNCE_MS, true);
+  }
+
+  retry(): void {
+    if (this.destroyed || this.dirty.size === 0) return;
+    this.error = undefined;
+    if (this.phase !== "syncing") this.phase = "pending";
+    this.publish();
+    if (this.phase !== "syncing") this.schedule(0, true);
+  }
+
+  reset(): void {
+    this.generation += 1;
+    this.clearTimer();
+    this.dirty.clear();
+    this.phase = "idle";
+    this.active = undefined;
+    this.error = undefined;
+    this.publish();
+  }
+
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.generation += 1;
+    this.clearTimer();
+    this.dirty.clear();
+  }
+
+  private schedule(delayMs: number, reset: boolean): void {
+    if (this.destroyed) return;
+    if (reset) this.clearTimer();
+    if (this.timer !== undefined) return;
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.flush();
+    }, delayMs);
+  }
+
+  private async flush(): Promise<void> {
+    if (this.destroyed || this.phase === "syncing") return;
+    const next = this.dirty.values().next();
+    if (next.done) {
+      this.phase = "idle";
+      this.error = undefined;
+      this.publish();
+      return;
+    }
+    if (!this.options.canSync()) {
+      this.phase = "pending";
+      this.publish();
+      this.schedule(this.options.retryMs ?? DEFAULT_RETRY_MS, false);
+      return;
+    }
+
+    const ref = next.value;
+    const key = resourceKey(ref);
+    const generation = this.generation;
+    this.dirty.delete(key);
+    this.phase = "syncing";
+    this.active = ref;
+    this.error = undefined;
+    this.publish();
+
+    try {
+      await this.options.push(ref);
+    } catch (caught) {
+      if (this.destroyed || generation !== this.generation) return;
+      this.dirty.set(key, ref);
+      this.active = undefined;
+      if (this.options.shouldRetryError?.(caught)) {
+        this.phase = "pending";
+        this.publish();
+        this.schedule(this.options.retryMs ?? DEFAULT_RETRY_MS, false);
+        return;
+      }
+      this.phase = "error";
+      this.error = caught instanceof Error ? caught.message : String(caught);
+      this.publish();
+      return;
+    }
+
+    if (this.destroyed || generation !== this.generation) return;
+
+    this.active = undefined;
+    if (this.dirty.size > 0) {
+      this.phase = "pending";
+      this.publish();
+      this.schedule(this.options.debounceMs ?? DEFAULT_DEBOUNCE_MS, false);
+    } else {
+      this.phase = "idle";
+      this.publish();
+    }
+  }
+
+  private clearTimer(): void {
+    if (this.timer === undefined) return;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  private snapshot(): RegistryResourceAutoPushState {
+    return {
+      phase: this.phase,
+      dirtyCount: this.dirty.size,
+      ...(this.active ? { active: this.active } : {}),
+      ...(this.error ? { error: this.error } : {}),
+    };
+  }
+
+  private publish(): void {
+    if (!this.destroyed) this.options.onChange(this.snapshot());
+  }
+}

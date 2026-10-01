@@ -31,6 +31,16 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("aria-level={row.depth + 1}");
   });
 
+  it("does not paint restored focus as a second hovered row after deletion", () => {
+    expect(explorerSource).toContain("if (focusTarget) await treeController.focusPath(focusTarget)");
+    expect(explorerSource).toContain("onfocus={() => treeState.focusedPath = entry.path}");
+    expect(explorerSource).toContain("hover:bg-panel-hover");
+    expect(explorerSource).not.toContain("focus-within:bg-panel-hover");
+    expect(explorerSource).toContain('treeState.selectedPath === entry.path ? "bg-panel-selected" : ""');
+    expect(explorerSource).toContain("focus-visible:outline-ring");
+    expect(explorerSource).toContain("group-focus-within:opacity-100");
+  });
+
   it("supports IDE tree navigation and a keyboard route to the external editor", () => {
     expect(treeControllerSource).toContain('event.key === "ArrowRight"');
     expect(treeControllerSource).toContain('event.key === "ArrowLeft"');

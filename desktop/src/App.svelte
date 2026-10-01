@@ -645,7 +645,8 @@
       client,
       workspace,
       blocked: operationRunning || projectServices.registry.actionId !== null
-        || projectServices.registry.backgroundSyncState.phase === "syncing",
+        || projectServices.registry.backgroundSyncState.phase === "syncing"
+        || projectServices.registry.resourceAutoPushState.phase === "syncing",
     }),
     refreshRegistry: () => void projectServices.registry.refresh(),
     activeSessionId: () => activeSessionId,

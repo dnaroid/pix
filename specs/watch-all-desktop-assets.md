@@ -28,6 +28,10 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   Quit, unidentified live app, or timeout reports a failed shutdown and retains
   the app/helper and their bundles rather than interrupting persistence.
 - A Desktop web-source change schedules `web` followed by `native`. The first successful build launches Desktop; later successful builds leave the running Desktop in place and mark the newer build as ready instead of interrupting the active session.
+- Changes to `desktop/src/**/*.test.ts` (Desktop's Vitest file convention)
+  do not schedule a rebuild. Production Svelte, TypeScript, and CSS sources
+  remain build triggers. This classification also applies to the Git reflog
+  fallback; initial builds and conservative failed-diff rebuilds are unchanged.
 - `watch:all` also watches the repository HEAD reflog as a fallback for Git worktree integrations such as `pull`, fast-forward `merge` (including Desktop's **Update project**), rebase, and reset. When HEAD advances through one of those operations, it diffs the old/new commits, classifies the changed paths with the same build-part rules, and queues the affected parts even if the OS file watcher missed some or all of the bulk checkout events. Ordinary local commits and branch checkouts do not use this fallback. If the bounded Git diff probe fails, the watcher conservatively queues all parts.
 - A watch-launched debug Desktop polls the bounded watcher state artifact and, when a newer build is ready, exposes a `Restart` control at the right side of its titlebar. Activating it requests a clean exit of the old process; the watcher waits for that process to finish saving window membership/geometry and cleaning up before launching the new artifact. It never sends termination signals during this handoff. If the old process has not exited within 30 seconds, the restart fails without killing it or launching a competing instance. Release builds and ordinary development launches have no watcher state and no control.
 - The same debug-only state carries `buildStatus` (`idle`, `queued`, `building`,

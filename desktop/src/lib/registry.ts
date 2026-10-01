@@ -115,14 +115,21 @@ export function registrySnapshotFromSessionState(
   return parseRegistrySnapshot(notification.data);
 }
 
-export function registryHasAttention(snapshot: RegistrySnapshot | undefined): boolean {
-  if (!snapshot) return false;
-  return snapshot.items.some((item) =>
-    item.status === "update-available"
+function itemNeedsAttention(item: RegistryItem): boolean {
+  return item.status === "update-available"
     || item.status === "missing-local"
     || item.status === "diverged"
-    || item.status === "registry-changed"
-  );
+    || item.status === "registry-changed";
+}
+
+export function registryHasAttention(snapshot: RegistrySnapshot | undefined): boolean {
+  if (!snapshot) return false;
+  return snapshot.items.some(itemNeedsAttention);
+}
+
+/** Count of items in a catalog list (e.g. Installed) whose status needs user attention. */
+export function registryAttentionCount(items: readonly RegistryItem[]): number {
+  return items.filter(itemNeedsAttention).length;
 }
 
 export function registryCatalogSection(item: RegistryItem): RegistryCatalogSection | undefined {

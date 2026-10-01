@@ -125,7 +125,11 @@ export function classifyChange(path) {
 		parts.add(PARTS.ACP);
 	}
 
-	if (relativePath === "desktop/src" || relativePath.startsWith("desktop/src/")) {
+	// Match Desktop's Vitest test-file convention; test-only edits produce no app assets.
+	if (
+		(relativePath === "desktop/src" || relativePath.startsWith("desktop/src/"))
+		&& !relativePath.endsWith(".test.ts")
+	) {
 		parts.add(PARTS.WEB);
 	}
 	if (relativePath.startsWith("desktop/") && WEB_FILES.has(relativePath.slice("desktop/".length))) {

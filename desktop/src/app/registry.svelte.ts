@@ -1,6 +1,7 @@
 import type { AcpClient } from "../lib/acp-client";
 import {
   registryDiffAvailable,
+  registryPublicationScope,
   registrySnapshotFromSessionState,
   type RegistryActionRequest,
   type RegistryDiffState,
@@ -10,8 +11,10 @@ import {
 import type { SessionStateNotification } from "../lib/session-state";
 import {
   RegistryBackgroundSyncCoordinator,
+  RegistryResourceAutoPushCoordinator,
   type RegistryBackgroundSyncState,
   type RegistryProjectSyncScope,
+  type RegistryResourceAutoPushState,
 } from "../lib/registry-background-sync";
 import { createRegistryProjectStorage } from "./registry-project-storage.svelte";
 
@@ -37,6 +40,10 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     phase: "idle",
     dirtyScopes: [],
   });
+  let resourceAutoPushState = $state<RegistryResourceAutoPushState>({
+    phase: "idle",
+    dirtyCount: 0,
+  });
 
   const backgroundSync = new RegistryBackgroundSyncCoordinator({
     canSync: () => Boolean(
@@ -45,6 +52,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       && options.workspace()
       && !options.operationRunning()
       && actionId === null
+      && resourceAutoPushState.phase !== "syncing"
     ),
     sync: async (scope) => {
       const requestClient = options.client();
@@ -62,6 +70,36 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       }
     },
     onChange: (state) => { backgroundSyncState = state; },
+    shouldRetryError: registryActionBusyError,
+  });
+
+  // Auto-pushes project-scope skill/agent local edits so they do not need a
+  // manual Push; global-scope publications stay manual (shared across projects).
+  const resourceAutoPush = new RegistryResourceAutoPushCoordinator({
+    canSync: () => Boolean(
+      snapshot?.configured
+      && options.client()
+      && options.workspace()
+      && !options.operationRunning()
+      && actionId === null
+      && backgroundSyncState.phase !== "syncing"
+    ),
+    push: async (ref) => {
+      const requestClient = options.client();
+      const workspace = options.workspace();
+      const requestGeneration = lifecycleGeneration;
+      if (!requestClient || !workspace) throw new Error("Registry resource auto-push has no active workspace.");
+      const next = await requestClient.registryAction(workspace, { action: "push", type: ref.type, name: ref.name });
+      if (
+        requestGeneration === lifecycleGeneration
+        && options.workspace() === workspace
+        && options.client() === requestClient
+      ) {
+        snapshot = next;
+        if (next.error) throw new Error(next.error);
+      }
+    },
+    onChange: (state) => { resourceAutoPushState = state; },
     shouldRetryError: registryActionBusyError,
   });
 
@@ -188,16 +226,31 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   function seedProjectSync(): void {
     if (!snapshot?.configured) {
       backgroundSync.reset();
+      resourceAutoPush.reset();
       return;
     }
-    if (backgroundSyncState.phase === "syncing" || backgroundSyncState.phase === "error") return;
-    for (const item of snapshot.items) {
-      if (item.type !== "project" && item.local && item.status === "local-only") {
-        backgroundSync.observe("project");
+    if (backgroundSyncState.phase !== "syncing" && backgroundSyncState.phase !== "error") {
+      for (const item of snapshot.items) {
+        if (item.type !== "project" && item.local && item.status === "local-only") {
+          backgroundSync.observe("project");
+        }
+        if (item.type === "project" && item.artifact && item.local
+          && (item.status === "local-only" || item.status === "local-changes")) {
+          backgroundSync.observe(item.artifact);
+        }
       }
-      if (item.type === "project" && item.artifact && item.local
-        && (item.status === "local-only" || item.status === "local-changes")) {
-        backgroundSync.observe(item.artifact);
+    }
+    if (resourceAutoPushState.phase !== "syncing" && resourceAutoPushState.phase !== "error") {
+      for (const item of snapshot.items) {
+        if (
+          item.type !== "project"
+          && item.local
+          && item.remote
+          && item.status === "local-changes"
+          && registryPublicationScope(item) === "project"
+        ) {
+          resourceAutoPush.observe({ type: item.type, name: item.name });
+        }
       }
     }
   }
@@ -209,6 +262,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     actionId = null;
     diff = undefined;
     backgroundSync.reset();
+    resourceAutoPush.reset();
     storage.reset();
   }
 
@@ -226,6 +280,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     get projectPiStorageError() { return storage.error; },
     get actionId() { return actionId; },
     get backgroundSyncState() { return backgroundSyncState; },
+    get resourceAutoPushState() { return resourceAutoPushState; },
     get diff() { return diff; },
     handleSessionState,
     refreshProjectInitialization: () => storage.refresh(),

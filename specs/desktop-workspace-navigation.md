@@ -34,6 +34,10 @@ while project selection/open state remains separate from transient focus.
   short accumulated query and wraps to the next visible matching entry name.
 - Opening a file updates persistent selected-file styling; moving focus alone
   never changes that selection.
+- Row hover background follows only the pointer, not DOM focus. Restoring focus
+  after deletion must not leave a second hover-like filled row when the pointer
+  moves elsewhere. Keyboard focus remains visible through the inset focus ring,
+  separately from persistent selected/open-file styling.
 - Refreshing project files updates the root and currently visible expanded
   directories in place. It preserves expanded directories, the selected file,
   focus state, and existing rows while refresh requests are in flight. When the

@@ -265,4 +265,34 @@ describe("automatic project sync recovery", () => {
     expect(registryAction.mock.calls[1]).toEqual(["/next", { action: "sync-project", scope: "workspace" }]);
     fixture.store.reset();
   });
+
+  it("auto-pushes a project-scope skill with local changes without a manual Push", async () => {
+    vi.useFakeTimers();
+    const registryAction = vi.fn(async () => fixture.snapshot);
+    const fixture = syncFixture(registryAction);
+    const item = {
+      id: "skill:pdf", type: "skill", name: "pdf", status: "local-changes", statusLabel: "LOCAL CHANGES",
+      icon: "!", local: true, remote: true, publicationScope: "project", actions: ["push"],
+    };
+    fixture.publish({ ...fixture.snapshot, items: [item] });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(registryAction).toHaveBeenCalledExactlyOnceWith("/project", { action: "push", type: "skill", name: "pdf" });
+    expect(fixture.store.resourceAutoPushState.phase).toBe("idle");
+    fixture.store.reset();
+  });
+
+  it("does not auto-push a global-scope skill with local changes", async () => {
+    vi.useFakeTimers();
+    const registryAction = vi.fn(async () => fixture.snapshot);
+    const fixture = syncFixture(registryAction);
+    const item = {
+      id: "skill:pdf", type: "skill", name: "pdf", status: "local-changes", statusLabel: "LOCAL CHANGES",
+      icon: "!", local: true, remote: true, publicationScope: "global", actions: ["push"],
+    };
+    fixture.publish({ ...fixture.snapshot, items: [item] });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(registryAction).not.toHaveBeenCalled();
+    expect(fixture.store.resourceAutoPushState.phase).toBe("idle");
+    fixture.store.reset();
+  });
 });

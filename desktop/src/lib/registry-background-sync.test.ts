@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RegistryBackgroundSyncCoordinator } from "./registry-background-sync";
+import { RegistryBackgroundSyncCoordinator, RegistryResourceAutoPushCoordinator } from "./registry-background-sync";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -122,5 +122,71 @@ describe("RegistryBackgroundSyncCoordinator", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(sync.mock.calls[1]?.[0]).toBe("project");
     expect(coordinator.state.phase).toBe("idle");
+  });
+});
+
+describe("RegistryResourceAutoPushCoordinator", () => {
+  it("debounces a single resource push", async () => {
+    vi.useFakeTimers();
+    const push = vi.fn(async () => {});
+    const coordinator = new RegistryResourceAutoPushCoordinator({ canSync: () => true, push, onChange: () => {}, debounceMs: 100 });
+
+    coordinator.observe({ type: "skill", name: "pdf" });
+    await vi.advanceTimersByTimeAsync(99);
+    expect(push).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(push).toHaveBeenCalledExactlyOnceWith({ type: "skill", name: "pdf" });
+    expect(coordinator.state.phase).toBe("idle");
+  });
+
+  it("deduplicates repeated observations of the same resource", async () => {
+    vi.useFakeTimers();
+    const push = vi.fn(async () => {});
+    const coordinator = new RegistryResourceAutoPushCoordinator({ canSync: () => true, push, onChange: () => {}, debounceMs: 100 });
+    coordinator.observe({ type: "skill", name: "pdf" });
+    await vi.advanceTimersByTimeAsync(50);
+    coordinator.observe({ type: "skill", name: "pdf" });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(push).toHaveBeenCalledExactlyOnceWith({ type: "skill", name: "pdf" });
+    coordinator.destroy();
+  });
+
+  it("pushes multiple dirty resources one at a time", async () => {
+    vi.useFakeTimers();
+    const push = vi.fn(async () => {});
+    const coordinator = new RegistryResourceAutoPushCoordinator({ canSync: () => true, push, onChange: () => {}, debounceMs: 100 });
+    coordinator.observe({ type: "skill", name: "pdf" });
+    coordinator.observe({ type: "agent", name: "researcher" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(push).toHaveBeenCalledWith({ type: "skill", name: "pdf" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(push).toHaveBeenCalledWith({ type: "agent", name: "researcher" });
+    expect(push).toHaveBeenCalledTimes(2);
+    expect(coordinator.state.phase).toBe("idle");
+  });
+
+  it("keeps retrying while sync is blocked and retries after it becomes available", async () => {
+    vi.useFakeTimers();
+    let ready = false;
+    const push = vi.fn(async () => {});
+    const coordinator = new RegistryResourceAutoPushCoordinator({
+      canSync: () => ready, push, onChange: () => {}, debounceMs: 100, retryMs: 50,
+    });
+    coordinator.observe({ type: "skill", name: "pdf" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(push).not.toHaveBeenCalled();
+    expect(coordinator.state.phase).toBe("pending");
+    ready = true;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(push).toHaveBeenCalledWith({ type: "skill", name: "pdf" });
+  });
+
+  it("surfaces terminal push errors and retains the dirty resource", async () => {
+    vi.useFakeTimers();
+    const push = vi.fn().mockRejectedValueOnce(new Error("remote changed"));
+    const coordinator = new RegistryResourceAutoPushCoordinator({ canSync: () => true, push, onChange: () => {}, debounceMs: 100 });
+    coordinator.observe({ type: "skill", name: "pdf" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(coordinator.state).toMatchObject({ phase: "error", error: "remote changed", dirtyCount: 1 });
   });
 });

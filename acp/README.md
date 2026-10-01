@@ -169,7 +169,7 @@ Also compare with the advanced fork
 
 ## Constraints
 
-- `@earendil-works/pi-coding-agent` is pinned **exactly** (currently `0.99.2`)
+- `@earendil-works/pi-coding-agent` is pinned **exactly** (currently `1.0.0`)
   to match the repo-wide SDK pin; bumps go through the `pi-sdk-update` skill.
   The RPC protocol of the spawned `pi` binary must stay in sync with this pin.
 - This package is intentionally NOT part of the root `npm run check`

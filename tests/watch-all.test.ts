@@ -61,6 +61,27 @@ describe("watch:all change classification", () => {
 	it("normalizes Windows separators", () => {
 		assert.deepEqual(sortedParts("desktop\\src\\App.svelte"), [PARTS.WEB]);
 	});
+
+	it("ignores Desktop Vitest files while retaining production source triggers", () => {
+		for (const path of [
+			"desktop/src/styles.test.ts",
+			"desktop/src/components/ProjectExplorer.test.ts",
+			"./desktop/src/app/desktop-watch-restart.test.ts",
+			"desktop\\src\\lib\\project-git-ignore.test.ts",
+		]) {
+			assert.deepEqual(sortedParts(path), [], path);
+			assert.deepEqual(createBuildPlan(classifyChange(path)).steps, [], path);
+		}
+		for (const path of [
+			"desktop/src/components/ProjectExplorer.svelte",
+			"desktop/src/lib/project-git-ignore.ts",
+			"desktop/src/styles.css",
+			"desktop/src/lib/test-utils.ts",
+		]) {
+			assert.deepEqual(sortedParts(path), [PARTS.WEB], path);
+			assert.deepEqual(createBuildPlan(classifyChange(path)).steps, [PARTS.WEB, PARTS.NATIVE], path);
+		}
+	});
 });
 
 describe("watch:all build planning", () => {

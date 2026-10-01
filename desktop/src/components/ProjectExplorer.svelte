@@ -726,7 +726,7 @@
         {@const directoryLoading = entry.kind === "directory" && treeState.loadingDirectories.includes(entry.path)}
         <div
           class={[
-            "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-panel-hover focus-within:bg-panel-hover",
+            "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-panel-hover",
             treeState.selectedPath === entry.path ? "bg-panel-selected" : "",
           ]}
           style:padding-left={`${4 + row.depth * 14}px`}
