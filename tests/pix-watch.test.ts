@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
 
-it("pix-watch resolves global symlinks and execs npm from the checkout without starting real watchers", async () => {
+it("pix-watch resolves global symlinks and execs npm from the checkout without starting real watchers", { skip: resolveSkipReason() }, async () => {
 	const temporary = await mkdtemp(join(tmpdir(), "pix-watch-launcher-"));
 	try {
 		const bin = join(temporary, "bin");
@@ -28,3 +28,8 @@ it("pix-watch resolves global symlinks and execs npm from the checkout without s
 		await rm(temporary, { recursive: true, force: true });
 	}
 });
+
+function resolveSkipReason(): string | false {
+	if (process.platform === "win32") return "pix-watch launcher is a POSIX sh script and cannot be spawned on Windows";
+	return false;
+}

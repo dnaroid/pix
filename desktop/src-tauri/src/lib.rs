@@ -186,7 +186,9 @@ fn desktop_watch_restart_target() -> Result<Option<PathBuf>, String> {
     desktop_watch_restart_target_from_state(&state)
 }
 
-fn desktop_watch_restart_target_from_state(state: &DesktopWatchState) -> Result<Option<PathBuf>, String> {
+fn desktop_watch_restart_target_from_state(
+    state: &DesktopWatchState,
+) -> Result<Option<PathBuf>, String> {
     if !state.stale {
         return Ok(None);
     }
@@ -10261,16 +10263,20 @@ mod tests {
                 &serde_json::to_vec(&serde_json::json!({
                     "version": 1, "target": env::temp_dir().join("pix"),
                     "stale": true, "buildStatus": status,
-                })).expect("serialize build status")
-            ).expect("valid build status");
+                }))
+                .expect("serialize build status"),
+            )
+            .expect("valid build status");
             assert_eq!(serde_json::to_value(state.build_status).unwrap(), status);
         }
         assert!(parse_desktop_watch_state(
             &serde_json::to_vec(&serde_json::json!({
                 "version": 1, "target": env::temp_dir().join("pix"),
                 "stale": true, "buildStatus": "invalid",
-            })).unwrap()
-        ).is_err());
+            }))
+            .unwrap()
+        )
+        .is_err());
         assert!(
             parse_desktop_watch_state(br#"{"version":1,"target":"relative","stale":true}"#)
                 .is_err()
