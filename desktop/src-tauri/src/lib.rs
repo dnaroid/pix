@@ -124,12 +124,24 @@ static WORKSPACE_CONFIG_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static GIT_CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 
+#[derive(Default, Deserialize, Serialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+enum DesktopBuildStatus {
+    #[default]
+    Idle,
+    Queued,
+    Building,
+    Failed,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DesktopWatchState {
     version: u8,
     target: PathBuf,
     stale: bool,
+    #[serde(default, rename = "buildStatus")]
+    build_status: DesktopBuildStatus,
 }
 
 /// Read the bounded, atomically replaced state file supplied only by `watch:all` debug launches.
@@ -171,6 +183,10 @@ fn desktop_watch_restart_target() -> Result<Option<PathBuf>, String> {
     let Some(state) = desktop_watch_state()? else {
         return Ok(None);
     };
+    desktop_watch_restart_target_from_state(&state)
+}
+
+fn desktop_watch_restart_target_from_state(state: &DesktopWatchState) -> Result<Option<PathBuf>, String> {
     if !state.stale {
         return Ok(None);
     }
@@ -195,6 +211,25 @@ fn desktop_watch_restart_request_path() -> Option<PathBuf> {
 #[tauri::command]
 fn desktop_watch_restart_available() -> Result<bool, String> {
     Ok(desktop_watch_restart_target()?.is_some())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopWatchStatus {
+    available: bool,
+    build_status: DesktopBuildStatus,
+}
+
+#[tauri::command]
+fn desktop_watch_status() -> Result<DesktopWatchStatus, String> {
+    let state = desktop_watch_state()?;
+    Ok(DesktopWatchStatus {
+        available: match &state {
+            Some(state) => desktop_watch_restart_target_from_state(state)?.is_some(),
+            None => false,
+        },
+        build_status: state.map(|state| state.build_status).unwrap_or_default(),
+    })
 }
 
 #[tauri::command]
@@ -9922,6 +9957,7 @@ pub fn run() {
             desktop_bootstrap::desktop_bootstrap_import_codex_api_key,
             desktop_bootstrap::desktop_bootstrap_install_idx,
             desktop_watch_restart_available,
+            desktop_watch_status,
             desktop_watch_restart,
             deepgram_token,
             acp_start,
@@ -10219,6 +10255,22 @@ mod tests {
         )
         .expect("valid watch state");
         assert!(state.stale);
+        assert!(matches!(state.build_status, DesktopBuildStatus::Idle));
+        for status in ["idle", "queued", "building", "failed"] {
+            let state = parse_desktop_watch_state(
+                &serde_json::to_vec(&serde_json::json!({
+                    "version": 1, "target": env::temp_dir().join("pix"),
+                    "stale": true, "buildStatus": status,
+                })).expect("serialize build status")
+            ).expect("valid build status");
+            assert_eq!(serde_json::to_value(state.build_status).unwrap(), status);
+        }
+        assert!(parse_desktop_watch_state(
+            &serde_json::to_vec(&serde_json::json!({
+                "version": 1, "target": env::temp_dir().join("pix"),
+                "stale": true, "buildStatus": "invalid",
+            })).unwrap()
+        ).is_err());
         assert!(
             parse_desktop_watch_state(br#"{"version":1,"target":"relative","stale":true}"#)
                 .is_err()

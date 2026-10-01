@@ -17,7 +17,10 @@ import type { RegistryUiItem, RegistryUiSnapshot } from "../src/registry/model.j
 
 // Real Git/filesystem scenarios spawn many processes. This is a deadlock
 // ceiling, not a performance assertion or a production command timeout.
-const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
+// Windows runners routinely stretch the heaviest scenarios several-fold
+// (observed 13s -> 30s+), so the ceiling stays well above load variance
+// while still tripping long before the production per-command bounds.
+const GIT_INTEGRATION_TIMEOUT_MS = 60_000;
 
 const ENV_KEYS = [
 	"HOME",

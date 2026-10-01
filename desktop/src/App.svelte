@@ -724,6 +724,7 @@
     {isMacOS}
     restartAvailable={desktopWatchRestart.available}
     restartPending={desktopWatchRestart.restarting}
+    buildStatus={desktopWatchRestart.buildStatus}
     onRestart={desktopWatchRestart.restart}
     projectSwitcher={sidebarViewModel.projectSwitcher}
     workbench={titlebarViewModel.workbench}

@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+# Resolve global symlinks back to the development checkout, not the caller's cwd.
+script=$0
+while [ -L "$script" ]; do
+  directory=$(CDPATH= cd -P -- "$(dirname -- "$script")" && pwd)
+  target=$(readlink "$script")
+  case "$target" in
+    /*) script=$target ;;
+    *) script=$directory/$target ;;
+  esac
+done
+root=$(CDPATH= cd -P -- "$(dirname -- "$script")/.." && pwd)
+cd "$root"
+exec npm run watch:all "$@"

@@ -16,9 +16,25 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 
 ## Behavior
 
+- The development-only `scripts/pix-watch` launcher can be symlinked onto
+  `PATH` as `pix-watch`. It resolves absolute/relative symlinks to its checkout,
+  changes to that root, and execs `npm run watch:all` with forwarded arguments
+  and npm from `PATH`. It does not require Zed or install a background service;
+  the terminal remains open and `Ctrl+C` stops the watcher normally.
 - A Desktop web-source change schedules `web` followed by `native`. The first successful build launches Desktop; later successful builds leave the running Desktop in place and mark the newer build as ready instead of interrupting the active session.
 - `watch:all` also watches the repository HEAD reflog as a fallback for Git worktree integrations such as `pull`, fast-forward `merge` (including Desktop's **Update project**), rebase, and reset. When HEAD advances through one of those operations, it diffs the old/new commits, classifies the changed paths with the same build-part rules, and queues the affected parts even if the OS file watcher missed some or all of the bulk checkout events. Ordinary local commits and branch checkouts do not use this fallback. If the bounded Git diff probe fails, the watcher conservatively queues all parts.
 - A watch-launched debug Desktop polls the bounded watcher state artifact and, when a newer build is ready, exposes a `Restart` control at the right side of its titlebar. Activating it requests a clean exit of the old process; the watcher waits for that process to finish saving window membership/geometry and cleaning up before launching the new artifact. It never sends termination signals during this handoff. If the old process has not exited within 30 seconds, the restart fails without killing it or launching a competing instance. Release builds and ordinary development launches have no watcher state and no control.
+- The same debug-only state carries `buildStatus` (`idle`, `queued`, `building`,
+  `failed`; absent means `idle` for older watcher state). Desktop shows a clock
+  for queued work, a reduced-motion-aware spinner during a build, and a red
+  failure icon with a tooltip pointing to the watcher terminal. These passive
+  indicators sit immediately left of Restart and also appear when no restart
+  is available. Successful completion clears the indicator; any previously
+  ready artifact stays restartable while subsequent work is queued/building or
+  fails. Edits during a build keep the building indicator until that cycle
+  finishes, then show queued work. State writes are serialized so older
+  asynchronous publications cannot overwrite newer status/artifact snapshots.
+  Desktop polling never overlaps and ignores completion after teardown.
 - `watch:all` disables Tauri's `beforeBuildCommand` because it has already built the web bundle once in the ordered build plan.
 - `desktop/src-tauri/build.rs` explicitly tracks the generated `<repo>/desktop/dist/index.html` as a Cargo input. Vite's production entrypoint contains hashed references to the emitted JS/CSS assets, so a successful web rebuild invalidates the native crate even when no Rust source changed.
 - The native rebuild therefore regenerates and recompiles Tauri's embedded asset context before the first Desktop launch or a user-requested restart into the newly bundled artifact.
@@ -61,7 +77,12 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 
 ## Related files
 
+- `scripts/pix-watch`
+- `tests/pix-watch.test.ts`
 - `scripts/watch-all.mjs`
+- `scripts/watch-all-state.mjs`
+- `tests/watch-all-state.test.ts`
+- `desktop/src/app/desktop-watch-restart.test.ts`
 - `scripts/watch-all-temp.mjs`
 - `tests/watch-all.test.ts`
 - `desktop/src/app/desktop-watch-restart.svelte.ts`
@@ -74,6 +95,15 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 
 ## Verification
 
+- `tests/watch-all-state.test.ts` covers the progress schema, serialized state
+  publication, failed-write recovery, failed-build recovery, and edits queued
+  during an active build without launching real processes. Desktop's
+  `desktop/src/app/desktop-watch-restart.test.ts` covers status polling,
+  non-overlap, and ignored late completion after teardown; native parser tests
+  cover legacy state and the four allowed progress values.
+- `tests/pix-watch.test.ts` uses a fake npm (never the real watcher) to verify
+  global symlink resolution, launch from an unrelated directory, argument
+  forwarding, and exit-status propagation.
 - `tests/watch-all.test.ts` covers the ordered `web -> native` build plan, the bounded watcher-state handoff, and the Tauri CLI override that suppresses the duplicate `beforeBuildCommand`.
 - `tests/watch-all.test.ts` also covers bounded failed-command output retention
   and the repeated bottom-of-terminal failure report, plus exact app-PID

@@ -75,6 +75,19 @@ temporary `.app` copies after builds/restarts and safely reclaims abandoned
 watcher temp roots at the next startup. Roots containing a running app or owned
 by another watcher are retained; do not delete them while Desktop is active.
 
+To run the watcher from any directory without keeping an editor open, install
+the development launcher once from the repository root:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+ln -s "$PWD/scripts/pix-watch" "$HOME/.local/bin/pix-watch"
+```
+
+Ensure `$HOME/.local/bin` is on `PATH`, then run `pix-watch` in a terminal.
+It runs `npm run watch:all` in the linked checkout using npm from `PATH`.
+Keep that terminal open; stop with `Ctrl+C`. This is not a background service.
+If you move the checkout, recreate the symlink.
+
 ## Release builds
 
 Release construction and native verification are intentionally separate from

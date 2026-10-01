@@ -2,11 +2,13 @@
 
 import { spawn } from "node:child_process";
 import { constants as fsConstants, existsSync, watch } from "node:fs";
-import { chmod, copyFile, cp, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canReclaimWatchDirectory, reclaimStaleWatchDirectories, WATCH_OWNER_FILE, WATCH_TEMP_PREFIX } from "./watch-all-temp.mjs";
+import { DesktopWatchStatePublisher, parseDesktopWatchState } from "./watch-all-state.mjs";
+export { desktopWatchState, parseDesktopWatchState, writeDesktopWatchState } from "./watch-all-state.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = dirname(SCRIPT_PATH);
@@ -35,32 +37,11 @@ const COMMAND_FAILURE_TAIL_BYTES = 16 * 1024;
 const NATIVE_ICON_PATH = "desktop/src-tauri/icons";
 const DESKTOP_WATCH_STATE_FILE = "desktop-watch-state.json";
 const DESKTOP_RESTART_REQUEST_FILE = "desktop-watch-state.restart";
-const DESKTOP_WATCH_STATE_MAX_BYTES = 4 * 1024;
 const DESKTOP_RESTART_POLL_MS = 100;
 const GIT_REFLOG_DEBOUNCE_MS = 150;
 const GIT_REFLOG_TAIL_BYTES = 16 * 1024;
 const GIT_DIFF_MAX_BYTES = 2 * 1024 * 1024;
 const GIT_DIFF_TIMEOUT_MS = 5_000;
-
-/** A deliberately small, atomically-published handoff from watch:all to a running debug Desktop. */
-export function desktopWatchState(target, stale) {
-	const state = JSON.stringify({ version: 1, target, stale: Boolean(stale) });
-	if (Buffer.byteLength(state) > DESKTOP_WATCH_STATE_MAX_BYTES) throw new Error("desktop watch state exceeds its size limit");
-	return `${state}\n`;
-}
-
-export async function writeDesktopWatchState(path, target, stale) {
-	const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-	await writeFile(temporaryPath, desktopWatchState(target, stale), { mode: 0o600 });
-	await rename(temporaryPath, path);
-}
-
-export function parseDesktopWatchState(value) {
-	if (!value || typeof value !== "object") return undefined;
-	const { version, target, stale } = value;
-	if (version !== 1 || typeof target !== "string" || typeof stale !== "boolean") return undefined;
-	return { target, stale };
-}
 
 async function readDesktopWatchState(path) {
 	try {
@@ -564,6 +545,7 @@ export class WatchAllSupervisor {
 		this.watchedPathStamps = new Map();
 		this.lastBuildFailure = undefined;
 		this.desktopWatchStatePath = undefined;
+		this.desktopStatePublisher = new DesktopWatchStatePublisher();
 		this.desktopRestartRequestPath = undefined;
 		this.restartRequestTimer = undefined;
 		this.restartRequestPolling = false;
@@ -764,6 +746,7 @@ export class WatchAllSupervisor {
 			console.error(`[watch:all] retrying after failed build: ${this.lastBuildFailure}`);
 		}
 		console.error(`[watch:all] change queued (${reason}): ${[...parts].join(", ")}`);
+		void this.publishBuildStatus();
 		if (this.building) return;
 		clearTimeout(this.buildTimer);
 		this.buildTimer = setTimeout(() => void this.runQueuedBuild(), options.immediate ? 0 : DEBOUNCE_MS);
@@ -774,6 +757,7 @@ export class WatchAllSupervisor {
 		this.building = true;
 		const requestedParts = new Set(this.pendingParts);
 		this.pendingParts.clear();
+		await this.publishBuildStatus();
 		const plan = createBuildPlan(requestedParts, {
 			initial: this.initialBuild,
 			hasNativeBuild: this.hasNativeBuild,
@@ -809,9 +793,22 @@ export class WatchAllSupervisor {
 		}
 
 		this.building = false;
+		await this.publishBuildStatus();
 		if (this.restartPending) this.scheduleDesktopRestart();
 		if (this.pendingParts.size > 0 && !this.stopping) {
 			this.buildTimer = setTimeout(() => void this.runQueuedBuild(), DEBOUNCE_MS);
+		}
+	}
+
+	async publishBuildStatus() {
+		let buildStatus = "idle";
+		if (this.building) buildStatus = "building";
+		else if (this.pendingParts.size > 0) buildStatus = "queued";
+		else if (this.lastBuildFailure) buildStatus = "failed";
+		try {
+			await this.desktopStatePublisher.publish(this.desktopWatchStatePath, { buildStatus });
+		} catch (error) {
+			console.error(`[watch:all] could not publish build status: ${error.message}`);
 		}
 	}
 
@@ -822,12 +819,12 @@ export class WatchAllSupervisor {
 		}
 		this.desktopRevision += 1;
 		if (this.desktopProcess) {
-			await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, true);
+			await this.desktopStatePublisher.publish(this.desktopWatchStatePath, { target: this.desktopExecutable, stale: true });
 			await this.pruneDesktopArtifacts();
 			console.error("[watch:all] desktop build is ready; use Restart in its titlebar when ready");
 			return;
 		}
-		await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, false);
+		await this.desktopStatePublisher.publish(this.desktopWatchStatePath, { target: this.desktopExecutable, stale: false });
 		await this.pruneDesktopArtifacts();
 		this.restartPending = true;
 		this.scheduleDesktopRestart();
@@ -1100,7 +1097,7 @@ export class WatchAllSupervisor {
 			console.error("[watch:all] starting the newly built desktop");
 		}
 		if (this.desktopWatchStatePath) {
-			await writeDesktopWatchState(this.desktopWatchStatePath, this.desktopExecutable, false);
+			await this.desktopStatePublisher.publish(this.desktopWatchStatePath, { target: this.desktopExecutable, stale: false });
 		}
 		const candidate = this.spawnDesktopCandidate();
 		this.candidateProcess = candidate.process;

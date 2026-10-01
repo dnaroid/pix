@@ -1,5 +1,9 @@
 <script lang="ts">
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import Clock from "@lucide/svelte/icons/clock";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import type { DesktopBuildStatus } from "../app/desktop-watch-restart.svelte";
   import type { ComponentProps } from "svelte";
   import { projectFolderHue } from "../lib/recent-projects";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
@@ -10,6 +14,7 @@
     isMacOS,
     restartAvailable = false,
     restartPending = false,
+    buildStatus = "idle",
     onRestart,
     projectSwitcher,
     workbench,
@@ -18,6 +23,7 @@
     isMacOS: boolean;
     restartAvailable?: boolean;
     restartPending?: boolean;
+    buildStatus?: DesktopBuildStatus;
     onRestart?: () => void;
     projectSwitcher: Omit<ComponentProps<typeof ProjectSwitcher>, "variant"> | null;
     workbench: ComponentProps<typeof WorkbenchTabs>;
@@ -25,6 +31,13 @@
   } = $props();
 
   const projectWorkspace = $derived(projectSwitcher?.workspace ?? "");
+  const buildHints: Record<DesktopBuildStatus, string> = {
+    idle: "",
+    queued: "New build queued",
+    building: "Building new version…",
+    failed: "Build failed — see the pix-watch terminal for details",
+  };
+  const buildHint = $derived(buildHints[buildStatus]);
   const projectTitlebarColor = $derived(
     projectWorkspace ? projectSwitcher?.projectColors.get(projectWorkspace) : undefined,
   );
@@ -56,8 +69,25 @@
     {/if}
   </div>
 
-  {#if restartAvailable}
-    <div class="flex shrink-0 items-center px-2">
+  {#if restartAvailable || buildStatus !== "idle"}
+    <div class="flex shrink-0 items-center gap-1 px-2">
+      {#if buildStatus !== "idle"}
+        <span
+          class={["grid h-7 w-7 place-items-center", buildStatus === "failed" ? "text-tool-error" : "text-chrome-foreground"]}
+          role="status"
+          aria-label={buildHint}
+          title={buildHint}
+        >
+          {#if buildStatus === "queued"}
+            <Clock class="h-4 w-4" aria-hidden="true" />
+          {:else if buildStatus === "building"}
+            <LoaderCircle class="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
+          {:else}
+            <CircleAlert class="h-4 w-4" aria-hidden="true" />
+          {/if}
+        </span>
+      {/if}
+      {#if restartAvailable}
       <button
         type="button"
         class="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait disabled:opacity-60"
@@ -68,6 +98,7 @@
       >
         <RotateCw class={["h-4 w-4", restartPending ? "animate-spin" : ""]} aria-hidden="true" />
       </button>
+      {/if}
     </div>
   {/if}
 </header>
