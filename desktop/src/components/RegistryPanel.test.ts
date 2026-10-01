@@ -235,6 +235,17 @@ describe("RegistryPanel resource diff", () => {
 });
 
 describe("Registry resource-card overflow", () => {
+  it("uses vertical dots and decorative icons beside every menu label", () => {
+    expect(actionsSource).toContain('icons/ellipsis-vertical');
+    expect(actionsSource).toContain('<EllipsisVertical ');
+    expect(actionsSource).not.toContain('<Ellipsis ');
+    expect(actionsSource).toContain('satisfies Record<RegistryItemAction, typeof Upload>');
+    expect(actionsSource).toContain('"toggle-scope": FolderGit2');
+    expect(actionsSource).toContain('? Globe : actionIcons[action]');
+    const menu = actionsSource.split('{#if open}')[1]!;
+    expect(menu).toContain('<Icon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />');
+    expect(menu.indexOf('<Icon ')).toBeLessThan(menu.indexOf('{registryFriendlyActionLabel(item, action)}'));
+  });
   it("renders only the selected primary plus Compare outside the labeled menu", () => {
     const direct = actionsSource.split("{#if open}")[0]!;
     expect(direct).toContain("{#if actions.primary}");

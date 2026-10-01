@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
-  import Ellipsis from "@lucide/svelte/icons/ellipsis";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import CloudOff from "@lucide/svelte/icons/cloud-off";
+  import Globe from "@lucide/svelte/icons/globe";
+  import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import PackageMinus from "@lucide/svelte/icons/package-minus";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import FileDiff from "@lucide/svelte/icons/file-diff";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import PackagePlus from "@lucide/svelte/icons/package-plus";
@@ -21,6 +27,17 @@
     onDiff: () => void;
   } = $props();
   const actions = $derived(registryCardActions(item));
+  const actionIcons = {
+    install: PackagePlus,
+    update: Download,
+    pull: Download,
+    push: Upload,
+    tags: Pencil,
+    "toggle-scope": FolderGit2,
+    "make-local": CloudOff,
+    uninstall: PackageMinus,
+    remove: Trash2,
+  } satisfies Record<RegistryItemAction, typeof Upload>;
   const busy = $derived(remoteDisabled || actionId !== null);
   const setupHint = 'Project visibility needs a project key first — set one with "Set project key" in the Project sync section.';
   let open = $state(false);
@@ -149,7 +166,7 @@
       onkeydown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); void show(event.key === "ArrowUp"); } }}>
       {#if actions.secondary.some((action) => actionId === `${item.id}:${action}`)}
         <RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-      {:else}<Ellipsis class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+      {:else}<EllipsisVertical class="h-3.5 w-3.5" aria-hidden="true" />{/if}
     </button>
   {/if}
 </div>
@@ -159,10 +176,12 @@
     style:max-width="calc(100vw - 1rem)" style:max-height="calc(100vh - 1rem)" style:left={`${position?.left ?? 0}px`} style:top={`${position?.top ?? 0}px`}
     style:visibility={position ? "visible" : "hidden"}>
     {#each actions.secondary as action}
+      {@const Icon = action === "toggle-scope" && registryScopeToggleDestination(item) === "global" ? Globe : actionIcons[action]}
       <button role="menuitem" tabindex="-1" type="button" disabled={busy || blocked(action)}
-        class={["flex min-h-7 w-full items-center rounded-sm px-2 py-1 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40", tone(action)]}
+        class={["flex min-h-7 w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40", tone(action)]}
         title={blocked(action) ? setupHint : registryFriendlyActionLabel(item, action)}
         onclick={() => { close(true); onAction(action); }}>
+        <Icon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         {registryFriendlyActionLabel(item, action)}
         {#if blocked(action)}<span class="sr-only"> — {setupHint}</span>{/if}
       </button>

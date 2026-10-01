@@ -22,9 +22,9 @@ status: active
   spacing, not colored divider lines. Project-sync rows are unchanged.
 - Resource cards keep at most two direct commands: the routine Install / Update /
   Push / Pull action, plus Compare when a two-sided diff is available. Other
-  commands are in a labeled **More actions** (`⋯`) menu: alternate conflict
+  commands are in a labeled **More actions** (`⋮`) menu, with an icon beside each label: alternate conflict
   resolution, tags, Global/Project visibility, unpublication and deletion.
-  Synced/context-only rows can therefore show only `⋯`. Menu commands retain
+  Synced/context-only rows can therefore show only `⋮`. Menu commands retain
   existing busy/setup guards and confirmations; a missing project key disables
   **Make project** with a setup hint. The menu is not clipped by the catalog's
   scrolling container, flips/clamps within the viewport, and dismisses on outside

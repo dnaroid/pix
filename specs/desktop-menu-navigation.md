@@ -44,7 +44,7 @@ roles and lifecycle are defined in `specs/desktop-context-menus.md`.
 - The Project switcher is a command menu. ArrowDown/ArrowUp from its trigger opens
   it and focuses the first/last enabled command, and menu navigation skips disabled
   current-window project actions while leaving new-window actions available.
-- Registry resource-card overflow menus open from `⋯` or ArrowDown/ArrowUp with
+- Registry resource-card overflow menus open from vertical `⋮` or ArrowDown/ArrowUp with
   first/last enabled-command focus. They reuse disabled-skipping, wrap, Home/End,
   type-ahead, Escape and Tab behavior; action execution remains in the Registry
   panel/store. Menus escape catalog clipping and dismiss on scrolling/resize or
