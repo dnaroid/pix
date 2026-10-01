@@ -133,7 +133,12 @@ process.stdin.on("end", () => {
       for (const attempt of attempts) assert.throws(() => process.kill(attempt.pid, 0), /ESRCH/, "old subprocess must be dead");
     } finally {
       await store.close();
-      await Promise.all([...cleaned, root].map((path) => rm(path, { recursive: true, force: true })));
+      // cleanupDirectory may run more than once for one directory (failure
+      // settlement plus the finalize lifecycle's last chance): concurrent
+      // recursive rm calls on the same tree race on Windows (Bun 1.3.14
+      // rejects with EFAULT), so deduplicate, and keep the transient retry
+      // policy removeRuntimeDirectory applies to these directories.
+      await Promise.all([...new Set(cleaned), root].map((path) => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
     }
   });
 }
