@@ -31,6 +31,18 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   `normalizeExternalHref` protocol policy, so internal anchors, local files,
   javascript and other unsupported destinations are not passed to the URL opener.
   A selected link also offers selection Copy.
+- Images in Markdown and the Preview tab offer Open Image in External App and
+  Copy Image, taking precedence over a surrounding link. Local images use the
+  backend-approved attachment path and the OS default application, not the text
+  editor. Data images are cached as PNG before opening; remote images open their
+  HTTP(S) URL. Copy Image writes PNG pixels, not a path or link. Conversion is
+  bounded to 16 megapixels and errors (including unloaded or cross-origin images)
+  use the application error reporter. Stale conversion/cache completions cannot
+  write the clipboard or open an app after replacement/disposal.
+- Image menus also offer Copy Absolute Path and Copy Relative Path (relative to
+  the active project root, with `../` for files outside it). These copy captured
+  plain filesystem paths without URI escaping. Images without a local file path
+  disable both commands; without an active project, relative-path copy is disabled.
 - xterm keeps its native clipboard event path; terminal menus offer Copy and,
   while the terminal accepts input, Paste. They do not offer document Select All
   or text-editor Undo. `TerminalView` exposes its read-only state explicitly.
@@ -51,8 +63,8 @@ Linux predefined Undo/Redo. It is scoped to the invoking WebView and does not
 evaluate arbitrary JavaScript. The Linux branch needs a native Linux smoke pass;
 macOS compilation and browser tests do not prove Wayland/native Linux behavior.
 
-Copy Link Address uses the official native clipboard plugin. Only write-text is
-permitted: no clipboard polling, read-image/read-text or clearing permission is
+Copy Link Address and Copy Image use the official native clipboard plugin. Only
+write-text and write-image are permitted: no clipboard polling, read-image/read-text or clearing permission is
 introduced. Clipboard and native menu errors use the existing application error
 reporter.
 
@@ -78,6 +90,8 @@ disposal, and link actions capture their URL rather than reading a later target.
 
 - `desktop/src/lib/native-context-menu.test.ts`: command policies, password and
   read-only safety, link actions, failures, inactive callbacks and Linux dispatch.
+- `desktop/src/lib/image-context-actions.test.ts`: image pixel copying, approved
+  local/remote opening, conversion bounds and stale copy/cache completions.
 - `desktop/src/lib/desktop-context-menu.test.ts`: suppression, focus/coordinates,
   generation races, resource replacement, unmount and failure handling.
 - `npm --prefix desktop run test:context-menu`: real Chromium DOM selection,

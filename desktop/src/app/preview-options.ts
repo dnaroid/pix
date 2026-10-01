@@ -3,6 +3,7 @@ import type { WorkbenchTabId } from "../lib/workbench-tabs";
 
 export type PreviewStoreOptions = {
   workspace: () => string;
+  loadExternalEditor: () => Promise<string | undefined>;
   activeWorkbenchTabId: () => WorkbenchTabId | null;
   activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
   setActiveWorkbenchTabId: (id: WorkbenchTabId | null) => void;

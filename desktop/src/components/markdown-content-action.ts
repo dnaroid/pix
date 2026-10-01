@@ -202,6 +202,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           media = video;
         }
         media.src = convertFileSrc(attachment.path);
+        if (kind === "image") media.dataset.imagePath = attachment.path;
         media.className = "markdown-media-content";
         media.addEventListener(
           "error",

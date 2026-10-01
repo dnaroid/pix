@@ -709,7 +709,7 @@
   const overlaysViewModel = viewModels.overlays;
   const statusBarViewModel = viewModels.statusBar;
 
-  onMount(() => installDesktopContextMenu({ reportError }));
+  onMount(() => installDesktopContextMenu({ reportError, workspace: () => workspace }));
   onMount(desktopLifecycle.start);
   onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
   onMount(desktopWatchRestart.start);

@@ -381,7 +381,7 @@
     {:else if attachment}
       <div class="grid min-h-0 min-w-0 flex-1 place-items-center overflow-hidden bg-background p-3">
         {#if attachment.kind === "image"}
-          <img class="max-h-full max-w-full object-contain" src={source} alt={attachment.name} />
+          <img class="max-h-full max-w-full object-contain" src={source} alt={attachment.name} data-image-path={attachment.path} />
         {:else}
         <!-- svelte-ignore a11y_media_has_caption User-selected videos do not necessarily include a captions track. -->
           <video

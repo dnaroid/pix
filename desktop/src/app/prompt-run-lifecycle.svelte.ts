@@ -21,6 +21,8 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
   const promptRunsBySessionId = new Map<string, Promise<void>>();
   const promptEndedAtBySessionId = new Map<string, number>();
   const runGenerationBySessionId = new Map<string, number>();
+  // Never reuse an owner generation after clearSession/reset while old requests settle.
+  let nextRunGeneration = 0;
 
   function isRunning(sessionId: string): boolean {
     return runningSessionIds.has(sessionId);
@@ -34,7 +36,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
   }
 
   function beginRun(sessionId: string): number {
-    const generation = (runGenerationBySessionId.get(sessionId) ?? 0) + 1;
+    const generation = ++nextRunGeneration;
     runGenerationBySessionId.set(sessionId, generation);
     promptEndedAtBySessionId.delete(sessionId);
     setRunning(sessionId, true);
@@ -59,8 +61,10 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
     runGeneration: number,
     stopReason?: StopReason,
   ): void {
+    if (generation(sessionId) !== runGeneration) return;
     finishRun(sessionId);
     queueMicrotask(() => {
+      if (generation(sessionId) !== runGeneration) return;
       void Promise.resolve(options.flushAutoQueue(sessionId)).then(() => {
         if (
           stopReason !== undefined

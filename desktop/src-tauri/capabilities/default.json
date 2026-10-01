@@ -10,6 +10,7 @@
     "core:webview:allow-create-webview-window",
     "dialog:allow-open",
     "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-write-image",
     "notification:default",
     "opener:allow-open-url",
     "opener:allow-default-urls",

@@ -47,6 +47,11 @@ is still available at its saved desktop coordinates.
 - The development Restart button uses the same clean exit. `watch:all` waits for
   the old process to exit before launching its replacement, so shutdown persistence
   is not interrupted by SIGTERM/SIGKILL. A timed-out handoff leaves the old process alone.
+- Normal macOS watcher shutdown, including terminal `Ctrl+C`, also requests
+  clean application Quit by exact native PID and waits up to 30 seconds. It must
+  not signal Desktop to stop it: failed/refused Quit or timeout leaves the app
+  and launch helper alive with their bundles retained, rather than losing the
+  latest window-membership snapshot.
 - After a clean application exit, the next launch restores the last normal size and position (excluding minimized, maximized and fullscreen rectangles).
 - Normal geometry is stored in macOS logical points, not unqualified physical
   pixels. It is applied to the window configuration before creation, so moving
@@ -110,6 +115,8 @@ is still available at its saved desktop coordinates.
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
 - `desktop/src/components/SessionInspector.svelte`
+- `scripts/watch-all.mjs`
+- `scripts/watch-all-desktop-quit.mjs`
 
 ## Tests
 
@@ -118,6 +125,7 @@ is still available at its saved desktop coordinates.
 - `desktop/src/app/project-workspace.test.ts`
 - `desktop/src/app/workspace-controller.test.ts`
 - `desktop/src/lib/window-layout-storage.test.ts`
+- `tests/watch-all-desktop-quit.test.ts`
 
 ## Verification
 

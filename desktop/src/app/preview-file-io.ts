@@ -11,8 +11,20 @@ import type { SettingsConfigDocument, SettingsConfigKind } from "../lib/settings
 import type { PreviewStoreOptions } from "./preview-options";
 import type { PreviewNavigation, PreviewState } from "./preview-state.svelte";
 
+type PreviewRead = { kind: "text"; file: ProjectFilePreview } | { kind: "external" };
+
 export function createPreviewFileIo(options: PreviewStoreOptions, state: PreviewState) {
   const fileValidationRequests = new Map<string, Promise<boolean>>();
+
+  async function openLargeFile(path: string, workspace: string | null, isCurrent: () => boolean): Promise<void> {
+    const editor = await options.loadExternalEditor();
+    if (!isCurrent()) return;
+    if (!editor) {
+      options.setErrorMessage("This file is too large for Preview. Choose an external file editor in Settings → Desktop → Editor.");
+      return;
+    }
+    await invoke("open_preview_file_in_editor", { workspace, path, editor });
+  }
 
   async function activateAttachment(attachment: Attachment): Promise<void> {
     const generation = state.beginFileLoad();
@@ -82,19 +94,24 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     }
 
     const generation = state.beginFileLoad();
+    const isCurrent = () => state.fileLoadIsCurrent(generation) && options.workspace() === workspace;
     const mediaKind = attachmentKind(mimeTypeForName(path));
     try {
       if (mediaKind !== "file") {
         const attachment = await resolveProjectMedia(path);
-        if (!attachment || !state.fileLoadIsCurrent(generation) || options.workspace() !== workspace) return;
+        if (!attachment || !isCurrent()) return;
         state.show({ kind: "attachment", attachment }, navigation);
         return;
       }
-      const preview = await invoke<ProjectFilePreview>("read_project_file", { workspace, path });
-      if (!state.fileLoadIsCurrent(generation) || options.workspace() !== workspace) return;
-      state.show({ kind: "file", file: preview, ...(lineRange ? { lineRange } : {}) }, navigation);
+      const result = await invoke<PreviewRead>("read_preview_file", { workspace, path });
+      if (!isCurrent()) return;
+      if (result.kind === "external") {
+        await openLargeFile(path, workspace, isCurrent);
+        return;
+      }
+      state.show({ kind: "file", file: result.file, ...(lineRange ? { lineRange } : {}) }, navigation);
     } catch (error) {
-      if (state.fileLoadIsCurrent(generation) && options.workspace() === workspace) options.reportError(error);
+      if (isCurrent()) options.reportError(error);
     }
   }
 
@@ -108,44 +125,47 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
 
   async function openLocalFile(path: string, navigation: PreviewNavigation = "replace"): Promise<void> {
     const generation = state.beginFileLoad();
+    const workspace = options.workspace();
+    const isCurrent = () => state.fileLoadIsCurrent(generation) && options.workspace() === workspace;
     const isHomePath = path.startsWith("~/");
     if (attachmentKind(mimeTypeForName(path)) !== "file") {
       try {
         const attachment = isHomePath ? await resolveHomeMedia(path) : await resolveLocalMedia(path);
-        if (!attachment || !state.fileLoadIsCurrent(generation)) return;
+        if (!attachment || !isCurrent()) return;
         state.show({ kind: "attachment", attachment }, navigation);
       } catch (error) {
-        if (state.fileLoadIsCurrent(generation)) options.reportError(error);
+        if (isCurrent()) options.reportError(error);
       }
       return;
     }
 
-    if (isHomePath) {
-      try {
-        const preview = await invoke<ProjectFilePreview>("read_home_file", { path });
-        if (!state.fileLoadIsCurrent(generation)) return;
-        state.show({ kind: "file", file: preview }, navigation);
-      } catch (error) {
-        if (state.fileLoadIsCurrent(generation)) options.reportError(error);
-      }
-      return;
-    }
-
+    let result: PreviewRead;
     try {
-      const preview = await invoke<ProjectFilePreview>("read_local_file", { path });
-      if (!state.fileLoadIsCurrent(generation)) return;
-      state.show({ kind: "file", file: preview }, navigation);
-      return;
-    } catch {
-      // Directories, binary/non-UTF-8 files and files beyond the bounded Preview
-      // limit retain the existing system-opener fallback.
-      if (!state.fileLoadIsCurrent(generation)) return;
-    }
-
-    try {
-      await invoke("open_local_file", { path });
+      result = await invoke<PreviewRead>("read_preview_file", { workspace: null, path });
     } catch (error) {
-      if (state.fileLoadIsCurrent(generation)) options.reportError(error);
+      if (!isCurrent()) return;
+      if (isHomePath) {
+        options.reportError(error);
+        return;
+      }
+      // Absolute directories and binary/non-UTF-8 files retain the OS fallback.
+      try {
+        await invoke("open_local_file", { path });
+      } catch (openError) {
+        if (isCurrent()) options.reportError(openError);
+      }
+      return;
+    }
+    if (!isCurrent()) return;
+    try {
+      if (result.kind === "external") {
+        await openLargeFile(path, null, isCurrent);
+      } else {
+        state.show({ kind: "file", file: result.file }, navigation);
+      }
+    } catch (error) {
+      // Editor launch failures must not retry with the OS opener.
+      if (isCurrent()) options.reportError(error);
     }
   }
 

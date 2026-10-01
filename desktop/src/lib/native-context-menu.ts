@@ -4,6 +4,7 @@ import { Menu, type MenuItemOptions, type PredefinedMenuItemOptions } from "@tau
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { DesktopContextTarget } from "./desktop-context-target";
+import { copyContextImage, openContextImage } from "./image-context-actions";
 
 export interface ContextMenuPosition { x: number; y: number }
 export interface NativeContextMenu {
@@ -72,6 +73,20 @@ export function nativeContextMenuItems(
   const separator = () => items.push({ item: "Separator" });
   const writable = context.kind === "editable" || context.kind === "password";
   const readonlyPassword = context.kind === "password" && context.readOnly;
+
+  if (context.image) {
+    const image = context.image;
+    items.push(
+      { id: "desktop.image.open", text: "Open Image in External App", action: run(() => openContextImage(image, isActive)) },
+      { id: "desktop.image.copy", text: "Copy Image", action: run(() => copyContextImage(image, isActive)) },
+      { item: "Separator" },
+      { id: "desktop.image.absolute", text: "Copy Absolute Path", enabled: Boolean(context.imagePath),
+        action: run(() => context.imagePath ? writeText(context.imagePath) : Promise.resolve()) },
+      { id: "desktop.image.relative", text: "Copy Relative Path", enabled: Boolean(context.imageRelativePath),
+        action: run(() => context.imageRelativePath ? writeText(context.imageRelativePath) : Promise.resolve()) },
+    );
+    return items;
+  }
 
   if (writable && !readonlyPassword) {
     edit("Undo");

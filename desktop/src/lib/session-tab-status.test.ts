@@ -69,6 +69,25 @@ describe("session tab status", () => {
     })).toBe("idle");
   });
 
+  it("treats blocked plan dependencies as normal rather than warning", () => {
+    const options = {
+      activity: { ...EMPTY_SESSION_ACTIVITY, blockedTodos: 1 },
+      paused: false,
+      running: false,
+      needsInput: false,
+      unseenComplete: false,
+    };
+    expect(sessionTabStatusKind(options)).toBe("idle");
+    expect(sessionTabStatusKind({ ...options, running: true })).toBe("running");
+    expect(sessionTabStatusKind({ ...options, paused: true })).toBe("paused");
+    expect(sessionTabStatusKind({ ...options, unseenComplete: true })).toBe("unseen-complete");
+    expect(sessionTabStatusKind({ ...options, needsInput: true })).toBe("needs-input");
+    expect(sessionTabStatusKind({
+      ...options,
+      activity: { ...options.activity, retryingSubagents: 1 },
+    })).toBe("warning");
+  });
+
   it("uses a dedicated label for unseen successful completion", () => {
     expect(sessionTabStatusLabel("unseen-complete", "Session idle")).toBe("Completed · not viewed");
     expect(sessionTabStatusLabel("warning", "1 retrying")).toBe("1 retrying");

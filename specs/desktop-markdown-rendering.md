@@ -65,13 +65,28 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   file. The backend canonicalizes it and grants scoped asset access only for a
   supported image/video extension. Existing bounded UTF-8 non-media files from
   `file://`, raw absolute Markdown destinations, or inline-code absolute paths
-  open read-only in the Desktop Preview. Directories, binary/non-UTF-8 files, and
-  files beyond the Preview limit retain the OS-opener fallback after user action.
+  open read-only in the Desktop Preview. Absolute directories and small
+  binary/non-UTF-8 files retain the OS-opener fallback after user action.
   Missing paths remain ordinary text.
+- Interactive non-media file opens (project, `~/`, and absolute local paths)
+  use a backend bounded read before sending content to the WebView. Files over
+  256 KiB or 2,000 source lines open in the configured external editor instead
+  of Preview; no pagination, content transfer, Preview history entry, or tab
+  activation is performed for these files. Metadata is checked first, and reads
+  are capped at 256 KiB plus one byte to catch concurrent growth. A newline
+  contributes one additional source line, including a trailing empty line.
+  Path confinement is revalidated before editor launch. If no editor is
+  configured, an actionable Settings → Desktop → Editor message is shown;
+  launch failures are reported without silently switching to the OS opener.
+  Stale read/settings completions after navigation, close, or workspace changes
+  cannot launch an editor. Existing config reads/writes retain their own limits.
 - Missing, disallowed, or unrenderable local media keeps a readable fallback and
   actionable caption; a media load failure does not replace the whole transcript
   with a global error.
 - Remote `http` and `https` image syntax is embedded only in the Markdown file Preview editor. Remote images do not send a referrer, and linked remote images retain their safe local or external destination behavior.
+- Right-clicking an image in Markdown or the Preview tab offers Copy Image and
+  Open Image in External App through the shared native context menu (see
+  `specs/desktop-context-menus.md`).
 - In a Markdown file Preview editor, tables use the available content width and wrap long cell content rather than creating a horizontal table scrollbar. Transcript tables retain horizontal scrolling.
 - Internal preview navigations push file or media entries onto a browser-like history stack inside the single Preview editor tab. Back and forward controls traverse that stack; following a new link after going back discards the old forward branch. Opening a preview from outside Preview starts a new history and activates the Preview tab; closing the Preview editor clears the history.
 - Each preview history entry retains its horizontal and vertical scroll position, which is restored when Back or Forward returns to that entry.
@@ -125,6 +140,10 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/app/preview.svelte.ts`
 - `desktop/src/app/preview-state.svelte.ts`
 - `desktop/src/app/preview-file-io.ts`
+- `desktop/src/app/preview-options.ts`
+- `desktop/src/app/desktop-project-services.ts`
+- `desktop/src/app/preview.test.ts`
+- `desktop/src-tauri/src/preview_file.rs`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/capabilities/default.json`
 - `desktop/src-tauri/tauri.conf.json`
@@ -136,6 +155,10 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   unsafe input, DCP control-block stripping/fail-open streaming behavior,
   Mermaid fallback/security, and incomplete fences.
 - Rust tests cover workspace/home confinement and preview size/UTF-8 validation.
+- Interactive-preview Rust tests cover byte/line boundaries, sparse oversize
+  files, bounded growth classification, small text, and project/home/absolute
+  targets. Preview-store tests cover configured-editor routing, missing/failed
+  editors, preserved small-file line ranges/history, and stale read/preferences.
 - Syntax-highlighting tests cover the large-source fallback, escaped markup, retained empty/CRLF lines, and unchanged small-source highlighting.
 - Preview-scroll tests cover ordering the requested line reveal after pending
   saved-position restoration and cancelling stale scheduled reveals.

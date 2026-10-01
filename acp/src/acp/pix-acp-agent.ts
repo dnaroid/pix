@@ -315,6 +315,10 @@ interface ActiveRun {
 	slashPrompt: boolean;
 	/** Whether pi emitted agent_start for this run. */
 	started: boolean;
+	/** Adopted runs use resuming as Desktop's unsolicited busy signal. */
+	extensionInitiated?: boolean;
+	/** A new agent_start invalidates all pending work for this settlement. */
+	settlement?: symbol | undefined;
 	/** Stop reason captured from `agent_end`, pending `agent_settled`. */
 	stopReason: StopReason | undefined;
 	resolve: (stopReason: StopReason) => void;
@@ -2213,6 +2217,7 @@ export class PixAcpAgent {
 			cancelled: false,
 			slashPrompt: false,
 			started: true,
+			extensionInitiated: true,
 			stopReason: undefined,
 			resolve: () => {},
 			reject: () => {},
@@ -2246,31 +2251,43 @@ export class PixAcpAgent {
 		}
 		switch (event.type) {
 			case "agent_start":
+				// Extensions can start a fresh SDK run while the previous settlement
+				// is awaiting RPC snapshots/notifications. Keep the busy owner, but
+				// invalidate that completion and discard its reason/cancellation.
+				if (run.settlement) {
+					run.cancelled = false;
+					void this.setAgentControlState(session, run.extensionInitiated ? "resuming" : "idle");
+				}
+				run.settlement = undefined;
+				run.stopReason = undefined;
 				run.started = true;
-				if (session.agentControlState === "resuming") {
+				if (!run.extensionInitiated && session.agentControlState === "resuming") {
 					void this.setAgentControlState(session, "idle");
 				}
 				return;
 			case "agent_end":
 				if (!event.willRetry) run.stopReason = stopReasonFromAgentEnd(event);
 				return;
-			case "agent_settled":
+			case "agent_settled": {
 				// Ignore a late duplicate settlement from the prior run. An early
 				// cancellation is the only valid run that can settle before start.
-				if (!run.started && !run.cancelled) return;
+				if ((!run.started && !run.cancelled) || run.settlement) return;
+				const settlement = Symbol("agent settlement");
+				run.settlement = settlement;
 				if (session.sdkQueueRestoreAfterInterrupt) {
 					const queues = session.sdkQueueRestoreAfterInterrupt;
 					session.sdkQueueRestoreAfterInterrupt = undefined;
 					void this.restoreSdkQueues(session, queues)
-						.then(() => this.finishActiveRun(session, run))
-						.catch((error: unknown) => this.rejectActiveRun(
-							session,
-							error instanceof Error ? error : new Error(stringifyUnknown(error)),
-						));
+						.then(() => this.finishActiveRun(session, run, settlement))
+						.catch((error: unknown) => {
+							if (session.activeRun !== run || run.settlement !== settlement) return;
+							this.rejectActiveRun(session, error instanceof Error ? error : new Error(stringifyUnknown(error)));
+						});
 					return;
 				}
-				void this.finishActiveRun(session, run);
+				void this.finishActiveRun(session, run, settlement);
 				return;
+			}
 			default:
 				return;
 		}
@@ -2678,13 +2695,15 @@ export class PixAcpAgent {
 			: "idle";
 	}
 
-	private async finishActiveRun(session: AgentSessionState, run: ActiveRun): Promise<void> {
-		if (session.activeRun !== run) return;
+	private async finishActiveRun(session: AgentSessionState, run: ActiveRun, settlement: symbol): Promise<void> {
+		const ownsSettlement = () => this.sessions.get(session.acpSessionId) === session
+			&& session.activeRun === run && run.settlement === settlement;
+		if (!ownsSettlement()) return;
 		const pauseRequested = session.agentControlState === "pause-requested";
 		const cancelled = run.cancelled;
 		if (cancelled) {
 			await this.setAgentControlState(session, "idle");
-			if (session.activeRun === run) this.resolveActiveRun(session, "cancelled");
+			if (ownsSettlement()) this.resolveActiveRun(session, "cancelled");
 			return;
 		}
 		let next: DesktopAgentControlState;
@@ -2694,9 +2713,9 @@ export class PixAcpAgent {
 			this.options.logger.warn(`agent control state refresh failed: ${stringifyUnknown(error)}`);
 			next = pauseRequested ? "paused" : "idle";
 		}
-		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun !== run) return;
+		if (!ownsSettlement()) return;
 		await this.setAgentControlState(session, next);
-		if (session.activeRun === run) this.resolveActiveRun(session, run.stopReason ?? "end_turn");
+		if (ownsSettlement()) this.resolveActiveRun(session, run.stopReason ?? "end_turn");
 	}
 
 	private async prompt(params: PromptRequest): Promise<PromptResponse> {
@@ -2781,7 +2800,7 @@ export class PixAcpAgent {
 		try {
 			await session.pi.prompt(input.text, input.images.length > 0 ? input.images : undefined);
 		} catch (error) {
-			session.activeRun = undefined;
+			if (session.activeRun === run) session.activeRun = undefined;
 			throw new RequestError(ERROR_SERVER, `pi prompt failed: ${stringifyUnknown(error)}`);
 		}
 		// The bundled session-title extension runs in the input preflight and

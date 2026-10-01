@@ -42,6 +42,10 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
   });
   const preview = createPreviewStore({
     workspace: options.workspace,
+    loadExternalEditor: async () => {
+      await projectWorkspace.loadPreferences(options.workspace());
+      return projectWorkspace.externalEditor;
+    },
     activeWorkbenchTabId: options.activeWorkbenchTabId,
     activeConversationWorkbenchTabId: options.activeConversationWorkbenchTabId,
     setActiveWorkbenchTabId: options.setActiveWorkbenchTabId,

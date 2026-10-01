@@ -3,12 +3,13 @@ import { contextElement, desktopContextTarget, focusContextTarget, type DesktopC
 import { createNativeContextMenuFactory, type ContextMenuPosition, type NativeContextMenu } from "./native-context-menu";
 
 interface ContextMenuOptions {
+  workspace?: () => string;
   reportError: (error: unknown) => void;
   createMenu?: (context: DesktopContextTarget, isActive: () => boolean) => Promise<NativeContextMenu>;
 }
 
 /** Installed once per App mount, including secondary project windows. */
-export function installDesktopContextMenu({ reportError, createMenu }: ContextMenuOptions): () => void {
+export function installDesktopContextMenu({ reportError, createMenu, workspace }: ContextMenuOptions): () => void {
   // A plain Vite browser preview is still a browser, not a privileged desktop host.
   if (!createMenu && !isTauri()) return () => {};
   const create = createMenu ?? createNativeContextMenuFactory(reportError);
@@ -69,7 +70,7 @@ export function installDesktopContextMenu({ reportError, createMenu }: ContextMe
   }
 
   function route(event: MouseEvent): void {
-    const context = desktopContextTarget(event.target);
+    const context = desktopContextTarget(event.target, workspace?.());
     if (!context) return; // Empty chrome has no invented or developer commands.
     const rect = context.element.getBoundingClientRect();
     const keyboard = event.clientX === 0 && event.clientY === 0;

@@ -2307,6 +2307,107 @@ test("session/prompt ignores a duplicate settlement before its agent_start", asy
 	});
 });
 
+for (const origin of ["prompt", "extension"] as const) {
+	test(`an extension restart during ${origin} settlement keeps run ownership`, async () => {
+		const { adapter, clients } = createTestAdapter();
+		await connect(adapter, async (cx) => {
+			const session = await cx.buildSession("/tmp/settlement-restart").start();
+			const pi = clients[0]!;
+			let promptSettled = false;
+			const pending = origin === "prompt"
+				? session.prompt("first").finally(() => { promptSettled = true; })
+				: undefined;
+			void pending?.catch(() => {});
+			if (pending) await waitFor(() => pi.promptCalls.length === 1);
+			pi.emit({ type: "agent_start" });
+			const owner = adapter.getSession(session.sessionId)!.activeRun;
+			let release!: () => void;
+			const gate = new Promise<void>((resolve) => { release = resolve; });
+			const getMessages = pi.getMessages.bind(pi);
+			pi.getMessages = async () => { await gate; return []; };
+			pi.emit({
+				type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "error" }], willRetry: false,
+			} as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+			// A todo nudge/hidden continuation starts before the old RPC snapshot returns.
+			pi.emit({ type: "agent_start" });
+			release();
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner);
+			assert.equal(promptSettled, false, "old settlement must not resolve a still-running prompt");
+			if (origin === "extension") {
+				assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "resuming",
+					"an adopted run must not publish an idle indicator while streaming");
+			}
+			assert.equal(owner!.stopReason, undefined, "previous run's error must not leak into the restart");
+			await assert.rejects(session.prompt("overlap"), /already in progress/);
+			const queued = await cx.request(PIX_QUEUE_MESSAGE_METHOD, {
+				sessionId: session.sessionId,
+				prompt: [{ type: "text", text: "queued during restart" }],
+				displayText: "queued during restart",
+			}) as { disposition: string };
+			assert.equal(queued.disposition, "steering");
+			assert.deepEqual(pi.steerCalls, ["queued during restart"]);
+			await cx.request(PIX_AGENT_CONTROL_METHOD, { sessionId: session.sessionId, action: "pause" });
+			assert.equal(pi.pauses, 1, "Pause must still own the restarted SDK run");
+			pi.getMessages = getMessages;
+			pi.emit({ type: "agent_settled" });
+			if (pending) assert.equal((await pending).stopReason, "end_turn");
+			await waitFor(() => adapter.getSession(session.sessionId)?.activeRun === undefined);
+		});
+	});
+}
+
+test("restart during a cancelled settlement notification retains the new SDK run", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/cancelled-settlement-restart").start();
+		const pi = clients[0]!;
+		pi.emit({ type: "agent_start" });
+		const state = adapter.getSession(session.sessionId)!;
+		const owner = state.activeRun!;
+		await cx.notify("session/cancel", { sessionId: session.sessionId });
+		await waitFor(() => pi.aborts === 1);
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const notify = state.client.notify.bind(state.client);
+		state.client.notify = async () => gate;
+		pi.emit({ type: "agent_settled" });
+		assert.equal(owner.cancelled, true);
+		pi.emit({ type: "agent_start" });
+		release();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(state.activeRun, owner);
+		assert.equal(owner.cancelled, false);
+		assert.equal(state.agentControlState, "resuming");
+		state.client.notify = notify;
+		pi.emit({ type: "agent_settled" });
+		await waitFor(() => state.activeRun === undefined);
+	});
+});
+
+test("a failed interrupted-queue restore cannot reject a restarted run", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/queue-restore-restart").start();
+		const pi = clients[0]!;
+		pi.emit({ type: "agent_start" });
+		const state = adapter.getSession(session.sessionId)!;
+		const owner = state.activeRun!;
+		let rejectRestore!: (error: Error) => void;
+		const gate = new Promise<void>((_resolve, reject) => { rejectRestore = reject; });
+		pi.steer = async () => gate;
+		state.sdkQueueRestoreAfterInterrupt = { steering: ["preserved"], followUp: [] };
+		pi.emit({ type: "agent_settled" });
+		pi.emit({ type: "agent_start" });
+		rejectRestore(new Error("old restore failed"));
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(state.activeRun, owner);
+		pi.emit({ type: "agent_settled" });
+		await waitFor(() => state.activeRun === undefined);
+	});
+});
+
 test("session/prompt rejects for unknown sessions and refuses concurrent prompts", async () => {
 	const { adapter, clients } = createTestAdapter();
 	await connect(adapter, async (cx) => {

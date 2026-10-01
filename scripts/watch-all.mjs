@@ -8,6 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canReclaimWatchDirectory, reclaimStaleWatchDirectories, WATCH_OWNER_FILE, WATCH_TEMP_PREFIX } from "./watch-all-temp.mjs";
 import { DesktopWatchStatePublisher, parseDesktopWatchState } from "./watch-all-state.mjs";
+import { quitMacDesktopApp } from "./watch-all-desktop-quit.mjs";
 export { desktopWatchState, parseDesktopWatchState, writeDesktopWatchState } from "./watch-all-state.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -490,10 +491,11 @@ async function findDesktopAppPid(executablePath, isAborted, onFound, timeoutMs =
 
 async function waitForProcessExit(pid, timeoutMs) {
 	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
+	do {
 		if (!parseProcessList(await processListSnapshot()).some((entry) => entry.pid === pid)) return true;
+		if (Date.now() >= deadline) break;
 		await delay(APP_PID_POLL_MS);
-	}
+	} while (Date.now() < deadline);
 	return false;
 }
 
@@ -510,6 +512,10 @@ async function signalAppProcess(appPid, signal = "SIGTERM") {
 }
 
 async function stopDesktopAppProcess(appPid) {
+	if (usesDesktopAppBundle()) {
+		await quitMacDesktopApp(appPid, waitForProcessExit);
+		return;
+	}
 	await signalAppProcess(appPid, "SIGTERM");
 	if (!(await waitForProcessExit(appPid, APP_EXIT_WAIT_MS))) {
 		await signalAppProcess(appPid, "SIGKILL");
@@ -518,7 +524,8 @@ async function stopDesktopAppProcess(appPid) {
 }
 
 export class WatchAllSupervisor {
-	constructor() {
+	constructor({ stopDesktopApp = stopDesktopAppProcess } = {}) {
+		this.stopDesktopApp = stopDesktopApp;
 		this.watchers = [];
 		this.pendingParts = new Set();
 		this.blockedParts = new Set();
@@ -1040,21 +1047,31 @@ export class WatchAllSupervisor {
 		};
 	}
 
-	/** Terminate a desktop instance: signal the app's own process group first, then clean up the child. */
+	/** On macOS request clean Quit first; only clean up the launcher after the app exits. */
 	async stopDesktopInstance(instance) {
 		if (!instance?.process) return;
-		if (usesDesktopAppBundle() && instance.appPid === undefined && instance.executable) {
-			instance.appPid = await findDesktopAppPid(
-				instance.executable,
-				() => instance.process.exitCode !== null || instance.process.signalCode !== null,
-				undefined,
-				APP_PID_CLEANUP_TIMEOUT_MS,
-			);
-		}
-		if (instance.appPid !== undefined && instance.appPid !== instance.process.pid) {
-			await stopDesktopAppProcess(instance.appPid);
+		try {
+			if (usesDesktopAppBundle() && instance.appPid === undefined && instance.executable) {
+				instance.appPid = await findDesktopAppPid(
+					instance.executable,
+					() => instance.process.exitCode !== null || instance.process.signalCode !== null,
+					undefined,
+					APP_PID_CLEANUP_TIMEOUT_MS,
+				);
+			}
+			if (usesDesktopAppBundle() && instance.appPid === undefined
+				&& instance.process.exitCode === null && instance.process.signalCode === null) {
+				throw new Error("could not identify the Desktop PID; leaving its launcher alive");
+			}
+			if (instance.appPid !== undefined && (usesDesktopAppBundle() || instance.appPid !== instance.process.pid)) {
+				await this.stopDesktopApp(instance.appPid);
+			}
+		} catch (error) {
+			console.error(`[watch:all] could not quit Desktop safely; retaining app and bundles: ${error.message}`);
+			return false;
 		}
 		await stopProcessTree(instance.process);
+		return true;
 	}
 
 	/** Restart is requested by Desktop's own app.exit(): let its save/cleanup finish, never signal it. */
@@ -1178,14 +1195,16 @@ export class WatchAllSupervisor {
 		for (const watcher of this.watchers) watcher.close();
 		if (this.activeCommand) await stopProcessTree(this.activeCommand);
 		if (this.candidateProcess) {
-			await this.stopDesktopInstance({
+			const stopped = await this.stopDesktopInstance({
 				process: this.candidateProcess,
 				appPid: this.candidateAppPid,
 				executable: this.candidateExecutable,
 			});
+			if (stopped === false) exitCode = 1;
 		}
 		if (this.desktopProcess) {
-			await this.stopDesktopInstance({ process: this.desktopProcess, appPid: this.desktopAppPid });
+			const stopped = await this.stopDesktopInstance({ process: this.desktopProcess, appPid: this.desktopAppPid, executable: this.desktopRunningExecutable });
+			if (stopped === false) exitCode = 1;
 		}
 		if (this.tempDirectory) {
 			// An app that survived shutdown must retain its on-disk executable.

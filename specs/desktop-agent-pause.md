@@ -34,6 +34,8 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - Desktop's deferred/auto queue does not consume another message while the session is `pause-requested`, `paused`, `continuable`, or `resuming`; advancing past those boundaries requires Continue or a new explicit user prompt.
 - Continue invokes `Agent.continue()` through the Pix RPC shim and then uses Pi's normal post-run retry, compaction, queue-draining, and settlement bookkeeping.
 - While continuation is active, Desktop treats the session as running, so Stop can cancel it and Pause can be requested again after the resumed run starts.
+- Extension-originated runs (including timed continuations and todo nudges) are also owned as active ACP runs and signal Desktop's running indicator. If an extension starts again while the prior settlement is awaiting RPC snapshots or notifications, the existing busy owner spans that restart: the stale settlement cannot publish an idle/paused state or resolve the owning request. Stop reasons and cancellation from the previous SDK run do not leak into the restarted run.
+- Desktop settlement is guarded by run ownership too: a late prompt/Continue completion cannot clear a newer run's busy flag, finalize its transcript activity, or flush its queue. Owner generations are not reused after session cleanup or runtime reset.
 - Loading, importing, or switching a live session recomputes whether its current transcript is resumable. A previously paused boundary may therefore rehydrate as the equivalent `continuable` state rather than preserving the in-memory `paused` label.
 
 ## Protocol bridge
@@ -56,6 +58,8 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - `desktop/src/lib/acp-client.ts`
 - `desktop/src/lib/acp-pix-extensions.ts`
 - `desktop/src/app/prompt-agent-control.svelte.ts`
+- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
+- `desktop/src/app/prompt-run-lifecycle.test.ts`
 - `desktop/src/app/prompt-runtime.svelte.ts`
 - `desktop/src/app/desktop-workbench-prop-builders.ts`
 - `desktop/src/components/TranscriptPane.svelte`
@@ -64,7 +68,9 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 ## Verification
 
 - ACP tests cover pause-requested to paused state and generic resumable-stop to continuation flow, including the settled continuation stop reason.
+- `acp/test/agent.test.ts` deterministically gates settlement snapshots and checks extension restarts during both prompt-owned and adopted runs, including retained ownership, queueing and Pause availability.
 - Desktop tests cover the private ACP control request, session-state parsing, same-session pause transition detection, and source-level wiring/placement of the centered pause toast.
+- `desktop/src/app/prompt-run-lifecycle.test.ts` covers stale completion and queued settlement callbacks, including cleanup/reset followed by a new run with the same session ID.
 - ACP typecheck/tests/stdio smoke and Desktop Svelte/TypeScript checks pass.
 
 ## Risks / compatibility

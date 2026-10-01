@@ -20,6 +20,7 @@ function fixture() {
   let workspace = "/one";
   const options = {
     workspace: () => workspace,
+    loadExternalEditor: vi.fn(async (): Promise<string | undefined> => "zed"),
     activeWorkbenchTabId: () => null,
     activeConversationWorkbenchTabId: () => null,
     setActiveWorkbenchTabId: vi.fn(),
@@ -53,7 +54,7 @@ describe("Preview async ownership", () => {
     options.prepareAttachment.mockReturnValue(preparation.promise);
     const pending = preview.activateAttachment(image);
     const file = { path: "new.ts", content: "new" };
-    tauri.invoke.mockResolvedValue(file);
+    tauri.invoke.mockResolvedValue({ kind: "text", file });
     await preview.openProjectFile(file.path);
     preparation.resolve();
     await pending;
@@ -62,11 +63,11 @@ describe("Preview async ownership", () => {
 
   it("an immediate preview invalidates an older file load", async () => {
     const { preview } = fixture();
-    const read = deferred<{ path: string; content: string }>();
+    const read = deferred<{ kind: "text"; file: { path: string; content: string } }>();
     tauri.invoke.mockReturnValue(read.promise);
     const pending = preview.openProjectFile("old.ts");
     preview.show({ kind: "attachment", attachment: image }, "replace");
-    read.resolve({ path: "old.ts", content: "old" });
+    read.resolve({ kind: "text", file: { path: "old.ts", content: "old" } });
     await pending;
     expect(preview.active).toMatchObject({ kind: "attachment", attachment: image });
   });
@@ -99,13 +100,13 @@ describe("Preview async ownership", () => {
     const { preview } = fixture();
     const file = { path: "/private/tmp/idx-compact-gate-qa/stdout.txt", content: "qa output\n" };
     tauri.invoke.mockImplementation((command: string) => {
-      if (command === "read_local_file") return Promise.resolve(file);
+      if (command === "read_preview_file") return Promise.resolve({ kind: "text", file });
       return Promise.resolve(undefined);
     });
 
     await preview.openLocalFile(file.path);
 
-    expect(tauri.invoke).toHaveBeenCalledWith("read_local_file", { path: file.path });
+    expect(tauri.invoke).toHaveBeenCalledWith("read_preview_file", { workspace: null, path: file.path });
     expect(tauri.invoke).not.toHaveBeenCalledWith("open_local_file", expect.anything());
     expect(preview.active).toMatchObject({ kind: "file", file });
   });
@@ -114,14 +115,14 @@ describe("Preview async ownership", () => {
     const { preview } = fixture();
     const path = "/private/tmp/idx-compact-gate-qa/archive.bin";
     tauri.invoke.mockImplementation((command: string) => {
-      if (command === "read_local_file") return Promise.reject(new Error("not UTF-8"));
+      if (command === "read_preview_file") return Promise.reject(new Error("not UTF-8"));
       if (command === "open_local_file") return Promise.resolve(undefined);
       return Promise.resolve(undefined);
     });
 
     await preview.openLocalFile(path);
 
-    expect(tauri.invoke).toHaveBeenCalledWith("read_local_file", { path });
+    expect(tauri.invoke).toHaveBeenCalledWith("read_preview_file", { workspace: null, path });
     expect(tauri.invoke).toHaveBeenCalledWith("open_local_file", { path });
     expect(preview.active).toBeUndefined();
   });
@@ -129,12 +130,94 @@ describe("Preview async ownership", () => {
   it("does not open an obsolete absolute local file externally after Preview navigation changes", async () => {
     const { preview } = fixture();
     const read = deferred<never>();
-    tauri.invoke.mockImplementation((command: string) => command === "read_local_file" ? read.promise : Promise.resolve(undefined));
+    tauri.invoke.mockImplementation((command: string) => command === "read_preview_file" ? read.promise : Promise.resolve(undefined));
     const pending = preview.openLocalFile("/private/tmp/old.txt");
     preview.show({ kind: "attachment", attachment: image }, "replace");
     read.reject(new Error("not previewable"));
     await pending;
     expect(tauri.invoke).not.toHaveBeenCalledWith("open_local_file", expect.anything());
     expect(preview.active).toMatchObject({ kind: "attachment", attachment: image });
+  });
+
+  it.each([
+    ["project", "inputs.json", "/one"],
+    ["home", "~/inputs.json", null],
+    ["absolute", "/tmp/inputs.json", null],
+  ] as const)("opens a large %s file in the configured editor without touching Preview history", async (kind, path, workspace) => {
+    const { preview, options } = fixture();
+    preview.show({ kind: "attachment", attachment: image }, "replace");
+    const previous = preview.active;
+    options.setActiveWorkbenchTabId.mockClear();
+    tauri.invoke.mockImplementation(async (command: string) => command === "read_preview_file" ? { kind: "external" } : undefined);
+
+    await (kind === "project" ? preview.openProjectFile(path, "push") : preview.openLocalFile(path, "push"));
+
+    expect(tauri.invoke).toHaveBeenCalledWith("read_preview_file", { workspace, path });
+    expect(tauri.invoke).toHaveBeenCalledWith("open_preview_file_in_editor", { workspace, path, editor: "zed" });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_local_file", expect.anything());
+    expect(preview.active).toBe(previous);
+    expect(options.setActiveWorkbenchTabId).not.toHaveBeenCalled();
+  });
+
+  it("keeps small project files and their line range in Preview", async () => {
+    const { preview } = fixture();
+    const file = { path: "small.json", content: "{}" };
+    tauri.invoke.mockResolvedValue({ kind: "text", file });
+    await preview.openProjectFile(file.path, "replace", { startLine: 1, endLine: 1 });
+    expect(preview.active).toMatchObject({ kind: "file", file, lineRange: { startLine: 1, endLine: 1 } });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_preview_file_in_editor", expect.anything());
+  });
+
+  it("asks for editor configuration rather than rendering a large file", async () => {
+    const { preview, options } = fixture();
+    options.loadExternalEditor.mockResolvedValue(undefined);
+    tauri.invoke.mockResolvedValue({ kind: "external" });
+    await preview.openProjectFile("inputs.json");
+    expect(options.setErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Settings → Desktop → Editor"));
+    expect(tauri.invoke).toHaveBeenCalledTimes(1);
+    expect(preview.active).toBeUndefined();
+  });
+
+  it("reports editor launch failure without using the OS opener", async () => {
+    const { preview, options } = fixture();
+    const error = new Error("editor unavailable");
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "read_preview_file") return { kind: "external" };
+      throw error;
+    });
+    await preview.openLocalFile("/tmp/inputs.json");
+    expect(options.reportError).toHaveBeenCalledWith(error);
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_local_file", expect.anything());
+    expect(preview.active).toBeUndefined();
+  });
+
+  it.each(["close", "workspace", "navigate"])("does not launch an external editor after %s during classification", async (change) => {
+    const { preview, options, setWorkspace } = fixture();
+    const read = deferred<{ kind: "external" }>();
+    tauri.invoke.mockReturnValue(read.promise);
+    const pending = preview.openProjectFile("inputs.json");
+    if (change === "close") preview.close();
+    else if (change === "workspace") setWorkspace("/two");
+    else preview.show({ kind: "attachment", attachment: image }, "replace");
+    read.resolve({ kind: "external" });
+    await pending;
+    expect(options.loadExternalEditor).not.toHaveBeenCalled();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_preview_file_in_editor", expect.anything());
+  });
+
+  it.each(["project", "local"])("ignores stale %s editor preferences and their errors", async (kind) => {
+    const { preview, options, setWorkspace } = fixture();
+    const editor = deferred<string | undefined>();
+    options.loadExternalEditor.mockReturnValue(editor.promise);
+    tauri.invoke.mockResolvedValue({ kind: "external" });
+    const pending = kind === "project" ? preview.openProjectFile("inputs.json") : preview.openLocalFile("~/inputs.json");
+    // Let the bounded read resolve and start preference loading.
+    await Promise.resolve();
+    expect(options.loadExternalEditor).toHaveBeenCalled();
+    setWorkspace("/two");
+    editor.reject(new Error("old settings read failed"));
+    await pending;
+    expect(options.reportError).not.toHaveBeenCalled();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_preview_file_in_editor", expect.anything());
   });
 });

@@ -16,7 +16,7 @@ export function sessionTabStatusKind(options: {
   unseenComplete: boolean;
 }): SessionTabStatusKind {
   if (options.needsInput) return "needs-input";
-  if ((options.activity?.retryingSubagents ?? 0) > 0 || (options.activity?.blockedTodos ?? 0) > 0) {
+  if ((options.activity?.retryingSubagents ?? 0) > 0) {
     return "warning";
   }
   if (options.paused) return "paused";

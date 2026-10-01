@@ -3,6 +3,52 @@ import type { AcpClient } from "../lib/acp-client";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 
 describe("prompt run notification lifecycle", () => {
+  it.each(["next run", "clear session", "reset"] as const)(
+    "ignores a stale completion after %s",
+    async (transition) => {
+      const client = {} as AcpClient;
+      const finalizeTranscriptActivity = vi.fn();
+      const flushAutoQueue = vi.fn();
+      const onPromptSettled = vi.fn();
+      const runs = createPromptRunLifecycle({
+        client: () => client, activeSessionId: () => "session-1", reportError: vi.fn(),
+        bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity, flushAutoQueue, onPromptSettled,
+      });
+      const staleGeneration = runs.beginRun("session-1");
+      if (transition === "clear session") runs.clearSession("session-1");
+      if (transition === "reset") runs.reset();
+      const currentGeneration = runs.beginRun("session-1");
+
+      // A late Continue finally must not finish a newer run, including after teardown.
+      runs.finishRunAndFlush("session-1", staleGeneration, "cancelled");
+      await Promise.resolve();
+      expect(runs.isRunning("session-1")).toBe(true);
+      expect(runs.endedAt("session-1")).toBeUndefined();
+      expect(finalizeTranscriptActivity).not.toHaveBeenCalled();
+      expect(flushAutoQueue).not.toHaveBeenCalled();
+      expect(onPromptSettled).not.toHaveBeenCalled();
+
+      runs.finishRunAndFlush("session-1", currentGeneration, "end_turn");
+      await vi.waitFor(() => expect(onPromptSettled).toHaveBeenCalledWith("session-1", "end_turn"));
+      expect(runs.isRunning("session-1")).toBe(false);
+    },
+  );
+
+  it("does not flush a stale settlement microtask after a newer run starts", async () => {
+    const client = {} as AcpClient;
+    const flushAutoQueue = vi.fn();
+    const runs = createPromptRunLifecycle({
+      client: () => client, activeSessionId: () => "session-1", reportError: vi.fn(),
+      bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue,
+    });
+    const generation = runs.beginRun("session-1");
+    runs.finishRunAndFlush("session-1", generation, "end_turn");
+    runs.beginRun("session-1");
+    await Promise.resolve();
+    expect(runs.isRunning("session-1")).toBe(true);
+    expect(flushAutoQueue).not.toHaveBeenCalled();
+  });
+
   it("reports only the final run after the Desktop auto queue drains", async () => {
     const client = {
       prompt: vi.fn(async () => ({ stopReason: "end_turn" as const })),

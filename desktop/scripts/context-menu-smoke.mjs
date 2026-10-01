@@ -48,6 +48,8 @@ try {
         <a id="unsafe" href="javascript:alert(1)">Unsafe</a>
         <a id="anchor" href="#heading">Internal anchor</a>
         <a id="local" href="file:///tmp/example.txt">Local file</a>
+        <a href="https://example.com/linked"><img id="linked-image" src="data:image/png;base64,AA=="></a>
+        <img id="preview-image" src="data:image/png;base64,AA==" data-image-path="/project/chart.png">
       </section>`;
     const records = [];
     const errors = [];
@@ -122,6 +124,12 @@ try {
 
   result = await click("link");
   assert.equal(result.records.at(-1).linkUrl, "https://example.com/path?q=test");
+
+  for (const id of ["linked-image", "preview-image"]) {
+    result = await click(id);
+    assert.equal(result.records.at(-1).kind, "image");
+    assert.equal(result.records.at(-1).linkUrl, undefined, "image actions override a surrounding link");
+  }
 
   await page.locator("#draft").focus();
   const beforeKeyboard = result.records.length;

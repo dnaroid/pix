@@ -5,6 +5,9 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { createNativeContextMenuFactory, nativeContextMenuItems } from "./native-context-menu";
 import type { DesktopContextTarget } from "./desktop-context-target";
+import { copyContextImage, openContextImage } from "./image-context-actions";
+
+vi.mock("./image-context-actions", () => ({ copyContextImage: vi.fn().mockResolvedValue(undefined), openContextImage: vi.fn().mockResolvedValue(undefined) }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: vi.fn() } }));
@@ -27,6 +30,29 @@ describe("native desktop context menu commands", () => {
 
   it("uses native editing roles instead of replacing values or synthesizing paste", () => {
     expect(labels({})).toEqual(["Undo", "Redo", "Separator", "Cut", "Copy", "Paste", "Separator", "SelectAll"]);
+  });
+  it("prioritizes image commands over the surrounding link and selection", async () => {
+    const image = {} as HTMLImageElement;
+    const commands = items({ kind: "image", image, linkUrl: "https://example.com/" });
+    expect(commands.map((item) => "text" in item && item.text)).toEqual(["Open Image in External App", "Copy Image", false, "Copy Absolute Path", "Copy Relative Path"]);
+    for (const command of commands) if ("action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    expect(openContextImage).toHaveBeenCalledWith(image, expect.any(Function));
+    expect(copyContextImage).toHaveBeenCalledWith(image, expect.any(Function));
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+  it("ignores stale image menu callbacks", () => {
+    const commands = items({ kind: "image", image: {} as HTMLImageElement }, false, () => false);
+    for (const command of commands) if ("action" in command) command.action?.("ignored");
+    expect(openContextImage).not.toHaveBeenCalled();
+    expect(copyContextImage).not.toHaveBeenCalled();
+  });
+  it("copies captured absolute and project-relative image paths", async () => {
+    const commands = items({ kind: "image", image: {} as HTMLImageElement, imagePath: "/project/assets/chart.png", imageRelativePath: "assets/chart.png" });
+    for (const command of commands) if ("id" in command && ["desktop.image.absolute", "desktop.image.relative"].includes(command.id ?? "") && "action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledWith("/project/assets/chart.png");
+    expect(writeText).toHaveBeenCalledWith("assets/chart.png");
   });
   it("copies textarea selections through the native clipboard instead of relying on a WebView menu role", async () => {
     const editor = {

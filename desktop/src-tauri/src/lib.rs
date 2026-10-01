@@ -34,6 +34,7 @@ mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
 mod native_process;
+mod preview_file;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
 mod startup_theme;
@@ -223,7 +224,11 @@ struct DesktopWatchStatus {
 }
 
 #[tauri::command]
-fn desktop_watch_status() -> Result<DesktopWatchStatus, String> {
+async fn desktop_watch_status() -> Result<DesktopWatchStatus, String> {
+    run_blocking(read_desktop_watch_status).await
+}
+
+fn read_desktop_watch_status() -> Result<DesktopWatchStatus, String> {
     let state = desktop_watch_state()?;
     Ok(DesktopWatchStatus {
         available: match &state {
@@ -9972,6 +9977,8 @@ pub fn run() {
             persist_task_attachment,
             open_attachment,
             open_local_file,
+            preview_file::read_preview_file,
+            preview_file::open_preview_file_in_editor,
             read_project_file,
             write_project_file,
             write_project_workspace_config_if_unchanged,

@@ -18,12 +18,12 @@ export function createDesktopWatchRestart(dependencies: DesktopWatchRestartDepen
   let buildStatus = $state<DesktopBuildStatus>("idle");
   let timer: ReturnType<typeof setInterval> | undefined;
   let generation = 0;
-  let refreshing = false;
+  let refreshingGeneration: number | undefined;
 
   async function refresh() {
-    if (refreshing) return;
-    refreshing = true;
+    if (refreshingGeneration === generation) return;
     const current = generation;
+    refreshingGeneration = current;
     try {
       const status = await dependencies.invoke<DesktopWatchStatus>("desktop_watch_status");
       if (current !== generation) return;
@@ -34,7 +34,7 @@ export function createDesktopWatchRestart(dependencies: DesktopWatchRestartDepen
       available = false;
       buildStatus = "idle";
     } finally {
-      refreshing = false;
+      if (refreshingGeneration === current) refreshingGeneration = undefined;
     }
   }
 
@@ -53,10 +53,12 @@ export function createDesktopWatchRestart(dependencies: DesktopWatchRestartDepen
 
   async function restart() {
     if (!available || restarting) return;
+    const current = generation;
     restarting = true;
     try {
       await dependencies.invoke("desktop_watch_restart");
     } catch {
+      if (current !== generation) return;
       restarting = false;
       await refresh();
     }

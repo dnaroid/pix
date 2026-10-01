@@ -1,12 +1,15 @@
 import { normalizeExternalHref } from "./markdown-links";
 
-export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal";
+export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image";
 
 export interface DesktopContextTarget {
   kind: DesktopContextKind;
   element: HTMLElement;
   editor: HTMLElement | null;
   linkUrl?: string;
+  image?: HTMLImageElement;
+  imagePath?: string;
+  imageRelativePath?: string;
   hasSelection: boolean;
   readOnly: boolean;
 }
@@ -29,7 +32,16 @@ export function hasContextSelection(element: HTMLElement): boolean {
   return false;
 }
 
-export function desktopContextTarget(target: EventTarget | null): DesktopContextTarget | null {
+export function relativeImagePath(path: string, workspace: string): string | undefined {
+  if (!path.startsWith("/") || !workspace.startsWith("/")) return undefined;
+  const destination = path.split("/").filter(Boolean);
+  const base = workspace.split("/").filter(Boolean);
+  let common = 0;
+  while (common < base.length && common < destination.length && base[common] === destination[common]) common++;
+  return [...base.slice(common).map(() => ".."), ...destination.slice(common)].join("/") || ".";
+}
+
+export function desktopContextTarget(target: EventTarget | null, workspace = ""): DesktopContextTarget | null {
   const element = contextElement(target);
   if (!element || element.closest("[inert]")) return null;
 
@@ -59,6 +71,16 @@ export function desktopContextTarget(target: EventTarget | null): DesktopContext
     let editor = element;
     while (editor.parentElement?.isContentEditable) editor = editor.parentElement;
     return { kind: "editable", element, editor, hasSelection: hasContextSelection(element), readOnly: false };
+  }
+
+  const image = element.closest("img");
+  if (image instanceof HTMLImageElement && image.getAttribute("src")) {
+    const imagePath = image.dataset.imagePath;
+    return {
+      kind: "image", element: image, image, imagePath,
+      imageRelativePath: imagePath ? relativeImagePath(imagePath, workspace) : undefined,
+      editor: null, hasSelection: false, readOnly: true,
+    };
   }
 
   const href = element.closest("a[href]")?.getAttribute("href");
