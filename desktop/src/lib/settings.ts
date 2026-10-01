@@ -53,6 +53,11 @@ export function updateSettingsEditorCache(next: SettingsEditorCache): void {
   editorCache = next;
 }
 
+/** Update one file without overwriting another concurrently mounted editor. */
+export function cacheSettingsDraft(kind: SettingsConfigKind, draft: SettingsDraftDocument): void {
+  editorCache = { ...editorCache, drafts: { ...editorCache.drafts, [kind]: draft } };
+}
+
 /**
  * Reconcile a completed save with the latest in-memory draft. A user can keep
  * typing while the IPC write is in flight; the returned document becomes the

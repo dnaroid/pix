@@ -1,32 +1,22 @@
 <script lang="ts">
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-
-  export type SettingsSectionNavItem = { id: string; label: string };
-
-  let {
-    items,
-    active,
-    onChange,
-  }: {
-    items: readonly SettingsSectionNavItem[];
+  import { SETTINGS_GROUPS } from "../../lib/settings-navigation";
+  let { visible, active, onChange }: {
+    visible: readonly string[];
     active: string;
     onChange: (id: string) => void;
   } = $props();
 </script>
 
-<div class="border-b border-sidebar-border bg-sidebar px-2 py-1.5">
-  <div class="relative min-w-0">
-    <span class="sr-only">Section</span>
-    <select
-      class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong py-0 pr-7 pl-2 text-xs font-medium text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30"
-      value={active}
-      aria-label="Settings section"
-      onchange={(event) => onChange((event.currentTarget as HTMLSelectElement).value)}
-    >
-      {#each items as item (item.id)}
-        <option value={item.id}>{item.label}</option>
+<nav aria-label="Settings chapters" class="min-h-0 overflow-y-auto px-1.5 pb-2">
+  {#each Object.entries(SETTINGS_GROUPS) as [kind, group]}
+    {#if group.sections.some((section) => visible.includes(`${kind}-${section.id}`))}
+      <div class="px-1.5 pt-3 pb-1 text-[11px] font-semibold text-muted-foreground">{group.label}</div>
+      {#each group.sections as section (section.id)}
+        {@const id = `${kind}-${section.id}`}
+        {#if visible.includes(id)}
+          <button type="button" aria-current={active === id ? "location" : undefined} onclick={() => onChange(id)} class={["block min-h-7 w-full rounded-md border-l-2 px-1.5 py-1 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring", active === id ? "border-primary bg-panel-selected font-medium text-foreground" : "border-transparent text-muted-foreground hover:bg-panel-hover hover:text-foreground"]}>{section.label}</button>
+        {/if}
       {/each}
-    </select>
-    <ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-  </div>
-</div>
+    {/if}
+  {/each}
+</nav>

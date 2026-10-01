@@ -19,8 +19,11 @@
   import Search from "@lucide/svelte/icons/search";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
-  import { onDestroy, tick } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import type { MenuNavigationItem } from "../lib/keyboard-navigation";
+  import type { GitSnapshot } from "../lib/git";
+  import { projectGitDecorations } from "../lib/project-git-decorations";
+  import { createProjectGitRefresh } from "../lib/project-git-refresh";
   import {
     projectExplorerExpandedDirectoriesFromWorkspaceConfig,
     workspaceConfigWithProjectExplorerExpandedDirectories,
@@ -36,6 +39,8 @@
     workspace,
     externalEditorLabel,
     refreshKey,
+    gitSnapshot,
+    onGitStatusRefresh,
     onListDirectory,
     onOpenFile,
     onOpenExternal,
@@ -44,6 +49,8 @@
     workspace: string;
     externalEditorLabel: string;
     refreshKey: number;
+    gitSnapshot?: GitSnapshot;
+    onGitStatusRefresh?: () => Promise<void>;
     onListDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
     onOpenFile: (path: string, range?: ProjectFileLineRange) => void;
     onOpenExternal: (path: string) => void;
@@ -87,6 +94,16 @@
   const treeState = treeController.state;
   const rootEntries = $derived(treeController.rootEntries);
   const rows = $derived(treeController.rows);
+  const gitDecorations = $derived(projectGitDecorations(gitSnapshot?.changes));
+  const gitRefresh = createProjectGitRefresh(async () => {
+    if (workspace && onGitStatusRefresh) await onGitStatusRefresh();
+  });
+  $effect(() => {
+    // Read only lifecycle inputs, not the snapshot updated by the request.
+    workspace;
+    refreshKey;
+    untrack(() => void gitRefresh.request());
+  });
   const searchActive = $derived(searchQuery.trim().length > 0);
   const rootLoading = $derived(treeController.rootLoading);
   const rootError = $derived(treeController.rootError);
@@ -99,6 +116,7 @@
   const menuState = menuController.state;
 
   onDestroy(() => {
+    gitRefresh.dispose();
     treeController.dispose();
     dragController.clear();
     menuController.dispose();
@@ -341,7 +359,10 @@
   }
 
   function finishOperation(operation: number): void {
-    if (operation === operationGeneration) operationBusy = false;
+    if (operation === operationGeneration) {
+      operationBusy = false;
+      void gitRefresh.request();
+    }
   }
 
   function errorMessage(error: unknown): string {
@@ -562,6 +583,7 @@
 </script>
 
 <svelte:window
+  onfocus={() => void gitRefresh.request()}
   onpointerdown={menuController.handleWindowPointerDown}
   onkeydown={handleWindowKeydown}
   onresize={menuController.handleWindowResize}
@@ -660,6 +682,7 @@
     {:else}
       {#each rows as row, index (row.entry.path)}
         {@const entry = row.entry}
+        {@const gitDecoration = (entry.kind === "directory" ? gitDecorations.directories : gitDecorations.files).get(entry.path)}
         {@const hiddenEntry = entry.name.startsWith(".")}
         {@const expanded = entry.kind === "directory" && treeState.expandedDirectories.includes(entry.path)}
         {@const directoryLoading = entry.kind === "directory" && treeState.loadingDirectories.includes(entry.path)}
@@ -680,13 +703,15 @@
             ]}
             type="button"
             role="treeitem"
-            title={`${entry.path} · Shift+Enter opens in ${externalEditorLabel}`}
+            title={`${entry.path}${gitDecoration ? ` · ${gitDecoration.label}` : ""} · Shift+Enter opens in ${externalEditorLabel}`}
+            aria-label={gitDecoration ? `${entry.name} · ${gitDecoration.label}` : entry.name}
             aria-level={row.depth + 1}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
             aria-selected={treeState.selectedPath === entry.path}
             aria-keyshortcuts="Shift+Enter F2 Delete"
             tabindex={tabbablePath === entry.path ? 0 : -1}
             data-project-tree-path={entry.path}
+            data-project-git-status={gitDecoration?.code}
             onfocus={() => treeState.focusedPath = entry.path}
             onkeydown={(event) => handleEntryKeydown(event, index, entry)}
             oncontextmenu={(event) => openEntryContextMenu(event, entry)}
@@ -713,7 +738,7 @@
               {:else if iconKind === "image"}<ImageIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               {:else}<File class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
             {/if}
-            <span class="min-w-0 flex-1 truncate">{entry.name}</span>
+            <span class={["min-w-0 flex-1 truncate", gitDecoration?.color ?? ""]}>{entry.name}</span>
           </button>
 
           <button

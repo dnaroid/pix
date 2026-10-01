@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSettingsSource,
+  cacheSettingsDraft,
+  settingsEditorCache,
+  updateSettingsEditorCache,
   reconcileSavedSettingsDraft,
   removeSettingsValue,
   settingsDefaultValue,
@@ -34,6 +37,20 @@ const schema: SettingsSchema = {
 };
 
 describe("settings JSONC helpers", () => {
+  it("keeps per-file drafts when independent editors load and save in either order", () => {
+    const previous = settingsEditorCache();
+    const draft: SettingsDraftDocument = { path: "desktop", content: "{}", exists: true, schema: "{}", source: "{}", savedSource: "{}", schemaObject: {} };
+    try {
+      updateSettingsEditorCache({ activeKind: "desktop", drafts: {} });
+      cacheSettingsDraft("desktop", draft);
+      cacheSettingsDraft("pi-tools-suite", { ...draft, path: "suite", source: "{\"enabled\":false}" });
+      cacheSettingsDraft("desktop", { ...draft, source: "{\"ignoreContextFiles\":true}" });
+      expect(settingsEditorCache().drafts["pi-tools-suite"]?.source).toBe('{"enabled":false}');
+      expect(settingsEditorCache().drafts.desktop?.source).toBe('{"ignoreContextFiles":true}');
+    } finally {
+      updateSettingsEditorCache(previous);
+    }
+  });
   it("uses path edits so comments and unrelated JSONC stay intact", () => {
     const original = `{
   "enabled": true,

@@ -157,6 +157,7 @@
     onRegistryProjectChange,
     onWorkspaceSettingsSave,
     onGitRefresh,
+    onGitStatusRefresh,
     onGitInitialize,
     onGitOpenDiff,
     onGitStage,
@@ -242,6 +243,7 @@
     onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
     onWorkspaceSettingsSave: (workspace: string) => void;
     onGitRefresh: () => void;
+    onGitStatusRefresh?: () => Promise<void>;
     onGitInitialize: () => void;
     onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onGitStage: (path?: string) => Promise<boolean>;
@@ -707,6 +709,8 @@
             {:else}
               <ProjectExplorer
                 {workspace}
+                {gitSnapshot}
+                {onGitStatusRefresh}
                 {externalEditorLabel}
                 refreshKey={projectTreeRefreshKey}
                 onListDirectory={onListProjectDirectory}

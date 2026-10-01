@@ -16,10 +16,11 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 ## Scope
 
-- A Settings panel with `Desktop` and `Tools Suite` tabs, one per config kind.
-- The Desktop tab exposes the complete set of settings consumed by Desktop/ACP while excluding terminal-renderer-only TUI settings.
+- A single continuous Settings page containing both `Desktop` and `Tools Suite` configuration groups, without config tabs or a chapter selector.
+- The Desktop group exposes the complete set of settings consumed by Desktop/ACP while excluding terminal-renderer-only TUI settings.
 - Settings use explicit product sections and purpose-built controls rather than deriving UI structure from JSON Schema properties.
-- Because Settings lives in a narrow attached sidebar, section navigation uses one compact native select rather than a horizontally scrolling tab strip. The top-level `Desktop` / `Tools Suite` switch remains a fixed two-item tab row.
+- A compact left-hand chapter index remains beside the scrollable content. Clicking a chapter scrolls to it below the file header; manual scrolling tracks and highlights the current visible chapter, including the final chapter at the bottom.
+- Search stays above the left index and matches case-insensitive whitespace-separated terms against authored setting labels, descriptions and chapter titles. Nonmatching rows and empty chapters/config groups are hidden from content and navigation; clearing search restores all controls. Search never includes control values (especially secrets). Controls stay mounted to preserve local edits during filtering; no-match queries show an explicit empty state.
 - Free-form/nested maps that do not have a stable bounded row model use deliberately placed structured JSON editors; the `Advanced` section is a compact launcher that opens the complete user-config source in the main editor tab as the lossless escape hatch.
 - Load the config document, edit it through the curated controls or the user-config editor tab launched from `Advanced`, and save it back to disk.
 - Size limits and error handling for both read and write paths.
@@ -38,7 +39,7 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - A missing config file is not an error: the document returns `exists: false` with default content `{ "$schema": "<schema-url>" }`; reading never creates the file.
 - An existing file larger than 2 MiB, not a regular file, or unreadable fails with a descriptive error; the editor shows the error instead of content.
 - The document carries the embedded JSON schema (from `schemas/pix-desktop.json` / `schemas/pi-tools-suite.json`) for validation and default resolution only. UI sections, labels, grouping, and control choice are hand-authored Desktop product code and are not generated from schema properties. `pix-desktop.json` contains only settings actually consumed by Desktop or its ACP backend.
-- The editor keeps one in-memory draft per kind (source, saved source, parsed schema); switching tabs or remounting the panel preserves drafts, but restarting the app discards them.
+- The editor keeps one in-memory draft per kind (source, saved source, parsed schema); filtering or remounting the panel preserves drafts, but restarting the app discards them. Both files load independently on mount and keep separate reload/save actions and lifecycle guards. Updating one file's cache entry merges against the latest cache so another mounted editor's draft cannot be overwritten.
 - Field edits and resets apply through JSONC-aware path modification so comments elsewhere in the file survive. Booleans use switches; bounded enums use selects; numbers use constrained number inputs; secrets use password inputs. Desktop model fields and fallback lists consume the same ACP session model catalog as the existing Model & Thinking picker instead of requiring `provider/model` text entry. Existing configured refs that are absent from the current catalog remain representable and are never rewritten merely because the catalog changed. The Git section includes a **CI fix model** selector for `desktop.git.ciFixModelRef`; leaving it unset intentionally means “use the normal default model” rather than introducing a second hard-coded default.
 - `visibleModels` is edited as an explicit “limit model picker” switch plus a model checklist; omitting the key means every catalog model is visible. Internal `thinkingByModel` memory is not exposed in the normal settings UI because Desktop maintains it automatically; it remains visible/editable only through the full JSONC editor launched from `Advanced`.
 - Pi Tools Suite fields that are semantically model references (lookup model/fallbacks and DCP summarizer/fallbacks) reuse the same catalog-backed model selectors; free-form model-pattern maps such as todo/DCP overrides remain structured JSON because wildcard keys are part of their contract.
@@ -95,6 +96,10 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 - `desktop/src-tauri/src/lib.rs` (`read_user_config`, `write_user_config`, `write_user_config_if_unchanged`, `read_user_config_from`, `write_user_config_from`, `write_user_config_if_unchanged_from`, `user_config_path`)
 - `desktop/src/components/SettingsPanel.svelte`
+- `desktop/src/components/settings/SettingsConfigEditor.svelte`
+- `desktop/src/components/settings/SettingsSectionNav.svelte`
+- `desktop/src/lib/settings-navigation.ts` and `settings-navigation.test.ts`
+- `desktop/src/lib/settings-viewport.ts` and `settings-viewport.test.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
 - `desktop/src/app/preview-state.svelte.ts`
@@ -119,7 +124,8 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 - Run `cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib user_settings` (round-trip and size-limit regression tests).
 - Run the desktop Svelte/TypeScript checks and unit tests.
-- Manual: in the native app, select `Advanced` and confirm it shows only `Open in editor`; click it and confirm the matching Desktop or Tools Suite config opens editable in the main editor tab. Save there and confirm comments plus trailing-newline normalization are preserved, while ordinary absolute/home local previews remain read-only. Also verify malformed JSONC routes to the same editor-tab path rather than presenting misleading structured values.
+- Manual: in the native app, use the left chapter index to reach `Advanced` and confirm it shows only `Open in editor`; click it and confirm the matching Desktop or Tools Suite config opens editable in the main editor tab. Save there and confirm comments plus trailing-newline normalization are preserved, while ordinary absolute/home local previews remain read-only. Also verify malformed JSONC routes to the same editor-tab path rather than presenting misleading structured values.
+- Manual: scroll through both configuration groups and verify current-chapter tracking, then search by a setting description, check hidden empty chapters and the no-results state, and clear the query. A draft edit must survive filtering and clearing; never search secret control values.
 
 ## Risks / unknowns
 
@@ -130,6 +136,6 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 - Confirmed by code: `write_user_config_from` computes `normalized` and checks `MAX_USER_CONFIG_BYTES` before `fs::write`; `read_user_config_from` returns default content for missing files and errors for oversized or non-file paths.
 - Confirmed by tests: `user_settings_configs_resolve_under_the_platform_home_and_round_trip`, `desktop_user_settings_ignore_tui_pix_config`, and `user_settings_reject_normalized_content_over_the_size_limit_before_writing` (oversized input leaves the existing config byte-identical).
-- Confirmed by code: `SettingsPanel.svelte` blocks save while `settingsSourceIssues` reports problems, generation-guards async loads, rejects stale compare-and-swap saves, reconciles a successful save response against the latest draft rather than clobbering edits typed during the write, routes `DesktopSettingsEditor` / `ToolsSuiteSettingsEditor` through explicit section navigation instead of schema-generated field sections, and makes `Advanced` a launcher instead of an inline source textarea. Preview state marks user-config targets; preview file I/O reads and saves them through the dedicated user-config commands; the workbench builder makes only those marked local previews editable while ordinary home/absolute local previews stay read-only.
+- Confirmed by code: `SettingsConfigEditor.svelte` blocks save while `settingsSourceIssues` reports problems, generation-guards async loads, rejects stale compare-and-swap saves, reconciles a successful save response against the latest draft rather than clobbering edits typed during the write, renders all authored chapters of `DesktopSettingsEditor` / `ToolsSuiteSettingsEditor`, and makes `Advanced` a launcher instead of an inline source textarea. `SettingsPanel.svelte` owns the shared search/index and aggregates errors from both files; `settings-viewport.ts` filters authored row metadata and tracks visible chapters with frame-coalesced scroll work, disposing observers/listeners on teardown. Preview state marks user-config targets; preview file I/O reads and saves them through the dedicated user-config commands; the workbench builder makes only those marked local previews editable while ordinary home/absolute local previews stay read-only.
 - Confirmed by tests: `desktop-workbench-prop-builders.test.ts` verifies user-config previews are editable and save through `saveUserConfig` while generic local previews remain read-only; `DesktopVisualRegressions.test.ts` verifies the inline Advanced JSONC textarea is absent and the editor launcher remains present.
 - Confirmed by tests: `reconcileSavedSettingsDraft` keeps newer in-memory edits while advancing `savedSource` to the document actually written to disk.

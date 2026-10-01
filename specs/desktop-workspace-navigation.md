@@ -85,6 +85,8 @@ while project selection/open state remains separate from transient focus.
 - Delete is destructive and requires confirmation before the filesystem mutation.
 - Existing pointer drag/drop behavior and lazy directory loading remain unchanged.
 - Project Explorer keeps dotfiles and dotfolders in the normal tree. Entries whose basename starts with `.` use muted opacity by default so ordinary source files retain visual priority; hover, keyboard focus, and selected/open state restore normal readability.
+- Project Explorer colors changed file names from the shared workspace Git snapshot, without displaying status letters or badges. Added/untracked files use success, deleted files warning, conflicts error, and other changes info semantic colors. Working-tree status takes color precedence over staged status; tooltips and accessible row labels describe both scopes. Existing folders containing changed descendants use info-colored names, even when collapsed, with conflicts taking error-color priority. Renames color both source and destination ancestor folders; absent/deleted files are not invented in the filesystem tree. Clean files and unavailable/non-repository snapshots have no decorations.
+- While Files is mounted, local Git status refreshes on opening/workspace change, Files Refresh, window focus, file-operation completion, and about every five seconds after the previous read completes. Reads are serialized and repeated triggers coalesce; closing the panel stops scheduling. This reuses the workspace-guarded Git store and does not fetch remotes or traverse/expand the lazy tree. Git errors do not prevent file browsing or change its health indicator.
 - The Files panel keeps a compact project-search field above the lazy tree. Typing a query runs a bounded background search over project-relative file paths and UTF-8 file contents without expanding tree nodes; `Ctrl+Shift+F` / `Cmd+Shift+F` focuses that field while the Files panel is active.
 - Project search does not follow symbolic links and skips dependency/generated directories such as `.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, and `.svelte-kit`. Individual content reads are bounded to 2 MB, scanning stops after 20,000 files, and at most 500 path/content matches are returned so searching cannot turn the renderer into an unbounded filesystem walk.
 - Search results show the relative path, source line/column when the hit came from file contents, and a compact line preview. Activating a content hit opens Preview at that exact source line; activating a path-only hit opens the file normally. Clearing the query returns to the existing lazy tree with its expansion/selection state intact.
@@ -113,6 +115,9 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/lib/project-tree.ts`
+- `desktop/src/lib/project-git-decorations.ts`
+- `desktop/src/lib/project-git-refresh.ts`
+- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
 - `desktop/src/lib/project-explorer-expansion.ts`
 - `desktop/src/lib/sidebar-indicators.ts`
 - `desktop/src-tauri/src/lib.rs`
@@ -126,6 +131,7 @@ while project selection/open state remains separate from transient focus.
   expansion persistence, malformed state rejection, and storage bounds.
 - `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the
   keyboard external-editor route.
+- `desktop/src/lib/project-git-decorations.test.ts` covers staged/working-tree status, conflicts, ancestor aggregation, rename/copy semantics, and clearing snapshots; `desktop/src/lib/project-git-refresh.test.ts` covers polling, request coalescing, failed reads, and in-flight teardown.
 - `desktop/src/components/WorkspaceSidebar.test.ts` covers Activity Bar composite
   wiring.
 - Native project-search tests cover path/content hits, case-insensitive ASCII

@@ -4,6 +4,16 @@ import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?r
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
+  it("uses shared Git snapshots for accessible decorations without changing tab stops", () => {
+    expect(explorerSource).toContain("projectGitDecorations(gitSnapshot?.changes)");
+    expect(explorerSource).toContain("gitDecorations.directories : gitDecorations.files");
+    expect(explorerSource).toContain('data-project-git-status={gitDecoration?.code}');
+    expect(explorerSource).toContain('"min-w-0 flex-1 truncate", gitDecoration?.color');
+    expect(explorerSource).not.toContain('>{gitDecoration.code}</span>');
+    expect(explorerSource).toContain('aria-label={gitDecoration ?');
+    expect(explorerSource).toContain('onfocus={() => void gitRefresh.request()}');
+    expect(explorerSource).toContain('gitRefresh.dispose()');
+  });
   it("uses tree semantics with one roving tab stop", () => {
     expect(explorerSource).toContain('role="tree"');
     expect(explorerSource).toContain('role="treeitem"');

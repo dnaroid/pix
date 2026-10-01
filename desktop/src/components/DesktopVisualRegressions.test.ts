@@ -21,6 +21,8 @@ import sessionInspectorSource from "./SessionInspector.svelte?raw";
 import sessionSubagentsSource from "./SessionSubagentsPanel.svelte?raw";
 import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
+import settingsConfigSource from "./settings/SettingsConfigEditor.svelte?raw";
+import settingsNavigationSource from "../lib/settings-navigation.ts?raw";
 import desktopSettingsEditorSource from "./settings/DesktopSettingsEditor.svelte?raw";
 import settingsFrontierModelsSource from "./settings/SettingsFrontierModels.svelte?raw";
 import settingsModelListSource from "./settings/SettingsModelList.svelte?raw";
@@ -506,10 +508,10 @@ describe("desktop visual regressions", () => {
   });
 
   it("uses curated settings editors and keeps native number chrome suppressed", () => {
-    expect(settingsSource).toContain('import DesktopSettingsEditor from "./settings/DesktopSettingsEditor.svelte"');
-    expect(settingsSource).toContain('import ToolsSuiteSettingsEditor from "./settings/ToolsSuiteSettingsEditor.svelte"');
-    expect(settingsSource).toContain("Open in editor");
-    expect(settingsSource).toContain("onOpenUserConfig(activeKind)");
+    expect(settingsConfigSource).toContain('from "./DesktopSettingsEditor.svelte"');
+    expect(settingsConfigSource).toContain('from "./ToolsSuiteSettingsEditor.svelte"');
+    expect(settingsConfigSource).toContain("Open in editor");
+    expect(settingsConfigSource).toContain("onOpenUserConfig(activeKind)");
     expect(settingsSource).not.toContain('aria-label={`${activeKind} advanced JSONC`}');
     expect(settingsSource).not.toContain("min-h-[28rem]");
     expect(settingsSource).not.toContain("settingsSections");
@@ -518,15 +520,19 @@ describe("desktop visual regressions", () => {
     expect(settingsSource).not.toContain("resize-y");
   });
 
-  it("keeps sidebar settings navigation compact without horizontally scrolling tabs", () => {
-    expect(settingsSectionNavSource).toContain('aria-label="Settings section"');
-    expect(settingsSectionNavSource).toContain("<select");
+  it("uses a searchable continuous settings page with tracked left chapters", () => {
+    expect(settingsSectionNavSource).toContain('aria-label="Settings chapters"');
+    expect(settingsSectionNavSource).not.toContain("<select");
     expect(settingsSectionNavSource).not.toContain("overflow-x-auto");
-    expect(settingsSectionNavSource).not.toContain("aria-current");
+    expect(settingsSectionNavSource).toContain("aria-current");
+    expect(settingsSource).toContain('aria-label="Search settings"');
+    expect(settingsSource).toContain("use:settingsViewport");
+    expect(settingsConfigSource).toContain("{#each sections as chapter");
+    expect(settingsSource).not.toContain("chooseKind");
   });
 
   it("uses the live model catalog instead of free-form model text fields", () => {
-    expect(settingsSource).toContain("modelThinkingConfigState(configOptions).models");
+    expect(settingsConfigSource).toContain("modelThinkingConfigState(configOptions).models");
     expect(desktopSettingsEditorSource).toContain("<SettingsModelSelect");
     expect(desktopSettingsEditorSource).toContain("<SettingsModelList");
     expect(desktopSettingsEditorSource).toContain("<SettingsModelVisibility");
@@ -549,7 +555,7 @@ describe("desktop visual regressions", () => {
   });
 
   it("edits frontier models with the live catalog in the Sub-agents section", () => {
-    expect(settingsSource).toContain('{ id: "subagents", label: "Sub-agents" }');
+    expect(settingsNavigationSource).toContain('{ id: "subagents", label: "Sub-agents" }');
     expect(toolsSuiteSettingsEditorSource).toContain('label="Economy mode"');
     expect(toolsSuiteSettingsEditorSource).toContain('label="Frontier models"');
     expect(toolsSuiteSettingsEditorSource).toContain("<SettingsFrontierModels");

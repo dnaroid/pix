@@ -166,6 +166,7 @@ export function createDesktopSidebarViewModel(options: {
       await options.git.refreshRemoteStatus();
       await options.gitCi.refresh();
     })(),
+    onGitStatusRefresh: options.git.refresh,
     onGitInitialize: () => void options.git.initialize(),
     onGitOpenDiff: (path, scope) => void options.git.openDiff(path, scope),
     onGitStage: options.git.stage,
