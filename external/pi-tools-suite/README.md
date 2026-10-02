@@ -511,8 +511,11 @@ Explicit task/CLI model overrides suppress automatic fallbacks. Setting
 `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) deliberately selects the parent model and
 strips conflicting model arguments; this is not the economical default.
 
-The eight built-in modes are `research` (read-only evidence and independent
-review), `implement` (bounded code, docs, tests, or UI changes), `verify`
+The built-in modes are `research` (read-only evidence and independent
+review), `implement` (default Luna coder for bounded code, docs, tests, or UI
+changes, with Sol fallback), `implement-core` (Sol for complex core changes or
+ambiguous bugs), `mechanical` (GLM for small prescribed behavior-preserving
+edits with deterministic checks), `verify`
 (run checks and diagnose logs without fixing files), `ui-qa` (real browser,
 terminal/TUI, and desktop-GUI verification), `frontier-review` (independent
 post-implementation review), `delivery-review` (explicit delivery-readiness
@@ -521,6 +524,12 @@ audit/minor drift repair), and `oracle` (deliberate strong second opinion).
 Ordinary workers use economical model candidates; no built-in parent-tier
 rule promotes them to a flagship. Oracle is the exception, not an automatic
 retry for difficult work. Task-specific discipline belongs in the brief.
+
+Broad migrations and semantic regression changes never belong to `mechanical`.
+Use coherent slices, an early affected typecheck and focused regression; do not
+weaken assertions to make a migration pass. Review roles use Sol without a GLM
+fallback. Compare cost per accepted verified change including failures, review
+and rework, not token price alone. See [coding acceptance guidance](docs/subagent-model-pools.md#coding-quality-and-acceptance).
 
 For non-UI work, start with the shortest parent pass that resolves user intent,
 semantics, and the main causal path. If a few targeted repository searches or
@@ -824,8 +833,7 @@ a frontier parent and `prefer-other` otherwise.
 ### Frontier models and economy mode
 
 Frontier models are named once in `pi-tools-suite.jsonc`; roles with
-`modelSelection: frontier` (bundled `oracle`, `frontier-review`,
-`delivery-review`) take candidates from this ordered list, so a new frontier
+`modelSelection: frontier` (bundled `oracle`) take candidates from this ordered list, so a new frontier
 release is a config edit:
 
 ```jsonc
@@ -844,7 +852,8 @@ release is a config edit:
   and a non-frontier parent gets any frontier model, other vendors first.
 - `frontier-review` (`forParentTier: non-frontier`) is hidden for frontier
   parents and explicitly excluded for `*gpt-6.1-sol*` parents even though Sol
-  is not frontier; `delivery-review` stays available to all parents.
+  is not frontier; `delivery-review` stays available to all parents. Both use
+  their own Sol-only `models`, not the frontier candidate list.
 - Entry fields: `vendor` (override inference), `expensive`, `enabled: false`
   (still recognized as frontier, never selected), `aliases` (globs recognizing
   the same model under other refs, e.g. OpenRouter), `roles` (limit an entry to

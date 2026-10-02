@@ -211,9 +211,9 @@ describe("economy mode", () => {
 		const config = configWith({ economy: true });
 		expect(oracle(config, "openai-codex/gpt-6-luna")).toEqual(["zai/glm-5.3"]);
 		const implement = resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement" }, config);
-		expect([implement.task.model, ...implement.fallbackModels]).toEqual(["zai/glm-5.3", "openai-codex/gpt-6.1-sol"]);
+		expect([implement.task.model, ...implement.fallbackModels]).toEqual(["openai-codex/gpt-6-luna", "openai-codex/gpt-6.1-sol"]);
 		const review = resolveAgentTaskConfig({ id: "d", task: "x", subagentType: "delivery-review" }, config);
-		expect([review.task.model, ...review.fallbackModels]).toEqual(["zai/glm-5.3"]);
+		expect([review.task.model, ...review.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol"]);
 	});
 
 	test("reports economy as the reason when nothing remains, and hides the oracle", () => {
@@ -244,14 +244,14 @@ describe("economy mode", () => {
 });
 
 describe("review roles share the frontier list", () => {
-	test("frontier-review is hidden for every frontier parent and uses non-oracle entries", () => {
+	test("frontier-review keeps parent visibility gates and selects Sol independently of frontier entries", () => {
 		const config = configWith();
 		for (const parent of ["openai-codex/gpt-6.1-sol", "openai-codex/gpt-6-astra", "zai/glm-5.3", "openrouter/~openai/gpt-astra-latest"]) {
 			expect(filterSubagentConfigForParentModel(config, parent).types["frontier-review"]).toBeUndefined();
 		}
 		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3-flash").types["frontier-review"]).toBeDefined();
 		const review = resolveAgentTaskConfig({ id: "f", task: "x", subagentType: "frontier-review" }, config, { parentModel: "zai/glm-5.3-flash" });
-		expect([review.task.model, ...review.fallbackModels]).toEqual(["zai/glm-5.3", "anthropic/claude-opus-5-5"]);
+		expect([review.task.model, ...review.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol"]);
 	});
 
 	test("Sol exclusion survives a custom frontier list in catalog and effective profiles", () => {

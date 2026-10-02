@@ -528,9 +528,9 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "knowledge-auditor", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
-		expect(config.types["frontier-review"].modelSelection).toBe("frontier");
+		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-6.1-sol"]);
 		expect(config.types.oracle.modelSelection).toBe("frontier");
 		expect(config.types.oracle.parentProviderPolicy).toBe("require-other-if-frontier");
 		expect(config.types["frontier-review"].forParentTier).toBe("non-frontier");
@@ -598,7 +598,7 @@ Research only this project.
 		});
 		for (const [subagentType, model, fallbackModels] of [
 			["research", "openai-codex/gpt-6-luna", ["zai/glm-5.3-flash"]],
-			["implement", "zai/glm-5.3", ["openai-codex/gpt-6.1-sol"]],
+			["implement", "openai-codex/gpt-6-luna", ["openai-codex/gpt-6.1-sol"]],
 			["verify", "openai-codex/gpt-6-luna", ["zai/glm-5.3-flash"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
@@ -670,7 +670,9 @@ Research only this project.
 			"delivery-review",
 			"frontier-review",
 			"implement",
+			"implement-core",
 			"knowledge-auditor",
+			"mechanical",
 			"oracle",
 			"research",
 			"ui-qa",

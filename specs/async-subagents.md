@@ -50,6 +50,19 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   changes requirements, the affected worker is stopped or rescoped before it
   continues editing. `[confirmed by code, core/agent-strategy.ts and
   tool-descriptions.ts]`
+- Delegated coding uses `implement` (Luna, then Sol for availability/quota),
+  `implement-core` (Sol only for complex core changes or ambiguous bugs), and
+  `mechanical` (GLM-5.3 only for small prescribed behavior-preserving edits with
+  deterministic checks). Broad migrations and semantic test changes must not
+  go to `mechanical`. Workers verify interfaces/types and focused regressions
+  after an early coherent slice, preserve negative/hidden-blocker assertions,
+  and report partial work honestly. These are prompt contracts, not automatic
+  rollback/checkpoint enforcement. Parents compare cost per accepted verified
+  change including failed attempts, review and rework, not token price alone.
+  Research/verification/UI QA/knowledge-auditor/oracle candidate policies are
+  unchanged. `[confirmed by agents/*.md, core/agent-strategy.ts;
+  tests: test/async-subagents/model-pools.test.ts,
+  test/prompt-evals/async-routing-e2e.test.ts under external/pi-tools-suite/]`
 
 ### Spawn (`core/spawn.ts`)
 1. Each sub-agent is spawned via `node:child_process.spawn()` running the pi binary in RPC mode. `[confirmed by code, spawn.ts ~188]`
@@ -88,7 +101,9 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    `anthropic/claude-opus-5-5` with alias `*opus*` (any serving provider).
    Sol is not frontier; the bundled `frontier-review` explicitly excludes
    `*gpt-6.1-sol*` parents independently of the frontier list. The `implement`
-   role still uses `openai-codex/gpt-6.1-sol` after `zai/glm-5.3`.
+   role uses Luna then Sol; `implement-core`, `frontier-review` and
+   `delivery-review` use their own Sol-only model lists rather than the frontier
+   candidate list. `mechanical` uses GLM-5.3 only.
    GPT-6 Sol is not an alias for GPT-6.1 Sol. Existing user/project model
    lists still override defaults and are not rewritten by this rollover.
    `[confirmed by frontier-models.ts and agents/implement.md]`

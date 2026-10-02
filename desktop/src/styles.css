@@ -329,15 +329,16 @@ html, body, #app {
 }
 
 /* Keep tool labels and other entry chrome out of native copy. Rendered
- * Markdown remains selectable within each entry. This controls what is
+ * Markdown, tool output and diff bodies remain selectable. This controls what is
  * selected; the ::selection rules below control how it is painted. */
 .transcript-pane .transcript-entry {
   -webkit-user-select: none;
   user-select: none;
 }
-.transcript-pane .transcript-entry .markdown-text {
+.transcript-pane .transcript-entry :is(.markdown-text, .tool-result, .diff-content) {
   -webkit-user-select: text;
   user-select: text;
+  cursor: text;
 }
 
 :where(

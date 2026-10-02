@@ -1,6 +1,6 @@
 ---
 description: Read-only delivery readiness and evidence review after a substantive implementation, when explicitly requested. Assess residual delivery risk and verification sufficiency; do not edit or perform real UI QA.
-modelSelection: frontier
+models: [openai-codex/gpt-6.1-sol]
 thinking: high
 tools: [read, grep, bash]
 ---

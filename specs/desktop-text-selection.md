@@ -33,7 +33,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 
 1. Desktop application chrome is non-selectable by default.
 2. Transcript message/content text and text-file Preview surfaces opt back into normal document text selection. Pointer selection that starts in either surface cannot continue selecting sidebar, tab, toolbar, status-bar, or other control labels outside that content surface.
-   Within the transcript, entry containers exclude tool/chrome labels from selection while Markdown text opts in. WebKit can paint selected inline content across the full width of a wrapped line: the transcript and read-only Markdown/source Preview surfaces therefore have transparent selection backgrounds, and selected glyphs use the theme's primary accent color instead of a background highlight. Links, Markdown code, and primary-colored source tokens change to foreground so their selected glyphs remain distinct. The Preview edit textarea uses the same transparent background/accent glyph treatment. Selection and Copy remain native. Other editable controls (such as the composer and Preview find input) retain normal selection paint.
+   Within the transcript, entry containers exclude tool/chrome labels from selection while Markdown text, expanded tool output (plain text, highlighted source, and mutation diagnostics), and diff bodies opt in. Tool disclosure labels, diff headers, and diff line-number gutters remain non-selectable. WebKit can paint selected inline content across the full width of a wrapped line: the transcript and read-only Markdown/source Preview surfaces therefore have transparent selection backgrounds, and selected glyphs use the theme's primary accent color instead of a background highlight. Links, Markdown code, and primary-colored source tokens change to foreground so their selected glyphs remain distinct. The Preview edit textarea uses the same transparent background/accent glyph treatment. Selection and Copy remain native. Other editable controls (such as the composer and Preview find input) retain normal selection paint.
 3. The composer textarea and other editable text controls opt into native text selection independently of those document surfaces.
 4. With focus in the composer textarea, `Cmd+A` on macOS or `Ctrl+A` on other desktop platforms selects the composer draft only.
 5. With focus outside an editable text control, native Select All is constrained to selectable document content because surrounding desktop chrome is non-selectable.
@@ -46,6 +46,8 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 
 - `desktop/src/styles.css`
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/components/ToolResult.svelte`
+- `desktop/src/components/DiffView.svelte`
 - `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/components/PromptComposer.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
@@ -55,6 +57,8 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
+- `npm --prefix desktop run test:tool-selection` exercises real transcript tool disclosures, pointer selection, copy, and exclusion of tool/diff chrome in Chromium.
+- Manual desktop verification: expand tool output and diffs, drag-select body text, and copy with `Cmd+C` or the native context menu; clipboard text must contain the selection, not disclosure labels or diff line numbers.
 - Manual desktop verification: drag-select through a long conversation and confirm selection stops at transcript content rather than extending into sidebar/tabs/status chrome.
 - Manual desktop verification: select across three or more wrapped lines in one Markdown paragraph; confirm only selected glyphs change color, no background color appears in the line or side gutters, and Copy returns the selected text.
 - Manual desktop verification: drag-select across several messages and confirm the empty side gutters outside the centered message column do not show selection color.

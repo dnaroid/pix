@@ -32,7 +32,7 @@
   <!-- Scrollable code surfaces need focus so keyboard users can pan them. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
-    class="max-h-[300px] overflow-auto"
+    class="diff-content max-h-[300px] overflow-auto"
     role="region"
     aria-label={`${label ?? model.path ?? "Diff"} contents`}
     tabindex="0"
@@ -84,6 +84,7 @@
     padding: 0 0.55rem;
     color: var(--muted-foreground);
     text-align: right;
+    -webkit-user-select: none;
     user-select: none;
   }
 

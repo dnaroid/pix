@@ -9,12 +9,18 @@ policy, not a price oracle.
 ## Execution modes
 
 - `research`: read-only evidence gathering, searches and focused review questions.
-- `implement`: bounded code, documentation, test and frontend changes.
+- `implement`: default Luna coder for bounded code, documentation, test and
+  frontend changes; Sol is the availability/quota fallback, not GLM.
+- `implement-core`: Sol for complex core changes, risky interface migrations
+  and ambiguous bugs in a bounded scope; no automatic weaker-model fallback.
+- `mechanical`: GLM-5.3 for small prescribed behavior-preserving edits with an
+  exact scope and deterministic acceptance check, never broad migrations,
+  interface redesign or semantic changes to regression tests.
 - `verify`: run checks and interpret logs, without fixing source or tests.
 - `ui-qa`: isolated real-UI workflow for browsers, terminal/TUI apps, and
   desktop GUIs with deterministic assertions and inspectable evidence.
-- `frontier-review`: independent post-implementation code review on a frontier
-  model; hidden when the current parent model is itself a frontier model.
+- `frontier-review`: independent post-implementation code review on Sol; the
+  historical role name and parent visibility gates are retained.
 - `delivery-review`: explicitly requested, read-only delivery readiness and
   evidence review, available to any parent; does not perform real UI QA or
   assume release authority.
@@ -33,7 +39,7 @@ shell access is not a read-only filesystem sandbox.
 `delivery-review` reviews the actual diff, surrounding code, and completed
 verification to assess residual delivery risk. Its bundled profile is
 self-contained: it does not require project skills or their discovery in the
-child. It uses GPT-6.1-Sol followed by GLM-5.3, `high` thinking, and the inspection
+child. It uses GPT-6.1-Sol without a GLM fallback, `high` thinking, and the inspection
 tools `read`, `grep`, and `bash`, subject to runtime availability. It remains
 available even when the parent is a frontier model.
 
@@ -60,7 +66,7 @@ fallbacks:
 ---
 description: Make bounded implementation changes.
 models:
-  - zai/glm-5.3
+  - openai-codex/gpt-6-luna
   - openai-codex/gpt-6.1-sol
 thinking: high
 ---
@@ -138,8 +144,8 @@ The bundled roles use it as follows:
 | Role | Selection | Result with the default list |
 |---|---|---|
 | `oracle` | `require-other-if-frontier` | GLM-5.3 parent → Astra, Opus; Astra parent → GLM-5.3, Opus; Opus parent → Astra, GLM-5.3; non-frontier parent → every frontier, other vendors first |
-| `frontier-review` | `forParentTier: non-frontier` | GLM-5.3, Opus; hidden for frontier parents and explicitly excluded for `*gpt-6.1-sol*` parents (Sol is not frontier) |
-| `delivery-review` | list order | GLM-5.3, Opus; available to all parents |
+| `frontier-review` | own `models`, `forParentTier: non-frontier` | Sol only; hidden for frontier parents and explicitly excluded for `*gpt-6.1-sol*` parents (Sol is not frontier) |
+| `delivery-review` | own `models` | Sol only; available to all parents |
 
 `economy: true` (or `PI_TOOLS_SUITE_ECONOMY=1`) excludes `expensive` frontier
 models from every role's automatic chain (including roles with their own
@@ -208,6 +214,30 @@ Markdown is applied, so a same-named project role can intentionally replace a
 disabled built-in.
 
 ## Compact handoff
+
+### Coding quality and acceptance
+
+Default to Luna for delegated implementation; choose Sol deliberately for core
+complexity or ambiguous bugs, not for every edit. GLM's coding role is mechanical
+work only. Research, verification, UI QA, docs-only knowledge auditing and the
+cross-vendor oracle retain their separate candidate policies; this is not a
+global ban on GLM or a change to frontier classification. Project replacements
+and explicit model overrides still follow the normal precedence rules.
+
+Give migrations coherent slices and an early affected typecheck plus focused
+regression before expanding the diff. Preserve regression meaning, negative
+cases and hidden-blocker checks; changed expectations require a contract reason
+and equivalent coverage. Workers stop expanding the diff near their execution
+limit and report incomplete slices, interface mismatches, checks and next steps.
+These are workflow instructions, not rollback or checkpoint guarantees: a hard
+timeout can still leave partial edits for the parent to inspect and rescope.
+Review compares old/new assertions and both sides of migrated interfaces.
+
+Judge cost per accepted verified change, including failed attempts, review and
+rework, rather than token price alone. Timeout alone does not establish model
+quality, and good Luna review results do not establish implementation quality on
+equivalent migrations. The role policy starts that comparison; it is not a
+measured quality/cost claim or a new accounting mechanism.
 
 Give workers a scope, acceptance criteria and the evidence needed to start.
 Read compact results first and inspect raw artifacts selectively. One noisy
