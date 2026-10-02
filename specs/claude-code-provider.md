@@ -110,3 +110,7 @@ Real Desktop/TUI QA belongs to `ui-qa`, not static test evidence.
 The native-image regressions cover a valid PNG over 256 KiB through the real
 provider stdin path into a fake CLI, byte/MIME preservation, deduplication,
 role correlation, label escaping and image-bearing recovery/lifecycle behavior.
+Response-observer rejection regressions cover both a still-live child requiring
+forced cleanup and a child whose close is observed before rejection. Both must
+publish only an error and finish private cleanup; the fixture must not race a
+short natural-exit timer against Windows process-tree termination.

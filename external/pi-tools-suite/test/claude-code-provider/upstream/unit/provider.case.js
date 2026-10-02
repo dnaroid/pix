@@ -1465,49 +1465,68 @@ test("provider waits for Pi's async response handler before streaming content", 
         await rm(fake.dir, { recursive: true, force: true });
     }
 });
-test("provider fails before streaming when Pi's async response handler rejects", async () => {
-    const fake = await fakeClaude(textResponseBody);
-    let rejectResponse;
-    let responseStarted;
-    const responseGate = new Promise((_, reject) => {
-        rejectResponse = reject;
-    });
-    const responseEntered = new Promise((resolve) => {
-        responseStarted = resolve;
-    });
-    try {
-        const events = [];
-        const stream = createClaudeStream({
-            executable: fake.executable,
-            version: CAPTURED_CLAUDE_VERSION,
-            subscriptionType: "pro",
-        })(model, context, {
-            reasoning: "medium",
-            async onResponse() {
-                responseStarted();
-                await responseGate;
-            },
+for (const childExited of [false, true]) {
+    test(`provider fails before streaming when Pi's async response handler rejects (${childExited ? "child exited" : "child alive"})`, async () => {
+        // Separate forced cleanup from natural exit instead of racing the
+        // fixture's 50ms exit timer against Windows taskkill.
+        const fake = await fakeClaude(textResponseBody + (childExited ? "" : "\nsetInterval(() => {}, 1000);"));
+        let requestChild;
+        let childClosed;
+        let rejectResponse;
+        let responseStarted;
+        const responseGate = new Promise((_, reject) => {
+            rejectResponse = reject;
         });
-        const consume = (async () => {
-            for await (const event of stream)
-                events.push(event.type);
-        })();
-        await responseEntered;
-        await new Promise((resolve) => setImmediate(resolve));
-        assert.deepEqual(events, []);
-        rejectResponse(new Error("observer rejected"));
-        await consume;
-        const result = await stream.result();
-        assert.equal(result.stopReason, "error");
-        assert.match(result.errorMessage ?? "", /after_provider_response handler failed: .*observer rejected/);
-        assert.deepEqual(events, ["error"]);
-        const metrics = await waitForRequestMetrics((entry) => entry.errorCategory === "response_hook");
-        assert.equal(metrics.stopReason, "error");
-    }
-    finally {
-        await rm(fake.dir, { recursive: true, force: true });
-    }
-});
+        const responseEntered = new Promise((resolve) => {
+            responseStarted = resolve;
+        });
+        try {
+            const events = [];
+            const stream = createClaudeStream({
+                executable: fake.executable,
+                version: CAPTURED_CLAUDE_VERSION,
+                subscriptionType: "pro",
+            }, {
+                supervise(child, options) {
+                    requestChild = child;
+                    const supervisor = superviseProcess(child, options);
+                    childClosed = supervisor.wait();
+                    return supervisor;
+                },
+            })(model, context, {
+                reasoning: "medium",
+                async onResponse() {
+                    responseStarted();
+                    await responseGate;
+                },
+            });
+            const consume = (async () => {
+                for await (const event of stream)
+                    events.push(event.type);
+            })();
+            await responseEntered;
+            if (childExited) await childClosed;
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(requestChild.exitCode !== null || requestChild.signalCode !== null, childExited);
+            assert.deepEqual(events, []);
+            rejectResponse(new Error("observer rejected"));
+            await consume;
+            const result = await stream.result();
+            assert.equal(result.stopReason, "error");
+            assert.match(result.errorMessage ?? "", /after_provider_response handler failed: .*observer rejected/);
+            assert.deepEqual(events, ["error"]);
+            const metrics = await waitForRequestMetrics((entry) => entry.errorCategory === "response_hook");
+            assert.equal(metrics.stopReason, "error");
+            assert.equal(metrics.cleanupComplete, true);
+            assert.equal(requestChild.exitCode !== null || requestChild.signalCode !== null, true);
+        }
+        finally {
+            rejectResponse(new Error("test teardown"));
+            if (requestChild) await terminateProcessGroup(requestChild);
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+}
 
 // A 200K-window model admits a system prompt of at most 200,000 estimated
 // tokens, which the byte estimator reaches at exactly 500,000 bytes.
