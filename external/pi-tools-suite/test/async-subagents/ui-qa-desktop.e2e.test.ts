@@ -22,11 +22,18 @@ e2eTest("wait-window discovers a late GUI descendant in the launched process gro
 		}
 		const doctor = spawnSync(helper, ["doctor"], { encoding: "utf8", timeout: 10_000 });
 		expect(doctor.stdout).toContain("accessibility=granted");
-		// Keep the wrapper alive long enough for wait-window to poll before the GUI
-		// exists, then let the GUI outlive its parent in the same owned POSIX group.
+		const missing = spawnSync(helper, ["wait-window", "--pid", "2147483647", "--timeout", "0.2"], {
+			encoding: "utf8", timeout: 5_000,
+		});
+		expect(missing.status).not.toBe(0);
+		expect(missing.stderr).toContain("last lookup: no running app matches the supplied selector");
+		// Keep multiple non-GUI wrappers alive while the late GUI appears in the
+		// same owned group; wrapper processes must not make discovery ambiguous.
 		wrapper = spawn(process.execPath, ["-e", `
 const { spawn } = require("node:child_process");
+spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
 setTimeout(() => { spawn(process.argv[1], [], { stdio: "ignore" }); }, 3000);
+setInterval(() => {}, 1000);
 `, fixture], { detached: true, stdio: "ignore" });
 		expect(wrapper.pid).toBeGreaterThan(0);
 		const result = spawnSync(helper, ["wait-window", "--pgid", String(wrapper.pid), "--timeout", "9", "--print-pid"], {

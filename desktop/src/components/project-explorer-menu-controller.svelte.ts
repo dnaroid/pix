@@ -51,7 +51,8 @@ export function createProjectExplorerMenuController(options: ProjectExplorerMenu
   function openContextMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
     event.preventDefault();
     event.stopPropagation();
-    const current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    let current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    if (!current && document.activeElement instanceof HTMLElement) current = document.activeElement;
     const rect = current?.getBoundingClientRect();
     const keyboard = event.clientX === 0 && event.clientY === 0;
     const anchorX = keyboard ? (rect?.left ?? MENU_MARGIN) + 12 : event.clientX;

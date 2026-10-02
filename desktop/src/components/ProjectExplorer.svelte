@@ -31,7 +31,7 @@
   } from "../lib/project-explorer-expansion";
   import { WORKSPACE_CONFIG_PATH } from "../lib/project-colors";
   import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
-  import type { ProjectSearchMatch, ProjectTreeEntry } from "../lib/project-tree";
+  import { projectTreeRootEntry, type ProjectSearchMatch, type ProjectTreeEntry } from "../lib/project-tree";
   import { createProjectExplorerDragController } from "./project-explorer-drag-controller.svelte";
   import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
@@ -110,7 +110,7 @@
   const rootLoading = $derived(treeController.rootLoading);
   const rootError = $derived(treeController.rootError);
   const tabbablePath = $derived(treeController.tabbablePath);
-  const rootContextEntry: ProjectTreeEntry = { name: "Project", path: "", kind: "directory" };
+  const rootContextEntry = $derived(projectTreeRootEntry(workspace));
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const revealLabel = isMacOS ? "Reveal in Finder" : /Windows/.test(navigator.userAgent)
     ? "Show in File Explorer" : "Show in File Manager";
@@ -341,14 +341,19 @@
   }
 
   function handleEntryKeydown(event: KeyboardEvent, index: number, entry: ProjectTreeEntry): void {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      openEntryContextMenu(new MouseEvent("contextmenu"), entry);
+      return;
+    }
     if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === "F2") {
       event.preventDefault();
-      openNameDialog("rename", entry);
+      if (entry.path) openNameDialog("rename", entry);
       return;
     }
     if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === "Delete") {
       event.preventDefault();
-      void deleteEntry(entry);
+      if (entry.path) void deleteEntry(entry);
       return;
     }
     if (primaryShortcut(event, "c")) {
@@ -451,7 +456,7 @@
         destination: destination || null,
       });
       if (workspace !== requestWorkspace) return;
-      if (destination) treeController.ensureDirectoryExpanded(destination);
+      treeController.ensureDirectoryExpanded(destination);
       await treeController.refreshDirectory(destination);
       await treeController.focusPath(created.path);
       clearOperationError();
@@ -500,7 +505,7 @@
       treeController.removePath(entry.path);
       await treeController.refreshDirectory(parent);
       const focusTarget = fallback ?? treeController.rows[0]?.entry.path;
-      if (focusTarget) await treeController.focusPath(focusTarget);
+      if (focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget);
       clearOperationError();
     } catch (error) {
       if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
@@ -562,7 +567,7 @@
           kind: dialog.mode === "new-file" ? "file" : "directory",
         });
         if (workspace !== requestWorkspace) return;
-        if (parent) treeController.ensureDirectoryExpanded(parent);
+        treeController.ensureDirectoryExpanded(parent);
         await treeController.refreshDirectory(parent);
         await treeController.focusPath(created.path);
         if (created.kind === "file") treeController.openFile(created.path);
@@ -707,22 +712,11 @@
     tabindex="-1"
     oncontextmenu={openRootContextMenu}
   >
-    {#if rootLoading && rootEntries.length === 0}
-      <div class="flex items-center justify-center gap-1.5 py-8 text-xs text-muted-foreground">
-        <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading project files…
-      </div>
-    {:else if rootError}
-      <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">
-        {rootError}
-      </div>
-    {:else if rootEntries.length === 0}
-      <div class="px-3 py-8 text-center text-xs text-muted-foreground">This project folder is empty.</div>
-    {:else}
       {#each rows as row, index (row.entry.path)}
         {@const entry = row.entry}
         {@const gitDecoration = (entry.kind === "directory" ? gitDecorations.directories : gitDecorations.files).get(entry.path)}
-        {@const hiddenEntry = entry.name.startsWith(".")}
-        {@const expanded = entry.kind === "directory" && treeState.expandedDirectories.includes(entry.path)}
+        {@const hiddenEntry = entry.path !== "" && entry.name.startsWith(".")}
+        {@const expanded = entry.kind === "directory" && treeController.isDirectoryExpanded(entry.path)}
         {@const directoryLoading = entry.kind === "directory" && treeState.loadingDirectories.includes(entry.path)}
         <div
           class={[
@@ -741,12 +735,12 @@
             ]}
             type="button"
             role="treeitem"
-            title={`${entry.path}${gitDecoration ? ` · ${gitDecoration.label}` : ""} · Shift+Enter opens in ${externalEditorLabel}`}
+            title={`${entry.path || workspace}${gitDecoration ? ` · ${gitDecoration.label}` : ""} · Shift+Enter opens in ${externalEditorLabel}`}
             aria-label={gitDecoration ? `${entry.name} · ${gitDecoration.label}` : entry.name}
             aria-level={row.depth + 1}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
             aria-selected={treeState.selectedPath === entry.path}
-            aria-keyshortcuts="Shift+Enter F2 Delete"
+            aria-keyshortcuts={entry.path ? "Shift+Enter F2 Delete" : "Shift+Enter"}
             tabindex={tabbablePath === entry.path ? 0 : -1}
             data-project-tree-path={entry.path}
             data-project-git-status={gitDecoration?.code}
@@ -754,7 +748,7 @@
             onkeydown={(event) => handleEntryKeydown(event, index, entry)}
             oncontextmenu={(event) => openEntryContextMenu(event, entry)}
             onclick={(event) => activateProjectEntry(event, entry)}
-            onpointerdown={(event) => dragController.start(event, entry)}
+            onpointerdown={(event) => { if (entry.path) dragController.start(event, entry); }}
             onpointermove={dragController.move}
             onpointerup={dragController.finish}
             onpointercancel={dragController.cancel}
@@ -790,13 +784,23 @@
             <ExternalLink class="h-3 w-3" aria-hidden="true" />
           </button>
         </div>
-        {#if entry.kind === "directory" && expanded && treeState.errorByDirectory[entry.path]}
+        {#if entry.path && entry.kind === "directory" && expanded && treeState.errorByDirectory[entry.path]}
           <div
             class="pr-2 text-xs leading-4 text-tool-error"
             style:padding-left={`${34 + (row.depth + 1) * 14}px`}
           >{treeState.errorByDirectory[entry.path]}</div>
         {/if}
       {/each}
+    {#if treeState.rootExpanded}
+      {#if rootLoading && rootEntries.length === 0}
+        <div class="flex items-center justify-center gap-1.5 py-8 text-xs text-muted-foreground">
+          <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading project files…
+        </div>
+      {:else if rootError}
+        <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">{rootError}</div>
+      {:else if rootEntries.length === 0}
+        <div class="px-3 py-8 text-center text-xs text-muted-foreground">This project folder is empty.</div>
+      {/if}
     {/if}
   </div>
   {/if}

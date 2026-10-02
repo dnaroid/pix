@@ -44,3 +44,9 @@ evidence.
 
 Attached applications remain externally owned. For launched applications,
 cleanup is limited to the runner-owned process group and correlated GUI target.
+
+If `waitForWindow` times out, report its retained `last lookup` diagnosis:
+`no running app matches` is a selection/registration problem, while an app name
+and PID with `no accessible window` means application lookup succeeded but no
+AX window was available. Neither alone proves whether the app rendered. Do not
+repeat the same launch blindly or declare the UI verified from the build log.

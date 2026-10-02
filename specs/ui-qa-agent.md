@@ -208,6 +208,13 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 
 ## Preserved contracts
 
+- macOS window-wait failures retain the last application/window lookup error,
+  including the matched application identity when available, rather than hiding
+  selection failures behind a generic timeout. This diagnostic is not UI proof.
+  When a launched process group has multiple application candidates, macOS
+  selects the unique accessible-window owner, excluding windowless wrappers.
+  Multiple window owners remain ambiguous; explicit app selectors are unchanged.
+
 - Only the unified/trusted runners own browser execution and credential
   handling; the QA child never invokes Playwright or `chrome-devtools`
   directly for probe/run.
@@ -236,6 +243,14 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
   reported as product verification. Blank/unloaded content and rendered content
   with an empty accessibility tree are distinguished using retained screenshot
   and accessibility evidence; missing launch prerequisites are `BLOCKED`.
+  Window discovery for a runner-owned launch defaults to 60 seconds and accepts
+  an explicit `waitForWindow.timeoutMs` up to 90000, clamped to the remaining
+  runner deadline. Other desktop steps retain the 30000 ms maximum and short
+  default; the whole-run maximum stays 100000 ms. On a window timeout the agent
+  inspects `application.log` and distinguishes an unfinished build, an exited
+  launcher, and an available process without a window. Builds exceeding the
+  bounded startup budget are handed to the parent as a prerequisite rather than
+  treated as missing UI capabilities or retried with the same short wait.
 - The actual requested target is tested; static checks or invented mock pages
   cannot substitute for requested UI QA.
 - Public QA does not require credentials or create an auth file.

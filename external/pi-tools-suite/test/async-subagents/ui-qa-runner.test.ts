@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { probeBrowserBackend, resolveBrowserDriver, runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
-import { desktopEvidenceName, desktopPlatformContract, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
+import { desktopEvidenceName, desktopPlatformContract, desktopStepTimeout, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
 import { releaseWindowsPtyResources, resolveTuiPresentation, terminateOwnedPty, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
 import { CHROME_DEVTOOLS_DRIVER, chromeDevtoolsStartArgs, probeChromeDevtoolsProvider } from "../../src/async-subagents/agents/ui-qa/drivers/chrome-devtools/chrome-devtools-provider.mjs";
 import { chooseNativeTerminalProvider, nativeTerminalBridgeCommandFile, nativeTerminalBridgeShellCommand, nativeTerminalProviderLaunchArgs } from "../../src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs";
@@ -265,6 +265,33 @@ describe("capability-first UI QA runner", () => {
 		expect(desktopEvidenceName(undefined, 6, "snapshot")).toBe("snapshot-7");
 		expect(desktopEvidenceName(undefined, 5, "screenshot")).toBe("screenshot-6");
 		expect(desktopEvidenceName("after-toggle", 6, "snapshot")).toBe("after-toggle");
+	});
+
+	test("budgets cold desktop window discovery separately from interactions", () => {
+		const context = {
+			deadline: Date.now() + 100_000,
+			stageTimeoutMs: 30_000,
+			flow: { target: { application: { launch: { argv: ["npm", "run", "dev"] } } } },
+		};
+		expect(desktopStepTimeout({ action: "waitForWindow" }, context)).toBe(60_000);
+		expect(desktopStepTimeout({ action: "waitForWindow", timeoutMs: 90_000 }, context)).toBe(90_000);
+		expect(desktopStepTimeout({ action: "activate" }, context)).toBe(15_000);
+		expect(desktopStepTimeout({ action: "waitForWindow" }, { ...context, flow: {} })).toBe(15_000);
+		expect(desktopStepTimeout({ action: "waitForWindow" }, { ...context, flow: {}, stageTimeoutMs: 500 })).toBe(500);
+	});
+
+	test("keeps desktop startup waits bounded and clamps them to the runner deadline", () => {
+		const context = { deadline: Date.now() + 100_000, stageTimeoutMs: 30_000 };
+		for (const timeoutMs of [49, 90_001, NaN, Infinity]) {
+			expect(() => desktopStepTimeout({ action: "waitForWindow", timeoutMs }, context)).toThrow("between 50 and 90000");
+		}
+		for (const action of ["activate", "waitForText", "setValue", "capture"]) {
+			expect(() => desktopStepTimeout({ action, timeoutMs: 30_001 }, context)).toThrow("between 50 and 30000");
+		}
+		const limited = desktopStepTimeout({ action: "waitForWindow", timeoutMs: 90_000 }, { ...context, deadline: Date.now() + 2000 });
+		expect(limited).toBeGreaterThan(0);
+		expect(limited).toBeLessThanOrEqual(2000);
+		expect(() => desktopStepTimeout({ action: "waitForWindow" }, { ...context, deadline: Date.now() - 1 })).toThrow("deadline expired");
 	});
 
 	test("selects the browser backend for a URL without launching Playwright", () => {

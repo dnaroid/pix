@@ -6,12 +6,46 @@ import {
   parseProjectTreeDrag,
   projectTreeDragPayloadFromUnknown,
   projectTreeParentIndex,
+  projectTreeRootEntry,
+  projectTreeRowsWithRoot,
   projectTreePromptPath,
   serializeProjectTreeDrag,
   type ProjectTreeEntry,
 } from "./project-tree";
 
 describe("project tree", () => {
+  it("names the workspace root independently of its empty relative path", () => {
+    expect(projectTreeRootEntry("/projects/my-app/")).toEqual({ name: "my-app", path: "", kind: "directory" });
+    expect(projectTreeRootEntry("/").name).toBe("Project");
+  });
+
+  it("keeps a root row for empty/loading trees and no rows without a workspace", () => {
+    expect(projectTreeRowsWithRoot("/projects/app", {}, new Set(), true)).toEqual([
+      { entry: projectTreeRootEntry("/projects/app"), depth: 0 },
+    ]);
+    expect(projectTreeRowsWithRoot("", {}, new Set(), true)).toEqual([]);
+  });
+
+  it("indents children under the root and resolves their visible parent", () => {
+    const entries = {
+      "": [{ name: "src", path: "src", kind: "directory" as const }],
+      src: [{ name: "main.ts", path: "src/main.ts", kind: "file" as const }],
+    };
+    const rows = projectTreeRowsWithRoot("/projects/app", entries, new Set(["src"]), true);
+    expect(rows.map((row) => [row.entry.path, row.depth])).toEqual([["", 0], ["src", 1], ["src/main.ts", 2]]);
+    expect(projectTreeParentIndex(rows, 0)).toBeNull();
+    expect(projectTreeParentIndex(rows, 1)).toBe(0);
+    expect(projectTreeParentIndex(rows, 2)).toBe(1);
+  });
+
+  it("collapsing the root hides descendants without changing their expansion state", () => {
+    const entries = { "": [{ name: "src", path: "src", kind: "directory" as const }] };
+    const expanded = new Set(["src"]);
+    expect(projectTreeRowsWithRoot("/projects/app", entries, expanded, false).map((row) => row.entry.path)).toEqual([""]);
+    expect([...expanded]).toEqual(["src"]);
+    expect(projectTreeRowsWithRoot("/projects/app", entries, expanded, true).map((row) => row.entry.path)).toEqual(["", "src"]);
+  });
+
   it("flattens only expanded directories", () => {
     const root: ProjectTreeEntry[] = [
       { name: "src", path: "src", kind: "directory" },

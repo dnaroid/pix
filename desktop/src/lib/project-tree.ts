@@ -42,6 +42,24 @@ export function flattenProjectTree(
   return rows;
 }
 
+/** The workspace root is a UI-only directory, not a persisted expansion path. */
+export function projectTreeRootEntry(workspace: string): ProjectTreeEntry {
+  return { name: workspace.split(/[\\/]/u).filter(Boolean).at(-1) ?? "Project", path: "", kind: "directory" };
+}
+
+export function projectTreeRowsWithRoot(
+  workspace: string,
+  entriesByDirectory: Readonly<Record<string, readonly ProjectTreeEntry[]>>,
+  expandedDirectories: ReadonlySet<string>,
+  rootExpanded: boolean,
+): ProjectTreeRow[] {
+  if (!workspace) return [];
+  const root = { entry: projectTreeRootEntry(workspace), depth: 0 };
+  if (!rootExpanded) return [root];
+  const children = flattenProjectTree(entriesByDirectory[""] ?? [], entriesByDirectory, expandedDirectories);
+  return [root, ...children.map((row) => ({ ...row, depth: row.depth + 1 }))];
+}
+
 /** Resolve the nearest visible parent row for keyboard Left-arrow navigation. */
 export function projectTreeParentIndex(rows: readonly ProjectTreeRow[], index: number): number | null {
   const row = rows[index];

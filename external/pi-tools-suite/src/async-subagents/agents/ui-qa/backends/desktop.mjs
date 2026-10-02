@@ -243,7 +243,8 @@ export async function runDesktopBackend(context) {
 			selector = application.selector ?? launchedApplicationSelector(launched);
 			observations.push({ action: "launch", pid: launched.pid, argv0: application.launch.argv[0] });
 			if (process.platform === "win32") {
-				const output = await helperCall(helper, ["wait-window", ...selector, "--timeout", "15", "--print-pid"], context, 20_000);
+				const timeoutMs = desktopStepTimeout(steps.find((step) => step.action === "waitForWindow") ?? { action: "waitForWindow" }, context);
+				const output = await helperCall(helper, ["wait-window", ...selector, "--timeout", String(timeoutMs / 1000), "--print-pid"], context, timeoutMs);
 				const parsed = Number(output.trim());
 				if (!Number.isInteger(parsed) || parsed <= 0) throw new Error("Windows UI Automation helper did not return the correlated GUI process id");
 				ownedGuiPid = parsed;
@@ -340,7 +341,7 @@ async function finalizeWindowRecorder(recorder, artifacts, observations) {
 
 async function executeStep(options) {
 	const { context, helper, selector, step, index, assertions, observations, artifacts } = options;
-	const timeoutMs = stepTimeout(step, context);
+	const timeoutMs = desktopStepTimeout(step, context);
 	switch (step.action) {
 		case "waitForWindow":
 			await helperCall(helper, ["wait-window", ...selector, "--timeout", String(timeoutMs / 1000)], context, timeoutMs);
@@ -891,9 +892,15 @@ function resolveProjectDirectory(projectRoot, value) {
 	return real;
 }
 
-function stepTimeout(step, context) {
-	const value = step.timeoutMs ?? Math.min(15_000, context.stageTimeoutMs);
-	if (!Number.isFinite(value) || value < 50 || value > 30_000) throw new Error("step timeoutMs must be between 50 and 30000");
+// Startup wrappers may still be building before a GUI process exists. Give
+// window discovery its own bounded budget without relaxing interaction limits.
+export function desktopStepTimeout(step, context) {
+	const windowWait = step.action === "waitForWindow";
+	const maximum = windowWait ? 90_000 : 30_000;
+	const defaultTimeout = windowWait && context.flow?.target?.application?.launch
+		? 60_000 : Math.min(15_000, context.stageTimeoutMs);
+	const value = step.timeoutMs ?? defaultTimeout;
+	if (!Number.isFinite(value) || value < 50 || value > maximum) throw new Error(`step timeoutMs must be between 50 and ${maximum}`);
 	return Math.min(Math.round(value), remainingTimeout(context, Math.round(value)));
 }
 

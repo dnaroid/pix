@@ -1,7 +1,7 @@
 import { tick, untrack } from "svelte";
 import { isTypeaheadKey, linearFocusIndex, typeaheadFocusIndex } from "../lib/keyboard-navigation";
 import {
-  flattenProjectTree,
+  projectTreeRowsWithRoot,
   projectTreeParentIndex,
   type ProjectTreeEntry,
 } from "../lib/project-tree";
@@ -21,6 +21,7 @@ interface ProjectExplorerTreeControllerOptions {
 
 export function createProjectExplorerTreeController(options: ProjectExplorerTreeControllerOptions) {
   const state = $state({
+    rootExpanded: true,
     entriesByDirectory: {} as Record<string, ProjectTreeEntry[]>,
     expandedDirectories: [] as string[],
     loadingDirectories: [] as string[],
@@ -53,6 +54,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     const refreshPaths = untrack(() => {
       if (workspaceChanged) {
         flushExpandedDirectoriesPersist();
+        state.rootExpanded = true;
         state.entriesByDirectory = {};
         state.expandedDirectories = [];
         restoreRevision = ++expansionRevision;
@@ -82,10 +84,11 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   });
 
   function rows() {
-    return flattenProjectTree(
-      state.entriesByDirectory[""] ?? [],
+    return projectTreeRowsWithRoot(
+      options.workspace(),
       state.entriesByDirectory,
       new Set(state.expandedDirectories),
+      state.rootExpanded,
     );
   }
 
@@ -130,6 +133,11 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function toggleDirectory(path: string): void {
+    if (!path) {
+      state.rootExpanded = !state.rootExpanded;
+      if (!state.rootExpanded) state.focusedPath = "";
+      return;
+    }
     if (state.expandedDirectories.includes(path)) {
       state.expandedDirectories = state.expandedDirectories.filter((candidate) => candidate !== path);
       expansionRevision += 1;
@@ -148,6 +156,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function ensureDirectoryExpanded(path: string): void {
+    state.rootExpanded = true;
     if (!path || state.expandedDirectories.includes(path)) return;
     state.expandedDirectories = [...state.expandedDirectories, path];
     expansionRevision += 1;
@@ -204,14 +213,14 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   function focusFallbackAfterRemoval(path: string): string | null {
     const visibleRows = rows();
     const index = visibleRows.findIndex((row) => row.entry.path === path);
-    if (index < 0) return state.focusedPath && !sameOrDescendantPath(state.focusedPath, path) ? state.focusedPath : null;
+    if (index < 0) return state.focusedPath !== null && !sameOrDescendantPath(state.focusedPath, path) ? state.focusedPath : null;
     for (let candidate = index + 1; candidate < visibleRows.length; candidate += 1) {
       const nextPath = visibleRows[candidate]?.entry.path;
-      if (nextPath && !sameOrDescendantPath(nextPath, path)) return nextPath;
+      if (nextPath !== undefined && !sameOrDescendantPath(nextPath, path)) return nextPath;
     }
     for (let candidate = index - 1; candidate >= 0; candidate -= 1) {
       const nextPath = visibleRows[candidate]?.entry.path;
-      if (nextPath && !sameOrDescendantPath(nextPath, path)) return nextPath;
+      if (nextPath !== undefined && !sameOrDescendantPath(nextPath, path)) return nextPath;
     }
     return null;
   }
@@ -248,7 +257,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     if (event.key === "ArrowRight") {
       event.preventDefault();
       if (entry.kind !== "directory") return;
-      if (!state.expandedDirectories.includes(entry.path)) {
+      if (!isDirectoryExpanded(entry.path)) {
         toggleDirectory(entry.path);
         return;
       }
@@ -259,7 +268,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
 
     if (event.key === "ArrowLeft") {
       event.preventDefault();
-      if (entry.kind === "directory" && state.expandedDirectories.includes(entry.path)) {
+      if (entry.kind === "directory" && isDirectoryExpanded(entry.path)) {
         toggleDirectory(entry.path);
         return;
       }
@@ -305,6 +314,10 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     options.onHealthChange(null);
     if (typeaheadTimer !== null) window.clearTimeout(typeaheadTimer);
     typeaheadTimer = null;
+  }
+
+  function isDirectoryExpanded(path: string): boolean {
+    return path === "" ? state.rootExpanded : state.expandedDirectories.includes(path);
   }
 
   async function restoreExpandedDirectories(
@@ -393,11 +406,12 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     get tabbablePath() {
       const visibleRows = rows();
       const visiblePaths = new Set(visibleRows.map((row) => row.entry.path));
-      if (state.focusedPath && visiblePaths.has(state.focusedPath)) return state.focusedPath;
+      if (state.focusedPath !== null && visiblePaths.has(state.focusedPath)) return state.focusedPath;
       if (state.selectedPath && visiblePaths.has(state.selectedPath)) return state.selectedPath;
       return visibleRows[0]?.entry.path ?? null;
     },
     toggleDirectory,
+    isDirectoryExpanded,
     ensureDirectoryExpanded,
     openFile,
     refreshDirectory,

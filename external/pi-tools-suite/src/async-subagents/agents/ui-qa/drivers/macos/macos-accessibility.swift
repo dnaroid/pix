@@ -277,6 +277,21 @@ func findApplication(_ arguments: Arguments) throws -> NSRunningApplication {
             }
         }
     }
+    // A launched group can contain npm/node wrappers registered with AppKit.
+    // They own no GUI window and must not make the actual target ambiguous.
+    // Keep explicit PID/name/bundle selectors unchanged, and never choose
+    // arbitrarily between multiple window-owning descendants.
+    if requestedPGID != nil && candidates.count > 1 && AXIsProcessTrusted() {
+        let windowOwners = candidates.filter { app in
+            let application = axApplication(app)
+            return (copyAttribute(application, kAXWindowsAttribute) as? [AXUIElement])?
+                .isEmpty == false || copyAttribute(application, kAXFocusedWindowAttribute) != nil
+        }
+        if windowOwners.isEmpty {
+            throw Failure("no accessible window in the launched process group (\(candidates.count) running apps)")
+        }
+        candidates = windowOwners
+    }
     guard !candidates.isEmpty else {
         throw Failure("no running app matches the supplied selector")
     }
@@ -919,21 +934,30 @@ func run(_ arguments: Arguments) throws {
         try requireAccessibility()
         let timeout = try arguments.double("timeout", default: 60)
         let deadline = Date().addingTimeInterval(timeout)
+        var lastFailure = "application lookup has not completed"
         while Date() < deadline {
-            if let app = try? findApplication(arguments), (try? frontWindow(app)) != nil {
+            do {
+                let app = try findApplication(arguments)
+                do {
+                    _ = try frontWindow(app)
+                } catch {
+                    throw Failure("app=\(quoted(app.localizedName ?? "?")) pid=\(app.processIdentifier): \(error)")
+                }
                 if arguments.has("print-pid") {
                     print(app.processIdentifier)
                 } else {
                     print("ready app=\(quoted(app.localizedName ?? "?")) pid=\(app.processIdentifier)")
                 }
                 return
+            } catch {
+                lastFailure = String(describing: error)
             }
             // NSWorkspace updates its running-app list through the main run loop.
             // Sleeping here freezes the snapshot when the GUI registers after
             // wait-window starts (notably a wrapper's later --pgid descendant).
             RunLoop.current.run(until: min(Date().addingTimeInterval(0.2), deadline))
         }
-        throw Failure("window did not appear within \(timeout)s")
+        throw Failure("window did not appear within \(timeout)s; last lookup: \(lastFailure)")
 
     case "focus":
         try requireAccessibility()

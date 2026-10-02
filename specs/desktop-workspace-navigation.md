@@ -18,6 +18,18 @@ while project selection/open state remains separate from transient focus.
 
 ## Project Explorer behavior
 
+- The tree starts with an explicit workspace-root directory row named after the
+  project folder. It is expanded on mount and workspace change; refresh and search
+  preserve its current state. Its children are one level deeper. Click,
+  Enter/Space and Left/Right toggle/navigate it like other directories. Collapsing
+  the root keeps descendant expansion preferences and selected files intact;
+  the root participates in the same single roving Tab stop.
+- Right-click or Context Menu / `Shift+F10` on the root offers New File/New Folder
+  and Paste in the project root, plus external-editor and file-manager commands,
+  without requiring empty space below the file list. The root cannot be renamed,
+  deleted, copied, duplicated or dragged. It remains reachable in empty, loading
+  and failed-listing states. Root collapse is transient and is not stored among
+  relative expanded-directory paths; successful create/paste expands its target.
 - The visible project hierarchy is exposed as one ARIA `tree` containing
   `treeitem` rows with `aria-level`; directory rows additionally expose
   `aria-expanded`.
@@ -148,7 +160,8 @@ while project selection/open state remains separate from transient focus.
 
 - `desktop/src/lib/keyboard-navigation.test.ts` covers composite and type-ahead
   navigation primitives.
-- `desktop/src/lib/project-tree.test.ts` covers visible parent lookup.
+- `desktop/src/lib/project-tree.test.ts` covers visible parent lookup, workspace
+  root naming, nesting, empty/loading rows, and collapse without preference loss.
 - `desktop/src/lib/project-explorer-expansion.test.ts` covers compact per-project
   expansion persistence, malformed state rejection, and storage bounds.
 - `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the

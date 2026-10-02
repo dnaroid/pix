@@ -58,6 +58,20 @@ attach to an already running requested application. Do not launch a raw debug
 binary unless its required services are confirmed ready. Missing prerequisites
 are `BLOCKED`, not a reason to test an empty shell or substitute another surface.
 
+Budget startup separately from UI interaction. Runner-owned launches default to
+60 seconds for `waitForWindow`; that step accepts an explicit `timeoutMs` up to
+90000, while other desktop steps stay capped at 30000. The whole run remains
+bounded by `--runner-timeout-ms` (at most 100000); choose a budget that leaves
+time for readiness, assertions, and cleanup. Do not rely on a short default
+window wait for a launch command that performs a cold build.
+
+If window discovery times out, inspect the retained `application.log` before
+reporting an unavailable application. Distinguish a still-running build from
+an exited launcher or a ready process without a window. A still-building launch
+is not proof of a missing UI capability. Relay its stage and ask the parent to
+complete the documented build prerequisites when they exceed the bounded launch
+budget; do not retry the same short wait or substitute a raw debug binary.
+
 `waitForWindow` proves only that a native window exists. Before testing the
 requested behavior, wait for and assert an application-content readiness marker
 from the real UI (for example a known editor, navigation control, or loaded

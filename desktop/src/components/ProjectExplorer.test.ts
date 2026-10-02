@@ -4,6 +4,21 @@ import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?r
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
+  it("exposes a default-expanded workspace root without persisting or mutating it", () => {
+    expect(treeControllerSource).toContain("rootExpanded: true");
+    expect(treeControllerSource).toContain("state.rootExpanded = true;");
+    expect(treeControllerSource).toContain('if (!path) {');
+    expect(treeControllerSource).toContain('if (!state.rootExpanded) state.focusedPath = ""');
+    expect(treeControllerSource).toContain('state.focusedPath !== null && visiblePaths.has(state.focusedPath)');
+    expect(explorerSource).toContain('$derived(projectTreeRootEntry(workspace))');
+    expect(explorerSource).toContain('treeController.isDirectoryExpanded(entry.path)');
+    expect(explorerSource).toContain('if (entry.path) openNameDialog("rename", entry)');
+    expect(explorerSource).toContain('if (entry.path) void deleteEntry(entry)');
+    expect(explorerSource).toContain('if (entry.path) dragController.start(event, entry)');
+    expect(explorerSource).toContain('event.key === "ContextMenu"');
+    expect(explorerSource).toContain('event.shiftKey && event.key === "F10"');
+    expect(explorerSource).toContain('treeController.ensureDirectoryExpanded(parent)');
+  });
   it("checks ignore eligibility asynchronously and refreshes Git after a guarded mutation", () => {
     expect(explorerSource).toContain('invoke<boolean>("git_can_ignore"');
     expect(explorerSource).toContain('return ignoreEligibility.invalidate');
@@ -32,7 +47,7 @@ describe("ProjectExplorer keyboard tree", () => {
   });
 
   it("does not paint restored focus as a second hovered row after deletion", () => {
-    expect(explorerSource).toContain("if (focusTarget) await treeController.focusPath(focusTarget)");
+    expect(explorerSource).toContain("if (focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget)");
     expect(explorerSource).toContain("onfocus={() => treeState.focusedPath = entry.path}");
     expect(explorerSource).toContain("hover:bg-panel-hover");
     expect(explorerSource).not.toContain("focus-within:bg-panel-hover");
@@ -45,7 +60,7 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(treeControllerSource).toContain('event.key === "ArrowRight"');
     expect(treeControllerSource).toContain('event.key === "ArrowLeft"');
     expect(treeControllerSource).toContain("projectTreeParentIndex(visibleRows, index)");
-    expect(explorerSource).toContain('aria-keyshortcuts="Shift+Enter F2 Delete"');
+    expect(explorerSource).toContain('aria-keyshortcuts={entry.path ? "Shift+Enter F2 Delete" : "Shift+Enter"}');
     expect(treeControllerSource).toContain("typeaheadFocusIndex");
   });
 
