@@ -55,5 +55,7 @@ errors, not invent or approve decisions.
 - [0001 — Subagent coding roles](0001-subagent-coding-roles.md)
 - [0002 — Agent-owned decision history](0002-agent-owned-decision-history.md)
 - [0003 — Reveal Desktop after the initial document loads](0003-desktop-startup-reveal.md)
+- [0004 — External TUI incident profiling](0004-external-tui-incident-profiling.md)
+- [0005 — Disk-saving native watch builds](0005-watch-all-cargo-disk.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

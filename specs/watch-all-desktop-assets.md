@@ -49,6 +49,18 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   watcher file/target inspection runs on a native blocking worker, not the UI
   thread. A late restart error after teardown does not restart polling.
 - `watch:all` disables Tauri's `beforeBuildCommand` because it has already built the web bundle once in the ordered build plan.
+- Every native watch build uses the persistent, isolated
+  `desktop/src-tauri/target/watch-all` cache with `CARGO_INCREMENTAL=0` and
+  `CARGO_PROFILE_DEV_DEBUG=0`, overriding inherited values for that subprocess.
+  This avoids retaining rustc incremental state for repeatedly changing embedded
+  assets and reduces debug artifact size. It remains a Tauri debug build; compiled
+  dependencies are reused, and ordinary native/release builds are unchanged.
+  Before each native build it runs `cargo clean --package pix-desktop` with an
+  explicit manifest and `--target-dir` pointing only to that watch cache. This
+  removes obsolete content-hashed Tauri embedded assets and application outputs
+  under Cargo's lock, not dependencies or the running Desktop's copied bundle.
+  A cleanup failure aborts the build without publishing an artifact. Other target
+  directories and obsolete dependency artifacts are not automatically cleaned.
 - `desktop/src-tauri/build.rs` explicitly tracks the generated `<repo>/desktop/dist/index.html` as a Cargo input. Vite's production entrypoint contains hashed references to the emitted JS/CSS assets, so a successful web rebuild invalidates the native crate even when no Rust source changed.
 - The native rebuild therefore regenerates and recompiles Tauri's embedded asset context before the first Desktop launch or a user-requested restart into the newly bundled artifact.
 - A failed web/native build keeps the previous working Desktop process alive and does not mark it stale; the watcher never restarts into a partially built frontend.
@@ -86,9 +98,11 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 
 - Running a development HTTP server from `watch:all`.
 - Rebuilding the web bundle twice per cycle.
-- Disabling Cargo incremental compilation for unrelated native-only changes.
+- Changing Cargo profiles or incremental compilation outside `watch:all`.
 
 ## Related files
+
+- [Decision: disk-saving native watch builds](../docs/decisions/0005-watch-all-cargo-disk.md)
 
 - `scripts/pix-watch`
 - `tests/pix-watch.test.ts`
@@ -123,6 +137,9 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   global symlink resolution, launch from an unrelated directory, argument
   forwarding, and exit-status propagation.
 - `tests/watch-all.test.ts` covers the ordered `web -> native` build plan, the bounded watcher-state handoff, and the Tauri CLI override that suppresses the duplicate `beforeBuildCommand`.
+- It also verifies that initial and repeated native watch builds use the same
+  disk-saving Cargo environment and package-only cleanup before build/capture,
+  without applying them to the web build, and abort on cleanup failure.
 - `tests/watch-all.test.ts` also covers bounded failed-command output retention
   and the repeated bottom-of-terminal failure report, plus exact app-PID
   liveness checks used by the macOS startup gate, artifact retention and stale

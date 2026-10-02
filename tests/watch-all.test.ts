@@ -85,6 +85,55 @@ describe("watch:all change classification", () => {
 });
 
 describe("watch:all build planning", () => {
+	it("uses disk-saving Cargo settings for every native watch build", async () => {
+		const supervisor = new WatchAllSupervisor();
+		const calls: { step: string; environment: Record<string, string> }[] = [];
+		const order: string[] = [];
+		let captures = 0;
+		supervisor.runCommand = async (step: string, command: string, args: string[], _cwd: string, environment: Record<string, string> = {}) => {
+			order.push("clean");
+			assert.equal(step, "clean desktop native cache");
+			assert.equal(command, "cargo");
+			assert.deepEqual(args, [
+				"clean", "--package", "pix-desktop", "--manifest-path", resolve("desktop/src-tauri/Cargo.toml"),
+				"--target-dir", resolve("desktop/src-tauri/target/watch-all"),
+			]);
+			assert.equal(environment.CARGO_TARGET_DIR, resolve("desktop/src-tauri/target/watch-all"));
+		};
+		supervisor.runNpmCommand = async (step: string, _args: string[], _cwd: string, environment = {}) => {
+			order.push("build");
+			calls.push({ step, environment });
+		};
+		supervisor.captureDesktopArtifact = async () => { order.push("capture"); captures += 1; };
+
+		// Both initial and subsequent builds must use the same profile/cache.
+		await supervisor.runBuildStep(PARTS.NATIVE);
+		await supervisor.runBuildStep(PARTS.NATIVE);
+		assert.equal(captures, 2);
+		assert.deepEqual(order, ["clean", "build", "capture", "clean", "build", "capture"]);
+		assert.equal(supervisor.hasNativeBuild, true);
+		for (const call of calls) {
+			assert.equal(call.step, "build desktop native");
+			assert.deepEqual(call.environment, {
+				CARGO_TARGET_DIR: resolve("desktop/src-tauri/target/watch-all"),
+				CARGO_INCREMENTAL: "0",
+				CARGO_PROFILE_DEV_DEBUG: "0",
+			});
+		}
+
+		await supervisor.runBuildStep(PARTS.WEB);
+		assert.deepEqual(calls.at(-1)?.environment, {});
+	});
+
+	it("does not build or publish an artifact if package cache cleanup fails", async () => {
+		const supervisor = new WatchAllSupervisor();
+		supervisor.runCommand = async () => { throw new Error("cache cleanup failed"); };
+		supervisor.runNpmCommand = async () => { assert.fail("must not build after failed cleanup"); };
+		supervisor.captureDesktopArtifact = async () => { assert.fail("must not publish after failed cleanup"); };
+		await assert.rejects(supervisor.runBuildStep(PARTS.NATIVE), /cache cleanup failed/u);
+		assert.equal(supervisor.hasNativeBuild, false);
+	});
+
 	it("embeds changed web assets in a fresh native build", () => {
 		assert.deepEqual(createBuildPlan([PARTS.WEB]), {
 			steps: [PARTS.WEB, PARTS.NATIVE],

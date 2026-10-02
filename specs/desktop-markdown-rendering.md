@@ -87,7 +87,12 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Right-clicking an image in Markdown or the Preview tab offers Copy Image and
   Open Image in External App through the shared native context menu (see
   `specs/desktop-context-menus.md`).
-- In a Markdown file Preview editor, tables use the available content width and wrap long cell content rather than creating a horizontal table scrollbar. Transcript tables retain horizontal scrolling.
+- In a Markdown file Preview editor, tables use the available content width and
+  wrap cell text at word boundaries. Intrinsic column sizing preserves whole
+  words and inline-code identifiers (for example, `station` must not become
+  `statio` / `n` just to narrow a column). Exceptionally wide tables retain a
+  horizontal scroll fallback rather than overflowing the Preview surface.
+  Transcript tables retain horizontal scrolling.
 - Internal preview navigations push file or media entries onto a browser-like history stack inside the single Preview editor tab. Back and forward controls traverse that stack; following a new link after going back discards the old forward branch. Opening a preview from outside Preview starts a new history and activates the Preview tab; closing the Preview editor clears the history.
 - Each preview history entry retains its horizontal and vertical scroll position, which is restored when Back or Forward returns to that entry.
 - Preview consumes the central workbench region rather than a resizable modal. Switching to a conversation or Git Diff tab in the unified top strip leaves the still-open Preview component mounted so its current edit draft and scroll/history state are not reset merely by tab switching.
@@ -125,6 +130,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/external-links.ts`
 - `desktop/src/lib/external-links.test.ts`
 - `desktop/src/components/MarkdownText.svelte`
+- `desktop/src/components/markdown-table-layout.test.ts`
 - `desktop/src/components/markdown-content-action.ts`
 - `desktop/src/components/markdown-code-copy-action.ts`
 - `desktop/src/components/markdown-code-copy-action.test.ts`
@@ -162,6 +168,8 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Syntax-highlighting tests cover the large-source fallback, escaped markup, retained empty/CRLF lines, and unchanged small-source highlighting.
 - Preview-scroll tests cover ordering the requested line reveal after pending
   saved-position restoration and cancelling stale scheduled reveals.
+- Table-style regression tests guard word-preserving intrinsic column sizing,
+  the Preview scroll fallback, and unchanged transcript table sizing.
 - Rust tests also cover project/absolute media confinement, traversal, unsupported
   local binary files, and allowed media resolution.
 - `npm run test`, `npm run check`, and `npm run build:web` pass in `desktop/`.

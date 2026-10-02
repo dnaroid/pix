@@ -259,7 +259,7 @@
 {#if status || showSkeletons}
   <div
     bind:this={root}
-    class="flex min-w-0 flex-1 items-center justify-between gap-1"
+    class="@container/runtime-status flex min-w-0 flex-1 items-center justify-between gap-1"
     data-runtime-status
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
@@ -319,9 +319,9 @@
           aria-controls="runtime-usage-popover"
           onclick={toggleUsage}
         >
-          <span class="font-sans text-xs text-muted-foreground max-[900px]:hidden">Usage</span>
+          <span class="font-sans text-xs text-muted-foreground @max-[380px]/runtime-status:hidden">Usage</span>
           {#if usageAccountLabel}
-            <span class="max-w-28 truncate text-muted-foreground max-[1100px]:hidden">{usageAccountLabel}</span>
+            <span class="max-w-28 truncate text-muted-foreground @max-[600px]/runtime-status:hidden">{usageAccountLabel}</span>
           {/if}
           {#if modelUsage?.stale}
             <span
@@ -360,7 +360,7 @@
                   <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
                 {/if}
                 {#if label !== "R" || window.resetAt > now}
-                  <span class="text-muted-foreground max-[980px]:hidden">{formatResetDuration(window.resetAt, now)}</span>
+                  <span class="text-muted-foreground @max-[480px]/runtime-status:hidden">{formatResetDuration(window.resetAt, now)}</span>
                 {/if}
               </span>
           {/each}
@@ -488,10 +488,10 @@
         data-runtime-usage-skeleton
         aria-hidden="true"
       >
-        <span class="font-sans text-xs text-muted-foreground max-[900px]:hidden">Usage</span>
+        <span class="font-sans text-xs text-muted-foreground @max-[380px]/runtime-status:hidden">Usage</span>
         <span class="h-1.5 w-8 rounded-sm bg-border"></span>
         <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
-        <span class="h-3 w-16 rounded-sm bg-muted-foreground/15 max-[980px]:hidden"></span>
+        <span class="h-3 w-16 rounded-sm bg-muted-foreground/15 @max-[480px]/runtime-status:hidden"></span>
       </div>
     {/if}
   </div>

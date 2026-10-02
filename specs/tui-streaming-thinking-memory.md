@@ -111,3 +111,9 @@ When investigating a recurrence, compare:
 If RSS rises while persisted history remains small, capture the watchdog report
 before killing the process when possible. That preserves evidence which is not
 recoverable from the final session JSONL.
+
+For freezes or typing-time growth after the answer has finished, the internal
+watchdog may be unable to run if the TUI event loop is blocked. The opt-in
+[external memory/freeze profiler](tui-external-memory-profiler.md) can collect
+RSS and macOS stack/map evidence independently. It is diagnostic instrumentation,
+not evidence that the streaming-thinking issue explains every TUI recurrence.

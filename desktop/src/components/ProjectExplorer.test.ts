@@ -4,6 +4,12 @@ import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?r
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
+  it("polls only visible directory listings through the mounted explorer lifecycle", () => {
+    expect(explorerSource).toContain("onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose)");
+    expect(treeControllerSource).toContain("async function refreshVisibleDirectories(): Promise<void>");
+    expect(treeControllerSource).toContain('["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration))');
+    expect(treeControllerSource).toContain("(!force && state.loadingDirectories.includes(path))");
+  });
   it("exposes a default-expanded workspace root without persisting or mutating it", () => {
     expect(treeControllerSource).toContain("rootExpanded: true");
     expect(treeControllerSource).toContain("state.rootExpanded = true;");

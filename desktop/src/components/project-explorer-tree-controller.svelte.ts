@@ -128,6 +128,11 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     await loadDirectory(path, generation, true);
   }
 
+  async function refreshVisibleDirectories(): Promise<void> {
+    const requestGeneration = generation;
+    await Promise.all(["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration)));
+  }
+
   function reportHealth(): void {
     options.onHealthChange(Object.values(state.errorByDirectory).find((message) => message.trim()) ?? null);
   }
@@ -415,6 +420,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     ensureDirectoryExpanded,
     openFile,
     refreshDirectory,
+    refreshVisibleDirectories,
     focusPath,
     remapPath,
     focusFallbackAfterRemoval,

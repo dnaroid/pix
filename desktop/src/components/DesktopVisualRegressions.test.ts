@@ -46,13 +46,20 @@ import transcriptSource from "./TranscriptPane.svelte?raw";
 
 describe("desktop visual regressions", () => {
   it("keeps compact context and quota controls from painting over one another", () => {
-    expect(runtimeStatusSource).toContain('class="flex min-w-0 flex-1 items-center justify-between gap-1"');
+    expect(runtimeStatusSource).toContain('class="@container/runtime-status flex min-w-0 flex-1 items-center justify-between gap-1"');
     expect(runtimeStatusSource).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
     expect(runtimeStatusSource).toContain('class="relative min-w-0" data-runtime-context');
     expect(runtimeStatusSource).toContain("overflow-hidden whitespace-nowrap");
     expect(runtimeStatusSource).toContain('class="relative ml-auto min-w-0 shrink-0 max-w-full"');
     expect(runtimeStatusSource.match(/>ctx<\/span>/g)).toHaveLength(2);
     expect(runtimeStatusSource).not.toContain(">resets {formatResetDuration");
+  });
+  it("scales quota details with the available telemetry width instead of the viewport", () => {
+    expect(runtimeStatusSource).toContain("@container/runtime-status");
+    expect(runtimeStatusSource.match(/@max-\[380px\]\/runtime-status:hidden/g)).toHaveLength(2);
+    expect(runtimeStatusSource.match(/@max-\[480px\]\/runtime-status:hidden/g)).toHaveLength(2);
+    expect(runtimeStatusSource).toContain("@max-[600px]/runtime-status:hidden");
+    expect(runtimeStatusSource).not.toMatch(/(?<!@)max-\[(900|980|1100)px\]:hidden/);
   });
   it("keeps the composer placeholder on one visual line", () => {
     expect(composerSource).toContain('"Ask Pix anything…"');

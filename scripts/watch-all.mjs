@@ -919,16 +919,32 @@ export class WatchAllSupervisor {
 			case PARTS.WEB:
 				await this.runNpmCommand("build desktop web", ["--prefix", "desktop", "run", "--silent", "build:web"], REPO_ROOT);
 				break;
-			case PARTS.NATIVE:
+			case PARTS.NATIVE: {
+				const environment = {
+					CARGO_TARGET_DIR,
+					CARGO_INCREMENTAL: "0",
+					CARGO_PROFILE_DEV_DEBUG: "0",
+				};
+				// Tauri's content-hashed embedded assets accumulate in this crate's
+				// OUT_DIR. Cargo owns the lock and removes only our package artifacts;
+				// dependencies and the running app's copied bundle remain intact.
+				await this.runCommand(
+					"clean desktop native cache",
+					"cargo",
+					["clean", "--package", "pix-desktop", "--manifest-path", resolve(TAURI_ROOT, "Cargo.toml"), "--target-dir", CARGO_TARGET_DIR],
+					REPO_ROOT,
+					environment,
+				);
 				await this.runNpmCommand(
 					"build desktop native",
 					["--prefix", "desktop", "exec", "tauri", "build", "--", ...desktopBuildArguments(process.platform)],
 					REPO_ROOT,
-					{ CARGO_TARGET_DIR },
+					environment,
 				);
 				await this.captureDesktopArtifact();
 				this.hasNativeBuild = true;
 				break;
+			}
 			default:
 				throw new Error(`unknown build step: ${step}`);
 		}

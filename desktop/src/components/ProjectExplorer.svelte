@@ -19,11 +19,12 @@
   import Search from "@lucide/svelte/icons/search";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
-  import { onDestroy, tick, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
   import type { MenuNavigationItem } from "../lib/keyboard-navigation";
   import type { GitSnapshot } from "../lib/git";
   import { projectGitDecorations } from "../lib/project-git-decorations";
   import { createProjectGitRefresh } from "../lib/project-git-refresh";
+  import { createProjectFilesRefresh } from "../lib/project-files-refresh";
   import { createProjectGitIgnoreEligibility } from "../lib/project-git-ignore";
   import {
     projectExplorerExpandedDirectoriesFromWorkspaceConfig,
@@ -94,6 +95,7 @@
     clearDrag: dragController.clear,
   });
   const treeState = treeController.state;
+  onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose);
   const rootEntries = $derived(treeController.rootEntries);
   const rows = $derived(treeController.rows);
   const gitDecorations = $derived(projectGitDecorations(gitSnapshot?.changes));

@@ -342,7 +342,6 @@
   }
   .markdown-text.fit-tables :global(.table-scroll) {
     width: 100%;
-    overflow-x: visible;
   }
   .markdown-text :global(table) {
     width: max-content;
@@ -368,7 +367,8 @@
     white-space: normal;
   }
   .markdown-text.fit-tables :global(td) {
-    overflow-wrap: anywhere;
+    /* Preserve whole words in auto-layout's intrinsic column sizing. */
+    overflow-wrap: break-word;
     word-break: normal;
     white-space: normal;
   }

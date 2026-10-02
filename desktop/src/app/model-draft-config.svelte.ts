@@ -10,14 +10,14 @@ import {
 import type { ModelConfigOptions } from "./model-config-options";
 
 /**
- * Delay before retrying a draft quota refresh flagged
+ * Faster cadence for a draft quota refresh flagged
  * `modelUsageCredentialPending`: the Claude Code credential was missing, so
  * the retry's provider query reads only local credentials and performs no
  * provider network traffic until Claude Code refreshes its login. The chain
- * stops at the first response that is ready, failed, or unavailable without
- * the flag, and is skipped when the staged selection moved on.
+ * returns to the normal five-minute cadence once the flag is absent.
  */
 const MODEL_USAGE_CREDENTIAL_RETRY_MS = 60_000;
+const MODEL_USAGE_REFRESH_MS = 5 * 60_000;
 
 export function createModelDraftConfig(options: ModelConfigOptions) {
   let configOptions = $state<SessionConfigOption[]>([]);
@@ -31,24 +31,20 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
   let usageGeneration = 0;
   let routingStatusGeneration = 0;
   let selectionInitialized = false;
-  let credentialRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let usageRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function scheduleModelUsageCredentialRetry(requestGeneration: number, modelRef: string, thinkingLevel: string): void {
-    if (credentialRetryTimer) return;
-    const timer = setTimeout(() => {
-      credentialRetryTimer = undefined;
-      // The staged selection must still be this request's selection; a newer
-      // refreshUsage/applySelection already superseded it.
-      if (requestGeneration !== usageGeneration) return;
+  function scheduleUsageRefresh(requestGeneration: number, modelRef: string, thinkingLevel: string, delay: number): void {
+    usageRefreshTimer = setTimeout(() => {
+      usageRefreshTimer = undefined;
+      if (requestGeneration !== usageGeneration || !options.draftSessionTabOpen()) return;
       void refreshUsage(modelRef, thinkingLevel);
-    }, MODEL_USAGE_CREDENTIAL_RETRY_MS);
-    credentialRetryTimer = timer;
+    }, delay);
   }
 
-  function clearModelUsageCredentialRetry(): void {
-    if (!credentialRetryTimer) return;
-    clearTimeout(credentialRetryTimer);
-    credentialRetryTimer = undefined;
+  function clearUsageRefresh(): void {
+    if (usageRefreshTimer === undefined) return;
+    clearTimeout(usageRefreshTimer);
+    usageRefreshTimer = undefined;
   }
 
   async function refreshUsage(
@@ -61,10 +57,13 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     const state = modelThinkingConfigState(configOptions);
     const effectiveModelRef = modelRef ?? state.currentModel?.ref;
     const effectiveThinking = thinkingLevel ?? state.currentThinking;
-    if (!requestClient || !requestWorkspace || !options.statusReady() || !effectiveModelRef) return;
+    if (!requestClient || !requestWorkspace || !options.statusReady() || !options.draftSessionTabOpen()
+      || !effectiveModelRef || effectiveModelRef === AUTO_MODEL_REF) return;
+    clearUsageRefresh();
     const requestGeneration = ++usageGeneration;
     if (clearPrevious) runtimeStatus = undefined;
     modelUsageRefreshing = true;
+    let nextRefreshDelay = MODEL_USAGE_REFRESH_MS;
     try {
       const response = await requestClient.draftConfig(requestWorkspace, {
         modelRef: effectiveModelRef,
@@ -76,19 +75,26 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
         || requestWorkspace !== options.workspace()
         || !options.draftSessionTabOpen()
       ) return;
+      const modelUsage = response.modelUsage
+        ?? (response.modelUsageRefresh === "failed" ? runtimeStatus?.modelUsage : undefined);
       runtimeStatus = {
         sessionId: "draft",
         modelUsageRefresh: response.modelUsageRefresh,
-        ...(response.modelUsage ? { modelUsage: response.modelUsage } : {}),
+        ...(modelUsage ? { modelUsage } : {}),
       };
       if (response.modelUsageRefresh === "unavailable" && response.modelUsageCredentialPending === true) {
-        scheduleModelUsageCredentialRetry(requestGeneration, effectiveModelRef, effectiveThinking);
+        nextRefreshDelay = MODEL_USAGE_CREDENTIAL_RETRY_MS;
       }
     } catch {
       // Draft quota is best-effort just like live runtime quota. Keep the model
       // selector usable even when provider usage is temporarily unavailable.
     } finally {
-      if (requestGeneration === usageGeneration) modelUsageRefreshing = false;
+      if (requestGeneration === usageGeneration) {
+        modelUsageRefreshing = false;
+        if (requestClient === options.client() && requestWorkspace === options.workspace() && options.draftSessionTabOpen()) {
+          scheduleUsageRefresh(requestGeneration, effectiveModelRef, effectiveThinking, nextRefreshDelay);
+        }
+      }
     }
   }
 
@@ -158,7 +164,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     autoRoutingSelected = false;
     routedTierId = undefined;
     selectionInitialized = false;
-    clearModelUsageCredentialRetry();
+    clearUsageRefresh();
     generation += 1;
     usageGeneration += 1;
     routingStatusGeneration += 1;
@@ -167,6 +173,9 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
   function applySelection(modelRef: string, thinkingLevel: string): string {
     if (modelRef === AUTO_MODEL_REF) {
       if (!autoRoutingAvailable) throw new Error("Automatic model routing is disabled.");
+      clearUsageRefresh();
+      usageGeneration += 1;
+      modelUsageRefreshing = false;
       autoRoutingSelected = true;
       routedTierId = undefined;
       modelOverride = null;

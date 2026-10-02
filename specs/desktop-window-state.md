@@ -34,6 +34,7 @@ is still available at its saved desktop coordinates.
 ## Behavior
 
 - On first launch, the window uses the dimensions and placement from `tauri.conf.json` and the operating system.
+- On macOS, clicking a control in an inactive window activates the window and delivers that same click to the webview (`acceptFirstMouse: true`), without requiring a second click. The shared configuration applies to default, restored, and newly opened project windows.
 - On subsequent launches, recreate each saved window with its original stable
   label and workspace URL; do not add an extra main window when only project
   windows were open. Desktop session tabs and active-session pointers are scoped
@@ -120,6 +121,7 @@ is still available at its saved desktop coordinates.
 
 ## Tests
 
+- `desktop/src/lib/native-window-config.test.ts`
 - `desktop/src-tauri/src/window_restore.rs`
 - `desktop/src-tauri/src/window_geometry.rs`
 - `desktop/src/app/project-workspace.test.ts`
