@@ -3,7 +3,7 @@
 use crate::window_geometry::{self, Geometry};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io::Read, path::Path, sync::Mutex};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow};
 
 const FILE_NAME: &str = "open-windows.json";
 const QA_FILE_NAME: &str = "qa-open-windows.json";
@@ -176,18 +176,15 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Er
             config.url = route(&window.workspace);
         }
         window_geometry::apply(&mut config, window.geometry, &monitors);
-        match WebviewWindowBuilder::from_config(app, &config)?.build() {
+        match crate::startup_theme::build(app, &config) {
             Ok(created) => {
-                crate::startup_theme::apply_to(&created);
                 track(&created, window.workspace.clone(), window.geometry);
             }
             Err(error) => eprintln!("could not restore window {}: {error}", window.label),
         }
     }
     if app.webview_windows().is_empty() {
-        let created =
-            WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
-        crate::startup_theme::apply_to(&created);
+        let created = crate::startup_theme::build(app, &app.config().app.windows[0])?;
         track(&created, String::new(), None);
     }
     Ok(restoring)
@@ -273,11 +270,7 @@ pub(crate) fn desktop_open_project_window(
         .file_name()
         .map(|name| name.to_string_lossy());
     config.title = format!("Pix Desktop — {}", name.as_deref().unwrap_or("workspace"));
-    let window = WebviewWindowBuilder::from_config(&app, &config)
-        .map_err(|e| e.to_string())?
-        .build()
-        .map_err(|e| e.to_string())?;
-    crate::startup_theme::apply_to(&window);
+    let window = crate::startup_theme::build(&app, &config).map_err(|e| e.to_string())?;
     if app.get_webview_window(&label).is_some() {
         track(&window, workspace, None);
     }

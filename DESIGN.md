@@ -177,6 +177,9 @@ Before the frontend bundle renders, the native window and initial document MUST
 paint with the `background` color for the current system color scheme. In
 particular, a dark-system launch must not expose the webview's default white
 surface while Pix is starting.
+On macOS, create windows hidden and reveal them only after the initial document
+has loaded; setting the native background alone does not cover WKWebView's
+unpainted surface. See [Desktop startup theme](specs/desktop-startup-theme.md).
 
 ## 5. Typography
 

@@ -54,5 +54,6 @@ errors, not invent or approve decisions.
 
 - [0001 — Subagent coding roles](0001-subagent-coding-roles.md)
 - [0002 — Agent-owned decision history](0002-agent-owned-decision-history.md)
+- [0003 — Reveal Desktop after the initial document loads](0003-desktop-startup-reveal.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).
