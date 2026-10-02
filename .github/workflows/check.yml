@@ -17,7 +17,10 @@ jobs:
   build-and-test:
     name: Check/build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # The macOS leg legitimately needs ~10 min (desktop frontend + Rust host +
+    # tools suite) and slow-runner days inflate every step ~1.5x; 15 min left
+    # no headroom and killed healthy runs, so allow 20.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

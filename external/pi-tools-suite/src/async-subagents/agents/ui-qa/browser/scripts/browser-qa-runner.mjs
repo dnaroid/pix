@@ -221,7 +221,6 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 	progress("playwright_load_started");
 	const playwright = loadPlaywright(cwd);
 	progress("playwright_load_finished");
-	runnerMayHaveBrowserChildren = true;
 	const browser = await runStage(progress, "browser_launch", deadline, () => launchChromium(playwright), profileId);
 	let context;
 	let page;
@@ -648,7 +647,6 @@ async function runAuthScaffold(cwd, args) {
 	try {
 		progress("auth_scaffold_started", { timeoutMs: timeout });
 		const playwright = loadPlaywright(cwd);
-		runnerMayHaveBrowserChildren = true;
 		browser = await runStage(progress, "auth_scaffold_browser_launch", deadline, () => launchChromium(playwright), profileId);
 		context = await runStage(progress, "auth_scaffold_context_create", deadline, () => browser.newContext({
 			...DEFAULT_ENVIRONMENT,
@@ -2094,19 +2092,31 @@ function loadPlaywright(cwd) {
  * and report an actionable BLOCKED handoff when none can be launched.
  */
 async function launchChromium(playwright) {
+	// Snapshot the pre-launch state: a launch attempt that fails before any
+	// process is spawned leaves no descendants, so the exit-time process-tree
+	// walk (a cold PowerShell/CIM startup on Windows) can stay skipped for
+	// runs that never had a browser child. Unknown launch failures keep the
+	// conservative walk enabled because the spawn state cannot be proven.
+	const hadBrowserChildren = runnerMayHaveBrowserChildren;
 	let pinnedError;
 	try {
+		runnerMayHaveBrowserChildren = true;
 		return await playwright.chromium.launch({ headless: true });
 	} catch (error) {
 		if (!isMissingBrowserExecutableError(error)) throw error;
 		pinnedError = error;
+		runnerMayHaveBrowserChildren = hadBrowserChildren;
 	}
 	for (const executablePath of installedChromiumCandidates()) {
 		try {
+			runnerMayHaveBrowserChildren = true;
 			return await playwright.chromium.launch({ headless: true, executablePath });
-		} catch {
+		} catch (error) {
 			// Try the next installed build; an incompatible or broken candidate
-			// must not mask a later working one.
+			// must not mask a later working one. A missing-executable rejection
+			// happens before any process is spawned, so only other failures
+			// keep the descendant walk enabled for this attempt.
+			runnerMayHaveBrowserChildren = hadBrowserChildren || !isMissingBrowserExecutableError(error);
 		}
 	}
 	throw new QaStatusError(

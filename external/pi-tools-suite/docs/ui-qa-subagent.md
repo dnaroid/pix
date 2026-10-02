@@ -385,6 +385,9 @@ current-session model availability.
 - Playwright can launch Chromium in its own POSIX process group. On runner
   failure the runner snapshots and kills only its own descendants before it
   exits, covering that detached browser tree without touching a user's browser.
+  A launch that fails before any process is spawned (missing executable) cannot
+  leave a descendant, so those exits skip the process-tree walk; a launch still
+  in flight or failed for an unknown reason keeps the walk enabled.
 
 ## Related files
 
