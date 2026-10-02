@@ -3,6 +3,8 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { onMount } from "svelte";
   import { agentIcon } from "../lib/agent-icons";
+  import { modelProviderBrand } from "../lib/model-display";
+  import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import {
     formatSessionSubagentActivity,
     formatSessionSubagentElapsed,
@@ -82,42 +84,47 @@
       <div class="pb-1.5">
         {#each runs as run (run.runDir)}
           <section aria-label={`Subagent run ${sessionSubagentRunName(run.runDir)}`}>
-            <h3 class="truncate px-2.5 py-1.5 font-mono text-xs font-medium text-muted-foreground" title={run.runDir}>
-              {sessionSubagentRunName(run.runDir)}
-            </h3>
             <div class="space-y-0.5 px-1.5">
               {#each run.agents as agent (`${run.runDir}\0${agent.id}`)}
                 {@const preview = sessionSubagentTaskPreview(run, agent.id)}
                 {@const task = preview?.task?.trim() || preview?.scope?.trim() || "Task unavailable"}
-                {@const role = preview?.subagentType?.trim()}
+                {@const role = preview?.subagentType?.trim() || "auto"}
                 {@const AgentIcon = agentIcon(preview?.icon)}
                 <article
                   class={[
-                    "rounded-md border-l-2 px-2 py-2 transition-colors hover:bg-panel-hover",
+                    "rounded-md border-l-2 px-1.5 py-2 transition-colors hover:bg-panel-hover",
                     agent.status === "running" || agent.status === "retrying"
                       ? "border-l-primary bg-panel-selected"
                       : "border-l-transparent",
                   ]}
-                  aria-label={`Subagent ${agent.id}${role ? ` (${role})` : ""}: ${statusLabel(agent.status)}`}
+                  aria-label={`Subagent ${agent.id} (${role}): ${statusLabel(agent.status)}`}
                 >
-                  <div class="flex min-w-0 items-start gap-2">
-                    <span class={["mt-px shrink-0", statusTone(agent.status)]} title={`${role ? `Role: ${role}` : "Agent"} · ${statusLabel(agent.status)}`}>
-                      <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
-                    </span>
+                  <div class="min-w-0">
                     <div class="min-w-0 flex-1">
-                      <div class="flex min-w-0 items-center gap-2">
-                        <h4 class="min-w-0 flex-1 truncate font-mono text-xs font-semibold leading-4 text-foreground" title={role ? `${agent.id} (${role})` : agent.id}>
-                          {agent.id}{role ? ` (${role})` : ""}
-                        </h4>
-                        <span class={["shrink-0 text-xs font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
+                      <div class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1" data-session-subagent-header>
+                        <span class={["grid h-4 w-4 shrink-0 place-items-center", statusTone(agent.status)]} title={`Role: ${role} · ${statusLabel(agent.status)}`} data-session-subagent-header-icon>
+                          <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
+                        </span>
+                        <span class="-ml-1 max-w-full shrink-0 break-words rounded-sm bg-muted px-1 font-mono text-xs font-semibold leading-4 text-foreground" data-session-subagent-role>
+                          {role}
+                        </span>
+                        <span class={["ml-auto shrink-0 text-xs font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
                         <span class="shrink-0 font-mono text-xs text-muted-foreground">{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                       </div>
+                      <h4 class="mt-0.5 truncate font-mono text-xs leading-4 text-foreground" title={`${agent.id} · ${run.runDir}`} data-session-subagent-name>
+                        {agent.id}
+                      </h4>
                       <p class="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-foreground/80">{task}</p>
-                      <div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                        <span class="shrink-0 font-mono">{sessionSubagentModelLabel(preview)}</span>
+                      <div class="mt-1.5 flex min-w-0 items-center gap-1.5 border-t border-border pt-1.5 text-xs font-semibold text-foreground" data-session-subagent-footer>
+                        <span class="inline-flex shrink-0 items-center gap-1.5 font-mono">
+                          {#if modelProviderBrand(preview?.model ?? "")}
+                            <ModelProviderIcon provider={preview?.model ?? ""} />
+                          {/if}
+                          {sessionSubagentModelLabel(preview)}
+                        </span>
                         {#if agent.lastActivity}
                           <span class="text-muted-foreground/50">·</span>
-                          <span class="min-w-0 truncate font-mono text-foreground/80">{formatSessionSubagentActivity(agent.lastActivity)}</span>
+                          <span class="min-w-0 truncate font-mono">{formatSessionSubagentActivity(agent.lastActivity)}</span>
                         {/if}
                         {#if agent.retryCount}<span class="shrink-0 text-tool-warning">retry {agent.retryCount}</span>{/if}
                       </div>

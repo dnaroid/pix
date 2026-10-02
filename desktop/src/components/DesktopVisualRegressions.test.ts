@@ -251,8 +251,26 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain("formatSessionSubagentElapsed");
     expect(sessionActivityStatusHudSource).toContain("sessionSubagentModelLabel");
     expect(sessionActivityStatusHudSource).toContain("indicator.preview?.subagentType?.trim()");
-    expect(sessionActivityStatusHudSource).toContain('{indicator.agent.id}{role ? ` (${role})` : ""}');
-    expect(sessionSubagentsSource).toContain('{agent.id}{role ? ` (${role})` : ""}');
+    for (const source of [sessionActivityStatusHudSource, sessionSubagentsSource]) {
+      expect(source).toContain('?.subagentType?.trim() || "auto"');
+      expect(source).toContain('data-session-subagent-header');
+      expect(source).toContain('data-session-subagent-role');
+      expect(source).toContain('data-session-subagent-name');
+      expect(source).toContain('flex-wrap items-center gap-x-1.5 gap-y-1');
+      expect(source).toContain('data-session-subagent-header-icon');
+      expect(source).toContain('grid h-4 w-4 shrink-0 place-items-center');
+      expect(source).toContain('max-w-full shrink-0 break-words rounded-sm bg-muted');
+      expect(source).toContain('-ml-1 max-w-full');
+      expect(source).toContain('data-session-subagent-footer');
+      expect(source).toContain('border-t border-border pt-1.5 text-xs font-semibold text-foreground');
+      expect(source).toContain('import ModelProviderIcon from "./ModelProviderIcon.svelte"');
+      expect(source).toContain('{#if modelProviderBrand(');
+      expect(source).toContain('<ModelProviderIcon provider={');
+      expect(source).toContain('formatSessionSubagentElapsed');
+    }
+    expect(sessionActivityStatusHudSource).not.toContain('{indicator.runName}');
+    expect(sessionSubagentsSource).not.toContain('<h3');
+    expect(sessionSubagentsSource).toContain('aria-label={`Subagent run ${sessionSubagentRunName(run.runDir)}`}');
     expect(sessionActivityStatusHudSource).toContain("bind:this={todoTooltipBody}");
     expect(sessionActivityStatusHudSource).toContain("onmouseenter={scrollTodoTooltipToCurrent}");
     expect(sessionActivityStatusHudSource).toContain("onfocus={scrollTodoTooltipToCurrent}");

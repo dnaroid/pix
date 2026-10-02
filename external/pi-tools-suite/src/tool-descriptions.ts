@@ -162,6 +162,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		promptGuidelines: [
 			"The parent model owns reasoning and synthesis from retrieved evidence; repo_context is retrieval, not a second answer-generating model.",
 			"Documents remain searchable even without frontmatter. Retrieval rankings are navigation, not authoritative contracts; an empty result does not prove no contract exists.",
+			"Before significant changes, read linked decision records as well as the current spec; search docs/decisions when needed. Check status and superseding links: historical rationale is not the current contract.",
 		],
 	},
 	{
@@ -171,6 +172,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		promptGuidelines: [
 			"Keep or create the primary spec in the same task; reviewed no-impact is valid. Skip for mechanical edits. Audit may use a stale indexed snapshot; read primary sources and verify semantics.",
 			"For a new spec, use the non-overwriting template installed by idx init at .indexer-cli/spec-template.md. Declare kind: spec and the intended status in frontmatter; list project-root-relative paths under Implementation and Tests. If the template is absent, ask before running setup instead of inventing one.",
+			"Record significant choices in docs/decisions using the project's convention/template while context is available: status, context, evidence vs assumptions, decision/scope, alternatives, consequences and revisit triggers; link the spec both ways. Skip trivial edits. The parent supplies rationale and decision paths to the auditor; never invent motives from code. Supersede old decisions explicitly instead of erasing history.",
 		],
 	},
 	{

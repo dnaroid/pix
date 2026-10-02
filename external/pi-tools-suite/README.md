@@ -78,6 +78,28 @@ diagnostics, and an empty result does not prove that no contract exists.
 Document metadata and inferred purpose are navigation aids, not a semantic
 correctness verdict. The reviewer owns the final decision.
 
+### Decision history
+
+Keep current behavior in specs and significant rationale in `docs/decisions/`,
+following the project's convention/template. Before changing a contract, read
+linked decisions and check status/superseding links. Historical rationale does
+not override the current spec. Plain Markdown already participates in retrieval
+subject to normal exclusions; no special idx kind or new storage is required.
+
+The parent records significant architecture, dependency/model, trade-off and
+accepted-risk choices while context is available: status, context, evidence
+versus assumptions, decision/scope, alternatives, consequences and revisit
+triggers. Include approval evidence and recording date, and link the spec both
+ways. Attribute conversation-only reports and disclose missing artifacts rather
+than inventing motives or benchmarks. Skip trivial edits. Superseding decisions
+link to their predecessors and mark/link old records without erasing history.
+
+Include decision paths and rationale (or why no new record was needed) in the
+final knowledge handoff. The auditor checks completeness and consistency,
+escalates missing/ambiguous rationale and never authors or approves decisions
+from code alone. The parent performs the same check if the auditor is absent.
+This is a prompt/workflow contract, not automatic enforcement or measurement.
+
 Mechanical refactors, typo/formatting edits, exact renames, and other changes
 that do not alter project behavior do not require this knowledge-maintenance
 lifecycle. Repo-aware tools still require both indexed project state and an

@@ -41,6 +41,12 @@ describe("built-in knowledge-auditor role", () => {
 		expect(role.timeoutMs).toBe(300_000);
 		expect(role.promptAppend).toContain("Run `idx audit`");
 		expect(role.promptAppend).toContain("ESCALATE");
+		const decisionGuidance = role.promptAppend!.replace(/\s+/g, " ");
+		expect(decisionGuidance).toContain("Missing rationale is an escalation");
+		expect(decisionGuidance).toContain("reciprocal spec links, evidence versus assumptions");
+		expect(decisionGuidance).toContain("Never invent motives from code");
+		expect(decisionGuidance).toContain("Do not create/accept/supersede decisions yourself");
+		expect(decisionGuidance).toContain("Trivial edits do not need a decision record");
 		expect(generatePrompt({
 			id: "audit",
 			task: "Audit the final knowledge drift",

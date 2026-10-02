@@ -8,6 +8,8 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import UserRound from "@lucide/svelte/icons/user-round";
   import { agentIcon } from "../lib/agent-icons";
+  import { modelProviderBrand } from "../lib/model-display";
+  import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import {
     sessionActivityLabel,
     sessionActivityTone,
@@ -138,7 +140,7 @@
       {@const tooltipId = "session-subagent-status-tooltip-" + index}
       {@const AgentIcon = agentIcon(indicator.preview?.icon)}
       {@const task = indicator.preview?.task?.trim() || indicator.preview?.scope?.trim() || "Task unavailable"}
-      {@const role = indicator.preview?.subagentType?.trim()}
+      {@const role = indicator.preview?.subagentType?.trim() || "auto"}
       <div class="group relative">
         <button
           class={[
@@ -146,7 +148,7 @@
             subagentStatusTone(indicator.agent.status),
           ]}
           type="button"
-          aria-label={"Open session activity. Subagent " + indicator.agent.id + (role ? " (" + role + ")" : "") + ": " + subagentStatusLabel(indicator.agent.status)}
+          aria-label={"Open session activity. Subagent " + indicator.agent.id + " (" + role + "): " + subagentStatusLabel(indicator.agent.status)}
           aria-describedby={tooltipId}
           onclick={onOpenSessionActivity}
         >
@@ -161,40 +163,45 @@
         </button>
         <div
           id={tooltipId}
-          class="pointer-events-auto absolute right-0 bottom-full z-40 hidden w-80 max-w-[calc(100vw-16px)] rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
+          class="pointer-events-auto absolute right-0 bottom-full z-40 hidden w-80 max-w-[calc(100vw-16px)] rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
           role="tooltip"
           data-session-subagent-tooltip
         >
-          <div class="flex min-w-0 items-start gap-2">
-            <span class={["mt-px shrink-0", subagentStatusTone(indicator.agent.status)]}>
-              <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
+          <div class="min-w-0">
             <div class="min-w-0 flex-1">
-              <div class="flex min-w-0 items-center gap-2">
-                <span class="min-w-0 flex-1 truncate font-mono text-xs font-semibold text-foreground" title={role ? `${indicator.agent.id} (${role})` : indicator.agent.id}>
-                  {indicator.agent.id}{role ? ` (${role})` : ""}
+              <div class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1" data-session-subagent-header>
+                <span class={["grid h-4 w-4 shrink-0 place-items-center", subagentStatusTone(indicator.agent.status)]} data-session-subagent-header-icon>
+                  <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
                 </span>
-                <span class={["shrink-0 text-xs font-medium", subagentStatusTone(indicator.agent.status)]}>
+                <span class="-ml-1 max-w-full shrink-0 break-words rounded-sm bg-muted px-1 font-mono text-xs font-semibold leading-4 text-foreground" data-session-subagent-role>
+                  {role}
+                </span>
+                <span class={["ml-auto shrink-0 text-xs font-medium", subagentStatusTone(indicator.agent.status)]}>
                   {subagentStatusLabel(indicator.agent.status)}
                 </span>
                 <span class="shrink-0 font-mono text-xs text-muted-foreground">
                   {formatSessionSubagentElapsed(indicator.agent.startedAt, subagentSnapshot?.checkedAt ?? Date.now())}
                 </span>
               </div>
+              <div class="mt-0.5 truncate font-mono text-xs text-foreground" title={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
+                {indicator.agent.id}
+              </div>
               <div
                 class="mt-0.5 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain pr-1"
                 data-session-subagent-tooltip-body
               >
-                <div class="truncate font-mono text-xs text-muted-foreground" title={indicator.runDir}>
-                  {indicator.runName}
-                </div>
                 <p class="mt-1 break-words text-xs leading-4 text-foreground/80">{task}</p>
               </div>
-              <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
-                <span class="shrink-0 font-mono">{sessionSubagentModelLabel(indicator.preview)}</span>
+              <div class="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-border pt-1.5 text-xs font-semibold text-foreground" data-session-subagent-footer>
+                <span class="inline-flex shrink-0 items-center gap-1.5 font-mono">
+                  {#if modelProviderBrand(indicator.preview?.model ?? "")}
+                    <ModelProviderIcon provider={indicator.preview?.model ?? ""} />
+                  {/if}
+                  {sessionSubagentModelLabel(indicator.preview)}
+                </span>
                 {#if indicator.agent.lastActivity}
                   <span class="text-muted-foreground/50">·</span>
-                  <span class="min-w-0 truncate font-mono text-foreground/80">
+                  <span class="min-w-0 truncate font-mono">
                     {formatSessionSubagentActivity(indicator.agent.lastActivity)}
                   </span>
                 {/if}

@@ -70,7 +70,36 @@ without treating generated answers or audit candidates as semantic proof.
   or unavailable, the existing parent-owned `repo_audit` workflow remains the
   fallback.
 
-## Related files
+## Decision history
+
+Rationale: [0002 — Agent-owned decision history](../docs/decisions/0002-agent-owned-decision-history.md).
+
+- Specs remain the current behavior contract; `docs/decisions/` records why
+  significant choices were made. Use the project's convention and template,
+  not the spec template or an invented idx document kind. This repository uses
+  [the decision log](../docs/decisions/README.md) and its
+  [template](../docs/decisions/TEMPLATE.md). Ordinary Markdown retrieval applies;
+  this does not introduce a database or runtime enforcement.
+- Before significant changes, read linked decisions and, when needed, search
+  the decision directory. Check status and replacement links rather than
+  treating historical reasoning as today's contract.
+- The parent records significant architecture, dependency/model, trade-off or
+  accepted-risk choices while context is available. Keep status, context,
+  evidence versus assumptions, decision/scope, alternatives, consequences and
+  revisit triggers; include owner/approval evidence and recording date. Specs
+  and decisions link both ways. Trivial edits need no record.
+- Attribute reported observations, cite durable sources when available and
+  disclose missing evidence; never reconstruct motives from final code. The
+  parent/user owns acceptance and supersession. New decisions explicitly replace
+  old records, which retain their reasoning and link to the successor.
+- The parent hands decision paths and rationale (or why no new decision was
+  needed) to the auditor along with normal task scope. The auditor checks
+  completeness, source/assumption distinctions, status, reciprocal links and
+  agreement with the current spec; missing or conflicting rationale is an
+  escalation. It may fix small proven links/typos, but never invent, accept or
+  supersede decisions itself. Parent-owned fallback audits use the same checks.
+
+## Implementation and related files
 
 - `external/pi-tools-suite/src/tool-descriptions.ts`
 - `external/pi-tools-suite/src/repo-discovery/index.ts`

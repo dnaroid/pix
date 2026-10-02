@@ -114,6 +114,11 @@ describe("tool descriptions", () => {
 		expect(text).toContain(".indexer-cli/spec-template.md");
 		expect(text).toContain("kind: spec");
 		expect(text).toContain("ask before running setup");
+		expect(text).toContain("read linked decision records");
+		expect(text).toContain("historical rationale is not the current contract");
+		expect(text).toContain("evidence vs assumptions");
+		expect(text).toContain("never invent motives from code");
+		expect(text).toContain("Supersede old decisions explicitly");
 		expect(text).not.toContain("repo_ask");
 		expect(text).not.toMatch(/wiki|include-secondary|action=impact|receiptPath/);
 		for (const tool of [CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Edit, CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Write, codexAliasToolDescriptions(true).applyPatch]) {

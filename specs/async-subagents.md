@@ -19,6 +19,8 @@ Active implemented contract.
 
 ## Purpose
 
+Decision rationale: [0001 — Subagent coding roles](../docs/decisions/0001-subagent-coding-roles.md).
+
 Headless system for running isolated async sub-agents. Each sub-agent is a
 separate `pi --mode rpc` child process that receives a task prompt via stdin
 JSONL and streams RPC events back on stdout. The parent tracks state on disk and
