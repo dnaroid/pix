@@ -366,10 +366,11 @@ describe("desktop visual regressions", () => {
     expect(lspInstallPaneSource).toContain("Continue the agent when you are ready.");
   });
 
-  it("keeps the jump-to-latest arrow nearly transparent over transcript content", () => {
-    expect(transcriptSource).toContain("bg-panel-strong/15");
-    expect(transcriptSource).toContain("backdrop-blur-sm");
-    expect(transcriptSource).toContain("hover:bg-panel-hover/45");
+  it("keeps the jump-to-latest arrow fully transparent over transcript content", () => {
+    expect(transcriptSource).toContain("place-items-center rounded-md bg-transparent text-foreground transition-colors hover:text-primary");
+    expect(transcriptSource).not.toContain("bg-panel-strong/15");
+    expect(transcriptSource).not.toContain("backdrop-blur-sm");
+    expect(transcriptSource).not.toContain("hover:bg-panel-hover/45");
     expect(transcriptSource).not.toContain("bg-panel-strong/70");
   });
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import { join } from "node:path";
 import test from "node:test";
 import { TuiMemoryTrace, TUI_MEMORY_TRACE_MAX_PROFILE_BYTES } from "../src/app/diagnostics/tui-memory-trace.js";
 
@@ -101,7 +102,7 @@ test("allocation profiles rotate three Chrome-compatible files and reject oversi
 		h.profile();
 		await new Promise((resolve) => setImmediate(resolve));
 	}
-	assert.deepEqual(h.writes.map((write) => write.path), [0, 1, 2, 0].map((i) => `/private/trace/allocations-${i}.heapprofile`));
+	assert.deepEqual(h.writes.map((write) => write.path), [0, 1, 2, 0].map((i) => join("/private/trace", `allocations-${i}.heapprofile`)));
 	assert.deepEqual(JSON.parse(h.writes[0]!.contents), { head: {}, samples: [] });
 	h.tick(30);
 	h.profile({ profile: { value: "a".repeat(TUI_MEMORY_TRACE_MAX_PROFILE_BYTES) } });

@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadPiToolsSuiteConfig } from "../config.js";
 import { PI_TOOLS_SUITE_MODULE_NAMES } from "../module-catalog.js";

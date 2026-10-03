@@ -11,17 +11,10 @@ const completeMock = mock(async () => ({
 }));
 
 function installBaseMocks(): void {
+	// Keep the mocked Type contract-complete: bun module mocks are process-global,
+	// so later test files importing pi-ai must not see a partial Type.
 	const piAiMock = createPiAiMock({
-			Type: {
-				Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-				Optional: (schema: any) => ({ kind: "optional", schema }),
-				String: (options?: any) => ({ kind: "string", options }),
-				Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-				Number: (options?: any) => ({ kind: "number", options }),
-				Boolean: (options?: any) => ({ kind: "boolean", options }),
-				Record: (key: any, value: any, options?: any) => ({ kind: "record", key, value, options }),
-				Unknown: (options?: any) => ({ kind: "unknown", options }),
-			},
+			Type: createTypeboxMock().Type,
 			complete: completeMock,
 		});
 	mock.module("@earendil-works/pi-ai", () => piAiMock);
