@@ -1,5 +1,6 @@
 import { loadPiToolsSuiteConfig } from "./config";
 import { publishContextInventoryState } from "./context-inventory";
+import { registerDesktopVisualPrompt } from "./desktop-visual-prompt.js";
 import { isPixOwnedHost } from "./lib/native-pi-tui.js";
 import { PI_TOOLS_SUITE_MODULE_CATALOG, type PiToolsSuiteModuleCatalogEntry } from "./module-catalog.js";
 import { loadSuiteModules } from "./module-loader.js";
@@ -43,6 +44,7 @@ export default async function piToolsSuite(pi: ExtensionAPI) {
 		});
 	}
 	registerProviderWebSearchGuard(pi);
+	registerDesktopVisualPrompt(pi);
 
 	// Register last so the snapshot observes model-specific tool selection after
 	// every module's session/model hooks have run.

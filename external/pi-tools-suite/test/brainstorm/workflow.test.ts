@@ -110,6 +110,7 @@ describe("bounded brainstorm workflow", () => {
 		const cwd = await temp(); let calls = 0;
 		await expect(runBrainstorm({ cwd, topic: "cancelled", config, signal: AbortSignal.abort(), runRound: async (input) => { calls++; return goodRound(input); } })).rejects.toThrow("aborted");
 		expect(calls).toBe(0);
+		await expect(access(path.join(cwd, ".pi"))).rejects.toThrow();
 		await expect(access(path.join(cwd, "docs"))).rejects.toThrow();
 	});
 
@@ -135,8 +136,8 @@ describe("bounded brainstorm workflow", () => {
 		await expect(finalizeBrainstorm(cwd, path.join(cwd, "outside"), "# forged")).rejects.toThrow();
 		const outside = path.join(cwd, "outside");
 		await mkdir(outside);
-		await symlink(outside, path.join(cwd, "docs/brainstorms/escape"));
-		await expect(finalizeBrainstorm(cwd, path.join(cwd, "docs/brainstorms/escape"), "# forged")).rejects.toThrow();
+		await symlink(outside, path.join(cwd, ".pi/brainstorms/escape"));
+		await expect(finalizeBrainstorm(cwd, path.join(cwd, ".pi/brainstorms/escape"), "# forged")).rejects.toThrow();
 		const attempts = await Promise.allSettled([
 			finalizeBrainstorm(cwd, result.runDir, "# final A"),
 			finalizeBrainstorm(cwd, result.runDir, "# final B"),
@@ -191,7 +192,7 @@ describe("bounded brainstorm workflow", () => {
 
 	test("rejects symlinked document roots before creating files outside the project", async () => {
 		const cwd = await temp(), outside = await temp();
-		await symlink(outside, path.join(cwd, "docs"));
+		await symlink(outside, path.join(cwd, ".pi"));
 		await expect(runBrainstorm({ cwd, topic: "escape", config, runRound: goodRound })).rejects.toThrow("symlink");
 		await expect(access(path.join(outside, "brainstorms"))).rejects.toThrow();
 	});

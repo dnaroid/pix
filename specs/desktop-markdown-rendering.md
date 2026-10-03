@@ -61,6 +61,19 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   Markdown render bounded inline media previews with their label as a caption.
   Images lazy-load and open the media viewer when activated; videos expose native
   inline playback controls and their caption opens the viewer.
+- Project/local Markdown images reserve their known intrinsic proportions through
+  loading, errors, and streaming rerenders, bounded by the existing 28rem height
+  cap and available width without cropping or upscaling. Unknown dimensions use
+  a compact fallback until first load, not a fixed square.
+  See [Desktop transcript scrolling](desktop-transcript-scrolling.md).
+- Unchanged project/local image previews retain their actual DOM subtree across
+  streaming HTML updates, including pending resolution, loaded images and error
+  state. Restoration happens before lazy observers run, without a new image load
+  or an intermediate empty frame. Identity includes the original preview markup
+  (scope, path and caption); duplicate occurrences remain distinct. Removed or
+  changed previews are not resurrected, and teardown releases retained nodes.
+  Videos and remote images are outside this retention policy.
+  See [image retention decision](../docs/decisions/0016-streaming-image-dom-retention.md).
 - `file://` media is accepted only after decoding to an absolute existing regular
   file. The backend canonicalizes it and grants scoped asset access only for a
   supported image/video extension. Existing bounded UTF-8 non-media files from

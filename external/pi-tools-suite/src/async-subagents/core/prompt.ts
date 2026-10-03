@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { PROJECT_ARTIFACTS_DIR, PROJECT_SUBAGENTS_DIR } from "../../artifact-paths.js";
 import type { AgentTask } from "./types.js";
 
 export function generatePrompt(task: AgentTask): string {
@@ -25,7 +26,7 @@ ${scopeLine}${imageLine}- Follow the parent task's constraints and repository in
 - Keep output compact by default.
 - Stay within the assigned scope and preserve unrelated work. Do not re-plan the project.
 - Report concrete blockers and gathered evidence rather than widening the task or escalating models yourself.
-- Keep noisy intermediate output in artifacts; return only decision-relevant evidence to the parent.
+- Keep disposable logs, scratch reports, mockups and captures in unique task/run directories under the current project's ${PROJECT_ARTIFACTS_DIR}/; never use project-root artifacts/ or .artifacts/ for scratch output. Harness-owned subagent/QA evidence stays in ${PROJECT_SUBAGENTS_DIR}/; explicit release/build paths and user-requested deliverable paths are exceptions. Return only decision-relevant evidence and artifact paths to the parent.
 - If the task explicitly asks for verbatim/raw file contents, command output, logs, or exact text, output only that content exactly and do not summarize it.
 - If requested raw content is very large, include the requested relevant portion and clearly say what was omitted.
 

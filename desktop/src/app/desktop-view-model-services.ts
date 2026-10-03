@@ -11,6 +11,7 @@ export function createDesktopViewModelServices(options: DesktopViewModelServices
       && options.state.runtimeReady
       && !options.presentation.promptRunning
       && !options.presentation.sessionMutationRunning
+      && !options.presentation.activeBrainstormLink?.owned
       && !options.sessions.history.loading,
     reportError: (error) => options.errors.report(error),
   });

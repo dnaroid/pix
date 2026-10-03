@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import repoDiscoveryExtension, { truncateOutput } from "../src/repo-discovery/index.js";
@@ -31,6 +31,57 @@ type RegisteredCommand = {
 };
 
 describe("repo discovery output truncation", () => {
+	for (const profile of ["baseline", "native-compact"] as const) {
+		test(`${profile}: every repo tool selects another indexed project without changing session cwd`, async () => {
+			const root = mkdtempSync(path.join(tmpdir(), "repo-project-path-"));
+			const other = path.join(root, "other project");
+			mkdirSync(path.join(root, ".indexer-cli"));
+			mkdirSync(path.join(other, ".indexer-cli"), { recursive: true });
+			const restorePath = installFakeIdxOnPath(root);
+			const tools: RegisteredTool[] = [];
+			const calls: Array<{ args: string[]; cwd?: string }> = [];
+			const ctx = { cwd: root };
+			try {
+				repoDiscoveryExtension({
+					registerCommand: () => undefined,
+					registerTool: (tool: RegisteredTool) => tools.push(tool),
+					exec: async (_command: string, args: string[], options: { cwd?: string }) => {
+						calls.push({ args, cwd: options.cwd });
+						return { stdout: "ok", stderr: "", code: 0 };
+					},
+				} as never, { profile, cwd: root });
+				for (const tool of tools) {
+					expect(tool.parameters.properties).toHaveProperty("projectPath");
+					const params = tool.name === "repo_context" ? { query: "behavior", pathPrefix: "src" }
+						: tool.name === "repo_audit" ? { paths: ["src/file.ts"] }
+						: ["repo_ast", "repo_search", "repo_explain", "repo_deps"].includes(tool.name) ? { target: "src/file.ts" } : {};
+					for (const projectPath of [other, "other project", undefined]) {
+						const result = await tool.execute("call", { ...params, projectPath }, undefined, undefined, ctx);
+						expect(result.isError).toBe(false);
+						expect(result.details?.cwd).toBe(projectPath === undefined ? root : other);
+						expect(calls.at(-1)?.cwd).toBe(projectPath === undefined ? root : other);
+						expect(calls.at(-1)?.args).not.toContain(other);
+						expect(ctx.cwd).toBe(root);
+					}
+					const count = calls.length;
+					mkdirSync(path.join(root, "unindexed"), { recursive: true });
+					writeFileSync(path.join(root, "not-directory"), "fixture");
+					for (const projectPath of ["", "  ", "bad\0path", 42, "missing", "not-directory", "unindexed"]) {
+						const result = await tool.execute("call", { ...params, projectPath }, undefined, undefined, ctx);
+						expect(result.isError).toBe(true);
+						if (projectPath === "unindexed") {
+							expect(result.details?.projectRoot).toBe(path.join(root, "unindexed"));
+							expect(result.content[0].text).toContain("Do not run /idx-init");
+						}
+					}
+					expect(calls).toHaveLength(count);
+				}
+				const homeResult = await tools[0].execute("home", { query: "behavior", projectPath: "~/nonexistent-repo-path-fixture" }, undefined, undefined, ctx);
+				expect(homeResult.details?.projectRoot).toBe(path.join(homedir(), "nonexistent-repo-path-fixture"));
+			} finally { restorePath(); rmSync(root, { recursive: true, force: true }); }
+		});
+	}
+
 	test("registered repo tools expose economy guidance without changing execution defaults", async () => {
 		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-discovery-guidance-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));

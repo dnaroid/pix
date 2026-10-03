@@ -36,6 +36,7 @@ Show image and video attachments in the desktop composer and transcript, while k
 ## Behavior
 
 - The composer accepts up to ten files per prompt and supports removal before sending.
+- In the normal conversation composer, `Attach files` is the first action in the `More composer actions` (⋮) menu, not a separate paperclip button in the input row. It is enabled when the conversation target (including a draft session) is ready, including while a response is running. Choosing it closes the menu, restores focus to its trigger, and invokes the existing file picker. Menu arrow-key/type-ahead navigation includes the action. Embedded editors and questionnaire image input retain their direct attachment control; paste and drag-and-drop are unchanged.
 - Images and videos show thumbnail previews. Clicking either opens a modal media viewer.
 - Other files show a compact file tile. Clicking it opens the path with the operating system's default application.
 - Selected and dropped images keep their local path. On submission they become

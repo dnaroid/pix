@@ -17,6 +17,21 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("model.thinkingLevels");
   });
 
+  it("preserves the current row during initialization and empty search", () => {
+    expect(pickerSource).toContain("const initialModel = config.currentModel ?? config.models[0]");
+    expect(pickerSource).toContain("selectedIndex = pickerModelIndex(filteredModels, selectedModelRef, query, visibilityMode)");
+  });
+
+  it("handles effort arrows throughout the dialog without double-stepping radio events", () => {
+    expect(pickerSource).toContain("if (event.defaultPrevented) return;");
+    expect(pickerSource).toContain('!visibilityMode && (event.key === "ArrowLeft" || event.key === "ArrowRight")');
+    expect(pickerSource).toContain('moveThinking(event.key === "ArrowRight" ? 1 : -1, true)');
+    expect(pickerSource).toContain("activateModalDialog(dialogElement, () => search, restoreFocus)");
+    expect(pickerSource).not.toContain("{:else if model.ref === selectedModelRef}");
+    expect(pickerSource).not.toContain("!dirty || disabled");
+    expect(pickerSource).toContain("if (!dirty) {\n      onClose();");
+  });
+
   it("confirms the staged selection with Enter from model rows in select mode only", () => {
     expect(pickerSource).toContain("function handleModelKeydown(event: KeyboardEvent): void {");
     expect(pickerSource).toContain('if (visibilityMode || event.key !== "Enter") return;');

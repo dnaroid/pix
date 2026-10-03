@@ -1,6 +1,8 @@
 import type { AgentState } from "./lib.js";
 
 export interface LiveAgent {
+	/** In-process launches settle only through their final retry/fallback callback. */
+	awaitingCompletion?: boolean;
 	runDir: string;
 	agentId: string;
 	preview?: AgentTaskPreview;

@@ -25,6 +25,19 @@ without treating generated answers or audit candidates as semantic proof.
 
 - Repo-aware tools are available only with indexed project state and an executable
   `idx`. Setup and indexing remain explicit operations.
+- Every `repo_*` tool accepts optional `projectPath`: an explicit project root
+  (absolute, relative to the call's session cwd, or `~/`). Without it, current
+  project discovery is unchanged. With it, `.indexer-cli` must exist directly in
+  that directory; invalid/missing/unindexed roots fail without ancestor fallback,
+  implicit setup, or changes to session cwd. Targets, scopes and audit paths refer
+  to the selected project. Both output profiles support this parameter, and idx
+  calls are queued by selected root. The launch-project registration gate remains
+  unchanged; this parameter selects another project once tools are available.
+- Model-facing tool guidance directs agents to pass `projectPath` for tasks in
+  another project, omit it for the current project, and retain the selected root
+  across related `repo_*` calls. Targets/scopes/audit paths are relative to that
+  root; subsequent file reads resolve returned paths against it, not session cwd.
+  Guidance must not encourage implicit index setup.
 - `repo_context` is the first choice for general behavior/task discovery. It
   retrieves bounded project behavior, documents, implementation and tests; the
   parent model reasons directly over that evidence rather than delegating to a

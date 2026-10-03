@@ -6,7 +6,6 @@
   import type { Attachment } from "../lib/attachments";
   import type { AgentControlState } from "../lib/agent-control";
   import type { ComposerActivity as Activity } from "../lib/composer-activity";
-  import ComposerActivity from "./ComposerActivity.svelte";
   import { desktopCommandDefinition } from "../lib/desktop-commands";
   import {
     isTypeaheadKey,
@@ -23,6 +22,7 @@
   } from "../lib/project-tree";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import PromptComposerActionsMenu from "./PromptComposerActionsMenu.svelte";
+  import PromptComposerActivityRow from "./PromptComposerActivityRow.svelte";
   import PromptComposerControls from "./PromptComposerControls.svelte";
   import PromptQuestionnairePanel from "./PromptQuestionnairePanel.svelte";
   import PromptSlashCommandMenu from "./PromptSlashCommandMenu.svelte";
@@ -175,6 +175,7 @@
   const textareaValue = $derived(composerText());
   const conversationContextKey = $derived(activeSessionId ?? (draftSession ? "pix:desktop-draft-session" : undefined));
   const hasConversationTarget = $derived(!!conversationContextKey);
+  const canChooseAttachments = $derived(!editorMode && !questionMode && hasConversationTarget && ready);
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
   const canSubmitPrompt = $derived(
     !editorMode
@@ -344,6 +345,13 @@
     await onOpenHistory();
   }
 
+  async function chooseAttachmentsFromMenu(): Promise<void> {
+    composerMenuOpen = false;
+    if (!canChooseAttachments) return;
+    composerMenuTrigger?.focus();
+    await onChooseAttachments();
+  }
+
   function toggleComposerMenu(): void {
     if (composerMenuOpen) {
       composerMenuOpen = false;
@@ -361,6 +369,7 @@
 
   function composerMenuNavigationItems(): MenuNavigationItem[] {
     return [
+      { label: "Attach files", disabled: !canChooseAttachments },
       { label: historyCommand.label, disabled: !canOpenPromptHistory },
       { label: enhanceCommand.label, disabled: !canEnhancePrompt },
       { label: createTaskCommand.label, disabled: !canCreateTask },
@@ -525,11 +534,19 @@
 
 <svelte:window onresize={textareaController.resize} onkeydown={handleWindowKeydown} />
 
-<div class={editorMode ? "relative" : "relative bg-panel py-2"}>
+<div class={editorMode ? "relative" : "relative py-2"}>
 <div class={editorMode ? "" : "relative mx-auto w-full max-w-4xl px-6 max-[760px]:px-3"}>
-{#if activity && !editorMode}
+{#if !editorMode}
   {#key activeSessionId}
-    <ComposerActivity {activity} />
+    <PromptComposerActivityRow
+      {activity}
+      {promptRunning}
+      {agentControlState}
+      showControls={!questionMode}
+      {onPause}
+      {onCancel}
+      {onContinue}
+    />
   {/key}
 {/if}
 {#if slashController.open}
@@ -546,6 +563,8 @@
 {#if composerMenuOpen && !editorMode && !questionMode}
   <PromptComposerActionsMenu
     bind:menu={composerMenu}
+    {canChooseAttachments}
+    onChooseAttachments={() => void chooseAttachmentsFromMenu()}
     historyLabel={historyCommand.label}
     enhanceLabel={enhanceCommand.label}
     createTaskLabel={createTaskCommand.label}
@@ -608,6 +627,7 @@
         onRemove={questionnaireController.removeDisplayedAttachment}
       />
       <div class="flex min-w-0 items-end gap-1.5" data-prompt-composer-row>
+        {#if editorMode || questionMode}
         <button
           class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
@@ -621,6 +641,7 @@
         >
           <Paperclip class="h-4 w-4" aria-hidden="true" />
         </button>
+        {/if}
         <div class="relative min-w-0 flex-1 text-sm">
           {#if textareaController.suggestion && !editorMode && !questionMode}
             <div
@@ -658,7 +679,7 @@
           ></textarea>
         </div>
         {#if !editorMode && !questionMode}
-          <div class="flex shrink-0 items-center gap-1">
+          <div class="grid w-23 shrink-0 grid-cols-3 items-center gap-1">
             <PromptComposerControls
               bind:menuTrigger={composerMenuTrigger}
               menuOpen={composerMenuOpen}
@@ -666,13 +687,9 @@
               voiceSupported={voiceController.supported}
               voiceCanStart={voiceController.canStart}
               {promptRunning}
-              {agentControlState}
               canSubmit={canSubmitPrompt}
               onToggleMenu={toggleComposerMenu}
               onToggleVoice={() => void voiceController.toggle()}
-              {onPause}
-              {onCancel}
-              {onContinue}
             />
           </div>
         {/if}

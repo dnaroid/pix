@@ -27,6 +27,7 @@ export function createDesktopStatusBarViewModel(options: {
   sessionActivity: () => StatusBarProps["sessionActivity"];
   sessionSubagentSnapshot: () => StatusBarProps["sessionSubagentSnapshot"];
   sessionTodoSnapshot: () => StatusBarProps["sessionTodoSnapshot"];
+  sessionBrainstormSnapshot?: () => StatusBarProps["sessionBrainstormSnapshot"];
   sessionNeedsInput: () => boolean;
   canClearTodos: () => boolean;
   clearSessionTodos: (sessionId: string) => Promise<boolean>;
@@ -91,6 +92,7 @@ export function createDesktopStatusBarViewModel(options: {
       sessionActivity,
       sessionSubagentSnapshot: options.sessionSubagentSnapshot(),
       sessionTodoSnapshot: options.sessionTodoSnapshot(),
+      sessionBrainstormSnapshot: options.sessionBrainstormSnapshot?.(),
       sessionActivityOpen: options.inspectorPreference.open,
       sessionNeedsInput: options.sessionNeedsInput(),
       canClearTodos: options.canClearTodos(),

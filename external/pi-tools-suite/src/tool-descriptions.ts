@@ -1,4 +1,5 @@
 import { COMPRESS_RANGE_DESCRIPTION } from "./dcp/prompts.js";
+import { PROJECT_ARTIFACTS_DIR } from "./artifact-paths.js";
 import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "./async-subagents/core/agent-catalog.js";
 import { SUBAGENT_DELEGATION_GUIDANCE } from "./async-subagents/core/agent-strategy.js";
 
@@ -160,7 +161,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		description: "First choice for general indexed behavior/task discovery: compact documents plus implementation and tests.",
 		promptSnippet: "Start general behavior/task discovery with repo_context; before a material behavior change, find the primary contract, scope narrowly, and read returned sources directly.",
 		promptGuidelines: [
-			"The parent model owns reasoning and synthesis from retrieved evidence; repo_context is retrieval, not a second answer-generating model.",
+			"For any repo_* tool, pass projectPath when the task targets another project; omit it for the current project. Use the same selected root for related calls and keep targets, scopes and audit paths relative to it. projectPath accepts absolute, session-cwd-relative or ~/ paths, requires .indexer-cli directly in that root, and does not change cwd; do not run setup implicitly. Resolve returned file paths against that root when using read. The parent model owns reasoning and synthesis from retrieved evidence; repo_context is retrieval, not a second answer-generating model.",
 			"Documents remain searchable even without frontmatter. Retrieval rankings are navigation, not authoritative contracts; an empty result does not prove no contract exists.",
 			"Before significant changes, read linked decision records as well as the current spec; search docs/decisions when needed. Check status and superseding links: historical rationale is not the current contract.",
 		],
@@ -338,7 +339,7 @@ export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 	},
 } satisfies Record<string, ToolDescription>;
 
-const SHELL_TEST_OUTPUT_GUIDANCE = "Tests: save full stdout/stderr to a unique log; emit only TEST_RESULT (passed/failed/incomplete), command, original exit code, verified counts (or unknown), and log path. Omit per-test PASS lines; show bounded exact failure diagnostics and flag omissions. Read only needed log ranges, never dump it. Preserve test exit status; timeout/abort is incomplete. Prefer supported compact reporters; do not alter tests/config just to shorten output.";
+const SHELL_TEST_OUTPUT_GUIDANCE = `Tests: save full stdout/stderr to a unique log under the current project's ${PROJECT_ARTIFACTS_DIR}/ (never root artifacts/ or .artifacts/); emit only TEST_RESULT (passed/failed/incomplete), command, original exit code, verified counts (or unknown), and log path. Omit per-test PASS lines; show bounded exact failure diagnostics and flag omissions. Read only needed log ranges, never dump it. Preserve test exit status; timeout/abort is incomplete. Prefer supported compact reporters; do not alter tests/config just to shorten output.`;
 
 export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions | boolean = false) {
 	const repoDiscovery = hasRepoDiscovery(options);

@@ -10,10 +10,13 @@
   final synthesis separately. No separate durable conversation artifact is cited.
 - Governing spec: [brainstorm](../../specs/brainstorm.md)
 - Replaces / replaced by: supersedes [0008](0008-configured-brainstorm-council.md);
-  no successor.
+  [0019](0019-desktop-persistent-council-sessions.md) partially supersedes fresh
+  participants for new Desktop runs; the five-round lifecycle remains unchanged.
 
 Extension: [0010 — Audit council modes](0010-audit-council-modes.md) adds an audit
 scenario and contextual routing; the five-round lifecycle remains in force.
+[0017](0017-brainstorm-v4-protocol-storage.md) bounds later-round history with
+ledgers and adds quorum, local storage and v4 manifests.
 
 ## Context
 

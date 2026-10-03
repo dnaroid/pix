@@ -11,6 +11,8 @@
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
+  import SessionBrainstormStatus from "./SessionBrainstormStatus.svelte";
+  import type { SessionBrainstormSnapshot } from "../lib/session-brainstorm";
 
   type ConfigValue = { value: string; name: string; group?: string };
 
@@ -33,6 +35,7 @@
     sessionActivity,
     sessionSubagentSnapshot,
     sessionTodoSnapshot,
+    sessionBrainstormSnapshot,
     sessionActivityOpen,
     sessionNeedsInput,
     canClearTodos,
@@ -61,6 +64,7 @@
     sessionActivity: SessionActivitySummary;
     sessionSubagentSnapshot: SessionSubagentSnapshot | undefined;
     sessionTodoSnapshot: SessionTodoSnapshot | undefined;
+    sessionBrainstormSnapshot?: SessionBrainstormSnapshot;
     sessionActivityOpen: boolean;
     sessionNeedsInput: boolean;
     canClearTodos: boolean;
@@ -194,6 +198,7 @@
     {/each}
   </div>
 
+  <SessionBrainstormStatus snapshot={sessionBrainstormSnapshot} open={sessionActivityOpen} onOpen={onOpenSessionActivity} />
   <SessionActivityStatusHud
     summary={sessionActivity}
     subagentSnapshot={sessionSubagentSnapshot}

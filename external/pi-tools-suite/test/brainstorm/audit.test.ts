@@ -25,7 +25,7 @@ test("audit uses five distinct audit rounds, retains evidence/history and persis
 	expect(result.status).toBe("awaiting_synthesis");
 	expect(result.mode).toBe("audit");
 	const manifestPath = path.join(result.runDir, "manifest.json");
-	expect(JSON.parse(await readFile(manifestPath, "utf8"))).toMatchObject({ mode: "audit", format: "pi-brainstorm-v3" });
+	expect(JSON.parse(await readFile(manifestPath, "utf8"))).toMatchObject({ mode: "audit", format: "pi-brainstorm-v4" });
 	expect(await readFile(path.join(result.runDir, "brief.md"), "utf8")).toContain("Mode: audit");
 	const draft = "# Audit report\nFinding A: GDD §2 contradicts §3. Confidence: low; severity: high. Playtest hypothesis, no redesign.";
 	const reviewed = await reviewBrainstorm({ cwd: directory, runDir: result.runDir, proposal: draft, runRound: runner });
@@ -77,6 +77,7 @@ test("invalid execution modes fail before artifacts or paid work", async () => {
 	const directory = await cwd();
 	await expect(runBrainstorm({ cwd: directory, topic: "topic", brief: "brief", mode: "auto" as any, config, runRound: async () => { throw new Error("must not run"); } })).rejects.toThrow("Run mode");
 	await expect(access(path.join(directory, "docs"))).rejects.toThrow();
+	await expect(access(path.join(directory, ".pi"))).rejects.toThrow();
 });
 
 test("original v2 runs continue as brainstorm, never as audit", async () => {
@@ -86,8 +87,13 @@ test("original v2 runs continue as brainstorm, never as audit", async () => {
 		if (stage === "finalize") await reviewBrainstorm({ cwd: directory, runDir: result.runDir, proposal: "draft", runRound: goodRound });
 		const file = path.join(result.runDir, "manifest.json");
 		const old = JSON.parse(await readFile(file, "utf8"));
-		old.format = "pi-brainstorm-v2"; delete old.mode;
+		// Original v2 stored texts inline and had no response files.
+		for (const [round, entries] of Object.entries(old.rounds) as [string, any[]][]) {
+			old.rounds[round] = await Promise.all(entries.map(async ({ id, model, file: responseFile }) => ({ id, model, text: await readFile(path.join(result.runDir, responseFile), "utf8") })));
+		}
+		old.format = "pi-brainstorm-v2"; delete old.mode; delete old.config.outputDir; delete old.config.thinkingOverrides; delete old.config.modelsExplicit;
 		await writeFile(file, JSON.stringify(old));
+		await rm(path.join(result.runDir, "rounds"), { recursive: true });
 		if (stage === "review") {
 			const reviewed = await reviewBrainstorm({ cwd: directory, runDir: result.runDir, proposal: "draft", runRound: async (input) => {
 				expect(input.tasks[0]!.task).toContain("Mode: brainstorm");
@@ -96,7 +102,12 @@ test("original v2 runs continue as brainstorm, never as audit", async () => {
 			} });
 			expect(reviewed.mode).toBe("brainstorm");
 		} else await finalizeBrainstorm(directory, result.runDir, "final", "no changes");
-		expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({ format: "pi-brainstorm-v3", mode: "brainstorm" });
+		const migrated = JSON.parse(await readFile(file, "utf8"));
+		expect(migrated).toMatchObject({ format: "pi-brainstorm-v4", mode: "brainstorm" });
+		for (const entry of migrated.rounds["1"]) {
+			expect(entry.text).toBeUndefined();
+			expect(await readFile(path.join(result.runDir, entry.file), "utf8")).toBe(`Finding 1 from ${entry.model}: GDD §2; confidence low; validate via playtest.`);
+		}
 	}
 });
 

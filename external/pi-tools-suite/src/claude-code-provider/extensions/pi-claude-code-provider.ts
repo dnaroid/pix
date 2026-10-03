@@ -16,7 +16,7 @@ import { flushMetricsLog, getLastRequestMetrics, getLastSearchMetrics, getMetric
 import { createClaudeStream } from "../src/provider.ts";
 import { cleanupStaleRuntimeDirectories, createRuntimeDirectory } from "../src/runtime-directories.ts";
 import { SessionImageStore } from "../src/session-image-store.ts";
-import { resolveSession, sessionRegistry } from "../src/session-registry.ts";
+import { resolveSession, sessionRegistry, type SessionEntry } from "../src/session-registry.ts";
 import { searchWithClaude } from "../src/web-search.ts";
 import type { RateLimitNotice } from "../src/claude-protocol.ts";
 import type { RuntimeCleanupResult } from "../src/runtime-directories.ts";
@@ -52,6 +52,16 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
   // because Pi's model runtime keeps only the newest provider.
   const sessions = sessionRegistry();
   let ownSessionId: string | undefined;
+  let ownSessionEntry: SessionEntry | undefined;
+  const releaseRegistration = (): void => {
+    // Workspace replacement starts the candidate before shutting down its
+    // predecessor, retaining the same session ID. Only remove our own record.
+    if (ownSessionId !== undefined && sessions.get(ownSessionId) === ownSessionEntry) {
+      sessions.delete(ownSessionId);
+    }
+    ownSessionId = undefined;
+    ownSessionEntry = undefined;
+  };
 
   const streamSimple = createClaudeStream(installation, {
     resolveSession: (request) => resolveSession(sessions, {
@@ -104,13 +114,14 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     // forked or cloned session and the command handler then rebinds again, so
     // `session_start` arrives twice with no shutdown between. Dropping the earlier
     // id is what keeps that second bind from orphaning the first one's entry.
-    if (ownSessionId !== undefined) sessions.delete(ownSessionId);
+    releaseRegistration();
     ownSessionId = ctx.sessionManager.getSessionId();
-    sessions.set(ownSessionId, {
+    ownSessionEntry = {
       cwd: ctx.cwd,
       imageStore,
       onRateLimitNotice: (notice) => activeRateLimitNotify?.(notice),
-    });
+    };
+    sessions.set(ownSessionId, ownSessionEntry);
     const platformWarning = startupPlatformWarning(currentPlatform);
     if (platformWarning) ctx.ui.notify(`${NOTICE_PREFIX} ${platformWarning}`, "warning");
     if (searchRegistrationAttempted) return;
@@ -127,8 +138,7 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
   pi.on("session_shutdown", async () => {
     activeRateLimitNotify = undefined;
     // Only this instance's own entry: another instance's sessions stay live.
-    if (ownSessionId !== undefined) sessions.delete(ownSessionId);
-    ownSessionId = undefined;
+    releaseRegistration();
     // The registration is shared, so it outlives whichever instance made it and
     // is withdrawn only once no session is left to serve.
     if (sessions.size === 0) compat?.unregisterApiProviders(PROVIDER);

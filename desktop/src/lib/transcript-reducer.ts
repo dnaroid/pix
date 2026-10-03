@@ -9,6 +9,7 @@ import {
 } from "./transcript-timing";
 import type { MessageRole, ToolItem, TranscriptItem, TranscriptState } from "./transcript-types";
 import { skillReadName } from "./tool-presentation";
+import { inferToolAction } from "./tool-activity";
 
 interface ReducerIndexes {
   readonly messages: Map<string, number>;
@@ -232,6 +233,8 @@ function upsertTool(
       ...existing,
       ...patch,
       skillName,
+      activityAction: patch.rawInput !== undefined || patch.name !== undefined || patch.title !== undefined || patch.kind !== undefined
+        ? inferToolAction({ ...existing, ...patch }) : existing.activityAction,
       ...(existing.startedAtMs !== undefined && patch.startedAtMs !== undefined
         ? { startedAtMs: existing.startedAtMs }
         : {}),
@@ -251,6 +254,7 @@ function upsertTool(
     status: patch.status ?? "pending",
     ...(patch.rawInput !== undefined ? { rawInput: patch.rawInput } : {}),
     ...(skillName ? { skillName } : {}),
+    activityAction: inferToolAction({ name: patch.name, title: patch.title ?? "Tool call", kind: patch.kind ?? "other", rawInput: patch.rawInput }),
     ...(patch.rawOutput !== undefined ? { rawOutput: patch.rawOutput } : {}),
     content: patch.content ?? "",
     diffs: patch.diffs ?? [],

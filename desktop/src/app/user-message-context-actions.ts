@@ -24,21 +24,14 @@ export function createUserMessageContextActions(
     }
     if (message.sessionEntryId) return message.sessionEntryId;
 
-    const branchMessages = await requestClient.branchUserMessages(sessionId);
-    if (requestClient !== options.client() || sessionId !== options.state.sessionId) {
-      throw new Error("The active conversation changed while resolving the message.");
+    // History carries the persisted entry identity, not a position in the visible
+    // tail. Hidden entries and in-flight prompts make positional offsets unsafe.
+    const replayPrefix = "replay-entry:";
+    if (message.messageId?.startsWith(replayPrefix)) {
+      const entryId = message.messageId.slice(replayPrefix.length);
+      if (entryId) return entryId;
     }
-    const visibleUsers = options.state.transcript.items.filter(
-      (item): item is MessageItem => item.type === "message" && item.role === "user" && !item.localOnly,
-    );
-    const visibleIndex = visibleUsers.findIndex((item) => item.id === message.id);
-    if (visibleIndex < 0) throw new Error("User message is no longer visible.");
-
-    const offset = branchMessages.length - visibleUsers.length;
-    if (offset < 0) throw new Error("Could not resolve this message on the active session branch.");
-    const resolved = branchMessages[offset + visibleIndex];
-    if (!resolved) throw new Error("Could not resolve this message on the active session branch.");
-    return resolved.entryId;
+    throw new Error("This message's session entry is not available yet. Wait for the prompt to finish or reload the conversation.");
   }
 
   async function runUserMessageContextAction(

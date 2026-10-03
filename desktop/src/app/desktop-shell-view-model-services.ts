@@ -21,6 +21,7 @@ export function createDesktopShellViewModelServices(
     modelConfig: options.model.config,
     preferences: options.model.preferences,
     quotaWait: options.quotaWait,
+    focusComposer: options.focusComposer,
   });
 
   const statusBar = createDesktopStatusBarViewModel({
@@ -37,6 +38,7 @@ export function createDesktopShellViewModelServices(
     sessionActivity: () => options.presentation.activeSessionActivity,
     sessionSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
     sessionTodoSnapshot: () => options.presentation.activeTodoSnapshot,
+    sessionBrainstormSnapshot: () => options.presentation.activeBrainstormSnapshot,
     sessionNeedsInput: () => options.presentation.activePendingElicitation !== null,
     canClearTodos: () => Boolean(
       options.state.sessionId && todoActions.canClear(options.state.sessionId),

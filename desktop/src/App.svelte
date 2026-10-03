@@ -665,11 +665,13 @@
     workbenchTabs: () => workbenchTabs,
     activeTodoSnapshot: () => presentationState.activeTodoSnapshot,
     activeSubagentSnapshot: () => presentationState.activeSubagentSnapshot,
+    activeBrainstormSnapshot: () => presentationState.activeBrainstormSnapshot,
     sessionInspectorOpen: () => sessionInspectorOpen,
     setSessionInspectorOpen,
     markSessionTabViewed: sessionTabAttention.clear,
   });
   const viewModels = createDesktopViewModelServices({
+    focusComposer: () => promptComposer?.focus(),
     platform: desktopShortcutPlatform,
     workspace: () => workspace,
     status: () => status,
@@ -712,6 +714,7 @@
 
   onMount(() => installDesktopContextMenu({ reportError, workspace: () => workspace }));
   onMount(desktopLifecycle.start);
+  onMount(nativeNotifications.start);
   onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
   onMount(desktopWatchRestart.start);
 

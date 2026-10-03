@@ -96,6 +96,11 @@ agent's session-local todo list.
     debounced/coalesced; a failed local write never enters the remote sync queue.
     If the Registry session is busy, the dirty task state remains pending until
     an idle sync window is available.
+15. The full-panel `Loading tasks…` state is used only until a valid task
+    document has been loaded for the current workspace. Subsequent reads keep
+    the existing list (including an empty list) visible until replacement data
+    arrives, without flashing a loading screen. Conflicting controls remain
+    disabled during the read; read failures still show the storage error.
 
 ## Contracts
 
@@ -164,6 +169,8 @@ agent's session-local todo list.
 
 ## Verification
 
+- `desktop/src/app/project-tasks-store.test.ts` covers initial versus repeat
+  loading, empty snapshots, workspace switches, reset, and stale read completion.
 - `desktop/src/lib/project-tasks.test.ts` covers untitled composer task creation,
   parsing, prompt generation, and drag/reorder semantics.
 - `desktop/src/lib/attachments.test.ts` covers data-URL decoding used when a

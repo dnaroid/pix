@@ -51,6 +51,18 @@ test("put atomically replaces another id mapped to the same Pi session path", as
 	assert.equal(await store.get("native-id"), undefined);
 });
 
+test("native discovery and renaming preserve explicit brainstorm linkage without parsing names", async () => {
+	const store = new SessionMapStore(await tempMapPath(), LOGGER);
+	const brainstorm = { runId: "run", parentSessionId: "parent", slot: 2, owned: true };
+	await store.put(record("participant", { brainstorm, title: "[BS:run] P2 zai/exact" }));
+	await store.mergeByPiSessionPath([record("native-id", { piSessionPath: record("participant").piSessionPath, title: "arbitrary renamed title" })]);
+	assert.deepEqual((await store.get("participant"))?.brainstorm, brainstorm);
+	assert.equal((await store.get("participant"))?.title, "arbitrary renamed title");
+	assert.equal(await store.get("native-id"), undefined);
+	await store.touch("participant", "another name");
+	assert.deepEqual((await store.get("participant"))?.brainstorm, brainstorm);
+});
+
 test("concurrent mutations preserve every session", async () => {
 	const path = await tempMapPath();
 	const store = new SessionMapStore(path, LOGGER);

@@ -9,6 +9,7 @@ export interface ContextInventoryState {
 	readonly thinking?: string;
 	readonly tools: readonly string[];
 	readonly skills: readonly string[];
+	readonly contextFiles?: readonly string[];
 	readonly agents?: readonly string[];
 }
 
@@ -17,6 +18,8 @@ export function parseContextInventoryState(value: unknown): ContextInventoryStat
 	const tools = stringList(value.tools);
 	const skills = stringList(value.skills);
 	if (!tools || !skills) return undefined;
+	const contextFiles = value.contextFiles === undefined ? undefined : stringList(value.contextFiles);
+	if (value.contextFiles !== undefined && !contextFiles) return undefined;
 	const agents = value.agents === undefined ? undefined : stringList(value.agents);
 	if (value.agents !== undefined && !agents) return undefined;
 	const reason = contextInventoryReason(value.reason);
@@ -37,6 +40,7 @@ export function parseContextInventoryState(value: unknown): ContextInventoryStat
 		...(thinking ? { thinking } : {}),
 		tools,
 		skills,
+		...(contextFiles === undefined ? {} : { contextFiles }),
 		...(agents === undefined ? {} : { agents }),
 	};
 }
@@ -64,6 +68,8 @@ export function formatReloadContextInventory(
 		heading,
 		"",
 		`Model: ${model}`,
+		"",
+		`Context files (in context):${formatContextFiles(state.contextFiles)}`,
 		"",
 		`Skills (in context): ${listOrNone(state.skills)}`,
 		"",
@@ -121,6 +127,16 @@ function listOrNone(values: readonly string[]): string {
  */
 function escapeMarkdownIdentifier(value: string): string {
 	return value.replace(/_/gu, "\\_");
+}
+
+function escapeMarkdownPath(value: string): string {
+	return value.replace(/[\\`*_{}\[\]()#+.!|>~-]/gu, "\\$&");
+}
+
+function formatContextFiles(paths: readonly string[] | undefined): string {
+	if (paths === undefined) return " (inventory unavailable)";
+	if (paths.length === 0) return " (none)";
+	return `\n${paths.map((path) => `- ${escapeMarkdownPath(path)}`).join("\n")}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

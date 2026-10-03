@@ -44,6 +44,7 @@ Add live views of the active session's execution Plan and Subagents to Pix Deskt
 - The bridge stays channel-agnostic; adding Subagents does not add another ACP method or transport.
 - Startup events must not be lost while the pi RPC subprocess is starting. The ACP wrapper subscribes before startup and the session is registered before events can be routed.
 - Desktop validates the generic notification and each channel payload independently. Malformed, unknown-version, stale, or wrong-session data is ignored.
+- The removed `workspace` tool no longer changes conversation cwd. Legacy `workspace` state envelopes do not update ACP session cwd, the translator, persisted session-map records or Desktop catalog cwd. See [Conversation workspace](workspace.md).
 
 ## Behavior
 

@@ -159,6 +159,25 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 15. **Exit handling**: waits 10ms for stdio flush, then finalizes. Exit-code resolution: timed_out→124, completedFromAgentEnd→0, lastAgentEndError→1, numeric→code, signal→128, else→1. `[confirmed by code]`
 16. **Parent billing accounting**: every finalized child assistant `message_end` with valid provider/model/usage is mirrored into the originating parent session through a durable `appendUsage("async-subagent", ...)` record. The spawn tool uses the captured parent session manager rather than whichever tab/session is active when a background child later finishes. Retries and provider/model fallbacks therefore record every billable child call. `[confirmed by code and async-subagents-usage.test.ts]`
 
+### Parent completion delivery
+
+- Every tracked child's terminal status (`done`, `failed`, or `stopped`) sends
+  an `async-subagents-agent-completion` custom message with result retrieval
+  instructions via `triggerTurn: true` and `deliverAs: "followUp"`. An idle
+  parent starts a new turn; a busy parent receives a queued follow-up rather
+  than an interruption. `[confirmed by code, index.ts/core/notifications.ts]`
+- Completion callbacks and the two-second disk watcher share reconciliation:
+  removing the tracked child before delivery prevents duplicate notifications.
+  In-process launches wait for their final retry/fallback callback rather than
+  treating an intermediate attempt's disk receipt as final. The watcher handles
+  running children adopted after extension reload.
+- A completion belonging to another session stays pending until that parent
+  session is active again. Session shutdown suppresses wakeups and keeps pending
+  entries untouched during cleanup.
+- Deterministic entrypoint tests cover idle-parent delivery, terminal statuses,
+  duplicate refreshes, session isolation and shutdown suppression in
+  `external/pi-tools-suite/test/async-subagents/tools.test.ts`.
+
 ### Concurrency (`core/concurrency.ts`)
 - `createSemaphore(limit)`: `limit ≤ 0` = unlimited. `acquire(signal?)` queues when full, rejects on abort. `[confirmed by code]`
 - Project-scoped semaphores cached in a `PROJECT_SEMAPHORES` Map keyed by resolved cwd; reused if same limit or if active/waiting > 0. `[confirmed by code, tools/spawn.ts ~50-58]`

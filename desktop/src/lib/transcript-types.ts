@@ -1,6 +1,7 @@
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
 import type { Attachment } from "./attachments";
 import type { ToolDiff } from "./diff";
+import type { InferredToolAction } from "./tool-activity";
 
 export type MessageRole = "user" | "assistant" | "thought" | "system";
 
@@ -29,6 +30,8 @@ export interface ToolItem {
   readonly rawInput?: unknown;
   /** Cached name for SKILL.md reads; collapsed headers never inspect rawInput. */
   readonly skillName?: string;
+  /** Fixed safe action inferred once from tool arguments at ingestion. */
+  readonly activityAction?: InferredToolAction;
   readonly rawOutput?: unknown;
   readonly content: string;
   readonly diffs: readonly ToolDiff[];

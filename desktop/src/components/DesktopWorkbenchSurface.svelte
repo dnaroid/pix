@@ -33,6 +33,7 @@
     transcript,
     queue,
     composer,
+    managedCouncil,
     preview,
     previewVisible,
     gitDiff,
@@ -56,6 +57,7 @@
     transcript: Omit<ComponentProps<typeof TranscriptPane>, "pane" | "content">;
     queue: ComponentProps<typeof QueuedMessagesPanel>;
     composer: Omit<ComponentProps<typeof PromptComposer>, "promptText">;
+    managedCouncil?: { runId: string; slot: number; owned: boolean; onOpenParent: () => void };
     preview: ComponentProps<typeof PreviewPane> | null;
     previewVisible: boolean;
     gitDiff: ComponentProps<typeof GitDiffPane> | null;
@@ -107,12 +109,20 @@
         <TranscriptPane bind:pane={transcriptPane} bind:content={transcriptContent} {...transcript} />
       {/if}
 
-      <div class="row-start-3 min-w-0 bg-panel" style:padding-right={`${transcriptScrollbarGutter}px`}>
+      <div class="row-start-3 min-w-0" style:padding-right={`${transcriptScrollbarGutter}px`}>
+        {#if managedCouncil}
+          <div class="flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground" role="status">
+            <span>Brainstorm {managedCouncil.runId} · P{managedCouncil.slot}{managedCouncil.owned ? " · Managed by orchestrator — read only" : " · Finished"}</span>
+            <button class="shrink-0 rounded px-2 py-1 text-foreground hover:bg-muted focus-visible:outline focus-visible:outline-ring" onclick={managedCouncil.onOpenParent}>Open orchestrator</button>
+          </div>
+        {/if}
+        {#if !managedCouncil?.owned}
         <PromptComposer bind:this={promptComposer} bind:promptText {...composer}>
           {#snippet queuedMessages()}
             <QueuedMessagesPanel {...queue} />
           {/snippet}
         </PromptComposer>
+        {/if}
       </div>
     </div>
 

@@ -11,6 +11,7 @@ import {
 	type RecoveryCaseId,
 } from "./recovery-corpus.js";
 import { readRecoveryProbeEvents, type RecoveryProbeEvent } from "./recovery-provenance.js";
+import { resolveEvalOutputDir } from "./harness/output-dir.js";
 import { renderRecoveryMarkdown, toSafeRecoveryRun, type RecoverySafeRun } from "./recovery-report.js";
 import { buildRecoveryRunIdentity, RECOVERY_REPORT_VERSION } from "./recovery-run-identity.js";
 import { parseEvalModels, runEvalCase } from "./harness/runner.js";
@@ -39,9 +40,7 @@ const PACKAGE_ROOT = path.resolve(HERE, "..", "..");
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, "..", "..");
 const timeoutMs = Number(process.env.PI_TOOLS_SUITE_EVAL_TIMEOUT_MS ?? 240_000);
 const streamIo = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_STREAM_IO ?? "");
-const outputDir = process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR
-	? path.resolve(process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR)
-	: path.resolve(HERE, "artifacts", `context-gateway-recovery-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+const outputDir = resolveEvalOutputDir("context-gateway-recovery", process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR);
 const identity = buildRecoveryRunIdentity({
 	packageRoot: PACKAGE_ROOT,
 	repoRoot: REPO_ROOT,

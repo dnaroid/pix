@@ -1,4 +1,5 @@
 import path from "node:path";
+import { homedir } from "node:os";
 import { REPO_DISCOVERY_TOOLS } from "../tool-descriptions";
 import { commandAvailable, directoryExists, findProjectRoot, hasAvailableIndexedProjectRoot } from "../lib/project.js";
 import {
@@ -24,6 +25,7 @@ const idxExecutionQueues = new Map<string, Promise<void>>();
 type IdxCommand = (typeof IDX_COMMANDS)[number];
 type RepoDiscoveryParams = {
 	command: IdxCommand;
+	projectPath?: string;
 	target?: string;
 	args?: string[];
 	maxLines?: number;
@@ -35,6 +37,7 @@ type RepoDiscoveryWrapperParams = Omit<RepoDiscoveryParams, "command">;
 
 type KnowledgeCommand = "context" | "audit";
 type KnowledgeParams = {
+	projectPath?: string;
 	query?: string;
 	paths?: string[];
 	budget?: number;
@@ -120,8 +123,18 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 	return value > 0 ? value : fallback;
 }
 
-function ensureIndexedProject(cwd: string, toolName: string) {
-	const projectRoot = findProjectRoot(cwd);
+function ensureIndexedProject(cwd: string, toolName: string, projectPath?: string) {
+	if (projectPath !== undefined && (typeof projectPath !== "string" || !projectPath.trim() || projectPath.includes("\0"))) {
+		return { error: `${toolName} projectPath must be a nonempty directory path without NUL characters.` };
+	}
+	// An explicit root must not silently fall back to an indexed ancestor.
+	let expanded = projectPath;
+	if (projectPath === "~") expanded = homedir();
+	else if (projectPath?.startsWith("~/")) expanded = path.join(homedir(), projectPath.slice(2));
+	const projectRoot = expanded === undefined ? findProjectRoot(cwd) : path.resolve(cwd, expanded);
+	if (!directoryExists(projectRoot)) {
+		return { projectRoot, error: `${toolName} project directory does not exist: ${projectRoot}` };
+	}
 	if (!commandAvailable("idx")) {
 		return {
 			projectRoot,
@@ -140,7 +153,9 @@ function ensureIndexedProject(cwd: string, toolName: string) {
 		error: [
 			`${toolName} is disabled because this project is not indexed: ${projectRoot}`,
 			"Missing .indexer-cli in the project root.",
-			"Ask the user for explicit permission to initialize and index this project with /idx-init, then run /reload.",
+			projectPath === undefined
+				? "Ask the user for explicit permission to initialize and index this project with /idx-init, then run /reload."
+				: "Ask the user for explicit permission to run idx init in the specified project directory. Do not run /idx-init in the current session's project instead.",
 		].join("\n"),
 	};
 }
@@ -348,8 +363,8 @@ async function executeKnowledgeCommand(pi: ExtensionAPI, command: KnowledgeComma
 		(params.maxBytes !== undefined && (!Number.isSafeInteger(params.maxBytes) || params.maxBytes < 1 || params.maxBytes > maxBytes))) {
 		return textResult(`${name} output limits must be positive integers within ${maxLines} lines and ${maxBytes} bytes.`, true);
 	}
-	const indexedProject = ensureIndexedProject(ctx.cwd, name);
-	if (indexedProject.error) return textResult(indexedProject.error, true, { projectRoot: indexedProject.projectRoot });
+	const indexedProject = ensureIndexedProject(ctx.cwd, name, params.projectPath);
+	if (indexedProject.error !== undefined) return textResult(indexedProject.error, true, { projectRoot: indexedProject.projectRoot });
 	const result = await runQueuedIdx(indexedProject.projectRoot, () => pi.exec("idx", idxArgs, { cwd: indexedProject.projectRoot, signal, timeout: 180_000 }));
 	const output = [result.stdout, result.stderr].filter(Boolean).join(result.stdout && result.stderr ? "\n" : "") || "No output";
 	const truncated = native
@@ -388,8 +403,8 @@ async function executeRepoDiscovery(
 	const idxArgs = buildIdxArgs(effectiveParams, toolName);
 	if (typeof idxArgs === "string") return textResult(idxArgs, true);
 
-	const indexedProject = ensureIndexedProject(ctx.cwd, toolName);
-	if (indexedProject.error) return textResult(indexedProject.error, true, { projectRoot: indexedProject.projectRoot });
+	const indexedProject = ensureIndexedProject(ctx.cwd, toolName, params.projectPath);
+	if (indexedProject.error !== undefined) return textResult(indexedProject.error, true, { projectRoot: indexedProject.projectRoot });
 
 	const result = await runQueuedIdx(indexedProject.projectRoot, () => pi.exec("idx", idxArgs, { cwd: indexedProject.projectRoot, signal, timeout: 120_000 }));
 	const exitCode = result.code ?? 0;
@@ -410,6 +425,8 @@ async function executeRepoDiscovery(
 		...(policyOutcome ? { nativePolicy: policyOutcome } : {}),
 	});
 }
+
+const PROJECT_PATH_SCHEMA = stringSchema("Optional project root directory (absolute, relative to session cwd, or ~/). Defaults to the current project. Must already contain .indexer-cli; does not change session cwd. Targets, scopes and audit paths are relative to this project.");
 
 const BASELINE_REPO_TOOL_PROPERTIES = {
 	maxLines: numberSchema("Returned line cap, keeps top lines (default 2000). Prefer native limits/cursors before raising.", DEFAULT_MAX_LINES),
@@ -451,6 +468,7 @@ function repoToolParameters(command: IdxCommand, targetDescription: string | und
 		? NATIVE_COMPACT_REPO_TOOL_PROPERTIES
 		: BASELINE_REPO_TOOL_PROPERTIES;
 	const properties = {
+		projectPath: PROJECT_PATH_SCHEMA,
 		args: argsSchema(command, profile),
 		...outputProperties,
 		...(profile === "native-compact" ? {
@@ -521,7 +539,7 @@ function registerKnowledgeCommand(pi: ExtensionAPI, command: KnowledgeCommand, p
 	};
 	pi.registerTool({
 		...description,
-		parameters: { type: "object", properties: { ...properties, ...limits, ...outputMode }, required: [command === "audit" ? "paths" : "query"], additionalProperties: false },
+		parameters: { type: "object", properties: { projectPath: PROJECT_PATH_SCHEMA, ...properties, ...limits, ...outputMode }, required: [command === "audit" ? "paths" : "query"], additionalProperties: false },
 		async execute(_toolCallId: string, params: KnowledgeParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ToolContext) {
 			return executeKnowledgeCommand(pi, command, params, signal, ctx, profile);
 		},

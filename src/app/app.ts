@@ -218,7 +218,7 @@ export class PiUiExtendApp {
 		});
 		this.screenStyler = new ScreenStyler({
 			theme: this.theme,
-			cwd: this.options.cwd,
+			get cwd() { return app.runtime?.cwd ?? app.options.cwd; },
 			get mouseSelection() { return app.mouseController.mouseSelection; },
 		});
 		this.toastController = new AppToastController({
@@ -230,7 +230,7 @@ export class PiUiExtendApp {
 			render: () => this.render(),
 		});
 		this.statusController = new AppStatusController({
-			cwd: this.options.cwd,
+			get cwd() { return app.runtime?.cwd ?? app.options.cwd; },
 			theme: this.theme,
 			blinkController: this.blinkController,
 			runtimeSession: () => this.runtime?.session,
@@ -485,7 +485,7 @@ export class PiUiExtendApp {
 			render: () => this.render(),
 		});
 		this.subagentsWidgetController = new AppSubagentsWidgetController({
-			cwd: this.options.cwd,
+			get cwd() { return app.runtime?.cwd ?? app.options.cwd; },
 			hasActiveRuntime: () => this.runtime !== undefined,
 			sessionFile: () => this.runtime?.session.sessionFile,
 			isRunning: () => this.running,
@@ -596,7 +596,7 @@ export class PiUiExtendApp {
 			get entryRenderVersions() { return app.sessionEvents.entryRenderVersions; },
 			get superCompactTools() { return app.superCompactTools; },
 			get allThinkingExpanded() { return app.allThinkingExpanded; },
-			cwd: this.options.cwd,
+			get cwd() { return app.runtime?.cwd ?? app.options.cwd; },
 			colors: this.theme.colors,
 			pixConfig: this.pixConfig,
 			outputFilters: this.outputFilters,
@@ -769,7 +769,7 @@ export class PiUiExtendApp {
 				tabsLifecycleGeneration: () => this.tabsController.lifecycleGeneration,
 				theme: () => this.theme,
 				modelColors: () => this.pixConfig.modelColors,
-				cwd: () => this.options.cwd,
+				cwd: () => this.runtime?.cwd ?? this.options.cwd,
 				enhancePrompt: () => this.promptEnhancer.enhancePrompt(),
 				openNewTab: () => {
 					void this.tabsController.openNewTab();
@@ -850,7 +850,7 @@ export class PiUiExtendApp {
 			render: () => this.render(),
 		});
 		this.shellController = new AppShellController({
-			cwd: this.options.cwd,
+			get cwd() { return app.runtime?.cwd ?? app.options.cwd; },
 			isRunning: () => this.running,
 			activeScopeKey: () => this.tabsController.activeInputTabId(),
 			addEntry: (entry) => this.addEntry(entry),
@@ -891,7 +891,7 @@ export class PiUiExtendApp {
 				sendShellInput: (text) => this.shellController.sendInput(text),
 				interruptShellCommand: () => this.shellController.interrupt(),
 				runInteractiveShellCommand: (command) => this.terminalController.runWithInteractiveTerminal(
-					() => runInteractiveShellCommand(command, this.options.cwd),
+					() => runInteractiveShellCommand(command, this.runtime?.cwd ?? this.options.cwd),
 				),
 				stop: () => this.stop(),
 				render: () => this.render(),
@@ -902,7 +902,7 @@ export class PiUiExtendApp {
 		);
 		this.inputController = new AppInputController({
 			inputEditor: this.inputEditor,
-			cwd: this.options.cwd,
+			get cwd() { return app.runtime?.cwd ?? app.options.cwd; },
 			inputScopeKey: () => this.tabsController.activeInputTabId(),
 			handleExtensionTerminalInput: (data) => this.extensionUiController.handleTerminalInput(data),
 			extensionInputUsesEditor: () => this.extensionUiController.activeCustomUiUsesEditor(),

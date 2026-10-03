@@ -24,6 +24,11 @@ export function agentControlAllowsAutoQueue(state: AgentControlState | undefined
   return (state ?? "idle") === "idle";
 }
 
+/** Loaded paused transcripts rehydrate as continuable; both need the pause tab glyph. */
+export function agentControlShowsPausedTab(state: AgentControlState): boolean {
+  return state === "paused" || state === "continuable";
+}
+
 export function agentPauseJustTriggered(
   previous: { sessionId: string | null; state: AgentControlState } | undefined,
   current: { sessionId: string | null; state: AgentControlState },

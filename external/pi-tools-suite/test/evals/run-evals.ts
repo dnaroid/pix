@@ -1,7 +1,5 @@
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { EVAL_CASES } from "./cases.js";
+import { resolveEvalOutputDir } from "./harness/output-dir.js";
 import { caseAppliesToModel, caseIsSelected, parseEvalModels, parseEvalSelection, runEvalCase } from "./harness/runner.js";
 import { writeEvalReport } from "./harness/report.js";
 import type { EvalReport, EvalRunResult } from "./harness/types.js";
@@ -16,9 +14,7 @@ const selection = parseEvalSelection();
 const timeoutMs = Number(process.env.PI_TOOLS_SUITE_EVAL_TIMEOUT_MS ?? 240_000);
 const keepProject = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_KEEP ?? "");
 const streamIo = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_STREAM_IO ?? "");
-const outputDir = process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR
-	? path.resolve(process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR)
-	: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "artifacts", new Date().toISOString().replace(/[:.]/g, "-"));
+const outputDir = resolveEvalOutputDir("report", process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR);
 
 const startedAt = new Date().toISOString();
 const results: EvalRunResult[] = [];

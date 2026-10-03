@@ -84,7 +84,7 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     sessions = sessions.filter((session) => session.sessionId !== sessionId);
   }
 
-  function updateInfo(sessionId: string, patch: Pick<SessionInfo, "title" | "updatedAt">): void {
+  function updateInfo(sessionId: string, patch: Partial<Pick<SessionInfo, "cwd" | "title" | "updatedAt">>): void {
     sessions = sessions.map((session) => session.sessionId === sessionId
       ? { ...session, ...patch }
       : session);

@@ -1,15 +1,18 @@
 import type { StopReason } from "@agentclientprotocol/sdk";
+import { invoke } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { AgentControlState } from "./agent-control";
 
 type NativeNotificationApi = {
   isPermissionGranted: () => Promise<boolean>;
   requestPermission: () => Promise<NotificationPermission>;
-  sendNotification: (options: { title: string; body?: string }, onClick: () => void) => void;
+  sendNotification: (options: { title: string; body?: string; sessionId: string | null }) => Promise<void>;
+  listenActivation: (handler: (sessionId: string | null) => void) => Promise<() => void>;
   focusWindow: () => Promise<void>;
 };
 
@@ -24,14 +27,16 @@ export type DesktopNotificationService = ReturnType<typeof createDesktopNotifica
 const NATIVE_NOTIFICATION_API: NativeNotificationApi = {
   isPermissionGranted,
   requestPermission,
-  sendNotification(options, onClick) {
-    // Tauri's Desktop helper uses the Web Notification API too, but returns no
-    // handle. Keep the handle here so a click can target this exact webview.
-    const notification = new Notification(options.title, { body: options.body });
-    notification.addEventListener("click", () => {
-      notification.close();
-      onClick();
-    }, { once: true });
+  sendNotification(options) {
+    // The plugin's Notification polyfill is fire-and-forget, not an EventTarget.
+    return invoke<void>("desktop_send_notification", options);
+  },
+  listenActivation(handler) {
+    // Match the native bridge's EventTarget::webview_window, not Window.
+    return getCurrentWebviewWindow().listen<{ sessionId: string | null }>(
+      "desktop-notification-activated",
+      ({ payload }) => handler(payload.sessionId),
+    );
   },
   async focusWindow() {
     const appWindow = getCurrentWindow();
@@ -66,6 +71,31 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
   let permissionGranted: boolean | undefined;
   let permissionRequest: Promise<boolean> | null = null;
   let activationHandler: ((sessionId: string) => void | Promise<void>) | null = null;
+  let activationSubscription: Promise<void> | null = null;
+  let unlistenActivation: (() => void) | null = null;
+  let disposed = false;
+
+  function ensureActivationListener(): Promise<void> {
+    if (disposed) return Promise.resolve();
+    if (activationSubscription) return activationSubscription;
+    activationSubscription = api.listenActivation((sessionId) => {
+      if (!disposed) void activate(sessionId);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenActivation = unlisten;
+    }).catch((error) => {
+      activationSubscription = null;
+      throw error;
+    });
+    return activationSubscription;
+  }
+
+  function dispose(): void {
+    disposed = true;
+    activationHandler = null;
+    unlistenActivation?.();
+    unlistenActivation = null;
+  }
 
   async function ensurePermission(): Promise<boolean> {
     if (permissionGranted !== undefined) return permissionGranted;
@@ -91,7 +121,7 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
     } catch {
       // Native window activation is best effort.
     }
-    if (!sessionId || !activationHandler) return;
+    if (disposed || !sessionId || !activationHandler) return;
     try {
       await activationHandler(sessionId);
     } catch {
@@ -100,7 +130,7 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
   }
 
   async function notify(title: string, body: string, sessionId: string | null): Promise<void> {
-    if (isForeground()) return;
+    if (disposed || isForeground()) return;
     try {
       if (!(await enabled())) return;
     } catch {
@@ -109,16 +139,23 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
     if (isForeground()) return;
     if (!(await ensurePermission()) || isForeground()) return;
     try {
-      api.sendNotification(
-        { title, body: compactBody(body) },
-        () => void activate(sessionId),
-      );
+      // Subscribe before delivery so even an immediate native click is retained.
+      await ensureActivationListener();
+      if (disposed || isForeground()) return;
+      await api.sendNotification({ title, body: compactBody(body), sessionId });
     } catch {
       // Native notifications are best effort and must never fail the agent flow.
     }
   }
 
   return {
+    start(): () => void {
+      void ensureActivationListener().catch(() => {
+        // A later notification retries subscription if host setup failed.
+      });
+      return dispose;
+    },
+    dispose,
     setActivationHandler(handler: (sessionId: string) => void | Promise<void>): void {
       activationHandler = handler;
     },

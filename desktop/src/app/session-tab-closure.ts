@@ -81,6 +81,27 @@ export function createSessionTabClosure(
       return true;
     }
 
+    // A participant tab is only a view of a council-owned runtime. Never send
+    // session/close (or clear its runtime/activity) when dismissing that view.
+    if (options.isBrainstormParticipant?.(sessionId)) {
+      options.tabs.markClosed(sessionId);
+      if (sessionId !== options.state.sessionId) {
+        options.retargetWorkbenchAnchors(sessionId, options.state.sessionId ?? undefined);
+        return true;
+      }
+      const nextSessionId = preferredNextSessionId !== sessionId && tabSessionIds.includes(preferredNextSessionId ?? "")
+        ? preferredNextSessionId
+        : tabSessionIds.find((id) => id !== sessionId);
+      options.state.saveActiveTranscript();
+      options.history.cancel();
+      options.state.clearActiveSession();
+      options.tabs.forgetActive(options.workspace());
+      options.retargetWorkbenchAnchors(sessionId, nextSessionId);
+      if (nextSessionId) await loadSession(nextSessionId);
+      else await options.draft.openStartTab();
+      return true;
+    }
+
     if (options.promptRunning(sessionId)) {
       const title = options.catalog.sessions.find((session) => session.sessionId === sessionId)?.title || "Untitled conversation";
       if (!window.confirm(`“${title}” is still running.\n\nClosing this tab will stop the active run. Close it?`)) return false;

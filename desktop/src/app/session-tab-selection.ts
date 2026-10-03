@@ -8,13 +8,14 @@ export function createSessionTabSelection(
 ) {
   async function loadSession(sessionId: string): Promise<void> {
     const requestClient = options.client();
-    const canSelectDuringDraftStartup = options.draft.materializing
-      && options.statusReady()
-      && !!options.workspace()
-      && !options.operationRunning();
+    // Navigation does not mutate the source session. In particular, a council
+    // participant's write lock must not trap the user in its tab. Draft startup
+    // may also continue in the background while another tab is selected.
     if (
       !requestClient
-      || (!options.canUseSession() && !canSelectDuringDraftStartup)
+      || !options.statusReady()
+      || !options.workspace()
+      || options.operationRunning()
       || sessionActionRunning(sessionId)
       || sessionId === options.state.sessionId
     ) return;

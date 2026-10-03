@@ -29,6 +29,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
   let loadFailed = $state(false);
   let saveError = $state<string | null>(null);
   let loadGeneration = 0;
+  let loadedWorkspace = $state<string | null>(null);
 
   async function load(projectPath: string): Promise<void> {
     const generation = ++loadGeneration;
@@ -39,6 +40,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
       const value = await invoke<unknown>("read_project_tasks", { workspace: projectPath });
       if (generation !== loadGeneration || options.workspace() !== projectPath) return;
       document = parseTaskDocument(value);
+      loadedWorkspace = projectPath;
     } catch (error) {
       if (generation === loadGeneration && options.workspace() === projectPath) {
         loadFailed = true;
@@ -157,6 +159,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
   function reset(): void {
     loadGeneration += 1;
     document = EMPTY_TASK_DOCUMENT;
+    loadedWorkspace = null;
     loading = false;
     loadFailed = false;
     saveError = null;
@@ -171,6 +174,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
   return {
     get document() { return document; },
     get loading() { return loading; },
+    get initialLoading() { return loading && loadedWorkspace !== options.workspace(); },
     get saving() { return saving; },
     get loadFailed() { return loadFailed; },
     get saveError() { return saveError; },

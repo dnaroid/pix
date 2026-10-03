@@ -22,6 +22,7 @@ export type SessionTabControllerOptions = {
   operationRunning: () => boolean;
   setOperationRunning: (running: boolean) => void;
   promptRunning: (sessionId: string) => boolean;
+  isBrainstormParticipant?: (sessionId: string) => boolean;
   catalog: SessionCatalog;
   tabs: SessionTabsState;
   draft: DraftSession;

@@ -19,7 +19,7 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - Load Pix's bundled question extension in Desktop-owned Pi RPC sessions.
 - Bridge a validated private question payload through Pi RPC and ACP.
 - Present one to five single- or multi-select questions, predefined choices, custom text, and custom image attachments inside the bottom composer while leaving the transcript visible.
-- Support direct question tabs, a final Preview tab for multi-question questionnaires, edit, submit, cancel, safe cancellation during reconnect or shutdown, and session ownership when the user changes conversation tabs.
+- Support direct question tabs, a final Preview tab for multi-question questionnaires, edit, submit, explicit cancel, recovery after runtime interruption, and session ownership when the user changes conversation tabs.
 - Keep existing TUI behavior and ordinary ACP form elicitation schema/answer semantics unchanged.
 
 ## Non-goals
@@ -27,6 +27,7 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - Expose the private `_pix.question` mode as a general ACP standard.
 - Allow zero-answer questions or more than one custom answer per question.
 - Change the serialized shape of existing single-select answers.
+- Persist partially filled answers or image drafts across runtime restarts.
 
 ## Behavior
 
@@ -35,13 +36,14 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 3. A question tab shows its prompt and predefined choices. Single-select questions use radio controls. Questions with `multiple: true` use checkboxes and may combine predefined choices with `Something else…`; selecting the latter activates the composer's textarea plus its image choose/paste/remove/preview interactions.
 4. A multi-select question defaults to at least one and at most every available answer, including the implicit custom answer. Optional `minSelections` and `maxSelections` constrain that count. An enabled custom answer counts as one selection and is complete only when it has non-empty text and/or images.
 5. For multi-question questionnaires, Preview lists every answer, highlights missing answers, and links back to each question. `Submit answers` is available only there and is disabled until all questions are complete. A single-question questionnaire instead exposes `Submit answer` on its question view and does not render an answer preview.
-6. Cancel returns a user-canceled tool result; reconnect, shutdown, malformed payloads, and unsupported responses also cancel rather than inventing an answer. Normal chat submission is unavailable in questionnaire mode.
+6. Explicit Cancel returns a user-canceled tool result. Malformed payloads and unsupported clients/responses still cancel rather than inventing an answer. Reconnect, shutdown, and closing the runtime interrupt an unanswered questionnaire without writing a cancellation result. Normal chat submission is unavailable in questionnaire mode.
 7. Custom images are previewed locally and returned as Pi image content. Desktop limits a questionnaire to 10 images, 25 MB per image, and 50 MB total.
 8. A session-scoped elicitation belongs to the `sessionId` carried by ACP. If that session becomes inactive, its questionnaire/form UI is hidden without resolving or moving the request; the owning session's top-tab activity remains in warning state. Activating the owning session restores the pending UI. Another active tab keeps its ordinary composer/drop behavior instead of inheriting the inactive session's question state.
 9. Different sessions may each hold one pending session-scoped elicitation at the same time, so an inactive session waiting for input does not cancel or globally lock an elicitation requested by another running session. A second elicitation for the same session is still canceled while that session already owns one. Request-scoped/unscoped elicitation remains exclusive because it has no session tab that can own its UI.
-10. Closing/forgetting the owning runtime cancels its pending elicitation. Notifications or requests from a superseded ACP client are ignored after reconnect so old client callbacks cannot recreate UI state in the replacement connection.
+10. Closing/forgetting the owning runtime clears its local questionnaire state without answering the pending question; ordinary form elicitations still cancel. Notifications or requests from a superseded ACP client are ignored after reconnect so old client callbacks cannot recreate UI state in the replacement connection.
 11. Question prompts, choice labels/descriptions, and preview answers wrap within the available composer width, including long unbroken paths or URLs. Choice text must not inherit the global button no-wrap style or introduce horizontal scrolling in the question content; question tabs may scroll horizontally.
 12. Within the questionnaire composer, Enter performs the current Next/Submit action, regardless of which choice, tab, or button has focus; it never selects/toggles a choice or activates Edit/Cancel. Incomplete answers and pending image ingestion block advancement/submission. Space selects the focused radio choice or toggles a checkbox via native button activation. In custom text, Space inserts a space and Shift+Enter inserts a newline; IME composition is not submitted and holding Enter does not repeat advancement/submission.
+13. Loading a saved session in Desktop or Pix TUI reopens unanswered valid `question` calls from the latest assistant tool-use turn, with every answer initially empty. Recovery requires all remaining unanswered calls in that turn to be questions; it does not replay side-effect tools or older turns. Answers and explicit Cancel produce a normal result for the original `toolCallId`, then the agent continues without a synthetic user prompt. Already answered/canceled calls do not reopen; stale runtime completions do not write results.
 
 ## Contracts
 
@@ -61,17 +63,24 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - Existing single-select results retain their current scalar answer shape. Multi-select results contain one answer per question with `multiple: true` and an ordered `selections` array; each item uses the existing choice/custom answer fields.
 - In the TUI, multi-select choices are toggled with Space. Enter validates and commits the whole current multi-select answer, advances to the next question, and from the final question submits when all answers are complete (otherwise it routes to the first unanswered question). Selecting `Something else…` with Space activates custom input; Enter there commits the custom text/images as part of the same multi-select answer and follows the same advance/submit behavior. Single-select activation behavior is unchanged.
 - Only Desktop-launched ACP sessions receive the explicit bundled extension path and bridge environment flag. Other ACP clients retain existing behavior.
+- Desktop clears interrupted question UI by returning an internal cancel response with `_meta["_pix/question-interrupted"] = true`. ACP recognizes that marker only for a validated question request and does not forward it as a Pi answer. Question transport failures likewise leave the invocation unanswered; ordinary forms retain their cancellation behavior.
+- Recovery uses the saved invocation, not a second persisted questionnaire store. The pinned SDK lifecycle adapter is isolated in `src/bundled-extensions/question/recovery.ts` because the SDK has no public pending-tool recovery method; see [decision 0020](../docs/decisions/0020-question-transcript-recovery.md).
 
 ## Verification
 
 - Root tests cover schema normalization, limits, additive custom answers, carrier validation, result compatibility, cancellation, and TUI interaction.
 - ACP tests cover multi-select carrier mapping, malformed bound rejection, response mapping, and explicit Pi extension arguments.
 - Desktop tests cover request parsing, session ownership/admission matching (including independent pending sessions), single/multi selection state, limits, additive custom answers, serialization, and tab/Preview navigation.
+- `tests/question-recovery.test.ts` covers real SDK persisted-session recovery, original result IDs, continuation, explicit Cancel, deferred start cancellation, and stale answers. ACP and Desktop elicitation tests distinguish interruption from explicit Cancel and preserve ordinary form behavior.
 - Run root question tests and typecheck, ACP tests/check, and Desktop tests/check/build:web.
 
 ## Related files
 
 - `src/bundled-extensions/question/{contract,types,result,tui,desktop}.ts`
+- `src/bundled-extensions/question/recovery.ts`
+- `src/app/session/session-lifecycle-controller.ts`
+- `acp/src/pi/pix-rpc-entry.js`
+- `acp/src/acp/pix-acp-agent.ts`
 - `acp/src/acp/ui-request-bridge.ts`
 - `desktop/src/lib/question.ts`
 - `desktop/src/components/PromptComposer.svelte`

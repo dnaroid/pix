@@ -8,7 +8,8 @@ function notificationHarness(foreground = false) {
   const api = {
     isPermissionGranted: vi.fn(async () => true),
     requestPermission: vi.fn(async () => "granted" as NotificationPermission),
-    sendNotification: vi.fn(),
+    sendNotification: vi.fn(async () => undefined),
+    listenActivation: vi.fn(async (_handler: (sessionId: string | null) => void): Promise<() => void> => () => undefined),
     focusWindow: vi.fn(async () => undefined),
   };
   const service = createDesktopNotificationService({ isForeground: () => foreground, api });
@@ -29,7 +30,8 @@ describe("desktop native notifications", () => {
     const api = {
       isPermissionGranted: vi.fn(async () => true),
       requestPermission: vi.fn(async () => "granted" as NotificationPermission),
-      sendNotification: vi.fn(),
+      sendNotification: vi.fn(async () => undefined),
+      listenActivation: vi.fn(async (_handler: (sessionId: string | null) => void) => vi.fn()),
       focusWindow: vi.fn(async () => undefined),
     };
     const service = createDesktopNotificationService({
@@ -49,7 +51,8 @@ describe("desktop native notifications", () => {
     const api = {
       isPermissionGranted: vi.fn(async () => false),
       requestPermission: vi.fn(async () => "granted" as NotificationPermission),
-      sendNotification: vi.fn(),
+      sendNotification: vi.fn(async () => undefined),
+      listenActivation: vi.fn(async (_handler: (sessionId: string | null) => void) => vi.fn()),
       focusWindow: vi.fn(async () => undefined),
     };
     const service = createDesktopNotificationService({ isForeground: () => false, api });
@@ -62,11 +65,13 @@ describe("desktop native notifications", () => {
     expect(api.sendNotification).toHaveBeenNthCalledWith(1, {
       title: "Pix — Question",
       body: "Research: Which branch should I use?",
-    }, expect.any(Function));
+      sessionId: "session-1",
+    });
     expect(api.sendNotification).toHaveBeenNthCalledWith(2, {
       title: "Pix — Completed",
       body: "Research",
-    }, expect.any(Function));
+      sessionId: "session-1",
+    });
   });
 
   it("focuses the owning window and activates the exact session when clicked", async () => {
@@ -75,13 +80,99 @@ describe("desktop native notifications", () => {
     service.setActivationHandler(activateSession);
 
     await service.question("session-2", "Research", "Need input");
-    const onClick = api.sendNotification.mock.calls[0]?.[1];
+    const onClick = api.listenActivation.mock.calls[0]?.[0];
     expect(onClick).toEqual(expect.any(Function));
 
-    onClick?.();
+    onClick?.("session-2");
 
     await vi.waitFor(() => expect(api.focusWindow).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(activateSession).toHaveBeenCalledWith("session-2"));
+  });
+
+  it("routes older notifications by their captured session, not the latest delivery", async () => {
+    const { api, service } = notificationHarness();
+    const activateSession = vi.fn();
+    service.setActivationHandler(activateSession);
+    await service.completed("first", "First");
+    await service.completed("second", "Second");
+    expect(api.listenActivation).toHaveBeenCalledTimes(1);
+    api.listenActivation.mock.calls[0]?.[0]("first");
+    await vi.waitFor(() => expect(activateSession).toHaveBeenCalledWith("first"));
+    expect(activateSession).not.toHaveBeenCalledWith("second");
+  });
+
+  it("installs the activation listener before native delivery", async () => {
+    const { api, service } = notificationHarness();
+    let subscribed!: (unlisten: () => void) => void;
+    api.listenActivation.mockImplementation(() => new Promise((resolve) => subscribed = resolve));
+    const sending = service.completed("first", "First");
+    await vi.waitFor(() => expect(api.listenActivation).toHaveBeenCalledTimes(1));
+    expect(api.sendNotification).not.toHaveBeenCalled();
+    subscribed(vi.fn());
+    await sending;
+    expect(api.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses delivery if the window foregrounds while subscription is pending", async () => {
+    const { api } = notificationHarness();
+    let foreground = false;
+    let subscribed!: (unlisten: () => void) => void;
+    api.listenActivation.mockImplementation(() => new Promise((resolve) => subscribed = resolve));
+    const service = createDesktopNotificationService({ api, isForeground: () => foreground });
+    const sending = service.completed("first", "First");
+    await vi.waitFor(() => expect(api.listenActivation).toHaveBeenCalledTimes(1));
+    foreground = true;
+    subscribed(() => undefined);
+    await sending;
+    expect(api.sendNotification).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it("retries a failed listener instead of delivering an unrouteable notification", async () => {
+    const { api, service } = notificationHarness();
+    api.listenActivation.mockRejectedValueOnce(new Error("host unavailable"));
+    await service.completed("first", "First");
+    expect(api.sendNotification).not.toHaveBeenCalled();
+    await service.completed("second", "Second");
+    expect(api.listenActivation).toHaveBeenCalledTimes(2);
+    expect(api.sendNotification).toHaveBeenCalledWith({
+      title: "Pix — Completed", body: "Second", sessionId: "second",
+    });
+  });
+
+  it("releases a late subscription and drops delivery after teardown", async () => {
+    const { api, service } = notificationHarness();
+    const unlisten = vi.fn();
+    const activateSession = vi.fn();
+    let subscribed!: (unlisten: () => void) => void;
+    api.listenActivation.mockImplementation(() => new Promise((resolve) => subscribed = resolve));
+    service.setActivationHandler(activateSession);
+    const sending = service.completed("first", "First");
+    await vi.waitFor(() => expect(api.listenActivation).toHaveBeenCalledTimes(1));
+    service.dispose();
+    subscribed(unlisten);
+    await sending;
+    api.listenActivation.mock.calls[0]?.[0]("first");
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(api.sendNotification).not.toHaveBeenCalled();
+    expect(api.focusWindow).not.toHaveBeenCalled();
+    expect(activateSession).not.toHaveBeenCalled();
+  });
+
+  it("releases the listener on unmount and still navigates if focus fails", async () => {
+    const { api, service } = notificationHarness();
+    const unlisten = vi.fn();
+    api.listenActivation.mockResolvedValue(unlisten);
+    api.focusWindow.mockRejectedValue(new Error("focus unavailable"));
+    const activateSession = vi.fn();
+    service.setActivationHandler(activateSession);
+    const stop = service.start();
+    await service.completed("first", "First");
+    api.listenActivation.mock.calls[0]?.[0]("first");
+    await vi.waitFor(() => expect(activateSession).toHaveBeenCalledWith("first"));
+    stop();
+    stop();
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
   it("sends a paused notification for a background session", async () => {
@@ -92,7 +183,8 @@ describe("desktop native notifications", () => {
     expect(api.sendNotification).toHaveBeenCalledWith({
       title: "Pix — Paused",
       body: "Long refactor",
-    }, expect.any(Function));
+      sessionId: "session-3",
+    });
   });
 });
 
@@ -122,7 +214,8 @@ describe("desktop agent notification coordinator", () => {
     expect(api.sendNotification).toHaveBeenCalledWith({
       title: "Pix — Completed",
       body: "Background task",
-    }, expect.any(Function));
+      sessionId: "session-1",
+    });
   });
 
   it("suppresses cancellation and turns abnormal stop reasons into errors", async () => {
@@ -142,7 +235,8 @@ describe("desktop agent notification coordinator", () => {
     expect(api.sendNotification).toHaveBeenCalledWith({
       title: "Pix — Error",
       body: "Limits: Agent stopped after reaching the turn/request limit.",
-    }, expect.any(Function));
+      sessionId: "session-1",
+    });
   });
 
   it("drops a deferred completion when new work starts", async () => {

@@ -4,6 +4,7 @@
   import Play from "@lucide/svelte/icons/play";
   import X from "@lucide/svelte/icons/x";
   import type { Attachment } from "../lib/attachments";
+  import { imageDimensions, imagePreviewStyle, type ImageDimensions } from "../lib/image-preview-layout";
 
   let {
     attachments,
@@ -21,6 +22,16 @@
 
   let failedPreviews = $state(new Set<string>());
   let preparedPreviews = $state(new Set<string>());
+  let previewDimensions = $state(new Map<string, ImageDimensions>());
+
+  function rememberDimensions(attachment: Attachment, event: Event): void {
+    if (variant !== "chat") return;
+    const image = event.currentTarget;
+    if (!(image instanceof HTMLImageElement)) return;
+    const dimensions = imageDimensions(image.naturalWidth, image.naturalHeight);
+    const source = previewUrl(attachment);
+    if (dimensions && source) previewDimensions = new Map(previewDimensions).set(source, dimensions);
+  }
 
   function previewReady(attachment: Attachment): boolean {
     return Boolean(
@@ -109,10 +120,12 @@
             variant === "composer"
               ? "h-16 w-20"
               : variant === "chat" && attachment.kind === "image"
-                ? "w-fit max-w-full"
+                ? "w-fit max-w-full place-items-center"
                 : "h-28 w-40",
             attachment.kind === "file" && "place-items-center px-2 py-2",
           ]}
+          style={variant === "chat" && attachment.kind === "image"
+            ? imagePreviewStyle(previewDimensions.get(previewUrl(attachment) ?? ""), 20) : undefined}
           type="button"
           title={attachment.kind === "file" ? `Open ${attachment.name}` : `Preview ${attachment.name}`}
           aria-label={attachment.kind === "file" ? `Open ${attachment.name}` : `Preview ${attachment.name}`}
@@ -125,6 +138,7 @@
                 : "h-full w-full object-cover"}
               src={previewUrl(attachment)}
               alt=""
+              onload={(event) => rememberDimensions(attachment, event)}
               onerror={() => markPreviewFailed(attachment.id)}
             />
           {:else if attachment.kind === "video" && previewUrl(attachment) && !failedPreviews.has(attachment.id)}

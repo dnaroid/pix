@@ -309,7 +309,7 @@ export function registerSpawnTool(
 				const completed = new Promise<void>((resolve) => {
 					resolveCompleted = resolve;
 				});
-				liveRun.set(task.id, { runDir, agentId: task.id, preview, parentSession, completed });
+				liveRun.set(task.id, { runDir, agentId: task.id, preview, parentSession, completed, awaitingCompletion: true });
 
 				void launchQueuedAgent({
 					resolved,

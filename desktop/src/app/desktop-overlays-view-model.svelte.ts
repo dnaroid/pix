@@ -24,6 +24,7 @@ export function createDesktopOverlaysViewModel(options: {
   modelConfig: ReturnType<typeof createModelConfig>;
   preferences: ReturnType<typeof createModelPreferencesStore>;
   quotaWait: QuotaWaitStore;
+  focusComposer: () => void | Promise<void>;
 }) {
   const props = $derived.by<OverlaysProps>(() => {
     const pending = options.pendingElicitation();
@@ -70,6 +71,7 @@ export function createDesktopOverlaysViewModel(options: {
         onSetDefault: options.preferences.saveDefaultSelection,
         onVisibleModelsChange: options.preferences.saveVisibleModelRefs,
         onClose: options.modelConfig.closePicker,
+        restoreFocus: () => { void options.focusComposer(); },
       } : null,
     };
   });

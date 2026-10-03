@@ -18,8 +18,10 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { BrainstormHost, BRAINSTORM_CHANNEL, type BrainstormLink } from "./brainstorm-host.js";
+import { brainstormParticipantOptions, freshParticipantAnswer } from "./brainstorm-participant.js";
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
@@ -87,6 +89,7 @@ const MAX_PROMPT_FILE_IMAGES_TOTAL_BYTES = 50 * 1024 * 1024;
 import {
 	isExtensionUiRequest,
 	type PiClient,
+	type PiAgentMessage,
 	type PiEvent,
 	type PiImageContent,
 	type PiModel,
@@ -265,7 +268,7 @@ import {
 	type DeferredToolResult,
 } from "./session-replay.js";
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
-import { cancelledResponse, fromElicitationResponse, toElicitationRequest } from "./ui-request-bridge.js";
+import { cancelledResponse, fromElicitationResponse, toElicitationRequest, PIX_QUESTION_ELICITATION_MODE } from "./ui-request-bridge.js";
 import {
 	PIX_CONTEXT_USAGE_CHANNEL,
 	PIX_DCP_CONTEXT_MAP_CHANNEL,
@@ -329,11 +332,12 @@ interface AgentSessionState {
 	readonly acpSessionId: string;
 	activityOwner: string | undefined;
 	readonly activitySnapshots: Map<string, PixSessionStateNotification>;
-	readonly cwd: string;
+	cwd: string;
 	readonly pi: PiClient;
 	readonly client: ClientCaller;
-	readonly translator: EventTranslator;
+	translator: EventTranslator;
 	unsubscribeEvents: (() => void) | undefined;
+	unsubscribeExit: (() => void) | undefined;
 	activeRun: ActiveRun | undefined;
 	agentControlState: DesktopAgentControlState;
 	builtinRunning: boolean;
@@ -348,6 +352,7 @@ interface AgentSessionState {
 	sdkQueueRestoreAfterInterrupt: { steering: string[]; followUp: string[] } | undefined;
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
 	readonly pendingDialogIds: Set<string>;
+	readonly pendingQuestionIds: Set<string>;
 	readonly workspaceUndoResults: Map<string, WorkspaceUndoBridgeResult>;
 	contextInventory: ContextInventoryState | undefined;
 	contextInventoryNoticeReason: "reload" | "model_select" | undefined;
@@ -470,6 +475,7 @@ export class PixAcpAgent {
 	private readonly app: AgentApp;
 	private readonly options: PixAcpAgentOptions;
 	private readonly sessionMap: SessionMapStore;
+	private readonly brainstormHost: BrainstormHost;
 	private readonly listPiSessions: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
 	private readonly completeAutocomplete: AutocompleteCompleter;
@@ -493,6 +499,46 @@ export class PixAcpAgent {
 	constructor(options: PixAcpAgentOptions) {
 		this.options = options;
 		this.sessionMap = new SessionMapStore(options.sessionMapPath, options.logger);
+		this.brainstormHost = new BrainstormHost({
+			create: async (parent, participant, link, signal) => {
+				const owner = this.sessions.get(parent);
+				if (!owner) throw new Error("brainstorm parent session lost");
+				const startup = await brainstormParticipantOptions(options.piEntry, owner.cwd, options.toolsSuiteExtensionPath, participant.model);
+				signal.throwIfAborted();
+				const session = await this.spawnSession(participant.sessionId, owner.cwd, owner.client, undefined, undefined, startup);
+				if (signal.aborted) { await this.teardownSession(session); signal.throwIfAborted(); }
+				await session.pi.setSessionName(participant.name);
+				if (signal.aborted || this.sessions.get(participant.sessionId) !== session) { await this.teardownSession(session); throw new Error("brainstorm participant startup cancelled"); }
+				await this.registerSessionRecord(participant.sessionId, owner.cwd, session.pi, participant.name, link);
+				if (signal.aborted) {
+					await this.teardownSession(session);
+					const record = await this.sessionMap.get(participant.sessionId);
+					if (record) await this.sessionMap.put({ ...record, brainstorm: this.brainstormHost.metadata(participant.sessionId) ?? link });
+					signal.throwIfAborted();
+				}
+			},
+			round: async (participant, task, signal) => {
+				const session = this.sessions.get(participant.sessionId);
+				if (!session) throw new Error("brainstorm participant session lost; no replacement permitted");
+				const state = await session.pi.getState();
+				if (`${state.model?.provider}/${state.model?.id}` !== participant.model) throw new Error("brainstorm requested model unavailable (no fallback)");
+				await session.pi.setThinkingLevel(task.thinking);
+				signal.throwIfAborted();
+				return freshParticipantAnswer(session.pi, task.task, () => this.prompt({ sessionId: participant.sessionId, prompt: [{ type: "text", text: task.task }] }, true), signal);
+			},
+			stop: async (id) => { const session = this.sessions.get(id); if (session) await this.teardownSession(session); },
+			link: (id, link) => this.withSessionLifecycle(id, async () => {
+				const record = await this.sessionMap.get(id);
+				if (record) await this.sessionMap.put({ ...record, brainstorm: link });
+			}),
+			publish: async (parent, data) => {
+				const session = this.sessions.get(parent);
+				if (!session) return;
+				const envelope: PixSessionStateNotification = { sessionId: parent, channel: BRAINSTORM_CHANNEL, data, ...(session.activityOwner ? { activityOwner: session.activityOwner } : {}) };
+				session.activitySnapshots.set(BRAINSTORM_CHANNEL, envelope);
+				await session.client.notify(PIX_SESSION_STATE_METHOD, envelope).catch(() => {});
+			},
+		});
 		this.listPiSessions = options.listPiSessions
 			?? ((cwd) => cwd ? SessionManager.list(cwd) : SessionManager.listAll());
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
@@ -551,7 +597,7 @@ export class PixAcpAgent {
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.forkSession(ctx.params, ctx.client)),
 			)
 			.onRequest("session/set_config_option", (ctx) => this.setConfigOption(ctx.params))
-			.onRequest("session/set_mode", () => ({}))
+			.onRequest("session/set_mode", async (ctx) => { await this.assertBrainstormWritable(ctx.params.sessionId); return {}; })
 			.onRequest("session/prompt", (ctx) => this.prompt(ctx.params))
 			.onRequest(PIX_AGENT_CONTROL_METHOD, parseDesktopAgentControlRequest, (ctx) =>
 				this.desktopAgentControl(ctx.params),
@@ -667,6 +713,7 @@ export class PixAcpAgent {
 	 */
 	async dispose(): Promise<void> {
 		this.disposed = true;
+		await this.brainstormHost.dispose();
 		this.claudeCodeQuotaCache.clear();
 		this.claudeQuotaRefreshes.clear();
 		await Promise.allSettled([...this.pendingSpawns]);
@@ -797,6 +844,7 @@ export class PixAcpAgent {
 	private async desktopUserMessageAction(
 		params: DesktopUserMessageActionRequest,
 	): Promise<DesktopUserMessageActionResponse> {
+		if (params.action !== "copy") await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		const messages = branchUserMessagesFromEntries(await session.pi.getEntries());
 		const selected = messages.find((message) => message.entryId === params.entryId);
@@ -858,6 +906,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopBash(params: DesktopBashRequest): Promise<Record<string, never>> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		if (session.bashRunning) {
 			throw new RequestError(ERROR_SERVER, "a bash command is already running");
@@ -895,6 +944,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopClearTodos(params: DesktopSessionRequest): Promise<Record<string, never>> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		if (session.activeRun || session.builtinRunning) {
 			throw new RequestError(ERROR_SERVER, "session plan clear is unavailable while the agent is running");
@@ -923,6 +973,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopQueueMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const message = await this.desktopQueuedMessage(params);
@@ -955,6 +1006,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopDeferMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const message = await this.desktopQueuedMessage(params);
@@ -968,6 +1020,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopTakeAutoMessage(params: DesktopSessionRequest): Promise<DesktopQueueActionResponse> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const state = await session.pi.getState();
@@ -980,6 +1033,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopQueueAction(params: DesktopQueueActionRequest): Promise<DesktopQueueActionResponse> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const state = await session.pi.getState();
@@ -1177,10 +1231,19 @@ export class PixAcpAgent {
 			history = deferredSessionHistoryFromMessages(
 				persisted.messages,
 				context,
-				params.cursor ? persisted.replayKeys : undefined,
+				persisted.replayKeys,
 			);
 		} else if (!params.cursor && session) {
-			history = await deferredSessionHistory(session.pi, context);
+			const entriesState = await session.pi.getEntries();
+			const messages = activeBranchEntries(entriesState.entries, entriesState.leafId)
+				.filter((entry) => entry.type === "message" && typeof entry.id === "string" && isRecord(entry.message));
+			history = messages.length > 0
+				? deferredSessionHistoryFromMessages(
+					messages.map((entry) => entry.message as PiAgentMessage),
+					context,
+					messages.map((entry) => entry.id as string),
+				)
+				: await deferredSessionHistory(session.pi, context);
 		}
 		if (!history) throw new RequestError(ERROR_SERVER, `session history ${params.sessionId} is unavailable`);
 
@@ -1257,6 +1320,7 @@ export class PixAcpAgent {
 		params: DesktopSessionRequest,
 		client: ClientCaller,
 	): Promise<{ configOptions?: SessionConfigOption[] }> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const current = this.sessions.get(params.sessionId);
 		if (!current) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		if (current.activeRun || current.builtinRunning) {
@@ -1293,6 +1357,7 @@ export class PixAcpAgent {
 	}
 
 	private async resumePath(params: DesktopResumePathRequest): Promise<{ configOptions?: SessionConfigOption[] }> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		if (session.activeRun || session.builtinRunning) {
@@ -1304,6 +1369,7 @@ export class PixAcpAgent {
 		}
 
 		const sessionPath = resolve(session.cwd, commandPathArgument(params.path) ?? params.path);
+		await this.assertBrainstormPathAvailable(sessionPath);
 		const switched = await session.pi.switchSession(sessionPath);
 		if (switched.cancelled) {
 			throw new RequestError(ERROR_SERVER, "session switch cancelled by an extension");
@@ -1316,6 +1382,7 @@ export class PixAcpAgent {
 	}
 
 	private async importSession(params: DesktopImportSessionRequest): Promise<{ configOptions?: SessionConfigOption[] }> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		if (session.activeRun || session.builtinRunning) {
@@ -1328,6 +1395,7 @@ export class PixAcpAgent {
 		if (!state.sessionFile) throw new RequestError(ERROR_SERVER, "current session has no persisted session file");
 
 		const sourcePath = resolve(session.cwd, commandPathArgument(params.path) ?? params.path);
+		await this.assertBrainstormPathAvailable(sourcePath);
 		const sourceStat = await stat(sourcePath).catch(() => undefined);
 		if (!sourceStat?.isFile()) throw new RequestError(ERROR_SERVER, `import file not found: ${sourcePath}`);
 
@@ -1423,6 +1491,8 @@ export class PixAcpAgent {
 	private async loadSession(params: LoadSessionRequest, client: ClientCaller): Promise<LoadSessionResponse> {
 		const lazyHistory = (params as { _meta?: Record<string, unknown> })._meta?.["pix.lazyHistory"] === true;
 		const owner = activityOwnerFromMeta(params._meta);
+		const participant = await this.attachBrainstormSession(params.sessionId, owner, !lazyHistory);
+		if (participant) return participant;
 		if (lazyHistory) {
 			const pendingNew = this.pendingDesktopNewSessions.get(params.sessionId);
 			if (pendingNew) {
@@ -1455,7 +1525,37 @@ export class PixAcpAgent {
 	}
 
 	private async resumeSession(params: ResumeSessionRequest, client: ClientCaller): Promise<ResumeSessionResponse> {
+		const participant = await this.attachBrainstormSession(params.sessionId, activityOwnerFromMeta(params._meta), false);
+		if (participant) return participant;
 		return this.loadOrResumeSession(params, client, { replay: false });
+	}
+
+	private async assertBrainstormWritable(sessionId: string): Promise<void> {
+		const link = this.brainstormHost.metadata(sessionId) ?? (await this.sessionMap.get(sessionId))?.brainstorm;
+		if (link?.owned) throw new RequestError(ERROR_SERVER, "brainstorm participant is owned by its parent; direct mutations are disabled");
+	}
+
+	private async assertBrainstormPathAvailable(path: string): Promise<void> {
+		const canonical = await realpath(path).catch(() => resolve(path));
+		const owned = (await this.sessionMap.list()).filter((record) => (this.brainstormHost.metadata(record.sessionId) ?? record.brainstorm)?.owned);
+		for (const record of owned) {
+			const candidate = await realpath(record.piSessionPath).catch(() => resolve(record.piSessionPath));
+			if (candidate === canonical) throw new RequestError(ERROR_SERVER, "brainstorm participant history is owned; a second writer is disabled");
+		}
+	}
+
+	private async attachBrainstormSession(sessionId: string, owner: string | undefined, replay: boolean): Promise<LoadSessionResponse | undefined> {
+		const link = this.brainstormHost.metadata(sessionId) ?? (await this.sessionMap.get(sessionId))?.brainstorm;
+		if (!link && !this.brainstormHost.ownsRuns(sessionId)) return undefined;
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			if (link?.owned) throw new RequestError(ERROR_SERVER, "brainstorm participant session lost; cannot resume or replace while owned");
+			return undefined;
+		}
+		await this.attachActivity(session, owner);
+		if (replay) await replaySessionHistory(session.pi, { sessionId, cwd: session.cwd }, (notification) => session.client.notify("session/update", notification));
+		const configOptions = await this.safeConfigOptions(session.pi);
+		return { ...(configOptions ? { configOptions } : {}), ...(link ? { _meta: { "pix.brainstorm": link } } : {}) };
 	}
 
 	/** Shared implementation of `session/load` (with replay) and `session/resume`. */
@@ -1463,11 +1563,12 @@ export class PixAcpAgent {
 		params: { sessionId: string; cwd: string },
 		client: ClientCaller,
 		options: { replay: boolean; activityOwner?: string },
-	): Promise<{ configOptions?: SessionConfigOption[] }> {
+	): Promise<{ configOptions?: SessionConfigOption[]; _meta?: Record<string, unknown> }> {
 		const record = await this.sessionMap.get(params.sessionId);
 		if (!record?.piSessionPath) {
 			throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		}
+		await this.assertBrainstormPathAvailable(record.piSessionPath);
 		// Reloading a live session reloads it fresh (the client forgot history).
 		if (this.sessions.has(params.sessionId)) await this.closeSession(params.sessionId);
 
@@ -1505,7 +1606,7 @@ export class PixAcpAgent {
 
 		const configOptions = await this.safeConfigOptions(session.pi);
 		this.scheduleAvailableCommands(session);
-		return configOptions ? { configOptions } : {};
+		return { ...(configOptions ? { configOptions } : {}), ...(record.brainstorm ? { _meta: { "pix.brainstorm": record.brainstorm } } : {}) };
 	}
 
 	private async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
@@ -1526,9 +1627,12 @@ export class PixAcpAgent {
 		const sessions: SessionInfo[] = records.map((record) => {
 			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt };
 			if (record.title !== undefined) info.title = record.title;
+			const brainstorm = this.brainstormHost.metadata(record.sessionId) ?? record.brainstorm;
+			if (brainstorm) info._meta = { "pix.brainstorm": brainstorm };
 			if (record.parentSessionPath !== undefined) {
 				const parentSessionId = sessionIdByPath.get(resolve(record.parentSessionPath));
 				info._meta = {
+					...info._meta,
 					"pix.isFork": true,
 					...(parentSessionId ? { "pix.parentSessionId": parentSessionId } : {}),
 				};
@@ -1562,6 +1666,7 @@ export class PixAcpAgent {
 	}
 
 	private async deleteSession(sessionId: string): Promise<void> {
+		await this.assertBrainstormWritable(sessionId);
 		const record = await this.sessionMap.get(sessionId);
 		this.desktopDeferredToolResults.delete(sessionId);
 		this.desktopDeferredImages.delete(sessionId);
@@ -1578,10 +1683,12 @@ export class PixAcpAgent {
 	}
 
 	private async forkSession(params: ForkSessionRequest, client: ClientCaller): Promise<{ sessionId: string; configOptions?: SessionConfigOption[]; _meta?: Record<string, unknown> }> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const record = await this.sessionMap.get(params.sessionId);
 		if (!record?.piSessionPath) {
 			throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		}
+		await this.assertBrainstormPathAvailable(record.piSessionPath);
 		const acpSessionId = randomUUID();
 		const cwd = params.cwd || record.cwd;
 		const session = await this.spawnSession(acpSessionId, cwd, client, undefined, activityOwnerFromMeta(params._meta));
@@ -1623,6 +1730,7 @@ export class PixAcpAgent {
 	}
 
 	private async setConfigOption(params: SetSessionConfigOptionRequest): Promise<SetSessionConfigOptionResponse> {
+		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) {
 			throw new RequestError(ERROR_SERVER, `session ${params.sessionId} not found`);
@@ -1662,8 +1770,9 @@ export class PixAcpAgent {
 		client: ClientCaller,
 		defaultModel?: PixDefaultModel,
 		activityOwner?: string,
+		startupOverride?: PiRpcClientOptions,
 	): Promise<AgentSessionState> {
-		const pending = this.startSession(acpSessionId, cwd, client, defaultModel, activityOwner);
+		const pending = this.startSession(acpSessionId, cwd, client, defaultModel, activityOwner, startupOverride);
 		this.pendingSpawns.add(pending);
 		void pending.finally(() => this.pendingSpawns.delete(pending)).catch(() => {});
 		return pending;
@@ -1675,6 +1784,7 @@ export class PixAcpAgent {
 		client: ClientCaller,
 		defaultModel?: PixDefaultModel,
 		activityOwner?: string,
+		startupOverride?: PiRpcClientOptions,
 	): Promise<AgentSessionState> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
@@ -1683,7 +1793,7 @@ export class PixAcpAgent {
 				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
 				: {}),
 		});
-		const pi = this.options.createPiClient(piClientOptions(
+		const startup = startupOverride ?? piClientOptions(
 			this.options.piEntry,
 			cwd,
 			defaultModel,
@@ -1693,7 +1803,9 @@ export class PixAcpAgent {
 			toolsSuiteExtensionPath,
 			this.options.quotaWaitExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
-		));
+		);
+		const hostEnv = !startupOverride && this.clientName === "pix-desktop" ? await this.brainstormHost.environment(acpSessionId) : {};
+		const pi = this.options.createPiClient({ ...startup, env: { ...startup.env, ...hostEnv } });
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const session: AgentSessionState = {
 			acpSessionId,
@@ -1704,6 +1816,7 @@ export class PixAcpAgent {
 			client,
 			translator,
 			unsubscribeEvents: undefined,
+			unsubscribeExit: undefined,
 			activeRun: undefined,
 			agentControlState: "idle",
 			builtinRunning: false,
@@ -1717,6 +1830,7 @@ export class PixAcpAgent {
 			trackedSteeringMessages: [],
 			sdkQueueRestoreAfterInterrupt: undefined,
 			pendingDialogIds: new Set(),
+			pendingQuestionIds: new Set(),
 			workspaceUndoResults: new Map(),
 			contextInventory: undefined,
 			contextInventoryNoticeReason: undefined,
@@ -1736,6 +1850,7 @@ export class PixAcpAgent {
 		try {
 			await pi.start();
 		} catch (error) {
+			await this.brainstormHost.cancelParent(acpSessionId, true);
 			this.unsubscribeSessionEvents(session);
 			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
 			void pi.stop().catch(() => {});
@@ -1744,30 +1859,34 @@ export class PixAcpAgent {
 				`failed to start pi (${this.options.piEntry}): ${stringifyUnknown(error)}`,
 			);
 		}
-		if (this.disposed) {
+		if (this.disposed || this.sessions.get(acpSessionId) !== session) {
 			this.unsubscribeSessionEvents(session);
 			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
 			await pi.stop().catch(() => {});
 			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		}
-		pi.onExit((error) => this.onPiExit(session, error));
-		await this.ensureDesktopQueuesLoaded(session);
+		session.unsubscribeExit = pi.onExit((error) => this.onPiExit(session, error));
+		if (!startupOverride) await this.ensureDesktopQueuesLoaded(session);
 		return session;
 	}
 
 	/**
 	 * Persist the session map entry for a live session. Non-fatal: sessions
 	 * keep working without persistence, they just cannot be resumed later.
+	 * Council participants fail closed: their stable ownership must be durable
+	 * before the first prompt or a catalog refresh could create another writer.
 	 */
 	private async registerSessionRecord(
 		sessionId: string,
 		cwd: string,
 		pi: PiClient,
 		title?: string,
+		brainstorm?: BrainstormLink,
 	): Promise<void> {
 		try {
 			const state = await pi.getState();
 			if (!state.sessionFile) {
+				if (brainstorm) throw new Error("brainstorm participant has no persisted session file");
 				this.options.logger.warn(`pi reported no session file for ${sessionId}; not persisting to session map`);
 				return;
 			}
@@ -1777,10 +1896,12 @@ export class PixAcpAgent {
 				piSessionId: state.sessionId,
 				cwd,
 				title: title ?? state.sessionName,
+				...(brainstorm ? { brainstorm } : {}),
 				updatedAt: new Date().toISOString(),
 			});
 		} catch (error) {
 			this.options.logger.warn(`failed to persist session map entry for ${sessionId}: ${stringifyUnknown(error)}`);
+			if (brainstorm) throw error;
 		}
 	}
 
@@ -2073,6 +2194,8 @@ export class PixAcpAgent {
 	 */
 	private onPiExit(session: AgentSessionState, error: Error): void {
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		void this.brainstormHost.participantLost(session.acpSessionId);
+		void this.brainstormHost.cancelParent(session.acpSessionId, true);
 		this.sessions.delete(session.acpSessionId);
 		this.pendingDesktopNewSessions.delete(session.acpSessionId);
 		this.desktopDeferredToolResults.delete(session.acpSessionId);
@@ -2081,6 +2204,7 @@ export class PixAcpAgent {
 		this.options.logger.warn(`session ${session.acpSessionId}: ${error.message}`);
 		this.rejectActiveRun(session, error);
 		session.pendingDialogIds.clear();
+		session.pendingQuestionIds.clear();
 	}
 
 	/** Bridges one extension UI request to ACP and answers pi. */
@@ -2102,7 +2226,8 @@ export class PixAcpAgent {
 				}
 			}
 			const activity = state.channel === "pi-tools-suite:todo:state"
-				|| state.channel === "pi-tools-suite:async-subagents:live-state";
+				|| state.channel === "pi-tools-suite:async-subagents:live-state"
+				|| state.channel === BRAINSTORM_CHANNEL;
 			const envelope: PixSessionStateNotification = {
 				sessionId: session.acpSessionId,
 				...state,
@@ -2159,18 +2284,27 @@ export class PixAcpAgent {
 		}
 
 		session.pendingDialogIds.add(request.id);
+		const isQuestion = elicitation.mode === PIX_QUESTION_ELICITATION_MODE;
+		if (isQuestion) session.pendingQuestionIds.add(request.id);
+		let interrupted = false;
 		try {
 			const answer = await session.client.request("elicitation/create", elicitation);
 			// The session may have been closed while the user was thinking.
 			if (this.sessions.get(session.acpSessionId) !== session) return;
+			if (isQuestion && answer._meta?.["_pix/question-interrupted"] === true) {
+				interrupted = true;
+				return;
+			}
 			this.safeRespond(session.pi, fromElicitationResponse(answer, request));
 		} catch (error) {
 			this.options.logger.warn(`elicitation/create failed: ${stringifyUnknown(error)}`);
-			if (this.sessions.get(session.acpSessionId) === session) {
+			interrupted = isQuestion;
+			if (!isQuestion && this.sessions.get(session.acpSessionId) === session) {
 				this.safeRespond(session.pi, cancelledResponse(request.id));
 			}
 		} finally {
 			session.pendingDialogIds.delete(request.id);
+			if (!interrupted) session.pendingQuestionIds.delete(request.id);
 		}
 	}
 
@@ -2294,6 +2428,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopAgentControl(params: DesktopAgentControlRequest): Promise<DesktopAgentControlResponse> {
+		if (params.action !== "state") await this.assertBrainstormWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 
@@ -2718,7 +2853,8 @@ export class PixAcpAgent {
 		if (ownsSettlement()) this.resolveActiveRun(session, run.stopReason ?? "end_turn");
 	}
 
-	private async prompt(params: PromptRequest): Promise<PromptResponse> {
+	private async prompt(params: PromptRequest, brainstormOwned = false): Promise<PromptResponse> {
+		if (!brainstormOwned) await this.assertBrainstormWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) {
 			throw new RequestError(ERROR_SERVER, `session ${params.sessionId} not found`);
@@ -2728,7 +2864,7 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} is reserved for Pix Desktop`);
 		}
 		const input = await collectPromptInput(params.prompt, fileImages);
-		const isSlashPrompt = input.images.length === 0 && /^\/\S/.test(input.text);
+		const isSlashPrompt = !brainstormOwned && input.images.length === 0 && /^\/\S/.test(input.text);
 
 		// Wait controls must not reset an existing paused state or acquire the
 		// active run; they also remain available while that run is streaming.
@@ -2745,7 +2881,7 @@ export class PixAcpAgent {
 		// handling; intercept them here. Everything else starting with "/"
 		// (extension commands, prompt templates, /skill:*) is forwarded to
 		// pi, which expands them natively.
-		const builtin = parseBuiltinCommand(input.text);
+		const builtin = brainstormOwned ? undefined : parseBuiltinCommand(input.text);
 		if (builtin) {
 			if (input.images.length > 0) {
 				throw new RequestError(ERROR_SERVER, `/${builtin.kind} does not accept attachments`);
@@ -2759,14 +2895,14 @@ export class PixAcpAgent {
 				session.builtinRunning = false;
 			}
 		}
-		const rendererCommand = rendererCommandName(input.text);
+		const rendererCommand = brainstormOwned ? undefined : rendererCommandName(input.text);
 		if (rendererCommand) {
 			throw new RequestError(
 				ERROR_SERVER,
 				`/${rendererCommand} requires Pix renderer UI and is not available as an ACP prompt command`,
 			);
 		}
-		const unsupportedCommand = unsupportedCommandName(input.text);
+		const unsupportedCommand = brainstormOwned ? undefined : unsupportedCommandName(input.text);
 		if (unsupportedCommand) {
 			throw new RequestError(
 				ERROR_SERVER,
@@ -3286,6 +3422,8 @@ export class PixAcpAgent {
 	}
 
 	private cancel(sessionId: string): void {
+		if (this.brainstormHost.metadata(sessionId)?.owned) return;
+		void this.brainstormHost.cancelParent(sessionId);
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
 		if (session.activeRun) session.activeRun.cancelled = true;
@@ -3297,6 +3435,8 @@ export class PixAcpAgent {
 	}
 
 	private async closeSession(sessionId: string): Promise<void> {
+		await this.assertBrainstormWritable(sessionId);
+		await this.brainstormHost.cancelParent(sessionId, true);
 		this.desktopDeferredToolResults.delete(sessionId);
 		this.desktopDeferredImages.delete(sessionId);
 		const pendingNew = this.pendingDesktopNewSessions.get(sessionId);
@@ -3315,11 +3455,14 @@ export class PixAcpAgent {
 			this.sessions.delete(session.acpSessionId);
 		}
 		const hadActiveRun = this.resolveActiveRun(session, "cancelled");
-		// Unblock extensions still waiting on a dialog answer.
+		// A questionnaire is an interrupted transcript call, not a user Cancel.
+		// Stop RPC without answering it so it can reopen after loading the session.
+		const hasPendingQuestion = session.pendingQuestionIds.size > 0;
 		for (const id of session.pendingDialogIds) {
+			if (session.pendingQuestionIds.has(id)) continue;
 			this.safeRespond(session.pi, cancelledResponse(id));
 		}
-		if (hadActiveRun) {
+		if (hadActiveRun && !hasPendingQuestion) {
 			await session.pi.abort().catch((error: unknown) => {
 				this.options.logger.warn(`pi abort failed during teardown: ${stringifyUnknown(error)}`);
 			});
@@ -3331,6 +3474,8 @@ export class PixAcpAgent {
 	}
 
 	private unsubscribeSessionEvents(session: AgentSessionState): void {
+		session.unsubscribeExit?.();
+		session.unsubscribeExit = undefined;
 		const unsubscribe = session.unsubscribeEvents;
 		if (!unsubscribe) return;
 		session.unsubscribeEvents = undefined;

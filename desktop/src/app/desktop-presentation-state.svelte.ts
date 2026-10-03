@@ -1,4 +1,6 @@
 import type { SessionInfo } from "@agentclientprotocol/sdk";
+import { agentControlShowsPausedTab } from "../lib/agent-control";
+import { brainstormSessionLink } from "../lib/session-brainstorm";
 import {
   DESKTOP_SLASH_COMMANDS,
   mergeSlashCommands,
@@ -43,7 +45,12 @@ type DesktopPresentationStateOptions = {
 
 export function createDesktopPresentationState(options: DesktopPresentationStateOptions) {
   const sessionMutationRunning = $derived(options.operationRunning() || options.draft.materializing);
-  const canUseSession = $derived(options.statusReady() && !!options.workspace() && !sessionMutationRunning);
+  const activeBrainstormLink = $derived(brainstormSessionLink(
+    options.state.sessionId,
+    options.sessions.catalog.sessions.find((session) => session.sessionId === options.state.sessionId)?._meta,
+    options.sessions.activity.brainstorms,
+  ));
+  const canUseSession = $derived(options.statusReady() && !!options.workspace() && !sessionMutationRunning && !activeBrainstormLink?.owned);
   const promptRunning = $derived(
     options.state.sessionId
       ? options.prompt.runtime.runningSessionIds.has(options.state.sessionId)
@@ -57,7 +64,7 @@ export function createDesktopPresentationState(options: DesktopPresentationState
   const anyPromptRunning = $derived(options.prompt.runtime.runningSessionIds.size > 0);
   const pausedSessionIds = $derived.by(() => new Set(
     [...options.prompt.runtime.agentControlStates]
-      .filter(([, state]) => state === "paused")
+      .filter(([, state]) => agentControlShowsPausedTab(state))
       .map(([sessionId]) => sessionId),
   ));
   const activeTitle = $derived(
@@ -105,7 +112,14 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     disabled: sessionMutationRunning,
     selectionDisabled: options.operationRunning(),
     realSessionCount: tabSessions.length,
-  }));
+  }).map((tab) => ({
+    ...tab,
+    viewOnlyClose: !!brainstormSessionLink(
+      tab.sessionId,
+      options.sessions.catalog.sessions.find((session) => session.sessionId === tab.sessionId)?._meta,
+      options.sessions.activity.brainstorms,
+    ),
+  })));
   const workbenchTabs = $derived.by(() => buildDesktopWorkbenchTabs({
     sessionTabs: workbenchSessionTabs,
     preview: options.project.preview.active,
@@ -137,6 +151,11 @@ export function createDesktopPresentationState(options: DesktopPresentationState
   );
   const activeSubagentSnapshot = $derived(
     options.state.sessionId ? options.sessions.activity.subagents.get(options.state.sessionId) : undefined,
+  );
+  const activeBrainstormSnapshot = $derived(
+    options.state.sessionId
+      ? options.sessions.activity.brainstorms.get(activeBrainstormLink?.parentSessionId ?? options.state.sessionId)
+      : undefined,
   );
   const activeSessionActivity = $derived(
     options.state.sessionId
@@ -177,6 +196,8 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     get activeWorkbenchTab() { return activeWorkbenchTab; },
     get activeTodoSnapshot() { return activeTodoSnapshot; },
     get activeSubagentSnapshot() { return activeSubagentSnapshot; },
+    get activeBrainstormSnapshot() { return activeBrainstormSnapshot; },
+    get activeBrainstormLink() { return activeBrainstormLink; },
     get activeSessionActivity() { return activeSessionActivity; },
     get activeSlashCommands() { return activeSlashCommands; },
     get dcpCompressionAvailable() { return dcpCompressionAvailable; },

@@ -6,6 +6,7 @@ import {
 } from "../lib/session-inspector-activity-policy";
 import type { SessionSubagentSnapshot } from "../lib/session-subagents";
 import type { SessionTodoSnapshot } from "../lib/session-todos";
+import type { SessionBrainstormSnapshot } from "../lib/session-brainstorm";
 import { createAttachmentDraftOwnership } from "./attachment-draft-ownership";
 import { createRegistryStartupLoader, type RegistryStartupState } from "./registry-startup";
 import {
@@ -35,6 +36,7 @@ type DesktopRootEffectsOptions = {
   workbenchTabs: () => readonly WorkbenchTab[];
   activeTodoSnapshot: () => SessionTodoSnapshot | undefined;
   activeSubagentSnapshot: () => SessionSubagentSnapshot | undefined;
+  activeBrainstormSnapshot: () => SessionBrainstormSnapshot | undefined;
   sessionInspectorOpen: () => boolean;
   setSessionInspectorOpen: (open: boolean) => void;
   markSessionTabViewed: (sessionId: string) => void;
@@ -92,6 +94,7 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
       options.activeSubagentSnapshot(),
       options.sessionInspectorOpen(),
       options.setSessionInspectorOpen,
+      options.activeBrainstormSnapshot(),
     );
   });
 

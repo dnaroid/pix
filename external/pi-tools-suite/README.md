@@ -15,7 +15,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
-- `src/brainstorm` — `/brainstorm [--mode auto|brainstorm|audit] <topic>` and the model-only `brainstorm` tool: five-round brainstorming or evidence-based audit with reviewed parent synthesis. Preserves the discussion, draft, final proposal/report and revision notes under `docs/brainstorms/`, without starting implementation. Requires async-subagents and the research role. See [the council contract](../../specs/brainstorm.md).
+- `src/brainstorm` — `/brainstorm [--mode auto|brainstorm|audit] <topic>` and the model-only `brainstorm` tool: five-round brainstorming or evidence-based audit with reviewed parent synthesis. Preserves the protocol under `.pi/brainstorms/`, without starting implementation. Desktop uses persistent native participant sessions; TUI/legacy runs require async-subagents and the research role. See [the council contract](../../specs/brainstorm.md).
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, and each role owns its ordered model candidate list (or selects from the suite-level `frontierModels` list) and optional parent-vendor policy; includes a cross-vendor `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
@@ -45,12 +45,16 @@ WebSocket continuation limitation.
 
 ## Brainstorm council configuration
 
+By default the council roster is the enabled `frontierModels` list in order (max 6).
 Set `brainstorm.models` in `~/.config/pi/pi-tools-suite.jsonc` (or the usual
-project override) to 2–6 distinct exact `provider/model` references. This list is
-independent of `frontierModels`, replaces inherited models and never silently
-falls back to different participants. Initial defaults are Astra, GLM-5.3,
-Opus 5.5 and Antigravity Gemini 3.8 Flash. `brainstorm.thinking` defaults to `high`
-and `brainstorm.timeoutSeconds` to 600 per participant per round (30–1800).
+project override) to 2–6 distinct exact `provider/model` references to replace it;
+there is never a silent fallback to different participants. `brainstorm.thinking`
+defaults to `high`, `brainstorm.thinkingOverrides` sets per-model levels (default
+`zai/glm-5.3 = max`), and `brainstorm.timeoutSeconds` is 600 per participant per
+round (30–1800). `brainstorm.quorum` (default roster − 1, min 2) lets a round
+continue when a participant fails; the gap is recorded. Protocols are written to
+`brainstorm.outputDir` (default `.pi/brainstorms/`, outside the knowledge base);
+`finalize` with `publish=true` copies only the final proposal to `docs/brainstorms/`.
 The parent clarifies only material uncertainty and prepares a brief before paid
 work. Default auto routing uses intent/context: create/develop alternatives →
 brainstorm; inspect existing material → audit. The parent announces the choice;
@@ -62,13 +66,28 @@ cross-check/coverage, critique of findings, priorities/minimal fixes and report
 review. Findings need cited evidence, severity separate from confidence, and
 validation; no findings is valid. The report preserves intent rather than silently
 redesigning the target. These are model instructions, not quality guarantees.
-The council performs five paid rounds (20 ordinary participant runs with
-four models), plus configured retries and parent drafting/revision. `run` performs
+The council performs five paid rounds (5 × roster size participant turns), plus configured retries and parent drafting/revision. `run` performs
 rounds 1–4; `review` preserves the draft and runs round 5 with the original settings;
 `finalize` requires that review and saves the final proposal and revision notes.
 Legacy two-round runs cannot be continued under this protocol. Invalid modes
 fail explicitly. Original v2 five-round runs can continue as
-brainstorm; v3 stores the resolved mode. Audit reports keep the `proposal.md` name.
+brainstorm; v2/v3 runs migrate to the v4 manifest (responses in `rounds/*.md`,
+hash-checked). TUI/legacy runs use fresh workers and older-round ledgers. New
+Desktop runs keep one ACP-owned session per slot through review, append only new
+peer answers, and expose a compact storm panel with native session navigation.
+Direct writes are blocked while a participant is owned. The saved execution mode
+prevents silently replacing lost Desktop sessions with fresh workers; host-loss
+recovery is not supported. Audit reports keep the `proposal.md` name.
+For one run only, use
+`/brainstorm --models provider/model:off,provider/other-model:low <topic>`
+(optionally with `--mode audit`, either order; `--models=...` also works).
+Supply 2–6 distinct models, comma-separated without spaces, each with explicit
+effort: `off|minimal|low|medium|high|xhigh|max`. The parent passes the exact array
+as `models` on `brainstorm(action="run")`; it must not choose an override itself.
+Settings remain untouched; all five rounds, including review, use the saved
+roster/efforts. Omit `models` on review/finalize (overrides are rejected there).
+Without the option, configured defaults apply. Timeout/output root/quorum remain
+configured; an explicit quorum larger than the selected roster is an error.
 Missing auth/models or policy rejection fail explicitly; forced-current
 model overrides and research CLI overrides are incompatible. Disable with
 `modules.brainstorm: false`. Reload/restart after installing the module.
@@ -91,6 +110,14 @@ lexical mode when semantic retrieval is unavailable. All indexed Markdown docume
 searchable subject to ignore/exclusion filters; they are not split into primary
 and secondary collections. Follow truncation/degradation diagnostics and read
 the primary source itself before relying on a summary.
+
+All `repo_*` tools accept optional `projectPath` to query another already indexed
+project without switching the session workspace. Use an absolute project-root
+path, a path relative to the session cwd, or `~/...`; omit it for the current
+project. The selected root must contain `.indexer-cli` directly (no ancestor
+fallback or implicit setup). Targets, scopes and audit paths are relative to that
+root. Example: `repo_context({ query: "authentication", projectPath: "/path/to/other-project" })`.
+The launch-project registration gate above is unchanged.
 
 For a **material behavior-changing implementation** in repo-aware mode, the
 model-facing contract is:
@@ -564,6 +591,21 @@ Notes:
 - The full commented templates (including GDScript via a headless Godot wrapper and the complete Markdown link-validation `settings`) are written to the shared config file on first run.
 
 ## Async sub-agents
+
+### Disposable output policy
+
+Agent scratch output (test logs, temporary reports, mockups and captures) belongs
+in unique task/run directories under the current project's `.pi/artifacts/`,
+never project-root `artifacts/` or release/build `.artifacts/`. Code-generated
+guidance and eval defaults share `PROJECT_ARTIFACTS_DIR` in `src/artifact-paths.ts`;
+do not cache an absolute workspace path. Harness-owned subagent/QA evidence
+remains in `.pi/subagents/`. Explicit release/build paths and user-requested
+deliverable paths are exceptions. New prompts/profiles/examples must keep this
+rule; a custom `promptOverride` replaces base guidance and must include it itself.
+Storage is disposable, not universally self-cleaning: initialized-project
+Desktop cleanup has a 72-hour background TTL and manual Clean is immediate.
+Export evidence that must be retained. See the Pix
+[artifact storage contract](../../specs/harness-artifact-storage.md).
 
 Model selection uses the ordered candidates from each agent's Markdown file,
 then applies the role's parent-provider policy and runtime capabilities.

@@ -28,6 +28,7 @@ mod acp_queue;
 mod backend_runtime;
 mod desktop_bootstrap;
 mod desktop_context_menu;
+mod desktop_notification;
 mod git_ci;
 mod git_ignore;
 mod git_operations;
@@ -9921,6 +9922,7 @@ pub fn run() {
         .manage(git_ci::GitCiProcessState::default())
         .manage(window_restore::WindowRestoreState::default())
         .setup(|app| {
+            desktop_notification::setup(app).map_err(std::io::Error::other)?;
             let restored_windows = window_restore::setup(app)?;
             app.manage(AttachmentPathState::new(app.handle()));
             #[cfg(feature = "bundled-runtime")]
@@ -9960,6 +9962,7 @@ pub fn run() {
             window_restore::desktop_window_workspace,
             window_restore::desktop_open_project_window,
             desktop_context_menu::desktop_edit,
+            desktop_notification::desktop_send_notification,
             desktop_bootstrap::desktop_bootstrap_inspect,
             desktop_bootstrap::desktop_bootstrap_import_opencode,
             desktop_bootstrap::desktop_bootstrap_import_codex_api_key,
@@ -10059,12 +10062,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build Pix Desktop");
     app.run(|handle, event| {
+        if matches!(&event, tauri::RunEvent::Exit) {
+            desktop_notification::shutdown(handle);
+        }
         if let tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::Destroyed,
             ..
         } = &event
         {
+            desktop_notification::destroyed(handle, label);
             window_restore::destroyed(handle, label);
             handle
                 .state::<git_ci::GitCiProcessState>()

@@ -12,7 +12,7 @@ export const BRAINSTORM_PUBLISH_DIR = "docs/brainstorms";
 export interface BrainstormConfig {
 	/** Resolved ordered roster: explicit brainstorm.models, otherwise enabled frontierModels. */
 	models: string[];
-	/** True when the roster came from brainstorm.models rather than frontierModels. */
+	/** True when the roster came from an explicit config or run override rather than frontierModels. */
 	modelsExplicit: boolean;
 	/** Default participant thinking level. */
 	thinking: string;
@@ -57,6 +57,33 @@ function assertModels(models: unknown): asserts models is string[] {
 
 function assertThinking(value: unknown, label = "brainstorm.thinking"): asserts value is string {
 	if (typeof value !== "string" || !(THINKING_LEVELS as readonly string[]).includes(value)) throw new Error(`Invalid ${label} level.`);
+}
+
+/** A run roster always specifies effort, avoiding inherited expensive per-model defaults. */
+export function parseRunModels(value: unknown): { models: string[]; thinkingOverrides: Record<string, string> } {
+	if (!Array.isArray(value) || value.length < 2 || value.length > 6) {
+		throw new Error("models must contain 2–6 distinct exact provider/model:effort entries.");
+	}
+	const models: string[] = [];
+	const thinkingOverrides: Record<string, string> = {};
+	for (const entry of value) {
+		if (typeof entry !== "string") throw new Error("Each models entry must be provider/model:effort.");
+		const separator = entry.lastIndexOf(":");
+		if (separator < 0) throw new Error("Each models entry must include :effort (off|minimal|low|medium|high|xhigh|max).");
+		const model = entry.slice(0, separator), thinking = entry.slice(separator + 1);
+		assertThinking(thinking, "models effort");
+		models.push(model);
+		thinkingOverrides[model] = thinking;
+	}
+	assertModels(models);
+	return { models, thinkingOverrides };
+}
+
+/** Copy configuration; never persist a one-run override back to user/project settings. */
+export function configForRun(base: BrainstormConfig, models?: unknown): BrainstormConfig {
+	const result = mergeBrainstormConfig(base, models === undefined ? undefined : parseRunModels(models));
+	assertRunnableConfig(result);
+	return result;
 }
 
 export function normalizeOutputDir(value: unknown): string {

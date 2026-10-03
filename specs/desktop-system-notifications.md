@@ -37,13 +37,16 @@ Notify the user through the operating system when a Pix Desktop agent needs atte
 9. Question notifications retain the owning session identity and the elicitation message. Completion and pause notifications use the session title. Error notifications use the session title plus a bounded single-line error/stop message.
 10. Notification bodies are whitespace-normalized and bounded. The feature does not mirror the transcript, thinking, tool calls/results, or full conversation history into OS notifications.
 11. Clicking a Desktop notification reactivates the exact Pix window that created it, including showing/unminimizing/focusing that window, then selects the owning conversation session and its unified workbench tab. Notification activation is best effort and must not affect agent execution if native focus or navigation fails.
+12. Each notification retains its own owning window and session. Clicking an older notification after a newer one was delivered must still select the older notification's conversation. Dismissal must not navigate. Activation listeners are window-scoped, installed before delivery, and released when the frontend unmounts; a subscription completing after teardown must not send or activate anything.
 
 ## Native integration
 
-- Desktop uses the official Tauri v2 notification plugin for notification permission integration and native application setup. Desktop delivery uses the Web Notification API directly (the same Desktop delivery path wrapped by the plugin helper) so Pix can retain the notification handle and attach an exact-window click handler.
-- `notification:default` is granted to the Desktop capability covering `main` and `project-*` windows.
-- The Tauri builder initializes `tauri_plugin_notification`; the frontend uses `@tauri-apps/plugin-notification` for permission checks and the Web Notification API for clickable Desktop delivery.
-- Windows native notification behavior still inherits the Tauri plugin limitation that normal app identity/icon behavior requires an installed application rather than development mode.
+- Desktop uses the official Tauri v2 notification plugin for notification permission integration. Supported macOS Desktop delivery uses the custom `desktop_send_notification` command and native activation bridge. The command derives ownership from the invoking native window; the frontend cannot choose another window label.
+- Desktop capabilities covering `main` and `project-*` windows allow only the plugin permission-check/request commands and explicitly deny `notification:notify`. This prevents plugin delivery from replacing Pix's native activation delegate.
+- Native routing metadata lives in each notification's property-list-compatible `userInfo`; window-incarnation tokens reject clicks for destroyed/recreated windows. Delivery uses the same legacy macOS `NSUserNotificationCenter` API as the installed plugin, with a retained delegate, no per-notification click waiters, and teardown on app exit. Unbundled development retains the plugin's Terminal identity workaround off the main thread.
+- The frontend listens on its own `WebviewWindow` for `desktop-notification-activated`, matching the native `EventTarget::webview_window` target kind and label (a `Window` listener is a different target). The payload carries the notification's `sessionId`; the existing conversation activation handler selects the session/workbench surface. It does not attach DOM click handlers to the plugin's fire-and-forget `Notification` constructor.
+- Desktop support is macOS only; Windows/Linux notification activation is not a delivery requirement.
+- Rationale: [Native notification activation routing](../docs/decisions/0016-native-notification-activation.md).
 
 ## Related files
 
@@ -54,13 +57,18 @@ Notify the user through the operating system when a Pix Desktop agent needs atte
 - `desktop/src/app/elicitation.svelte.ts`
 - `desktop/src/app/session-activity.svelte.ts`
 - `desktop/src-tauri/src/lib.rs`
+- `desktop/src-tauri/src/desktop_notification.rs`
+- `desktop/src-tauri/Cargo.toml`
+- `desktop/src-tauri/Cargo.lock`
 - `desktop/src-tauri/capabilities/default.json`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 
 ## Verification
 
-- Desktop notification tests cover foreground suppression, permission reuse, completion/error/cancel policy, active-subagent deferral, and stale-completion cancellation.
+- `desktop/src/lib/desktop-notifications.test.ts` covers foreground suppression, permission reuse, completion/error/cancel policy, active-subagent deferral, stale-completion cancellation, older-notification routing, subscribe-before-send, retry, and teardown races.
+- `desktop/src/lib/desktop-notification-transport.test.ts` uses the real Tauri frontend APIs with mocked IPC to verify native command delivery, matching `WebviewWindow` subscription targets for main/project windows, owning-session activation, and unsubscribe even when the host `Notification` constructor has no EventTarget methods.
+- `desktop/src-tauri/src/desktop_notification.rs` contains native metadata/activation and ownership regressions: out-of-order delivery, multiple windows, body clicks versus dismissal/actions, reused window labels, stale queued sends, and shutdown.
 - Prompt-run lifecycle tests cover auto-queue generation gating and dedicated prompt-error signaling.
 - Elicitation tests verify agent-originated pending requests notify while Desktop-local text input does not.
 - ACP tests verify continuation returns its settled stop reason.

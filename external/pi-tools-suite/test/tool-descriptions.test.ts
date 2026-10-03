@@ -24,7 +24,9 @@ describe("tool descriptions", () => {
 		for (const prompt of prompts) {
 			expect(prompt.slice(prompt.indexOf("Tests:"))).toBe(guidance);
 			expect(prompt.match(/TEST_RESULT/g)).toHaveLength(1);
-			expect(prompt).toContain("save full stdout/stderr to a unique log; emit only TEST_RESULT");
+			expect(prompt).toContain("save full stdout/stderr to a unique log under the current project's .pi/artifacts/");
+			expect(prompt).toContain("never root artifacts/ or .artifacts/");
+			expect(prompt).toContain("emit only TEST_RESULT");
 			expect(prompt).toContain("command, original exit code, verified counts (or unknown), and log path");
 			expect(prompt).toContain("Omit per-test PASS lines");
 			expect(prompt).toContain("bounded exact failure diagnostics and flag omissions");
@@ -46,10 +48,24 @@ describe("tool descriptions", () => {
 		const shell = CODEX_ALIAS_TOOL_DESCRIPTIONS.shellCommand.description;
 		const bash = CLAUDE_ALIAS_TOOL_DESCRIPTIONS.Bash.description;
 		// Keep the full description, including routing and test policy, compact.
-		for (const prompt of [shell, bash]) expect(prompt.length).toBeLessThanOrEqual(650);
+		for (const prompt of [shell, bash]) expect(prompt.length).toBeLessThanOrEqual(750);
 		expect(shell).toContain("Set workdir/cwd instead of cd");
 		expect(shell).toContain("prefer read for simple file reads");
 		expect(bash).toContain("Prefer Read/Edit/Write/Grep/Glob for file operations");
+	});
+
+	test("repo guidance selects another indexed project explicitly and preserves its root across calls", () => {
+		const context = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_context")!;
+		const guidance = context.promptGuidelines.join("\n");
+		expect(guidance).toContain("For any repo_* tool, pass projectPath when the task targets another project");
+		expect(guidance).toContain("omit it for the current project");
+		expect(guidance).toContain("same selected root for related calls");
+		expect(guidance).toContain("targets, scopes and audit paths relative to it");
+		expect(guidance).toContain("absolute, session-cwd-relative or ~/ paths");
+		expect(guidance).toContain("requires .indexer-cli directly in that root");
+		expect(guidance).toContain("does not change cwd");
+		expect(guidance).toContain("do not run setup implicitly");
+		expect(guidance).toContain("Resolve returned file paths against that root when using read");
 	});
 
 	test("repo search starts without code bodies and permits only a narrow inline follow-up", () => {

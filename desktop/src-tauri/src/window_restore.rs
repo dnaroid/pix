@@ -109,6 +109,16 @@ fn valid_workspace(workspace: &str) -> bool {
     workspace.is_empty() || (Path::new(workspace).is_absolute() && !workspace.contains('\0'))
 }
 
+fn workspace_window_title(workspace: &str) -> String {
+    if workspace.is_empty() {
+        return "Pix".into();
+    }
+    let name = Path::new(workspace)
+        .file_name()
+        .map(|name| name.to_string_lossy());
+    format!("Pix — {}", name.as_deref().unwrap_or(workspace))
+}
+
 fn parse(bytes: &[u8]) -> Result<Vec<SavedWindow>, String> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err("window snapshot is too large".into());
@@ -172,6 +182,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Er
     for window in &windows {
         let mut config = app.config().app.windows[0].clone();
         config.label = window.label.clone();
+        config.title = workspace_window_title(&window.workspace);
         if restoring {
             config.url = route(&window.workspace);
         }
@@ -184,7 +195,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Er
         }
     }
     if app.webview_windows().is_empty() {
-        let created = crate::startup_theme::build(app, &app.config().app.windows[0])?;
+        let mut config = app.config().app.windows[0].clone();
+        config.title = workspace_window_title("");
+        let created = crate::startup_theme::build(app, &config)?;
         track(&created, String::new(), None);
     }
     Ok(restoring)
@@ -233,6 +246,9 @@ pub(crate) fn desktop_window_workspace(
     if !valid_workspace(&workspace) {
         return Err("invalid window workspace".into());
     }
+    window
+        .set_title(&workspace_window_title(&workspace))
+        .map_err(|e| e.to_string())?;
     let state = window.state::<WindowRestoreState>();
     let mut registry = state.0.lock().map_err(|e| e.to_string())?;
     if valid_label(window.label())
@@ -266,10 +282,7 @@ pub(crate) fn desktop_open_project_window(
     let mut config = app.config().app.windows[0].clone();
     config.label = label.clone();
     config.url = route(&workspace);
-    let name = Path::new(&workspace)
-        .file_name()
-        .map(|name| name.to_string_lossy());
-    config.title = format!("Pix Desktop — {}", name.as_deref().unwrap_or("workspace"));
+    config.title = workspace_window_title(&workspace);
     let window = crate::startup_theme::build(&app, &config).map_err(|e| e.to_string())?;
     if app.get_webview_window(&label).is_some() {
         track(&window, workspace, None);
@@ -319,6 +332,14 @@ pub(crate) fn save(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_window_title_identifies_the_current_project() {
+        assert_eq!(workspace_window_title("/projects/pix"), "Pix — pix");
+        assert_eq!(workspace_window_title("/projects/Мой проект/"), "Pix — Мой проект");
+        assert_eq!(workspace_window_title("/"), "Pix — /");
+        assert_eq!(workspace_window_title(""), "Pix");
+    }
 
     #[test]
     fn qa_restore_opt_in_never_uses_user_membership_storage() {

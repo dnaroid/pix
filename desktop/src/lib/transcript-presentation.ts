@@ -115,6 +115,19 @@ export interface ActivityGroupHeading {
 const ACTIVITY_THINKING_ACTION = "Thinking";
 
 const ACTIVITY_ACTIONS_BY_NAME: readonly (readonly [readonly string[], string])[] = [
+  [["repo_context"], "Gathering project context"],
+  [["repo_architecture"], "Exploring architecture"],
+  [["repo_structure"], "Inspecting project structure"],
+  [["repo_ast"], "Inspecting code structure"],
+  [["repo_explain"], "Inspecting implementation"],
+  [["repo_deps"], "Checking dependencies"],
+  [["repo_audit"], "Auditing project knowledge"],
+  [["session_overview", "session_read_section", "session_recovery_context"], "Reviewing session history"],
+  [["session_search"], "Searching session history"],
+  [["session_name"], "Naming session"],
+  [["compress"], "Compacting context"],
+  [["brainstorm"], "Consulting model council"],
+  [["multi_tool_use", "parallel"], "Running parallel tools"],
   [["read", "read_file", "readoutput"], "Reading code"],
   [["grep", "rg", "glob", "find", "search", "ast_grep"], "Searching project"],
   [
@@ -142,9 +155,8 @@ const ACTIVITY_ACTIONS_BY_KIND: readonly (readonly [readonly string[], string])[
  * active entry in entry order while anything is live, otherwise the settled
  * outcome (`Failed` when any tool call failed). This action is used by the
  * pinned composer status, not the neutral collapsed name list.
- * Derived only from normalized tool metadata; command text and status payloads
- * are never inspected, so arbitrary commands are not reported as running tests
- * and a subagent status call never claims spawning.
+ * Derived only from normalized tool metadata (including the fixed action
+ * cached at ingestion); rendering never inspects command text or payloads.
  */
 export function activityGroupHeading(entries: readonly ActivityEntry[]): ActivityGroupHeading {
   let action: string | undefined;
@@ -161,8 +173,9 @@ export function activityGroupHeading(entries: readonly ActivityEntry[]): Activit
     : { action, active: true, moreCount: activeCount - 1, failed };
 }
 
-function toolEntryAction(tool: ToolItem): string {
+export function toolEntryAction(tool: ToolItem): string {
   if (tool.skillName) return "Reading instructions";
+  if (tool.activityAction) return tool.activityAction;
   const name = toolPresentationName(tool);
   for (const [names, action] of ACTIVITY_ACTIONS_BY_NAME) {
     if (names.includes(name)) return action;

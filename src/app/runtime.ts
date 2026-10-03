@@ -470,13 +470,14 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 	const agentDir = getAgentDir();
 	const reusableServices = reusableRuntimeServices(runtimeOptions.reuseServicesFrom, options.cwd, agentDir);
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
-		const config = runtimeOptions.config ?? loadPixConfig(cwd);
+		const isInitialSession = !sessionStartEvent || sessionStartEvent.reason === "startup";
+		const config = isInitialSession && normalizePathForCompare(cwd) === normalizePathForCompare(options.cwd)
+			? runtimeOptions.config ?? loadPixConfig(cwd) : loadPixConfig(cwd);
 		const modelRefs = resolvePixRuntimeModelRefs(options, sessionManager, config);
 		// Only reuse services for the initial session. Session replacements
 		// (switchSession/newSession/fork) must get fresh services so extensions
 		// are re-loaded with a fresh pi — otherwise handlers capture the old,
 		// invalidated pi and throw stale-ctx errors on the next session_start.
-		const isInitialSession = !sessionStartEvent || sessionStartEvent.reason === "startup";
 		const services = isInitialSession && reusableServices && sameRuntimeServiceTarget(reusableServices, cwd, agentDir)
 			? reusableServices
 			: await createPixRuntimeServices({
@@ -553,7 +554,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 		};
 	};
 
-	return await createAgentSessionRuntime(createRuntime, {
+	const runtime = await createAgentSessionRuntime(createRuntime, {
 		cwd: options.cwd,
 		agentDir,
 		sessionManager: options.noSession
@@ -562,6 +563,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				? await openLazySessionManager(options.sessionPath, { cwdOverride: options.cwd })
 				: SessionManager.create(options.cwd),
 	});
+	return runtime;
 }
 
 async function createPixRuntimeServices(options: {

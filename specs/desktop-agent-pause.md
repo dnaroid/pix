@@ -16,7 +16,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 
 ## Scope
 
-- Show a pause control next to Desktop's stop control while an agent run is active.
+- Show a pause control next to Desktop's stop control in the activity/status row above the message input while an agent run is active.
 - Pause only after the current agent turn has completed; do not abort an in-flight tool batch.
 - Show a continue control when the session is paused or an idle transcript is otherwise resumable.
 - Continue the same Pi agent transcript without inserting an artificial user message.
@@ -24,12 +24,13 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 
 ## Behavior
 
-- While a normal Desktop prompt or continuation is running, the composer shows Pause and Stop controls together.
+- While a normal Desktop prompt or continuation is running, the activity/status row above the composer shows Pause and Stop controls together at its right edge. Message actions (menu, voice, and Send/Queue) stay inside the input; run controls do not. File attachments are available through the message menu, not a separate input-row button. The row remains available even before live activity metadata arrives, with a neutral `Working` fallback.
 - Pause changes the session to `pause-requested` immediately and becomes disabled until Pi reaches the next turn boundary or the run finishes naturally.
-- A successful turn-boundary pause changes the session to `paused`; the active conversation shows a short non-interactive `Agent paused` toast centered over the chat viewport, and once the prompt request settles the composer shows Continue instead of Pause/Stop. A native `Pix — Paused` notification is also eligible through the normal Desktop notification policy when the owning window is in the background. Both are transition-driven: opening or switching to a session that is already paused does not replay an old pause notification.
-- While a session is in `paused`, its conversation-tab status icon is a static Pause glyph rather than the normal running spinner, including the short settlement interval where the prompt runtime may still be marked running.
+- A successful turn-boundary pause changes the session to `paused`; the active conversation shows a short non-interactive `Agent paused` toast centered over the chat viewport, and once the prompt request settles the activity/status row shows Continue instead of Pause/Stop. Without live activity, it shows static `Agent paused` or `Ready to continue` text for the respective resumable state. A native `Pix — Paused` notification is also eligible through the normal Desktop notification policy when the owning window is in the background. Both are transition-driven: opening or switching to a session that is already paused does not replay an old pause notification.
+- While a session is in `paused` or `continuable`, its conversation-tab status icon is a static Pause glyph rather than the normal running spinner, including the short settlement interval where the prompt runtime may still be marked running. After restart, the icon updates when loading discovers a resumable transcript boundary; this does not require persisting the in-memory pause label or eagerly loading every tab.
 - When a run becomes idle with a non-assistant transcript tail or queued Pi message, Desktop reports `continuable`. This covers turn/request-limit stops that leave Pi at a resumable boundary.
 - A normal completed assistant response is `idle` and does not show Continue.
+- Run controls remain hidden in embedded editors and questionnaire mode; questionnaire activity can still show `Waiting for input`. Status announcements contain only status text, not the adjacent action buttons. Long status text truncates without shrinking the controls.
 - Explicit Stop/cancel clears the continuation affordance; cancellation is not treated as pause.
 - Desktop's deferred/auto queue does not consume another message while the session is `pause-requested`, `paused`, `continuable`, or `resuming`; advancing past those boundaries requires Continue or a new explicit user prompt.
 - Continue invokes `Agent.continue()` through the Pix RPC shim and then uses Pi's normal post-run retry, compaction, queue-draining, and settlement bookkeeping.
@@ -64,12 +65,15 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - `desktop/src/app/desktop-workbench-prop-builders.ts`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/PromptComposerControls.svelte`
+- `desktop/src/components/PromptComposerActivityRow.svelte`
+- `desktop/src/components/PromptComposerActivityRow.test.ts`
 
 ## Verification
 
 - ACP tests cover pause-requested to paused state and generic resumable-stop to continuation flow, including the settled continuation stop reason.
 - `acp/test/agent.test.ts` deterministically gates settlement snapshots and checks extension restarts during both prompt-owned and adopted runs, including retained ownership, queueing and Pause availability.
 - Desktop tests cover the private ACP control request, session-state parsing, same-session pause transition detection, and source-level wiring/placement of the centered pause toast.
+- Activity-row render tests cover running controls without metadata, Pause disablement while requested/resuming, paused/continuable Continue, idle row removal, and questionnaire suppression. Source checks cover placement above the message form and callback separation from message actions.
 - `desktop/src/app/prompt-run-lifecycle.test.ts` covers stale completion and queued settlement callbacks, including cleanup/reset followed by a new run with the same session ID.
 - ACP typecheck/tests/stdio smoke and Desktop Svelte/TypeScript checks pass.
 

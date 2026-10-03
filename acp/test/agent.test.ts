@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import {
 	client,
@@ -2638,6 +2638,51 @@ test("session/close cancels dialogs still waiting for an elicitation answer", as
 	assert.deepEqual(clients[0]!.uiResponses, [{ type: "extension_ui_response", id: "ui-5", cancelled: true }]);
 });
 
+test("session/close leaves a pending questionnaire unanswered and stops RPC without abort", async () => {
+	const { adapter, clients } = createTestAdapter();
+	try {
+		await connect(adapter, async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+			const { sessionId } = await cx.buildSession("/tmp").start();
+			const fakePi = clients[0]!;
+			fakePi.emit({ type: "extension_ui_request", id: "restorable-question", method: "editor",
+				title: PIX_QUESTION_EDITOR_TITLE, prefill: JSON.stringify({ version: 1, questions: [{ id: "scope", label: "Scope",
+					prompt: "Which scope?", choices: [{ value: "small", label: "Small" }, { value: "large", label: "Large" }] }] }) });
+			const state = adapter.getSession(sessionId);
+			await waitFor(() => state?.pendingQuestionIds.size === 1);
+			await cx.request("session/close", { sessionId });
+			assert.deepEqual(fakePi.uiResponses, []);
+			assert.equal(fakePi.aborts, 0);
+			assert.equal(fakePi.started, false);
+		}, (app) => { app.onRequest("elicitation/create", async () => new Promise<CreateElicitationResponse>(() => {})); });
+	} finally { await adapter.dispose(); }
+});
+
+test("question interruption metadata and transport errors are not serialized as user Cancel", async () => {
+	for (const transportError of [false, true]) {
+		const { adapter, clients } = createTestAdapter();
+		try {
+			await connect(adapter, async (cx) => {
+				await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+				const { sessionId } = await cx.buildSession("/tmp").start();
+				const fakePi = clients[0]!;
+				fakePi.emit({ type: "extension_ui_request", id: "interrupted-question", method: "editor",
+					title: PIX_QUESTION_EDITOR_TITLE, prefill: JSON.stringify({ version: 1, questions: [{ id: "scope", label: "Scope",
+						prompt: "Which scope?", choices: [{ value: "small", label: "Small" }, { value: "large", label: "Large" }] }] }) });
+				const state = adapter.getSession(sessionId);
+				await waitFor(() => state?.pendingQuestionIds.size === 1 && state.pendingDialogIds.size === 0);
+				assert.deepEqual(fakePi.uiResponses, []);
+				await cx.request("session/close", { sessionId });
+				assert.deepEqual(fakePi.uiResponses, []);
+				assert.equal(fakePi.aborts, 0);
+			}, (app) => { app.onRequest("elicitation/create", () => {
+				if (transportError) throw new Error("connection lost");
+				return { action: "cancel", _meta: { "_pix/question-interrupted": true } };
+			}); });
+		} finally { await adapter.dispose(); }
+	}
+});
+
 test("fire-and-forget extension UI requests produce no response and no elicitation", async () => {
 	const { adapter, clients } = createTestAdapter();
 	let elicitationCalls = 0;
@@ -3000,6 +3045,30 @@ test("activity attachments rebind a reused runtime and replay cached snapshots w
 	});
 });
 
+test("legacy workspace state cannot change the live session cwd", async () => {
+	const harness = createTestAdapter();
+	const notifications: Array<{ sessionId: string; channel: string; data: unknown }> = [];
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[0]!;
+		pi.emit({ type: "extension_ui_request", id: "workspace", method: "setWidget", widgetKey: "pix.session-state",
+			widgetLines: ["workspace", JSON.stringify({ cwd: "/tmp/proj/committed", stack: ["/tmp/proj"] })] });
+		await waitFor(() => notifications.length === 1);
+		assert.deepEqual(notifications[0], { sessionId: created.sessionId, channel: "workspace",
+			data: { cwd: "/tmp/proj/committed", stack: ["/tmp/proj"] } });
+		const store = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+		assert.equal((await store.get(created.sessionId))?.cwd, "/tmp/proj");
+		assert.equal((await store.list("/tmp/proj"))[0]?.sessionId, created.sessionId);
+		assert.deepEqual(await store.list("/tmp/proj/committed"), []);
+	}, (app) => {
+		const custom = app as unknown as { onNotification(method: string,
+			parser: (params: unknown) => typeof notifications[number],
+			handler: (ctx: { params: typeof notifications[number] }) => void): void };
+		custom.onNotification(PIX_SESSION_STATE_METHOD, (value) => value as typeof notifications[number],
+			(ctx) => notifications.push(ctx.params));
+	});
+});
+
 test("desktop history is readable directly from JSONL while the pi runtime is closed", async () => {
 	const harness = createTestAdapter();
 	await connect(harness.adapter, async (cx) => {
@@ -3028,10 +3097,30 @@ test("desktop history is readable directly from JSONL while the pi runtime is cl
 		};
 		assert.deepEqual(history.updates, [{
 			sessionUpdate: "user_message_chunk",
-			messageId: "replay-0",
+			messageId: "replay-entry:u1",
 			content: { type: "text", text: "direct history" },
 		}]);
 		assert.equal(harness.clients.length, 1, "reading history must not spawn pi");
+	});
+});
+
+test("desktop full live history preserves user entry identities on the active branch", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const { sessionId } = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const pi = harness.clients[0]!;
+		pi.entriesState = {
+			leafId: "u2",
+			entries: [
+				{ type: "message", id: "u1", parentId: null, message: { role: "user", content: "repeat" } },
+				{ type: "message", id: "abandoned", parentId: "u1", message: { role: "user", content: "repeat" } },
+				{ type: "message", id: "u2", parentId: "u1", message: { role: "user", content: "repeat" } },
+			],
+		};
+		const history = await cx.request(PIX_SESSION_HISTORY_METHOD, { sessionId, full: true }) as {
+			updates: Array<{ sessionUpdate: string; messageId?: string }>;
+		};
+		assert.deepEqual(history.updates.map((update) => update.messageId), ["replay-entry:u1", "replay-entry:u2"]);
 	});
 });
 
@@ -3065,7 +3154,7 @@ test("desktop history cursor reads older persisted pages without starting a pi r
 		};
 		assert.equal(tail.updates.length, 180);
 		assert.ok(tail.cursor);
-		assert.equal(tail.updates[0]?.messageId, "replay-0");
+		assert.equal(tail.updates[0]?.messageId, "replay-entry:u5");
 
 		const older = await cx.request(PIX_SESSION_HISTORY_METHOD, { sessionId, cursor: tail.cursor }) as {
 			updates: Array<Record<string, unknown>>;
@@ -4476,3 +4565,114 @@ async function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
+
+test("Desktop brainstorm native load attaches the same owned runtime and blocks every direct writer", async () => {
+	const spawned: PiRpcClientOptions[] = [];
+	const pis: FakePiClient[] = [];
+	const harness = createTestAdapter({
+		toolsSuiteExtensionPath: fileURLToPath(new URL("../../external/pi-tools-suite/src/index.ts", import.meta.url)),
+		createPiClient: (options) => {
+			spawned.push(options);
+			const pi = new FakePiClient({ model: { provider: options.provider ?? "zai", id: options.model ?? "exact" } });
+			pis.push(pi);
+			if (options.env?.PIX_BRAINSTORM_PARTICIPANT === "1") {
+				pi.promptHandledWithoutRun = true;
+				pi.promptHook = (text) => {
+					pi.emit({ type: "agent_start" });
+					const n = pi.promptCalls.length;
+					pi.entriesState.entries.push({ id: `u-${n}`, type: "message", message: { role: "user", content: text } },
+						{ id: `a-${n}`, type: "message", message: { role: "assistant", content: [{ type: "text", text: `answer ${n}` }], stopReason: "stop" } });
+					pi.emit({ type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }], willRetry: false } as PiEvent);
+					pi.emit({ type: "agent_settled" });
+				};
+			}
+			return pi;
+		},
+	});
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			const parent = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [], _meta: { "pix.activityOwner": "parent-owner" } });
+			const env = spawned[0]!.env!;
+			assert.ok(env.PIX_BRAINSTORM_HOST_URL); assert.ok(env.PIX_BRAINSTORM_HOST_TOKEN);
+			const send = (body: unknown) => fetch(env.PIX_BRAINSTORM_HOST_URL!, { method: "POST", headers: { Authorization: `Bearer ${env.PIX_BRAINSTORM_HOST_TOKEN}` }, body: JSON.stringify(body) });
+			const body = (round: number) => ({ action: "round", runId: "native-test", runDir: "/tmp/brainstorm-test", topic: "topic", round,
+				tasks: [{ id: `round-${round}-participant-1`, model: "zai/exact", task: `research ${round}`, thinking: "high", timeoutSeconds: 30 }] });
+			const first = await (await send(body(1))).json() as { responses: { source: string; text: string }[]; missing: unknown[] };
+			assert.deepEqual(first.missing, []); assert.equal(first.responses[0]?.text, "answer 1");
+			const id = first.responses[0]!.source;
+			const snapshot = harness.adapter.getSession(parent.sessionId)!.activitySnapshots.get("pi-tools-suite:brainstorm:state")!;
+			assert.equal(snapshot.activityOwner, "parent-owner");
+			assert.equal(spawned[1]!.env?.PIX_BRAINSTORM_HOST_TOKEN, "");
+			await cx.request("session/load", { sessionId: parent.sessionId, cwd: "/tmp/proj", mcpServers: [], _meta: { "pix.activityOwner": "reattached-parent" } });
+			assert.equal(spawned.length, 2); assert.equal(pis[1]!.started, true);
+			assert.equal(harness.adapter.getSession(parent.sessionId)!.activityOwner, "reattached-parent");
+			for (const lazy of [false, true]) {
+				const loaded = await cx.request("session/load", { sessionId: id, cwd: "/tmp/proj", mcpServers: [], _meta: { "pix.lazyHistory": lazy } });
+				assert.equal((loaded._meta?.["pix.brainstorm"] as { owned: boolean }).owned, true);
+				assert.equal(spawned.length, 2); assert.equal(pis[1]!.started, true);
+			}
+			const listed = await cx.request("session/list", { cwd: "/tmp/proj" });
+			assert.deepEqual(listed.sessions.find((s) => s.sessionId === id)?._meta?.["pix.brainstorm"], { runId: "native-test", parentSessionId: parent.sessionId, slot: 1, owned: true });
+			await assert.rejects(cx.request("session/prompt", { sessionId: id, prompt: [{ type: "text", text: "direct paid write" }] }), /owned/);
+			await assert.rejects(cx.request("session/set_config_option", { sessionId: id, configId: "model", value: "zai/other" }), /owned/);
+			await assert.rejects(cx.request("session/fork", { sessionId: id, cwd: "/tmp/proj", mcpServers: [] }), /owned/);
+			await assert.rejects(cx.request("session/delete", { sessionId: id }), /owned/);
+			await assert.rejects(cx.request("session/close", { sessionId: id }), /owned/);
+			await assert.rejects(cx.request(PIX_QUEUE_MESSAGE_METHOD, { sessionId: id, prompt: [{ type: "text", text: "queued write" }], displayText: "queued write" }), /owned/);
+			await assert.rejects(cx.request(PIX_AGENT_CONTROL_METHOD, { sessionId: id, action: "continue" }), /owned/);
+			for (let n = 2; n <= 5; n++) {
+				const result = await (await send(body(n))).json() as { responses: { source: string; text: string }[] };
+				assert.equal(result.responses[0]?.source, id); assert.equal(result.responses[0]?.text, `answer ${n}`);
+			}
+			assert.equal(pis[1]!.promptCalls.length, 5); assert.equal(spawned.length, 2);
+			assert.equal((await send({ action: "finish", runId: "native-test", status: "complete" })).status, 200);
+			assert.equal(pis[1]!.started, false);
+			const record = await new SessionMapStore(harness.sessionMapPath, TEST_LOGGER).get(id);
+			assert.equal(record?.brainstorm?.owned, false);
+		});
+	} finally { await harness.adapter.dispose(); }
+});
+
+test("owned brainstorm records never resume or acquire a second writer after host session loss", async () => {
+	const { adapter, clients, sessionMapPath } = createTestAdapter();
+	try {
+		await new SessionMapStore(sessionMapPath, TEST_LOGGER).put({ sessionId: "lost-participant", piSessionId: "pi-lost", piSessionPath: "/tmp/lost.jsonl", cwd: "/tmp/proj", updatedAt: new Date().toISOString(),
+			brainstorm: { runId: "lost-run", parentSessionId: "lost-parent", slot: 1, owned: true } });
+		await connect(adapter, async (cx) => {
+			await assert.rejects(cx.request("session/load", { sessionId: "lost-participant", cwd: "/tmp/proj", mcpServers: [] }), /lost/);
+			await assert.rejects(cx.request("session/prompt", { sessionId: "lost-participant", prompt: [{ type: "text", text: "write" }] }), /owned/);
+		});
+		assert.equal(clients.length, 0);
+	} finally { await adapter.dispose(); }
+});
+
+for (const failure of ["substituted model", "missing persistence"] as const) test(`brainstorm rejects ${failure} before any participant prompt`, async () => {
+	const spawned: PiRpcClientOptions[] = [], pis: FakePiClient[] = [];
+	const { adapter } = createTestAdapter({
+		toolsSuiteExtensionPath: fileURLToPath(new URL("../../external/pi-tools-suite/src/index.ts", import.meta.url)),
+		createPiClient: (options) => {
+			spawned.push(options);
+			const pi = new FakePiClient({ model: { provider: "zai", id: failure === "substituted model" ? "substituted" : "exact" } });
+			if (failure === "missing persistence" && options.env?.PIX_BRAINSTORM_PARTICIPANT === "1") {
+				const { sessionFile: _file, ...state } = pi.state;
+				pi.state = state;
+			}
+			pis.push(pi); return pi;
+		},
+	});
+	try {
+		await connectAs(adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+			const env = spawned[0]!.env!;
+			const response = await fetch(env.PIX_BRAINSTORM_HOST_URL!, { method: "POST", headers: { Authorization: `Bearer ${env.PIX_BRAINSTORM_HOST_TOKEN}` }, body: JSON.stringify({
+				action: "round", runId: "exact-model-test", runDir: "/tmp/brainstorm-test", topic: "topic", round: 1,
+				tasks: [{ id: "round-1-participant-1", model: "zai/exact", task: "research", thinking: "high", timeoutSeconds: 30 }],
+			}) });
+			const result = await response.json() as { responses: unknown[]; missing: { reason: string }[] };
+			assert.equal(result.responses.length, 0); assert.match(result.missing[0]!.reason, failure === "substituted model" ? /no fallback/ : /no persisted session file/);
+			assert.equal(pis[1]!.promptCalls.length, 0); assert.equal(pis[1]!.started, false); assert.equal(spawned.length, 2);
+		});
+	} finally { await adapter.dispose(); }
+});

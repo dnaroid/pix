@@ -6,6 +6,7 @@ import {
   visibleSessionTodoRows,
   type SessionTodoSnapshot,
 } from "./session-todos";
+import type { SessionBrainstormSnapshot } from "./session-brainstorm";
 
 export type SessionInspectorActivityTransition = "close" | null;
 
@@ -20,10 +21,12 @@ export function createSessionInspectorActivityTracker() {
     sessionId: string | null,
     todoSnapshot: SessionTodoSnapshot | undefined,
     subagentSnapshot: SessionSubagentSnapshot | undefined,
+    brainstormSnapshot?: SessionBrainstormSnapshot,
   ): SessionInspectorActivityTransition {
     if (!sessionId) return null;
     return visibleSessionTodoRows(todoSnapshot).length === 0
       && visibleSessionSubagentRuns(subagentSnapshot).length === 0
+      && (brainstormSnapshot?.runs.length ?? 0) === 0
       ? "close"
       : null;
   }
@@ -40,8 +43,9 @@ export function syncSessionInspectorActivity(
   subagentSnapshot: SessionSubagentSnapshot | undefined,
   open: boolean,
   setOpen: SetSessionInspectorOpen,
+  brainstormSnapshot?: SessionBrainstormSnapshot,
 ): void {
-  const transition = tracker.observe(sessionId, todoSnapshot, subagentSnapshot);
+  const transition = tracker.observe(sessionId, todoSnapshot, subagentSnapshot, brainstormSnapshot);
   if (open && transition === "close") setOpen(false);
 }
 

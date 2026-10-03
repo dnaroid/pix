@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildDesktopWorkbenchTabs, buildSessionWorkbenchTabs } from "./workbench-model";
 import { workbenchSessionTabId } from "../lib/workbench-tabs";
 import { EMPTY_SESSION_ACTIVITY } from "../lib/session-activity";
+import { agentControlShowsPausedTab, type AgentControlState } from "../lib/agent-control";
 
 function build(sessions: SessionInfo[]) {
   return buildSessionWorkbenchTabs({
@@ -60,6 +61,28 @@ describe("session workbench model", () => {
 
     expect(tab?.statusKind).toBe("paused");
     expect(tab?.title).toContain("Paused");
+  });
+
+  it("changes the restored tab icon when loading discovers continuation, and clears it on resume", () => {
+    function tabFor(state: AgentControlState) {
+      return buildSessionWorkbenchTabs({
+        sessions: [{ sessionId: "restored", cwd: "/tmp/project" }],
+        draftSessionTabId: "draft",
+        pausedSessionIds: new Set(agentControlShowsPausedTab(state) ? ["restored"] : []),
+        runningSessionIds: new Set(state === "resuming" ? ["restored"] : []),
+        sessionActivityBySessionId: new Map(),
+        pendingElicitationSessionIds: new Set(),
+        unseenCompletedSessionIds: new Set(),
+        disabled: false,
+        realSessionCount: 1,
+      })[0];
+    }
+
+    expect(tabFor("idle")?.statusKind).toBe("idle");
+    expect(tabFor("continuable")?.statusKind).toBe("paused");
+    expect(tabFor("continuable")?.title).toContain("Paused");
+    expect(tabFor("resuming")?.statusKind).toBe("running");
+    expect(tabFor("idle")?.statusKind).toBe("idle");
   });
 
   it("does not spin an idle session tab solely because its saved plan has in-progress work", () => {

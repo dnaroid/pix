@@ -18,4 +18,10 @@ describe("queued message presentation", () => {
     expect(source).toContain('aria-label="Edit queued message"');
     expect(source).toContain('aria-label="Cancel queued message"');
   });
+
+  it("distinguishes paused and waiting icons with quiet semantic color tiles", () => {
+    expect(source).toContain('grid h-5 w-5 shrink-0 place-items-center rounded-sm bg-tool-info/10 text-tool-info');
+    expect(source).toContain('grid h-5 w-5 shrink-0 place-items-center rounded-sm bg-tool-warning/10 text-tool-warning');
+    expect(source).not.toContain('animate-');
+  });
 });

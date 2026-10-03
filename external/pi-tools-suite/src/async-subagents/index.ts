@@ -19,6 +19,7 @@ import {
 	type SubagentSessionRecord,
 } from "./lib.js";
 import { activityFromRpcEvent } from "./core/activity.js";
+import { buildAgentCompletionNotification } from "./core/notifications.js";
 import { buildUltraworkPrompt, isUltraworkEnvEnabled, registerCommands } from "./commands.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt } from "./core/agent-strategy.js";
 import { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
@@ -141,6 +142,7 @@ export default function (pi: ExtensionAPI) {
 	let currentSessionFile: string | undefined;
 	let currentSessionStateContext: ExtensionContext | undefined;
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
+	let shuttingDown = false;
 
 	function publishSubagentCatalogState(ctx: unknown): void {
 		const state = createSubagentCatalogState(ctx);
@@ -169,6 +171,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function reconcileLiveAgentCompletions(): void {
+		if (shuttingDown) return;
 		for (const [runDir, liveRun] of [...liveAgents.entries()]) {
 			const states = new Map(
 				getRunState(runDir, [...liveRun.keys()], {
@@ -177,13 +180,26 @@ export default function (pi: ExtensionAPI) {
 				}).agents.map((agent) => [agent.id, agent]),
 			);
 			for (const agentId of [...liveRun.keys()]) {
+				const liveAgent = liveRun.get(agentId)!;
+				// Disk receipts may describe an intermediate attempt. Only the
+				// final callback can settle launches still owned by this instance.
+				if (liveAgent.awaitingCompletion) continue;
 				const state = states.get(agentId);
 				if (!state) {
 					removeLiveAgent(runDir, agentId);
 					continue;
 				}
 				if (!isTerminalAgentStatus(state.status)) continue;
+				// A shared runtime may have switched sessions while the child ran.
+				// Keep its completion pending until its originating session is active.
+				if (!agentMatchesSession(liveAgent, currentSessionFile)) continue;
 				removeLiveAgent(runDir, agentId);
+				pi.sendMessage(buildAgentCompletionNotification({
+					agentId, runDir, state,
+					runAgents: getRunState(runDir, undefined, {
+						includeLineCounts: false, checkRpcPromptFailure: false,
+					}).agents,
+				}), { triggerTurn: true, deliverAs: "followUp" });
 			}
 		}
 	}
@@ -204,7 +220,9 @@ export default function (pi: ExtensionAPI) {
 		completionWatchTimer = undefined;
 	}
 
-	const handleAgentCompletion: AgentCompletionHandler = () => {
+	const handleAgentCompletion: AgentCompletionHandler = ({ runDir, agentId }) => {
+		const liveAgent = liveAgents.get(runDir)?.get(agentId);
+		if (liveAgent) liveAgent.awaitingCompletion = false;
 		refreshSubagentOverlay();
 	};
 
@@ -222,6 +240,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		try {
+			shuttingDown = false;
 			sawAutoUltraworkCandidate = false;
 			currentSessionFile = sessionFileFromContext(ctx);
 			currentSessionStateContext = ctx;
@@ -303,6 +322,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (event, ctx) => {
 		try {
+			shuttingDown = true;
 			clearSubagentsNativeWidget(ctx);
 			subagentOverlay.dispose();
 			if (completionWatchTimer) {

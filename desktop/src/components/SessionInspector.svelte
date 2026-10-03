@@ -6,8 +6,10 @@
   import type { SessionActivitySummary } from "../lib/session-activity";
   import type { SessionSubagentSnapshot } from "../lib/session-subagents";
   import type { SessionTodoSnapshot } from "../lib/session-todos";
+  import type { SessionBrainstormSnapshot } from "../lib/session-brainstorm";
   import SessionSubagentsPanel from "./SessionSubagentsPanel.svelte";
   import SessionTodosPanel from "./SessionTodosPanel.svelte";
+  import SessionBrainstormPanel from "./SessionBrainstormPanel.svelte";
 
   let {
     activeSessionId,
@@ -15,18 +17,22 @@
     summary,
     todoSnapshot,
     subagentSnapshot,
+    brainstormSnapshot,
     canClearTodos,
     onClearTodos,
     onClose,
+    onOpenBrainstormParticipant,
   }: {
     activeSessionId: string | null;
     sessionTitle: string;
     summary: SessionActivitySummary;
     todoSnapshot: SessionTodoSnapshot | undefined;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
+    brainstormSnapshot: SessionBrainstormSnapshot | undefined;
     canClearTodos: boolean;
     onClearTodos: () => Promise<boolean>;
     onClose: () => void;
+    onOpenBrainstormParticipant: (sessionId: string) => void | Promise<void>;
   } = $props();
 
   const WIDTH_KEY = windowLayoutKey("sessionInspectorWidth");
@@ -175,6 +181,7 @@
     <div class="min-h-0 overflow-y-auto">
       {#key activeSessionId}
         <SessionSubagentsPanel snapshot={subagentSnapshot} activeCount={summary.activeSubagents} />
+        <SessionBrainstormPanel snapshot={brainstormSnapshot} onOpenParticipant={onOpenBrainstormParticipant} />
         <SessionTodosPanel snapshot={todoSnapshot} summary={summary} {canClearTodos} {onClearTodos} />
       {/key}
     </div>

@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   agentControlAllowsAutoQueue,
+  agentControlShowsPausedTab,
   agentControlStateFromSessionState,
   agentPauseJustTriggered,
   isAgentControlState,
 } from "./agent-control";
 
 describe("Desktop agent control state", () => {
+  it("updates tab pause status when a restored boundary is discovered and later resumed", () => {
+    const states = ["idle", "continuable", "resuming", "idle", "pause-requested", "paused"] as const;
+    expect(states.map(agentControlShowsPausedTab)).toEqual([false, true, false, false, false, true]);
+  });
+
   it("parses pause and continuation states from the private session-state channel", () => {
     expect(agentControlStateFromSessionState({
       sessionId: "session-1",

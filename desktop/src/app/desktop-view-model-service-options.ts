@@ -44,6 +44,7 @@ export type DesktopViewModelServicesOptions = {
   changingConfig: () => string | null;
   displayedConfigOptions: () => SessionConfigOption[];
   reconnect: () => void | Promise<void>;
+  focusComposer: () => void | Promise<void>;
   state: ActiveSessionState;
   errors: ErrorState;
   sessions: DesktopSessionServices;

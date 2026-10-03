@@ -18,6 +18,11 @@ without blocking desktop interactions.
 
 ## Behavior
 
+- Native window titles use `Pix — <project folder name>` in the macOS Dock and
+  system window lists. Windows without an active project use `Pix`; a filesystem
+  root uses its path as the name. The title is set when creating/restoring each
+  project window and updated when the current window selects another workspace.
+  This native title does not add visible text to the custom titlebar.
 - The window title bar does not contain a project selector. Instead, immediately
   after the platform/native-control inset it shows a compact non-interactive
   colored square with a two-letter abbreviation for the active project before
@@ -159,6 +164,7 @@ without blocking desktop interactions.
 
 ## Related files
 
+- `desktop/src-tauri/src/window_restore.rs`
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/app/project-workspace.svelte.ts`
 - `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
@@ -179,6 +185,8 @@ without blocking desktop interactions.
 
 ## Verification
 
+- `desktop/src-tauri/src/window_restore.rs` tests cover native project-title
+  formatting, Unicode/spaces, trailing separators, root paths, and empty windows.
 - `desktop/src/lib/recent-projects.test.ts` covers normalized full-path fallback
   identity and two-letter project abbreviations.
 - `desktop/src/app/project-workspace.test.ts` covers URL precedence over stale

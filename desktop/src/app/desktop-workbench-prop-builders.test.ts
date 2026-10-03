@@ -56,6 +56,21 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
 }
 
 describe("workbench composer props", () => {
+  it("makes owned participant read-only and returns to its explicit orchestrator ID", () => {
+    const options = conversationOptions("participant");
+    options.brainstormLink = () => ({ runId: "r", slot: 2, parentSessionId: "parent", owned: true });
+    options.openBrainstormSession = vi.fn();
+    const props = buildWorkbenchConversationProps(options);
+    expect(props.composer.ready).toBe(false);
+    expect(props.queue.disabled).toBe(true);
+    expect(props.transcript.operationRunning).toBe(true);
+    props.managedCouncil?.onOpenParent();
+    expect(options.openBrainstormSession).toHaveBeenCalledWith("parent");
+    props.transcript.onUserMessageAction?.({} as never, "fork");
+    expect(options.branchActions.runUserMessageContextAction).not.toHaveBeenCalled();
+    options.brainstormLink = () => ({ runId: "r", slot: 2, parentSessionId: "parent", owned: false });
+    expect(buildWorkbenchConversationProps(options).composer.ready).toBe(true);
+  });
   it("keeps input ready while the selected session runtime and history are opening", () => {
     const options = conversationOptions("opening");
     options.activeSessionRuntimeReady = () => false;
@@ -94,6 +109,8 @@ describe("workbench inspector props", () => {
       activeSessionActivity: () => undefined,
       activeTodoSnapshot: () => undefined,
       activeSubagentSnapshot: () => undefined,
+      activeBrainstormSnapshot: () => undefined,
+      openBrainstormParticipant: vi.fn(),
       canClearTodos: () => false,
       clearSessionTodos: vi.fn(async () => true),
       inspectorPreference: {

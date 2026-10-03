@@ -221,6 +221,22 @@
     cursor: pointer;
     transition: border-color 120ms ease, background-color 120ms ease;
   }
+  /* The action restores known natural dimensions before a streaming rerender
+     paints. Unknown images keep the compact loading fallback. */
+  .markdown-text :global(.markdown-media[data-project-media="image"] .markdown-media-frame),
+  .markdown-text :global(.markdown-media[data-local-media="image"] .markdown-media-frame) {
+    box-sizing: border-box;
+    min-height: 0;
+    flex-shrink: 0;
+  }
+  .markdown-text :global(.markdown-media[data-project-media="image"] .markdown-media-content),
+  .markdown-text :global(.markdown-media[data-local-media="image"] .markdown-media-content) {
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    object-fit: contain;
+  }
   .markdown-text :global(a.markdown-media-frame:hover) {
     border-color: var(--input);
     background: var(--accent);

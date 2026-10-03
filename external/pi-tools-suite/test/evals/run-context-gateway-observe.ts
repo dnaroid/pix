@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { parseEvalModels, runEvalCase } from "./harness/runner.js";
+import { resolveEvalOutputDir } from "./harness/output-dir.js";
 import type { EvalCase, EvalRunResult } from "./harness/types.js";
 import type {
 	ContextGatewayBudgets,
@@ -78,9 +78,7 @@ if (models.length === 0) {
 
 const timeoutMs = Number(process.env.PI_TOOLS_SUITE_EVAL_TIMEOUT_MS ?? 240_000);
 const streamIo = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_STREAM_IO ?? "");
-const outputDir = process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR
-	? path.resolve(process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR)
-	: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "artifacts", `context-gateway-observe-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+const outputDir = resolveEvalOutputDir("context-gateway-observe", process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR);
 
 function prepareResidualProject(projectDir: string): void {
 	const readLines = [

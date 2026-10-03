@@ -125,7 +125,7 @@ Representative coverage:
 | `coding-discipline` | coding-discipline tests | coding-quality workflows |
 | `ast-grep` | ast-grep tests | structural tool selection |
 | `async-subagents` | core/tools/UI tests | Sol/Luna orchestration |
-| `brainstorm` | config, command/tool routing instructions, audit/brainstorm prompts, mode persistence/v2 compatibility, nested subagent adapter, isolated SDK research-tool inventory/guards, five-round workflow and locked review/finalization tests | deterministic only; no paid council/routing or live web-service eval yet; actual routing, clarification and audit/synthesis quality are not certified |
+| `brainstorm` | config, command/tool routing instructions, audit/brainstorm prompts, mode persistence/v2–v3→v4 migration, quorum gaps, ledger history/position matrix, outputDir/publish, nested subagent adapter, isolated SDK research-tool inventory/guards, five-round workflow and locked review/finalization tests | deterministic only; no paid council/routing or live web-service eval yet; actual routing, clarification and audit/synthesis quality are not certified |
 | `lsp` | LSP tests | deterministic only |
 | `comment-checker` | comment-checker tests | deterministic only |
 | `session-name` | session-name tests | deterministic only |
@@ -392,11 +392,21 @@ provider does not populate monetary cost metadata.
 `npm run evals:report` writes:
 
 ```text
-test/evals/artifacts/<timestamp>/eval-report.json
-test/evals/artifacts/<timestamp>/eval-report.md
+.pi/artifacts/evals/report-<timestamp>-<uuid>/eval-report.json
+.pi/artifacts/evals/report-<timestamp>-<uuid>/eval-report.md
 ```
 
-The default artifact directory is ignored by Git.
+The default artifact directory is ignored by Git. All five report entrypoints
+use the shared output resolver and `PROJECT_ARTIFACTS_DIR` constant. Resolution
+starts at the caller's cwd and uses the nearest ancestor with `.pi` or `.git`
+(including Git worktree marker files), falling back to cwd for standalone use.
+Thus running from the nested suite writes under the enclosing project's `.pi`,
+not alongside installed harness sources. No absolute project path is cached.
+Each run gets a unique timestamp/UUID directory. `PI_TOOLS_SUITE_EVAL_OUTPUT_DIR`
+and delivery-review's `DELIVERY_REVIEW_OUTPUT` remain explicit output overrides
+(relative paths resolve from cwd). Export retained CI evidence to durable storage;
+Desktop may clean scratch output. See the Pix
+[artifact storage contract](../../../specs/harness-artifact-storage.md).
 
 The Markdown report contains a model summary table with:
 

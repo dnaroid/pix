@@ -47,14 +47,27 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 9. Reaching the top repeatedly continues paging until the cursor is exhausted, at which point the first persisted transcript entry is reachable.
 10. History pagination must not eagerly hydrate deferred tool bodies or start a Pi runtime merely to read older persisted JSONL history.
 11. The floating jump-to-latest arrow has a fully transparent background, without a border, shadow, or backdrop blur, so transcript content underneath remains readable. Hover changes the arrow color, not its background; keyboard focus retains a visible outline.
+12. Chat image attachments and project/local Markdown image previews retain natural proportions without cropping or upscaling, capped at their existing heights (20rem for chat attachments, 28rem for Markdown) and the available width. After the browser learns intrinsic dimensions, those dimensions reserve the frame through loading/error fallbacks and Markdown regeneration during streaming, including offscreen previews awaiting lazy hydration. A first image with unknown dimensions uses a compact fallback and can change height once on load; there is no arbitrary square or guaranteed reservation before dimensions are known. Composer/tool thumbnails, videos, and remote images in the Preview editor retain their existing sizing. Follow-latest behavior is unchanged.
 
 ## Related files
+
+Unchanged project/local Markdown image nodes are restored before lazy hydration
+during streaming, not merely dimension-reserved. Pending work follows retained
+node ownership; removed nodes and destroyed renderers ignore late completion.
+See [image retention decision](../docs/decisions/0016-streaming-image-dom-retention.md).
 
 - `desktop/src/app/transcript-scroll.svelte.ts`
 - `desktop/src/app/prompt-queue-actions.svelte.ts`
 - `desktop/src/app/desktop-prompt-action-services.ts`
 - `desktop/src/app/session-history.svelte.ts`
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/components/AttachmentGrid.svelte`
+- `desktop/src/components/MarkdownText.svelte`
+- `desktop/src/components/markdown-image-retention.ts`
+- `desktop/src/components/markdown-content-action.ts`
+- `desktop/src/lib/image-preview-layout.ts`
+- `desktop/src/components/markdown-image-layout.test.ts`
+- `desktop/src/components/transcript-image-layout.test.ts`
 - `desktop/src/lib/acp-pix-extensions.ts`
 - `acp/src/acp/session-history-file.ts`
 - `acp/src/acp/pix-acp-agent.ts`
@@ -62,6 +75,7 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 ## Verification
 
 - `npm --prefix desktop test -- transcript-scroll.test.ts`
+- `npm --prefix desktop test -- transcript-image-layout.test.ts`
 - `npm --prefix desktop test -- prompt-queue-actions.test.ts`
 - `npm --prefix desktop test -- session-history.test.ts acp-client.test.ts`
 - `node --import tsx --test acp/test/session-history-file.test.ts` from the repo root

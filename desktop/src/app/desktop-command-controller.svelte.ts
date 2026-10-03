@@ -90,6 +90,9 @@ export function createDesktopCommandController(options: DesktopCommandController
       case "session.open":
         return options.statusReady() && !!options.workspace() && !options.sessionMutationRunning();
       case "session.jump":
+        return options.canUseSession()
+          && !!options.activeSessionId()
+          && options.activeSessionRuntimeReady();
       case "session.history":
         return options.clientAvailable()
           && !!options.activeSessionId()
@@ -98,7 +101,7 @@ export function createDesktopCommandController(options: DesktopCommandController
       case "session.activity":
         return !!options.activeSessionId();
       case "session.modelThinking":
-        return (options.draftSessionTabActive()
+        return options.canUseSession() && (options.draftSessionTabActive()
           ? options.draftConfigAvailable()
           : !!options.activeSessionId() && options.activeSessionRuntimeReady())
           && !options.sessionMutationRunning()

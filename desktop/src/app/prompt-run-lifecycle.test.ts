@@ -3,6 +3,38 @@ import type { AcpClient } from "../lib/acp-client";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 
 describe("prompt run notification lifecycle", () => {
+  it.each(["current", "clear session", "reset", "replace client"] as const)(
+    "binds the submitted prompt rather than the final steering entry (%s)",
+    async (transition) => {
+      let finish!: (value: { stopReason: "end_turn" }) => void;
+      const client = {
+        branchUserMessages: vi.fn()
+          .mockResolvedValueOnce([{ entryId: "old", text: "repeat" }])
+          .mockResolvedValueOnce([
+            { entryId: "old", text: "repeat" },
+            { entryId: "submitted", text: "repeat" },
+            { entryId: "steering", text: "repeat" },
+          ]),
+        prompt: vi.fn(() => new Promise((resolve) => { finish = resolve; })),
+      } as unknown as AcpClient;
+      let activeClient = client;
+      const bindPromptSessionEntry = vi.fn();
+      const runs = createPromptRunLifecycle({
+        client: () => activeClient, activeSessionId: () => "session-1", reportError: vi.fn(),
+        bindPromptSessionEntry, finalizeTranscriptActivity: vi.fn(), flushAutoQueue: vi.fn(),
+      });
+      const pending = runs.runPromptRequest(client, "session-1", [], [], "local:1");
+      await vi.waitFor(() => expect(client.prompt).toHaveBeenCalledOnce());
+      if (transition === "clear session") runs.clearSession("session-1");
+      if (transition === "reset") runs.reset();
+      if (transition === "replace client") activeClient = {} as AcpClient;
+      finish({ stopReason: "end_turn" });
+      await pending;
+      if (transition === "current") expect(bindPromptSessionEntry).toHaveBeenCalledWith("session-1", "local:1", "submitted");
+      else expect(bindPromptSessionEntry).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["next run", "clear session", "reset"] as const)(
     "ignores a stale completion after %s",
     async (transition) => {

@@ -13,11 +13,60 @@ const tool = (name: string, status: ToolItem["status"] = "in_progress"): ToolIte
 });
 
 describe("composer activity", () => {
-  it("follows the latest live action and counts concurrent entries without inheriting failures", () => {
+  it.each([
+    ["repo_context", "Gathering project context"],
+    ["repo_architecture", "Exploring architecture"],
+    ["repo_structure", "Inspecting project structure"],
+    ["repo_ast", "Inspecting code structure"],
+    ["repo_explain", "Inspecting implementation"],
+    ["repo_deps", "Checking dependencies"],
+    ["repo_audit", "Auditing project knowledge"],
+    ["session_overview", "Reviewing session history"],
+    ["session_search", "Searching session history"],
+    ["compress", "Compacting context"],
+    ["brainstorm", "Consulting model council"],
+    ["multi_tool_use.parallel", "Running parallel tools"],
+    ["unknown", "Running tool"],
+  ])("describes %s from metadata", (name, action) => {
+    expect(composerActivity({ items: [user, tool(name)] }, live)?.action).toBe(action);
+  });
+
+  it("adds safe context for every active file or skill, never raw payloads", () => {
+    const read = { ...tool("read"), path: "/private/project/composer-activity.ts",
+      get rawInput(): unknown { throw new Error("payload access"); } };
+    expect(composerActivity({ items: [user, read] }, live)?.action).toBe("Reading code · composer-activity.ts");
+    expect(composerActivity({ items: [user, read, tool("repo_deps")] }, live))
+      .toEqual({ action: "Reading code · composer-activity.ts • Checking dependencies", moreCount: 0 });
+    expect(composerActivity({ items: [user, read, { ...tool("edit"), path: "C:\\project\\file.ts" }] }, live)?.action)
+      .toBe("Reading code · composer-activity.ts • Making changes · file.ts");
+    expect(composerActivity({ items: [user, { ...tool("read"), skillName: "pix-desktop-frontend" }] }, live)?.action)
+      .toBe("Reading instructions · pix-desktop-frontend");
+    expect(composerActivity({ items: [user, { ...tool("shell"), path: "/private/test.ts" }] }, live)?.action)
+      .toBe("Running command");
+  });
+
+  it.each(["https://host/file?token=secret", "/tmp/file#secret", "/tmp/bad\nfile", "/tmp/bad\u202efile"])(
+    "does not display unsafe path %j", (path) => {
+      expect(composerActivity({ items: [user, { ...tool("read"), path }] }, live)?.action).toBe("Reading code");
+    },
+  );
+
+  it("bounds context and drops settled context", () => {
+    const read = { ...tool("read"), path: `/tmp/${"a".repeat(100)}` };
+    expect(composerActivity({ items: [user, read] }, live)?.action).toBe(`Reading code · ${"a".repeat(61)}…`);
+    expect(composerActivity({ items: [user, { ...read, status: "completed" }] }, live)?.action).toBe("Working");
+  });
+
+  it("lists all concurrent entries without inheriting failures or hiding repeated actions", () => {
     expect(composerActivity({ items: [user, tool("shell", "failed"), tool("read"), tool("apply_patch")] }, live))
-      .toEqual({ action: "Making changes", moreCount: 1 });
+      .toEqual({ action: "Reading code • Making changes", moreCount: 0 });
     expect(composerActivity({ items: [user, tool("shell", "failed"), tool("read")] }, live))
       .toEqual({ action: "Reading code", moreCount: 0 });
+    expect(composerActivity({ items: [user, tool("read"), tool("read"), tool("shell")] }, live)?.action)
+      .toBe("Reading code • Reading code • Running command");
+    const thought: TranscriptItem = { type: "message", id: "t", role: "thought", text: "", attachments: [], startedAtMs: 1 };
+    expect(composerActivity({ items: [user, thought, tool("read")] }, live)?.action)
+      .toBe("Thinking • Reading code");
   });
 
   it("shows thinking only for a live timed thought, not replayed history", () => {

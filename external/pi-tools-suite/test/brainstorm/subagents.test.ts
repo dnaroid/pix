@@ -22,7 +22,7 @@ afterEach(async () => {
 const config = { models: ["one/a", "two/b"], thinking: "high", timeoutSeconds: 30 };
 const tasks = config.models.map((model, i) => ({ id: `member-${i}`, model, task: "Discuss only", thinking: "high", timeoutSeconds: 30 }));
 
-function fixture(options: { onWait?: () => void; failWait?: boolean; failSpawn?: boolean; model?: string; truncated?: boolean; text?: string } = {}) {
+function fixture(options: { onWait?: () => void; failWait?: boolean; failOne?: boolean; failSpawn?: boolean; model?: string; truncated?: boolean; text?: string } = {}) {
 	const calls: any[] = [];
 	const ctx: any = {
 		cwd: root, tools: [{ name: "subagents" }],
@@ -37,7 +37,7 @@ function fixture(options: { onWait?: () => void; failWait?: boolean; failSpawn?:
 				if (options.failSpawn) return { isError: true, result: { content: [{ type: "text", text: "Unavailable model" }], details: {} } };
 			}
 			if (args.action === "wait") options.onWait?.();
-			const details = args.action === "wait" ? { agents: tasks.map((task) => ({ id: task.id, status: options.failWait ? "failed" : "done" })) }
+			const details = args.action === "wait" ? { agents: tasks.map((task) => ({ id: task.id, status: options.failWait || (options.failOne && task.id === "member-1") ? "failed" : "done" })) }
 				: args.action === "result" ? { state: { status: "done" }, structured: { model: options.model ?? tasks.find((task) => task.id === args.agentId)!.model, resultTruncated: options.truncated } } : {};
 			return { isError: false, result: { content: [], details } };
 		},
@@ -47,9 +47,10 @@ function fixture(options: { onWait?: () => void; failWait?: boolean; failSpawn?:
 
 test("uses exact configured models and read-only research with no extra runner", async () => {
 	const f = fixture();
-	const reports = await f.run();
+	const { responses: reports, missing } = await f.run();
+	expect(missing).toEqual([]);
 	expect(reports.map((report) => report.model)).toEqual(config.models);
-	expect(reports[0].text).toContain("A proposal with dissent");
+	expect(reports[0]!.text).toContain("A proposal with dissent");
 	expect(f.calls[0].tasks.map((task: any) => ({ model: task.model, tools: task.tools, role: task.subagentType, prompt: task.promptOverride }))).toEqual(config.models.map((model) => ({ model, tools: ["read"], role: "research", prompt: "{task}" })));
 	for (const task of f.calls[0].tasks) {
 		expect(task.extraArgs).toEqual(["--extension", expect.stringContaining(join("brainstorm", "research-extension.ts")), "--tools", COUNCIL_RESEARCH_TOOLS.join(",")]);
@@ -79,9 +80,19 @@ test("pre-aborted invocation never launches", async () => {
 });
 
 test("failed rounds, nested errors, substituted models, truncation and empty/oversize reports are rejected", async () => {
-	for (const options of [{ failWait: true }, { failSpawn: true }, { model: "other/model" }, { truncated: true }, { text: " " }, { text: "x".repeat(65537) }]) {
+	for (const options of [{ failSpawn: true }, { model: "other/model" }, { truncated: true }, { text: " " }, { text: "x".repeat(65537) }]) {
 		const f = fixture(options);
 		await expect(f.run()).rejects.toThrow();
 		for (const task of tasks) expect(await readFile(join(f.calls[0].runDir, task.id, "exit_code"), "utf8")).toContain("stopped");
 	}
+});
+
+test("failed participants become declared gaps without reading their results; the workflow enforces the quorum", async () => {
+	const one = fixture({ failOne: true });
+	const outcome = await one.run();
+	expect(outcome.responses.map((response) => response.id)).toEqual(["member-0"]);
+	expect(outcome.missing).toEqual([{ id: "member-1", model: "two/b", reason: "participant failed" }]);
+	expect(one.calls.map((call) => call.action)).toEqual(["spawn", "wait", "result"]);
+	const all = fixture({ failWait: true });
+	expect((await all.run()).missing.map((gap) => gap.id)).toEqual(["member-0", "member-1"]);
 });

@@ -534,7 +534,9 @@ function toSdkOptions(options: PiRpcClientOptions): RpcClientOptions {
 	if (options.provider) sdkOptions.provider = options.provider;
 	if (options.model) sdkOptions.model = options.model;
 	if (options.args) sdkOptions.args = [...options.args];
-	if (options.env) sdkOptions.env = options.env;
+	// RpcClient overlays env on process.env: a new session must not accidentally
+	// inherit another ACP session's brainstorm capability.
+	sdkOptions.env = { PIX_BRAINSTORM_HOST_URL: "", PIX_BRAINSTORM_HOST_TOKEN: "", ...options.env };
 	return sdkOptions;
 }
 

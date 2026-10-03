@@ -1,6 +1,8 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Attachment } from "../lib/attachments";
+import { imageDimensions, imagePreviewStyle, type ImageDimensions } from "../lib/image-preview-layout";
 import { renderMermaidDiagram } from "../lib/mermaid";
+import { MarkdownImageRetention } from "./markdown-image-retention";
 import {
   FileLinkValidationCache,
   type FileLinkScope,
@@ -17,6 +19,7 @@ interface MarkdownContentActionOptions {
 
 export function createMarkdownContentAction(options: MarkdownContentActionOptions) {
   const mediaCache = new Map<string, Promise<Attachment | undefined>>();
+  const mediaDimensions = new Map<string, ImageDimensions>();
 
   function decorateExternalLinks(node: HTMLElement): void {
     const template = options.externalLinkIconTemplate()?.querySelector("svg");
@@ -36,6 +39,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
     let generation = 0;
     let destroyed = false;
     const fileLinkValidationCache = new FileLinkValidationCache();
+    const retainedImages = new MarkdownImageRetention();
     let mediaObserver: IntersectionObserver | undefined;
     let diagramObserver: IntersectionObserver | undefined;
     let fileLinkObserver: IntersectionObserver | undefined;
@@ -46,6 +50,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       const scheduledGeneration = generation;
       queueMicrotask(() => {
         if (scheduledGeneration !== generation) return;
+        retainedImages.restore(node);
         decorateExternalLinks(node);
         observeFileLinks(scheduledGeneration);
         observeDiagrams(scheduledGeneration);
@@ -139,8 +144,20 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       const previews = Array.from(node.querySelectorAll<HTMLElement>(
         ".markdown-media[data-project-media], .markdown-media[data-local-media]",
       ));
+      // Restore every known frame before paint, even when it is offscreen and
+      // lazy hydration is deferred. Otherwise streamed HTML collapses it.
+      for (const preview of previews) {
+        const path = preview.dataset.projectFile ?? preview.dataset.localFile;
+        const scope = preview.dataset.projectFile ? "project" : "local";
+        const kind = preview.dataset.projectMedia ?? preview.dataset.localMedia;
+        const frame = preview.querySelector<HTMLElement>(".markdown-media-frame");
+        const style = imagePreviewStyle(mediaDimensions.get(`${scope}:${path}`), 28);
+        if (kind === "image" && frame && style) frame.setAttribute("style", style);
+      }
       const render = (preview: HTMLElement) => {
         if (preview.dataset.mediaState === "loading" || preview.dataset.mediaState === "ready") return;
+        const kind = preview.dataset.projectMedia ?? preview.dataset.localMedia;
+        if (kind === "image" && preview.dataset.mediaState === "error") return;
         void renderMediaPreview(preview, scheduledGeneration);
       };
       if (typeof IntersectionObserver === "undefined") {
@@ -163,6 +180,10 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       const path = projectPath ?? localPath;
       const scope = projectPath ? "project" : "local";
       const kind = projectPath ? preview.dataset.projectMedia : preview.dataset.localMedia;
+      // Retained images may span render generations. Containment is their
+      // lifecycle guard; videos still use the existing generation guard.
+      const isCurrent = () => !destroyed && node.contains(preview)
+        && (kind === "image" || scheduledGeneration === generation);
       const resolver = projectPath ? options.onResolveProjectMedia() : options.onResolveLocalMedia();
       const frame = preview.querySelector<HTMLElement>(".markdown-media-frame");
       if (!path || !resolver || (kind !== "image" && kind !== "video") || !frame) return;
@@ -180,7 +201,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           mediaCache.set(cacheKey, request);
         }
         const attachment = await request;
-        if (scheduledGeneration !== generation || !node.contains(preview)) return;
+        if (!isCurrent()) return;
         if (!attachment?.path || attachment.kind !== kind) {
           showMediaError(frame, preview);
           return;
@@ -192,6 +213,15 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           image.alt = label;
           image.loading = "lazy";
           image.decoding = "async";
+          image.addEventListener("load", () => {
+            const dimensions = imageDimensions(image.naturalWidth, image.naturalHeight);
+            if (!dimensions || destroyed) return;
+            mediaDimensions.set(cacheKey, dimensions);
+            if (!isCurrent()) return;
+            const currentFrame = preview.querySelector<HTMLElement>(".markdown-media-frame");
+            const style = imagePreviewStyle(dimensions, 28);
+            if (currentFrame && style) currentFrame.setAttribute("style", style);
+          }, { once: true });
           media = image;
         } else {
           const video = document.createElement("video");
@@ -207,6 +237,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         media.addEventListener(
           "error",
           () => {
+            if (!isCurrent()) return;
             const currentFrame = preview.querySelector<HTMLElement>(".markdown-media-frame");
             if (node.contains(preview) && currentFrame) showMediaError(currentFrame, preview);
           },
@@ -216,6 +247,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           const link = document.createElement("a");
           link.href = "#";
           link.className = frame.className;
+          const style = frame.getAttribute("style");
+          if (style) link.setAttribute("style", style);
           link.title = `Preview ${path}`;
           link.setAttribute("aria-label", `Preview ${label}`);
           if (projectPath) link.dataset.projectFile = path;
@@ -228,7 +261,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         }
         preview.dataset.mediaState = "ready";
       } catch (error: unknown) {
-        if (scheduledGeneration !== generation || !node.contains(preview)) return;
+        if (!isCurrent()) return;
         console.warn(`Failed to render ${scope} media ${path}`, error);
         showMediaError(frame, preview);
       }
@@ -299,6 +332,9 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       destroy() {
         destroyed = true;
         generation += 1;
+        mediaCache.clear();
+        mediaDimensions.clear();
+        retainedImages.clear();
         fileLinkObserver?.disconnect();
         mediaObserver?.disconnect();
         diagramObserver?.disconnect();

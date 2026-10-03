@@ -7,6 +7,8 @@ export const PIX_DCP_TOKENS_SAVED_CHANNEL = "dcp-tokens-saved";
 export const PIX_DCP_CONTEXT_MAP_CHANNEL = "dcp-context-map";
 /** Pushed Anthropic API-key response-header usage (parsed, no network refresh). */
 export const PIX_MODEL_USAGE_CHANNEL = "model-usage";
+/** Direct ACP-owned persistent council snapshots, scoped to the orchestrator. */
+export const PIX_BRAINSTORM_CHANNEL = "pi-tools-suite:brainstorm:state";
 
 export interface SessionStateEnvelope {
 	readonly channel: string;

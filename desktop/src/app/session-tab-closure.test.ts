@@ -24,6 +24,7 @@ function createHarness(
   const state = {
     sessionId: activeSessionId,
     deleteSessionTranscript: vi.fn(),
+    saveActiveTranscript: vi.fn(),
     clearActiveSession: vi.fn(),
   };
   const client = {
@@ -79,6 +80,44 @@ function createHarness(
 }
 
 describe("session tab closure", () => {
+  it.each([false, true])("hides a participant without touching its runtime (active=%s)", async (active) => {
+    const h = createHarness(active ? "participant" : "parent", ["participant", "parent"], async () => ({}));
+    h.options.isBrainstormParticipant = (id) => id === "participant";
+    h.options.promptRunning = () => true;
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("window", { confirm });
+    await expect(h.closure.closeSessionTab("participant", "parent")).resolves.toBe(true);
+    expect(h.tabs.markClosed).toHaveBeenCalledWith("participant");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(h.client.closeSession).not.toHaveBeenCalled();
+    expect(h.client.deleteSession).not.toHaveBeenCalled();
+    expect(h.options.forgetRuntime).not.toHaveBeenCalled();
+    expect(h.options.clearSessionActivity).not.toHaveBeenCalled();
+    expect(h.options.state.deleteSessionTranscript).not.toHaveBeenCalled();
+    expect(h.options.forgetComposerDraft).not.toHaveBeenCalled();
+    if (active) expect(h.loadSession).toHaveBeenCalledWith("parent");
+    else expect(h.loadSession).not.toHaveBeenCalled();
+  });
+
+  it("opens a draft after hiding the sole participant, without reopening itself", async () => {
+    const h = createHarness("participant", ["participant"], async () => ({}));
+    h.options.isBrainstormParticipant = () => true;
+    await expect(h.closure.closeSessionTab("participant", "participant")).resolves.toBe(true);
+    expect(h.options.state.saveActiveTranscript).toHaveBeenCalledOnce();
+    expect(h.options.state.clearActiveSession).toHaveBeenCalledOnce();
+    expect(h.options.draft.openStartTab).toHaveBeenCalledOnce();
+    expect(h.client.closeSession).not.toHaveBeenCalled();
+    expect(h.loadSession).not.toHaveBeenCalled();
+  });
+
+  it("still respects mutation guards when hiding a participant", async () => {
+    const h = createHarness("participant", ["participant"], async () => ({}));
+    h.options.isBrainstormParticipant = () => true;
+    h.options.sessionMutationRunning = () => true;
+    await expect(h.closure.closeSessionTab("participant")).resolves.toBe(false);
+    expect(h.tabs.markClosed).not.toHaveBeenCalled();
+  });
+
   it("hides a background tab before ACP close resolves", async () => {
     const request = deferred<Record<string, never>>();
     const { closure, options, tabs } = createHarness("active", ["active", "closing"], () => request.promise);

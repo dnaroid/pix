@@ -2,6 +2,7 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 export interface ReloadContextInventory {
 	readonly model: string;
+	readonly contextFiles: readonly string[];
 	readonly skills: readonly string[];
 	readonly tools: readonly string[];
 	readonly agents: readonly string[] | undefined;
@@ -27,6 +28,7 @@ export function createReloadContextInventory(
 			: [];
 	return {
 		model: currentModelLabel(runtime),
+		contextFiles: unique(session.resourceLoader.getAgentsFiles().agentsFiles.map((file) => file.path)),
 		skills,
 		tools,
 		agents,
@@ -59,6 +61,8 @@ export function formatReloadContextInventory(
 		heading,
 		"",
 		`Model: ${inventory.model}`,
+		"",
+		`Context files (in context):${inventory.contextFiles.length ? `\n${inventory.contextFiles.map((path) => `- ${path}`).join("\n")}` : " (none)"}`,
 		"",
 		`Skills (in context): ${inventory.skillsReadable ? listOrNone(inventory.skills) : "(none; read/bash inactive)"}`,
 		"",

@@ -6,6 +6,7 @@
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import { fuzzySearch } from "../lib/fuzzy";
   import { activateModalDialog } from "../lib/modal-dialog";
+  import { pickerModelIndex, nextPickerThinking } from "../lib/model-picker-navigation";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import {
     AUTO_MODEL_REF,
@@ -25,6 +26,7 @@
     onSetDefault,
     onVisibleModelsChange,
     onClose,
+    restoreFocus,
   }: {
     configOptions: readonly SessionConfigOption[];
     visibleModelRefs?: readonly string[];
@@ -35,6 +37,7 @@
     onSetDefault: (selection: ModelDefaultSelection) => void | Promise<void>;
     onVisibleModelsChange: (modelRefs: readonly string[]) => void | Promise<void>;
     onClose: () => void;
+    restoreFocus?: () => void;
   } = $props();
 
   const config = $derived(modelThinkingConfigState(configOptions));
@@ -98,9 +101,10 @@
       selectedThinking = clampThinkingLevel(config.currentThinking, initialModel.thinkingLevels);
       thinkingByModel.set(initialModel.ref, selectedThinking);
     }
+    selectedIndex = pickerModelIndex(filteredModels, selectedModelRef, query, visibilityMode);
     initialized = true;
     if (!dialogElement) return;
-    return activateModalDialog(dialogElement, () => search);
+    return activateModalDialog(dialogElement, () => search, restoreFocus);
   });
 
   $effect(() => {
@@ -112,14 +116,7 @@
     // reads become dependencies of this effect and a row click immediately
     // retriggers the effect, snapping the selection back to the first model.
     untrack(() => {
-      const normalizedQuery = query.trim();
-      selectedIndex = !visibilityMode
-        && normalizedQuery
-        && filteredModels[0]?.ref === AUTO_MODEL_REF
-        && filteredModels.length > 1
-        && !/^(?:auto|automatic|routing|router)/iu.test(normalizedQuery)
-          ? 1
-          : 0;
+      selectedIndex = pickerModelIndex(filteredModels, selectedModelRef, query, visibilityMode);
       const first = filteredModels[selectedIndex];
       if (first && !visibilityMode) stageModel(first);
     });
@@ -218,6 +215,12 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented) return;
+    if (!visibilityMode && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      event.preventDefault();
+      moveThinking(event.key === "ArrowRight" ? 1 : -1);
+      return;
+    }
     if (event.target === search && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
       moveModel(event.key === "ArrowDown" ? 1 : -1);
@@ -255,26 +258,33 @@
     void applySelection();
   }
 
-  function handleThinkingKeydown(event: KeyboardEvent, index: number): void {
+  function moveThinking(direction: 1 | -1, focus = false): void {
+    if (!selectedModel || selectedAuto || disabled || applying) return;
+    const next = nextPickerThinking(selectedModel.thinkingLevels, selectedThinking, direction);
+    if (!next) return;
+    stageThinking(next);
+    if (focus) void tick().then(() => {
+      panel?.querySelector<HTMLButtonElement>(`[data-thinking-level="${CSS.escape(next)}"]`)?.focus();
+    });
+  }
+
+  function handleThinkingKeydown(event: KeyboardEvent): void {
     if (event.key === "Enter") {
       event.preventDefault();
       void applySelection();
       return;
     }
-    if (!selectedModel || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    const levels = selectedModel.thinkingLevels;
-    const nextIndex = (index + (event.key === "ArrowRight" ? 1 : -1) + levels.length) % levels.length;
-    const next = levels[nextIndex];
-    if (!next) return;
-    stageThinking(next);
-    void tick().then(() => {
-      panel?.querySelector<HTMLButtonElement>(`[data-thinking-level="${CSS.escape(next)}"]`)?.focus();
-    });
+    moveThinking(event.key === "ArrowRight" ? 1 : -1, true);
   }
 
   async function applySelection(): Promise<void> {
-    if (!selectedModel || !dirty || disabled || applying) return;
+    if (!selectedModel || disabled || applying) return;
+    if (!dirty) {
+      onClose();
+      return;
+    }
     applying = true;
     applyError = "";
     try {
@@ -364,7 +374,8 @@
       {#each filteredModels as model, index (model.ref)}
         <button
           class={[
-            "grid w-full grid-cols-[22px_16px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+            "grid w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+            visibilityMode ? "grid-cols-[22px_16px_minmax(0,1fr)_auto]" : "grid-cols-[16px_minmax(0,1fr)_auto]",
             (!visibilityMode && model.ref === selectedModelRef) || (visibilityMode && index === selectedIndex) ? "bg-panel-selected" : "",
           ]}
           type="button"
@@ -384,10 +395,6 @@
         >
           {#if visibilityMode}
             {#if modelIsVisible(model)}<Check class="h-4 w-4 text-primary" aria-hidden="true" />{:else}<span class="h-3.5 w-3.5 rounded-sm border border-muted-foreground/50" aria-hidden="true"></span>{/if}
-          {:else if model.ref === selectedModelRef}
-            <Check class="h-4 w-4 text-primary" aria-hidden="true" />
-          {:else}
-            <span aria-hidden="true"></span>
           {/if}
           <ModelProviderIcon provider={model.provider} />
           <span class="min-w-0">
@@ -420,7 +427,7 @@
       {#if selectedAuto}
         <p class="text-xs leading-4 text-muted-foreground">The first prompt selects a semantic tier, target model, and tier thinking level before the session is created.</p>
       {:else}<div class="flex flex-wrap gap-1" role="radiogroup" aria-label="Thinking level">
-        {#each selectedModel?.thinkingLevels ?? ["off"] as level, index (level)}
+        {#each selectedModel?.thinkingLevels ?? ["off"] as level (level)}
           <button
             class={[
               "h-7 rounded-sm border px-2.5 text-xs font-medium transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
@@ -434,7 +441,7 @@
             data-thinking-level={level}
             tabindex={selectedThinking === level ? 0 : -1}
             onclick={() => stageThinking(level)}
-            onkeydown={(event) => handleThinkingKeydown(event, index)}
+            onkeydown={handleThinkingKeydown}
           >{level}</button>
         {/each}
       </div>{/if}
@@ -466,7 +473,7 @@
           type="button"
           disabled={disabled || applying || savingDefault || !selectedModel || selectedIsDefault}
           onclick={() => void setDefaultSelection()}
-        >{savingDefault ? "Saving…" : selectedIsDefault ? "Default ✓" : "Set default"}</button>{/if}
+        >{savingDefault ? "Saving…" : selectedIsDefault ? "Default" : "Set default"}</button>{/if}
         <button
           class="h-7 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
@@ -475,7 +482,7 @@
         {#if !visibilityMode}<button
           class="h-7 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
-          disabled={!dirty || disabled || applying || !selectedModel}
+          disabled={disabled || applying || !selectedModel}
           onclick={() => void applySelection()}
         >{applying ? "Applying…" : "Apply"}</button>{/if}
       </div>

@@ -9,6 +9,7 @@ import modelConfigActionsSource from "../app/model-config-actions.ts?raw";
 import modelPickerStateSource from "../app/model-picker-state.svelte.ts?raw";
 import modelThinkingPickerSource from "./ModelThinkingPicker.svelte?raw";
 import composerSource from "./PromptComposer.svelte?raw";
+import composerActionsSource from "./PromptComposerActionsMenu.svelte?raw";
 import diffViewSource from "./DiffView.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
 import gitCommitComposerSource from "./GitCommitComposer.svelte?raw";
@@ -89,10 +90,20 @@ describe("desktop visual regressions", () => {
     const rowEnd = composerSource.indexOf("{#if !editorMode && !questionMode && (voiceController.interim", rowStart);
     const row = composerSource.slice(rowStart, rowEnd);
     expect(rowStart).toBeGreaterThanOrEqual(0);
-    expect(row).toContain("<Paperclip");
+    expect(row).toContain("{#if editorMode || questionMode}");
     expect(row).toContain("<textarea");
     expect(row).toContain("<PromptComposerControls");
     expect(composerSource).not.toContain('class="mt-1.5 flex items-center justify-between gap-2"');
+  });
+
+  it("offers file attachments in the overflow menu rather than the normal input row", () => {
+    expect(composerActionsSource).toContain("<span>Attach files</span>");
+    expect(composerActionsSource).toContain("disabled={!canChooseAttachments}");
+    expect(composerActionsSource).toContain("onclick={onChooseAttachments}");
+    expect(composerSource).toContain('{ label: "Attach files", disabled: !canChooseAttachments }');
+    expect(composerSource).toContain("onChooseAttachments={() => void chooseAttachmentsFromMenu()}");
+    expect(composerSource).toMatch(/async function chooseAttachmentsFromMenu\(\)[^]*?composerMenuOpen = false;[^]*?if \(!canChooseAttachments\) return;[^]*?composerMenuTrigger\?\.focus\(\);[^]*?await onChooseAttachments\(\);/);
+    expect(composerSource).toMatch(/\{#if editorMode \|\| questionMode\}[^]*?<Paperclip[^]*?\{\/if\}\s*<div class="relative min-w-0 flex-1 text-sm">/);
   });
 
   it("hides native textarea resize handles and auto-sizes the commit message", async () => {

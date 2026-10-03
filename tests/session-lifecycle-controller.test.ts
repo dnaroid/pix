@@ -175,12 +175,7 @@ function createController(bindExtensions: () => Promise<void>): {
 	controller: AppSessionLifecycleController;
 	runtime: AgentSessionRuntime;
 } {
-	const session = {
-		sessionId: "test-session",
-		sessionFile: "/tmp/test-session.jsonl",
-		subscribe: () => () => {},
-		bindExtensions,
-	} as unknown as AgentSession;
+	const session = fakeSession("test-session", bindExtensions);
 	const runtime = { session } as AgentSessionRuntime;
 	const host = {
 		runtime: () => runtime,
@@ -212,6 +207,8 @@ function fakeSession(
 	return {
 		sessionId,
 		sessionFile: `/tmp/${sessionId}.jsonl`,
+		messages: [],
+		sessionManager: { getSessionFile: () => `/tmp/${sessionId}.jsonl` },
 		subscribe: (listener: (event: AgentSessionEvent) => void) => {
 			onSubscribe(listener);
 			return () => {};

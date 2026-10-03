@@ -20,7 +20,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 - The menu is available from the user bubble's context menu and from an ellipsis button shown on hover/focus. It renders as a viewport-fixed overlay outside transcript-entry paint containment, flips above the anchor when there is not enough room below, and stays above the composer/chrome instead of being clipped by transcript scrolling. Each of the four actions has a dedicated icon. Opening focuses the first enabled command; ArrowUp/ArrowDown, Home/End, and printable-key type-ahead navigate enabled commands; Escape closes the menu and restores its invoker when available. Tab, transcript scrolling/resizing, or an outside click dismisses it without trapping focus. `[confirmed by code: desktop/src/components/transcript-user-message-menu-controller.svelte.ts]`
 - Copy remains available for renderer-only user rows. Both Fork actions and Undo require a real Pi user session entry. Fork (replace source) and Undo are idle-only; **Fork in new tab** remains available while the source prompt is running. History loading and active-session mutation still disable all three. `[confirmed by code]`
 - Right-click on selected text or an external link delegates to the text/link context menu instead of opening the four whole-message actions. The ellipsis always remains a route to those four actions, and right-click without a text/link context still opens them. This precedence is defined in `specs/desktop-context-menus.md` and exercised by `desktop/scripts/context-menu-smoke.mjs`.
-- Newly submitted Desktop rows are associated with Pi entries by comparing current-branch user entry IDs before and after the serialized prompt. Extension/builtin commands that create no Pi user entry are marked renderer-only. Historical rows resolve against the ordered current branch rather than by message text, so repeated identical prompts remain unambiguous. `[confirmed by code: desktop/src/app/prompt-run-lifecycle.svelte.ts, desktop/src/app/user-message-context-actions.ts, acp/src/acp/pix-acp-agent.ts]`
+- Newly submitted Desktop rows are associated with the first new Pi user entry by comparing current-branch user entry IDs before and after the serialized prompt; later steering/follow-up entries must not replace that binding. Stale prompt generations or replaced clients cannot bind rows. Extension/builtin commands that create no Pi user entry are marked renderer-only. Historical rows carry their persisted entry ID in `replay-entry:<id>` on both initial and older history pages and on full live-branch history. Message actions use this identity, never prompt text or a visible-row/branch-length offset. Rows without a proven entry ID fail closed and ask the user to wait for prompt settlement or reload. `[confirmed by code: desktop/src/app/prompt-run-lifecycle.svelte.ts, desktop/src/app/user-message-context-actions.ts, acp/src/acp/pix-acp-agent.ts]`
 
 ## Copy and fork behavior
 
@@ -89,6 +89,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 ## Verification
 
 - `desktop/src/app/conversation-fork-action.test.ts` covers running-source preservation, latest transcript/composer ownership, late source updates, stale fork cleanup, and unchanged replacement/history/mutation gates. `desktop/src/components/transcript-user-message-menu-controller.test.ts` covers running-session action permissions and renderer-only rejection.
+- `desktop/src/app/user-message-context-actions.test.ts` covers exact persisted/bound entry selection with duplicate text, hidden entries and an in-flight user, plus fail-closed unbound/legacy rows. `desktop/src/app/prompt-run-lifecycle.test.ts` covers first-new-entry binding with steering and stale binding rejection.
 - `tests/workspace-undo-extension.test.ts` covers session mutation recording, tool-start ownership, conflict refusal against a later parallel edit, and legacy TUI index fallback.
 - `tests/workspace-undo.test.ts` covers patch/write rollback, changed-file refusal, path confinement, and transactional rollback after a later failure.
 - `tests/workspace-actions-controller.test.ts` verifies TUI mutations also append portable hidden session entries.
@@ -96,3 +97,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 - `acp/test/agent.test.ts` covers current-branch entry lookup, duplicate prompt text, abandoned branches, private bridge gating, and Copy/Undo ACP behavior.
 - `desktop/src/lib/acp-client.test.ts` covers Desktop private RPC shapes; `desktop/src/lib/transcript.test.ts` covers binding optimistic rows to Pi entries or renderer-only state.
 - Root, ACP, Desktop TypeScript/Svelte checks and Rust compilation must remain green.
+
+## Decisions
+
+- [Identity-only Desktop message actions](../docs/decisions/0018-desktop-message-action-identity.md)

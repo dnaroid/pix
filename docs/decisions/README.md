@@ -63,5 +63,10 @@ errors, not invent or approve decisions.
 - [0009 — Five-round brainstorm with reviewed synthesis](0009-five-round-brainstorm.md)
 - [0010 — Audit scenario and transparent parent routing](0010-audit-council-modes.md)
 - [0011 — Read-only council research capabilities](0011-council-research-tools.md)
+- [0017 — Brainstorm v4: local protocol storage, quorum and ledger history](0017-brainstorm-v4-protocol-storage.md)
+- [0018 — Identity-only Desktop message actions](0018-desktop-message-action-identity.md)
+- [0019 — Desktop councils own persistent participant sessions](0019-desktop-persistent-council-sessions.md)
+- [0022 — Run-only council roster and effort](0022-brainstorm-run-roster.md)
+- [0023 — Remove workspace tool](0023-remove-workspace-tool.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

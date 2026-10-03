@@ -7,6 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { InputEditor } from "../../input-editor.js";
 import { createId } from "../id.js";
+import { scheduleQuestionRecovery } from "../../bundled-extensions/question/recovery.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import { collectStartupAvailabilityIssues } from "../cli/startup-checks.js";
 import type { AppOptions, Entry, PixExtensionUIContext, SessionActivity } from "../types.js";
@@ -271,14 +272,23 @@ export class AppSessionLifecycleController {
 			return this.extensionBindPromise;
 		}
 
-		const startBind = (): Promise<void> => {
+		const startBind = async (): Promise<void> => {
 			if (!this.isCurrentRuntimeSession(runtime, session, options.ownershipGeneration)) return Promise.resolve();
-			return session.bindExtensions({
+			await session.bindExtensions({
 				uiContext: this.host.createExtensionUIContext(scopeKey),
 				commandContextActions: this.host.createExtensionCommandContextActions(runtime),
 				shutdownHandler: this.host.extensionShutdownHandler(),
 				onError: (error) => {
 					if (this.isCurrentRuntimeSession(runtime, session, options.ownershipGeneration)) this.host.handleExtensionError(error);
+				},
+			});
+			scheduleQuestionRecovery(session, {
+				isCurrent: () => this.isCurrentRuntimeSession(runtime, session, options.ownershipGeneration),
+				isAlive: () => this.host.isRunning() && runtime.session === session,
+				onError: (error) => {
+					if (this.isCurrentRuntimeSession(runtime, session, options.ownershipGeneration)) {
+						this.host.showToast(`Question recovery failed: ${stringifyUnknown(error)}`, "error");
+					}
 				},
 			});
 		};

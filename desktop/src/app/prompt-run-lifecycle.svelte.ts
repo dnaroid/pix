@@ -102,9 +102,11 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
       }
       if (transcriptMessageId && before) {
         const after = await requestClient.branchUserMessages(sessionId).catch(() => undefined);
-        if (after) {
+        if (after && generation(sessionId) === runGeneration && requestClient === options.client()) {
           const beforeIds = new Set(before.map((message) => message.entryId));
-          const sessionEntryId = after.filter((message) => !beforeIds.has(message.entryId)).at(-1)?.entryId;
+          // The submitted prompt is the first new user entry; steering/follow-up
+          // entries can be appended before the same prompt request settles.
+          const sessionEntryId = after.find((message) => !beforeIds.has(message.entryId))?.entryId;
           options.bindPromptSessionEntry(sessionId, transcriptMessageId, sessionEntryId);
         }
       }

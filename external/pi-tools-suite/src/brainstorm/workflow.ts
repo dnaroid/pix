@@ -16,8 +16,16 @@ export interface BrainstormResponse { id: string; model: string; text: string; s
 export interface MissingParticipant { id: string; model: string; reason: string }
 /** A runner may return only responses (all required) or declare missing participants for the quorum check. */
 export interface RoundOutcome { responses: BrainstormResponse[]; missing?: MissingParticipant[] }
-export interface RunRoundInput { round: BrainstormRound; tasks: BrainstormTask[]; signal?: AbortSignal }
-export type RunRound = (input: RunRoundInput) => Promise<BrainstormResponse[] | RoundOutcome>;
+export type BrainstormExecution = "desktop-sessions";
+export interface RunRoundInput { round: BrainstormRound; tasks: BrainstormTask[]; signal?: AbortSignal; runId?: string; runDir?: string; topic?: string; execution?: BrainstormExecution }
+export type TerminalNotification = (runId: string, status: "complete" | "incomplete") => Promise<void>;
+export interface RunRound {
+	(input: RunRoundInput): Promise<BrainstormResponse[] | RoundOutcome>;
+	execution?: BrainstormExecution;
+	/** Check continuation compatibility before writing the draft or changing state. */
+	validateExecution?: (execution: BrainstormExecution | undefined) => void;
+	onTerminal?: TerminalNotification;
+}
 
 /** Response text lives in rounds/<id>.md; the manifest keeps only provenance and integrity data. */
 export interface StoredResponse { id: string; model: string; file: string; sha256: string; chars: number; source?: string; warnings?: string[] }
@@ -37,6 +45,8 @@ export interface BrainstormManifest {
 	draftSha256?: string;
 	publishedPath?: string;
 	error?: string;
+	/** Absent on legacy/TUI runs: use fresh nested subagents, never silently switch. */
+	execution?: BrainstormExecution;
 }
 /** Manifest plus loaded response texts. */
 export interface RunState { manifest: BrainstormManifest; texts: Partial<Record<BrainstormRound, BrainstormResponse[]>> }
@@ -129,8 +139,8 @@ export async function collectRound(input: { state: RunState; directory: string; 
 	const { state, round, signal } = input;
 	const { manifest } = state;
 	checkAbort(signal);
-	const tasks = makeTasks({ mode: manifest.mode, topic: manifest.topic, brief: manifest.brief, models: manifest.models, round, rounds: state.texts, draft: input.draft, config: manifest.config });
-	const raw = await input.runRound({ round, tasks, signal });
+	const tasks = makeTasks({ mode: manifest.mode, topic: manifest.topic, brief: manifest.brief, models: manifest.models, round, rounds: state.texts, draft: input.draft, config: manifest.config, persistent: manifest.execution === "desktop-sessions" });
+	const raw = await input.runRound({ round, tasks, signal, runId: manifest.id, runDir: input.directory, topic: manifest.topic, execution: manifest.execution });
 	checkAbort(signal);
 	const { responses, missing } = validateResponses(raw, tasks, resolvedQuorum(manifest.config));
 	if (totalChars(state) + responses.reduce((total, response) => total + response.text.length, 0) > MAX_DOCUMENT_CHARS) throw new Error("Brainstorm output exceeds the total document size limit");
@@ -171,7 +181,7 @@ export async function runBrainstorm(input: { cwd: string; topic: string; brief: 
 	const discussionPath = path.join(runDir, "discussion.md");
 	const proposalPath = path.join(runDir, "proposal.md");
 	const manifestPath = path.join(runDir, "manifest.json");
-	const manifest: BrainstormManifest = { format: MANIFEST_FORMAT, mode, id, topic: input.topic, brief: input.brief, config, createdAt: new Date().toISOString(), status: "running", models: [...config.models], rounds: {} };
+	const manifest: BrainstormManifest = { format: MANIFEST_FORMAT, mode, id, topic: input.topic, brief: input.brief, config, createdAt: new Date().toISOString(), status: "running", models: [...config.models], rounds: {}, ...(input.runRound.execution ? { execution: input.runRound.execution } : {}) };
 	const state: RunState = { manifest, texts: {} };
 	const thinking = config.models.map((model) => `${model}: ${thinkingForModel(config, model)}`).join(", ");
 	try {
@@ -197,6 +207,7 @@ export async function runBrainstorm(input: { cwd: string; topic: string; brief: 
 		return { mode, runDir, status: "awaiting_synthesis", models: [...config.models], discussionPath, proposalPath };
 	} catch (error) {
 		await markIncomplete(runDir, state, error);
+		if (manifest.execution) await input.runRound.onTerminal?.(id, "incomplete");
 		return { mode, runDir, status: "incomplete", models: [...config.models], discussionPath, proposalPath };
 	}
 }

@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { EVAL_CASES } from "./cases.js";
+import { resolveEvalOutputDir } from "./harness/output-dir.js";
 import { caseAppliesToModel, parseEvalModels, runEvalCase } from "./harness/runner.js";
 import type { EvalCase, EvalRunResult } from "./harness/types.js";
 
@@ -55,9 +55,7 @@ const timeoutMs = Number(process.env.PI_TOOLS_SUITE_EVAL_TIMEOUT_MS ?? 240_000);
 const keepProject = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_KEEP ?? "");
 const streamIo = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_STREAM_IO ?? "");
 const seed = process.env.PI_TOOLS_SUITE_P01N_SEED ?? "p01n-2026-09-07";
-const outputDir = process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR
-	? path.resolve(process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR)
-	: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "artifacts", `p01n-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+const outputDir = resolveEvalOutputDir("p01n", process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR);
 
 function armOrder(model: string, evalCase: EvalCase): Arm[] {
 	let score = 0;

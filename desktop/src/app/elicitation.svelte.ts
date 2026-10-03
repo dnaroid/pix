@@ -88,7 +88,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     pendingUnscoped = null;
     pendingBySession = new Map();
     options.cancelQuestionImageOperation();
-    for (const item of pending) item.resolve({ action: "cancel" });
+    for (const item of pending) item.resolve(interruptedResponse(item));
   }
 
   function requestInternal(
@@ -184,7 +184,13 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     next.delete(sessionId);
     pendingBySession = next;
     if (pending.kind === "question") options.cancelQuestionImageOperation(pending.requestId);
-    pending.resolve({ action: "cancel" });
+    pending.resolve(interruptedResponse(pending));
+  }
+
+  function interruptedResponse(pending: PendingElicitation): CreateElicitationResponse {
+    return pending.kind === "question"
+      ? { action: "cancel", _meta: { "_pix/question-interrupted": true } }
+      : { action: "cancel" };
   }
 
   async function requestLocalTextInput(message: string, title: string): Promise<string | undefined> {

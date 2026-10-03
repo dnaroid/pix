@@ -454,6 +454,10 @@ describe.serial("core utils and prompt generation", () => {
 		expect(prompt).toContain("Your focused task:\nInspect tests");
 		expect(prompt).toContain("- Relevant files/areas: async-subagents/core");
 		expect(prompt).toContain("Output format:");
+		expect(prompt).toContain("unique task/run directories under the current project's .pi/artifacts/");
+		expect(prompt).toContain("never use project-root artifacts/ or .artifacts/ for scratch output");
+		expect(prompt).toContain("subagent/QA evidence stays in .pi/subagents/");
+		expect(prompt).toContain("user-requested deliverable paths are exceptions");
 
 		const defaultPrompt = generatePrompt({ id: "agent-2", task: "Run" });
 		expect(defaultPrompt).toContain("Parent objective:\ncurrent user task");

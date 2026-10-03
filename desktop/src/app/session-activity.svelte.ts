@@ -14,6 +14,11 @@ import {
   updateSessionSubagentSnapshots,
   type SessionSubagentSnapshot,
 } from "../lib/session-subagents";
+import {
+  sessionBrainstormSnapshot,
+  updateSessionBrainstormSnapshots,
+  type SessionBrainstormSnapshot,
+} from "../lib/session-brainstorm";
 
 type SessionActivityStoreOptions = {
   onChange?: (sessionId: string) => void;
@@ -23,6 +28,7 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
   let todos = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagents = $state<Map<string, SessionSubagentSnapshot>>(new Map());
   let summaries = $state<Map<string, SessionActivitySummary>>(new Map());
+  let brainstorms = $state<Map<string, SessionBrainstormSnapshot>>(new Map());
   const owners = new Map<string, string>();
   const pending = new Map<string, Map<string, SessionStateNotification>>();
 
@@ -69,17 +75,20 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     }
 
     const subagentSnapshot = sessionSubagentSnapshot(notification);
-    if (!subagentSnapshot) return false;
+    const brainstormSnapshot = sessionBrainstormSnapshot(notification);
+    if (!subagentSnapshot && !brainstormSnapshot) return false;
     if (!notification.activityOwner || owners.get(notification.sessionId) !== notification.activityOwner) {
       stage(notification);
       return true;
     }
-    const previous = subagents.get(notification.sessionId);
+    const previous = subagentSnapshot ? subagents.get(notification.sessionId) : brainstorms.get(notification.sessionId);
+    const checkedAt = subagentSnapshot?.checkedAt ?? brainstormSnapshot!.checkedAt;
     if (!shouldAcceptSessionActivitySnapshot(
-      subagentSnapshot.checkedAt,
+      checkedAt,
       previous?.checkedAt,
     )) return true;
-    subagents = updateSessionSubagentSnapshots(subagents, notification.sessionId, subagentSnapshot);
+    if (subagentSnapshot) subagents = updateSessionSubagentSnapshots(subagents, notification.sessionId, subagentSnapshot);
+    if (brainstormSnapshot) brainstorms = updateSessionBrainstormSnapshots(brainstorms, notification.sessionId, brainstormSnapshot);
     summaries = updateSessionActivitySummary(
       summaries,
       notification.sessionId,
@@ -101,8 +110,8 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     const snapshots = notification.activityOwner && pending.get(notification.activityOwner);
     if (!snapshots) return;
     const prior = snapshots.get(notification.channel);
-    const current = sessionTodoSnapshot(notification) ?? sessionSubagentSnapshot(notification);
-    const previous = prior && (sessionTodoSnapshot(prior) ?? sessionSubagentSnapshot(prior));
+    const current = sessionTodoSnapshot(notification) ?? sessionSubagentSnapshot(notification) ?? sessionBrainstormSnapshot(notification);
+    const previous = prior && (sessionTodoSnapshot(prior) ?? sessionSubagentSnapshot(prior) ?? sessionBrainstormSnapshot(prior));
     if (current && shouldAcceptSessionActivitySnapshot(current.checkedAt, previous?.checkedAt)) {
       snapshots.set(notification.channel, notification);
     }
@@ -119,6 +128,11 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
       next.delete(sessionId);
       subagents = next;
     }
+    if (brainstorms.has(sessionId)) {
+      const next = new Map(brainstorms);
+      next.delete(sessionId);
+      brainstorms = next;
+    }
     if (summaries.has(sessionId)) {
       const next = new Map(summaries);
       next.delete(sessionId);
@@ -129,6 +143,7 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
   function reset(): void {
     todos = new Map();
     subagents = new Map();
+    brainstorms = new Map();
     summaries = new Map();
     owners.clear();
     pending.clear();
@@ -139,6 +154,7 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     get pendingRequestCount() { return pending.size; },
     get todos() { return todos; },
     get subagents() { return subagents; },
+    get brainstorms() { return brainstorms; },
     get summaries() { return summaries; },
     handle,
     open,

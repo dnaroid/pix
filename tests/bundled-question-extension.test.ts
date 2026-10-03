@@ -385,6 +385,7 @@ describe("bundled extensions", () => {
 		const result = await loadBundledExtensions();
 		assert.deepEqual(result.errors, []);
 		assert.equal(result.extensions.length, 5);
+		assert.ok(result.extensions.every((extension) => !extension.tools.has("workspace")));
 		assert.ok(result.extensions.some((extension) => extension.tools.has("question")));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(sessionTitleExtensionPath)));
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(terminalBellExtensionPath)));

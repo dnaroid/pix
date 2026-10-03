@@ -16,6 +16,7 @@ describe("reload context inventory", () => {
 			skills: ["project-agent-creator", "frontier-model-rollover", "project-agent-creator"],
 			model: { provider: "openai-codex", id: "gpt-5.6-luna" },
 			thinkingLevel: "high",
+			contextFiles: ["/parent/AGENTS.md", "/project/AGENTS.override.md", "/parent/AGENTS.md"],
 		});
 
 		const inventory = createReloadContextInventory(runtime, ["research", "frontier-review", "research"]);
@@ -24,6 +25,8 @@ describe("reload context inventory", () => {
 		assert.deepEqual(inventory.skills, ["frontier-model-rollover", "project-agent-creator"]);
 		assert.deepEqual(inventory.agents, ["frontier-review", "research"]);
 		assert.equal(inventory.model, "openai-codex/gpt-5.6-luna:high");
+		assert.deepEqual(inventory.contextFiles, ["/parent/AGENTS.md", "/project/AGENTS.override.md"]);
+		assert.match(formatReloadContextInventory(inventory), /Context files \(in context\):\n- \/parent\/AGENTS.md\n- \/project\/AGENTS.override.md/);
 		assert.match(formatReloadContextInventory(inventory), /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
 		assert.match(formatReloadContextInventory(inventory), /Agents \(available\): frontier-review, research/);
 	});
@@ -63,12 +66,14 @@ describe("reload context inventory", () => {
 	it("does not claim skills or agents are in context when their access tools are inactive", () => {
 		const inventory = createReloadContextInventory(fakeRuntime({
 			tools: ["repo_search", "apply_patch"],
+			contextFiles: ["/project/AGENTS.md"],
 			skills: ["frontier-model-rollover"],
 			model: { provider: "openai-codex", id: "gpt-5.6-sol" },
 			thinkingLevel: "off",
 		}), ["research"]);
 
 		assert.deepEqual(inventory.skills, []);
+		assert.deepEqual(inventory.contextFiles, ["/project/AGENTS.md"]);
 		assert.deepEqual(inventory.agents, []);
 		const text = formatReloadContextInventory(inventory);
 		assert.match(text, /Skills \(in context\): \(none; read\/bash inactive\)/);
@@ -84,6 +89,7 @@ describe("reload context inventory", () => {
 		}), undefined);
 
 		assert.equal(inventory.agents, undefined);
+		assert.match(formatReloadContextInventory(inventory), /Context files \(in context\): \(none\)/);
 		assert.match(formatReloadContextInventory(inventory), /Agents \(available\): \(catalog unavailable\)/);
 	});
 });
@@ -114,6 +120,7 @@ function fakeRuntime(options: {
 	skills: string[];
 	model: { provider: string; id: string };
 	thinkingLevel: string;
+	contextFiles?: string[];
 }): AgentSessionRuntime {
 	return ({
 		session: {
@@ -122,6 +129,7 @@ function fakeRuntime(options: {
 			getActiveToolNames: () => options.tools,
 			resourceLoader: {
 				getSkills: () => ({ skills: options.skills.map((name) => ({ name })) }),
+				getAgentsFiles: () => ({ agentsFiles: (options.contextFiles ?? []).map((path) => ({ path, content: "private instructions" })) }),
 			},
 		},
 	} as unknown) as AgentSessionRuntime;

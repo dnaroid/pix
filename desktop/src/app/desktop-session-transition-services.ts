@@ -5,6 +5,7 @@ import { createComposerDraftStore } from "./composer-drafts";
 import { createDraftSession } from "./draft-session.svelte";
 import { createSessionTabController } from "./session-tab-controller";
 import type { Attachment } from "../lib/attachments";
+import { brainstormSessionLink } from "../lib/session-brainstorm";
 
 type DraftModelOverride = { modelRef: string; thinkingLevel: string } | null;
 
@@ -113,6 +114,11 @@ export function createDesktopSessionTransitionServices(
     operationRunning: options.operationRunning,
     setOperationRunning: options.setOperationRunning,
     promptRunning: options.promptRunning,
+    isBrainstormParticipant: (sessionId) => !!brainstormSessionLink(
+      sessionId,
+      options.sessions.catalog.sessions.find((session) => session.sessionId === sessionId)?._meta,
+      options.sessions.activity.brainstorms,
+    ),
     catalog: options.sessions.catalog,
     tabs: options.sessions.tabs,
     draft,

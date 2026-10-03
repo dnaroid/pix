@@ -163,7 +163,7 @@
               type="button"
               tabindex="-1"
               aria-label={`Close ${tab.label}`}
-              title={tab.kind === "session" && tab.running ? "Close tab and stop running session" : `Close ${tab.label}`}
+              title={tab.kind === "session" && tab.viewOnlyClose ? "Hide participant tab; council continues" : tab.kind === "session" && tab.running ? "Close tab and stop running session" : `Close ${tab.label}`}
               onclick={() => void closeAndRestoreFocus(tab.id)}
               disabled={tab.disabled}
             ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>

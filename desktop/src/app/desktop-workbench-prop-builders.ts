@@ -2,6 +2,7 @@ import type { ComponentProps } from "svelte";
 import DesktopWorkbenchSurface from "../components/DesktopWorkbenchSurface.svelte";
 import { isWorkspaceProjectFilePath } from "../lib/project-files";
 import { composerActivity } from "../lib/composer-activity";
+import type { BrainstormSessionLink } from "../lib/session-brainstorm";
 import type { PendingElicitation, createElicitationStore } from "./elicitation.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createAutocompleteStore } from "./autocomplete.svelte";
@@ -46,6 +47,8 @@ export type WorkbenchShellBuilderOptions = {
 };
 
 export type WorkbenchConversationBuilderOptions = {
+  brainstormLink?: () => BrainstormSessionLink | undefined;
+  openBrainstormSession?: (sessionId: string) => void | Promise<void>;
   transcript: () => DesktopWorkbenchSurfaceViewProps["transcript"]["transcript"];
   activeSessionId: () => string | null;
   workspace: () => string;
@@ -105,8 +108,10 @@ export type WorkbenchInspectorBuilderOptions = {
   activeSessionActivity: () => InspectorProps["summary"];
   activeTodoSnapshot: () => InspectorProps["todoSnapshot"];
   activeSubagentSnapshot: () => InspectorProps["subagentSnapshot"];
+  activeBrainstormSnapshot: () => InspectorProps["brainstormSnapshot"];
   canClearTodos: () => boolean;
   clearSessionTodos: (sessionId: string) => Promise<boolean>;
+  openBrainstormParticipant: (sessionId: string) => void | Promise<void>;
   inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
 };
 
@@ -130,8 +135,9 @@ export function buildWorkbenchShellProps(
 
 export function buildWorkbenchConversationProps(
   options: WorkbenchConversationBuilderOptions,
-): Pick<DesktopWorkbenchSurfaceViewProps, "transcript" | "queue" | "composer"> {
+): Pick<DesktopWorkbenchSurfaceViewProps, "transcript" | "queue" | "composer" | "managedCouncil"> {
   const sessionId = options.activeSessionId();
+  const link = options.brainstormLink?.();
   const pending = options.pendingElicitation();
   const transcript = options.transcript();
   const questionMode = pending?.kind === "question"
@@ -158,7 +164,7 @@ export function buildWorkbenchConversationProps(
       workspace: options.workspace(),
       promptRunning: options.promptRunning(),
       agentControlState: options.activeAgentControlState(),
-      operationRunning: options.operationRunning(),
+      operationRunning: options.operationRunning() || link?.owned === true,
       historyLoading: options.sessionHistoryLoading(),
       showScrollToBottom: !options.transcriptScroll.followsLatest,
       onScroll: options.transcriptScroll.handleScroll,
@@ -174,14 +180,14 @@ export function buildWorkbenchConversationProps(
       onOpenLocalFile: options.preview.openLocalFile,
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onLoadToolResult: (toolCallId) => void options.history.loadDeferredToolResult(toolCallId),
-      onUserMessageAction: (message, action) => void options.branchActions.runUserMessageContextAction(message, action),
+      onUserMessageAction: (message, action) => { if (!link?.owned) void options.branchActions.runUserMessageContextAction(message, action); },
       lspSuggestion: options.lspOnboarding.activeSuggestion(),
       onInstallLsp: sessionId ? () => void options.lspOnboarding.pauseAndInstall(sessionId) : undefined,
       onDismissLsp: sessionId ? () => options.lspOnboarding.dismiss(sessionId) : undefined,
     },
     queue: {
       items: sessionId ? (options.promptRuntime.queueItemsBySession.get(sessionId) ?? []) : [],
-      disabled: options.operationRunning() || options.promptQueue.actionRunning,
+      disabled: options.operationRunning() || options.promptQueue.actionRunning || link?.owned === true,
       onAction: (item, action) => void options.promptQueue.actOnQueuedMessage(item, action),
     },
     composer: {
@@ -199,6 +205,7 @@ export function buildWorkbenchConversationProps(
       activeSessionId: sessionId,
       draftSession: options.draft.active,
       ready: options.statusReady()
+        && !link?.owned
         && !options.sessionMutationRunning()
         && (options.draft.active || sessionId !== null),
       promptRunning: options.promptRunning(),
@@ -229,6 +236,7 @@ export function buildWorkbenchConversationProps(
       onRemoveAttachment: options.attachments.removeAttachment,
       onOpenAttachment: (attachment) => void options.preview.activateAttachment(attachment),
     },
+    managedCouncil: link ? { ...link, onOpenParent: () => void options.openBrainstormSession?.(link.parentSessionId) } : undefined,
   };
 }
 
@@ -315,12 +323,14 @@ export function buildWorkbenchInspectorProps(
       summary: options.activeSessionActivity(),
       todoSnapshot: options.activeTodoSnapshot(),
       subagentSnapshot: options.activeSubagentSnapshot(),
+      brainstormSnapshot: options.activeBrainstormSnapshot(),
       canClearTodos: options.canClearTodos(),
       onClearTodos: () => {
         const activeSessionId = options.activeSessionId();
         return activeSessionId ? options.clearSessionTodos(activeSessionId) : Promise.resolve(false);
       },
       onClose: () => options.inspectorPreference.setOpen(false),
+      onOpenBrainstormParticipant: options.openBrainstormParticipant,
     } : null,
   };
 }

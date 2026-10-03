@@ -2964,6 +2964,9 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "libc",
+ "mac-notification-sys",
+ "objc2",
+ "objc2-foundation",
  "portable-pty",
  "reqwest",
  "serde",
@@ -2979,6 +2982,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "tokio",
+ "uuid",
  "webkit2gtk",
  "windows-sys 0.61.2",
 ]

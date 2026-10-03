@@ -3,10 +3,13 @@
   import History from "@lucide/svelte/icons/history";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Pause from "@lucide/svelte/icons/pause";
+  import Paperclip from "@lucide/svelte/icons/paperclip";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
 
   let {
     menu = $bindable<HTMLDivElement | null>(null),
+    canChooseAttachments,
+    onChooseAttachments,
     historyLabel,
     enhanceLabel,
     createTaskLabel,
@@ -25,6 +28,8 @@
     onKeydown,
   }: {
     menu: HTMLDivElement | null;
+    canChooseAttachments: boolean;
+    onChooseAttachments: () => void;
     historyLabel: string;
     enhanceLabel: string;
     createTaskLabel: string;
@@ -53,6 +58,17 @@
   aria-label="Composer actions"
   onkeydown={onKeydown}
 >
+  <button
+    class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    type="button"
+    role="menuitem"
+    tabindex="-1"
+    disabled={!canChooseAttachments}
+    onclick={onChooseAttachments}
+  >
+    <Paperclip class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <span>Attach files</span>
+  </button>
   <button
     class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
     type="button"

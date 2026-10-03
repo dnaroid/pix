@@ -5,6 +5,7 @@ import {
 } from "./session-inspector-activity-policy";
 import type { SessionSubagentSnapshot } from "./session-subagents";
 import type { SessionTodoSnapshot } from "./session-todos";
+import type { SessionBrainstormSnapshot } from "./session-brainstorm";
 
 function todos(tasks: SessionTodoSnapshot["details"]["tasks"]): SessionTodoSnapshot {
   return {
@@ -23,6 +24,10 @@ function subagents(runs: SessionSubagentSnapshot["runs"]): SessionSubagentSnapsh
     runs,
     checkedAt: 1,
   };
+}
+
+function brainstorm(status: SessionBrainstormSnapshot["runs"][number]["status"]): SessionBrainstormSnapshot {
+  return { version: 1, checkedAt: 1, runs: [{ runId: "run", runDir: "/run", topic: "topic", status, round: 1, participants: [] }] };
 }
 
 describe("session inspector activity policy", () => {
@@ -74,5 +79,12 @@ describe("session inspector activity policy", () => {
 
     syncSessionInspectorActivity(tracker, "empty", undefined, undefined, open, setOpen);
     expect(open).toBe(false);
+  });
+
+  it("keeps the inspector available for participant navigation through synthesis and completion", () => {
+    const tracker = createSessionInspectorActivityTracker();
+    expect(tracker.observe("session", undefined, undefined, brainstorm("awaiting_synthesis"))).toBeNull();
+    expect(tracker.observe("session", undefined, undefined, brainstorm("complete"))).toBeNull();
+    expect(tracker.observe("session", undefined, undefined)).toBe("close");
   });
 });

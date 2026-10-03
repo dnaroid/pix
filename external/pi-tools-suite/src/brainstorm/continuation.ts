@@ -5,7 +5,7 @@ import { assertMode, type BrainstormMode } from "./modes.js";
 import { assertBoundedText, ensureConfinedDirectory, LOCK_MODE, MAX_DOCUMENT_CHARS, readJson, replaceDocument, runRoots, validatedRunPath, writeExclusive, writeJson } from "./storage.js";
 import {
 	checkAbort, collectRound, markIncomplete, MANIFEST_FORMAT, renderDiscussion, roundFile, sha256, validateResponses,
-	type BrainstormManifest, type BrainstormResponse, type BrainstormRound, type RunRound, type RunState, type StoredResponse,
+	type BrainstormManifest, type BrainstormResponse, type BrainstormRound, type RunRound, type RunState, type StoredResponse, type TerminalNotification,
 } from "./workflow.js";
 
 async function readDocument(directory: string, name: string): Promise<string> {
@@ -32,6 +32,7 @@ async function loadState(directory: string, raw: Record<string, unknown>, rounds
 		throw new Error(`Only a fully completed run with rounds ${rounds.join(",")} can continue; incomplete runs cannot continue`);
 	}
 	assertMode(manifest.mode);
+	if (manifest.execution !== undefined && manifest.execution !== "desktop-sessions") throw new Error("Unknown council execution mode; refusing to replace participant sessions");
 	if (!/^[a-z0-9-]+$/i.test(path.basename(directory)) || !path.basename(directory).endsWith(`-${manifest.id}`)) throw new Error("Run directory does not match its generated manifest identity");
 	assertBoundedText(manifest.topic, "Topic", 2_000);
 	assertBoundedText(manifest.brief, "Brief", 12_000);
@@ -111,6 +112,7 @@ export async function reviewBrainstorm(input: { cwd: string; runDir: string; pro
 	assertBoundedText(input.proposal, "Draft proposal", 40_000);
 	return withRunLock(input.cwd, input.runDir, input.outputDir, "awaiting_synthesis", input.signal, async (directory, state) => {
 		const { manifest } = state;
+		input.runRound.validateExecution?.(manifest.execution);
 		const draftPath = path.join(directory, "draft-proposal.md");
 		const discussionPath = path.join(directory, "discussion.md");
 		try {
@@ -127,12 +129,13 @@ export async function reviewBrainstorm(input: { cwd: string; runDir: string; pro
 			return { mode: manifest.mode, status: "awaiting_finalization", runDir: directory, draftPath, discussionPath };
 		} catch (error) {
 			await markIncomplete(directory, state, error);
+			if (manifest.execution) await input.runRound.onTerminal?.(manifest.id, "incomplete");
 			return { mode: manifest.mode, status: "incomplete", runDir: directory, draftPath, discussionPath };
 		}
 	});
 }
 
-export interface FinalizeOptions { outputDir?: string; publish?: boolean; signal?: AbortSignal }
+export interface FinalizeOptions { outputDir?: string; publish?: boolean; signal?: AbortSignal; onTerminal?: TerminalNotification }
 
 /** Finalize; with `publish`, also copy the proposal (only) into docs/brainstorms/. */
 export async function finalizeBrainstormRun(cwd: string, runDir: string, proposal: string, revisionNotes: string, options: FinalizeOptions = {}): Promise<{ proposalPath: string; publishedPath?: string }> {
@@ -166,8 +169,10 @@ export async function finalizeBrainstormRun(cwd: string, runDir: string, proposa
 			checkAbort(signal);
 		} catch (error) {
 			await markIncomplete(directory, state, error);
+			if (manifest.execution) await options.onTerminal?.(manifest.id, "incomplete");
 			throw error;
 		}
+		if (manifest.execution) await options.onTerminal?.(manifest.id, "complete");
 		return publishedPath ? { proposalPath, publishedPath } : { proposalPath };
 	});
 }

@@ -94,6 +94,7 @@
     settingsConfigOptions,
     tasks,
     loading,
+    initialLoading = loading,
     saving,
     storageError,
     taskStorageIndicatorError,
@@ -175,6 +176,7 @@
     settingsConfigOptions: SessionConfigOption[];
     tasks: ProjectTask[];
     loading: boolean;
+    initialLoading?: boolean;
     saving: boolean;
     storageError: boolean;
     taskStorageIndicatorError: string | null;
@@ -674,7 +676,7 @@
         <WorkspaceSidebarTasksPanel
           {workspace}
           {tasks}
-          {loading}
+          loading={initialLoading}
           {storageError}
           {busy}
           {activeTaskId}

@@ -187,6 +187,137 @@ afterEach(async () => {
 });
 
 describe.serial("extension entrypoint", () => {
+	test.serial("delivers a detached spawned child's completion without another parent tool call", async () => {
+		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
+		const cwd = tempDir();
+		isolateSubagentConfig(cwd);
+		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
+		const ctx = { cwd, sessionManager: { getSessionFile: () => parentSession } };
+		const piScript = path.join(tempDir(), "pi.js");
+		const releaseFile = path.join(cwd, "release-child");
+		const startedFile = path.join(cwd, "child-started");
+		writeFile(piScript, `
+const fs = require("node:fs");
+let buffer = "";
+process.stdin.on("data", (data) => {
+  buffer += data;
+  let newline;
+  while ((newline = buffer.indexOf("\\n")) >= 0) {
+    const command = JSON.parse(buffer.slice(0, newline));
+    buffer = buffer.slice(newline + 1);
+    if (command.type === "prompt") {
+      fs.writeFileSync(${JSON.stringify(startedFile)}, "started");
+      const timer = setInterval(() => {
+      if (!fs.existsSync(${JSON.stringify(releaseFile)})) return;
+      clearInterval(timer);
+      console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "child result" }] }] }));
+      console.log(JSON.stringify({ type: "agent_settled" }));
+      }, 10);
+    }
+  }
+});
+`);
+		process.argv[1] = piScript;
+		const pi = new FakePi();
+		registerExtension(pi as any);
+		await pi.events.get("session_start")![0]({}, ctx);
+		try {
+			const result = await pi.tools.get("subagents").execute("spawn", {
+				action: "spawn", watchSeconds: 0,
+				tasks: [{ id: "child", task: "Return a result", subagentType: "research" }],
+			}, undefined, undefined, ctx);
+			expect(pi.messages).toHaveLength(0);
+			await waitUntil(() => fs.existsSync(startedFile));
+			// Reproduce the disk-visible terminal receipt between attempts, before
+			// the final retry/fallback callback has settled this tracked launch.
+			const exitFile = path.join(result.details.runDir, "child", "exit_code");
+			writeFile(exitFile, "1");
+			const { getAgentState } = await import("../../src/async-subagents/lib.js");
+			expect(getAgentState(result.details.runDir, "child")?.status).toBe("failed");
+			await pi.events.get("tool_execution_end")![0]({ toolName: "subagents" });
+			expect(pi.messages).toHaveLength(0);
+			fs.unlinkSync(exitFile);
+			writeFile(releaseFile);
+			await waitUntil(() => pi.messages.length > 0, 5000);
+			expect(pi.messages).toHaveLength(1);
+			expect(pi.messages[0]).toMatchObject({
+				message: { details: { agentId: "child", runDir: result.details.runDir, status: "done" } },
+				options: { triggerTurn: true, deliverAs: "followUp" },
+			});
+			expect(fs.readFileSync(path.join(result.details.runDir, "child", "result.md"), "utf-8")).toBe("child result");
+			await pi.events.get("tool_execution_end")![0]({ toolName: "subagents" });
+			expect(pi.messages).toHaveLength(1);
+		} finally {
+			await pi.events.get("session_shutdown")![0]({}, ctx);
+		}
+	});
+
+	for (const [status, exitCode] of [["done", "0"], ["failed", "1"], ["stopped", "stopped"]]) {
+		test.serial(`wakes the idle parent once when a restored child becomes ${status}`, async () => {
+			const { default: registerExtension } = await import("../../src/async-subagents/index.js");
+			const { createRunDir } = await import("../../src/async-subagents/lib.js");
+			const cwd = tempDir();
+			const parentSession = path.join(cwd, "sessions", "parent.jsonl");
+			const ctx = { cwd, sessionManager: { getSessionFile: () => parentSession } };
+			const runDir = createRunDir(cwd, "wake-parent");
+			const agentDir = createAgent(runDir, "child", { pid: String(process.pid), parent_session: parentSession });
+			const pi = new FakePi();
+			registerExtension(pi as any);
+			await pi.events.get("session_start")![0]({}, ctx);
+			try {
+				expect(pi.messages).toHaveLength(0);
+				writeFile(path.join(agentDir, "exit_code"), exitCode!);
+				// No parent tool calls or new input: the completion watcher must wake it.
+				await waitUntil(() => pi.messages.length > 0, 4000);
+				expect(pi.messages).toHaveLength(1);
+				expect(pi.messages[0]).toMatchObject({
+					message: { customType: "async-subagents-agent-completion", details: { agentId: "child", status } },
+					options: { triggerTurn: true, deliverAs: "followUp" },
+				});
+				await pi.events.get("tool_execution_end")![0]({ toolName: "subagents" });
+				expect(pi.messages).toHaveLength(1);
+			} finally {
+				await pi.events.get("session_shutdown")![0]({ reason: "reload" }, ctx);
+			}
+		});
+	}
+
+	test.serial("defers completion while another session is active and suppresses shutdown wakeups", async () => {
+		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
+		const { createRunDir } = await import("../../src/async-subagents/lib.js");
+		const cwd = tempDir();
+		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
+		const ctx = { cwd, sessionManager: { getSessionFile: () => parentSession } };
+		const siblingCtx = { cwd, sessionManager: { getSessionFile: () => path.join(cwd, "sessions", "sibling.jsonl") } };
+		const runDir = createRunDir(cwd, "session-isolation");
+		const agentDir = createAgent(runDir, "child", { pid: String(process.pid), parent_session: parentSession });
+		const pi = new FakePi();
+		registerExtension(pi as any);
+		const start = pi.events.get("session_start")![0];
+		const refresh = pi.events.get("tool_execution_end")![0];
+		const shutdown = pi.events.get("session_shutdown")![0];
+		await start({}, ctx);
+		await start({}, siblingCtx);
+		writeFile(path.join(agentDir, "exit_code"), "0");
+		await refresh({ toolName: "subagents" });
+		expect(pi.messages).toHaveLength(0);
+		await start({}, ctx);
+		expect(pi.messages).toHaveLength(1);
+		await refresh({ toolName: "subagents" });
+		expect(pi.messages).toHaveLength(1);
+		const lateAgentDir = createAgent(runDir, "late-child", { pid: String(process.pid), parent_session: parentSession });
+		await start({}, ctx);
+		await shutdown({ reason: "reload" }, ctx);
+		writeFile(path.join(lateAgentDir, "exit_code"), "1");
+		await refresh({ toolName: "subagents" });
+		expect(pi.messages).toHaveLength(1);
+		// Shutdown suppression must not consume the pending completion.
+		await start({}, ctx);
+		expect(pi.messages).toHaveLength(2);
+		expect(pi.messages[1].message.details.agentId).toBe("late-child");
+		await shutdown({ reason: "reload" }, ctx);
+	});
+
 	test.serial("registers tools and default commands without UI renderers", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;

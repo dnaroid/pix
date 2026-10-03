@@ -72,6 +72,7 @@ export function createDesktopSidebarViewModel(options: {
     settingsConfigOptions: options.configOptions(),
     tasks: options.projectTasks.document.tasks,
     loading: options.projectTasks.loading,
+    initialLoading: options.projectTasks.initialLoading,
     saving: options.projectTasks.saving,
     storageError: options.projectTasks.loadFailed,
     taskStorageIndicatorError: options.projectTasks.saveError,

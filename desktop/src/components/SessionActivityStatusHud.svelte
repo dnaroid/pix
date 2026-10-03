@@ -230,7 +230,7 @@
       <div class="group relative">
         <button
           class={[
-            "flex h-6 items-center gap-0.5 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+            "relative flex h-6 items-center gap-0.5 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             activityToneClass(),
           ]}
           type="button"
@@ -243,6 +243,16 @@
         >
           <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span>{summary.completedTodos}/{summary.totalTodos}</span>
+          <span
+            class="pointer-events-none absolute inset-x-1.5 bottom-0.5 h-0.5 overflow-hidden bg-tool-info/20"
+            aria-hidden="true"
+            data-session-todo-progress
+          >
+            <span
+              class="block h-full bg-tool-info"
+              style:width={`${(summary.completedTodos / summary.totalTodos) * 100}%`}
+            ></span>
+          </span>
         </button>
 
         {#if currentTodo}
@@ -281,6 +291,7 @@
                       "rounded-md border-l-2 py-1.5 pr-1.5",
                       isCurrent ? "border-l-primary bg-panel-selected" : "border-l-transparent",
                       task.status === "completed" && "opacity-60",
+                      !isCurrent && (task.status === "pending" || task.status === "deferred") && "opacity-70",
                     ]}
                     style:padding-left={`${6 + Math.min(row.depth, 4) * 10}px`}
                     data-session-todo-current={isCurrent ? "true" : undefined}

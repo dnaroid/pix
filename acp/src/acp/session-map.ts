@@ -15,6 +15,7 @@ import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { lock } from "proper-lockfile";
 import type { Logger } from "../logging.js";
+import type { BrainstormLink } from "./brainstorm-host.js";
 
 const FORMAT_VERSION = 1;
 
@@ -35,6 +36,8 @@ export interface SessionMapRecord {
 	/** Path to the parent Pi session when this session is a fork. */
 	parentSessionPath?: string | undefined;
 	title?: string | undefined;
+	/** Explicit council linkage; session display names are not identities. */
+	brainstorm?: BrainstormLink;
 	/** ISO 8601 timestamp of the last activity. */
 	updatedAt: string;
 }
@@ -110,6 +113,7 @@ export class SessionMapStore {
 					sessionId,
 					piSessionPath,
 					...(candidate.title === undefined && existing?.title !== undefined ? { title: existing.title } : {}),
+					...(existing?.brainstorm ? { brainstorm: existing.brainstorm } : {}),
 				};
 				if (!existing || !sameRecord(existing, next)) {
 					map.set(sessionId, next);
@@ -174,14 +178,14 @@ export class SessionMapStore {
 		});
 	}
 
-	private async mutate(operation: () => Promise<void>): Promise<void> {
-		await this.enqueue(async () => {
+	private async mutate<T = void>(operation: () => Promise<T>): Promise<T> {
+		return this.enqueue(async () => {
 			const release = await this.acquireFileLock();
 			try {
 				// Always reload after taking the process-wide lock. Another adapter
 				// may have written mappings since this instance last read the file.
 				this.cache = await this.readFromDisk(true);
-				await operation();
+				return await operation();
 			} finally {
 				await release();
 			}
@@ -246,6 +250,7 @@ function sameRecord(left: SessionMapRecord, right: SessionMapRecord): boolean {
 		&& left.cwd === right.cwd
 		&& left.parentSessionPath === right.parentSessionPath
 		&& left.title === right.title
+		&& JSON.stringify(left.brainstorm) === JSON.stringify(right.brainstorm)
 		&& left.updatedAt === right.updatedAt;
 }
 

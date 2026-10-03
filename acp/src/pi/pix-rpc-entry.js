@@ -7,6 +7,10 @@ process.emitWarning = () => {};
 
 const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
 const { AgentSession, ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+const { installContextInventoryHost } = await import("./context-inventory-host.js");
+installContextInventoryHost(AgentSession);
+const { installRpcQuestionRecovery } = await import("../../../dist/bundled-extensions/question/recovery.js");
+installRpcQuestionRecovery(AgentSession);
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";

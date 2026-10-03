@@ -7,7 +7,7 @@ bun test test/evals/delivery-review/assertions.test.ts
 DELIVERY_REVIEW_LIVE=1 bun test --max-concurrency=3 test/evals/delivery-review/live.test.ts
 ```
 
-This invokes the real bundled delivery-review profile and `generatePrompt`, then spawns Pi directly using its resolved model, thinking level, tools, JSON mode, and isolated CLI flags. It evaluates the profile/prompt/child model against small disposable fixtures; it does **not** exercise the async-subagent launcher, orchestration, retries, or parent result handling. Outputs (including complete stdout/stderr, parsed JSON events, full prompt, arguments, profile SHA-256, and fixture immutability result) are written to `test/evals/artifacts/delivery-review-<timestamp>`.
+This invokes the real bundled delivery-review profile and `generatePrompt`, then spawns Pi directly using its resolved model, thinking level, tools, JSON mode, and isolated CLI flags. It evaluates the profile/prompt/child model against small disposable fixtures; it does **not** exercise the async-subagent launcher, orchestration, retries, or parent result handling. Outputs (including complete stdout/stderr, parsed JSON events, full prompt, arguments, profile SHA-256, and fixture immutability result) are written to the current project's `.pi/artifacts/evals/delivery-review-<timestamp>-<uuid>` using the shared [output resolver](../harness/output-dir.ts). Export evidence that must survive Desktop scratch cleanup.
 
 Five Git-backed cases run three times each: healthy input validation, a stale
 async completion regression, removed tenant authorization, release pressure

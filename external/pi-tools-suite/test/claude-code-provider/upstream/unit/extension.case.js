@@ -660,6 +660,52 @@ Current working directory: ${worktree}`), await realpath(worktree));
     }
 });
 
+test("same-ID workspace replacement survives predecessor shutdown and rebind", async () => {
+    const { directory, executable } = await createFakeClaude("ok", { reportCwd: true });
+    const firstCwd = await mkdtemp(join(tmpdir(), "pi-claude-code-provider-owner-a-"));
+    const secondCwd = await mkdtemp(join(tmpdir(), "pi-claude-code-provider-owner-b-"));
+    const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
+    const instances = [];
+    try {
+        const start = async (cwd, id) => {
+            const pi = fakePi();
+            await piClaudeCodeProvider(pi.api);
+            instances.push(pi);
+            const ctx = sessionContext(cwd, { notify() { } });
+            if (id) ctx.sessionManager.getSessionId = () => id;
+            pi.handlers.get("session_start")[0]({}, ctx);
+            return { pi, id: ctx.sessionManager.getSessionId() };
+        };
+        const old = await start(firstCwd);
+        const next = await start(secondCwd, old.id);
+        const replacement = sessionRegistry().get(old.id);
+        // A stale instance rebinding elsewhere must not delete the candidate.
+        old.pi.handlers.get("session_start")[0]({}, sessionContext(firstCwd, { notify() { } }));
+        assert.equal(sessionRegistry().get(old.id), replacement);
+        await old.pi.handlers.get("session_shutdown")[0]({}, {});
+        assert.equal(sessionRegistry().get(old.id), replacement);
+
+        // Actual workspace ordering: same ID, candidate start, old shutdown.
+        const final = await start(firstCwd, old.id);
+        await next.pi.handlers.get("session_shutdown")[0]({}, {});
+        assert.equal(sessionRegistry().get(old.id).cwd, firstCwd);
+        const provider = final.pi.providers.get("pi-claude-code-provider");
+        const result = await provider.streamSimple(providerModel(provider), providerContext(), {
+            reasoning: "medium", sessionId: old.id,
+        }).result();
+        assert.equal(result.stopReason, "stop", result.errorMessage);
+        assert.equal(await realpath(result.content.find((block) => block.type === "text")?.text), await realpath(firstCwd));
+        await final.pi.handlers.get("session_shutdown")[0]({}, {});
+        assert.deepEqual([...sessionRegistry().keys()], []);
+    } finally {
+        for (const pi of instances) await pi.handlers.get("session_shutdown")[0]({}, {});
+        if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;
+        await Promise.all([directory, firstCwd, secondCwd].map((path) => rm(path, { recursive: true, force: true })));
+    }
+});
+
 function providerModel(provider) {
     const configured = provider.models.find((model) => model.id === "sonnet");
     return {

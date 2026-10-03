@@ -22,9 +22,8 @@
   }
 </script>
 
-<div data-composer-activity role="status" class="mb-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-  <span use:constantSpeedSweep class="activity-label min-w-0 truncate">{visible.action}</span>
-  {#if visible.moreCount > 0}<span class="shrink-0">+{visible.moreCount} more</span>{/if}
+<div data-composer-activity role="status" class="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+  <span use:constantSpeedSweep class="activity-label min-w-0 truncate" title={visible.action}>{visible.action}</span>
 </div>
 
 <style>

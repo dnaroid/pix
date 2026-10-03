@@ -77,5 +77,37 @@ test("tool rejects unresolved mode and continuation overrides before preflight o
 	}
 	for (const action of ["review", "finalize"]) {
 		await expect(tool.execute("id", { action, mode: "audit", runDir: "/irrelevant", proposal: "draft", revisionNotes: "none" }, undefined, undefined, {})).rejects.toThrow("Mode is fixed");
+		await expect(tool.execute("id", { action, models: ["p/a:off", "p/b:low"] }, undefined, undefined, {})).rejects.toThrow("Models are fixed");
 	}
+});
+
+test("command passes only an explicit user roster to run, not to continuation or settings", async () => {
+	const f = fixture();
+	await f.command.handler("--models p/a:off,p/b:low --mode audit Topic", { waitForIdle: async () => {} });
+	expect(f.messages[0]).toContain('["p/a:off","p/b:low"]');
+	expect(f.messages[0]).toContain("Pass this exact array as models to action='run'");
+	expect(f.messages[0]).toContain("Omit models on review/finalize");
+	expect(f.messages[0]).toContain("Do not edit configuration");
+	const defaults = fixture();
+	await defaults.command.handler("Topic", { waitForIdle: async () => {} });
+	expect(defaults.messages[0]).toContain("omit models from action='run'");
+	// The full suite's shared TypeBox mock wraps Optional and stores options separately.
+	const raw = f.tool.parameters.properties.models;
+	const schema = raw.schema ?? raw;
+	expect(schema.type ?? schema.kind).toBe("array");
+	expect(schema.options ?? schema).toMatchObject({ minItems: 2, maxItems: 6 });
+});
+
+test("invalid or empty run rosters never queue requests or reach execution preflight", async () => {
+	for (const list of ["p/a:off", "p/a:low,p/a:max", "p/a:wrong,p/b:low", "p/a,p/b", "p/a:low,p/b:low,"]) {
+		const f = fixture(); const notices: string[] = [];
+		await f.command.handler(`--models ${list} Topic`, { ui: { notify: (text: string) => notices.push(text) } });
+		expect(f.messages).toHaveLength(0);
+		expect(notices).toHaveLength(1);
+		await expect(f.tool.execute("id", { action: "run", mode: "brainstorm", topic: "Topic", brief: "Brief", models: list.split(",") }, undefined, undefined, {})).rejects.toThrow(/models|effort/);
+	}
+	const f = fixture(); const notices: string[] = [];
+	await f.command.handler("--models p/a:off,p/b:low", { ui: { notify: (text: string) => notices.push(text) } });
+	expect(f.messages).toHaveLength(0);
+	expect(notices[0]).toContain("Usage:");
 });

@@ -90,13 +90,13 @@
       {#if restartAvailable}
       <button
         type="button"
-        class="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait disabled:opacity-60"
+        class="grid h-6 w-6 place-items-center rounded-sm bg-tool-error/10 text-tool-error hover:bg-tool-error/20 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait disabled:opacity-60"
         title={restartPending ? "Restarting Desktop…" : "Restart Desktop to use the newly built version"}
         aria-label={restartPending ? "Restarting Desktop" : "Restart Desktop to use the newly built version"}
         disabled={restartPending}
         onclick={onRestart}
       >
-        <RotateCw class={["h-4 w-4", restartPending ? "animate-spin" : ""]} aria-hidden="true" />
+        <RotateCw class={["h-3.5 w-3.5", restartPending ? "animate-spin" : ""]} aria-hidden="true" />
       </button>
       {/if}
     </div>
