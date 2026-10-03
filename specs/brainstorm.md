@@ -1,9 +1,41 @@
 ---
 kind: spec
-status: active
+status: proposed
 ---
 
 # Configured multi-model brainstorm and audit council
+
+## Work-in-progress integration (2026-10-03)
+
+The unfinished changes from `issue` commit `8c66acf` have been transferred in
+full at the user's request, after adding and testing
+[module-loading protection](pi-tools-suite-module-loading.md). Only the known
+instruction-string parsing error was repaired; this task does not finish or
+approve the new council behavior. The accepted decisions below have not been
+superseded by an approved replacement. The remaining sections retain the prior
+accepted protocol as a reference, **not a claim that this WIP implements it**.
+
+The transferred implementation now derives an unspecified roster from enabled
+frontier models, adds per-model thinking overrides and quorum-based rounds,
+defaults artifacts to `.pi/brainstorms/` with configurable output and optional
+final-proposal publication to `docs/brainstorms/`, and writes v4 manifests with
+file-backed responses/ledger context. These are unfinished implementation
+changes, not independently approved requirements. Tests and the prior contract
+still need deliberate reconciliation before release; do not merely change
+expectations to make tests green.
+
+Current focused verification (`bun test test/module-loader.test.ts test/brainstorm
+test/config.test.ts test/evals/extension-contracts.test.ts`): 74 passed, 8 failed.
+Failures include old format/config/adapter expectations and a legacy-v2
+continuation fixture. Startup-protection tests pass separately; that does not
+certify councils. No paid council has been run for this transfer.
+
+Known residual risk from source review: finalization replaces `proposal.md`
+before optional publication and final manifest persistence. A later error/abort
+can mark the run incomplete after replacing the proposal, without a retry path.
+This is recorded for the ongoing brainstorm work, not repaired by loading
+protection. See [0012](../docs/decisions/0012-isolate-suite-module-loading.md) for
+the scope of this integration.
 
 ## Behavior
 
@@ -205,6 +237,7 @@ Dependency: [async-subagents](async-subagents.md).
 - `external/pi-tools-suite/src/brainstorm/modes.ts`
 - `external/pi-tools-suite/src/brainstorm/instructions.ts`
 - `external/pi-tools-suite/src/brainstorm/storage.ts`
+- `external/pi-tools-suite/src/brainstorm/ledger.ts`
 - `external/pi-tools-suite/src/config.ts`
 - `external/pi-tools-suite/src/default-pi-tools-suite-config.ts`
 - `external/pi-tools-suite/src/module-catalog.ts`

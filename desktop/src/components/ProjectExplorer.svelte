@@ -32,7 +32,7 @@
   } from "../lib/project-explorer-expansion";
   import { WORKSPACE_CONFIG_PATH } from "../lib/project-colors";
   import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
-  import { projectTreeRootEntry, type ProjectSearchMatch, type ProjectTreeEntry } from "../lib/project-tree";
+  import { projectTreeAbsolutePath, projectTreeRootEntry, type ProjectSearchMatch, type ProjectTreeEntry } from "../lib/project-tree";
   import { createProjectExplorerDragController } from "./project-explorer-drag-controller.svelte";
   import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
@@ -319,6 +319,7 @@
         { label: "Duplicate" },
         { label: "Rename…" },
         { label: "Copy Relative Path" },
+        { label: "Copy Absolute Path" },
       );
       if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: operationBusy });
       items.push({ label: "Delete" });
@@ -399,14 +400,17 @@
     menuController.close(true);
   }
 
-  async function copyRelativePath(entry: ProjectTreeEntry): Promise<void> {
+  async function copyPath(entry: ProjectTreeEntry, absolute = false): Promise<void> {
     if (!entry.path || operationBusy) return;
+    const requestWorkspace = workspace;
+    const generation = operationGeneration;
+    const path = absolute ? projectTreeAbsolutePath(requestWorkspace, entry.path) : entry.path;
     menuController.close(true);
     try {
-      await writeText(entry.path);
-      clearOperationError();
+      await writeText(path);
+      if (workspace === requestWorkspace && generation === operationGeneration) clearOperationError();
     } catch (error) {
-      operationError = errorMessage(error);
+      if (workspace === requestWorkspace && generation === operationGeneration) operationError = errorMessage(error);
     }
   }
 
@@ -871,8 +875,11 @@
           <Pencil class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Rename…</span>
           <span class="ml-auto font-mono text-xs text-muted-foreground">F2</span>
         </button>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyRelativePath(menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyPath(menuEntry)}>
           <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Relative Path</span>
+        </button>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyPath(menuEntry, true)}>
+          <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Absolute Path</span>
         </button>
         {#if canIgnoreEntry}
           <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={operationBusy} onclick={() => void ignoreEntry(menuEntry)}>

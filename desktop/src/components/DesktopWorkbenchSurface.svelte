@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ComponentProps } from "svelte";
+  import { observeTranscriptScrollbarGutter } from "../lib/transcript-scrollbar-gutter";
   import ErrorBanner from "./ErrorBanner.svelte";
   import GitDiffPane from "./GitDiffPane.svelte";
   import LspInstallPane from "./LspInstallPane.svelte";
@@ -71,6 +72,16 @@
     previewPane?: PreviewPaneHandle | null;
     terminalPane?: WorkbenchTerminalPaneHandle | null;
   } = $props();
+
+  let transcriptScrollbarGutter = $state(0);
+  $effect(() => {
+    const pane = sessionStart ? null : transcriptPane;
+    transcriptScrollbarGutter = 0;
+    if (!pane) return;
+    return observeTranscriptScrollbarGutter(pane, (width) => {
+      transcriptScrollbarGutter = width;
+    });
+  });
 </script>
 
 <div class="relative flex min-h-0 min-w-0 flex-1">
@@ -96,7 +107,7 @@
         <TranscriptPane bind:pane={transcriptPane} bind:content={transcriptContent} {...transcript} />
       {/if}
 
-      <div class="row-start-3 min-w-0">
+      <div class="row-start-3 min-w-0 bg-panel" style:padding-right={`${transcriptScrollbarGutter}px`}>
         <PromptComposer bind:this={promptComposer} bind:promptText {...composer}>
           {#snippet queuedMessages()}
             <QueuedMessagesPanel {...queue} />

@@ -229,7 +229,8 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 			: normalizeFrontierModels(raw.frontierModels) ?? config.frontierModels;
 	}
 	if (typeof raw.economy === "boolean") config.economy = raw.economy;
-	config.brainstorm = mergeBrainstormConfig(config.brainstorm, raw.brainstorm);
+	// Without an explicit brainstorm.models the council roster tracks enabled frontierModels.
+	config.brainstorm = mergeBrainstormConfig(config.brainstorm, raw.brainstorm, config.frontierModels);
 	mergeResourceRegistry(config, raw.resourceRegistry);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
@@ -331,7 +332,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
 		lookupFallbackModels: [...config.lookupFallbackModels],
 		frontierModels: config.frontierModels.map((entry) => ({ ...entry })),
-		brainstorm: { ...config.brainstorm, models: [...config.brainstorm.models] },
+		brainstorm: { ...config.brainstorm, models: [...config.brainstorm.models], thinkingOverrides: { ...config.brainstorm.thinkingOverrides } },
 		economy: config.economy,
 		resourceRegistry: { ...config.resourceRegistry },
 	};

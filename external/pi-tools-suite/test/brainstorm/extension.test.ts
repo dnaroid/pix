@@ -24,6 +24,9 @@ test("command queues one council request, preserving dissent without implementat
 	expect(f.messages[0]).toContain("Do not invent consensus or begin implementation");
 	expect(f.messages[0]).toContain("Ask the user only about material uncertainty");
 	expect(f.messages[0]).toContain("without a mandatory approval round");
+	expect(f.messages[0]).toContain('"Fixed decisions"');
+	expect(f.messages[0]).toContain('or "none"');
+	expect(f.messages[0]).toContain("exact paths and sections to read");
 	expect(f.messages[0]).toContain("action='review'");
 	expect(f.messages[0]).toContain("revisionNotes");
 });

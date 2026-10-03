@@ -125,6 +125,10 @@ Major capabilities include:
 | Payload hygiene | truncation normalization and opt-in credential firewall |
 
 Optional modules activate only when their host requirements are available.
+Broken module imports/factories are skipped with a startup warning instead of
+removing the whole suite. This does not certify unfinished feature behavior or
+undo arbitrary initialization side effects; see
+[module loading](../specs/pi-tools-suite-module-loading.md).
 
 Adaptive plans keep dependencies, blockers, ownership and the active step
 visible:

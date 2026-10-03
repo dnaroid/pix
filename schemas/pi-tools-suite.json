@@ -221,15 +221,22 @@
       "type": "object",
       "properties": {
         "models": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[^\\s/*?]+/[^\\s*?]+$"
-          },
-          "minItems": 2,
-          "maxItems": 6,
-          "uniqueItems": true,
-          "description": "Explicit provider/model council roster. Replaces the inherited list; independent of frontierModels. No automatic fallback or substitution."
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^\\s/*?]+/[^\\s*?]+$"
+              },
+              "minItems": 2,
+              "maxItems": 6,
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit provider/model council roster. Omit (or null) to use the enabled frontierModels in order (max 6). No automatic fallback or substitution."
         },
         "thinking": {
           "anyOf": [
@@ -261,13 +268,81 @@
               "type": "string",
               "const": "max"
             }
-          ]
+          ],
+          "description": "Default participant thinking level; default high."
+        },
+        "thinkingOverrides": {
+          "anyOf": [
+            {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "off"
+                    },
+                    {
+                      "type": "string",
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-model thinking level keyed by provider/model (or bare model id). Default: zai/glm-5.3 = max. null removes an inherited entry."
         },
         "timeoutSeconds": {
           "type": "integer",
           "minimum": 30,
           "maximum": 1800,
-          "description": "Per-participant timeout for each of two rounds; default 600 seconds."
+          "description": "Per-participant timeout for each round; default 600 seconds."
+        },
+        "outputDir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Project-relative directory for council protocols; default .pi/brainstorms (outside the knowledge base)."
+        },
+        "quorum": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 6
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Minimum successful participants per round; default max(2, roster − 1). Missing participants are recorded as coverage gaps."
         }
       },
       "description": "Multi-model brainstorm council. Requires async-subagents and its research role."

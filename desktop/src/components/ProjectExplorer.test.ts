@@ -81,6 +81,10 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("New Folder…");
     expect(explorerSource).toContain("Duplicate");
     expect(explorerSource).toContain("Copy Relative Path");
+    expect(explorerSource).toContain('{ label: "Copy Absolute Path" }');
+    expect(explorerSource).toContain('onclick={() => void copyPath(menuEntry, true)}');
+    expect(explorerSource).toContain('projectTreeAbsolutePath(requestWorkspace, entry.path)');
+    expect(explorerSource).toContain('await writeText(path)');
     expect(explorerSource).toContain('"Reveal in Finder"');
     expect(explorerSource).toContain('"Show in File Explorer"');
     expect(explorerSource).toContain('"Show in File Manager"');

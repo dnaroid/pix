@@ -617,6 +617,14 @@ them.
 
 Running state indicators SHOULD be small and restrained.
 
+The conversation composer dock (including activity and queued messages) MUST
+share the transcript column's centered maximum width and responsive horizontal
+insets. Its panel background may span the pane, but the input frame MUST NOT be
+wider than the message content area. Embedded task editors are not constrained
+by the conversation column.
+Alignment MUST use the transcript's usable scrollport width, excluding any
+reserved vertical scrollbar gutter, rather than the full pane width.
+
 Queued-message rows SHOULD sit directly above the composer inside its dock,
 below the running activity/status indicator. Each row uses the composer's
 rounded frame, semantic input border, and stronger panel background, aligned

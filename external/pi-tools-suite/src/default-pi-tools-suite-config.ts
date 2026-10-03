@@ -81,17 +81,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Economy mode: no sub-agent role selects an "expensive" frontier model.
   // Also toggled by PI_TOOLS_SUITE_ECONOMY=1/0.
   "economy": false,
-  // Explicit council roster for /brainstorm. This does not track frontierModels.
-  // Every model participates in both rounds; unavailable models fail, never substitute.
+  // /brainstorm council. Without "models" the roster is the enabled frontierModels
+  // (in order, max 6); set "models" to pin an explicit 2–6 model roster instead.
+  // Unavailable models never substitute: a round needs "quorum" successful
+  // participants (default roster − 1, min 2); missing ones are recorded as gaps.
+  // The protocol is written to outputDir (outside docs/); finalize publish=true
+  // copies only the final proposal to docs/brainstorms/.
   "brainstorm": {
-    "models": [
-      "openai-codex/gpt-6-astra",
-      "zai/glm-5.3",
-      "anthropic/claude-opus-5-5",
-      "antigravity/antigravity-gemini-3.8-flash"
-    ],
     "thinking": "high",
-    "timeoutSeconds": 600
+    "thinkingOverrides": { "zai/glm-5.3": "max" },
+    "timeoutSeconds": 600,
+    "outputDir": ".pi/brainstorms"
   },
   "terminalBell": { "sound": true },
   // comment-checker: nudges the agent to remove AI-slop code comments it just

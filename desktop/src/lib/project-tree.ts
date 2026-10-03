@@ -47,6 +47,11 @@ export function projectTreeRootEntry(workspace: string): ProjectTreeEntry {
   return { name: workspace.split(/[\\/]/u).filter(Boolean).at(-1) ?? "Project", path: "", kind: "directory" };
 }
 
+/** Join a workspace root and a tree entry without escaping filesystem characters. */
+export function projectTreeAbsolutePath(workspace: string, path: string): string {
+  return `${workspace.replace(/\/+$/u, "")}/${path}`;
+}
+
 export function projectTreeRowsWithRoot(
   workspace: string,
   entriesByDirectory: Readonly<Record<string, readonly ProjectTreeEntry[]>>,

@@ -76,7 +76,10 @@ while project selection/open state remains separate from transient focus.
   stop per row. Right-click, the Context Menu key, and `Shift+F10` open the same
   command surface for the focused row. The command set includes Open/Open in
   External Editor, New File/New Folder for directory targets, Copy/Paste,
-  Duplicate, Rename, Copy Relative Path, and Delete where applicable.
+  Duplicate, Rename, Copy Relative Path, Copy Absolute Path, and Delete where applicable.
+  Both path commands apply to files and folders below the workspace root and copy
+  plain filesystem text without quoting or URI escaping. Absolute paths include
+  the active workspace root; relative paths retain the existing project-relative form.
 - The same context menu reveals the targeted file or folder in the OS file manager,
   or opens the project folder for the root context menu. The label is **Reveal in
   Finder** on macOS, **Show in File Explorer** on Windows, and **Show in File

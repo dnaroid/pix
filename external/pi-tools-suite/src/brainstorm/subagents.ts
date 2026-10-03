@@ -19,6 +19,8 @@ interface RoundRequest {
 	signal?: AbortSignal;
 }
 
+const TERMINAL = new Set(["done", "failed", "stopped"]);
+
 function abortIfNeeded(signal?: AbortSignal): void {
 	if (signal?.aborted) throw new Error("Brainstorm cancelled.");
 }
@@ -70,18 +72,32 @@ export function createCouncilRunner(ctx: ExtensionToolContext) {
 			// Includes queue time; retries remain governed by async-subagents, but
 			// cannot extend this council round indefinitely.
 			const deadline = Date.now() + (tasks.reduce((total, task) => total + task.timeoutSeconds, 0) + 30) * 1000;
+			// Wait for every participant: a failed/stopped/timed-out participant
+			// becomes a declared gap; the workflow enforces the quorum.
+			const statuses = new Map<string, string>();
 			while (true) {
 				const remaining = (deadline - Date.now()) / 1000;
-				if (remaining <= 0) throw new Error(`Brainstorm round ${round} timed out. Artifacts: ${runDir}`);
-				const details = await call({ action: "wait", agentIds: ids, timeout: Math.min(30, remaining), interval: 1, failFast: true });
+				if (remaining <= 0) break;
+				const details = await call({ action: "wait", agentIds: ids, timeout: Math.min(30, remaining), interval: 1 });
 				const agents = details?.agents as Array<{ id: string; status: string }> | undefined;
 				if (!agents || agents.length !== ids.length || new Set(agents.map((agent) => agent.id)).size !== ids.length ||
 					agents.some((agent) => !ids.includes(agent.id))) throw new Error(`Incomplete council state: ${runDir}`);
-				if (agents.some((agent) => agent.status === "failed" || agent.status === "stopped")) throw new Error(`Brainstorm round ${round} failed. Artifacts: ${runDir}`);
-				if (agents.every((agent) => agent.status === "done")) break;
+				for (const agent of agents) statuses.set(agent.id, agent.status);
+				if (agents.every((agent) => TERMINAL.has(agent.status))) break;
 			}
-			const reports = [];
+			const pending = ids.filter((id) => !TERMINAL.has(statuses.get(id) ?? ""));
+			if (pending.length) {
+				const failures = stopAgents(runDir, pending).filter((stop) => stop.error);
+				if (failures.length) throw new Error(`Round ${round} timed out and cancellation needs attention: ${failures.map((stop) => stop.error).join("; ")}\n${runDir}`);
+			}
+			const responses = [];
+			const missing = [];
 			for (const task of tasks) {
+				const status = statuses.get(task.id);
+				if (status !== "done") {
+					missing.push({ id: task.id, model: task.model, reason: status && TERMINAL.has(status) ? `participant ${status}` : "timed out" });
+					continue;
+				}
 				const details = await call({ action: "result", agentId: task.id });
 				if (details?.state?.status !== "done" || details?.structured?.model !== task.model || details?.structured?.resultTruncated) {
 					throw new Error(`Missing, substituted or truncated council response from ${task.id}: ${runDir}`);
@@ -90,9 +106,9 @@ export function createCouncilRunner(ctx: ExtensionToolContext) {
 				const text = await readBoundedResult(resultPath);
 				abortIfNeeded(signal);
 				if (!text.trim()) throw new Error(`Empty council response: ${resultPath}`);
-				reports.push({ id: task.id, model: task.model, text: `Source: ${resultPath}\n\n${text}` });
+				responses.push({ id: task.id, model: task.model, text, source: resultPath });
 			}
-			return reports;
+			return { responses, missing };
 		} catch (error) {
 			// The SDK rejects nested work on a cancelled/stale tool context. Use
 			// the shared ownership-aware cancellation primitive for our exact run.

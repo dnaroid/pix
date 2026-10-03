@@ -525,7 +525,8 @@
 
 <svelte:window onresize={textareaController.resize} onkeydown={handleWindowKeydown} />
 
-<div class={editorMode ? "relative" : "relative bg-panel px-3 py-2"}>
+<div class={editorMode ? "relative" : "relative bg-panel py-2"}>
+<div class={editorMode ? "" : "relative mx-auto w-full max-w-4xl px-6 max-[760px]:px-3"}>
 {#if activity && !editorMode}
   {#key activeSessionId}
     <ComposerActivity {activity} />
@@ -721,4 +722,5 @@
     {promptAssistiveStatus}
   </p>
 </form>
+</div>
 </div>

@@ -2,6 +2,7 @@ import { loadPiToolsSuiteConfig } from "./config";
 import { publishContextInventoryState } from "./context-inventory";
 import { isPixOwnedHost } from "./lib/native-pi-tui.js";
 import { PI_TOOLS_SUITE_MODULE_CATALOG, type PiToolsSuiteModuleCatalogEntry } from "./module-catalog.js";
+import { loadSuiteModules } from "./module-loader.js";
 import { registerProviderWebSearchGuard } from "./provider-web-search-guard.js";
 import { publishStartupModuleList } from "./startup-section";
 
@@ -28,22 +29,18 @@ export const MODULES: readonly RegisteredPiToolsSuiteModule[] = PI_TOOLS_SUITE_M
 }));
 
 export default async function piToolsSuite(pi: ExtensionAPI) {
-	const loadedModuleNames: string[] = [];
 	const config = loadPiToolsSuiteConfig(MODULES.map((module) => module.name));
 	const disabledModules = new Set(config.enabled ? config.disabledModules : MODULES.map((module) => module.name));
 
-	for (const module of MODULES) {
-		if (disabledModules.has(module.name)) continue;
-		if (module.cleanPiOnly && isPixOwnedHost()) continue;
-
-		try {
-			const loaded = await module.load();
-			await loaded.default(pi);
-			loadedModuleNames.push(module.name);
-		} catch (error) {
-			const message = error instanceof Error ? error.stack ?? error.message : String(error);
-			throw new Error(`Failed to load pi-tools-suite module ${module.name}: ${message}`);
-		}
+	const { loaded: loadedModuleNames, failures } = await loadSuiteModules(pi, MODULES.filter((module) =>
+		!disabledModules.has(module.name) && !(module.cleanPiOnly && isPixOwnedHost())));
+	for (const failure of failures) {
+		console.warn(`Skipped pi-tools-suite module ${failure.name}: ${failure.error}`);
+	}
+	if (failures.length > 0) {
+		pi.on("session_start", (_event: unknown, ctx: any) => {
+			ctx.ui.notify(`pi-tools-suite: skipped broken modules: ${failures.map((failure) => failure.name).join(", ")}. See startup log for details.`, "warning");
+		});
 	}
 	registerProviderWebSearchGuard(pi);
 
