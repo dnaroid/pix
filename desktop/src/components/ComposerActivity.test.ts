@@ -9,7 +9,10 @@ describe("pinned composer activity wiring", () => {
     expect(composer).toContain("{#if activity && !editorMode}");
     expect(composer).toContain("{#key activeSessionId}");
     expect(composer.indexOf("<ComposerActivity {activity} />")).toBeLessThan(composer.indexOf("<form"));
-    expect(surface).toMatch(/row-start-3[^]*<QueuedMessagesPanel[^]*<PromptComposer/);
+    expect(surface).toMatch(/row-start-3[^]*<PromptComposer[^]*\{#snippet queuedMessages\(\)\}[^]*<QueuedMessagesPanel/);
+    const queuedMessages = composer.indexOf("{@render queuedMessages?.()}");
+    expect(queuedMessages).toBeGreaterThan(composer.indexOf("<ComposerActivity {activity} />"));
+    expect(queuedMessages).toBeLessThan(composer.indexOf("<form"));
     expect(group).not.toContain("ComposerActivity");
   });
 

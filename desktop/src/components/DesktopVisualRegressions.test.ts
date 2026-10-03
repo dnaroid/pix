@@ -45,6 +45,23 @@ import transcriptActivityGroupSource from "./TranscriptActivityGroup.svelte?raw"
 import transcriptSource from "./TranscriptPane.svelte?raw";
 
 describe("desktop visual regressions", () => {
+  it("distinguishes user turns without messenger-style alignment or changing message actions", () => {
+    const userStart = transcriptSource.indexOf('{:else if item.role === "user"}');
+    const userEnd = transcriptSource.indexOf('{:else if item.role === "system"}', userStart);
+    const user = transcriptSource.slice(userStart, userEnd);
+    expect(userStart).toBeGreaterThanOrEqual(0);
+    expect(user).not.toContain('data-user-message-author');
+    expect(user).not.toContain('<UserRound');
+    expect(user).not.toContain('>You</div>');
+    expect(user).toContain("border-l-[3px] border-chat-user-border bg-chat-user py-3");
+    expect(user).not.toContain("ml-auto");
+    expect(user).toContain("<AttachmentGrid");
+    expect(user).toContain("<MarkdownText");
+    expect(user).toContain('aria-label="Message actions"');
+    expect(transcriptSource).toContain('if (next?.type === "message" && next.role === "user") return "mb-8";');
+    expect(transcriptActivityGroupSource).toContain('data-activity-name={label} class="font-normal text-muted-foreground/45"');
+    expect(transcriptSource).not.toContain('"border-t border-border pt-3"');
+  });
   it("keeps compact context and quota controls from painting over one another", () => {
     expect(runtimeStatusSource).toContain('class="@container/runtime-status flex min-w-0 flex-1 items-center justify-between gap-1"');
     expect(runtimeStatusSource).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
@@ -196,7 +213,7 @@ describe("desktop visual regressions", () => {
     expect(transcriptActivityGroupSource).not.toContain("data-activity-settled");
     // All collapsed names share a neutral tone; expanded rows keep their tool tones.
     expect(transcriptActivityGroupSource).toContain("activityGroupPresentationLabels");
-    expect(header).toContain('data-activity-name={label} class="font-normal text-muted-foreground/85"');
+    expect(header).toContain('data-activity-name={label} class="font-normal text-muted-foreground/45"');
     expect(header).not.toContain("data-tool-tone");
     expect(header).not.toContain("tool-name");
     expect(header).not.toContain("text-primary");

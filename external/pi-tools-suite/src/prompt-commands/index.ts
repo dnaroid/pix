@@ -27,6 +27,7 @@ const LIST_LABEL = "List commands";
 const PATH_LABEL = "Show config path";
 const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const RESERVED_COMMAND_NAMES = new Set([
+	"brainstorm",
 	MENU_COMMAND,
 	"help",
 	"model",

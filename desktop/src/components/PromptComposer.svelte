@@ -1,7 +1,7 @@
 <script lang="ts">
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Paperclip from "@lucide/svelte/icons/paperclip";
-  import { onDestroy, onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick, type Snippet } from "svelte";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
   import type { Attachment } from "../lib/attachments";
   import type { AgentControlState } from "../lib/agent-control";
@@ -43,6 +43,7 @@
     ready,
     promptRunning,
     activity,
+    queuedMessages,
     agentControlState = "idle",
     dragActive,
     autocompleteEnabled,
@@ -75,6 +76,7 @@
     ready: boolean;
     promptRunning: boolean;
     activity?: Activity;
+    queuedMessages?: Snippet;
     agentControlState?: AgentControlState;
     dragActive: boolean;
     autocompleteEnabled: boolean;
@@ -523,7 +525,7 @@
 
 <svelte:window onresize={textareaController.resize} onkeydown={handleWindowKeydown} />
 
-<div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-2"}>
+<div class={editorMode ? "relative" : "relative bg-panel px-3 py-2"}>
 {#if activity && !editorMode}
   {#key activeSessionId}
     <ComposerActivity {activity} />
@@ -560,6 +562,10 @@
     onScheduleContinuation={scheduleContinuation}
     onKeydown={handleComposerMenuKeydown}
   />
+{/if}
+
+{#if !editorMode}
+  {@render queuedMessages?.()}
 {/if}
 
 <form
@@ -623,6 +629,9 @@
             ><span class="text-transparent">{promptText}</span><span class="text-muted-foreground/45">{textareaController.suggestion}</span></div>
           {/if}
           <textarea
+            data-native-spelling-menu={!editorMode && !questionMode ? "" : undefined}
+            spellcheck={!editorMode}
+            {...{ autocorrect: "off" }}
             class="relative z-10 block min-h-7 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 py-1 leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-40 [&::placeholder]:whitespace-nowrap disabled:cursor-default disabled:opacity-40"
             bind:this={textarea}
             value={textareaValue}

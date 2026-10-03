@@ -8,7 +8,7 @@ function metrics(scrollHeight: number, scrollTop: number, clientHeight: number):
 describe("transcript scroll scheduling", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  function setup() {
+  function setup({ clampScroll = false } = {}) {
     const callbacks = new Map<number, FrameRequestCallback>();
     let nextFrame = 1;
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -18,6 +18,15 @@ describe("transcript scroll scheduling", () => {
     });
     vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
     const pane = { scrollHeight: 600, scrollTop: 300, clientHeight: 300 };
+    if (clampScroll) {
+      let scrollTop = pane.scrollTop;
+      Object.defineProperty(pane, "scrollTop", {
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = Math.max(0, Math.min(value, pane.scrollHeight - pane.clientHeight));
+        },
+      });
+    }
     let activeSessionId = "session-1";
     const controller = createTranscriptScrollController({
       activeSessionId: () => activeSessionId,
@@ -76,6 +85,68 @@ describe("transcript scroll scheduling", () => {
     runFrame();
     expect(pane.scrollTop).toBe(900);
     expect(controller.followsLatest).toBe(true);
+  });
+
+  it("keeps the latest edge through composer growth and layout scrolls before the follow frame", () => {
+    const { controller, pane, callbacks, runFrame } = setup({ clampScroll: true });
+    // Multiline input shrinks the transcript viewport; its old offset is no
+    // longer near the bottom, even though the reader has not scrolled upward.
+    pane.clientHeight = 160;
+    controller.handleScroll(); // layout scroll arrives before ResizeObserver
+    controller.scheduleScrollToLatest(); // observer/stream notification
+    controller.handleScroll(); // another stationary scroll before the frame
+    expect(controller.followsLatest).toBe(true);
+    expect(callbacks.size).toBe(1);
+    runFrame();
+    expect(pane.scrollTop).toBe(440);
+
+    // The scroll event from the browser's clamped write must keep following.
+    controller.handleScroll();
+    pane.clientHeight = 100;
+    controller.handleScroll();
+    runFrame();
+    expect(pane.scrollTop).toBe(500);
+    expect(controller.followsLatest).toBe(true);
+  });
+
+  it("honors an upward scroll even when composer growth and a follow frame are pending", () => {
+    const { controller, pane, runFrame } = setup();
+    pane.clientHeight = 160;
+    controller.handleScroll();
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+  });
+
+  it("does not steal a scrolled-up reader's position on composer resize and can reach bottom again", () => {
+    const { controller, pane, runFrame } = setup({ clampScroll: true });
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    pane.clientHeight = 160;
+    controller.handleScroll();
+    controller.scheduleScrollToLatest();
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+    pane.scrollTop = pane.scrollHeight - pane.clientHeight;
+    controller.handleScroll();
+    expect(controller.followsLatest).toBe(true);
+    pane.clientHeight = 100;
+    controller.handleScroll();
+    runFrame();
+    expect(pane.scrollTop).toBe(500);
+  });
+
+  it("honors upward movement in the same scroll event as viewport shrink", () => {
+    const { controller, pane, runFrame } = setup();
+    Object.assign(pane, { clientHeight: 160, scrollTop: 100 });
+    controller.handleScroll();
+    controller.scheduleScrollToLatest();
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
   });
 
   it("jump-to-latest resumes following and disposal cancels a pending frame", () => {

@@ -5,6 +5,7 @@ import { getHeapSpaceStatistics, getHeapStatistics, writeHeapSnapshot } from "no
 
 import type { MemoryWatchdogConfig } from "../../config.js";
 import { logPixEvent, type PixLogDetails, type PixLogLevel } from "../logger.js";
+import { TuiMemoryTrace } from "./tui-memory-trace.js";
 
 /** How often process memory is sampled. `process.memoryUsage()` is a cheap syscall-level read. */
 export const MEMORY_WATCHDOG_SAMPLE_INTERVAL_MS = 15_000;
@@ -50,6 +51,7 @@ export type MemoryWatchdogHost = {
 type TimerHandle = { unref?(): unknown };
 
 export type MemoryWatchdogDeps = {
+	trace?: Pick<TuiMemoryTrace, "enabled" | "start" | "stop">;
 	now(): number;
 	memoryUsage(): NodeJS.MemoryUsage;
 	setInterval(callback: () => void, ms: number): TimerHandle;
@@ -124,6 +126,7 @@ export class MemoryWatchdog {
 	private reportInFlight: Promise<MemoryWatchdogReportResult | undefined> | undefined;
 	private snapshotTaken = false;
 	private readonly startedAt: number;
+	private readonly trace: Pick<TuiMemoryTrace, "enabled" | "start" | "stop">;
 
 	constructor(
 		private readonly host: MemoryWatchdogHost,
@@ -134,6 +137,9 @@ export class MemoryWatchdog {
 		this.config = { ...config };
 		this.nextReportBytes = thresholdBytes(config);
 		this.startedAt = this.deps.now();
+		this.trace = this.deps.trace ?? new TuiMemoryTrace(() => this.host.appContext(), {
+			log: (event, details) => this.deps.log("info", event, details),
+		});
 	}
 
 	start(): void {
@@ -142,9 +148,11 @@ export class MemoryWatchdog {
 		// Diagnostics must never keep the process alive on its own.
 		timer.unref?.();
 		this.timer = timer;
+		this.trace.start(this.config.thresholdMb);
 	}
 
 	stop(): void {
+		this.trace.stop();
 		if (this.timer) this.deps.clearInterval(this.timer);
 		this.timer = undefined;
 		if (this.snapshotTimer) this.deps.clearTimeout(this.snapshotTimer);
@@ -221,7 +229,8 @@ export class MemoryWatchdog {
 		const dir = this.deps.reportDir();
 		const baseName = `${REPORT_FILE_PREFIX}${fileTimestamp(sample.at)}-${process.pid}`;
 		const reportPath = join(dir, `${baseName}.json`);
-		const wantsSnapshot = this.config.heapSnapshot && !this.snapshotTaken;
+		// Allocation sampling avoids a multi-GB synchronous snapshot during the incident.
+		const wantsSnapshot = this.config.heapSnapshot && !this.snapshotTaken && !this.trace.enabled;
 		const snapshotAllowed = wantsSnapshot && sample.heapUsed <= MEMORY_WATCHDOG_MAX_SNAPSHOT_HEAP_BYTES;
 		const heapSnapshotPath = snapshotAllowed ? join(dir, `${baseName}.heapsnapshot`) : undefined;
 
@@ -240,6 +249,7 @@ export class MemoryWatchdog {
 				execArgv: process.execArgv,
 			},
 			config: this.config,
+			allocationTrace: this.trace.enabled,
 			current: sampleInMb(sample),
 			app: safeCall(() => this.host.appContext()),
 			runtime: safeCall(() => this.deps.runtimeDiagnostics()),

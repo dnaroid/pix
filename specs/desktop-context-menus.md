@@ -7,7 +7,8 @@ Change. Active implemented contract.
 ## Scope
 
 Pix project windows must expose application commands, not WebView navigation,
-reload, inspection, search, dictionary or browser text menus. The standalone Vite
+reload, inspection, search, dictionary or browser text menus, except for the
+macOS prose-composer spelling menu described below. The standalone Vite
 browser preview retains browser behavior; this policy belongs to the Tauri host.
 
 ## Routing and commands
@@ -23,6 +24,18 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   Redo, Cut, Copy, Paste and Select All. Read-only text inputs offer Copy and
   Select All. Password fields never expose Cut or Copy; read-only passwords have
   only Select All.
+- On macOS, a real right-click in the normal message composer uses WebKit's
+  system text menu instead of the generic Tauri menu. Misspelled words offer
+  OS-provided corrections when the configured system dictionaries have guesses;
+  selecting a correction uses native text editing and the normal input/draft
+  path. The OS owns the other spelling/text services in this menu. No Pix popup,
+  dictionary service, draft-value replacement or silent autocorrection is added.
+  The composer explicitly enables spellcheck and disables autocorrection.
+  Code editor mode disables spellcheck and retains the application menu;
+  questionnaire fields, read-only/disabled/inert controls, passwords, terminals,
+  and all other surfaces retain the existing routing. Synthetic Context Menu /
+  Shift+F10 requests still use the application menu because they cannot invoke
+  the WebKit spelling hit test. See [decision 0007](../docs/decisions/0007-native-composer-spelling.md).
 - Selected document text offers Copy for the selected fragment, not a whole
   message. Existing user-message Copy/Fork/Fork in new tab/Undo remains available
   through right-click without a text/link context and through the ellipsis even
@@ -83,6 +96,11 @@ selection. Selected document text blurs an unrelated editor before opening the
 native menu. IPC creation is generation-guarded: a newer click, input, focus
 change, blur, scroll, resize or key press invalidates a pending menu. Detached
 targets and creations that complete after unmount cannot open a popup.
+
+A native composer spelling request also invalidates pending IPC work, releases
+the previously owned application menu and disables its callbacks; the bubbling
+fallback must not create a second menu. The system owns its spelling menu's
+focus, placement, dismissal and native undo history.
 
 At most one successfully opened native menu is retained by the controller.
 Replacement/disposal releases it; stale creations and failed popups are also

@@ -97,8 +97,11 @@
       {/if}
 
       <div class="row-start-3 min-w-0">
-        <QueuedMessagesPanel {...queue} />
-        <PromptComposer bind:this={promptComposer} bind:promptText {...composer} />
+        <PromptComposer bind:this={promptComposer} bind:promptText {...composer}>
+          {#snippet queuedMessages()}
+            <QueuedMessagesPanel {...queue} />
+          {/snippet}
+        </PromptComposer>
       </div>
     </div>
 

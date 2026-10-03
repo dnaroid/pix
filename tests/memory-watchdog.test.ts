@@ -119,6 +119,23 @@ async function tickAndSnapshot(harness: Harness) {
 }
 
 describe("memory watchdog", () => {
+	it("allocation trace disables blocking heap snapshots and follows watchdog teardown", async () => {
+		let starts = 0;
+		let stops = 0;
+		const trace = { enabled: true, start: () => { starts++; }, stop: () => { stops++; } };
+		const harness = createHarness({}, { trace });
+		harness.watchdog.start();
+		harness.setRss(2 * GB, GB);
+		await harness.watchdog.tick();
+		assert.equal(starts, 1);
+		assert.equal(harness.snapshots.length, 0);
+		const report = JSON.parse([...harness.reports.values()][0]!);
+		assert.equal(report.heapSnapshot, "disabled");
+		assert.equal(report.allocationTrace, true);
+		harness.watchdog.stop();
+		assert.equal(stops, 1);
+	});
+
 	it("samples on an unref'd interval and never starts when disabled", () => {
 		const enabled = createHarness();
 		enabled.watchdog.start();

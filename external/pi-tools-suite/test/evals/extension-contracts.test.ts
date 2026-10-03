@@ -110,5 +110,7 @@ function allModelFacingToolNames(): string[] {
 	// lookup is registered dynamically by coding-discipline and intentionally
 	// lives outside tool-descriptions because its availability is model/config gated.
 	names.add("lookup");
+	// The council owns its model-only orchestration contract in its module.
+	names.add("brainstorm");
 	return [...names];
 }

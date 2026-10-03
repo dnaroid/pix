@@ -15,6 +15,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
+- `src/brainstorm` — `/brainstorm [--mode auto|brainstorm|audit] <topic>` and the model-only `brainstorm` tool: five-round brainstorming or evidence-based audit with reviewed parent synthesis. Preserves the discussion, draft, final proposal/report and revision notes under `docs/brainstorms/`, without starting implementation. Requires async-subagents and the research role. See [the council contract](../../specs/brainstorm.md).
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, and each role owns its ordered model candidate list (or selects from the suite-level `frontierModels` list) and optional parent-vendor policy; includes a cross-vendor `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
@@ -41,6 +42,44 @@ Registration order is preserved by the ordered catalog in `src/module-catalog.ts
 The [Codex reasoning replay spec](../../specs/codex-reasoning-fix.md) owns the
 last suite hook's narrow wire-only contract, evidence, and known cached
 WebSocket continuation limitation.
+
+## Brainstorm council configuration
+
+Set `brainstorm.models` in `~/.config/pi/pi-tools-suite.jsonc` (or the usual
+project override) to 2–6 distinct exact `provider/model` references. This list is
+independent of `frontierModels`, replaces inherited models and never silently
+falls back to different participants. Initial defaults are Astra, GLM-5.3,
+Opus 5.5 and Antigravity Gemini 3.8 Flash. `brainstorm.thinking` defaults to `high`
+and `brainstorm.timeoutSeconds` to 600 per participant per round (30–1800).
+The parent clarifies only material uncertainty and prepares a brief before paid
+work. Default auto routing uses intent/context: create/develop alternatives →
+brainstorm; inspect existing material → audit. The parent announces the choice;
+mixed/unclear requests need clarification. Use `--mode brainstorm` or `--mode audit`
+to override; mode is fixed once the run starts. No separate paid classifier is used.
+Audit requires target material/version, author intent, criteria and coverage limits;
+missing material must be supplied before launch. Its rounds are findings,
+cross-check/coverage, critique of findings, priorities/minimal fixes and report
+review. Findings need cited evidence, severity separate from confidence, and
+validation; no findings is valid. The report preserves intent rather than silently
+redesigning the target. These are model instructions, not quality guarantees.
+The council performs five paid rounds (20 ordinary participant runs with
+four models), plus configured retries and parent drafting/revision. `run` performs
+rounds 1–4; `review` preserves the draft and runs round 5 with the original settings;
+`finalize` requires that review and saves the final proposal and revision notes.
+Legacy two-round runs cannot be continued under this protocol. Invalid modes
+fail explicitly. Original v2 five-round runs can continue as
+brainstorm; v3 stores the resolved mode. Audit reports keep the `proposal.md` name.
+Missing auth/models or policy rejection fail explicitly; forced-current
+model overrides and research CLI overrides are incompatible. Disable with
+`modules.brainstorm: false`. Reload/restart after installing the module.
+
+Participants in both modes can use `read`/`grep`, `web_search`/`web_fetch`, and
+read-only `repo_*` tools through an explicitly loaded, restricted child extension.
+Repo tools require an existing index and `idx`; web tools use existing credentials.
+No shell, edits, setup/credential commands or nested agents are enabled. Participants
+are instructed to research when useful, cite sources, report access gaps, and never
+send private repository/brief content or secrets to web services. Tool selection is
+enforced; privacy and source-quality instructions are not a network/filesystem sandbox.
 
 ## Repository knowledge and spec maintenance
 

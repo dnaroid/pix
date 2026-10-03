@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isTauri } from "@tauri-apps/api/core";
-import { desktopContextTarget, focusContextTarget } from "./desktop-context-target";
+import { desktopContextTarget, focusContextTarget, nativeSpellingContextTarget } from "./desktop-context-target";
 import { installDesktopContextMenu } from "./desktop-context-menu";
 import type { DesktopContextTarget } from "./desktop-context-target";
 import type { NativeContextMenu } from "./native-context-menu";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: vi.fn(() => true) }));
-vi.mock("./desktop-context-target", () => ({ contextElement: vi.fn(), desktopContextTarget: vi.fn(), focusContextTarget: vi.fn() }));
+vi.mock("./desktop-context-target", () => ({ contextElement: vi.fn(), desktopContextTarget: vi.fn(), focusContextTarget: vi.fn(), nativeSpellingContextTarget: vi.fn() }));
 vi.mock("./native-context-menu", () => ({ createNativeContextMenuFactory: vi.fn() }));
 
 function deferred<T>() {
@@ -31,10 +31,18 @@ describe("desktop context menu lifecycle", () => {
     target.dispatchEvent(event);
     return event;
   }
+  function trustedRightClick() {
+    const event = Object.assign(new Event("contextmenu", { cancelable: true }), { clientX: 50, clientY: 70 });
+    Object.defineProperty(event, "isTrusted", { value: true });
+    target.dispatchEvent(event);
+    return event;
+  }
   beforeEach(() => {
     vi.clearAllMocks();
     target = new EventTarget();
     vi.stubGlobal("window", target);
+    vi.stubGlobal("navigator", { userAgent: "Macintosh" });
+    vi.mocked(nativeSpellingContextTarget).mockReturnValue(false);
     vi.mocked(isTauri).mockReturnValue(true);
     vi.mocked(desktopContextTarget).mockReturnValue(context);
   });
@@ -62,6 +70,61 @@ describe("desktop context menu lifecycle", () => {
     rightClick(0, 0);
     await flush();
     expect(native.popup).toHaveBeenCalledWith({ x: 20, y: 45 });
+  });
+  it("keeps synthetic spelling requests on the application menu path", async () => {
+    vi.mocked(nativeSpellingContextTarget).mockReturnValue(true);
+    const native = menu();
+    dispose = installDesktopContextMenu({ reportError, createMenu: async () => native });
+    expect(rightClick(0, 0).defaultPrevented).toBe(true);
+    await flush();
+    expect(native.popup).toHaveBeenCalledWith({ x: 20, y: 45 });
+  });
+  it("hands trusted composer clicks to macOS without creating a second menu", async () => {
+    vi.mocked(nativeSpellingContextTarget).mockReturnValue(true);
+    const createMenu = vi.fn();
+    dispose = installDesktopContextMenu({ reportError, createMenu });
+    const event = trustedRightClick();
+    await flush();
+    expect(event.defaultPrevented).toBe(false);
+    expect(createMenu).not.toHaveBeenCalled();
+    expect(focusContextTarget).not.toHaveBeenCalled();
+  });
+  it("cancels pending IPC creation when the system spelling menu takes over", async () => {
+    const pending = deferred<NativeContextMenu>();
+    const native = menu();
+    dispose = installDesktopContextMenu({ reportError, createMenu: () => pending.promise });
+    rightClick();
+    vi.mocked(nativeSpellingContextTarget).mockReturnValue(true);
+    expect(trustedRightClick().defaultPrevented).toBe(false);
+    pending.resolve(native);
+    await flush();
+    expect(native.popup).not.toHaveBeenCalled();
+    expect(native.close).toHaveBeenCalledOnce();
+  });
+  it("releases an owned application menu and invalidates callbacks before native spelling", async () => {
+    const native = menu();
+    let isActive!: () => boolean;
+    dispose = installDesktopContextMenu({ reportError, createMenu: async (_context, callback) => {
+      isActive = callback;
+      return native;
+    } });
+    rightClick(); await flush();
+    expect(isActive()).toBe(true);
+    vi.mocked(nativeSpellingContextTarget).mockReturnValue(true);
+    trustedRightClick(); await flush();
+    expect(isActive()).toBe(false);
+    expect(native.close).toHaveBeenCalledOnce();
+    dispose(); dispose = undefined;
+    expect(native.close).toHaveBeenCalledOnce();
+  });
+  it("retains application menus outside macOS even for opted-in prose", async () => {
+    vi.stubGlobal("navigator", { userAgent: "X11; Linux" });
+    vi.mocked(nativeSpellingContextTarget).mockReturnValue(true);
+    const native = menu();
+    dispose = installDesktopContextMenu({ reportError, createMenu: async () => native });
+    expect(trustedRightClick().defaultPrevented).toBe(true);
+    await flush();
+    expect(native.popup).toHaveBeenCalledOnce();
   });
   it.each(["pointerdown", "input", "focusin", "blur", "resize", "scroll"])("cancels a pending menu after %s", async (name) => {
     const pending = deferred<NativeContextMenu>();

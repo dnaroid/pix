@@ -145,8 +145,8 @@
   --panel-strong: #ffffff;
   --panel-hover: #eceae3;
   --panel-selected: color-mix(in srgb, var(--primary) 8%, var(--background));
-  --chat-user: color-mix(in srgb, var(--primary) 7%, var(--background));
-  --chat-user-border: color-mix(in srgb, var(--primary) 38%, var(--border));
+  --chat-user: color-mix(in srgb, var(--primary) 10%, var(--background));
+  --chat-user-border: color-mix(in srgb, var(--primary) 65%, var(--border));
   --code: #f0efe9;
   --code-border: #d2d0c8;
   --selection: color-mix(in srgb, var(--primary) 28%, var(--background));
@@ -236,8 +236,8 @@
     --panel-strong: #1a1f27;
     --panel-hover: #202630;
     --panel-selected: #1d2635;
-    --chat-user: #161e2b;
-    --chat-user-border: #334b70;
+    --chat-user: #1b2637;
+    --chat-user-border: #5275ad;
     --code: #11161d;
     --code-border: #2c3440;
     --selection: color-mix(in srgb, var(--primary) 48%, var(--background));

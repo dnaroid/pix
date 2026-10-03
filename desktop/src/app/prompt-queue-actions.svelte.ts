@@ -25,6 +25,7 @@ type PromptQueueActionsOptions = {
   promptRuntime: PromptRuntime;
   appendQueuedMessage: (sessionId: string, message: QueuedUserMessage) => string;
   restoreQueuedMessage: (message: QueuedUserMessage) => void;
+  scrollToLatest: () => Promise<void>;
   focusComposer: () => void | Promise<void>;
   refreshSessions: () => void | Promise<void>;
   setErrorMessage: (message: string | null) => void;
@@ -121,7 +122,10 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
       if (!result.message) throw new Error("Queued message is no longer available.");
 
       await options.promptRuntime.promptRun(sessionId)?.catch(() => undefined);
+      if (requestClient !== options.client() || sessionId !== options.activeSessionId()) return;
       const transcriptMessageId = options.appendQueuedMessage(sessionId, result.message);
+      await options.scrollToLatest();
+      if (requestClient !== options.client() || sessionId !== options.activeSessionId()) return;
       await options.promptRuntime.runPromptRequest(
         requestClient,
         sessionId,

@@ -117,13 +117,15 @@ Two invariants are enforced by `extension-contracts.test.ts`:
 This is intentionally a maintenance gate. Adding a new extension or tool without
 assigning it a contract causes the eval contract test to fail.
 
-The current extension registry covers all 19 modules:
+The authoritative module/tool coverage registry is `test/evals/coverage-manifest.ts`.
+Representative coverage:
 
 | Extension | Deterministic coverage | Representative live coverage |
 | --- | --- | --- |
 | `coding-discipline` | coding-discipline tests | coding-quality workflows |
 | `ast-grep` | ast-grep tests | structural tool selection |
 | `async-subagents` | core/tools/UI tests | Sol/Luna orchestration |
+| `brainstorm` | config, command/tool routing instructions, audit/brainstorm prompts, mode persistence/v2 compatibility, nested subagent adapter, isolated SDK research-tool inventory/guards, five-round workflow and locked review/finalization tests | deterministic only; no paid council/routing or live web-service eval yet; actual routing, clarification and audit/synthesis quality are not certified |
 | `lsp` | LSP tests | deterministic only |
 | `comment-checker` | comment-checker tests | deterministic only |
 | `session-name` | session-name tests | deterministic only |

@@ -81,6 +81,18 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Economy mode: no sub-agent role selects an "expensive" frontier model.
   // Also toggled by PI_TOOLS_SUITE_ECONOMY=1/0.
   "economy": false,
+  // Explicit council roster for /brainstorm. This does not track frontierModels.
+  // Every model participates in both rounds; unavailable models fail, never substitute.
+  "brainstorm": {
+    "models": [
+      "openai-codex/gpt-6-astra",
+      "zai/glm-5.3",
+      "anthropic/claude-opus-5-5",
+      "antigravity/antigravity-gemini-3.8-flash"
+    ],
+    "thinking": "high",
+    "timeoutSeconds": 600
+  },
   "terminalBell": { "sound": true },
   // comment-checker: nudges the agent to remove AI-slop code comments it just
   // added via write/edit/apply_patch. Net-new comments are classified and a

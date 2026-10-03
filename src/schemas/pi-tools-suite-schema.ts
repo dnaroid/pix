@@ -340,6 +340,11 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		lookupFallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered lookup model fallbacks tried after lookupModel." })),
 		frontierModels: Type.Optional(Type.Union([Type.Array(FrontierModelEntry), Type.Null()], { description: "Ordered frontier models used by frontier-selecting sub-agent roles (oracle, frontier-review, delivery-review). A layer's list replaces inherited entries; null restores the built-in list." })),
 		economy: Type.Optional(Type.Boolean({ description: "Economy mode: no sub-agent role selects a frontier model marked expensive. PI_TOOLS_SUITE_ECONOMY overrides it." })),
+		brainstorm: Type.Optional(Type.Object({
+			models: Type.Optional(Type.Array(Type.String({ pattern: "^[^\\s/*?]+/[^\\s*?]+$" }), { minItems: 2, maxItems: 6, uniqueItems: true, description: "Explicit provider/model council roster. Replaces the inherited list; independent of frontierModels. No automatic fallback or substitution." })),
+			thinking: Type.Optional(Type.Union(["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)))),
+			timeoutSeconds: Type.Optional(Type.Integer({ minimum: 30, maximum: 1800, description: "Per-participant timeout for each of two rounds; default 600 seconds." })),
+		}, { description: "Multi-model brainstorm council. Requires async-subagents and its research role." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
 		commentChecker: Type.Optional(CommentCheckerConfig),
 		dcp: Type.Optional(DcpConfig),

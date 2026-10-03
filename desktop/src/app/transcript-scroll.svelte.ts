@@ -35,6 +35,17 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   let restorePending = false;
   let savedScrollTop = 0;
   let activatedSessionId: string | null | undefined;
+  let lastScroll = snapshotScroll();
+
+  function snapshotScroll() {
+    const pane = options.pane();
+    return pane ? {
+      pane,
+      clientHeight: pane.clientHeight,
+      scrollHeight: pane.scrollHeight,
+      scrollTop: pane.scrollTop,
+    } : undefined;
+  }
 
   function isNearBottom(): boolean {
     const pane = options.pane();
@@ -44,7 +55,21 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
 
   function handleScroll(): void {
     if (!visible || restorePending || !options.pane()?.clientHeight) return;
-    followsLatest = isNearBottom();
+    const current = snapshotScroll()!;
+    const previous = lastScroll?.pane === current.pane ? lastScroll : undefined;
+    const geometryChanged = previous !== undefined
+      && (previous.clientHeight !== current.clientHeight || previous.scrollHeight !== current.scrollHeight);
+    // Composer growth reduces the viewport before ResizeObserver's follow
+    // frame. A layout scroll event at the old offset is not a reader moving
+    // upward. Keep following, but still honor an actual upward scroll.
+    const layoutMovedBottom = geometryChanged && current.scrollTop >= previous!.scrollTop;
+    const waitingAtSameOffset = frame !== 0 && current.scrollTop === previous?.scrollTop;
+    if (followsLatest && (layoutMovedBottom || waitingAtSameOffset)) {
+      scheduleScrollToLatest();
+    } else {
+      followsLatest = isNearBottom();
+    }
+    lastScroll = current;
   }
 
   // Called before the workbench changes display:none, while the old pane still
@@ -92,6 +117,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
       // A show frame can run before layout is usable; ResizeObserver retries.
       if (!pane?.clientHeight) return;
       pane.scrollTop = followsLatest ? pane.scrollHeight : savedScrollTop;
+      lastScroll = snapshotScroll();
       restorePending = false;
     });
   }
@@ -105,6 +131,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     const pane = options.pane();
     if (visible && pane?.clientHeight) {
       pane.scrollTop = pane.scrollHeight;
+      lastScroll = snapshotScroll();
       restorePending = false;
     }
   }
@@ -127,6 +154,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     const pane = options.pane();
     const content = options.content();
     if (!pane || typeof ResizeObserver === "undefined") return;
+    if (lastScroll?.pane !== pane) lastScroll = snapshotScroll();
     let connected = true;
     const observer = new ResizeObserver(() => {
       if (!connected || !visible || pane !== options.pane() || !pane.clientHeight) return;

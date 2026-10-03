@@ -138,8 +138,51 @@ try {
   assert.equal(await page.evaluate(() => window.contextSmoke.records.at(-1).kind), "editable");
   assert.deepEqual(await page.evaluate(() => window.contextSmoke.errors), []);
 
+  // Real DOM eligibility, not proof of WebKit's native spelling popup.
+  await page.evaluate(async () => {
+    const { nativeSpellingContextTarget } = await import("/src/lib/desktop-context-target.ts");
+    const draft = document.querySelector("#draft");
+    const eligible = () => nativeSpellingContextTarget(draft);
+    if (eligible()) throw new Error("unmarked editors must retain the application menu");
+    draft.setAttribute("data-native-spelling-menu", "");
+    draft.spellcheck = true;
+    if (!eligible()) throw new Error("prose composer should opt into native spelling");
+    for (const name of ["readonly", "disabled", "inert"]) {
+      draft.setAttribute(name, "");
+      if (eligible()) throw new Error(`${name} editors must not opt into native spelling`);
+      draft.removeAttribute(name);
+    }
+    draft.spellcheck = false;
+    if (eligible()) throw new Error("spellcheck-disabled editors must retain the application menu");
+    draft.spellcheck = true;
+    document.querySelector("#password").setAttribute("data-native-spelling-menu", "");
+    if (nativeSpellingContextTarget(document.querySelector("#password"))) throw new Error("passwords must not opt in");
+  });
+
   await page.evaluate(() => { window.contextSmoke.dispose(); window.contextSmoke.controller.dispose(); });
   assert.equal((await click("chrome")).prevented, false, "teardown restores the host's listeners");
+
+  await page.evaluate(async () => {
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Macintosh" });
+    const { installDesktopContextMenu } = await import("/src/lib/desktop-context-menu.ts");
+    window.spellingSmoke = { popups: 0, prevented: null, trusted: null };
+    window.spellingSmoke.dispose = installDesktopContextMenu({
+      reportError: (error) => { throw error; },
+      createMenu: async () => ({ popup: async () => window.spellingSmoke.popups++, close: async () => {} }),
+    });
+    window.addEventListener("contextmenu", (event) => {
+      window.spellingSmoke.prevented = event.defaultPrevented;
+      window.spellingSmoke.trusted = event.isTrusted;
+    });
+  });
+  await page.locator("#draft").click({ button: "right" });
+  assert.deepEqual(await page.evaluate(() => [window.spellingSmoke.trusted, window.spellingSmoke.prevented, window.spellingSmoke.popups]), [true, false, 0]);
+  await page.keyboard.press("Escape");
+  await page.locator("#draft").focus();
+  await page.keyboard.press("Shift+F10");
+  await page.waitForFunction(() => window.spellingSmoke.popups === 1);
+  assert.equal(await page.evaluate(() => window.spellingSmoke.prevented), true, "synthetic keyboard requests keep their application fallback");
+  await page.evaluate(() => window.spellingSmoke.dispose());
   console.log("PASS: real-DOM context routing, selection/focus, native-input scopes, message-menu precedence, safe links, Shift+F10 and teardown (Chromium; native IPC stubbed)");
 } finally {
   await browser?.close();

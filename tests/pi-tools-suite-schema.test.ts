@@ -35,6 +35,16 @@ function assertTemplateKeysAreModeled(value: unknown, rawSchema: any, path = "$"
 }
 
 describe("pi-tools-suite config schema", () => {
+	it("models the explicit brainstorm roster and bounded round settings", () => {
+		assert.equal(Value.Check(PiToolsSuiteConfigSchema, { brainstorm: { models: ["one/a", "two/b"], thinking: "high", timeoutSeconds: 600 } }), true);
+		for (const brainstorm of [
+			{ models: [] }, { models: ["one/a"] }, { models: ["one/a", "one/a"] },
+			{ models: ["one/*", "two/b"] }, { models: ["one", "two/b"] },
+			{ models: Array.from({ length: 7 }, (_, i) => `provider/m${i}`) },
+			{ thinking: "turbo" }, { timeoutSeconds: 29 }, { timeoutSeconds: 1801 }, { timeoutSeconds: 90.5 },
+		]) assert.equal(Value.Check(PiToolsSuiteConfigSchema, { brainstorm }), false);
+	});
+
 	it("does not advertise the removed Telegram connector", () => {
 		assert.equal("telegramConnector" in PiToolsSuiteConfigSchema.properties, false);
 	});

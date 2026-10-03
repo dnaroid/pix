@@ -165,6 +165,7 @@
     item: TranscriptDisplayItem,
     next: TranscriptDisplayItem | undefined,
   ): string {
+    if (next?.type === "message" && next.role === "user") return "mb-8";
     if (isServiceItem(item) && isServiceItem(next)) return "mb-1";
     return isServiceItem(item) || isServiceItem(next) ? "mb-2" : "mb-6";
   }
@@ -304,7 +305,7 @@
               data-transcript-entry-id={item.id}
             >
               <article
-                class="w-full rounded-r-sm border-l-2 border-chat-user-border bg-chat-user py-2 pr-10 pl-3 text-foreground"
+                class="w-full min-w-0 rounded-r-sm border-l-[3px] border-chat-user-border bg-chat-user py-3 pr-10 pl-3 text-foreground"
                 oncontextmenu={(event) => openUserMessageContextMenu(event, item.id)}
               >
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
@@ -328,8 +329,7 @@
             </article>
           {:else}
             <article
-              class={["transcript-entry w-full min-w-0 text-foreground", gapClass,
-                displayItems[index - 1]?.type === "activity-group" && "border-t border-border pt-3"]}
+              class={["transcript-entry w-full min-w-0 text-foreground", gapClass]}
               data-transcript-entry-id={item.id}
             >
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
@@ -385,7 +385,7 @@
   {#if activeSessionId && showScrollToBottom}
     <button
       type="button"
-      class="absolute bottom-4 left-1/2 z-20 grid h-8 w-8 -translate-x-1/2 place-items-center rounded-md border border-border/55 bg-panel-strong/15 text-foreground shadow-xs backdrop-blur-sm transition-colors hover:bg-panel-hover/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      class="absolute bottom-4 left-1/2 z-20 grid h-8 w-8 -translate-x-1/2 place-items-center rounded-md bg-transparent text-foreground transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       aria-label="Jump to latest message"
       title="Jump to latest message"
       onclick={onScrollToBottom}

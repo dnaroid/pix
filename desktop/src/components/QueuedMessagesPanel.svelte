@@ -29,9 +29,9 @@
 </script>
 
 {#if items.length > 0}
-  <section class="max-h-44 overflow-y-auto border-t border-border bg-panel px-3 py-1" aria-label="Queued messages">
+  <section class="mb-2 flex max-h-44 flex-col gap-2 overflow-y-auto" aria-label="Queued messages">
     {#each items as item (item.id)}
-      <article class="group flex min-h-9 items-center gap-2 border-b border-border/60 px-1 py-1.5 last:border-b-0">
+      <article class="group flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-input bg-panel-strong px-2 py-1.5" aria-label={label(item)}>
         {#if item.source === "deferred"}
           <Pause class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         {:else}
@@ -39,7 +39,9 @@
         {/if}
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-baseline gap-2">
-            <span class="shrink-0 font-mono text-xs font-medium uppercase tracking-[0.06em] text-muted-foreground">{label(item)}</span>
+            {#if item.source === "auto" || item.source === "sdk-follow-up"}
+              <span class="shrink-0 font-mono text-xs font-medium uppercase tracking-[0.06em] text-muted-foreground">{label(item)}</span>
+            {/if}
             <span class="truncate text-xs text-foreground" title={item.text}>{item.text || "(image message)"}</span>
             {#if imageCount(item) > 0}<span class="shrink-0 text-xs text-muted-foreground">+{imageCount(item)} image{imageCount(item) === 1 ? "" : "s"}</span>{/if}
           </div>

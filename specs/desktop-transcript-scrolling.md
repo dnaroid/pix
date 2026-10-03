@@ -33,10 +33,12 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 
 1. The transcript pane owns its vertical scrolling independently from the desktop shell and anchored composer.
 2. When the transcript is following the latest content, appended content and transcript-size changes keep the viewport at the bottom.
+   Growing the multiline composer reduces the transcript viewport without disabling follow mode: layout-driven scroll events at an unchanged or forward offset must not cancel the pending follow frame. Actual upward scrolling still stops following, including during resize; readers already scrolled up retain their position and can scroll back to the new bottom.
    Stream updates and resize notifications share an already pending animation-frame scroll rather than canceling and postponing it; continuous streaming must not starve follow-latest scrolling.
    Selecting a different conversation tab arms latest-content restoration before the shared pane's transcript is replaced. Layout-driven scroll events during that transition must not disable follow mode; returning to a conversation restores its current bottom and continues following subsequent updates. Scroll frames owned by the previous conversation are cancelled or ignored.
    Navigating to a specific transcript entry cancels any pending restoration frame and leaves follow mode off. Switching to an auxiliary workbench tab (Preview, Git Diff, Terminal, or LSP installer) preserves the underlying conversation's follow mode. Hidden-pane scroll/resize events must not change that mode or write zero-sized scroll geometry. Returning restores the current bottom after layout when following, including content appended while hidden; a reader who had scrolled up instead retains their saved scroll offset without enabling follow mode.
 3. Once the user scrolls away from the bottom, passive follow-latest scrolling stops until the user returns near the bottom. Explicit latest-content actions re-enable follow mode: using the jump-to-latest control or sending/appending a new user message scrolls the transcript all the way to the bottom after the new content is rendered.
+   This includes sending a queued/deferred message with its frame's send-immediately button: append the message, restore the latest edge after rendering, then start its prompt request. If the active session or client changes while waiting for the previous run, do not append or scroll the newly active conversation.
 4. A normal `pix/session/history` request returns a bounded recent persisted-history window plus an opaque cursor when older persisted entries exist.
 5. When the Desktop viewport reaches the top threshold, it requests the preceding history page using that cursor and prepends the resulting transcript items.
 6. Because collapsed/grouped tool rows can make many persisted entries occupy little vertical space, a loaded tail that still leaves the pane at the top triggers another cursor page after rendering; paging continues until the pane gains scrollable history or the cursor is exhausted.
@@ -44,11 +46,13 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 8. After prepend, Desktop preserves the current DOM transcript entry as the viewport anchor. Browser-native scroll anchoring is respected; an explicit offset correction is applied only for the remaining anchor delta.
 9. Reaching the top repeatedly continues paging until the cursor is exhausted, at which point the first persisted transcript entry is reachable.
 10. History pagination must not eagerly hydrate deferred tool bodies or start a Pi runtime merely to read older persisted JSONL history.
-11. The floating jump-to-latest arrow uses a near-transparent panel background with a stronger hover surface so it remains legible without visually blocking transcript content underneath it.
+11. The floating jump-to-latest arrow has a fully transparent background, without a border, shadow, or backdrop blur, so transcript content underneath remains readable. Hover changes the arrow color, not its background; keyboard focus retains a visible outline.
 
 ## Related files
 
 - `desktop/src/app/transcript-scroll.svelte.ts`
+- `desktop/src/app/prompt-queue-actions.svelte.ts`
+- `desktop/src/app/desktop-prompt-action-services.ts`
 - `desktop/src/app/session-history.svelte.ts`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/acp-pix-extensions.ts`
@@ -58,6 +62,7 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 ## Verification
 
 - `npm --prefix desktop test -- transcript-scroll.test.ts`
+- `npm --prefix desktop test -- prompt-queue-actions.test.ts`
 - `npm --prefix desktop test -- session-history.test.ts acp-client.test.ts`
 - `node --import tsx --test acp/test/session-history-file.test.ts` from the repo root
 - `node --import tsx --test --test-name-pattern="desktop history cursor" acp/test/agent.test.ts` from the repo root
@@ -65,6 +70,7 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 - `npm --prefix desktop run build:web`
 - Manual desktop verification: open a conversation longer than the initial history tail, scroll continuously upward, and confirm older turns appear while the visible entry stays anchored and the first persisted entry is eventually reachable.
 - Manual desktop verification: while remaining at the bottom, append/stream new transcript content and confirm follow-latest behavior still works.
+- Manual desktop verification: grow a multiline composer while following the latest transcript, confirm the viewport remains at its new bottom; repeat while scrolled up and confirm reading position is not forced to the bottom, then scroll fully down again.
 - Manual desktop verification: switch from a following conversation to an auxiliary tab while content continues to grow, return, and confirm the latest content is visible and follow mode continues. Repeat after scrolling up and confirm the saved position is restored without forcing a jump to the bottom.
 
 ## Evidence

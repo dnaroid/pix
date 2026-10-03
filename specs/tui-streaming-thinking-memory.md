@@ -114,6 +114,9 @@ recoverable from the final session JSONL.
 
 For freezes or typing-time growth after the answer has finished, the internal
 watchdog may be unable to run if the TUI event loop is blocked. The opt-in
+[embedded incident trace](tui-embedded-memory-trace.md) enables independent RSS,
+OS captures and sampled JS allocation profiles with `PIX_MEMORY_TRACE=1 pix`.
+Alternatively, the
 [external memory/freeze profiler](tui-external-memory-profiler.md) can collect
 RSS and macOS stack/map evidence independently. It is diagnostic instrumentation,
 not evidence that the streaming-thinking issue explains every TUI recurrence.

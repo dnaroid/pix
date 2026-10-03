@@ -23,6 +23,17 @@ export function contextElement(target: EventTarget | null): HTMLElement | null {
   return element instanceof HTMLElement ? element : element?.parentElement ?? null;
 }
 
+/** Only the prose composer opts into WebKit's OS-owned spelling menu. */
+export function nativeSpellingContextTarget(target: EventTarget | null): boolean {
+  const element = contextElement(target);
+  return element instanceof HTMLTextAreaElement
+    && element.hasAttribute("data-native-spelling-menu")
+    && element.spellcheck
+    && !element.readOnly
+    && !element.matches(":disabled")
+    && !element.closest("[inert]");
+}
+
 /** A selection elsewhere in the window must not steal a control's context menu. */
 export function hasContextSelection(element: HTMLElement): boolean {
   const selection = element.ownerDocument.getSelection();

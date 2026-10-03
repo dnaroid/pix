@@ -57,5 +57,11 @@ errors, not invent or approve decisions.
 - [0003 — Reveal Desktop after the initial document loads](0003-desktop-startup-reveal.md)
 - [0004 — External TUI incident profiling](0004-external-tui-incident-profiling.md)
 - [0005 — Disk-saving native watch builds](0005-watch-all-cargo-disk.md)
+- [0006 — Embedded opt-in TUI incident trace](0006-embedded-tui-incident-trace.md)
+- [0007 — Native spelling corrections in the macOS composer](0007-native-composer-spelling.md)
+- [0008 — Configured brainstorm council](0008-configured-brainstorm-council.md)
+- [0009 — Five-round brainstorm with reviewed synthesis](0009-five-round-brainstorm.md)
+- [0010 — Audit scenario and transparent parent routing](0010-audit-council-modes.md)
+- [0011 — Read-only council research capabilities](0011-council-research-tools.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

@@ -1,5 +1,5 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { contextElement, desktopContextTarget, focusContextTarget, type DesktopContextTarget } from "./desktop-context-target";
+import { contextElement, desktopContextTarget, focusContextTarget, nativeSpellingContextTarget, type DesktopContextTarget } from "./desktop-context-target";
 import { createNativeContextMenuFactory, type ContextMenuPosition, type NativeContextMenu } from "./native-context-menu";
 
 interface ContextMenuOptions {
@@ -18,6 +18,8 @@ export function installDesktopContextMenu({ reportError, createMenu, workspace }
   let active: { menu: NativeContextMenu; valid: boolean } | null = null;
   const capture = { capture: true };
   const released = new WeakSet<NativeContextMenu>();
+  const systemSpellingEvents = new WeakSet<MouseEvent>();
+  const macOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
 
   async function close(menu: NativeContextMenu): Promise<void> {
     // A popup rejection can arrive after replacement/disposal has released it.
@@ -31,11 +33,20 @@ export function installDesktopContextMenu({ reportError, createMenu, workspace }
   }
   function invalidatePending(): void { generation++; }
   function suppressBrowserMenu(event: MouseEvent): void {
+    invalidatePending();
+    if (active) active.valid = false;
+    // The real WebKit pointer event carries the misspelled-word hit test. A
+    // synthetic keyboard event cannot open that OS menu, so keep its fallback.
+    if (macOS && event.isTrusted && nativeSpellingContextTarget(event.target)) {
+      systemSpellingEvents.add(event);
+      const previous = active;
+      active = null;
+      if (previous) void close(previous.menu);
+      return;
+    }
     // Capture guarantees suppression even when a component stops propagation.
     // Do not stop the event: component-owned menus still get their normal handler.
     event.preventDefault();
-    invalidatePending();
-    if (active) active.valid = false;
   }
 
   async function show(context: DesktopContextTarget, position: ContextMenuPosition): Promise<void> {
@@ -70,6 +81,7 @@ export function installDesktopContextMenu({ reportError, createMenu, workspace }
   }
 
   function route(event: MouseEvent): void {
+    if (systemSpellingEvents.has(event)) return;
     const context = desktopContextTarget(event.target, workspace?.());
     if (!context) return; // Empty chrome has no invented or developer commands.
     const rect = context.element.getBoundingClientRect();

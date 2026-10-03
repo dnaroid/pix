@@ -590,6 +590,11 @@ Assistant content SHOULD remain close to the application canvas and prioritize r
 
 User messages may use a contained neutral card/bubble, but should stay compact and avoid consumer-messenger styling.
 
+User turns SHOULD remain on the shared left axis and be identifiable by a
+restrained theme-aware 3px left accent and a slightly contrasting card surface,
+without a separate author-label or icon row. Leave more space before a new user turn than between
+its message and tool activity. Keep message actions and Markdown content intact.
+
 Tool calls, reasoning details, logs, and code SHOULD visually recede from primary conversational content through muted surfaces and Geist Mono where appropriate.
 
 Conversation spacing MUST prioritize user/assistant turns over service telemetry.
@@ -611,6 +616,18 @@ history SHOULD retain available thinking blocks instead of silently dropping
 them.
 
 Running state indicators SHOULD be small and restrained.
+
+Queued-message rows SHOULD sit directly above the composer inside its dock,
+below the running activity/status indicator. Each row uses the composer's
+rounded frame, semantic input border, and stronger panel background, aligned
+with the composer edges; keep the queue stack height bounded and scrollable.
+Queued-message rows above the composer SHOULD omit visible `paused` and
+`steering` text badges; retain their state icons, accessible status labels, and
+message actions. Other queue-source labels remain visible.
+
+Collapsed activity names and their disclosure chevron SHOULD use the same muted
+tone as elapsed time. Do not add a horizontal separator between an activity group
+and the following assistant message.
 
 The transcript MUST NOT use top/bottom gradient fading or CSS masking to obscure
 content near the scroll edges. Content should remain fully opaque up to the pane

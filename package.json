@@ -35,6 +35,8 @@
     "bin",
     "docs",
     "dist",
+    "scripts/pix-memory-profiler.mjs",
+    "scripts/profile-pix-memory.mjs",
     "schemas",
     "skills",
     "!skills/**/.pi",

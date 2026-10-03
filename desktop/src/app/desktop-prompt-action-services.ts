@@ -75,6 +75,7 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     promptRuntime: options.prompt.runtime,
     appendQueuedMessage: options.prompt.queue.appendToTranscript,
     restoreQueuedMessage: options.prompt.queue.restoreToComposer,
+    scrollToLatest: options.scrollToLatest,
     focusComposer: options.focusComposer,
     refreshSessions: options.sessions.catalog.refresh,
     setErrorMessage: options.setErrorMessage,
