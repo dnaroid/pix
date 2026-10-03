@@ -52,7 +52,7 @@ test("uses exact configured models and read-only research with no extra runner",
 	expect(reports[0].text).toContain("A proposal with dissent");
 	expect(f.calls[0].tasks.map((task: any) => ({ model: task.model, tools: task.tools, role: task.subagentType, prompt: task.promptOverride }))).toEqual(config.models.map((model) => ({ model, tools: ["read"], role: "research", prompt: "{task}" })));
 	for (const task of f.calls[0].tasks) {
-		expect(task.extraArgs).toEqual(["--extension", expect.stringContaining("/brainstorm/research-extension.ts"), "--tools", COUNCIL_RESEARCH_TOOLS.join(",")]);
+		expect(task.extraArgs).toEqual(["--extension", expect.stringContaining(join("brainstorm", "research-extension.ts")), "--tools", COUNCIL_RESEARCH_TOOLS.join(",")]);
 		expect(await readFile(task.extraArgs[1], "utf8")).toContain("function councilResearch");
 	}
 	expect(f.calls.map((call) => call.action)).toEqual(["spawn", "wait", "result", "result"]);
