@@ -23,6 +23,9 @@ describe("SessionCommandActions.runReloadCommand", () => {
 							{ name: "project-agent-creator" },
 						],
 					}),
+					getAgentsFiles: () => ({
+						agentsFiles: [{ path: "AGENTS.md", content: "guidelines" }],
+					}),
 				},
 				async reload() { events.push("reload"); },
 			},
@@ -37,7 +40,12 @@ describe("SessionCommandActions.runReloadCommand", () => {
 			render: () => events.push("render"),
 			setSessionStatus: () => events.push("session-status"),
 			addEntry: (entry: { text: string }) => entries.push(entry.text),
-			toast: { success: (message: string) => events.push(`toast:${message}`) },
+			toast: {
+				success: (message: string) => events.push(`toast:${message}`),
+				error: (message: string) => events.push(`toast:error:${message}`),
+				warning: (message: string) => events.push(`toast:warning:${message}`),
+				info: (message: string) => events.push(`toast:info:${message}`),
+			},
 		} as unknown) as CommandControllerHost;
 
 		await new SessionCommandActions(host).runReloadCommand();
@@ -52,6 +60,7 @@ describe("SessionCommandActions.runReloadCommand", () => {
 		]);
 		assert.equal(entries.length, 1);
 		assert.match(entries[0]!, /Model: openai-codex\/gpt-5\.6-luna:medium/);
+		assert.match(entries[0]!, /Context files \(in context\):\n- AGENTS\.md/);
 		assert.match(entries[0]!, /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
 		assert.match(entries[0]!, /Tools \(active\): repo_search, read, subagents/);
 		assert.match(entries[0]!, /Agents \(available\): frontier-review, research/);

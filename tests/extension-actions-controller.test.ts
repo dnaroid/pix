@@ -167,7 +167,10 @@ describe("AppExtensionActionsController", () => {
 			model: { provider: "openai-codex", id: "gpt-5.6-luna" },
 			thinkingLevel: "medium",
 			getActiveToolNames: () => ["read", "subagents"],
-			resourceLoader: { getSkills: () => ({ skills: [{ name: "frontier-model-rollover" }] }) },
+			resourceLoader: {
+				getSkills: () => ({ skills: [{ name: "frontier-model-rollover" }] }),
+				getAgentsFiles: () => ({ agentsFiles: [{ path: "AGENTS.md", content: "guidelines" }] }),
+			},
 			async reload() {},
 		};
 		const runtime = { session } as unknown as AgentSessionRuntime;
@@ -183,6 +186,7 @@ describe("AppExtensionActionsController", () => {
 		assert.equal(entries.length, 1);
 		const text = entries[0]?.kind === "system" ? entries[0].text : "";
 		assert.match(text, /^Reloaded resources\n\nModel: openai-codex\/gpt-5\.6-luna:medium/);
+		assert.match(text, /Context files \(in context\):\n- AGENTS\.md/);
 		assert.match(text, /\n\nSkills \(in context\): frontier-model-rollover\n\n/);
 		assert.match(text, /Agents \(available\): frontier-review, research/);
 	});

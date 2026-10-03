@@ -40,6 +40,7 @@ describe("ModelCommandActions.runModelCommand", () => {
 			"reload",
 		]);
 		assert.match(events[7] ?? "", /^entry:Reloaded resources after model change to openai\/gpt-5\n\nModel: openai\/gpt-5/);
+		assert.match(events[7] ?? "", /\n\nContext files \(in context\):\n- AGENTS\.md\n/);
 		assert.deepEqual(events.slice(8), [
 			"toast:success:Model changed and resources reloaded",
 			"session-status",
@@ -305,7 +306,10 @@ function createHost(session: {
 			appendCustomEntry: (_type: string, data: { text?: string }) => events.push(`persist:${data.text ?? ""}`),
 		},
 		getActiveToolNames: () => ["read"],
-		resourceLoader: { getSkills: () => ({ skills: [] }) },
+		resourceLoader: {
+			getSkills: () => ({ skills: [] }),
+			getAgentsFiles: () => ({ agentsFiles: [{ path: "AGENTS.md", content: "guidelines" }] }),
+		},
 	});
 	const runtime = { session: decoratedSession };
 	return ({
