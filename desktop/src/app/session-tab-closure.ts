@@ -1,4 +1,5 @@
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
+import { confirmRunningTabClose } from "../lib/close-confirmation";
 import type { SessionLoader, SessionTabControllerOptions } from "./session-tab-controller-options";
 
 export type SessionActionTracker = {
@@ -104,7 +105,21 @@ export function createSessionTabClosure(
 
     if (options.promptRunning(sessionId)) {
       const title = options.catalog.sessions.find((session) => session.sessionId === sessionId)?.title || "Untitled conversation";
-      if (!window.confirm(`“${title}” is still running.\n\nClosing this tab will stop the active run. Close it?`)) return false;
+      const confirmationClient = options.client();
+      const confirmationWorkspace = options.workspace();
+      if (!sessionActions.begin(sessionId)) return false;
+      try {
+        if (!await confirmRunningTabClose(title)) return false;
+        if (confirmationClient !== options.client()
+          || confirmationWorkspace !== options.workspace()
+          || options.sessionMutationRunning()
+          || !options.tabSessionIds().includes(sessionId)) return false;
+      } catch (error) {
+        options.reportError(error);
+        return false;
+      } finally {
+        sessionActions.end(sessionId);
+      }
     }
     options.runtime.invalidatePrewarm();
     const requestClient = options.client();

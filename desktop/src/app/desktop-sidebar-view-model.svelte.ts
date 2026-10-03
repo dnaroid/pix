@@ -109,6 +109,7 @@ export function createDesktopSidebarViewModel(options: {
       onActivate: options.gitCi.activate,
       onDeactivate: options.gitCi.deactivate,
       onRefresh: () => void options.gitCi.refresh(true),
+      onRefreshIndicator: () => void options.gitCi.refreshIndicator(),
       onLoadJobs: options.gitCi.loadJobs,
       canFixWithAi: options.gitAssist.canFixCi(options.gitCi.snapshot),
       onFixWithAi: () => options.gitAssist.fixCiInNewSession(options.gitCi.snapshot),

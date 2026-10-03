@@ -9,7 +9,7 @@ import {
 
 describe("Desktop agent control state", () => {
   it("updates tab pause status when a restored boundary is discovered and later resumed", () => {
-    const states = ["idle", "continuable", "resuming", "idle", "pause-requested", "paused"] as const;
+    const states = ["idle", "continuable", "resuming", "running", "pause-requested", "paused"] as const;
     expect(states.map(agentControlShowsPausedTab)).toEqual([false, true, false, false, false, true]);
   });
 
@@ -24,6 +24,11 @@ describe("Desktop agent control state", () => {
       channel: "agent-control",
       data: { state: "continuable" },
     })).toBe("continuable");
+    expect(agentControlStateFromSessionState({
+      sessionId: "session-1",
+      channel: "agent-control",
+      data: { state: "running" },
+    })).toBe("running");
   });
 
   it("rejects malformed or unrelated session state", () => {
@@ -48,6 +53,7 @@ describe("Desktop agent control state", () => {
     expect(agentControlAllowsAutoQueue("paused")).toBe(false);
     expect(agentControlAllowsAutoQueue("continuable")).toBe(false);
     expect(agentControlAllowsAutoQueue("resuming")).toBe(false);
+    expect(agentControlAllowsAutoQueue("running")).toBe(false);
   });
 
   it("detects only a live same-session transition into paused", () => {

@@ -35,6 +35,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - Desktop's deferred/auto queue does not consume another message while the session is `pause-requested`, `paused`, `continuable`, or `resuming`; advancing past those boundaries requires Continue or a new explicit user prompt.
 - Continue invokes `Agent.continue()` through the Pix RPC shim and then uses Pi's normal post-run retry, compaction, queue-draining, and settlement bookkeeping.
 - While continuation is active, Desktop treats the session as running, so Stop can cancel it and Pause can be requested again after the resumed run starts.
+- `resuming` denotes continuation startup only and disables Pause. An extension-originated run that has emitted `agent_start` (including automatic continuation after question recovery) publishes `running`: Desktop adopts its busy owner while leaving Pause enabled. `running` is not a settlement signal and does not allow the deferred/auto queue to advance.
 - Extension-originated runs (including timed continuations and todo nudges) are also owned as active ACP runs and signal Desktop's running indicator. If an extension starts again while the prior settlement is awaiting RPC snapshots or notifications, the existing busy owner spans that restart: the stale settlement cannot publish an idle/paused state or resolve the owning request. Stop reasons and cancellation from the previous SDK run do not leak into the restarted run.
 - Desktop settlement is guarded by run ownership too: a late prompt/Continue completion cannot clear a newer run's busy flag, finalize its transcript activity, or flush its queue. Owner generations are not reused after session cleanup or runtime reset.
 - Loading, importing, or switching a live session recomputes whether its current transcript is resumable. A previously paused boundary may therefore rehydrate as the equivalent `continuable` state rather than preserving the in-memory `paused` label.
@@ -44,6 +45,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - Desktop uses the private `pix/session/agent_control` ACP request with `state`, `pause`, and `continue` actions.
 - A successful `continue` response includes the final ACP `stopReason` from the resumed run after it settles, alongside the resulting agent-control state. Desktop uses that settled reason for the same completion/error classification as a normal prompt; `state` and `pause` responses do not need a stop reason.
 - ACP publishes session-scoped state changes over the existing private `pix/session-state` notification on the `agent-control` channel.
+- ACP and Desktop both recognize the pause-ready `running` state. See [0026 — Pause-ready adopted continuations](../docs/decisions/0026-pause-ready-adopted-continuations.md).
 - The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the turn-boundary pause algorithm by wrapping `Agent.finishTurn` and using `Agent.continue()`. Existing explicit `continue` decisions remain authoritative, so a pause request stays pending until the next boundary that can be resumed through `Agent.continue()`.
 - Explicit `PIX_ACP_PI_ENTRY` overrides remain supported, but a replacement entry must implement the Pix control shim for Desktop pause/continue to work.
 
@@ -72,6 +74,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 
 - ACP tests cover pause-requested to paused state and generic resumable-stop to continuation flow, including the settled continuation stop reason.
 - `acp/test/agent.test.ts` deterministically gates settlement snapshots and checks extension restarts during both prompt-owned and adopted runs, including retained ownership, queueing and Pause availability.
+- Recovered-question/adopted-run regressions cover `running` state parsing, enabled Pause/Stop rendering, actual pause dispatch, duplicate start notifications, failed pause recovery, and terminal settlement without losing the busy owner.
 - Desktop tests cover the private ACP control request, session-state parsing, same-session pause transition detection, and source-level wiring/placement of the centered pause toast.
 - Activity-row render tests cover running controls without metadata, Pause disablement while requested/resuming, paused/continuable Continue, idle row removal, and questionnaire suppression. Source checks cover placement above the message form and callback separation from message actions.
 - `desktop/src/app/prompt-run-lifecycle.test.ts` covers stale completion and queued settlement callbacks, including cleanup/reset followed by a new run with the same session ID.

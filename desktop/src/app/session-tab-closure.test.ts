@@ -1,6 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { confirmRunningTabClose } from "../lib/close-confirmation";
 import { createSessionTabClosure } from "./session-tab-closure";
 import type { SessionTabControllerOptions } from "./session-tab-controller-options";
+
+vi.mock("../lib/close-confirmation", () => ({ confirmRunningTabClose: vi.fn() }));
+beforeEach(() => vi.mocked(confirmRunningTabClose).mockReset().mockResolvedValue(true));
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -80,6 +84,56 @@ function createHarness(
 }
 
 describe("session tab closure", () => {
+  it.each(["active", "background"])("cancelling running %s close preserves the tab and runtime", async (id) => {
+    const h = createHarness("active", ["active", "background"], async () => ({}));
+    h.options.promptRunning = () => true;
+    vi.mocked(confirmRunningTabClose).mockResolvedValueOnce(false);
+    await expect(h.closure.closeSessionTab(id)).resolves.toBe(false);
+    expect(confirmRunningTabClose).toHaveBeenCalledOnce();
+    expect(h.client.closeSession).not.toHaveBeenCalled();
+    expect(h.tabs.markClosed).not.toHaveBeenCalled();
+    expect(h.options.runtime.invalidatePrewarm).not.toHaveBeenCalled();
+    expect(h.options.clearSessionActivity).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates close attempts while consent is pending, then closes exactly once", async () => {
+    const consent = deferred<boolean>();
+    const close = deferred<Record<string, never>>();
+    const h = createHarness("active", ["active", "background"], () => close.promise);
+    h.options.promptRunning = () => true;
+    vi.mocked(confirmRunningTabClose).mockReturnValueOnce(consent.promise);
+    const pending = h.closure.closeSessionTab("background");
+    await expect(h.closure.closeSessionTab("background")).resolves.toBe(false);
+    expect(h.tabs.markClosed).not.toHaveBeenCalled();
+    consent.resolve(true);
+    await vi.waitFor(() => expect(h.tabs.markClosed).toHaveBeenCalledWith("background"));
+    expect(h.client.closeSession).toHaveBeenCalledOnce();
+    close.resolve({});
+    await expect(pending).resolves.toBe(true);
+  });
+
+  it("does not close a session in a replacement workspace after delayed consent", async () => {
+    const consent = deferred<boolean>();
+    const h = createHarness("active", ["active"], async () => ({}));
+    h.options.promptRunning = () => true;
+    vi.mocked(confirmRunningTabClose).mockReturnValueOnce(consent.promise);
+    const pending = h.closure.closeSessionTab("active");
+    h.setWorkspace("/other");
+    consent.resolve(true);
+    await expect(pending).resolves.toBe(false);
+    expect(h.client.closeSession).not.toHaveBeenCalled();
+  });
+
+  it("fails closed if the confirmation dialog cannot open and permits retry", async () => {
+    const h = createHarness("active", ["active"], async () => ({}));
+    h.options.promptRunning = () => true;
+    vi.mocked(confirmRunningTabClose).mockRejectedValueOnce(new Error("dialog unavailable"));
+    await expect(h.closure.closeSessionTab("active")).resolves.toBe(false);
+    expect(h.options.reportError).toHaveBeenCalledOnce();
+    expect(h.tabs.markClosed).not.toHaveBeenCalled();
+    await expect(h.closure.closeSessionTab("active")).resolves.toBe(true);
+  });
+
   it.each([false, true])("hides a participant without touching its runtime (active=%s)", async (active) => {
     const h = createHarness(active ? "participant" : "parent", ["participant", "parent"], async () => ({}));
     h.options.isBrainstormParticipant = (id) => id === "participant";

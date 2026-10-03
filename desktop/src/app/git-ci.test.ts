@@ -49,6 +49,83 @@ beforeEach(() => invoke.mockReset());
 afterEach(() => vi.restoreAllMocks());
 
 describe("Git CI lifecycle", () => {
+  it("remembers the first sidebar refresh until the initial Git HEAD arrives", async () => {
+    const head = "a".repeat(40);
+    invoke.mockResolvedValue(ciSnapshot(head));
+    const store = createGitCiStore({ workspace: () => "/one" });
+    await store.refreshIndicator();
+    await store.refreshIndicator();
+    expect(invoke).not.toHaveBeenCalled();
+    store.updateTarget(gitSnapshot(head));
+    await flush();
+    expect(invoke.mock.calls.filter(([command]) => command === "git_ci_status")).toHaveLength(1);
+    expect(store.snapshot?.headSha).toBe(head);
+    store.dispose();
+  });
+
+  it("discards a pending first indicator refresh on teardown", async () => {
+    const store = createGitCiStore({ workspace: () => "/one" });
+    await store.refreshIndicator();
+    store.dispose();
+    store.updateTarget(gitSnapshot("a".repeat(40)));
+    await store.refreshIndicator();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it.each(["resolve", "reject"])("discards %s completion for a run removed from the current snapshot", async (completion) => {
+    const head = "a".repeat(40);
+    const pending = deferred<GitCiJobsResult>();
+    let statusCalls = 0;
+    invoke.mockImplementation((command: string) => {
+      if (command === "git_ci_status") return Promise.resolve(ciSnapshot(head, statusCalls++ === 0
+        ? [{ id: "1", name: "Build", status: "running", rawStatus: "running", headSha: head }]
+        : []));
+      if (command === "git_ci_jobs") return pending.promise;
+      return Promise.resolve(true);
+    });
+    const store = createGitCiStore({ workspace: () => "/one" });
+    store.activate();
+    store.updateTarget(gitSnapshot(head));
+    await flush();
+    store.loadJobs("1");
+    await store.refresh();
+    if (completion === "resolve") pending.resolve({ runId: "1", jobs: [] });
+    else pending.reject(new Error("late removed-run failure"));
+    await flush();
+    expect(store.jobs.size).toBe(0);
+    expect(store.jobsErrors.size).toBe(0);
+    expect(store.jobsLoading.size).toBe(0);
+    store.dispose();
+  });
+
+  it("refreshes a closed-panel indicator once without jobs, overlap or its own timer", async () => {
+    vi.useFakeTimers();
+    const head = "a".repeat(40);
+    const pending = deferred<GitCiSnapshot>();
+    invoke.mockImplementation((command: string) => command === "git_ci_status" ? pending.promise : Promise.resolve(true));
+    const store = createGitCiStore({ workspace: () => "/one" });
+    store.updateTarget(gitSnapshot(head));
+    void store.refreshIndicator(); void store.refreshIndicator();
+    expect(invoke.mock.calls.filter(([command]) => command === "git_ci_status")).toHaveLength(1);
+    pending.resolve(ciSnapshot(head, [{ id: "1", name: "Test", status: "failure", rawStatus: "failure", headSha: head }]));
+    await flush();
+    expect(store.snapshot?.runs[0]?.status).toBe("failure");
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(invoke.mock.calls.filter(([command]) => command === "git_ci_status")).toHaveLength(1);
+    expect(invoke.mock.calls.some(([command]) => command === "git_ci_jobs")).toBe(false);
+    store.dispose(); vi.useRealTimers();
+  });
+
+  it("does not retry missing background CI prerequisites on every tick", async () => {
+    const head = "a".repeat(40);
+    invoke.mockResolvedValue({ ...ciSnapshot(head), availability: "cliMissing" });
+    const store = createGitCiStore({ workspace: () => "/one" });
+    store.updateTarget(gitSnapshot(head));
+    await store.refreshIndicator(); await store.refreshIndicator();
+    expect(invoke.mock.calls.filter(([command]) => command === "git_ci_status")).toHaveLength(1);
+    store.dispose();
+  });
+
   it("cancels and ignores a stale status request across a workspace switch", async () => {
     let workspace = "/one";
     const first = deferred<GitCiSnapshot>();

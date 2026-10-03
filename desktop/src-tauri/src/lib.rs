@@ -26,6 +26,7 @@ use tauri_plugin_window_state::StateFlags;
 
 mod acp_queue;
 mod backend_runtime;
+mod close_guard;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod desktop_notification;
@@ -544,6 +545,8 @@ struct IdxOverview {
     initialized: bool,
     embedding_provider: Option<IdxEmbeddingProvider>,
     index_status: Option<IdxParsedStatus>,
+    knowledge_dirty: Option<bool>,
+    index_stale: Option<bool>,
     raw_status: String,
     errors: Vec<String>,
 }
@@ -1630,11 +1633,13 @@ async fn copy_project_entry(
     workspace: String,
     path: String,
     destination: Option<String>,
+    source_workspace: Option<String>,
 ) -> Result<ProjectTreeEntry, String> {
     run_blocking(move || {
-        copy_project_entry_from(
-            Path::new(&workspace),
+        copy_project_entry_between(
+            Path::new(source_workspace.as_deref().unwrap_or(&workspace)),
             Path::new(&path),
+            Path::new(&workspace),
             destination.as_deref().map(Path::new),
         )
     })
@@ -2941,33 +2946,51 @@ fn copy_project_path(source: &Path, target: &Path) -> Result<(), String> {
         return Err(format!("cannot copy symbolic link {}", source.display()));
     }
     if metadata.is_file() {
-        fs::copy(source, target).map_err(|error| {
-            format!(
-                "failed to copy {} to {}: {error}",
-                source.display(),
-                target.display()
-            )
-        })?;
-        return Ok(());
+        let mut input = fs::File::open(source)
+            .map_err(|error| format!("failed to open {}: {error}", source.display()))?;
+        // Reserve exclusively: another instance may claim the suggested name first.
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(target)
+            .map_err(|error| format!("failed to create {}: {error}", target.display()))?;
+        let result = std::io::copy(&mut input, &mut output)
+            .and_then(|_| output.set_permissions(metadata.permissions()))
+            .map_err(|error| {
+                format!(
+                    "failed to copy {} to {}: {error}",
+                    source.display(),
+                    target.display()
+                )
+            });
+        if result.is_err() {
+            remove_project_path_if_exists(target);
+        }
+        return result;
     }
     if !metadata.is_dir() {
         return Err(format!("{} is not a file or directory", source.display()));
     }
     fs::create_dir(target)
         .map_err(|error| format!("failed to create {}: {error}", target.display()))?;
-    fs::set_permissions(target, metadata.permissions()).map_err(|error| {
-        format!(
-            "failed to preserve permissions for {}: {error}",
-            target.display()
-        )
-    })?;
-    for entry in fs::read_dir(source)
-        .map_err(|error| format!("failed to read {}: {error}", source.display()))?
-    {
-        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
-        copy_project_path(&entry.path(), &target.join(entry.file_name()))?;
+    let result = (|| {
+        for entry in fs::read_dir(source)
+            .map_err(|error| format!("failed to read {}: {error}", source.display()))?
+        {
+            let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+            copy_project_path(&entry.path(), &target.join(entry.file_name()))?;
+        }
+        fs::set_permissions(target, metadata.permissions()).map_err(|error| {
+            format!(
+                "failed to preserve permissions for {}: {error}",
+                target.display()
+            )
+        })
+    })();
+    if result.is_err() {
+        remove_project_path_if_exists(target);
     }
-    Ok(())
+    result
 }
 
 fn remove_project_path_if_exists(path: &Path) {
@@ -2981,13 +3004,24 @@ fn remove_project_path_if_exists(path: &Path) {
     }
 }
 
+#[cfg(test)]
 fn copy_project_entry_from(
     workspace: &Path,
     relative_path: &Path,
     destination: Option<&Path>,
 ) -> Result<ProjectTreeEntry, String> {
-    let (root, source) = resolve_project_entry_path(workspace, relative_path)?;
-    let (_, destination_directory) = resolve_project_directory_path(workspace, destination)?;
+    copy_project_entry_between(workspace, relative_path, workspace, destination)
+}
+
+fn copy_project_entry_between(
+    source_workspace: &Path,
+    relative_path: &Path,
+    destination_workspace: &Path,
+    destination: Option<&Path>,
+) -> Result<ProjectTreeEntry, String> {
+    let (_, source) = resolve_project_entry_path(source_workspace, relative_path)?;
+    let (root, destination_directory) =
+        resolve_project_directory_path(destination_workspace, destination)?;
     let metadata = fs::symlink_metadata(&source)
         .map_err(|error| format!("failed to inspect {}: {error}", source.display()))?;
     if metadata.is_dir() && destination_directory.starts_with(&source) {
@@ -2999,10 +3033,7 @@ fn copy_project_entry_from(
         .ok_or_else(|| "project entry name is not valid UTF-8".to_owned())?;
     let target =
         available_project_copy_target(&destination_directory, source_name, metadata.is_dir())?;
-    if let Err(error) = copy_project_path(&source, &target) {
-        remove_project_path_if_exists(&target);
-        return Err(error);
-    }
+    copy_project_path(&source, &target)?;
     sync_directory(&destination_directory)?;
     project_tree_entry_from_path(&root, &target)
 }
@@ -4489,6 +4520,14 @@ fn sidebar_registry_indicator_state_inner(
         };
 
     let local_resources = sidebar_registry_local_resources(root)?;
+    // Provenance churn must not retain every resource ever observed. Eviction
+    // only loses cached work; it does not change the current sample verdict.
+    if let Ok(mut cache) = state.registry_cache.lock() {
+        if let Some(workspace) = cache.get_mut(root) {
+            workspace.entries.retain(|key, _| provenance.resources.contains_key(key)
+                || key.strip_prefix("project:").is_some_and(|artifact| provenance.project_resources.contains_key(artifact)));
+        }
+    }
     let mut hash_budget = MAX_SIDEBAR_REGISTRY_HASH_BYTES;
     let mut local_changes = configured_before
         && local_resources
@@ -4859,7 +4898,11 @@ fn sidebar_registry_cached_path_changed(
         if !cache.contains_key(root) && cache.len() >= 32 {
             cache.clear();
         }
-        cache.entry(root.to_path_buf()).or_default().entries.insert(
+        let workspace = cache.entry(root.to_path_buf()).or_default();
+        if workspace.entries.len() >= MAX_SIDEBAR_REGISTRY_ENTRIES && !workspace.entries.contains_key(cache_key) {
+            workspace.entries.clear();
+        }
+        workspace.entries.insert(
             cache_key.to_owned(),
             SidebarRegistryCacheEntry {
                 expected_hash: expected_hash.to_owned(),
@@ -5229,7 +5272,7 @@ fn sidebar_git_remote_update_probe_from(
         });
     }
 
-    let branch_output = git_output_raw(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let branch_output = sidebar_git_bounded_output(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
     if !branch_output.status.success() {
         return Ok(SidebarGitRemoteUpdateProbe {
             has_updates: false,
@@ -5248,8 +5291,8 @@ fn sidebar_git_remote_update_probe_from(
 
     let remote_key = format!("branch.{branch}.remote");
     let merge_key = format!("branch.{branch}.merge");
-    let remote_output = git_output_raw(root, &["config", "--get", &remote_key])?;
-    let merge_output = git_output_raw(root, &["config", "--get", &merge_key])?;
+    let remote_output = sidebar_git_bounded_output(root, &["config", "--get", &remote_key])?;
+    let merge_output = sidebar_git_bounded_output(root, &["config", "--get", &merge_key])?;
     if !remote_output.status.success() || !merge_output.status.success() {
         return Ok(SidebarGitRemoteUpdateProbe {
             has_updates: false,
@@ -5269,7 +5312,7 @@ fn sidebar_git_remote_update_probe_from(
         });
     }
 
-    let local_output = git_output_raw(
+    let local_output = sidebar_git_bounded_output(
         root,
         &["rev-parse", "--verify", "--quiet", "@{upstream}^{commit}"],
     )?;
@@ -5314,7 +5357,11 @@ fn sidebar_git_remote_ls_remote_output(
     remote: &str,
     merge_ref: &str,
 ) -> Result<std::process::Output, String> {
-    let mut command = git_command(root, &["ls-remote", "--exit-code", remote, merge_ref]);
+    sidebar_git_bounded_output(root, &["ls-remote", "--exit-code", remote, merge_ref])
+}
+
+fn sidebar_git_bounded_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut command = git_command(root, args);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     native_process::isolate(&mut command);
 
@@ -5882,8 +5929,7 @@ fn run_idx_command(
     max_bytes: usize,
 ) -> Result<IdxCommandResult, String> {
     let mut command = idx_process_command(launcher, root, args)?;
-    let mut child = command
-        .spawn()
+    let mut child = native_process::spawn(&mut command)
         .map_err(|error| format!("failed to start idx {}: {error}", args.join(" ")))?;
     let process_id = child.id();
     let stdout = child
@@ -5898,16 +5944,15 @@ fn run_idx_command(
     let stderr_thread = thread::spawn(move || read_bounded_idx_stream(stderr, max_bytes));
     let deadline = Instant::now() + timeout;
     let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
-            Ok(None) => {
+        // Observe without reaping the group leader. Otherwise descendants can
+        // retain a pipe forever after a successful CLI exit, bypassing timeout.
+        #[cfg(unix)]
+        match native_process::exited_before_reap(&child) {
+            Ok(true) => {
                 force_kill_idx_process(process_id, &mut child);
-                let _ = child.wait();
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                return Err(format!("idx {} timed out", args.join(" ")));
+                break child.wait().map_err(|error| format!("failed to reap idx: {error}"))?;
             }
+            Ok(false) => {}
             Err(error) => {
                 force_kill_idx_process(process_id, &mut child);
                 let _ = child.wait();
@@ -5919,6 +5964,19 @@ fn run_idx_command(
                 ));
             }
         }
+        #[cfg(not(unix))]
+        if let Some(status) = child.try_wait().map_err(|error| format!("failed to observe idx: {error}"))? {
+            force_kill_idx_process(process_id, &mut child);
+            break status;
+        }
+        if Instant::now() >= deadline {
+            force_kill_idx_process(process_id, &mut child);
+            let _ = child.wait();
+            let _ = stdout_thread.join();
+            let _ = stderr_thread.join();
+            return Err(format!("idx {} timed out", args.join(" ")));
+        }
+        thread::sleep(POLL_INTERVAL);
     };
     let (stdout, stdout_truncated) = stdout_thread
         .join()
@@ -5999,6 +6057,8 @@ fn idx_overview_from(
                 initialized,
                 embedding_provider,
                 index_status: None,
+                knowledge_dirty: None,
+                index_stale: None,
                 raw_status: String::new(),
                 errors: vec![error],
             });
@@ -6025,6 +6085,8 @@ fn idx_overview_from(
             initialized: false,
             embedding_provider,
             index_status: None,
+            knowledge_dirty: None,
+            index_stale: None,
             raw_status: String::new(),
             errors,
         });
@@ -6043,7 +6105,7 @@ fn idx_overview_from(
             if result.exit_code != Some(0) {
                 errors.push(non_empty_idx_error("idx index --status failed", &result));
             }
-            if !text.trim().is_empty() {
+            if result.exit_code == Some(0) && !result.truncated && !text.trim().is_empty() {
                 Some(parse_idx_index_status(&text))
             } else {
                 None
@@ -6054,6 +6116,24 @@ fn idx_overview_from(
             None
         }
     };
+    let knowledge_dirty = match run_idx_command(
+        &launcher,
+        &root,
+        &["knowledge".to_owned(), "dirty".to_owned()],
+        Duration::from_secs(5),
+        4096,
+    ) {
+        Ok(result) => parse_idx_knowledge_dirty(&result, &mut errors),
+        Err(error) => { errors.push(error); None }
+    };
+    // Revision mismatch is a conservative signal, not a claim that a matching
+    // HEAD proves file freshness. No dry-run, filesystem scan or indexing here.
+    let index_stale = index_status.as_ref()
+        .and_then(|status| status.fields.get("gitRef"))
+        .filter(|sha| valid_idx_git_revision(sha))
+        .and_then(|indexed| sidebar_git_bounded_output(&root, &["rev-parse", "--verify", "HEAD"]).ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| idx_index_revision_stale(indexed, String::from_utf8_lossy(&output.stdout).trim())));
     Ok(IdxOverview {
         available: true,
         executable: Some(launcher.display_path().to_string_lossy().into_owned()),
@@ -6064,8 +6144,37 @@ fn idx_overview_from(
             .as_ref()
             .map_or(String::new(), |status| status.raw.clone()),
         index_status,
+        knowledge_dirty,
+        index_stale,
         errors,
     })
+}
+
+fn valid_idx_git_revision(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn idx_index_revision_stale(indexed: &str, head: &str) -> Option<bool> {
+    // A matching revision says nothing about uncommitted edits.
+    (valid_idx_git_revision(indexed) && valid_idx_git_revision(head) && !indexed.eq_ignore_ascii_case(head))
+        .then_some(true)
+}
+
+fn parse_idx_knowledge_dirty(result: &IdxCommandResult, errors: &mut Vec<String>) -> Option<bool> {
+    if !result.truncated && result.exit_code == Some(0) {
+        match result.stdout.trim() {
+            "yes" => return Some(true),
+            "no" => return Some(false),
+            _ => {}
+        }
+    }
+    let text = idx_result_text(result).to_ascii_lowercase();
+    // Older CLIs are supported: missing capability is unknown, never clean.
+    if result.exit_code != Some(0) && (text.contains("unknown command") || text.contains("unrecognized command")) {
+        return None;
+    }
+    errors.push(non_empty_idx_error("idx knowledge dirty check incomplete", result));
+    None
 }
 
 fn non_empty_idx_error(prefix: &str, result: &IdxCommandResult) -> String {
@@ -9914,6 +10023,7 @@ fn ui_qa_workspace_url(current_url: &tauri::Url, workspace: &Path) -> Result<tau
 pub fn run() {
     let builder = tauri::Builder::default()
         .manage(AcpProcessState::default())
+        .manage(close_guard::CloseGuardState::default())
         .manage(PackageTerminalState::default())
         .manage(UserConfigState::default())
         .manage(WorkspaceConfigState::default())
@@ -9959,6 +10069,7 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
         .invoke_handler(tauri::generate_handler![
+            close_guard::desktop_set_running_activity,
             window_restore::desktop_window_workspace,
             window_restore::desktop_open_project_window,
             desktop_context_menu::desktop_edit,
@@ -10062,6 +10173,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build Pix Desktop");
     app.run(|handle, event| {
+        if let tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::CloseRequested { api, .. },
+            ..
+        } = &event {
+            if close_guard::prevent(handle, Some(label), None) {
+                api.prevent_close();
+            }
+        }
         if matches!(&event, tauri::RunEvent::Exit) {
             desktop_notification::shutdown(handle);
         }
@@ -10072,6 +10192,7 @@ pub fn run() {
         } = &event
         {
             desktop_notification::destroyed(handle, label);
+            close_guard::destroyed(handle, label);
             window_restore::destroyed(handle, label);
             handle
                 .state::<git_ci::GitCiProcessState>()
@@ -10098,6 +10219,10 @@ pub fn run() {
         }
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             let state = handle.state::<AcpProcessState>();
+            if !state.exiting.load(Ordering::Acquire) && close_guard::prevent(handle, None, code) {
+                api.prevent_exit();
+                return;
+            }
             if !state.exiting.swap(true, Ordering::AcqRel) {
                 api.prevent_exit();
                 let windows = window_restore::freeze(handle);
@@ -10597,7 +10722,7 @@ mod tests {
         let workspace = temporary_workspace("idx-overview");
         fs::create_dir(workspace.join(".indexer-cli")).expect("initialized workspace");
         let executable = workspace.join("fake-idx");
-        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> idx-args\nif [ \"$1\" = '--version' ]; then printf '2.0.7\\n'; else printf 'Snapshot: test (completed)\\n'; fi\n").expect("write fake idx");
+        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> idx-args\nif [ \"$1\" = '--version' ]; then printf '2.0.7\\n'; elif [ \"$1\" = 'knowledge' ]; then printf 'yes\\n'; else printf 'Snapshot: test (completed)\\n'; fi\n").expect("write fake idx");
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
             .expect("executable idx");
 
@@ -10605,7 +10730,7 @@ mod tests {
             idx_overview_from(&workspace, Ok(IdxLauncher::System(executable))).expect("overview");
         assert_eq!(
             fs::read_to_string(workspace.join("idx-args")).expect("CLI calls"),
-            "--version\nindex --status\n"
+            "--version\nindex --status\nknowledge dirty\n"
         );
         assert_eq!(
             overview
@@ -10616,7 +10741,58 @@ mod tests {
         );
         assert_eq!(overview.version.as_deref(), Some("2.0.7"));
         assert_eq!(overview.embedding_provider, None);
+        assert_eq!(overview.knowledge_dirty, Some(true));
+        assert_eq!(overview.index_stale, None);
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn idx_index_revision_mismatch_is_conservative() {
+        let indexed = "a".repeat(40);
+        let head = "b".repeat(40);
+        assert_eq!(idx_index_revision_stale(&indexed, &head), Some(true));
+        assert_eq!(idx_index_revision_stale(&indexed, &indexed), None);
+        assert_eq!(idx_index_revision_stale("(none)", &head), None);
+        assert_eq!(idx_index_revision_stale(&indexed, "malformed"), None);
+        assert_eq!(idx_index_revision_stale(&"a".repeat(64), &"b".repeat(64)), Some(true));
+    }
+
+    #[test]
+    fn idx_knowledge_dirty_requires_complete_explicit_verdict() {
+        let mut errors = Vec::new();
+        let mut result = IdxCommandResult { stdout: "yes\n".to_owned(), stderr: String::new(), exit_code: Some(0), truncated: false };
+        assert_eq!(parse_idx_knowledge_dirty(&result, &mut errors), Some(true));
+        result.stdout = "no\n".to_owned();
+        assert_eq!(parse_idx_knowledge_dirty(&result, &mut errors), Some(false));
+        result.stdout = "yes\n".to_owned();
+        result.exit_code = Some(2);
+        assert_eq!(parse_idx_knowledge_dirty(&result, &mut errors), None);
+        assert_eq!(errors.len(), 1);
+        errors.clear();
+        result.stderr = "error: unknown command 'knowledge'".to_owned();
+        result.exit_code = Some(1);
+        assert_eq!(parse_idx_knowledge_dirty(&result, &mut errors), None);
+        assert!(errors.is_empty());
+        result.exit_code = Some(0);
+        result.truncated = true;
+        assert_eq!(parse_idx_knowledge_dirty(&result, &mut errors), None);
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn idx_command_reaps_descendants_holding_successful_exit_pipes() {
+        use std::os::unix::fs::PermissionsExt;
+        let workspace = temporary_workspace("idx-inherited-pipes");
+        let executable = workspace.join("fake-idx");
+        fs::write(&executable, "#!/bin/sh\nsleep 30 &\nprintf 'yes\\n'\nexit 0\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let started = Instant::now();
+        let result = run_idx_command(&IdxLauncher::System(executable), &workspace, &[], Duration::from_secs(1), 1024).unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(result.stdout.trim(), "yes");
+        assert!(started.elapsed() < Duration::from_secs(3));
+        fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -11142,6 +11318,46 @@ mod tests {
     }
 
     #[test]
+    fn project_entry_copy_between_workspaces_preserves_source_and_avoids_collisions() {
+        let source = temporary_workspace("cross-copy-source");
+        let destination = temporary_workspace("cross-copy-destination");
+        fs::create_dir_all(source.join("docs/nested")).unwrap();
+        fs::write(source.join("docs/nested/a.txt"), "contents").unwrap();
+        fs::create_dir_all(destination.join("target/docs")).unwrap();
+        fs::write(destination.join("target/docs/keep.txt"), "existing").unwrap();
+        let copied = copy_project_entry_between(&source, Path::new("docs"), &destination, Some(Path::new("target"))).unwrap();
+        assert_eq!(copied.path, "target/docs copy");
+        assert_eq!(fs::read_to_string(destination.join("target/docs copy/nested/a.txt")).unwrap(), "contents");
+        assert_eq!(fs::read_to_string(destination.join("target/docs/keep.txt")).unwrap(), "existing");
+        assert!(source.join("docs/nested/a.txt").is_file());
+        let file = copy_project_entry_between(&source, Path::new("docs/nested/a.txt"), &destination, None).unwrap();
+        assert_eq!(file.path, "a.txt");
+        let again = copy_project_entry_between(&source, Path::new("docs/nested/a.txt"), &destination, None).unwrap();
+        assert_eq!(again.path, "a copy.txt");
+        assert!(copy_project_entry_between(&source, Path::new("../escape"), &destination, None).is_err());
+        assert!(copy_project_entry_between(&source, Path::new("docs"), &destination, Some(Path::new("../escape"))).is_err());
+        // Different workspace roots can still point into the source tree.
+        assert!(copy_project_entry_between(&source, Path::new("docs"), &source.join("docs/nested"), None).is_err());
+        fs::remove_dir_all(source).unwrap();
+        fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[test]
+    fn project_copy_exclusive_targets_do_not_overwrite_or_remove_existing_entries() {
+        let workspace = temporary_workspace("copy-exclusive-targets");
+        fs::write(workspace.join("source.txt"), "source").unwrap();
+        fs::write(workspace.join("existing.txt"), "keep").unwrap();
+        assert!(copy_project_path(&workspace.join("source.txt"), &workspace.join("existing.txt")).is_err());
+        assert_eq!(fs::read_to_string(workspace.join("existing.txt")).unwrap(), "keep");
+        fs::create_dir(workspace.join("source-dir")).unwrap();
+        fs::create_dir(workspace.join("existing-dir")).unwrap();
+        fs::write(workspace.join("existing-dir/keep.txt"), "keep").unwrap();
+        assert!(copy_project_path(&workspace.join("source-dir"), &workspace.join("existing-dir")).is_err());
+        assert!(workspace.join("existing-dir/keep.txt").is_file());
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
     fn resolves_external_editor_targets_only_inside_the_workspace() {
         let workspace = temporary_workspace("external-editor-target");
         fs::create_dir(workspace.join("src")).expect("create src directory");
@@ -11474,6 +11690,29 @@ mod tests {
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn sidebar_registry_cache_drops_removed_provenance_resources() {
+        let workspace = temporary_workspace("sidebar-registry-churn");
+        let home = temporary_workspace("sidebar-registry-churn-home");
+        let state = SidebarIndicatorState::default();
+        for number in 0..12 {
+            let name = format!("demo-{number}");
+            let skill = workspace.join(".pi/skills").join(&name);
+            fs::create_dir_all(&skill).unwrap();
+            fs::write(skill.join("SKILL.md"), "hello\n").unwrap();
+            let hash = sidebar_registry_hash_path(&skill).unwrap();
+            fs::write(workspace.join(".pi/registry.json"), format!(
+                "{{\"version\":1,\"resources\":{{\"skill:{name}\":{{\"type\":\"skill\",\"name\":\"{name}\",\"hash\":\"{hash}\"}}}},\"projectResources\":{{}}}}"
+            )).unwrap();
+            let result = sidebar_registry_indicator_state(&state, &workspace, &home);
+            assert!(result.stable && result.error.is_none());
+            assert_eq!(state.registry_cache.lock().unwrap().get(&workspace).unwrap().entries.len(), 1);
+            fs::remove_dir_all(skill).unwrap();
+        }
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

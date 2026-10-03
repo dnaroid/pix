@@ -68,5 +68,9 @@ errors, not invent or approve decisions.
 - [0019 — Desktop councils own persistent participant sessions](0019-desktop-persistent-council-sessions.md)
 - [0022 — Run-only council roster and effort](0022-brainstorm-run-roster.md)
 - [0023 — Remove workspace tool](0023-remove-workspace-tool.md)
+- [0024 — Native Desktop close warnings](0024-desktop-close-warning.md)
+- [0025 — Sparse read-only sidebar health](0025-sidebar-health-polling.md)
+- [0026 — Cross-instance Project Explorer clipboard](0026-cross-instance-file-clipboard.md)
+- [0026 — Pause-ready adopted continuations](0026-pause-ready-adopted-continuations.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

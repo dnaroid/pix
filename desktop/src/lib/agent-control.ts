@@ -3,10 +3,11 @@ import type { SessionStateNotification } from "./session-state";
 export const AGENT_CONTROL_CHANNEL = "agent-control";
 
 export type AgentControlAction = "state" | "pause" | "continue";
-export type AgentControlState = "idle" | "pause-requested" | "paused" | "resuming" | "continuable";
+export type AgentControlState = "idle" | "running" | "pause-requested" | "paused" | "resuming" | "continuable";
 
 export function isAgentControlState(value: unknown): value is AgentControlState {
   return value === "idle"
+    || value === "running"
     || value === "pause-requested"
     || value === "paused"
     || value === "resuming"

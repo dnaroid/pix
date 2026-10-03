@@ -19,12 +19,15 @@ The existing contract requires activation of the exact owning window and convers
 - Existing tests mocked callback delivery and did not exercise that host constructor. The new [transport regression](../../desktop/src/lib/desktop-notification-transport.test.ts) verifies the actual IPC/listener boundary.
 - Native OS interaction remains a separate acceptance check; mocked IPC alone cannot prove notification-center behavior.
 - Follow-up source verification found a second boundary mismatch: native emits to `WebviewWindow`, but the first frontend bridge subscribed via `Window.listen`. Tauri filters these target kinds separately. The transport regression now keeps the actual frontend APIs and asserts the IPC target kind and label, rather than mocking `.listen`.
+- The user confirmed conversation selection works after the target-kind repair, then requested foregrounding the owning window. The existing frontend focus calls do not explicitly activate the macOS application; the native click path now activates Pix and makes the validated owning window key/front.
 
 ## Decision
 
 Keep plugin permission checks but replace delivery with a macOS native command/activation bridge. Derive window ownership from the invoking webview, retain the session with each notification, and emit activation only to that window. Subscribe before sending and release frontend listeners on unmount, including subscriptions that complete after disposal. Retain the existing conversation/workbench selection handler and foreground-suppression/completion policy.
 
 Use the installed plugin's legacy `NSUserNotificationCenter` delivery API with an owned delegate, notification-local metadata, and live-window incarnation checks. Deny the plugin's delivery command so it cannot overwrite the delegate; retain only its permission APIs. Development's Terminal identity lookup runs off the main thread. No thread waits for a notification click.
+
+Foreground the validated owner synchronously on the native main thread before emitting its conversation activation: unhide the application, deminiaturize the owning window, activate Pix, then make that specific window key/front. Retain frontend focus as a best-effort fallback. Do not raise unrelated Pix windows or focus a stale notification owner.
 
 ## Alternatives
 

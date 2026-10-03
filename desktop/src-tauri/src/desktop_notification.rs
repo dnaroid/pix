@@ -84,8 +84,9 @@ mod native {
         define_class, msg_send,
         rc::Retained,
         runtime::{AnyObject, ProtocolObject},
-        AnyThread, DefinedClass,
+        AnyThread, DefinedClass, MainThreadMarker,
     };
+    use objc2_app_kit::{NSApplication, NSWindow};
     use objc2_foundation::{
         ns_string, NSDictionary, NSObject, NSObjectProtocol, NSString, NSUserNotification,
         NSUserNotificationActivationType, NSUserNotificationCenter,
@@ -152,7 +153,8 @@ mod native {
                         .ok()
                         .and_then(|state| state.activate(&route, true));
                     if let Some(payload) = activation {
-                        if app.get_webview_window(&route.window).is_some() {
+                        if let Some(window) = app.get_webview_window(&route.window) {
+                            foreground_window(&window);
                             let _ = app.emit_to(
                                 EventTarget::webview_window(&route.window),
                                 EVENT,
@@ -164,6 +166,29 @@ mod native {
             }
         }
     );
+
+    fn foreground_window(window: &WebviewWindow) {
+        // Only called after ownership validation, on the main thread. Window
+        // focus alone does not activate Pix when another application is active.
+        let Some(main_thread) = MainThreadMarker::new() else {
+            return;
+        };
+        let Ok(native_window) = window.ns_window() else {
+            return;
+        };
+        // SAFETY: Tauri's live window owns this NSWindow. The callback retains
+        // the WebviewWindow and uses the pointer only synchronously on main.
+        let Some(native_window) = (unsafe { native_window.cast::<NSWindow>().as_ref() }) else {
+            return;
+        };
+        let app = NSApplication::sharedApplication(main_thread);
+        app.unhideWithoutActivation();
+        native_window.deminiaturize(None);
+        app.activateIgnoringOtherApps(true);
+        // App activation may raise a different Pix window; key/order the exact
+        // notification owner afterwards, not every window in the application.
+        native_window.makeKeyAndOrderFront(None);
+    }
 
     impl Delegate {
         fn new(app: AppHandle, routing: Arc<Mutex<Routing>>) -> Retained<Self> {

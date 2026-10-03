@@ -318,7 +318,7 @@ interface ActiveRun {
 	slashPrompt: boolean;
 	/** Whether pi emitted agent_start for this run. */
 	started: boolean;
-	/** Adopted runs use resuming as Desktop's unsolicited busy signal. */
+	/** Adopted runs use running as Desktop's unsolicited, pause-ready busy signal. */
 	extensionInitiated?: boolean;
 	/** A new agent_start invalidates all pending work for this settlement. */
 	settlement?: symbol | undefined;
@@ -2362,8 +2362,8 @@ export class PixAcpAgent {
 			run.reject = reject;
 		});
 		void settled.catch(() => {});
-		if (session.agentControlState !== "resuming") {
-			void this.setAgentControlState(session, "resuming");
+		if (session.agentControlState !== "running") {
+			void this.setAgentControlState(session, "running");
 		}
 	}
 
@@ -2390,7 +2390,7 @@ export class PixAcpAgent {
 				// invalidate that completion and discard its reason/cancellation.
 				if (run.settlement) {
 					run.cancelled = false;
-					void this.setAgentControlState(session, run.extensionInitiated ? "resuming" : "idle");
+					void this.setAgentControlState(session, run.extensionInitiated ? "running" : "idle");
 				}
 				run.settlement = undefined;
 				run.stopReason = undefined;
@@ -2454,7 +2454,7 @@ export class PixAcpAgent {
 				await session.pi.pause();
 			} catch (error) {
 				if (this.sessions.get(session.acpSessionId) === session && session.activeRun) {
-					await this.setAgentControlState(session, "idle");
+					await this.setAgentControlState(session, session.activeRun.extensionInitiated ? "running" : "idle");
 				}
 				throw new RequestError(ERROR_SERVER, `pi pause failed: ${stringifyUnknown(error)}`);
 			}

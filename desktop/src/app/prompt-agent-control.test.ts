@@ -4,8 +4,9 @@ import { createPromptAgentControl } from "./prompt-agent-control.svelte";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 
 describe("prompt agent control notifications", () => {
-  it("keeps an adopted scheduled run active until pause settles", async () => {
-    const client = { agentControl: vi.fn() } as unknown as AcpClient;
+  it.each(["resuming", "running"] as const)("adopts %s and enables Pause once the continuation starts", async (initialState) => {
+    const agentControl = vi.fn(async () => ({ sessionId: "session-1", state: "pause-requested" as const }));
+    const client = { agentControl } as unknown as AcpClient;
     const flushAutoQueue = vi.fn(async () => {});
     const runs = createPromptRunLifecycle({
       client: () => client, activeSessionId: () => "session-1", reportError: vi.fn(),
@@ -15,12 +16,42 @@ describe("prompt agent control notifications", () => {
       client: () => client, activeSessionId: () => "session-1", runtimeReady: () => true,
       operationRunning: () => false, setErrorMessage: vi.fn(), reportError: vi.fn(), runs,
     });
-    control.handleAgentControlStatePush("session-1", "resuming");
+    control.handleAgentControlStatePush("session-1", initialState);
     expect(runs.isRunning("session-1")).toBe(true);
-    control.handleAgentControlStatePush("session-1", "pause-requested");
+    if (initialState === "resuming") {
+      await control.pauseActiveAgent();
+      expect(agentControl).not.toHaveBeenCalled();
+    }
+    control.handleAgentControlStatePush("session-1", "running");
+    control.handleAgentControlStatePush("session-1", "running");
+    expect(runs.isRunning("session-1")).toBe(true);
+    expect(flushAutoQueue).not.toHaveBeenCalled();
+    await control.pauseActiveAgent();
+    expect(agentControl).toHaveBeenCalledWith("session-1", "pause");
+    expect(control.agentState("session-1")).toBe("pause-requested");
+    await control.pauseActiveAgent();
+    expect(agentControl).toHaveBeenCalledTimes(1);
     expect(runs.isRunning("session-1")).toBe(true);
     control.handleAgentControlStatePush("session-1", "paused");
     expect(runs.isRunning("session-1")).toBe(false);
+    await vi.waitFor(() => expect(flushAutoQueue).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(["idle", "continuable"] as const)("settles an adopted recovered-question run at %s", async (state) => {
+    const client = {} as AcpClient;
+    const flushAutoQueue = vi.fn(async () => {});
+    const runs = createPromptRunLifecycle({
+      client: () => client, activeSessionId: () => "session-1", reportError: vi.fn(),
+      bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue,
+    });
+    const control = createPromptAgentControl({
+      client: () => client, activeSessionId: () => "session-1", runtimeReady: () => true,
+      operationRunning: () => false, setErrorMessage: vi.fn(), reportError: vi.fn(), runs,
+    });
+    control.handleAgentControlStatePush("session-1", "running");
+    control.handleAgentControlStatePush("session-1", state);
+    expect(runs.isRunning("session-1")).toBe(false);
+    expect(control.agentState("session-1")).toBe(state);
     await vi.waitFor(() => expect(flushAutoQueue).toHaveBeenCalledTimes(1));
   });
 

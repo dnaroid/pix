@@ -65,9 +65,11 @@ while project selection/open state remains separate from transient focus.
 - `Shift+Enter` opens the focused file or directory in the configured external
   editor. Gram is a supported built-in choice. When no external editor is
   configured, Desktop reports that the user must choose one in Desktop Settings
-  rather than silently assuming Zed. The pointer hover icon remains available but
-  is removed from the normal Tab sequence so every tree row does not add a second
-  Tab stop.
+  rather than silently assuming Zed. The external-editor icon is visible only on
+  the pointer-hovered row, disappearing immediately when the pointer leaves;
+  retained DOM focus or selected-file state must not leave another icon visible.
+  It is removed from the normal Tab sequence so every tree row does not add a
+  second Tab stop.
 - On macOS, Gram targets are opened through Gram's bundled CLI when it is present
   inside the installed app bundle; LaunchServices app opening remains the fallback.
   This keeps file/project opening aligned with Gram's own command-line entry point
@@ -91,10 +93,29 @@ while project selection/open state remains separate from transient focus.
   primary Copy/Paste shortcuts operate on the Project Explorer entry clipboard
   while tree focus is active. These shortcuts do not replace normal text-editing
   shortcuts outside the tree.
+- Copy writes a versioned Pix file/folder reference (source workspace, relative
+  path and kind) to the system text clipboard. Paste works across project windows
+  and independently running Pix instances on the same macOS machine, including
+  after changing projects or closing the source window. It copies the current
+  source contents at paste time, not a snapshot; deleted/inaccessible sources
+  report an operation error. Finder file clipboard interoperability is not part
+  of this format. Ordinary text, path-only Copy commands and invalid references
+  do not count as copied entries and never fall back to a stale local reference.
+  Clipboard reads occur only on opening a file menu and on Paste, not by polling;
+  Paste rereads the clipboard before issuing the mutation. Late menu reads and
+  operation completions cannot affect a replaced workspace or disposed panel.
+  See [decision 0026](../docs/decisions/0026-cross-instance-file-clipboard.md).
 - File mutations are workspace-relative backend operations. They reject paths
   that escape the active project and do not follow symbolic links. Copying a
   project entry creates a non-conflicting destination name rather than silently
-  overwriting an existing file or directory.
+  overwriting an existing file or directory. Cross-project Paste validates source
+  paths relative to the source workspace and destination paths relative to the
+  receiving workspace, checks canonical paths to reject copying a folder into
+  itself/descendants even through different workspace roots, and runs recursive
+  copying off the UI thread. Exclusive creation prevents overwrite or deletion
+  of a target claimed concurrently by another instance; a collision race reports
+  an error and can be retried. Partial copies owned by the operation are cleaned
+  up after a copy failure, including encountering a nested symbolic link.
 - Rename, copy/paste, duplicate, create, and delete refresh only the affected
   directory state. Rename preserves focus/selection and expanded descendants
   under the new path when possible and updates the workspace-config expansion paths;
@@ -164,6 +185,7 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/lib/project-git-ignore.ts`
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
 - `desktop/src/lib/project-explorer-expansion.ts`
+- `desktop/src/lib/project-entry-clipboard.ts`
 - `desktop/src/lib/sidebar-indicators.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/src/git_ignore.rs`
@@ -183,6 +205,11 @@ while project selection/open state remains separate from transient focus.
   expansion persistence, malformed state rejection, and storage bounds.
 - `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the
   keyboard external-editor route.
+- `desktop/src/lib/project-entry-clipboard.test.ts` covers shared references,
+  format/path validation, cross-project eligibility, text replacement, failures,
+  out-of-order reads and teardown. Native project-entry/copy tests cover recursive
+  cross-workspace copying, preserved source contents, collision naming, exclusive
+  target creation, unsafe destinations and canonical self/descendant rejection.
 - Native `git_ignore` tests cover real Git eligibility, literal rules, nested
   ignore files, append preservation, tracked files/folders with unchanged index
   contents, and unsafe paths.

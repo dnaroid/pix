@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
+  import { invoke, isTauri } from "@tauri-apps/api/core";
+  import { createWindowRunActivitySync } from "./app/window-run-activity";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
@@ -717,6 +718,15 @@
   onMount(nativeNotifications.start);
   onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
   onMount(desktopWatchRestart.start);
+
+  const windowRunActivity = createWindowRunActivitySync(
+    (running) => invoke("desktop_set_running_activity", { running }),
+    reportError,
+  );
+  $effect(() => {
+    if (isTauri()) windowRunActivity.update(promptRuntime.runningSessionIds.size > 0 || draftSessionMaterializing);
+  });
+  onMount(() => windowRunActivity.dispose);
 
 </script>
 

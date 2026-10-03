@@ -314,6 +314,8 @@
     taskStorageSaveError: taskStorageIndicatorError,
     activeTaskId,
     registrySnapshot,
+    hasPlannedTasks: tasks.some((task) => task.status === "todo"),
+    gitCiSnapshot: gitCi.snapshot,
     registryBackgroundSync,
     settingsPanelError,
   }));
@@ -428,6 +430,7 @@
     indicatorService = new SidebarIndicatorService(
       getCurrentWindow().label,
       (state) => indicatorServiceState = state,
+      () => gitCi.onRefreshIndicator?.(),
     );
     indicatorService.setViewedTab(layoutController.collapsed ? undefined : activeTab);
     indicatorService.start(workspace);

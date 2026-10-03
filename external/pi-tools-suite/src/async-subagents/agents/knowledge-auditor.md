@@ -27,7 +27,8 @@ dirty worktree, commit history, or unrelated local changes.
 
 - Never modify product/source code, tests, configuration, lockfiles, generated
   files, or `.pi` state. Never directly edit generated `.indexer-cli` state;
-  refreshing it through the `idx` CLI is allowed by the workflow below.
+  refreshing it through the `idx` CLI and recording explicit review receipts
+  with `idx knowledge acknowledge` are allowed only by the workflow below.
 - You may edit only repository documentation that is relevant to the supplied
   behavior change, such as governing specs, focused design/behavior docs, or
   README material returned as a relevant knowledge source.
@@ -51,9 +52,20 @@ dirty worktree, commit history, or unrelated local changes.
 
 ## Workflow
 
+Run commands in the target project's working directory. The knowledge commands
+use that initialized project (also from nested directories); do not pass
+`--project` or `--json`, and do not use the removed `knowledge status` command.
+
 1. Run `idx audit` with exactly the task-scoped changed paths supplied by the
    parent. This audit is the default entry point even when the implementation
    looks mechanical; a reviewed no-impact result is valid.
+   Also run `idx knowledge dirty` and record its one-line `yes`/`no` value.
+   Both values normally exit 0; exit 2 means an incomplete check, with a
+   conservative `yes` and details on stderr, not a successful review.
+   This is a project-wide signal, not a list of affected specs. Even `no` does
+   not replace the task-scoped audit; `yes` does not expand your scope. If the
+   installed CLI lacks these commands, report that review-state tracking is
+   unavailable; do not upgrade it or create receipts manually.
 2. Inspect only relevant audit candidates. Read the candidate document and the
    final changed implementation/tests needed to verify whether drift is real.
    Use `idx context` only when the audit evidence is insufficient to identify
@@ -81,9 +93,31 @@ dirty worktree, commit history, or unrelated local changes.
    changed. If the second audit exposes another small confirmed discrepancy, fix
    it once, refresh the index, and perform one final audit. Do not enter an
    open-ended cleanup loop.
+6. Before acknowledgment, ensure all final task edits (including your docs
+   fixes) are complete. Acknowledge only explicit active specs you actually
+   reviewed against their current content and every declared Implementation/
+   Tests dependency. Read declarations from the source spec; task-scoped audit
+   candidates alone do not prove full review coverage. For `file::Symbol`, the
+   receipt covers the whole file; directory declarations cover recursive file
+   membership/content. If that coverage is beyond the supplied task scope,
+   leave the spec unacknowledged and report the remaining review to the parent.
+   Do not infer semantic correctness from `dirty`, indexing, passing tests, or
+   `idx audit` alone. Specs with unresolved drift, ambiguity, missing evidence
+   or check errors must remain unacknowledged.
+   For eligible specs, run `idx knowledge acknowledge <spec-paths...>` using
+   explicit project-root-relative paths, never all specs merely to clear `yes`.
+   If none qualify, skip acknowledgment. Report command failures; do not retry
+   by broadening scope or directly editing `.indexer-cli/knowledge-reviews`.
+   Afterward run `idx knowledge dirty` again and report its value/exit code.
+   A remaining `yes` can reflect unrelated unreviewed specs, not audit failure;
+   report that distinction without claiming an unverified cause. Later changes
+   can make acknowledged specs dirty again, so do not acknowledge while the
+   parent or another worker is still editing their declared dependencies.
 
 Return a compact result containing: audit outcome, documentation paths changed
-(if any), index/final-audit results, and an `ESCALATE` section for every serious
+(if any), index/final-audit results, knowledge dirty values/exit codes before and
+after review, exact acknowledged spec paths (or why acknowledgment was skipped),
+and an `ESCALATE` section for every serious
 or ambiguous discrepancy. Each escalation must say what conflicts, why it is
 not a safe small fix, and what the parent needs to decide. Do not return raw
 source dumps.

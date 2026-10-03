@@ -246,7 +246,7 @@
             <span>{summary.completedTodos}/{summary.totalTodos}</span>
           </span>
           <span
-            class="h-1 overflow-hidden rounded-full bg-muted-foreground/25"
+            class="-mt-0.5 h-1 overflow-hidden rounded-full bg-muted-foreground/25"
             aria-hidden="true"
             data-session-todo-progress
           >

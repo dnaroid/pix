@@ -31,6 +31,8 @@ export interface IdxOverview {
   readonly initialized: boolean;
   readonly embeddingProvider?: IdxEmbeddingProvider;
   readonly indexStatus?: IdxParsedStatus;
+  readonly knowledgeDirty?: boolean;
+  readonly indexStale?: boolean;
   readonly rawStatus: string;
   readonly errors: readonly string[];
 }

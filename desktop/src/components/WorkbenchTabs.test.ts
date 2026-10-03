@@ -4,6 +4,7 @@ import titlebarViewModelSource from "../app/desktop-titlebar-view-model.svelte.t
 import sessionTabClosureSource from "../app/session-tab-closure.ts?raw";
 import workbenchControllerSource from "../app/workbench-controller.ts?raw";
 import workbenchModelSource from "../app/workbench-model.ts?raw";
+import closeConfirmationSource from "../lib/close-confirmation.ts?raw";
 import titlebarSource from "./DesktopTitlebar.svelte?raw";
 import projectSwitcherSource from "./ProjectSwitcher.svelte?raw";
 import statusIconSource from "./SessionTabStatusIcon.svelte?raw";
@@ -93,7 +94,8 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(workbenchControllerSource).toContain("options.closeGitDiff();");
     expect(workbenchControllerSource).toContain("options.closeTerminal();");
     expect(sessionTabClosureSource).toContain("if (options.promptRunning(sessionId))");
-    expect(sessionTabClosureSource).toContain("Closing this tab will stop the active run. Close it?");
+    expect(sessionTabClosureSource).toContain("await confirmRunningTabClose(title)");
+    expect(closeConfirmationSource).toContain("Closing this tab will stop the active run.");
   });
 
   it("keeps the sole UI-only draft conversation non-closable", () => {

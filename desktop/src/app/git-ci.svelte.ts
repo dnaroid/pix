@@ -38,6 +38,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let statusRequestId: string | undefined;
   let statusQueued = false;
+  let indicatorQueued = false;
   let jobsRequestId: string | undefined;
   let jobsRunningRunId: string | undefined;
   let jobsQueue: string[] = [];
@@ -106,6 +107,10 @@ export function createGitCiStore(options: GitCiStoreOptions) {
 
   function refreshObservedJobs(): void {
     const visibleRunIds = new Set(snapshot?.runs.map((run) => run.id) ?? []);
+    jobs = new Map([...jobs].filter(([id]) => visibleRunIds.has(id)));
+    jobsErrors = new Map([...jobsErrors].filter(([id]) => visibleRunIds.has(id)));
+    jobsQueue = jobsQueue.filter((id) => visibleRunIds.has(id));
+    jobsLoading = new Set([...jobsLoading].filter((id) => visibleRunIds.has(id)));
     for (const runId of [...observedRunIds]) {
       if (visibleRunIds.has(runId)) queueJobs(runId, true);
       else observedRunIds.delete(runId);
@@ -135,6 +140,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
     }
     statusQueued = false;
     if (active && workspace && targetHead && !disposed) void refresh(true);
+    else if (indicatorQueued && workspace && targetHead && !disposed) void refreshIndicator();
   }
 
   function pollDelay(value: GitCiSnapshot | undefined): number | undefined {
@@ -157,8 +163,8 @@ export function createGitCiStore(options: GitCiStoreOptions) {
     }, delay);
   }
 
-  async function refresh(force = false): Promise<void> {
-    if (disposed || !active) return;
+  async function refresh(force = false, indicator = false): Promise<void> {
+    if (disposed || (!active && !indicator)) return;
     const workspace = options.workspace();
     const head = targetHead;
     if (!workspace || !head) return;
@@ -170,6 +176,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
 
     const requestGeneration = generation;
     const requestId = nextRequestId("status");
+    indicatorQueued = false;
     statusRequestId = requestId;
     loading = true;
     error = null;
@@ -215,6 +222,8 @@ export function createGitCiStore(options: GitCiStoreOptions) {
         statusQueued = false;
         if (!disposed && active && queued && targetHead && options.workspace()) {
           queueMicrotask(() => void refresh(true));
+        } else if (!disposed && !active && indicatorQueued && targetHead && options.workspace()) {
+          queueMicrotask(() => void refreshIndicator());
         } else if (!disposed && active && requestGeneration === generation) {
           schedule();
         }
@@ -226,6 +235,19 @@ export function createGitCiStore(options: GitCiStoreOptions) {
     if (disposed || !active || !snapshot?.runs.some((run) => run.id === runId)) return;
     observedRunIds.add(runId);
     queueJobs(runId);
+  }
+
+  async function refreshIndicator(): Promise<void> {
+    // The sidebar owns sparse cadence. Never add a second timer or fetch jobs,
+    // overlap panel requests, or repeatedly probe missing CLI/auth/setup.
+    if (disposed || active || statusRequestId || !options.workspace()) return;
+    if (!targetHead) {
+      // The first sidebar tick may precede initial Git snapshot loading.
+      indicatorQueued = true;
+      return;
+    }
+    if (snapshot && snapshot.availability !== "ready" && snapshot.availability !== "error" && snapshot.availability !== "headChanged") return;
+    await refresh(false, true);
   }
 
   async function pumpJobs(): Promise<void> {
@@ -258,6 +280,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
         || targetHead !== head
         || jobsRequestId !== requestId
         || result.runId !== runId
+        || !snapshot?.runs.some((run) => run.id === runId)
       ) return;
       if (result.headChanged) {
         invalidateStaleTarget();
@@ -276,6 +299,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
         || options.workspace() !== workspace
         || targetHead !== head
         || jobsRequestId !== requestId
+        || !snapshot?.runs.some((run) => run.id === runId)
       ) return;
       if (isHeadChangedError(reason)) {
         invalidateStaleTarget();
@@ -316,6 +340,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
   }
 
   function reset(): void {
+    indicatorQueued = false;
     updateTarget(undefined);
   }
 
@@ -323,6 +348,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
     if (disposed) return;
     disposed = true;
     active = false;
+    indicatorQueued = false;
     generation += 1;
     clearTimer();
     statusQueued = false;
@@ -347,6 +373,7 @@ export function createGitCiStore(options: GitCiStoreOptions) {
     activate,
     deactivate,
     updateTarget,
+    refreshIndicator,
     refresh,
     loadJobs,
     reset,

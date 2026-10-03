@@ -45,6 +45,9 @@ is still available at its saved desktop coordinates.
   Closing the last window exits the app and retains that last window for relaunch.
 - Explicit application Quit freezes window membership/workspaces before background
   resource cleanup; destruction and late workspace updates cannot erase that snapshot.
+- A window close or application Quit with active conversations first requires
+  [explicit confirmation](desktop-close-warning.md). Cancelling leaves the window
+  registry unfrozen and all resources untouched; confirmation resumes clean exit.
 - The development Restart button uses the same clean exit. `watch:all` waits for
   the old process to exit before launching its replacement, so shutdown persistence
   is not interrupted by SIGTERM/SIGKILL. A timed-out handoff leaves the old process alone.

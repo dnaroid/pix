@@ -1,6 +1,13 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import {
+    canPasteProjectEntry,
+    createProjectEntryClipboardReader,
+    decodeProjectEntryClipboard,
+    encodeProjectEntryClipboard,
+    type ProjectEntryClipboard,
+  } from "../lib/project-entry-clipboard";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
   import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
@@ -70,7 +77,8 @@
   let searchResults = $state<ProjectSearchMatch[]>([]);
   let searchLoading = $state(false);
   let searchError = $state<string | null>(null);
-  let entryClipboard = $state<{ workspace: string; entry: ProjectTreeEntry } | null>(null);
+  let entryClipboard = $state<ProjectEntryClipboard | null>(null);
+  const clipboardReader = createProjectEntryClipboardReader(readText);
   let operationGeneration = 0;
   let searchGeneration = 0;
   let expansionSaveTail: Promise<void> = Promise.resolve();
@@ -132,6 +140,7 @@
 
   onDestroy(() => {
     operationGeneration += 1;
+    clipboardReader.invalidate();
     ignoreEligibility.invalidate();
     gitRefresh.dispose();
     treeController.dispose();
@@ -156,6 +165,7 @@
     searchLoading = false;
     searchError = null;
     entryClipboard = null;
+    clipboardReader.invalidate();
     nameDialogElement?.close();
     nameDialog = null;
     menuController.close();
@@ -298,10 +308,15 @@
   }
 
   function canPasteInto(entry: ProjectTreeEntry): boolean {
-    const copied = entryClipboard;
-    if (!copied || copied.workspace !== workspace) return false;
-    const destination = destinationDirectory(entry);
-    return copied.entry.kind !== "directory" || !sameOrDescendantPath(destination, copied.entry.path);
+    return !operationBusy && canPasteProjectEntry(entryClipboard, workspace, destinationDirectory(entry));
+  }
+
+  function refreshEntryClipboard(entry: ProjectTreeEntry): void {
+    const requestWorkspace = workspace;
+    entryClipboard = null;
+    void clipboardReader.refresh((value) => {
+      if (workspace === requestWorkspace && menuState.entry?.path === entry.path) entryClipboard = value;
+    });
   }
 
   function menuNavigationItems(entry: ProjectTreeEntry): MenuNavigationItem[] {
@@ -330,12 +345,14 @@
   function openEntryContextMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
     treeState.focusedPath = entry.path;
     menuController.openContextMenu(event, entry);
+    refreshEntryClipboard(entry);
   }
 
   function openRootContextMenu(event: MouseEvent): void {
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest("[data-project-tree-path]")) return;
     menuController.openContextMenu(event, rootContextEntry);
+    refreshEntryClipboard(rootContextEntry);
   }
 
   function primaryShortcut(event: KeyboardEvent, key: string): boolean {
@@ -361,7 +378,7 @@
     }
     if (primaryShortcut(event, "c")) {
       event.preventDefault();
-      copyEntry(entry);
+      void copyEntry(entry);
       return;
     }
     if (primaryShortcut(event, "v")) {
@@ -393,11 +410,23 @@
     return error instanceof Error ? error.message : String(error);
   }
 
-  function copyEntry(entry: ProjectTreeEntry): void {
+  async function copyEntry(entry: ProjectTreeEntry): Promise<void> {
     if (!entry.path || operationBusy) return;
-    entryClipboard = { workspace, entry };
-    clearOperationError();
     menuController.close(true);
+    clipboardReader.invalidate();
+    const requestWorkspace = workspace;
+    const operation = beginOperation();
+    const text = encodeProjectEntryClipboard(requestWorkspace, entry);
+    try {
+      await writeText(text);
+      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      entryClipboard = decodeProjectEntryClipboard(text);
+      clearOperationError();
+    } catch (error) {
+      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+    } finally {
+      finishOperation(operation);
+    }
   }
 
   async function copyPath(entry: ProjectTreeEntry, absolute = false): Promise<void> {
@@ -449,23 +478,29 @@
   }
 
   async function pasteEntry(entry: ProjectTreeEntry): Promise<void> {
-    const copied = entryClipboard;
-    if (!copied || copied.workspace !== workspace || operationBusy || !canPasteInto(entry)) return;
+    if (operationBusy) return;
     menuController.close();
     const requestWorkspace = workspace;
     const destination = destinationDirectory(entry);
     const operation = beginOperation();
     try {
+      // Read again at activation: another app/instance may have replaced the clipboard.
+      const copied = decodeProjectEntryClipboard(await readText());
+      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      entryClipboard = copied;
+      if (!canPasteProjectEntry(copied, requestWorkspace, destination) || !copied) return;
       const created = await invoke<ProjectTreeEntry>("copy_project_entry", {
         workspace: requestWorkspace,
-        path: copied.entry.path,
+        sourceWorkspace: copied.workspace,
+        path: copied.path,
         destination: destination || null,
       });
-      if (workspace !== requestWorkspace) return;
+      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
       treeController.ensureDirectoryExpanded(destination);
       await treeController.refreshDirectory(destination);
+      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
       await treeController.focusPath(created.path);
-      clearOperationError();
+      if (operation === operationGeneration && workspace === requestWorkspace) clearOperationError();
     } catch (error) {
       if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
@@ -780,7 +815,7 @@
           </button>
 
           <button
-            class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100"
+            class="invisible grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground group-hover:visible"
             type="button"
             tabindex="-1"
             aria-hidden="true"
@@ -858,7 +893,7 @@
 
       <div class="my-1 h-px bg-border" role="separator"></div>
       {#if menuEntry.path}
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => copyEntry(menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyEntry(menuEntry)}>
           <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy</span>
           <span class="ml-auto font-mono text-xs text-muted-foreground">{isMacOS ? "⌘C" : "Ctrl+C"}</span>
         </button>

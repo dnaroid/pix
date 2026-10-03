@@ -64,6 +64,7 @@ export interface GitCiPanelState {
   readonly onActivate: () => void;
   readonly onDeactivate: () => void;
   readonly onRefresh: () => void;
+  readonly onRefreshIndicator?: () => void;
   readonly onLoadJobs: (runId: string) => void;
   readonly canFixWithAi: boolean;
   readonly onFixWithAi: () => Promise<void>;

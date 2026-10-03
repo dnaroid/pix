@@ -84,10 +84,13 @@ Linux predefined Undo/Redo. It is scoped to the invoking WebView and does not
 evaluate arbitrary JavaScript. The Linux branch needs a native Linux smoke pass;
 macOS compilation and browser tests do not prove Wayland/native Linux behavior.
 
-Copy Link Address and Copy Image use the official native clipboard plugin. Only
-write-text and write-image are permitted: no clipboard polling, read-image/read-text or clearing permission is
-introduced. Clipboard and native menu errors use the existing application error
-reporter.
+Copy Link Address and Copy Image use the official native clipboard plugin with
+write-text and write-image permissions. Project Explorer additionally uses
+read-text for action-triggered cross-instance file Copy/Paste, as specified in
+[workspace navigation](desktop-workspace-navigation.md); generic context menus
+do not read the clipboard. No clipboard polling, read-image or clearing permission
+is introduced. Clipboard and native menu errors use the existing application
+error reporter (Project Explorer uses its file-operation error surface).
 
 ## Focus, cancellation and resource ownership
 

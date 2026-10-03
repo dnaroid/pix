@@ -33,8 +33,17 @@ describe("composer activity row rendering", () => {
     const html = renderRow(state, true);
     const buttons = html.match(/<button\b[^>]*>/g) ?? [];
     expect(buttons).toHaveLength(2);
-    expect(buttons[0]).toMatch(/\bdisabled\b/);
-    expect(buttons[1]).not.toMatch(/\bdisabled\b/);
+    expect(buttons[0]).toMatch(/\sdisabled(?:[=\s>])/);
+    expect(buttons[1]).not.toMatch(/\sdisabled(?:[=\s>])/);
+  });
+
+  it("enables Pause and Stop once a recovered-question continuation is running", () => {
+    const html = renderRow("running", true);
+    const buttons = html.match(/<button\b[^>]*>/g) ?? [];
+    expect(buttons).toHaveLength(2);
+    expect(html).toContain('aria-label="Pause after current turn"');
+    expect(html).toContain('aria-label="Stop response"');
+    for (const button of buttons) expect(button).not.toMatch(/\sdisabled(?:[=\s>])/);
   });
 
   it.each(["paused", "continuable"] as const)("keeps the row with Continue while %s without live activity", (state) => {

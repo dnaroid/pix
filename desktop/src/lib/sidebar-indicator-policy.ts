@@ -29,11 +29,15 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
     errorIndicator(inputs.taskStorageSaveError),
     inputs.taskStorageError ? { tone: "error", reason: "Project tasks could not be read or saved" } : undefined,
     inputs.activeTaskId ? { tone: "info", reason: "A project task is running" } : undefined,
+    inputs.hasPlannedTasks ? { tone: "info", reason: "Project has planned tasks" } : undefined,
   );
 
   const git = poll?.git;
   indicators.git = strongestIndicator(
     errorIndicator(git?.error),
+    inputs.gitCiSnapshot?.availability === "ready" && inputs.gitCiSnapshot.runs.some((run) => run.status === "failure")
+      ? { tone: "error", reason: "CI failed for the current Git HEAD" }
+      : undefined,
     git?.conflicted ? { tone: "error", reason: "Git has unresolved conflicts" } : undefined,
     git?.detached ? { tone: "warning", reason: "Git is on a detached HEAD" } : undefined,
     service.gitRemote?.hasUpdates ? { tone: "info", reason: "Upstream has updates available" } : undefined,
@@ -91,6 +95,12 @@ export function sidebarIndicators(inputs: SidebarIndicatorInputs): SidebarIndica
       : undefined,
     (idxOverview?.errors.length ?? 0) > 0
       ? { tone: "error", reason: idxOverview?.errors[0] ?? "IDX status check failed" }
+      : undefined,
+    idxOverview?.knowledgeDirty === true
+      ? { tone: "warning", reason: "Knowledge base requires review" }
+      : undefined,
+    idxOverview?.indexStale === true
+      ? { tone: "warning", reason: "Index Git revision differs from HEAD" }
       : undefined,
     (poll?.idx.runningIds.length ?? 0) > 0
       ? { tone: "info", reason: "IDX maintenance is running" }

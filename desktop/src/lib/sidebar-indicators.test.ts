@@ -32,6 +32,31 @@ function inputs(service: SidebarIndicatorServiceState): SidebarIndicatorInputs {
 }
 
 describe("sidebar indicators", () => {
+  it("reports planned tasks without confusing completion with work remaining", () => {
+    const base = inputs({ poll: poll(), unseenScriptFailureIds: [], unseenIdxFailureIds: [] });
+    expect(sidebarIndicators({ ...base, hasPlannedTasks: false }).tasks).toBeUndefined();
+    expect(sidebarIndicators({ ...base, hasPlannedTasks: true }).tasks?.reason).toBe("Project has planned tasks");
+    expect(sidebarIndicators({ ...base, hasPlannedTasks: true, taskStorageError: true }).tasks?.tone).toBe("error");
+  });
+
+  it("reports failed CI even when another run is running and does not infer failure from setup errors", () => {
+    const base = inputs({ poll: poll(), unseenScriptFailureIds: [], unseenIdxFailureIds: [] });
+    const snapshot = { availability: "ready" as const, headSha: "head", localOnly: false, runs: [
+      { id: "1", name: "Build", status: "running" as const, rawStatus: "running", headSha: "head" },
+      { id: "2", name: "Test", status: "failure" as const, rawStatus: "failure", headSha: "head" },
+    ] };
+    expect(sidebarIndicators({ ...base, gitCiSnapshot: snapshot }).git?.tone).toBe("error");
+    expect(sidebarIndicators({ ...base, gitCiSnapshot: { ...snapshot, availability: "headChanged" } }).git).toBeUndefined();
+  });
+
+  it("uses explicit knowledge dirty and revision-stale signals rather than legacy counts", () => {
+    const base = { ...inputs({ poll: poll(), unseenScriptFailureIds: [], unseenIdxFailureIds: [] }) };
+    const idxOverview = { available: true, initialized: true, rawStatus: "", errors: [] };
+    expect(sidebarIndicators({ ...base, service: { ...base.service, idxOverview: { ...idxOverview, knowledgeDirty: true } } }).idx?.tone).toBe("warning");
+    expect(sidebarIndicators({ ...base, service: { ...base.service, idxOverview: { ...idxOverview, indexStale: true } } }).idx?.reason).toBe("Index Git revision differs from HEAD");
+    expect(sidebarIndicators({ ...base, service: { ...base.service, idxOverview: { ...idxOverview, knowledgeDirty: false } } }).idx).toBeUndefined();
+  });
+
   it("uses one semantic Git dot and lets conflicts outrank ordinary changes", () => {
     const changed = sidebarIndicators(inputs({
       poll: poll({

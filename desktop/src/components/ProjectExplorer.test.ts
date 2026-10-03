@@ -59,7 +59,18 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).not.toContain("focus-within:bg-panel-hover");
     expect(explorerSource).toContain('treeState.selectedPath === entry.path ? "bg-panel-selected" : ""');
     expect(explorerSource).toContain("focus-visible:outline-ring");
-    expect(explorerSource).toContain("group-focus-within:opacity-100");
+  });
+
+  it("shows the external-editor icon only on the pointer-hovered row without a fade-out", () => {
+    const externalButton = explorerSource.slice(
+      explorerSource.indexOf('class="invisible grid h-6 w-6'),
+      explorerSource.indexOf('<ExternalLink class="h-3 w-3"'),
+    );
+    expect(externalButton).toContain("group-hover:visible");
+    expect(externalButton).toContain('tabindex="-1"');
+    expect(externalButton).toContain("stopAndOpenExternal(event, entry.path)");
+    expect(externalButton).not.toContain("transition-opacity");
+    expect(explorerSource).not.toContain("group-focus-within:opacity-100");
   });
 
   it("supports IDE tree navigation and a keyboard route to the external editor", () => {
@@ -104,6 +115,15 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("window.confirm");
     expect(explorerSource).toContain("operationGeneration");
     expect(explorerSource).toContain("finishOperation(operation)");
+  });
+
+  it("uses shared clipboard references and rechecks at paste activation", () => {
+    expect(explorerSource).toContain("encodeProjectEntryClipboard(requestWorkspace, entry)");
+    expect(explorerSource).toContain("decodeProjectEntryClipboard(await readText())");
+    expect(explorerSource).toContain("sourceWorkspace: copied.workspace");
+    expect(explorerSource).toContain("refreshEntryClipboard(entry)");
+    expect(explorerSource).toContain("clipboardReader.invalidate()");
+    expect(explorerSource).not.toContain("copied.workspace !== workspace");
   });
 
   it("keeps dotfiles and dotfolders visible but visually muted", () => {

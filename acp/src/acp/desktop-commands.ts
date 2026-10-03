@@ -96,7 +96,7 @@ export interface DesktopBashRequest extends DesktopSessionRequest {
 }
 
 export type DesktopAgentControlAction = "state" | "pause" | "continue";
-export type DesktopAgentControlState = "idle" | "pause-requested" | "paused" | "resuming" | "continuable";
+export type DesktopAgentControlState = "idle" | "running" | "pause-requested" | "paused" | "resuming" | "continuable";
 
 export interface DesktopAgentControlRequest extends DesktopSessionRequest {
 	readonly action: DesktopAgentControlAction;

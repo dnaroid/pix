@@ -63,6 +63,7 @@ export class SidebarIndicatorService {
   private gitRemoteLastAttemptMs = 0;
   private idxRunning = false;
   private idxQueued = false;
+  private idxLastAttemptMs = 0;
   private started = false;
   private destroyed = false;
   private unlisteners: UnlistenFn[] = [];
@@ -70,6 +71,7 @@ export class SidebarIndicatorService {
   constructor(
     private readonly windowLabel: string,
     private readonly onChange: (state: SidebarIndicatorServiceState) => void,
+    private readonly refreshCiIndicator?: () => void,
   ) {}
 
   start(workspace: string): void {
@@ -88,12 +90,13 @@ export class SidebarIndicatorService {
   }
 
   setWorkspace(workspace: string): void {
-    if (workspace === this.workspace) return;
+    if (this.destroyed || workspace === this.workspace) return;
     this.workspace = workspace;
     this.fastGeneration += 1;
     this.gitRemoteGeneration += 1;
     this.idxGeneration += 1;
     this.gitRemoteLastAttemptMs = 0;
+    this.idxLastAttemptMs = 0;
     this.acknowledgedScriptFailures.clear();
     this.acknowledgedIdxFailures.clear();
     this.state = {
@@ -106,6 +109,7 @@ export class SidebarIndicatorService {
   }
 
   setViewedTab(tab: SidebarIndicatorTab | undefined): void {
+    if (this.destroyed) return;
     const previous = this.viewedTab;
     this.viewedTab = tab;
     if (tab === "idx" && previous !== "idx") this.idxGeneration += 1;
@@ -124,7 +128,9 @@ export class SidebarIndicatorService {
   refreshNow(): void {
     void this.refreshFast();
     this.refreshGitRemoteIfDue();
-    void this.refreshIdx();
+    if (this.idxLastAttemptMs === 0 || Date.now() - this.idxLastAttemptMs >= GIT_REMOTE_FOCUS_MIN_MS) {
+      void this.refreshIdx();
+    }
   }
 
   invalidateFast(): void {
@@ -250,6 +256,7 @@ export class SidebarIndicatorService {
     }
     this.gitRemoteRunning = true;
     this.gitRemoteLastAttemptMs = Date.now();
+    this.refreshCiIndicator?.();
     const workspace = this.workspace;
     const generation = ++this.gitRemoteGeneration;
     try {
@@ -287,6 +294,7 @@ export class SidebarIndicatorService {
       return;
     }
     this.idxRunning = true;
+    this.idxLastAttemptMs = Date.now();
     const workspace = this.workspace;
     const generation = ++this.idxGeneration;
     try {
@@ -351,6 +359,7 @@ export class SidebarIndicatorService {
   }
 
   private publish(): void {
+    if (this.destroyed) return;
     this.onChange(this.state);
   }
 

@@ -2307,6 +2307,40 @@ test("session/prompt ignores a duplicate settlement before its agent_start", asy
 	});
 });
 
+test("a recovered-question extension run publishes pause-ready running state", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/recovered-question-pause").start();
+		const pi = clients[0]!;
+		pi.emit({ type: "agent_start" });
+		const owner = adapter.getSession(session.sessionId)!.activeRun;
+		const state = await cx.request(PIX_AGENT_CONTROL_METHOD, {
+			sessionId: session.sessionId, action: "state",
+		}) as DesktopAgentControlResponse;
+		assert.equal(state.state, "running", "agent_start must not leave Pause disabled as resuming");
+
+		pi.pauseHook = () => { throw new Error("pause failed"); };
+		await assert.rejects(cx.request(PIX_AGENT_CONTROL_METHOD, {
+			sessionId: session.sessionId, action: "pause",
+		}), /pause failed/);
+		assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "running");
+		assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner);
+
+		pi.pauseHook = undefined;
+		const pause = await cx.request(PIX_AGENT_CONTROL_METHOD, {
+			sessionId: session.sessionId, action: "pause",
+		}) as DesktopAgentControlResponse;
+		assert.equal(pause.state, "pause-requested");
+		assert.equal(pi.pauses, 2);
+		assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner,
+			"requesting Pause must not settle the adopted run early");
+		FakePiClient.sessionFiles.set(pi.state.sessionFile!, [{ role: "toolResult", content: [] }]);
+		pi.emit({ type: "agent_settled" });
+		await waitFor(() => adapter.getSession(session.sessionId)?.activeRun === undefined);
+		assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "paused");
+	});
+});
+
 for (const origin of ["prompt", "extension"] as const) {
 	test(`an extension restart during ${origin} settlement keeps run ownership`, async () => {
 		const { adapter, clients } = createTestAdapter();
@@ -2336,7 +2370,7 @@ for (const origin of ["prompt", "extension"] as const) {
 			assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner);
 			assert.equal(promptSettled, false, "old settlement must not resolve a still-running prompt");
 			if (origin === "extension") {
-				assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "resuming",
+				assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "running",
 					"an adopted run must not publish an idle indicator while streaming");
 			}
 			assert.equal(owner!.stopReason, undefined, "previous run's error must not leak into the restart");
@@ -2379,7 +2413,7 @@ test("restart during a cancelled settlement notification retains the new SDK run
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		assert.equal(state.activeRun, owner);
 		assert.equal(owner.cancelled, false);
-		assert.equal(state.agentControlState, "resuming");
+		assert.equal(state.agentControlState, "running");
 		state.client.notify = notify;
 		pi.emit({ type: "agent_settled" });
 		await waitFor(() => state.activeRun === undefined);

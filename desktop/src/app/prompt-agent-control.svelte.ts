@@ -44,9 +44,9 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
   /**
    * Handle an agent-control state pushed by the ACP side.
    *
-   * Extension-initiated continuations (for example a timed /wait resuming a
-   * paused transcript) arrive as an unsolicited "resuming" state with no
-   * Desktop prompt run behind it. Adopt a run so the session shows as
+   * Extension-initiated continuations (timed /wait or question recovery) arrive
+   * as an unsolicited "running" state with no Desktop prompt run behind it.
+   * Also accept the legacy "resuming" busy signal. Adopt a run so the session shows as
    * running and Stop works, and finish it when the run settles.
    */
   function handleAgentControlStatePush(sessionId: string, state: AgentControlState): void {
@@ -54,7 +54,7 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
       setAgentState(sessionId, state);
       return;
     }
-    if (state === "resuming" && !options.runs.isRunning(sessionId)) {
+    if ((state === "resuming" || state === "running") && !options.runs.isRunning(sessionId)) {
       extensionRunGenerations.set(sessionId, options.runs.beginRun(sessionId));
     } else if (extensionRunGenerations.has(sessionId) && !options.runs.isRunning(sessionId)) {
       finishExtensionRun(sessionId);

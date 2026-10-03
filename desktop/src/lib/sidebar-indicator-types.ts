@@ -1,4 +1,5 @@
 import type { IdxOverview } from "./idx";
+import type { GitCiSnapshot } from "./git-ci";
 import type { RegistryProjectArtifact, RegistrySnapshot } from "./registry";
 import type { RegistryBackgroundSyncState } from "./registry-background-sync";
 
@@ -72,6 +73,8 @@ export interface SidebarIndicatorInputs {
   readonly taskStorageError: boolean;
   readonly taskStorageSaveError?: string | null;
   readonly activeTaskId?: string | null;
+  readonly hasPlannedTasks?: boolean;
+  readonly gitCiSnapshot?: GitCiSnapshot;
   readonly registrySnapshot?: RegistrySnapshot;
   readonly registryBackgroundSync?: RegistryBackgroundSyncState;
   readonly settingsPanelError?: string | null;
