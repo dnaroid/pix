@@ -26,9 +26,8 @@ describe("status HUD todo mini-track", () => {
       expect(html).toContain(`${completed}/${total}`);
       expect(html).toContain(`width: ${percentage}%`);
       expect(html.match(/data-session-todo-progress/g)).toHaveLength(1);
-      expect(html).toContain("inset-x-1.5 bottom-0.5 h-0.5");
-      expect(html).toContain("bg-tool-info/20");
-      expect(html).toContain("block h-full bg-tool-info");
+      expect(html).toContain("h-1 overflow-hidden rounded-full bg-muted-foreground/25");
+      expect(html).toContain("block h-full rounded-full bg-tool-info");
     },
   );
 

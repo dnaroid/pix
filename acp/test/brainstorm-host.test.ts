@@ -4,6 +4,7 @@ import { BrainstormHost, type BrainstormHostBackend, type BrainstormRun } from "
 import { brainstormParticipantOptions, freshParticipantAnswer } from "../src/acp/brainstorm-participant.js";
 import type { PiClient, PiSessionEntry } from "../src/pi/pi-rpc-client.js";
 import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; }
 function fixture(overrides: Partial<BrainstormHostBackend> = {}, deadline?: () => AbortSignal) {
@@ -200,7 +201,7 @@ test("participant launch isolates extensions/tools and clears inherited capabili
 	const tools = options.args![options.args!.indexOf("--tools") + 1]!;
 	assert.ok(!tools.split(",").some((tool) => ["bash", "write", "edit", "shell", "async_subagents"].includes(tool)));
 	const extensions = options.args!.filter((_, i, args) => args[i - 1] === "--extension");
-	assert.equal(extensions.length, 2); assert.ok(extensions[0]!.endsWith("research-extension.ts")); assert.ok(extensions[1]!.endsWith("antigravity-auth/index.ts"));
+	assert.equal(extensions.length, 2); assert.ok(extensions[0]!.endsWith("research-extension.ts")); assert.ok(extensions[1]!.endsWith(join("antigravity-auth", "index.ts")));
 	const packaged = await brainstormParticipantOptions("/pi", "/project", fileURLToPath(new URL("../../external/pi-tools-suite/index.ts", import.meta.url)), "zai/exact");
 	assert.deepEqual(packaged.args!.filter((_, i, args) => args[i - 1] === "--extension"), [extensions[0]]);
 });
