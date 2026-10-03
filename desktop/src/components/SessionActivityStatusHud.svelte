@@ -230,7 +230,7 @@
       <div class="group relative">
         <button
           class={[
-            "relative flex h-6 items-center gap-0.5 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+            "relative flex h-6 items-center gap-1 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             activityToneClass(),
           ]}
           type="button"
@@ -241,15 +241,15 @@
           onfocus={scrollTodoTooltipToCurrent}
           onclick={onOpenSessionActivity}
         >
-          <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>{summary.completedTodos}/{summary.totalTodos}</span>
+          <ListTodo class="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span class="text-[11px]">{summary.completedTodos}/{summary.totalTodos}</span>
           <span
-            class="pointer-events-none absolute inset-x-1.5 bottom-0.5 h-0.5 overflow-hidden bg-tool-info/20"
+            class="pointer-events-none absolute inset-x-1.5 bottom-0.5 h-1 overflow-hidden rounded-full bg-muted-foreground/25"
             aria-hidden="true"
             data-session-todo-progress
           >
             <span
-              class="block h-full bg-tool-info"
+              class="block h-full rounded-full bg-tool-info"
               style:width={`${(summary.completedTodos / summary.totalTodos) * 100}%`}
             ></span>
           </span>
