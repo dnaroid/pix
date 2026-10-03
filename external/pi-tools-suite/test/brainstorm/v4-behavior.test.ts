@@ -151,7 +151,7 @@ test("publish copies only the final proposal into docs/brainstorms; default fina
 	const { publishedPath } = await finalizeBrainstormRun(cwd, loud.runDir, "# Final loud\n\n", "none", { publish: true });
 	expect(publishedPath).toBe(path.join(await realpath(cwd), "docs/brainstorms", `${path.basename(loud.runDir)}.md`));
 	const published = await readFile(publishedPath!, "utf8");
-	expect(published).toStartWith("# Final loud\n\n---\n\nCouncil protocol (local, not published): `.pi/brainstorms/");
+	expect(published).toStartWith(`# Final loud\n\n---\n\nCouncil protocol (local, not published): \`${path.join(".pi", "brainstorms")}${path.sep}`);
 	expect(published).not.toContain("Round 1 body");
 	const manifest = JSON.parse(await readFile(path.join(loud.runDir, "manifest.json"), "utf8"));
 	expect(manifest).toMatchObject({ status: "complete", publishedPath });

@@ -336,7 +336,10 @@ mod tests {
     #[test]
     fn native_window_title_identifies_the_current_project() {
         assert_eq!(workspace_window_title("/projects/pix"), "Pix — pix");
-        assert_eq!(workspace_window_title("/projects/Мой проект/"), "Pix — Мой проект");
+        assert_eq!(
+            workspace_window_title("/projects/Мой проект/"),
+            "Pix — Мой проект"
+        );
         assert_eq!(workspace_window_title("/"), "Pix — /");
         assert_eq!(workspace_window_title(""), "Pix");
     }
