@@ -5,6 +5,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { AcpClient, type QueueState, type QueuedUserMessage } from "../lib/acp-client";
 import type { SessionStateNotification } from "../lib/session-state";
+import type { ForkReadyNotification } from "../lib/acp-client-types";
 import { TauriAcpTransport } from "../lib/tauri-transport";
 
 export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
@@ -19,6 +20,7 @@ type ConnectionStoreOptions = {
   onCancelActivityRequest?: (owner: string) => void;
   onQueueState: (state: QueueState) => void;
   onQueueConsumed: (sessionId: string, message: QueuedUserMessage) => void;
+  onForkReady?: (notification: ForkReadyNotification) => void;
   onElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
   onDisconnect: () => void;
   openWorkspaceSession: () => Promise<void>;
@@ -71,6 +73,9 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
       },
       onQueueConsumed: (sessionId, message) => {
         if (client === next) options.onQueueConsumed(sessionId, message);
+      },
+      onForkReady: (notification) => {
+        if (client === next) options.onForkReady?.(notification);
       },
       onElicitation: (request): Promise<CreateElicitationResponse> => client === next
         ? options.onElicitation(request)

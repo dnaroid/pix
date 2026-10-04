@@ -5,13 +5,15 @@ import { presentHeadsUp } from "./presentation.js";
 import { requestHeadsUp } from "./inference.js";
 import { loadHeadsUpSettings, offline } from "./settings.js";
 import { observerUsageRecorder } from "./usage.js";
+import { DelegatedEvidence, DELEGATED_EVIDENCE_EVENT } from "./delegated.js";
+import { DESKTOP_OBSERVER_PREFERENCE, desktopObserverPreference, isDesktopObserver } from "./desktop-preference.js";
 
 export function observerRuntimeAllowed(ctx: ExtensionContext): boolean {
 	return !offline() && !process.env.PI_SUBAGENT_AGENT_DIR && ctx.hasUI
 		&& (ctx.mode === "tui" || (ctx.mode === "rpc" && process.env.PIX_ACP_SESSION_STATE_BRIDGE === "1"));
 }
 
-/** No tool registration, agent continuations, custom messages or transcript mutations. */
+/** No tool registration, agent continuations or conversation messages; Desktop persists only opt-in metadata. */
 export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSettings): void {
 	let controller: HeadsUpController | undefined;
 	let owner: ExtensionContext | undefined;
@@ -21,6 +23,8 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 	let uiBlocked = false;
 	let removeAbort: (() => void) | undefined;
 	let initializing: Promise<void> | undefined;
+	const delegated = new DelegatedEvidence();
+	let removeDelegated: (() => void) | undefined;
 
 	function render(): void {
 		if (!controller || !owner) return;
@@ -35,9 +39,11 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 		const users = entries.filter((entry) => entry.messages.some((message) => message.role === "user")).slice(-3);
 		for (const entry of entries.slice(-64)) for (const message of entry.messages) target.context.addMessage(message, entry.sourceEntry.id);
 		for (const entry of users) for (const message of entry.messages) if (message.role === "user") target.context.addMessage(message, entry.sourceEntry.id);
+		for (const record of delegated.records(new Set(entries.map((entry) => entry.sourceEntry.id)))) target.context.add(record);
 	}
 	async function initialize(ctx: ExtensionContext): Promise<void> {
 		const ticket = ++epoch;
+		removeDelegated?.(); removeDelegated = undefined; delegated.clear();
 		removeAbort?.(); removeAbort = undefined;
 		controller?.dispose(); controller = undefined; owner = ctx;
 		expanded = false; awaitingUserRecord = false; uiBlocked = false;
@@ -64,10 +70,23 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 			},
 		});
 		controller = next; next.setModel(settings.model);
-		if (settings.enabled) { seed(ctx, next); next.setEnabled(true); }
+		removeDelegated = pi.events.on(DELEGATED_EVIDENCE_EVENT, (event) => {
+			if (ticket !== epoch || !next.isEnabled || !observerRuntimeAllowed(ctx)) return;
+			if (delegated.accept(event, manager.getSessionId())) next.noteDelegatedCompletion();
+		});
+		const enabled = (isDesktopObserver(ctx) ? desktopObserverPreference(manager.getEntries()) : undefined) ?? settings.enabled;
+		if (enabled) { seed(ctx, next); next.setEnabled(true); }
 	}
-	function invalidate(reason: string, clearContext = false): void { expanded = false; controller?.invalidateForLifecycle(reason, clearContext); }
+	function setEnabled(ctx: ExtensionContext, current: HeadsUpController, enabled: boolean): void {
+		// Save explicit choices only, before publishing success. Never alter profile defaults.
+		if (isDesktopObserver(ctx)) pi.appendEntry(DESKTOP_OBSERVER_PREFERENCE, { version: 1, enabled });
+		if (enabled) seed(ctx, current);
+		else delegated.clear();
+		current.setEnabled(enabled);
+	}
+	function invalidate(reason: string, clearContext = false): void { delegated.clear(); expanded = false; controller?.invalidateForLifecycle(reason, clearContext); }
 	function shutdown(): void {
+		removeDelegated?.(); removeDelegated = undefined; delegated.clear();
 		controller?.dispose(); ++epoch; removeAbort?.(); removeAbort = undefined;
 		controller = undefined; owner = undefined;
 	}
@@ -125,12 +144,14 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 			const [action = "status", value] = args.trim().split(/\s+/).filter(Boolean);
 			// Popup consumers request this after subscribing; it is deliberately quiet and read-only.
 			if (current && action === "snapshot") { current.refreshStatus(); return; }
-			if (current && action === "off") { current.setEnabled(false); return; }
+			if (current && action === "off") { setEnabled(ctx, current, false); return; }
 			if (!current || !observerRuntimeAllowed(ctx)) { ctx.ui.notify("Heads up is unavailable in this runtime or offline mode.", "info"); return; }
-			if (action === "on") { seed(ctx, current); current.setEnabled(true); }
-			else if (action === "off") current.setEnabled(false);
+			if (action === "on") setEnabled(ctx, current, true);
 			else if (action === "check") { void current.check(true).catch(() => {}); }
-			else if (action === "model" && value) { if (!current.setModel(value)) ctx.ui.notify("Use /heads-up model provider/model-id", "info"); }
+			else if (action === "model" && value) {
+				if (current.setModel(value)) delegated.clear();
+				else ctx.ui.notify("Use /heads-up model provider/model-id", "info");
+			}
 			else if (["dismiss", "known", "irrelevant"].includes(action)) {
 				const id = value ?? current.currentNotice?.id;
 				if (id) current.feedbackNotice(id, action as "dismiss" | "known" | "irrelevant");

@@ -3,6 +3,7 @@ import { AcpClient, type AcpExit, type AcpTransport, type AcpTransportHandlers }
 import { PIX_SESSION_STATE_METHOD } from "./session-state";
 import { createSessionActivityStore } from "../app/session-activity.svelte";
 import { TODO_STATE_CHANNEL } from "./session-todos";
+import { parseQueueState } from "./acp-response-parsers";
 
 class FakeTransport implements AcpTransport {
   handlers?: AcpTransportHandlers;
@@ -45,6 +46,30 @@ async function startedClient(transport: FakeTransport, overrides: Record<string,
 }
 
 describe("ACP JSON-RPC client", () => {
+  it("retains fork queue identity, editable payload and failure diagnostics", () => {
+    const item = { id: "fork:1", source: "fork", mode: "fork", index: 0, text: "branch", error: "snapshot failed",
+      message: { id: "1", promptText: "branch", displayText: "branch", images: [] } };
+    expect(parseQueueState({ sessionId: "source", items: [item] })).toEqual({ sessionId: "source", items: [item] });
+  });
+  it("submits fork payloads separately and receives background fork notifications", async () => {
+    const transport = new FakeTransport();
+    const onForkReady = vi.fn();
+    const client = await startedClient(transport, { onForkReady });
+    const prompt = [{ type: "text" as const, text: "new branch" }];
+    const sending = client.forkMessage("source", prompt, "new branch");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/session/fork_message", params: {
+      sessionId: "source", prompt, displayText: "new branch",
+    } });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { disposition: "fork", itemId: "fork-1" } });
+    await expect(sending).resolves.toEqual({ itemId: "fork-1" });
+    const notification = { sourceSessionId: "source", sessionId: "child", cwd: "/workspace" };
+    transport.message({ jsonrpc: "2.0", method: "pix/session/fork_ready", params: notification });
+    transport.message({ jsonrpc: "2.0", method: "pix/session/fork_ready", params: { ...notification, sessionId: "source" } });
+    transport.message({ jsonrpc: "2.0", method: "pix/session/fork_ready", params: { sessionId: "bad" } });
+    expect(onForkReady).toHaveBeenCalledExactlyOnceWith(notification);
+    await client.dispose();
+  });
   it("binds startup activity for new/fork requests and releases failed request ownership", async () => {
     const transport = new FakeTransport();
     const activity = createSessionActivityStore();

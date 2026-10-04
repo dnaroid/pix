@@ -108,10 +108,15 @@ See [Configuration and accounts](configuration.md) for provider and voice setup.
 
 ## Observer (experimental)
 
-The **Observer** item in the statusbar shows whether the passive Heads up
-observer is off, waiting, checking, holding a finding, or unable to check. Click
-it for the **current-session switch**, **Check now**, model, last check result
-and duration, token counters, and rolling limits. Opening this popup does not
+The **eye** in the statusbar is grey when Observer is off and primary-colored
+when enabled, except a static amber eye while blocked by an Observer budget limit.
+The tooltip and popup say «Достигнут лимит проверок» and show the earliest known
+quota release time (not a promised check or full reset). Once the runtime clears
+the limit, the eye returns to primary. It pulses only while checking (unless reduced motion is enabled).
+Click it for the **current-session switch**, **Check now**, current state/reason,
+last check result and duration, and actual usage counters. The switch is saved
+with this session and restored after restart; other sessions are unaffected.
+Opening this popup does not
 call a model. Checking does consume the selected provider's tokens/quota.
 
 The popup's **Observer settings** action opens **Settings → Desktop → Observer**.

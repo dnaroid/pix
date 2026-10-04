@@ -292,6 +292,15 @@ export class AcpClient {
     return this.pix.deferMessage(sessionId, prompt, displayText, fileImages);
   }
 
+  forkMessage(
+    sessionId: string,
+    prompt: readonly ContentBlock[],
+    displayText: string,
+    fileImages: readonly PromptFileImage[] = [],
+  ): Promise<{ itemId: string }> {
+    return this.pix.forkMessage(sessionId, prompt, displayText, fileImages);
+  }
+
   queueAction(sessionId: string, item: QueueItem, action: QueueAction): Promise<{
     message?: QueuedUserMessage;
     interruptRequired: boolean;
@@ -390,6 +399,11 @@ export class AcpClient {
         this.handlers.onQueueState?.(parseQueueState(params));
       } catch (error) {
         this.handlers.onDiagnostic?.(`ignored invalid queue state: ${toError(error).message}`);
+      }
+    } else if (method === "pix/session/fork_ready" && isRecord(params)) {
+      if (typeof params.sourceSessionId === "string" && typeof params.sessionId === "string"
+        && typeof params.cwd === "string" && params.sessionId !== params.sourceSessionId) {
+        this.handlers.onForkReady?.({ sourceSessionId: params.sourceSessionId, sessionId: params.sessionId, cwd: params.cwd });
       }
     } else if (method === "pix/session/queue_consumed" && isRecord(params)) {
       const queued = parseQueuedUserMessage(params.message);

@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { hasToolInput, toolInputText } from "./tool-input";
+import { hasToolInput, languageForToolInput, toolInputText } from "./tool-input";
 
 const source = (name: string, rawInput?: unknown) => ({ name, title: name, kind: "other", rawInput });
 
 describe("expanded tool inputs", () => {
+  it("chooses languages only for executable inputs, including normalized names", () => {
+    expect(languageForToolInput(source("functions.codemode"))).toBe("javascript");
+    for (const name of ["shell", "bash", "shell_command", "exec", "execute", "run_command"]) {
+      expect(languageForToolInput(source(name))).toBe("shell");
+    }
+    expect(languageForToolInput(source("repo_context"))).toBeUndefined();
+    expect(languageForToolInput(source("question"))).toBeUndefined();
+  });
   it.each(["codemode", "shell", "bash", "repo_context", "repo_search", "repo_audit", "ast_grep", "ast_apply", "subagents", "brainstorm", "web_search", "question"])("selects %s", (name) => {
     expect(hasToolInput(source(name, { prompt: "full input" }))).toBe(true);
   });

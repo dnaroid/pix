@@ -16,6 +16,35 @@ function reply(value: unknown = { kind: "none" }, overrides: Partial<AssistantMe
 const finding = { kind: "heads_up", title: "Compatibility was dropped", consequence: "Existing configurations will no longer load.", evidenceIds: ["u", "t"] };
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail; }); return { promise, resolve, reject }; }
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+
+test("delegated completion near parent finish coalesces without fake turns or bypassing cadence/budget", async () => {
+	const h = harness({ config: { maxChecksPerHour: 1 } }); h.observer.setEnabled(true);
+	h.observer.noteDelegatedCompletion(); h.observer.noteDelegatedCompletion();
+	assert.equal(h.observer.snapshot().details?.newTurns, 0);
+	h.advance(59_999); await flush(); assert.equal(h.calls.length, 0);
+	h.advance(1); await flush(); assert.equal(h.calls.length, 1);
+	h.observer.noteDelegatedCompletion(); h.advance(60_000); await flush();
+	assert.equal(h.calls.length, 1); assert.equal(h.observer.snapshot().phase, "limited");
+	assert.equal(h.timers.size, 0); h.observer.dispose();
+});
+
+test("delegated arrivals during transport wait for physical completion and retain interval", async () => {
+	const pending = deferred<AssistantMessage>(); let count = 0;
+	const h = harness({ request: async () => { count++; return count === 1 ? pending.promise : reply(); } });
+	h.observer.setEnabled(true); const check = h.observer.check(true); await flush();
+	h.observer.noteDelegatedCompletion(); h.observer.noteDelegatedCompletion();
+	h.advance(1000); await flush(); assert.equal(count, 1);
+	pending.resolve(reply()); await check; h.advance(58_999); await flush(); assert.equal(count, 1);
+	h.advance(1); await flush(); assert.equal(count, 2); h.observer.dispose();
+});
+
+test("delegated pending timers are cancelled by lifecycle invalidation and disable", async () => {
+	for (const invalidate of [(o: HeadsUpController) => o.invalidateForLifecycle("branch"), (o: HeadsUpController) => o.setEnabled(false), (o: HeadsUpController) => o.dispose()]) {
+		const h = harness(); h.observer.setEnabled(true); h.observer.noteDelegatedCompletion();
+		invalidate(h.observer); h.advance(60_000); await flush();
+		assert.equal(h.calls.length, 0); assert.equal(h.timers.size, 0); h.observer.dispose();
+	}
+});
 function harness(overrides: Partial<HeadsUpControllerOptions> = {}) {
 	let now = 0;
 	const timers = new Map<symbol, { at: number; callback: () => void }>();

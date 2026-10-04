@@ -73,7 +73,7 @@ export type RegistryDiffState =
   | { readonly phase: "error"; readonly target: RegistryDiffTarget; readonly error: string };
 
 export type RegistryActionRequest =
-  | { readonly action: "refresh" | "configure" | "project-key" }
+  | { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" }
   | {
       readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
       readonly type: "skill" | "agent";

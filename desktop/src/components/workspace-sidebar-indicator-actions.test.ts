@@ -21,6 +21,25 @@ function fixture() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("workspace indicator action activation", () => {
+  it.each(["current", "workspace", "reason", "capability"])("guards bulk Registry sync activation: %s", (change) => {
+    const f = fixture();
+    const sync = vi.fn();
+    f.current.reasons = { registry: [{ id: "registry.local", tone: "warning", reason: "Local edits" }] };
+    const controller = createWorkspaceSidebarIndicatorActions({
+      workspace: () => f.current.workspace, reasons: () => f.current.reasons,
+      enabled: () => ({ "registry.push-project-resources": f.current.enabled }), beforeOpen: vi.fn(), reveal: f.reveal,
+      handlers: { "registry.push-project-resources": sync },
+    });
+    controller.open(f.event, "registry");
+    if (change === "workspace") f.current.workspace = "/other";
+    if (change === "reason") f.current.reasons = {};
+    if (change === "capability") f.current.enabled = false;
+    controller.run("registry.push-project-resources");
+    expect(sync).toHaveBeenCalledTimes(change === "current" ? 1 : 0);
+    expect(f.reveal).not.toHaveBeenCalled();
+    controller.menu.dispose();
+    f.controller.menu.dispose();
+  });
   it("invokes the existing AI review callback without revealing or collapsing a panel", () => {
     const f = fixture();
     f.controller.open(f.event, "idx");

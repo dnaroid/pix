@@ -14,7 +14,7 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain('"git.commit-push": () => { void onGitStageGenerateCommitPush?.(); }');
   });
   it("does not reveal panels for work commands; inspection remains separate", () => {
-    const workActions = ["project.retry", "tasks.reload", "git.refresh", "git.fix-ci", "git.fetch", "git.push", "git.commit-push", "registry.refresh", "idx.review"];
+    const workActions = ["project.retry", "tasks.reload", "git.refresh", "git.fix-ci", "git.fetch", "git.push", "git.commit-push", "registry.refresh", "registry.push-project-resources", "idx.review"];
     const handlers = sidebarSource.slice(sidebarSource.indexOf("handlers: {"), sidebarSource.indexOf("const indicatorMenuController"));
     for (const id of workActions) {
       expect(handlers).toContain(`"${id}":`);

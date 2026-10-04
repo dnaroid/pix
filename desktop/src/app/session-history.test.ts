@@ -5,6 +5,33 @@ import { createActiveSessionState } from "./active-session-state.svelte";
 import { createSessionHistory } from "./session-history.svelte";
 
 describe("desktop lazy session history", () => {
+  it.each(["none", "reset", "forget"])("primes background history without active hydration or selection changes (%s)", async (invalidation) => {
+    let finish!: (value: unknown) => void;
+    const client = { sessionHistory: () => new Promise((resolve) => { finish = resolve; }) } as unknown as AcpClient;
+    const state = createActiveSessionState();
+    state.setSessionId("source");
+    state.initializeSessionTranscript("source");
+    const history = createSessionHistory({
+      client: () => client, state, workspace: () => "/project", ensureRuntime: vi.fn(),
+      runtimeReady: () => true, scheduleScrollToLatest: vi.fn(), recoverUnavailableSession: vi.fn(), reportError: vi.fn(),
+    });
+    const activeGeneration = history.begin();
+    const work = history.primeBackground(client, "child", "/project");
+    if (invalidation === "reset") history.reset();
+    if (invalidation === "forget") history.forget("child");
+    finish({ updates: [{ sessionUpdate: "user_message_chunk", messageId: "replay-1", content: { type: "text", text: "inherited" } }], deferredToolCallIds: [], cursor: "99" });
+    expect(await work).toBe(invalidation === "none");
+    expect(state.sessionId).toBe("source");
+    expect(state.transcript.items).toEqual([]);
+    if (invalidation === "none") {
+      expect(history.generation).toBe(activeGeneration);
+      expect(history.loading).toBe(true);
+      expect(history.olderCursorCount).toBe(1);
+      expect(state.sessionTranscript("child")?.items).toHaveLength(1);
+    } else {
+      expect(state.sessionTranscript("child")).toBeUndefined();
+    }
+  });
   it.each([false, true])("preserves an optimistic prompt while history settles (missing=%s)", async (missing) => {
     let finish!: (value: unknown) => void;
     let fail!: (error: Error) => void;

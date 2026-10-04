@@ -26,6 +26,7 @@ describe("composer activity", () => {
     ["compress", "Compacting context"],
     ["brainstorm", "Consulting model council"],
     ["multi_tool_use.parallel", "Running parallel tools"],
+    ["codemode", "Running code"],
     ["unknown", "Running tool"],
   ])("describes %s from metadata", (name, action) => {
     expect(composerActivity({ items: [user, tool(name)] }, live)?.action).toBe(action);

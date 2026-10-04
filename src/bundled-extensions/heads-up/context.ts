@@ -1,7 +1,7 @@
 /** Bounded transcript data, never executable instructions or hidden thinking. */
 export interface ContextRecord {
 	readonly id: string;
-	readonly kind: "user" | "assistant" | "tool";
+	readonly kind: "user" | "assistant" | "tool" | "delegated";
 	readonly text: string;
 	readonly clipped?: boolean;
 }

@@ -91,7 +91,8 @@ export function createDesktopSidebarViewModel(options: {
     registryBackgroundSync: options.registry.backgroundSyncState,
     registryLoading: options.registry.actionId === "refresh",
     registryActionId: options.registry.actionId
-      ?? (options.registry.backgroundSyncState.phase === "syncing" ? "background-sync" : null),
+      ?? (options.registry.backgroundSyncState.phase === "syncing" ? "background-sync" : null)
+      ?? (options.registry.resourceAutoPushState.phase === "syncing" ? "resource-auto-push" : null),
     registryDiff: options.registry.diff,
     gitSnapshot: options.git.snapshot,
     gitUninitialized: options.git.uninitialized,

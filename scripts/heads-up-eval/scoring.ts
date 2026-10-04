@@ -3,6 +3,7 @@ import { HeadsUpContext, cleanObserverText } from "../../src/bundled-extensions/
 import { DEFAULT_HEADS_UP_CONFIG } from "../../src/bundled-extensions/heads-up/config.js";
 import { parseHeadsUpResponse } from "../../src/bundled-extensions/heads-up/parser.js";
 import { validObserverUsage } from "../../src/bundled-extensions/heads-up/usage.js";
+import { DelegatedEvidence } from "../../src/bundled-extensions/heads-up/delegated.js";
 import type { EvalCase } from "./cases.js";
 
 export type Outcome = "tp" | "tn" | "fp" | "fn" | "wrong_notice" | "invalid" | "error" | "timeout" | "cancelled" | "not_run";
@@ -24,6 +25,9 @@ export interface CaseResult {
 export function buildCaseInput(testCase: EvalCase) {
 	const context = new HeadsUpContext();
 	for (const entry of testCase.entries) context.addMessage(entry.message, entry.id);
+	const delegated = new DelegatedEvidence();
+	for (const event of testCase.delegatedEvents ?? []) delegated.accept(event, "eval-parent");
+	for (const record of delegated.records(new Set(testCase.entries.map((entry) => entry.id)))) context.add(record);
 	return context.toInput(DEFAULT_HEADS_UP_CONFIG.maxInputChars, testCase.previousNotices);
 }
 

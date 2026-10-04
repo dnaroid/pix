@@ -23,8 +23,8 @@ function result(testCase: EvalCase, response: AssistantMessage): CaseResult {
 
 test("corpus has positive/negative controls and every oracle satisfies its own visible-source rubric", () => {
 	validateCases(HEADS_UP_CASES);
-	assert.equal(HEADS_UP_CASES.length, 18);
-	assert.equal(HEADS_UP_CASES.filter((item) => item.expected.kind === "heads_up").length, 7);
+	assert.equal(HEADS_UP_CASES.length, 21);
+	assert.equal(HEADS_UP_CASES.filter((item) => item.expected.kind === "heads_up").length, 8);
 	for (const item of HEADS_UP_CASES) {
 		const scored = assess(item, reference(item));
 		assert.equal(scored.outcome, item.expected.kind === "none" ? "tn" : "tp", `${item.id}: ${scored.issues.join(", ")}`);
@@ -47,15 +47,15 @@ test("input uses production redaction/budget and never includes grading labels, 
 
 test("always-none cannot pass the eval and undefined precision is not reported as 100 percent", () => {
 	const summary = summarize(HEADS_UP_CASES.map((item) => result(item, message({ kind: "none" }))));
-	assert.equal(summary.counts.fn, 7); assert.equal(summary.counts.tn, 11);
+	assert.equal(summary.counts.fn, 8); assert.equal(summary.counts.tn, 13);
 	assert.equal(summary.recall, 0); assert.equal(summary.precisionProxy, null);
-	assert.equal(summary.passed, 11); assert.equal(summary.complete, true);
+	assert.equal(summary.passed, 13); assert.equal(summary.complete, true);
 });
 
 test("always-warning gets false positives; a wrong topic with real IDs is not a positive hit", () => {
 	const results = HEADS_UP_CASES.map((item) => result(item, message({ kind: "heads_up", title: "Add more tests", consequence: "It might be useful.", evidenceIds: [buildCaseInput(item).records[0]!.id] })));
 	const summary = summarize(results);
-	assert.equal(summary.counts.wrong_notice, 7); assert.equal(summary.counts.fp, 11);
+	assert.equal(summary.counts.wrong_notice, 8); assert.equal(summary.counts.fp, 13);
 	assert.equal(summary.precisionProxy, 0); assert.equal(summary.falsePositiveRate, 1);
 });
 

@@ -3,6 +3,40 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
+test("Pix RPC freezes safe turn boundary metadata after SDK assistant/tool persistence", async () => {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	const sdk = await readFile(new URL("../../node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js", import.meta.url), "utf8");
+	const start = sdk.indexOf("_handleAgentEvent = async (event) => {");
+	const end = sdk.indexOf("    _willRetryAfterAgentEnd(event)", start);
+	assert.ok(start >= 0 && end > start);
+	const handler = sdk.slice(start, end);
+	const emitted: Array<{ type: string; pixForkLeafId?: string; pixForkSessionPath?: string }> = [];
+	let leaf = "user";
+	const sessionManager = { getLeafId: () => leaf, getSessionFile: () => "/session.jsonl",
+		appendMessage: (message: { role: string }) => { leaf = message.role; return leaf; } };
+	// Exercise the installed SDK's actual event handler and Pix wrapper, not a
+	// duplicate implementation that could silently diverge on an SDK update.
+	const context = { emitted, sessionManager, contentText: () => "" };
+	runInNewContext(`class AgentSession {
+		sessionManager = sessionManager; _entryIdsByMessage = new Map(); _retryAttempt = 0;
+		async _emitExtensionEvent() {} _flushPendingCustomMessages() {}
+		_emit(event) { emitted.push(event); }
+		${handler}
+	}
+	${source.slice(source.indexOf("const originalForkBoundaryEmit ="), source.indexOf("const PIX_PAUSE_MESSAGE ="))}
+	globalThis.session = new AgentSession();`, context);
+	const session = (context as unknown as { session: { _handleAgentEvent(event: unknown): Promise<void> } }).session;
+	await session._handleAgentEvent({ type: "message_end", message: { role: "assistant", stopReason: "toolUse" } });
+	await session._handleAgentEvent({ type: "message_end", message: { role: "toolResult" } });
+	await session._handleAgentEvent({ type: "turn_end", toolResults: [] });
+	leaf = "later-user";
+	assert.equal(emitted[2]?.pixForkLeafId, "toolResult");
+	assert.equal(emitted[2]?.pixForkSessionPath, "/session.jsonl");
+	assert.equal(emitted[0]?.pixForkLeafId, undefined, "unsafe message_end must not expose a boundary");
+	const { toJsonEvent } = await import(new URL("../../node_modules/@earendil-works/pi-coding-agent/dist/modes/json-event.js", import.meta.url).href);
+	assert.equal(toJsonEvent(emitted[2]).pixForkLeafId, "toolResult", "RPC must preserve the extra boundary fields");
+});
+
 test("Pix RPC wait control resumes a paused transcript without persisting the envelope", async () => {
 	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
 	const patch = source.slice(source.indexOf('const PIX_QUOTA_CONTROL_CUSTOM_TYPE ='), source.indexOf("const originalPrompt ="));

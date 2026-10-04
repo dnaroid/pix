@@ -114,7 +114,7 @@ async function entryHarness(ids = ["child"]) {
 	const cwd = fs.mkdtempSync(path.join(scratchRoot, "case-"));
 	dirs.push(cwd);
 	const parent = path.join(cwd, "parent.jsonl");
-	const ctx = { cwd, sessionManager: { getSessionFile: () => parent } };
+	const ctx = { cwd, sessionManager: { getSessionFile: () => parent, getSessionId: () => parent, getLeafId: () => "spawn-entry" } };
 	const runDir = createRunDir(cwd, "delivery");
 	for (const id of ids) {
 		const dir = path.join(runDir, id);
@@ -126,7 +126,9 @@ async function entryHarness(ids = ["child"]) {
 	const tools = new Map<string, any>();
 	const handlers = new Map<string, any>();
 	const messages: any[] = [];
+	const evidenceEvents: any[] = [];
 	register({
+		events: { emit: (channel: string, event: unknown) => { if (channel === "async-subagents:delegated-evidence") evidenceEvents.push(event); } },
 		registerTool: (tool: any) => tools.set(tool.name, tool),
 		registerCommand() {},
 		on: (event: string, handler: any) => handlers.set(event, handler),
@@ -134,20 +136,30 @@ async function entryHarness(ids = ["child"]) {
 	} as any);
 	await handlers.get("session_start")({}, ctx);
 	return {
-		ctx, runDir, messages,
+		ctx, runDir, messages, evidenceEvents,
 		finish: (id = "child", code = "0") => fs.writeFileSync(path.join(runDir, id, "exit_code"), code),
 		refresh: () => handlers.get("tool_execution_end")({ toolName: "subagents" }),
 		close: (stopChildren = false) => handlers.get("session_shutdown")(stopChildren ? {} : { reason: "reload" }, ctx),
 		wait: (params: any = {}, onUpdate?: (update: any) => void, signal?: AbortSignal, context = ctx) =>
 			tools.get("subagents").execute("wait", { action: "wait", runDir, timeout: 0, ...params }, signal, onUpdate, context),
-		spawn: (watchSeconds: number, onUpdate?: () => void) => tools.get("subagents").execute("spawn", {
+		spawn: (watchSeconds: number, onUpdate?: () => void, subagentType = "research") => tools.get("subagents").execute("spawn", {
 			action: "spawn", runDir, watchSeconds,
-			tasks: [{ id: "child", task: "Return a result", subagentType: "research" }],
+			tasks: [{ id: "child", task: "Return a result", subagentType }],
 		}, undefined, onUpdate, ctx),
 	};
 }
 
 describe.serial("completion delivery through the entrypoint", () => {
+	test("routing rejection retires the observer launch without delivering a completion", async () => {
+		const h = await entryHarness([]);
+		try {
+			const result = await h.spawn(0, undefined, "definitely-not-an-available-role");
+			expect(result.isError).toBe(true);
+			expect(h.evidenceEvents.map((event) => event.phase)).toEqual(["started", "retired"]);
+			expect(h.evidenceEvents[0].launchId).toBe(h.evidenceEvents[1].launchId);
+			expect(h.messages).toHaveLength(0);
+		} finally { await h.close(); }
+	});
 	for (const mode of ["spawn", "wait"]) {
 		test(`${mode} consumes the in-process final callback without a follow-up`, async () => {
 			const h = await entryHarness([]);
@@ -183,6 +195,9 @@ process.stdin.on("data", (data) => {
 				expect(result.details.agents[0].status).toBe("done");
 				await h.refresh();
 				expect(h.messages).toHaveLength(0);
+				for (let i = 0; i < 100 && !h.evidenceEvents.some((event) => event.phase === "completed"); i++) await Bun.sleep(10);
+				expect(h.evidenceEvents.map((event) => event.phase)).toEqual(["started", "completed"]);
+				expect(h.evidenceEvents[1].report).toContain("finished");
 			} finally {
 				process.argv[1] = originalArgv;
 				await h.close(true);
@@ -258,7 +273,7 @@ process.stdin.on("data", (data) => {
 		const h = await entryHarness();
 		try {
 			h.finish();
-			const sibling = { ...h.ctx, sessionManager: { getSessionFile: () => path.join(h.ctx.cwd, "sibling.jsonl") } };
+			const sibling = { ...h.ctx, sessionManager: { ...h.ctx.sessionManager, getSessionId: () => "sibling", getSessionFile: () => path.join(h.ctx.cwd, "sibling.jsonl") } };
 			await h.wait({}, undefined, undefined, sibling);
 			expect(h.messages).toHaveLength(1);
 		} finally { await h.close(); }

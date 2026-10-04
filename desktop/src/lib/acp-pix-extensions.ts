@@ -349,6 +349,22 @@ export class AcpPixExtensions {
     return { itemId: response.itemId };
   }
 
+  async forkMessage(
+    sessionId: string,
+    prompt: readonly ContentBlock[],
+    displayText: string,
+    fileImages: readonly PromptFileImage[] = [],
+  ): Promise<{ itemId: string }> {
+    const response = await this.request<unknown>("pix/session/fork_message", {
+      sessionId, prompt, displayText,
+      ...(fileImages.length > 0 ? { _meta: { "pix.fileImages": fileImages } } : {}),
+    }, null);
+    if (!isRecord(response) || response.disposition !== "fork" || typeof response.itemId !== "string") {
+      throw new Error("pix/session/fork_message returned an invalid response");
+    }
+    return { itemId: response.itemId };
+  }
+
   async queueAction(sessionId: string, item: QueueItem, action: QueueAction): Promise<{
     message?: QueuedUserMessage;
     interruptRequired: boolean;

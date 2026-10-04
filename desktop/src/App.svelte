@@ -20,6 +20,7 @@
   import { createDesktopSessionServices } from "./app/desktop-session-services";
   import { createDesktopProjectServices } from "./app/desktop-project-services";
   import { createDesktopConnectionServices } from "./app/desktop-connection-services";
+  import { createBackgroundForkController } from "./app/background-fork";
   import { createDesktopSessionOrchestration } from "./app/desktop-session-orchestration";
   import { createDesktopLifecycleServices } from "./app/desktop-lifecycle-services";
   import { createDesktopPromptServices } from "./app/desktop-prompt-services";
@@ -106,6 +107,7 @@
     sessionCoordinator: () => sessionCoordinator,
     promptRuntime: () => promptRuntime,
     workspaceSessionStartup: () => workspaceSessionStartup,
+    onForkReady: (notification) => { void backgroundFork.handleReady(notification); },
     requestElicitation: (request) => requestElicitation(request),
     setErrorMessage: errors.set,
     reportError,
@@ -119,6 +121,12 @@
   const quotaWait = createQuotaWaitStore({
     client: () => client,
     runtimeReady: (sessionId) => sessionServices.runtime.isReady(sessionId),
+    reportError,
+  });
+  const backgroundFork = createBackgroundForkController({
+    client: () => client,
+    workspace: () => workspace,
+    get sessions() { return sessionServices; },
     reportError,
   });
   const sessionServices = createDesktopSessionServices({

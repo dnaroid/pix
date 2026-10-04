@@ -12,6 +12,20 @@ installContextInventoryHost(AgentSession);
 const { installRpcQuestionRecovery } = await import("../../../dist/bundled-extensions/question/recovery.js");
 installRpcQuestionRecovery(AgentSession);
 
+// _emit is synchronous. At turn_end the SDK has already appended the assistant
+// and every tool result, whereas message_end listeners run BEFORE persistence.
+// Carry the immutable boundary identity over RPC instead of asking for a later leaf.
+const originalForkBoundaryEmit = AgentSession.prototype._emit;
+AgentSession.prototype._emit = function pixForkBoundaryEmit(event) {
+	if (event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled") {
+		event = { ...event,
+			pixForkLeafId: this.sessionManager.getLeafId(),
+			pixForkSessionPath: this.sessionManager.getSessionFile(),
+		};
+	}
+	return originalForkBoundaryEmit.call(this, event);
+};
+
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
 const PIX_CLEAR_TODOS_MESSAGE = "\u0000pix:clear-todos";

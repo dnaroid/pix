@@ -46,6 +46,7 @@ const ACTION_TO_INTERNAL_TOOL: Record<string, string> = {
 
 class ToolCollector {
 	tools = new Map<string, any>();
+	constructor(readonly events: ExtensionAPI["events"]) {}
 	registerTool(tool: any): void { this.tools.set(tool.name, tool); }
 }
 
@@ -78,7 +79,7 @@ export function registerSubagentsTool(
 	completionDelivery?: CompletionDelivery,
 ): void {
 	const toolDescriptions = asyncSubagentToolDescriptions(hasAvailableIndexedProjectRoot());
-	const collector = new ToolCollector();
+	const collector = new ToolCollector(pi.events);
 	registerSpawnTool(collector as any, liveAgents, handleAgentCompletion, onLiveAgentsChange, onAgentRpcEvent, completionDelivery);
 	registerStatusTool(collector as any);
 	registerStopTool(collector as any, liveAgents, onLiveAgentsChange);

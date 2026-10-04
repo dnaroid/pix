@@ -27,12 +27,12 @@ npm run eval:heads-up -- --live
 # A small smoke run, or rerun one failure:
 npm run eval:heads-up -- --live --case api-break --case api-approved
 
-# Check variability across three independent passes (18 x 3 = 54 requests):
-npm run eval:heads-up -- --live --repeat 3 --max-calls 54
+# Check variability across three independent passes (21 x 3 = 63 requests):
+npm run eval:heads-up -- --live --repeat 3 --max-calls 63
 
 # Compare explicitly selected providers/models, with a total-request budget:
 npm run eval:heads-up -- --live --model provider-a/model-a \
-  --model provider-b/model-b --max-calls 36
+  --model provider-b/model-b --max-calls 42
 ```
 
 Without `--model`, the evaluator imports the feature's initial model reference
@@ -66,14 +66,34 @@ passes. Invalid JSON is a quality failure; it is never treated as correct silenc
 
 ## Corpus and scoring
 
-The initial development corpus contains 18 hand-authored synthetic cases: seven
-positive and eleven negative controls. Positives cover public API compatibility,
+The development corpus contains 21 hand-authored synthetic cases: eight
+positive and thirteen negative controls. Positives cover public API compatibility,
 cross-tenant caching, migration data loss, duplicate billing, old config loading,
 prohibited logging, and preservation of requirements in a long conversation.
 Negative controls cover a user-approved tradeoff, a fixed issue, an already-known
 notice, benign changes, insufficient information, a failed edit, tool-output prompt
 injection, agreed omission of tests, an unverified assistant claim, a changed task,
 and redaction of synthetic secret/thinking/image canaries.
+
+Three delegated fixtures use the production bridge reducer (not fabricated tool
+results): a child reports a breaking async API despite “done/tests pass”; a matched
+compatible child report stays silent; a final report that corrects the earlier
+break and retests also stays silent. The parent context is identical in all three.
+This tests reported-claim reasoning, not actual file mutation or test provenance.
+Deterministic bridge/extension/controller tests cover ownership and delivery near
+parent completion independently of inference quality.
+
+## Delegated increment observation (2026-10-04)
+
+A single bounded live Luna pass covered 21 fixtures: the three new delegated
+controls passed, with the breaking-API notice correctly attributed to the child
+report. Automated result was 20/21 (8/8 positive proxy matches, 1/13 false positives,
+no invalid/error/unrun calls; p50/p95 2,770/4,751 ms). Manual review confirmed the
+`failed-edit` false positive: it warned about a rejected change while acknowledging
+that the current source was unchanged. The `api-break` proxy match also reversed
+the requested direction, so it is not a semantic success despite matching IDs and
+keywords. Do not equate this result with production readiness or verified mutation
+coverage. Retained run: `.pi/artifacts/heads-up-eval-2ZKA7s/report.md` (disposable).
 
 The production context builder bounds/redacts messages; the production inference
 function sends the prompt; the production parser validates the reply and evidence

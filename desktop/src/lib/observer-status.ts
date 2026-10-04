@@ -13,8 +13,17 @@ export function observerStatus(snapshot: HeadsUpSnapshot | undefined, runtimeRea
   if (!snapshot) return { kind: "unavailable", label: "Observer loading", detail: "Waiting for the observer runtime to publish its status." };
   if (!snapshot.enabled || snapshot.phase === "off") return { kind: "off", label: "Observer off", detail: "Observer is disabled for this session." };
   if (snapshot.phase === "checking") return { kind: "checking", label: "Observer checking", detail: snapshot.reason ?? "Reviewing the latest turn." };
+  if (snapshot.phase === "limited") {
+    const expiry = snapshot.details?.windowResetsAt;
+    const reason = snapshot.reason === "hourly input limit reached"
+      ? "Достигнут лимит входных данных для проверок."
+      : "Проверки временно приостановлены.";
+    const timing = expiry != null
+      ? `Ближайшее освобождение квоты: ${observerTime(expiry)}. Это не время запуска проверки или полного сброса лимита.`
+      : "Время освобождения квоты неизвестно.";
+    return { kind: "limited", label: "Достигнут лимит проверок", detail: `${reason} ${timing}` };
+  }
   if (snapshot.notice && snapshot.notice.expiresAt > now) return { kind: "notice", label: "Observer notice", detail: snapshot.notice.title };
-  if (snapshot.phase === "limited") return { kind: "limited", label: "Observer limited", detail: snapshot.reason ?? "A rolling observer budget is currently limited." };
   if (snapshot.phase === "error" || snapshot.details?.lastCheck?.result === "error" && snapshot.reason === "check failed") return { kind: "error", label: "Observer error", detail: snapshot.reason ?? "Observer could not complete its last check." };
   if (snapshot.phase === "unavailable") return { kind: "unavailable", label: "Observer unavailable", detail: snapshot.reason ?? "Observer is unavailable for this runtime." };
   return { kind: "waiting", label: "Observer waiting", detail: observerWaitingReason(snapshot, now) };

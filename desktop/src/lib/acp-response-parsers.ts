@@ -227,8 +227,8 @@ export function parseQueueState(value: unknown): QueueState {
     if (
       !isRecord(candidate)
       || typeof candidate.id !== "string"
-      || !["sdk-steering", "sdk-follow-up", "auto", "deferred"].includes(String(candidate.source))
-      || !["steering", "follow-up"].includes(String(candidate.mode))
+      || !["sdk-steering", "sdk-follow-up", "auto", "deferred", "fork"].includes(String(candidate.source))
+      || !["steering", "follow-up", "fork"].includes(String(candidate.mode))
       || !Number.isSafeInteger(candidate.index)
       || typeof candidate.text !== "string"
     ) throw new Error("invalid Pix queue item");
@@ -237,10 +237,11 @@ export function parseQueueState(value: unknown): QueueState {
     items.push({
       id: candidate.id,
       source: candidate.source as QueueSource,
-      mode: candidate.mode as "steering" | "follow-up",
+      mode: candidate.mode as QueueItem["mode"],
       index: Number(candidate.index),
       text: candidate.text,
       ...(queued ? { message: queued } : {}),
+      ...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
     });
   }
   return { sessionId: value.sessionId, items };

@@ -15,7 +15,7 @@ import { collectRegistryUiSnapshot } from "./status.js";
 import { publishResourceTags } from "./tag-publication.js";
 import { selectPublicationRuntime } from "./publication-location.js";
 import { togglePublicationScope } from "./publication-scope.js";
-import { syncProjectResources } from "./project-resource-sync.js";
+import { pushProjectResourceChanges, syncProjectResources } from "./project-resource-sync.js";
 
 const queues = new Map<string, Promise<void>>();
 
@@ -105,6 +105,7 @@ export class DesktopRegistryService {
 		return withRegistryCache(async () => {
 			try {
 				switch (request.action) {
+					case "push-project-resources": await pushProjectResourceChanges(this.executor, ctx); break;
 					case "install": await installResource(this.executor, ctx, request.type, request.name); break;
 					case "update": await updateResource(this.executor, ctx, request.type, request.name); break;
 					case "push": await pushResource(this.executor, ctx, request.type, request.name); break;

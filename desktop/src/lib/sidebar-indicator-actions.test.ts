@@ -10,6 +10,15 @@ const base: SidebarIndicatorInputs = {
 };
 
 describe("sidebar indicator reason actions", () => {
+  it("offers a guarded bulk project sync alongside review for local Registry changes", () => {
+    const groups = sidebarIndicatorActionGroups([{ id: "registry.local", tone: "warning", reason: "Local changes" }], {
+      "registry.push-project-resources": false,
+    });
+    expect(groups[0]!.actions).toEqual([
+      { id: "registry.review", label: "Review resource changes…", disabled: false },
+      { id: "registry.push-project-resources", label: "Sync project changes to Registry", disabled: true },
+    ]);
+  });
   it("adds combined staging, AI commit and push only to dirty Git, with a capability guard", () => {
     const reasons = [{ id: "git.dirty" as const, tone: "info" as const, reason: "Changes" }];
     const actions = sidebarIndicatorActionGroups(reasons, { "git.commit-push": false })[0]!.actions;

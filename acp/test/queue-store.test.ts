@@ -1,11 +1,30 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { loadDesktopQueues, saveDesktopQueues } from "../src/acp/queue-store.js";
+import { loadDesktopQueues, removeDesktopQueueTab, saveDesktopQueues } from "../src/acp/queue-store.js";
 import { tuiTabSnapshotPath } from "../src/acp/tui-tabs.js";
+
+test("fork queue round-trips attachments/errors independently and old writers preserve it", async () => {
+	const root = fileURLToPath(new URL("../../.pi/artifacts/desktop-fork-backend-20260723/", import.meta.url));
+	await mkdir(root, { recursive: true });
+	const agentDir = await mkdtemp(join(root, "queue-store-"));
+	const cwd = "/tmp/fork-project";
+	const path = resolve("/tmp/fork-session.jsonl");
+	const message = { id: "fork", promptText: "expanded", displayText: "@file", error: "disk full", images: [
+		{ type: "image" as const, data: "abc", mimeType: "image/png" },
+	] };
+	await saveDesktopQueues(cwd, path, { auto: [], deferred: [], fork: [message] }, agentDir);
+	await saveDesktopQueues(cwd, path, { auto: [], deferred: [] }, agentDir);
+	assert.deepEqual((await loadDesktopQueues(cwd, path, agentDir)).fork, [message]);
+	await saveDesktopQueues(cwd, path, { auto: [], deferred: [], fork: [] }, agentDir);
+	assert.deepEqual((await loadDesktopQueues(cwd, path, agentDir)).fork, []);
+	await removeDesktopQueueTab(cwd, path, agentDir);
+	assert.deepEqual(JSON.parse(await readFile(tuiTabSnapshotPath(cwd, agentDir), "utf8")).tabs, []);
+});
 
 test("Desktop queue persistence reuses the TUI v4 tab snapshot without clobbering tab UI state", async () => {
 	const agentDir = await mkdtemp(join(tmpdir(), "pix-queue-store-"));

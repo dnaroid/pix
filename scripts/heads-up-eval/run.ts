@@ -15,6 +15,7 @@ import { offline } from "../../src/bundled-extensions/heads-up/settings.js";
 const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const HASH_PATHS = [
 	"src/bundled-extensions/heads-up/context.ts", "src/bundled-extensions/heads-up/inference.ts",
+	"src/bundled-extensions/heads-up/delegated.ts",
 	"src/bundled-extensions/heads-up/parser.ts", "src/bundled-extensions/heads-up/config.ts",
 	"scripts/heads-up-eval/cases.ts", "scripts/heads-up-eval/scoring.ts", "scripts/heads-up-eval/runner.ts",
 	"scripts/heads-up-eval/options.ts", "scripts/heads-up-eval/run.ts",

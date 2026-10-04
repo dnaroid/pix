@@ -2,23 +2,27 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { DesktopQueuedUserMessage } from "./desktop-commands.js";
+import type { DesktopQueuedForkMessage, DesktopQueuedUserMessage } from "./desktop-commands.js";
 import { tuiTabSnapshotPath } from "./tui-tabs.js";
 
 export interface PersistedDesktopQueues {
 	readonly auto: DesktopQueuedUserMessage[];
 	readonly deferred: DesktopQueuedUserMessage[];
+	readonly fork?: DesktopQueuedForkMessage[];
 }
 
 type MutableTab = Record<string, unknown> & {
 	path: string;
 	autoUserMessages?: DesktopQueuedUserMessage[];
 	deferredUserMessages?: DesktopQueuedUserMessage[];
+	forkUserMessages?: DesktopQueuedForkMessage[];
 };
 
 const EMPTY_QUEUES: PersistedDesktopQueues = { auto: [], deferred: [] };
 const writeTails = new Map<string, Promise<void>>();
 const INVALID_TAB_STATE = Symbol("invalid-tab-state");
+
+type MutableTabState = { version: number; cwd?: string; activePath?: string; tabs: MutableTab[] };
 
 export async function loadDesktopQueues(
 	cwd: string,
@@ -40,9 +44,37 @@ export function saveDesktopQueues(
 	agentDir = getAgentDir(),
 ): Promise<void> {
 	if (!sessionPath) return Promise.resolve();
+	return updateTabState(cwd, agentDir, (existing) => {
+		const target = resolve(sessionPath);
+		let tab = existing.tabs.find((candidate) => resolve(candidate.path) === target);
+		if (!tab) {
+			tab = { path: target };
+			existing.tabs.push(tab);
+		}
+		if (queues.auto.length > 0) tab.autoUserMessages = queues.auto.map(cloneMessage);
+		else delete tab.autoUserMessages;
+		if (queues.deferred.length > 0) tab.deferredUserMessages = queues.deferred.map(cloneMessage);
+		else delete tab.deferredUserMessages;
+		if (queues.fork !== undefined) {
+			if (queues.fork.length > 0) tab.forkUserMessages = queues.fork.map(cloneMessage);
+			else delete tab.forkUserMessages;
+		}
+	});
+}
+
+/** Remove an unpublished orphan entirely, not an empty-but-restorable tab. */
+export function removeDesktopQueueTab(cwd: string, sessionPath: string, agentDir = getAgentDir()): Promise<void> {
+	return updateTabState(cwd, agentDir, (existing) => {
+		const target = resolve(sessionPath);
+		existing.tabs = existing.tabs.filter((tab) => resolve(tab.path) !== target);
+		if (existing.activePath && resolve(existing.activePath) === target) delete existing.activePath;
+	});
+}
+
+function updateTabState(cwd: string, agentDir: string, update: (existing: MutableTabState) => void): Promise<void> {
 	const path = tuiTabSnapshotPath(cwd, agentDir);
 	const previous = writeTails.get(path) ?? Promise.resolve();
-	const write = previous.then(async () => {
+	const write = previous.catch(() => {}).then(async () => {
 		const loaded = await readTabState(cwd, agentDir);
 		if (loaded === INVALID_TAB_STATE) {
 			throw new Error("refusing to overwrite an invalid or unsupported Pix tab snapshot while saving the message queue");
@@ -52,18 +84,7 @@ export function saveDesktopQueues(
 			cwd: resolve(cwd),
 			tabs: [] as MutableTab[],
 		};
-		const target = resolve(sessionPath);
-		let tab = existing.tabs.find((candidate) => resolve(candidate.path) === target);
-		if (!tab) {
-			tab = { path: target };
-			existing.tabs.push(tab);
-		}
-
-		if (queues.auto.length > 0) tab.autoUserMessages = queues.auto.map(cloneMessage);
-		else delete tab.autoUserMessages;
-		if (queues.deferred.length > 0) tab.deferredUserMessages = queues.deferred.map(cloneMessage);
-		else delete tab.deferredUserMessages;
-
+		update(existing);
 		existing.version = 4;
 		existing.cwd = typeof existing.cwd === "string" ? existing.cwd : resolve(cwd);
 		await mkdir(dirname(path), { recursive: true });
@@ -106,12 +127,13 @@ function queuesFromTab(tab: MutableTab): PersistedDesktopQueues {
 	return {
 		auto: parseMessages(tab.autoUserMessages),
 		deferred: parseMessages(tab.deferredUserMessages),
+		fork: parseMessages(tab.forkUserMessages),
 	};
 }
 
-function parseMessages(value: unknown): DesktopQueuedUserMessage[] {
+function parseMessages(value: unknown): DesktopQueuedForkMessage[] {
 	if (!Array.isArray(value)) return [];
-	return value.flatMap((candidate): DesktopQueuedUserMessage[] => {
+	return value.flatMap((candidate): DesktopQueuedForkMessage[] => {
 		if (!isRecord(candidate) || typeof candidate.promptText !== "string" || typeof candidate.displayText !== "string") return [];
 		const images = Array.isArray(candidate.images)
 			? candidate.images.flatMap((image) => (
@@ -125,16 +147,18 @@ function parseMessages(value: unknown): DesktopQueuedUserMessage[] {
 			promptText: candidate.promptText,
 			displayText: candidate.displayText,
 			images,
+			...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
 		}];
 	});
 }
 
-function cloneMessage(message: DesktopQueuedUserMessage): DesktopQueuedUserMessage {
+function cloneMessage(message: DesktopQueuedForkMessage): DesktopQueuedForkMessage {
 	return {
 		id: message.id,
 		promptText: message.promptText,
 		displayText: message.displayText,
 		images: message.images.map((image) => ({ ...image })),
+		...(message.error !== undefined ? { error: message.error } : {}),
 	};
 }
 

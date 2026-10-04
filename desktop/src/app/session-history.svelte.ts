@@ -34,6 +34,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   const loadingOlderSessionIds = new Map<string, HistoryRequestOwner>();
   const hydrationBySessionId = new Map<string, { promise: Promise<void>; generation: number }>();
   const retainedHydrationBySessionId = new Map<string, number>();
+  const backgroundOwners = new Map<string, object>();
 
   function begin(): number {
     loading = true;
@@ -143,6 +144,26 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     }
   }
 
+  /** Prime an unopened background fork without disturbing active hydration. */
+  async function primeBackground(requestClient: AcpClient, sessionId: string, requestWorkspace: string): Promise<boolean> {
+    const owner = {};
+    backgroundOwners.set(sessionId, owner);
+    try {
+      const history = await requestClient.sessionHistory(sessionId);
+      if (requestClient !== options.client() || requestWorkspace !== options.workspace()
+        || backgroundOwners.get(sessionId) !== owner) return false;
+      if (!options.state.sessionTranscript(sessionId)) {
+        let transcript = applySessionUpdates(emptyTranscript, history.updates);
+        transcript = markDeferredToolResults(transcript, history.deferredToolCallIds);
+        if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
+        options.state.setSessionTranscript(sessionId, transcript);
+      }
+      return true;
+    } finally {
+      if (backgroundOwners.get(sessionId) === owner) backgroundOwners.delete(sessionId);
+    }
+  }
+
   async function loadOlder(): Promise<boolean> {
     const requestClient = options.client();
     const sessionId = options.state.sessionId;
@@ -228,6 +249,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   }
 
   function forget(sessionId: string): void {
+    backgroundOwners.delete(sessionId);
     retainedHydrationBySessionId.delete(sessionId);
     olderCursorBySessionId.delete(sessionId);
     loadingOlderSessionIds.delete(sessionId);
@@ -240,6 +262,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   }
 
   function reset(): void {
+    backgroundOwners.clear();
     cancel();
     retainedHydrationBySessionId.clear();
     hydrationBySessionId.clear();
@@ -254,6 +277,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     cancel,
     isCurrent,
     hydrate,
+    primeBackground,
     waitForHydration,
     loadOlder,
     loadDeferredToolResult,

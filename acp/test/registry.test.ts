@@ -467,6 +467,86 @@ test("resource background saving preserves companions, private edits, scope togg
 	assert.equal(fs.existsSync(path.join(seed, "projects", "alpha", "agents", "author.md")), false);
 });
 
+test("bulk push syncs only changed Project publications, preserving Global, conflicts, unpublished and project state", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, remote, seed, h } = await scopeFixture();
+	const skills = path.join(project, ".pi", "skills");
+	for (const name of ["draft", "unchanged", "conflict"]) {
+		fs.mkdirSync(path.join(skills, name), { recursive: true });
+		fs.writeFileSync(path.join(skills, name, "SKILL.md"), `---\ndescription: ${name}\n---\nOriginal\n`);
+	}
+	const agents = path.join(project, ".pi", "agents");
+	fs.mkdirSync(path.join(agents, "author"), { recursive: true });
+	fs.writeFileSync(path.join(agents, "author.md"), "---\ndescription: Author\nmodels: [test/model]\n---\nOriginal\n");
+	fs.writeFileSync(path.join(agents, "author", "guide.md"), "Original asset\n");
+	assert.equal((await act(project, { action: "sync-project", scope: "project" }, h.ctx)).error, undefined);
+	await act(project, { action: "install", type: "skill", name: "demo" }, h.ctx);
+	fs.appendFileSync(path.join(skills, "demo", "SKILL.md"), "Global local edit\n");
+	fs.appendFileSync(path.join(skills, "draft", "SKILL.md"), "Project local edit\n");
+	fs.appendFileSync(path.join(skills, "conflict", "SKILL.md"), "Conflicting local edit\n");
+	fs.appendFileSync(path.join(agents, "author.md"), "Agent local edit\n");
+	fs.writeFileSync(path.join(agents, "author", "guide.md"), "Edited asset\n");
+	fs.mkdirSync(path.join(skills, "unpublished"), { recursive: true });
+	fs.writeFileSync(path.join(skills, "unpublished", "SKILL.md"), "---\ndescription: Private\n---\nPrivate\n");
+	fs.writeFileSync(path.join(project, ".pi", "TODO.md"), "Do not push project state\n");
+	git(seed, ["pull", "--ff-only", "origin", "main"]);
+	fs.appendFileSync(path.join(seed, "projects", "alpha", "skills", "conflict", "SKILL.md"), "Remote edit\n");
+	git(seed, ["add", "."]);
+	git(seed, ["commit", "-m", "Remote conflict"]);
+	git(seed, ["push"]);
+	h.confirmations.length = 0;
+	const batchBase = git(root, ["--git-dir", remote, "rev-parse", "main"]);
+	const concurrent = await Promise.all([
+		act(project, { action: "push-project-resources" }, h.ctx),
+		act(project, { action: "push-project-resources" }, h.ctx),
+	]);
+	assert.ok(concurrent.every((entry) => entry.error === undefined));
+	assert.equal(git(root, ["--git-dir", remote, "rev-list", "--count", `${batchBase}..main`]), "2");
+	const snapshot = concurrent[0]!;
+	assert.equal(snapshot.error, undefined);
+	for (const id of ["skill:draft", "agent:author", "skill:unchanged"]) assert.equal(item(snapshot, id).status, "up-to-date");
+	assert.equal(item(snapshot, "skill:demo").status, "local-changes");
+	assert.equal(item(snapshot, "skill:conflict").status, "diverged");
+	assert.equal(item(snapshot, "skill:unpublished").status, "local-only");
+	assert.match(git(root, ["--git-dir", remote, "show", "main:projects/alpha/skills/draft/SKILL.md"]), /Project local edit/);
+	assert.match(git(root, ["--git-dir", remote, "show", "main:projects/alpha/agents/author.md"]), /Agent local edit/);
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/alpha/agents/author/guide.md"]), "Edited asset");
+	assert.doesNotMatch(git(root, ["--git-dir", remote, "show", "main:skills/demo/SKILL.md"]), /Global local edit/);
+	assert.doesNotMatch(git(root, ["--git-dir", remote, "show", "main:projects/alpha/skills/conflict/SKILL.md"]), /Conflicting local edit/);
+	const files = git(root, ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"]);
+	assert.doesNotMatch(files, /unpublished|TODO.md/);
+	assert.deepEqual(h.confirmations, []);
+	const before = git(root, ["--git-dir", remote, "rev-parse", "main"]);
+	assert.equal((await act(project, { action: "push-project-resources" }, h.ctx)).error, undefined);
+	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
+});
+
+test("bulk project push stops on failure and retry retains earlier published resources", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, remote, h } = await scopeFixture();
+	for (const name of ["a", "b", "c"]) {
+		const dir = path.join(project, ".pi", "skills", name);
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, "SKILL.md"), `---\ndescription: ${name}\n---\nOriginal\n`);
+	}
+	await act(project, { action: "sync-project", scope: "project" }, h.ctx);
+	for (const name of ["a", "b", "c"]) fs.appendFileSync(path.join(project, ".pi", "skills", name, "SKILL.md"), "Edited\n");
+	let pushes = 0;
+	const executor: RegistryExecutor = { exec: async (command, args, options) => {
+		if (args[0] === "push" && ++pushes === 2) return { stdout: "", stderr: "Injected push failure", code: 1 };
+		return registryExecutor.exec(command, args, options);
+	} };
+	const failed = await act(project, { action: "push-project-resources" }, h.ctx, new DesktopRegistryService(executor));
+	assert.match(failed.error ?? "", /Injected push failure/);
+	assert.equal(pushes, 2);
+	assert.equal(item(failed, "skill:a").status, "up-to-date");
+	for (const name of ["b", "c"]) {
+		assert.doesNotMatch(git(root, ["--git-dir", remote, "show", `main:projects/alpha/skills/${name}/SKILL.md`]), /Edited/);
+		assert.match(fs.readFileSync(path.join(project, ".pi", "skills", name, "SKILL.md"), "utf8"), /Edited/);
+	}
+	const retried = await act(project, { action: "push-project-resources" }, h.ctx);
+	assert.equal(retried.error, undefined);
+	for (const name of ["a", "b", "c"]) assert.equal(item(retried, `skill:${name}`).status, "up-to-date");
+});
+
 test("Local-only resource publication needs a project key and skips untracked Global collisions", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { root, project, remote, h } = await scopeFixture();
 	const local = path.join(project, ".pi", "skills", "draft");
@@ -478,6 +558,8 @@ test("Local-only resource publication needs a project key and skips untracked Gl
 	const missing = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
 	assert.match(missing.error ?? missing.projectIssue ?? "", /project key/i);
 	assert.match((await act(project, { action: "push", type: "skill", name: "draft" }, h.ctx)).error ?? "", /project key/i);
+	const bulkMissingKey = await act(project, { action: "push-project-resources" }, h.ctx);
+	assert.match(bulkMissingKey.error ?? bulkMissingKey.projectIssue ?? "", /project key/i);
 	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
 	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	fs.rmSync(local, { recursive: true });

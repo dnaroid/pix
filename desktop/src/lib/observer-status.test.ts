@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_HEADS_UP_CONFIG } from "../../../src/bundled-extensions/heads-up/config";
 import { parseHeadsUpSnapshot, type HeadsUpSnapshot } from "./heads-up";
-import { observerPopoverPosition, observerResultLabel, observerStatus, observerWaitingReason } from "./observer-status";
+import { observerPopoverPosition, observerResultLabel, observerStatus, observerWaitingReason, observerTime } from "./observer-status";
 
 function snapshot(): HeadsUpSnapshot {
   return { version: 1, instanceId: "r1", revision: 1, enabled: true, model: "provider/model", phase: "idle", checks: 0, inputTokens: 0, outputTokens: 0, notice: null,
@@ -9,6 +9,22 @@ function snapshot(): HeadsUpSnapshot {
 }
 
 describe("Observer status presentation and protocol", () => {
+  it("prioritizes limits over an existing notice and reports only known reservation expiry", () => {
+    const state: HeadsUpSnapshot = { ...snapshot(), phase: "limited", reason: "hourly check limit reached",
+      notice: { id: "n", title: "Finding", consequence: "Finding", evidence: [], createdAt: 0, expiresAt: 999999 },
+      details: { ...snapshot().details!, windowResetsAt: 60000 } };
+    const limited = observerStatus(state, true, "s", 0);
+    expect(limited.kind).toBe("limited");
+    expect(limited.label).toBe("Достигнут лимит проверок");
+    expect(limited.detail).toContain(observerTime(60000));
+    expect(limited.detail).toContain("не время запуска проверки или полного сброса");
+    // Wall time alone cannot establish that all budget gates have cleared.
+    expect(observerStatus(state, true, "s", 60001).kind).toBe("limited");
+    expect(observerStatus({ ...state, phase: "idle" }, true, "s", 0).kind).toBe("notice");
+    expect(observerStatus({ ...state, enabled: false }, true, "s", 0).kind).toBe("off");
+    expect(observerStatus({ ...state, reason: "hourly input limit reached" }, true, "s").detail).toContain("лимит входных данных");
+    expect(observerStatus({ ...state, details: undefined }, true, "s").detail).toContain("Время освобождения квоты неизвестно");
+  });
   it("distinguishes off, waiting, checking, missing, limited, and errors", () => {
     const state = snapshot();
     expect(observerStatus(state, false, "s").kind).toBe("unavailable");

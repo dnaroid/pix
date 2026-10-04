@@ -52,6 +52,8 @@ export class HeadsUpController {
 	private generation = 0;
 	private active: AbortController | undefined;
 	private stopExpiry: (() => void) | undefined;
+	private stopDelegated: (() => void) | undefined;
+	private delegatedPending = false;
 	private checks = 0;
 	private inputTokens = 0;
 	private outputTokens = 0;
@@ -114,7 +116,7 @@ export class HeadsUpController {
 		try { this.options.publish?.(this.snapshot()); } catch { /* Optional UI never breaks inference. */ }
 	}
 	private clearNotice(): void { this.stopExpiry?.(); this.stopExpiry = undefined; this.notice = null; }
-	private expire(): void { if (this.notice && this.notice.expiresAt <= this.now()) { this.clearNotice(); this.publish(); } }
+	private expire(): void { if (this.notice && this.notice.expiresAt <= this.now()) { this.clearNotice(); this.publish(); this.scheduleDelegated(); } }
 	private completeLastCheck(token: number, result: HeadsUpCheckResult): boolean {
 		if (this.lastCheckToken !== token || !this.lastCheck || this.lastCheck.finishedAt !== null) return false;
 		const finishedAt = this.now();
@@ -124,6 +126,7 @@ export class HeadsUpController {
 		return true;
 	}
 	private invalidate(): void {
+		this.stopDelegated?.(); this.stopDelegated = undefined; this.delegatedPending = false;
 		const active = this.active;
 		const token = this.lastCheckToken;
 		this.generation++;
@@ -146,6 +149,17 @@ export class HeadsUpController {
 		this.phase = this.enabled ? "idle" : "off"; this.reason = undefined; this.publish(); return true;
 	}
 	noteUserRequest(): void { this.invalidateForLifecycle("new user request"); }
+	/** A coalesced evidence opportunity, not a fabricated primary turn or a forced check. */
+	noteDelegatedCompletion(): void {
+		if (this.disposed || !this.enabled) return;
+		this.delegatedPending = true; this.scheduleDelegated();
+	}
+	private scheduleDelegated(): void {
+		if (!this.delegatedPending || this.stopDelegated || this.active || this.notice || this.disposed || !this.enabled) return;
+		this.stopDelegated = this.after(Math.max(0, this.lastCheckAt + this.config.minIntervalMs - this.now()), () => {
+			this.stopDelegated = undefined; void this.check().catch(() => {});
+		});
+	}
 	noteTurn(message: MessageLike, id: string, results: readonly MessageLike[], resultIds: readonly string[]): void {
 		if (this.disposed) return;
 		this.turns++; this.context.addTurn(message, id, results, resultIds);
@@ -167,7 +181,9 @@ export class HeadsUpController {
 		if (this.disposed || !this.enabled) return false;
 		if (!(this.options.allowed?.() ?? true)) { this.setEnabled(false); return false; }
 		if (this.active) return this.refuse(this.active.signal.aborted ? "cooldown" : "checking", "waiting for the current request to finish");
-		if (!explicit && (this.notice || this.turns - this.checkedTurns < this.config.minTurns || this.now() - this.lastCheckAt < this.config.minIntervalMs)) return false;
+		if (!explicit && (this.notice || (!this.delegatedPending && this.turns - this.checkedTurns < this.config.minTurns) || this.now() - this.lastCheckAt < this.config.minIntervalMs)) return false;
+		// Consume once even when limited/unavailable: no timer polling or budget bypass.
+		this.delegatedPending = false; this.stopDelegated?.(); this.stopDelegated = undefined;
 		this.reservations = this.currentReservations();
 		if (this.reservations.length >= this.config.maxChecksPerHour) return this.refuse("limited", "hourly check limit reached");
 		if (this.accountingFailed || !this.options.canAccountUsage()) return this.refuse("unavailable", "usage accounting unavailable");
@@ -190,6 +206,7 @@ export class HeadsUpController {
 		const transport = Promise.resolve().then(() => this.options.request({ model, input: input.body, signal: abort.signal, maxTokens: this.config.maxTokens, timeoutMs: this.config.timeoutMs }));
 		const observed = transport.then((message) => { this.recordUsage(message); return message; }).finally(() => {
 			if (this.active === abort) this.active = undefined;
+			this.scheduleDelegated();
 		});
 		let timedOut = false;
 		const cancelTimeout = this.after(this.config.timeoutMs, () => {
@@ -236,6 +253,7 @@ export class HeadsUpController {
 			return false;
 		} finally {
 			cancelTimeout(); abort.signal.removeEventListener("abort", onAbort);
+			this.scheduleDelegated();
 		}
 	}
 	private recordUsage(message: AssistantMessage): void {
@@ -250,7 +268,7 @@ export class HeadsUpController {
 		const notice = this.currentNotice;
 		if (!notice || notice.id !== id) return false;
 		this.remember(`${feedback}: ${notice.title}. ${notice.consequence}`);
-		this.clearNotice(); this.publish(); return true;
+		this.clearNotice(); this.publish(); this.scheduleDelegated(); return true;
 	}
 	explain(id?: string): HeadsUpNotice | null { const notice = this.currentNotice; return !id || notice?.id === id ? notice : null; }
 	dispose(): void {

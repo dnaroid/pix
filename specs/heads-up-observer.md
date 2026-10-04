@@ -50,8 +50,17 @@ and persist milliseconds. Fields have labelled controls and reset-to-default
 actions; settings search can reveal advanced fields. A trusted project override
 can supersede user defaults. Saved changes apply to new or reloaded runtimes,
 not silently to active sessions. Runtime toggles/commands never write config.
-On/off state, deduplication and limits are runtime-local and reset on runtime
-recreation; usage entries are durable. There is no cross-session knowledge profile.
+Desktop explicit on/off commands persist a versioned `pix-desktop-observer-enabled`
+custom session entry (not a conversation message or model input). The last valid
+boolean choice in that session overrides the configured enable default on reload
+or app restart; unrelated sessions and profile defaults are unchanged. Branch
+navigation does not rewind the session preference. Forks inherit only metadata
+copied in their source branch; a fork without that entry uses defaults. Invalid
+entries are ignored. A failed save must not publish a successful toggle. Drafts
+without a conversation are not durable sessions. Restoring a choice never starts
+inference by itself. TUI on/off remains runtime-local and ignores this Desktop
+metadata. Deduplication, limits and check history reset on runtime recreation;
+usage entries are durable. There is no cross-session knowledge profile.
 
 ## Context and cadence
 
@@ -60,6 +69,13 @@ since the last check (or initial runtime creation). They run from `turn_end`
 without returning its inference promise. An open notice suppresses further
 automatic checks. A manual check can bypass cadence, not enablement,
 concurrency, availability or budgets.
+
+A newly accepted delegated completion is another coalesced automatic opportunity:
+it does not require six more primary turns or wake the parent. A single timer
+waits for the same minimum interval, physical request lock and open-notice expiry
+or dismissal. Arrivals during a request remain pending for a later check. All
+availability, input and rolling-hour limits still apply; a refused opportunity
+does not poll until a budget becomes available. Invalidation cancels the timer.
 
 Default limits are twelve checks per rolling hour, a 16,000-character serialized
 observation payload, 192,000 payload characters per rolling hour, 900 output
@@ -78,6 +94,40 @@ text and bounded tool arguments/results are included, with real source-entry
 IDs. Thinking, image bytes and full logs are excluded. Omission/clipping is
 explicit. No full-history scan occurs per render or per streamed token.
 
+### Delegated work (first increment)
+
+The suite publishes a runtime-only versioned `async-subagents:delegated-evidence`
+bridge independently of its generic completion messages, wait delivery and
+parent follow-up arbitration. Capture starts synchronously at spawn execution,
+before routing/authentication awaits, with a unique launch ID, captured parent
+session/branch anchor and child ID. The final retry/fallback completion binds the
+actual run directory and asynchronously reads at most 128 KiB of `result.json`.
+Only the final visible report (or summary fallback) is used, never hidden thinking,
+full logs or shared-working-tree diffs. Oversized/unreadable/mismatched results
+produce no evidence. No replay or adoption of previously launched workers occurs.
+Prelaunch exits (routing/model errors, aborts or setup errors) retire unbound
+captures; cancelled/failed launches retire their captures without invented reports.
+Returning from a successful spawn does not retire background children.
+
+The enabled parent observer must have observed that launch in its current
+lifecycle. Evidence additionally requires the anchor in the active projection
+when input is assembled. It holds at most 64 pending launches and 64 completed
+reports; duplicate completions are ignored. Disable, new user request, stop/error,
+model change, branch/session replacement, compaction and shutdown retire captured
+ownership. Enabling again does not adopt an earlier child. This conservative rule
+can omit a still-running child's late report after a task boundary.
+
+Records have a `delegated:` launch ID and are explicitly **child-reported, not
+verified mutation/test evidence**. Process status and “done/tests pass” do not
+prove correctness. A concrete reported design change can contradict a user
+requirement; any notice must attribute it to the report rather than claim an
+independent inspection. Generic custom completion notices alone are ignored.
+Reports use the same redaction, 3,000-character record bound and total input budget;
+clipping is explicit and missing text is not proof of failure. Read retained
+corrections/retests in order, rather than extracting old risk fragments. Verified
+per-child changed-file or test-command/outcome provenance is not implemented:
+current compact child artifacts do not provide it. Children never run an observer.
+
 Common credential patterns, private-key blocks and control sequences are
 filtered. This is best-effort redaction, not proof that arbitrary project text
 contains no secrets or personal data. Enabling an observer sends the selected
@@ -90,7 +140,10 @@ provenance, not the correctness of a model inference.
 
 At most one short notice appears above the composer. TUI uses a keyed widget;
 Desktop consumes the structured `heads-up` session-state channel. Desktop
-validates bounded payloads and rejects stale revisions and retired instances.
+validates bounded payloads, rejects stale revisions of the current instance, and
+rejects snapshots from the 32 most recently retired instances per session. This
+bounded in-memory retirement history is not an arbitrary-history replay guard:
+an instance evicted from it is no longer rejected solely by its instance ID.
 Feedback actions include already-known, irrelevant and dismiss, keyed by notice
 ID so a stale button cannot clear a newer notice. Recent shown/feedback topics
 are included in subsequent checks; exact normalized duplicates are suppressed.
@@ -98,21 +151,33 @@ are included in subsequent checks; exact normalized duplicates are suppressed.
 `/heads-up explain` expands existing evidence in TUI. Desktop has an evidence
 expander and feedback actions; expansion never makes another model request.
 Desktop management lives in a persistent statusbar Observer item, not in the
-composer actions menu. Off, waiting, checking, finding, unavailable/error and
-limited states are distinguished. Only a real checking phase animates. A draft
+composer actions menu. The trigger contains only an eye: grey when off/unready,
+primary when enabled (including waiting and error states), except a static amber
+eye while budget-limited. Limited status takes precedence over an existing finding
+in the trigger/popup; the finding card remains separate. The limit label is
+«Достигнут лимит проверок»; tooltip and popup include the earliest known reservation
+expiry (or explicitly unknown), not a promised check time or full reset. Input
+budget exhaustion is distinguished in the detail. A runtime update clearing the
+limit restores primary; wall-clock expiry alone does not claim recovery. The same eye
+pulses only during a real checking phase, respecting reduced motion; no spinner,
+visible status label or notice badge is shown. Accessible label/tooltip and popup
+distinguish off, waiting, checking, finding, unavailable/error and limited states. A draft
 or unready runtime still allows opening settings, but not session controls.
 Cards expire after five minutes by default, including while the main agent is
 idle; the existing evidence/feedback card stays above the composer.
 
-The statusbar popup contains a current-session toggle, explicit Check now and
-an Observer settings deep link. It shows the actual runtime model, last check
-time/result/duration, completed-turn progress, interval eligibility, rolling
-request/input reservations, and recorded input/cache/output tokens. Never-run,
+The statusbar popup contains the standard SettingsSwitch for the current session,
+explicit Check now and an Observer settings deep link. It shows dynamic state and
+wait/error reasons, last check time/result/duration, new completed turns, actual
+rolling/total checks, used input characters and recorded input/cache/output tokens.
+Configured model, cadence, interval and budget ceilings stay in Settings, not the
+popup. Earliest reservation expiry is shown only while limited. Never-run,
 no finding, finding, suppressed duplicate, malformed reply, error, timeout and
 cancellation are distinct results. Older snapshots without optional `details`
 remain readable; missing details are unavailable, not claimed successful checks.
 Eligibility time is not a promised launch time: automatic work still requires
-a completed agent turn. The earliest reservation expiry is not a full reset.
+a completed agent turn or a pending delegated completion opportunity, and the
+remaining gates must pass. The earliest reservation expiry is not a full reset.
 
 Opening the popup may issue `/heads-up snapshot`, a quiet out-of-band state
 refresh with no inference, context assembly, transcript notification, or parent
@@ -162,9 +227,14 @@ observer. This feature does not inherit into ordinary async-subagent workers.
 ## Implementation
 
 - `src/bundled-extensions/heads-up/index.ts`
+- `src/bundled-extensions/heads-up/desktop-preference.ts`
 - `src/bundled-extensions/heads-up/controller.ts`
 - `src/bundled-extensions/heads-up/config.ts`
 - `src/bundled-extensions/heads-up/context.ts`
+- `src/bundled-extensions/heads-up/delegated.ts`
+- `external/pi-tools-suite/src/async-subagents/delegated-evidence.ts`
+- `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/tools/subagents.ts`
 - `src/bundled-extensions/heads-up/inference.ts`
 - `src/bundled-extensions/heads-up/parser.ts`
 - `src/bundled-extensions/heads-up/presentation.ts`
@@ -205,10 +275,13 @@ observer. This feature does not inherit into ordinary async-subagent workers.
 - `tests/heads-up-controller.test.ts`
 - `tests/heads-up-context.test.ts`
 - `tests/heads-up-extension.test.ts`
+- `tests/heads-up-delegated.test.ts`
+- `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`
 - `tests/bundled-question-extension.test.ts`
 - `desktop/src/app/heads-up.svelte.test.ts`
 - `desktop/src/lib/heads-up.test.ts`
 - `desktop/src/components/HeadsUpCard.test.ts`
+- `desktop/src/components/ObserverStatus.test.ts`
 - `acp/test/agent.test.ts`
 - `acp/test/config.test.ts`
 - `tests/heads-up-eval.test.ts`

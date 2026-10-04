@@ -12,7 +12,7 @@
   import type { Attachment } from "../lib/attachments";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ToolItem } from "../lib/transcript";
-  import { toolInputText } from "../lib/tool-input";
+  import { languageForToolInput, toolInputText } from "../lib/tool-input";
   import DiffView from "./DiffView.svelte";
   import MarkdownText from "./MarkdownText.svelte";
 
@@ -36,6 +36,8 @@
 
   let language = $derived(languageForReadTool(tool.kind, tool.title, tool.path));
   let inputText = $derived(toolInputText(tool));
+  let inputLanguage = $derived(languageForToolInput(tool));
+  let highlightedInput = $derived(inputText !== undefined && inputLanguage ? highlightCode(inputText, inputLanguage) : undefined);
   let renderAsMarkdown = $derived(language === "markdown");
   let highlighted = $derived(language && !renderAsMarkdown ? highlightCode(tool.content, language) : undefined);
   let shellDiff = $derived(isShellDiffTool(tool.kind, tool.title) && tool.content ? unifiedDiffModel(tool.content) : undefined);
@@ -46,7 +48,7 @@
 {#if inputText !== undefined}
   <section aria-label="Tool input">
     <div class="tool-section-label">Input</div>
-    <pre class="tool-result tool-input">{inputText}</pre>
+    <pre class="tool-result tool-input">{#if highlightedInput}<code class="highlighted-code" data-language={highlightedInput.language}>{@html highlightedInput.html}</code>{:else}{inputText}{/if}</pre>
   </section>
   {#if tool.content || shellDiff || mutationDiffs.length > 0}
     <div class="tool-section-label">Result</div>
@@ -106,6 +108,11 @@
     display: block;
     min-height: 1.35em;
     white-space: pre;
+  }
+
+  .tool-input .highlighted-code :global(.sh__line) {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .markdown-result {

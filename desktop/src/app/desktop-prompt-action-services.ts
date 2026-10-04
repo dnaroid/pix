@@ -61,6 +61,7 @@ type DesktopPromptActionServicesOptions = {
 
 export function createDesktopPromptActionServices(options: DesktopPromptActionServicesOptions) {
   const queue = createPromptQueueActions({
+    waitForAttachmentDraftSettled: options.attachments.waitForSettled,
     client: options.client,
     activeSessionId: () => options.state.sessionId,
     promptText: options.promptText,

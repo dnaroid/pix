@@ -1,6 +1,6 @@
 <script lang="ts">
   import Eye from "@lucide/svelte/icons/eye";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import SettingsSwitch from "./settings/SettingsSwitch.svelte";
   import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
@@ -31,6 +31,11 @@
   let position = $state({ left: 8, bottom: 34, width: 384, maxHeight: 500 });
   const status = $derived(observerStatus(snapshot, runtimeReady, sessionId, now));
   const canControl = $derived(Boolean(sessionId && runtimeReady && snapshot));
+  const iconColor = $derived.by(() => {
+    if (!canControl || status.kind === "off") return "text-muted-foreground/70";
+    if (status.kind === "limited") return "text-tool-warning";
+    return "text-primary";
+  });
   const canCheck = $derived(canControl && snapshot!.enabled && snapshot!.phase !== "checking" && !pendingToggle && !pendingCheck);
 
   $effect(() => {
@@ -97,13 +102,9 @@
 <div class="shrink-0" data-observer-status>
   <button bind:this={trigger} type="button" aria-label={status.label} title={`${status.label} · ${status.detail}`}
     aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onclick={() => void togglePopup()}
-    class={["flex h-6 min-w-0 items-center gap-1 rounded-sm px-1.5 text-xs transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-      status.kind === "checking" && "text-primary", status.kind === "error" && "text-tool-error",
-      ["notice", "limited"].includes(status.kind) && "text-tool-warning", ["off", "unavailable"].includes(status.kind) && "text-muted-foreground/70"]}>
-    {#if status.kind === "checking"}<LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-    {:else}<Eye class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{/if}
-    <span class="max-w-[140px] truncate max-[760px]:hidden">{status.label}</span>
-    {#if status.kind === "notice"}<span class="h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
+    class={["grid h-6 w-6 place-items-center rounded-sm transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring",
+      iconColor]}>
+    <Eye class={["h-3.5 w-3.5", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
   </button>
 
   {#if open}
@@ -116,23 +117,19 @@
         <button type="button" class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" aria-label="Close Observer status" onclick={() => closePopup()}><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>
       <div class="space-y-3 px-3 py-3 text-xs">
-        <label class="flex items-center justify-between gap-3 font-medium">
+        <div class="flex items-center justify-between gap-3 font-medium">
           <span>Observer for this session</span>
-          <input type="checkbox" role="switch" checked={snapshot?.enabled ?? false} disabled={!canControl || pendingToggle} onchange={onToggle} class="accent-primary disabled:cursor-default disabled:opacity-40" />
-        </label>
+          <SettingsSwitch value={snapshot?.enabled ?? false} disabled={!canControl || pendingToggle} onChange={onToggle} ariaLabel="Observer for this session" />
+        </div>
         {#if snapshot}
           <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 leading-4">
-            <dt class="text-muted-foreground">Model</dt><dd class="break-all font-mono" title={snapshot.model}>{snapshot.model}</dd>
             <dt class="text-muted-foreground">Last check</dt><dd>{snapshot.details ? observerTime(snapshot.details.lastCheck?.finishedAt ?? snapshot.details.lastCheck?.startedAt ?? null) : "Unavailable in this runtime"}</dd>
             <dt class="text-muted-foreground">Result</dt><dd>{snapshot.details ? observerResultLabel(snapshot.details.lastCheck) : "Unavailable in this runtime"}{snapshot.details?.lastCheck?.durationMs != null ? ` · ${observerDuration(snapshot.details.lastCheck.durationMs)}` : ""}</dd>
-            <dt class="text-muted-foreground">New turns</dt><dd>{snapshot.details ? `${snapshot.details.newTurns} / ${snapshot.details.config.minTurns} required` : "Unavailable"}</dd>
-            <dt class="text-muted-foreground">Min. interval</dt><dd>{#if snapshot.details}{observerDuration(snapshot.details.config.minIntervalMs)} · {now >= snapshot.details.intervalEligibleAt ? "elapsed" : "not elapsed"}{:else}Unavailable{/if}</dd>
-            <dt class="text-muted-foreground">Checks</dt><dd>{snapshot.details ? `${snapshot.details.checksInWindow} / ${snapshot.details.config.maxChecksPerHour} in rolling hour` : ""}<span class="block text-muted-foreground">{snapshot.checks} total in this runtime</span></dd>
-            <dt class="text-muted-foreground">Input budget</dt><dd>{snapshot.details ? `${snapshot.details.inputCharsInWindow.toLocaleString()} / ${snapshot.details.config.maxInputCharsPerHour.toLocaleString()} chars in rolling hour` : "Unavailable"}</dd>
+            <dt class="text-muted-foreground">New turns</dt><dd>{snapshot.details?.newTurns ?? "Unavailable"}</dd>
+            <dt class="text-muted-foreground">Checks</dt><dd>{snapshot.details ? `${snapshot.details.checksInWindow} in the past hour · ` : ""}{snapshot.checks} total</dd>
+            <dt class="text-muted-foreground">Input used</dt><dd>{snapshot.details ? `${snapshot.details.inputCharsInWindow.toLocaleString()} chars in the past hour` : "Unavailable"}</dd>
             <dt class="text-muted-foreground">Recorded tokens</dt><dd>{snapshot.inputTokens.toLocaleString()} input/cache · {snapshot.outputTokens.toLocaleString()} output</dd>
           </dl>
-          {#if snapshot.details?.windowResetsAt}<p class="text-muted-foreground">Earliest budget reservation expiry: {observerTime(snapshot.details.windowResetsAt)}. Reopen to refresh budget counters.</p>{/if}
-          <p class="text-muted-foreground">Automatic checks also require a completed agent turn. No check is scheduled by this popup.</p>
         {:else}
           <p class="leading-4 text-muted-foreground">{sessionId ? "No Observer status has been received. A new or reloaded session may be needed." : "Start a session to enable Observer. You can set defaults in Settings."}</p>
         {/if}

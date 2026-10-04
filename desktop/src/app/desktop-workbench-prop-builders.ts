@@ -249,6 +249,7 @@ export function buildWorkbenchConversationProps(
       onEnhance: () => options.conversationActions.enhancePromptDraft(options.promptText()),
       onSubmit: options.promptSubmit.submit,
       onDefer: options.promptQueue.deferCurrentDraft,
+      onFork: options.promptQueue.forkCurrentDraft,
       onCreateTask: options.projectActions.createTaskFromComposer,
       onScheduleContinuation: sessionId ? () => options.quotaWait.openSchedule(sessionId) : undefined,
       onPause: options.promptRuntime.pauseActiveAgent,

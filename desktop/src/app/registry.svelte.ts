@@ -147,6 +147,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       || options.operationRunning()
       || actionId !== null
       || backgroundSyncState.phase === "syncing"
+      || resourceAutoPushState.phase === "syncing"
     ) return;
 
     actionId = nextActionId;
@@ -158,6 +159,10 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       const next = await requestClient.registryAction(workspace, request);
       if (!current()) return;
       snapshot = next;
+      if (request.action === "push-project-resources") {
+        const error = next.error ?? next.projectIssue;
+        if (error) options.reportError(new Error(error));
+      }
       if (request.action === "pull-project") reloadLocalProjectState(request.scope, workspace);
     } catch (error) {
       if (current()) options.reportError(error);

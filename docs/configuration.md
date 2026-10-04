@@ -196,8 +196,10 @@ Additional fields are `maxInputChars`, `maxInputCharsPerHour`, `maxTokens`,
 `timeoutMs` and `noticeTtlMs`. The settings UI shows time in seconds and saves
 milliseconds. Model refs and numeric bounds are validated; fields can reset to
 defaults. These settings apply to new or reloaded Desktop runtimes. The
-statusbar popup's switch changes only its current session and does not save
-configuration. A trusted project `.pi/pix-desktop.jsonc` can override defaults.
+statusbar popup's switch saves a per-session choice, restored after app restart,
+without changing configuration or other sessions. An explicit saved choice takes
+precedence over the enable default; all other observer settings still use the
+profile. A trusted project `.pi/pix-desktop.jsonc` can override defaults.
 Desktop does not inherit `heads-up.jsonc`; that remains the TUI observer config.
 Enabling an observer sends bounded conversation excerpts to its chosen provider.
 

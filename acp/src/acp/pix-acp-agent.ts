@@ -122,6 +122,8 @@ import {
 	PIX_BASH_METHOD,
 	PIX_CLEAR_TODOS_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
+	PIX_FORK_MESSAGE_METHOD,
+	PIX_FORK_READY_METHOD,
 	PIX_IMPORT_SESSION_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
 	PIX_QUEUE_CONSUMED_METHOD,
@@ -183,6 +185,7 @@ import {
 	type DesktopQueueSubmitRequest,
 	type DesktopQueueSubmitResponse,
 	type DesktopQueuedUserMessage,
+	type DesktopForkReadyNotification,
 	type DesktopRegistryActionRequest,
 	type DesktopRegistryActionResponse,
 	type DesktopRegistryDiffFile,
@@ -237,9 +240,12 @@ import {
 import { createPromptEnhancer, type PromptEnhancer } from "./prompt-enhancer.js";
 import {
 	loadDesktopQueues,
+	removeDesktopQueueTab,
 	saveDesktopQueues,
 	type PersistedDesktopQueues,
 } from "./queue-store.js";
+import { DesktopForkQueue } from "./desktop-fork-queue.js";
+import { createDesktopForkSnapshot, type DesktopForkSnapshot, type DesktopForkChild } from "./desktop-fork-snapshot.js";
 import {
 	BUILTIN_SLASH_COMMANDS,
 	builtinFeedback,
@@ -292,6 +298,7 @@ type ClientCaller = {
 	notify(method: typeof PIX_SESSION_STATE_METHOD, params: PixSessionStateNotification): Promise<void>;
 	notify(method: typeof PIX_QUEUE_STATE_METHOD, params: DesktopQueueStateResponse): Promise<void>;
 	notify(method: typeof PIX_QUEUE_CONSUMED_METHOD, params: DesktopQueueConsumedNotification): Promise<void>;
+	notify(method: typeof PIX_FORK_READY_METHOD, params: DesktopForkReadyNotification): Promise<void>;
 	request(method: "elicitation/create", params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
 };
 
@@ -348,6 +355,7 @@ interface AgentSessionState {
 	followUpQueue: string[];
 	autoUserMessages: DesktopQueuedUserMessage[];
 	deferredUserMessages: DesktopQueuedUserMessage[];
+	forks: DesktopForkQueue;
 	trackedSteeringMessages: DesktopQueuedUserMessage[];
 	sdkQueueRestoreAfterInterrupt: { steering: string[]; followUp: string[] } | undefined;
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
@@ -450,6 +458,8 @@ export interface PixAcpAgentOptions {
 	/** Shared Pix queue persistence readers/writers (overridable for hermetic tests). */
 	readonly loadDesktopQueues?: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
 	readonly saveDesktopQueues?: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
+	/** Isolated native SDK snapshot creation (overridable for deterministic lifecycle tests). */
+	readonly createDesktopForkSnapshot?: (snapshot: DesktopForkSnapshot) => Promise<DesktopForkChild>;
 	/** Clipboard writer (overridable for hermetic tests). */
 	readonly copyText?: (text: string) => Promise<void>;
 }
@@ -493,6 +503,8 @@ export class PixAcpAgent {
 	private readonly copyText: (text: string) => Promise<void>;
 	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff">;
 	private disposed = false;
+	private readonly retiringForkQueues = new Set<Promise<void>>();
+	private readonly retiringForkQueuePaths = new Map<string, Promise<void>>();
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
 	private clientName: string | undefined;
@@ -663,6 +675,9 @@ export class PixAcpAgent {
 			.onRequest(PIX_DEFER_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) =>
 				this.desktopDeferMessage(ctx.params),
 			)
+			.onRequest(PIX_FORK_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) =>
+				this.desktopForkMessage(ctx.params),
+			)
 			.onRequest(PIX_QUEUE_ACTION_METHOD, parseDesktopQueueActionRequest, (ctx) =>
 				this.desktopQueueAction(ctx.params),
 			)
@@ -720,6 +735,7 @@ export class PixAcpAgent {
 		await Promise.allSettled([...this.pendingSpawns]);
 		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
+		await Promise.all([...this.retiringForkQueues]);
 	}
 
 	getSession(sessionId: string): AgentSessionState | undefined {
@@ -1020,6 +1036,89 @@ export class PixAcpAgent {
 		return { disposition: "deferred", itemId: message.id };
 	}
 
+	private async desktopForkMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
+		await this.assertBrainstormWritable(params.sessionId);
+		const session = this.requireDesktopSession(params.sessionId);
+		await this.ensureDesktopQueuesLoaded(session);
+		const message = await this.desktopQueuedMessage(params);
+		await session.forks.admit(message);
+		if (this.clientName === "pix-desktop" && message.displayText.trim()) {
+			void queueRequestHistoryEntry(message.displayText).catch(() => undefined);
+		}
+		return { disposition: "fork", itemId: message.id };
+	}
+
+	private createForkQueue(owner: () => AgentSessionState): DesktopForkQueue {
+		const childIds = new Map<string, string>();
+		return new DesktopForkQueue({
+			isLive: () => !this.disposed && this.sessions.get(owner().acpSessionId) === owner(),
+			captureIdle: async () => {
+				const session = owner();
+				const busy = (state: PiSessionState) => session.activeRun || session.builtinRunning
+					|| state.isStreaming || state.isCompacting;
+				const state = await session.pi.getState();
+				if (busy(state)) return undefined;
+				if (!state.sessionFile) throw new Error("fork requires a persistent source session");
+				const entries = await session.pi.getEntries();
+				const checked = await session.pi.getState();
+				if (busy(checked) || checked.sessionFile !== state.sessionFile) return undefined;
+				const hasConversation = entries.entries.some((entry) => entry.type === "message" && isRecord(entry.message)
+					&& (entry.message.role === "user" || entry.message.role === "assistant"));
+				return { sessionPath: resolve(state.sessionFile), leafId: entries.leafId, cwd: session.cwd,
+					...(!hasConversation ? { unflushedEntries: entries.entries } : {}) };
+			},
+			create: this.options.createDesktopForkSnapshot ?? createDesktopForkSnapshot,
+			saveChild: async (child, message) => {
+				const session = owner();
+				const sessionId = randomUUID();
+				childIds.set(child.sessionPath, sessionId);
+				await this.saveDesktopQueues(session.cwd, child.sessionPath, { auto: [message], deferred: [], fork: [] });
+				await this.sessionMap.put({ sessionId, piSessionPath: child.sessionPath,
+					piSessionId: child.piSessionId, cwd: session.cwd, updatedAt: new Date().toISOString() });
+			},
+			announce: async (child) => {
+				const session = owner();
+				const sessionId = childIds.get(child.sessionPath);
+				if (!sessionId) throw new Error("fork child registration missing");
+				await session.client.notify(PIX_FORK_READY_METHOD, {
+					sourceSessionId: session.acpSessionId, sessionId, cwd: session.cwd,
+				});
+				childIds.delete(child.sessionPath);
+			},
+			cleanup: async (child) => {
+				const sessionId = childIds.get(child.sessionPath);
+				childIds.delete(child.sessionPath);
+				const results = await Promise.allSettled([
+					this.options.saveDesktopQueues
+						? this.saveDesktopQueues(owner().cwd, child.sessionPath, { auto: [], deferred: [], fork: [] })
+						: removeDesktopQueueTab(owner().cwd, child.sessionPath),
+					...(sessionId ? [this.sessionMap.delete(sessionId)] : []),
+					rm(child.sessionPath, { force: true }),
+				]);
+				for (const result of results) if (result.status === "rejected") {
+					this.options.logger.warn(`fork orphan cleanup failed: ${stringifyUnknown(result.reason)}`);
+				}
+			},
+			persist: () => this.saveDesktopQueues(owner().cwd, owner().queueSessionPath, {
+				auto: owner().autoUserMessages, deferred: owner().deferredUserMessages, fork: owner().forks.messages,
+			}),
+			changed: () => this.notifyDesktopQueueState(owner()),
+			report: (error) => this.options.logger.warn(`queued fork failed: ${stringifyUnknown(error)}`),
+		});
+	}
+
+	private retireForkQueue(session: AgentSessionState): void {
+		session.forks.close();
+		const pending = session.forks.settled();
+		this.retiringForkQueues.add(pending);
+		const path = session.queueSessionPath;
+		if (path) this.retiringForkQueuePaths.set(path, pending);
+		void pending.finally(() => {
+			this.retiringForkQueues.delete(pending);
+			if (path && this.retiringForkQueuePaths.get(path) === pending) this.retiringForkQueuePaths.delete(path);
+		}).catch(() => {});
+	}
+
 	private async desktopTakeAutoMessage(params: DesktopSessionRequest): Promise<DesktopQueueActionResponse> {
 		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
@@ -1028,7 +1127,12 @@ export class PixAcpAgent {
 		if (session.activeRun || session.builtinRunning || state.isStreaming || state.isCompacting) return {};
 		const message = session.autoUserMessages.shift();
 		if (!message) return {};
-		await this.persistDesktopQueues(session);
+		try {
+			await this.persistDesktopQueues(session);
+		} catch (error) {
+			session.autoUserMessages.unshift(message);
+			throw error;
+		}
 		await this.notifyDesktopQueueState(session);
 		return { message: cloneQueuedUserMessage(message) };
 	}
@@ -1037,6 +1141,13 @@ export class PixAcpAgent {
 		await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
+		if (params.source === "fork") {
+			if (params.action === "send-now") throw new RequestError(ERROR_INVALID_PARAMS, "send-now is not supported for fork messages");
+			const removed = await session.forks.take(params.index, params.text);
+			if (!removed) throw queueItemMissingError();
+			await this.notifyDesktopQueueState(session);
+			return params.action === "edit" ? { message: cloneQueuedUserMessage(removed) } : {};
+		}
 		const state = await session.pi.getState();
 		const interruptRequired = params.action === "send-now"
 			&& (Boolean(session.activeRun) || state.isStreaming || state.isCompacting === true);
@@ -1142,10 +1253,15 @@ export class PixAcpAgent {
 		const state = await session.pi.getState();
 		const sessionPath = state.sessionFile ? resolve(state.sessionFile) : undefined;
 		if (session.queueSessionPath === sessionPath) return;
+		// A closed owner may still be restoring a consumed fork item after its
+		// worker was invalidated. Do not hydrate a replacement from an interim state.
+		if (sessionPath) await this.retiringForkQueuePaths.get(sessionPath);
 		const persisted = await this.loadDesktopQueues(session.cwd, sessionPath);
 		session.queueSessionPath = sessionPath;
 		session.autoUserMessages = persisted.auto.map(cloneQueuedUserMessage);
 		session.deferredUserMessages = persisted.deferred.map(cloneQueuedUserMessage);
+		session.forks.load(persisted.fork ?? []);
+		void session.forks.tryIdle();
 	}
 
 	private async persistDesktopQueues(session: AgentSessionState): Promise<void> {
@@ -1153,6 +1269,7 @@ export class PixAcpAgent {
 		await this.saveDesktopQueues(session.cwd, session.queueSessionPath, {
 			auto: session.autoUserMessages,
 			deferred: session.deferredUserMessages,
+			fork: session.forks.messages,
 		});
 	}
 
@@ -1190,7 +1307,7 @@ export class PixAcpAgent {
 			text: message.displayText,
 			message: cloneQueuedUserMessage(message),
 		}));
-		return { sessionId: session.acpSessionId, items: [...steering, ...followUp, ...auto, ...deferred] };
+		return { sessionId: session.acpSessionId, items: [...steering, ...followUp, ...auto, ...deferred, ...session.forks.items()] };
 	}
 
 	private async notifyDesktopQueueState(session: AgentSessionState): Promise<void> {
@@ -1829,6 +1946,7 @@ export class PixAcpAgent {
 			followUpQueue: [],
 			autoUserMessages: [],
 			deferredUserMessages: [],
+			forks: this.createForkQueue(() => session),
 			trackedSteeringMessages: [],
 			sdkQueueRestoreAfterInterrupt: undefined,
 			pendingDialogIds: new Set(),
@@ -1869,6 +1987,7 @@ export class PixAcpAgent {
 		}
 		session.unsubscribeExit = pi.onExit((error) => this.onPiExit(session, error));
 		if (!startupOverride) await this.ensureDesktopQueuesLoaded(session);
+		void session.forks.tryIdle();
 		return session;
 	}
 
@@ -2008,6 +2127,10 @@ export class PixAcpAgent {
 		// A replaced process may still flush events while it is stopping. Never
 		// route those events into the newer process registered under the same id.
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		if ((event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled")
+			&& typeof event.pixForkSessionPath === "string" && event.pixForkLeafId !== undefined) {
+			session.forks.boundary({ sessionPath: event.pixForkSessionPath, leafId: event.pixForkLeafId, cwd: session.cwd });
+		}
 
 		if (isExtensionUiRequest(event)) {
 			void this.handleExtensionUiRequest(session, event);
@@ -2196,6 +2319,7 @@ export class PixAcpAgent {
 	 */
 	private onPiExit(session: AgentSessionState, error: Error): void {
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		this.retireForkQueue(session);
 		void this.brainstormHost.participantLost(session.acpSessionId);
 		void this.brainstormHost.cancelParent(session.acpSessionId, true);
 		this.sessions.delete(session.acpSessionId);
@@ -3453,6 +3577,7 @@ export class PixAcpAgent {
 	}
 
 	private async teardownSession(session: AgentSessionState): Promise<void> {
+		this.retireForkQueue(session);
 		if (this.sessions.get(session.acpSessionId) === session) {
 			this.sessions.delete(session.acpSessionId);
 		}

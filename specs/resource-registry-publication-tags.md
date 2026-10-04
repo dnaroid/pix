@@ -54,6 +54,15 @@ status: active
 - **Save to project registry** explicitly publishes an unpublished project copy
   in the Project namespace. Pushes to existing publications retain their scope.
   Existing collision/conflict protection applies.
+- The Registry Activity Bar local-changes menu offers **Sync project changes to
+  Registry** ([decision 0027](../docs/decisions/0027-sidebar-reason-actions.md)).
+  One workspace-scoped `push-project-resources` action freshly selects installed
+  skills/agents with `local-changes` and Project publication scope. Global/legacy
+  Global publications, unchanged resources, unpublished copies, unsafe/conflicted
+  states and project artifacts are untouched. Pushes run sequentially under the
+  checkout lock with existing revision/provenance guards and no overwrite dialog.
+  Failure stops the batch, reports the error and retains prior successful pushes;
+  retry selects only remaining eligible edits. It does not open a sidebar panel.
 - Published resources have a **Make project** / **Make global** visibility
   toggle. Global definitions live in `skills/<name>` or `agents/<name>.md`;
   Project definitions live in `projects/<projectKey>/skills/<name>` or

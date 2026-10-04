@@ -128,6 +128,7 @@ const ACTIVITY_ACTIONS_BY_NAME: readonly (readonly [readonly string[], string])[
   [["compress"], "Compacting context"],
   [["brainstorm"], "Consulting model council"],
   [["multi_tool_use", "parallel"], "Running parallel tools"],
+  [["codemode"], "Running code"],
   [["read", "read_file", "readoutput"], "Reading code"],
   [["grep", "rg", "glob", "find", "search", "ast_grep"], "Searching project"],
   [

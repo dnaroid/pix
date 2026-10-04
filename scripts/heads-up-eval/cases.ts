@@ -14,6 +14,8 @@ export interface EvalCase {
 	category: string;
 	rationale: string;
 	entries: EvalEntry[];
+	/** Runtime bridge envelopes passed through the production reducer, not transcript messages. */
+	delegatedEvents?: unknown[];
 	previousNotices?: string[];
 	expected: { kind: "none" } | NoticeExpectation;
 }
@@ -45,8 +47,21 @@ const migration = [
 ];
 const apiWarning = notice("Публичный API стал асинхронным", "getUser теперь возвращает Promise вместо User; существующие синхронные клиенты сломаются.", ["e03"], [["getUser"], ["Promise", "асинхрон", "async"], ["клиент", "caller", "consumer", "совместим"]]);
 
+const delegatedParent = [api[0]!, assistant("spawn", "Делегирую оптимизацию SDK ребёнку. Итоговый родительский ответ: готово, тесты прошли.")];
+function delegatedReport(report: string): unknown[] {
+	const identity = { version: 1, launchId: "eval-child", sessionId: "eval-parent", anchorId: "spawn", agentId: "sdk-worker" };
+	return [{ ...identity, phase: "started" }, { ...identity, phase: "completed", runDir: "synthetic/run", status: "done", report }];
+}
+
 /** Hand-authored synthetic development set. No repository/session/customer content is loaded. */
 export const HEADS_UP_CASES: readonly EvalCase[] = [
+	{ id: "delegated-api-break", category: "delegated", rationale: "A concrete child-reported async design conflicts with the synchronous API requirement despite success claims.", entries: delegatedParent,
+		delegatedEvents: delegatedReport("Done, tests pass. Updated exported getUser(id) in src/sdk.ts to async: it now returns Promise<User>. Existing synchronous clients must await it. All new async tests pass."),
+		expected: notice("Ребёнок сообщает об изменении API", "По отчёту ребёнка getUser теперь возвращает Promise вместо User; это нарушает требование не менять синхронных клиентов.", ["delegated:eval-child"], [["getUser"], ["Promise", "асинхрон", "async"], ["клиент", "caller", "consumer", "совместим"]]) },
+	{ id: "delegated-api-compatible", category: "delegated-control", rationale: "Same parent and successful child result, but the exported contract is preserved.", entries: delegatedParent,
+		delegatedEvents: delegatedReport("Done, tests pass. Only private warmCache is async. Exported getUser(id): User still reads the synchronous cache. Existing synchronous clients and return type are unchanged; compatibility tests pass."), expected: { kind: "none" } },
+	{ id: "delegated-api-fixed", category: "delegated-control", rationale: "A later correction and retest in the final report resolve its earlier async API conflict.", entries: delegatedParent,
+		delegatedEvents: delegatedReport("Initially changed exported getUser to async Promise<User>; tests passed but I noticed this violated the protected synchronous API. Corrected it: reverted the exported async change. Current getUser(id): User is synchronous; async work is private. Reran existing synchronous-client regressions: pass. Done."), expected: { kind: "none" } },
 	{ id: "api-break", category: "contract", rationale: "Exported return type contradicts the explicit compatibility requirement.", entries: api, expected: apiWarning },
 	{ id: "tenant-cache", category: "isolation", rationale: "Two tenants share a key and an observed request returns another tenant's profile.", entries: tenant,
 		expected: notice("Tenant profiles share a cache key", "The cache omits tenantId, so the same userId can receive another tenant's profile.", ["e02", "e03"], [["tenant", "арендатор"], ["cache", "кэш", "кеш"], ["profile", "профил"]]) },

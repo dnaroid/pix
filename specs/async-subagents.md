@@ -172,6 +172,13 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Parent completion delivery
 
 - Decision: [0031 — Single-channel subagent completion delivery](../docs/decisions/0031-subagent-completion-delivery.md).
+- The optional parent [Heads Up observer](heads-up-observer.md#delegated-work-first-increment)
+  receives a separate runtime-only evidence bridge: spawn captures session/anchor
+  ownership before routing awaits, and final retry/fallback completion publishes
+  a bounded child-reported result. This is not a parent message, wakeup, verified
+  mutation/test receipt or an additional completion-delivery channel. It does not
+  change wait/watch arbitration and does not replay adopted launches. Rationale:
+  [0034 — Heads Up observer](../docs/decisions/0034-heads-up-observer.md#delegated-evidence-follow-up--2026-10-04).
 - A tracked child's terminal status (`done`, `failed`, or `stopped`) sends
   an `async-subagents-agent-completion` custom message with result retrieval
   instructions via `triggerTurn: true` and `deliverAs: "followUp"`. An idle
@@ -1110,11 +1117,14 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/core/attachment-bridge.ts`
 - `external/pi-tools-suite/src/async-subagents/core/structured-result.ts`
 - `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/delegated-evidence.ts`
 - `external/pi-tools-suite/src/async-subagents/commands.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
 
 ## Tests
 
+- `tests/heads-up-delegated.test.ts`: cross-package report bridge, launch ownership,
+  provenance labels, redaction and duplicate suppression.
 - `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`:
   tool-result/follow-up arbitration and reservation lifecycle regressions.
 - `external/pi-tools-suite/test/async-subagents/owned-launch/`: launcher

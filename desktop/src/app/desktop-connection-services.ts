@@ -4,6 +4,7 @@ import type {
   SessionNotification,
 } from "@agentclientprotocol/sdk";
 import type { QueueState, QueuedUserMessage } from "../lib/acp-client";
+import type { ForkReadyNotification } from "../lib/acp-client-types";
 import type { SessionStateNotification } from "../lib/session-state";
 import { createConnectionStore } from "./connection.svelte";
 
@@ -31,6 +32,7 @@ type DesktopConnectionServicesOptions = {
   sessionCoordinator: () => SessionCoordinatorBridge;
   promptRuntime: () => PromptRuntimeBridge;
   workspaceSessionStartup: () => WorkspaceSessionStartupBridge;
+  onForkReady?: (notification: ForkReadyNotification) => void;
   requestElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
@@ -47,6 +49,7 @@ export function createDesktopConnectionServices(options: DesktopConnectionServic
     onCancelActivityRequest: (owner) => options.sessionCoordinator().cancelActivityRequest(owner),
     onQueueState: (state) => options.promptRuntime().handleQueueState(state),
     onQueueConsumed: (sessionId, message) => options.promptRuntime().handleQueueConsumed(sessionId, message),
+    onForkReady: options.onForkReady,
     onElicitation: options.requestElicitation,
     onDisconnect: () => options.sessionCoordinator().resetAfterDisconnect(),
     openWorkspaceSession: () => options.workspaceSessionStartup().open(),

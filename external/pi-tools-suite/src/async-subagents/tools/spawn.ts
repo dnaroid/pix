@@ -37,6 +37,7 @@ import { formatAgentStatus } from "../format.js";
 import { getLiveRun } from "../live.js";
 import { clampWatchSeconds, pollRunWithUpdates } from "../polling.js";
 import type { CompletionDelivery } from "../completion-delivery.js";
+import { beginDelegatedEvidence } from "../delegated-evidence.js";
 import type { RunState } from "../lib.js";
 import { renderPlainRunSummary, renderSubagentRun, renderSubagentSpawnPrompts } from "../render.js";
 import { normalizeAgentTasks, toTaskPreviews } from "../tasks.js";
@@ -231,6 +232,7 @@ export function registerSpawnTool(
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const parentSessionManager = ctx.sessionManager;
+			const evidenceOwner = { sessionId: parentSessionManager?.getSessionId?.() ?? "", anchorId: parentSessionManager?.getLeafId?.() ?? "" };
 			const parentSession = typeof ctx.sessionManager?.getSessionFile === "function"
 				? ctx.sessionManager.getSessionFile()
 				: undefined;
@@ -253,168 +255,179 @@ export function registerSpawnTool(
 				};
 			}
 			let routed: Awaited<ReturnType<typeof routeSubagentTasks>>;
+			// Capture observer ownership before routing/auth awaits can switch the parent branch.
+			const evidence = new Map((normalized.tasks ?? []).map((task) => [task.id, beginDelegatedEvidence(pi.events, evidenceOwner, task.id)]));
 			try {
-				routed = await routeSubagentTasks(normalized.tasks ?? [], config, ctx as any, signal ?? undefined);
-			} catch (error) {
-				if (!(error instanceof SubagentRoutingError)) throw error;
-				return {
-					content: [{ type: "text", text: `No agents were launched. Correct the roles and resubmit the whole batch.\n${error.message}` }],
-					details: { error: "subagent_routing", taskIds: error.taskIds, allowedTypes: error.allowedTypes },
-					isError: true,
-				};
-			}
-			const timeoutMs = timeoutMsFromSeconds(params.timeoutSeconds);
-			const parentModel = currentModelRef((ctx as { model?: unknown }).model);
-			let resolvedTasks: ResolvedAgentTaskConfig[];
-			try {
-				resolvedTasks = await Promise.all(routed.tasks.map(async (task) => applySessionModelFallback(await selectAvailableAgentModels(
-					resolveAgentTaskConfig(task, config, {
-						thinking: params.thinking,
-						extraArgs: Array.isArray(params.extraArgs) ? params.extraArgs : [],
-						forcedModel,
-						parentModel,
-						timeoutMs,
-					}), config, ctx.modelRegistry, signal,
-				))));
-			} catch (error) {
-				if (!(error instanceof SubagentModelSelectionError)) throw error;
-				return { content: [{ type: "text", text: error.message }], details: { error: "subagent_model_selection" }, isError: true };
-			}
-			const tasks: AgentTask[] = resolvedTasks.map((resolved) => resolved.task);
-			if (signal?.aborted) throw new Error("Aborted");
-			if (signal?.aborted) throw new Error("Aborted");
-			// Resolve the entire batch before creating run state or launching children.
-			const runDir = params.runDir
-				? resolveRunDir(ctx.cwd, params.runDir)
-				: createRunDir(ctx.cwd, params.slug);
-			const taskPreviews = toTaskPreviews(tasks).map((preview, index) => {
-				// tasks[i] === resolvedTasks[i].task (positional), so the resolved
-				// profile's icon rides along into every preview consumer (tool render
-				// details, live-state events, and the desktop subagents panel).
-				const icon = resolvedTasks[index]?.profile?.icon;
-				return icon ? { ...preview, icon } : preview;
-			});
-			const results: { id: string; pid: number; agentDir: string }[] = [];
-			const maxConcurrent = config.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
-			const semaphore = getProjectSemaphore(ctx.cwd, maxConcurrent);
-			const launchErrors: { id: string; error: string }[] = [];
-			recordSubagentRun(ctx.cwd, runDir, tasks.map((task) => task.id));
-
-			// Materialize prompts up front so queued agents appear as planned in status/wait
-			// output before their semaphore slot opens.
-			for (const task of tasks) writePromptFile(runDir, task);
-			const liveRun = getLiveRun(liveAgents, runDir);
-			const reservation = completionDelivery?.begin(parentSession);
-			let deliveredState: RunState | undefined;
-
-			try {
-				for (const resolved of resolvedTasks) {
-					const task = resolved.task;
-					const preview = taskPreviews.find((item) => item.id === task.id);
-					let resolveCompleted: () => void = () => {};
-					const completed = new Promise<void>((resolve) => {
-						resolveCompleted = resolve;
-					});
-					liveRun.set(task.id, { runDir, agentId: task.id, preview, parentSession, completed, awaitingCompletion: true });
-					reservation?.add(liveRun.get(task.id)!);
-
-					void launchQueuedAgent({
-						resolved,
-						runDir,
-						cwd: ctx.cwd,
-						parentSession,
-						semaphore,
-						signal: signal ?? undefined,
-						onResult: (result) => results.push({ id: task.id, pid: result.pid, agentDir: result.agentDir }),
-						onComplete: (completion) => {
-							resolveCompleted();
-							handleAgentCompletion(completion);
-						},
-						onCancelled: () => {
-							stopAgents(runDir, [task.id], { signal: "SIGTERM" });
-							resolveCompleted();
-							const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "stopped" as const };
-							handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 0, state });
-						},
-						onLaunchError: (error) => {
-							const message = errorMessage(error);
-							launchErrors.push({ id: task.id, error: message });
-							if (ownedLaunchHoldsSlot(runDir, task.id)) {
-								// No terminal proof for the owned artifacts: preserve
-								// ownership and the concurrency slot rather than
-								// fabricating a terminal launch failure.
-								onLiveAgentsChange?.();
-								return;
-							}
-							writeLaunchFailure(runDir, task, message, resolved.maxResultBytes);
-							resolveCompleted();
-							const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "failed" as const, exitCode: 1 };
-							handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 1, state });
-						},
-						onUpdate: () => {
-							onLiveAgentsChange?.();
-							const partialDetails: SubagentRunRenderDetails = {
-								runDir,
-								agents: getRunState(runDir).agents,
-								tasks: taskPreviews,
-								mode: "spawn",
-							};
-							onUpdate?.({
-								content: [{ type: "text", text: renderPlainRunSummary(partialDetails) }],
-								details: partialDetails,
-							});
-						},
-					onRpcEvent: (event) => {
-						recordSubagentUsage(parentSessionManager, event, task.id);
-						onAgentRpcEvent?.(runDir, task.id, event);
-					},
-					});
+				try {
+					routed = await routeSubagentTasks(normalized.tasks ?? [], config, ctx as any, signal ?? undefined);
+				} catch (error) {
+					if (!(error instanceof SubagentRoutingError)) throw error;
+					return {
+						content: [{ type: "text", text: `No agents were launched. Correct the roles and resubmit the whole batch.\n${error.message}` }],
+						details: { error: "subagent_routing", taskIds: error.taskIds, allowedTypes: error.allowedTypes },
+						isError: true,
+					};
 				}
-
-				// Let immediately available semaphore slots start before the first status poll.
-				await Promise.resolve();
-
-				const state = await pollRunWithUpdates(runDir, undefined, {
-					mode: "spawn",
-					tasks: taskPreviews,
-					timeoutSeconds: clampWatchSeconds(params.watchSeconds),
-					intervalSeconds: DEFAULT_UPDATE_INTERVAL_SECONDS,
-					signal: signal ?? undefined,
-					onUpdate,
-					settledState: completionDelivery ? (state) => completionDelivery.settledState(state) : undefined,
+				const timeoutMs = timeoutMsFromSeconds(params.timeoutSeconds);
+				const parentModel = currentModelRef((ctx as { model?: unknown }).model);
+				let resolvedTasks: ResolvedAgentTaskConfig[];
+				try {
+					resolvedTasks = await Promise.all(routed.tasks.map(async (task) => applySessionModelFallback(await selectAvailableAgentModels(
+						resolveAgentTaskConfig(task, config, {
+							thinking: params.thinking,
+							extraArgs: Array.isArray(params.extraArgs) ? params.extraArgs : [],
+							forcedModel,
+							parentModel,
+							timeoutMs,
+						}), config, ctx.modelRegistry, signal,
+					))));
+				} catch (error) {
+					if (!(error instanceof SubagentModelSelectionError)) throw error;
+					return { content: [{ type: "text", text: error.message }], details: { error: "subagent_model_selection" }, isError: true };
+				}
+				const tasks: AgentTask[] = resolvedTasks.map((resolved) => resolved.task);
+				if (signal?.aborted) throw new Error("Aborted");
+				if (signal?.aborted) throw new Error("Aborted");
+				// Resolve the entire batch before creating run state or launching children.
+				const runDir = params.runDir
+					? resolveRunDir(ctx.cwd, params.runDir)
+					: createRunDir(ctx.cwd, params.slug);
+				const taskPreviews = toTaskPreviews(tasks).map((preview, index) => {
+					// tasks[i] === resolvedTasks[i].task (positional), so the resolved
+					// profile's icon rides along into every preview consumer (tool render
+					// details, live-state events, and the desktop subagents panel).
+					const icon = resolvedTasks[index]?.profile?.icon;
+					return icon ? { ...preview, icon } : preview;
 				});
-				const details: SubagentRunRenderDetails = { runDir, agents: state.agents, tasks: taskPreviews, mode: "spawn" };
-				onLiveAgentsChange?.();
-				const hasActiveOrQueued = state.agents.some((agent) => agent.status === "planned" || agent.status === "running" || agent.status === "retrying");
-				const lines = [
-					`Scheduled ${tasks.length} agent(s) in ${runDir}`,
-					`Started ${results.length} agent(s) so far; maxConcurrent=${semaphore.limit} (project-wide).`,
-					...(routed.usedLlm
-						? [`LLM-routed ${Object.keys(routed.routes).length} inferred subagent type(s).`]
-						: []),
-					...(routed.warnings.length > 0 ? [`Routing fallback: ${routed.warnings.join(" ")}`] : []),
-					"",
-					...state.agents.map(
-						(a) => `${formatAgentStatus(a.status)} ${a.id}${a.pid ? ` (pid ${a.pid})` : ""}`,
-					),
-					...(launchErrors.length > 0
-						? ["", "Launch errors:", ...launchErrors.map((item) => `- ${item.id}: ${item.error}`)]
-						: []),
-					"",
-					hasActiveOrQueued
-						? "Agents continue running or queued in the background after this watch window."
-						: "All scheduled agents are no longer running or queued.",
-					`Use subagents({ action: "status" }) for the latest project run, or include runDir: "${runDir}" for an exact run.`,
-					"Use subagents({ action: \"result\", agentId: \"<agent-id>\" }) to read output; runDir is optional because .pi/subagents/registry.json maps agent IDs to their latest run.",
-				];
+				const results: { id: string; pid: number; agentDir: string }[] = [];
+				const maxConcurrent = config.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
+				const semaphore = getProjectSemaphore(ctx.cwd, maxConcurrent);
+				const launchErrors: { id: string; error: string }[] = [];
+				recordSubagentRun(ctx.cwd, runDir, tasks.map((task) => task.id));
 
-				deliveredState = state;
-				return {
-					content: [{ type: "text", text: lines.join("\n") }],
-					details,
-				};
+				// Materialize prompts up front so queued agents appear as planned in status/wait
+				// output before their semaphore slot opens.
+				for (const task of tasks) writePromptFile(runDir, task);
+				const liveRun = getLiveRun(liveAgents, runDir);
+				const reservation = completionDelivery?.begin(parentSession);
+				let deliveredState: RunState | undefined;
+
+				try {
+					for (const resolved of resolvedTasks) {
+						const task = resolved.task;
+						const preview = taskPreviews.find((item) => item.id === task.id);
+						let resolveCompleted: () => void = () => {};
+						const completed = new Promise<void>((resolve) => {
+							resolveCompleted = resolve;
+						});
+						liveRun.set(task.id, { runDir, agentId: task.id, preview, parentSession, completed, awaitingCompletion: true });
+						reservation?.add(liveRun.get(task.id)!);
+						const capture = evidence.get(task.id);
+						const reportCompletion = capture?.bind(runDir);
+
+						void launchQueuedAgent({
+							resolved,
+							runDir,
+							cwd: ctx.cwd,
+							parentSession,
+							semaphore,
+							signal: signal ?? undefined,
+							onResult: (result) => results.push({ id: task.id, pid: result.pid, agentDir: result.agentDir }),
+							onComplete: (completion) => {
+								reportCompletion?.(completion);
+								resolveCompleted();
+								handleAgentCompletion(completion);
+							},
+							onCancelled: () => {
+								capture?.cancel();
+								stopAgents(runDir, [task.id], { signal: "SIGTERM" });
+								resolveCompleted();
+								const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "stopped" as const };
+								handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 0, state });
+							},
+							onLaunchError: (error) => {
+								const message = errorMessage(error);
+								launchErrors.push({ id: task.id, error: message });
+								if (ownedLaunchHoldsSlot(runDir, task.id)) {
+									// No terminal proof for the owned artifacts: preserve
+									// ownership and the concurrency slot rather than
+									// fabricating a terminal launch failure.
+									onLiveAgentsChange?.();
+									return;
+								}
+								writeLaunchFailure(runDir, task, message, resolved.maxResultBytes);
+								capture?.cancel();
+								resolveCompleted();
+								const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "failed" as const, exitCode: 1 };
+								handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 1, state });
+							},
+							onUpdate: () => {
+								onLiveAgentsChange?.();
+								const partialDetails: SubagentRunRenderDetails = {
+									runDir,
+									agents: getRunState(runDir).agents,
+									tasks: taskPreviews,
+									mode: "spawn",
+								};
+								onUpdate?.({
+									content: [{ type: "text", text: renderPlainRunSummary(partialDetails) }],
+									details: partialDetails,
+								});
+							},
+						onRpcEvent: (event) => {
+							recordSubagentUsage(parentSessionManager, event, task.id);
+							onAgentRpcEvent?.(runDir, task.id, event);
+						},
+						});
+					}
+
+					// Let immediately available semaphore slots start before the first status poll.
+					await Promise.resolve();
+
+					const state = await pollRunWithUpdates(runDir, undefined, {
+						mode: "spawn",
+						tasks: taskPreviews,
+						timeoutSeconds: clampWatchSeconds(params.watchSeconds),
+						intervalSeconds: DEFAULT_UPDATE_INTERVAL_SECONDS,
+						signal: signal ?? undefined,
+						onUpdate,
+						settledState: completionDelivery ? (state) => completionDelivery.settledState(state) : undefined,
+					});
+					const details: SubagentRunRenderDetails = { runDir, agents: state.agents, tasks: taskPreviews, mode: "spawn" };
+					onLiveAgentsChange?.();
+					const hasActiveOrQueued = state.agents.some((agent) => agent.status === "planned" || agent.status === "running" || agent.status === "retrying");
+					const lines = [
+						`Scheduled ${tasks.length} agent(s) in ${runDir}`,
+						`Started ${results.length} agent(s) so far; maxConcurrent=${semaphore.limit} (project-wide).`,
+						...(routed.usedLlm
+							? [`LLM-routed ${Object.keys(routed.routes).length} inferred subagent type(s).`]
+							: []),
+						...(routed.warnings.length > 0 ? [`Routing fallback: ${routed.warnings.join(" ")}`] : []),
+						"",
+						...state.agents.map(
+							(a) => `${formatAgentStatus(a.status)} ${a.id}${a.pid ? ` (pid ${a.pid})` : ""}`,
+						),
+						...(launchErrors.length > 0
+							? ["", "Launch errors:", ...launchErrors.map((item) => `- ${item.id}: ${item.error}`)]
+							: []),
+						"",
+						hasActiveOrQueued
+							? "Agents continue running or queued in the background after this watch window."
+							: "All scheduled agents are no longer running or queued.",
+						`Use subagents({ action: "status" }) for the latest project run, or include runDir: "${runDir}" for an exact run.`,
+						"Use subagents({ action: \"result\", agentId: \"<agent-id>\" }) to read output; runDir is optional because .pi/subagents/registry.json maps agent IDs to their latest run.",
+					];
+
+					deliveredState = state;
+					return {
+						content: [{ type: "text", text: lines.join("\n") }],
+						details,
+					};
+				} finally {
+					reservation?.finish(deliveredState, signal);
+				}
 			} finally {
-				reservation?.finish(deliveredState, signal);
+				for (const capture of evidence.values()) capture.releaseUnbound();
 			}
 		},
 

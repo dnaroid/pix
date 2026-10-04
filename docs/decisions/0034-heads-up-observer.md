@@ -108,7 +108,8 @@ to one session/runtime, including while settings load asynchronously.
 Store Desktop defaults in the existing `pix-desktop.jsonc` profile under
 `headsUp`, independent of standalone TUI observer configuration. Reuse the
 normal conflict-checked settings editor and provider/model picker. Defaults
-apply on new/reloaded runtimes; a popup switch only changes its current runtime.
+apply on new/reloaded runtimes; a popup switch originally changed only its current
+runtime (the persistence follow-up below supersedes that part).
 Immediate propagation to all running sessions was not chosen because it could
 cancel or silently enable background requests in unrelated tabs. Shared TUI
 defaults were rejected to preserve the requested Desktop separation. Existing
@@ -119,3 +120,80 @@ This changes discoverability and configuration, not the observer's inference
 prompt, model-quality claims, or permission to act on findings. Browser
 integration uses synthetic model/native IPC to verify the UI contract; native
 window behavior and real-model usefulness remain distinct verification scopes.
+
+## Desktop compact controls and persistence follow-up — 2026-10-04
+
+Status: accepted; supersedes runtime-only Desktop enablement above, not TUI
+enablement or profile-default propagation. User approval is in this conversation:
+icon-only eye, grey off / primary enabled / flicker during work, dynamic-only popup,
+the standard switch, and retaining enablement after application restart.
+
+Evidence: the old popup command called only `setEnabled`, and initialization read
+only profile defaults, so toggling was lost on runtime recreation. Decision: save
+explicit Desktop on/off as non-message custom session metadata via the SDK and
+restore the last valid choice for that session before publishing enabled state.
+Branch navigation does not rewind a session-owned preference. Existing settings
+still supply the model and limits. No automatic check runs simply on restoration.
+
+Alternatives: writing global defaults would affect unrelated/new sessions;
+browser-local storage would separate ownership from durable native sessions and
+require replaying commands after reconnect. Neither is necessary to retain the
+current-session switch. Consequences: forks inherit metadata only when present
+in their copied branch, and drafts without a conversation are not persisted.
+TUI behavior, runtime counters/budgets and inference policy remain unchanged.
+Revisit if a global quick-toggle or explicit reset-to-default action is requested.
+
+Keep only the eye in chrome and live diagnostics in the popup; static model and
+budget settings remain in Settings. This removes duplicated configuration rather
+than hiding diagnostics. The standard switch preserves keyboard semantics.
+
+## Desktop limited indicator follow-up — 2026-10-04
+
+Status: accepted; supersedes primary-for-all-enabled states in the compact
+controls decision above. User requested a static amber eye for budget-blocked
+checks, with the limit and earliest known quota release in tooltip and popup.
+The [current spec](../../specs/heads-up-observer.md#presentation-and-feedback)
+defines the presentation contract.
+
+Evidence: runtime publishes `limited` for both hourly check and input budgets;
+`windowResetsAt` is the earliest reservation expiry, not a full reset or scheduled
+check. Decision: use the semantic warning color, prioritize limited over a live
+notice in status chrome, and restore primary only on a runtime state update.
+The finding card remains untouched. Do not infer recovery from wall time, start
+inference, or add polling. Keeping primary hides blocked work; guessing a full
+reset from the earliest expiry misrepresents the input budget. Revisit if runtime
+adds authoritative next-eligibility notifications. No inference policy changes.
+
+## Delegated evidence follow-up — 2026-10-04
+
+Status: accepted first increment for the same opt-in experiment. The user asked
+to continue the delegated-work handoff; that handoff explicitly permits bounded
+child reports while authoritative mutation/test provenance is unavailable.
+The [governing spec](../../specs/heads-up-observer.md#delegated-work-first-increment)
+defines the scope and limitations.
+
+Evidence: generic async completion notices are custom messages, excluded by the
+observer's transcript reducer; parent summaries can therefore hide a concrete
+child design conflict. Compact child events contain tool names/counts rather than
+authoritative file mutations, command arguments or test output. Structured results
+derive from the visible child report, not independent verification. Assumption:
+attributing a concrete reported conflict can still be useful, but usefulness and
+false-positive rates require semantic evaluation.
+
+Decision: use a passive runtime bridge with launch ownership captured before
+async routing, and bounded final reports after retries/fallback. Keep a single
+parent observer and unchanged follow-up/wait arbitration. Treat reports as claims,
+not inspected code or verified tests. Add a coalesced completion opportunity under
+existing budgets/interval/concurrency, so parent settlement does not strand new
+evidence. Retire launches across lifecycle boundaries instead of adopting old work.
+
+Alternatives deferred: authoritative child-tool instrumentation is a larger
+future provenance increment; global worktree diffs cannot attribute changes among
+concurrent workers; one observer per child expands cost and ownership complexity;
+using only parent follow-ups retains the original omission and delivery dependency.
+
+Consequences: child summaries may be incomplete or wrong, clipping can hide a
+correction, and lifecycle invalidation can drop late reports. This does not close
+the verified-diff/test-evidence gap. Revisit when child mutation/test provenance
+exists or representative sessions show omissions/false positives; do not infer
+production readiness from synthetic eval scores alone.

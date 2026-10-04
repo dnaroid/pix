@@ -40,6 +40,7 @@ mod native_process;
 mod preview_file;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
+mod sidebar_registry_resource_hash;
 mod startup_theme;
 mod window_geometry;
 mod window_restore;
@@ -4559,6 +4560,7 @@ fn sidebar_registry_indicator_state_inner(
                 root,
                 key,
                 &path,
+                tracked.resource_type == "agent",
                 &tracked.hash,
                 &mut hash_budget,
             )? {
@@ -4610,6 +4612,7 @@ fn sidebar_registry_indicator_state_inner(
                 root,
                 &cache_key,
                 &path,
+                false,
                 &tracked.hash,
                 &mut hash_budget,
             )?
@@ -4873,10 +4876,12 @@ fn sidebar_registry_cached_path_changed(
     root: &Path,
     cache_key: &str,
     path: &Path,
+    include_agent_companion: bool,
     expected_hash: &str,
     hash_budget: &mut u64,
 ) -> Result<Option<bool>, String> {
-    let (fingerprint_before, file_bytes) = sidebar_registry_tree_fingerprint(path)?;
+    let fingerprint = || sidebar_registry_resource_hash::fingerprint(path, include_agent_companion);
+    let (fingerprint_before, file_bytes) = fingerprint()?;
     let cached = state.registry_cache.lock().ok().and_then(|cache| {
         cache
             .get(root)
@@ -4885,7 +4890,7 @@ fn sidebar_registry_cached_path_changed(
     });
     if let Some(cached) = cached {
         if cached.expected_hash == expected_hash && cached.fingerprint == fingerprint_before {
-            let (fingerprint_after, _) = sidebar_registry_tree_fingerprint(path)?;
+            let (fingerprint_after, _) = fingerprint()?;
             return Ok((fingerprint_before == fingerprint_after).then_some(cached.changed));
         }
     }
@@ -4894,8 +4899,8 @@ fn sidebar_registry_cached_path_changed(
         return Ok(None);
     }
     *hash_budget -= file_bytes;
-    let actual_hash = sidebar_registry_hash_path(path)?;
-    let (fingerprint_after, _) = sidebar_registry_tree_fingerprint(path)?;
+    let actual_hash = sidebar_registry_resource_hash::hash(path, include_agent_companion)?;
+    let (fingerprint_after, _) = fingerprint()?;
     if fingerprint_before != fingerprint_after {
         return Ok(None);
     }

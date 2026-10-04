@@ -171,7 +171,7 @@ test("snapshot command is quiet, read-only, and remains available to an existing
 	headsUp({
 		on: (name: string, handler: (...args: any[]) => any) => { handlers.set(name, handler); return () => handlers.delete(name); },
 		registerCommand: (_name: string, definition: { handler: typeof command }) => { command = definition.handler; },
-		events: { emit: (_channel: string, snapshot: HeadsUpSnapshot) => snapshots.push(snapshot) },
+		events: { emit: (_channel: string, snapshot: HeadsUpSnapshot) => snapshots.push(snapshot), on: () => () => {} },
 	} as unknown as ExtensionAPI, async () => ({ enabled: false, model: "openai-codex/gpt-6-luna", config: DEFAULT_HEADS_UP_CONFIG }));
 	await handlers.get("session_start")!({}, ctx);
 	const before = snapshots.length;

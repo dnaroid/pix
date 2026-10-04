@@ -38,6 +38,7 @@ export interface AcpClientHandlers {
   readonly onCancelActivityRequest?: (owner: string) => void;
   readonly onQueueState?: (state: QueueState) => void;
   readonly onQueueConsumed?: (sessionId: string, message: QueuedUserMessage) => void;
+  readonly onForkReady?: (notification: ForkReadyNotification) => void;
   readonly onElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
   readonly onDiagnostic?: (message: string) => void;
   readonly onExit?: (exit: AcpExit) => void;
@@ -86,7 +87,7 @@ export interface PromptFileImage {
   readonly name?: string;
 }
 
-export type QueueSource = "sdk-steering" | "sdk-follow-up" | "auto" | "deferred";
+export type QueueSource = "sdk-steering" | "sdk-follow-up" | "auto" | "deferred" | "fork";
 export type QueueAction = "cancel" | "edit" | "send-now";
 
 export interface QueuedImage {
@@ -105,15 +106,22 @@ export interface QueuedUserMessage {
 export interface QueueItem {
   readonly id: string;
   readonly source: QueueSource;
-  readonly mode: "steering" | "follow-up";
+  readonly mode: "steering" | "follow-up" | "fork";
   readonly index: number;
   readonly text: string;
   readonly message?: QueuedUserMessage;
+  readonly error?: string;
 }
 
 export interface QueueState {
   readonly sessionId: string;
   readonly items: QueueItem[];
+}
+
+export interface ForkReadyNotification {
+  readonly sourceSessionId: string;
+  readonly sessionId: string;
+  readonly cwd: string;
 }
 
 export interface LazySessionHistory {

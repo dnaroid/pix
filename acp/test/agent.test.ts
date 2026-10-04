@@ -22,6 +22,8 @@ import type {
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
+	PIX_FORK_MESSAGE_METHOD,
+	PIX_FORK_READY_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
 	PIX_BASH_METHOD,
@@ -73,6 +75,8 @@ import type {
 	AutocompleteResponse,
 } from "../src/acp/autocomplete.js";
 import { SessionMapStore } from "../src/acp/session-map.js";
+import type { PersistedDesktopQueues } from "../src/acp/queue-store.js";
+import type { DesktopForkSnapshot, DesktopForkChild } from "../src/acp/desktop-fork-snapshot.js";
 import type { Logger } from "../src/logging.js";
 import type {
 	PiAgentMessage,
@@ -3726,6 +3730,188 @@ test("Pix Desktop todo clear validates its target and rejects busy state without
 		assert.equal(harness.clients[0]!.clearTodosCalls, 0);
 		assert.notEqual(first.sessionId, second.sessionId);
 	});
+});
+
+test("Desktop fork_message persists child auto payload and opens only through fork_ready, never prompts the source", async () => {
+	const saved = new Map<string, PersistedDesktopQueues>();
+	let failNextWrite = false;
+	const snapshots: DesktopForkSnapshot[] = [];
+	const ready: Array<{ sourceSessionId: string; sessionId: string; cwd: string }> = [];
+	const childPath = resolve(".pi/artifacts/desktop-fork-backend-20260723/transport-child.jsonl");
+	const h = createTestAdapter({
+		loadDesktopQueues: async (_cwd, path) => saved.get(path ?? "") ?? { auto: [], deferred: [] },
+		saveDesktopQueues: async (_cwd, path, queues) => {
+			if (failNextWrite) { failNextWrite = false; throw new Error("dequeue disk full"); }
+			saved.set(path ?? "", structuredClone(queues));
+		},
+		createDesktopForkSnapshot: async (snapshot) => { snapshots.push(snapshot); return { sessionPath: childPath, piSessionId: "fork-child" }; },
+	});
+	await connectAs(h.adapter, "pix-desktop", async (cx) => {
+		const source = await cx.request("session/new", { cwd: "/tmp/fork-transport", mcpServers: [] }) as { sessionId: string };
+		const pi = h.clients[0]!;
+		pi.entriesState.leafId = "idle-leaf";
+		const response = await cx.request(PIX_FORK_MESSAGE_METHOD, { sessionId: source.sessionId,
+			prompt: [{ type: "text", text: "child task" }, { type: "image", data: "abc", mimeType: "image/png" }], displayText: "child task" }) as { disposition: string; itemId: string };
+		assert.equal(response.disposition, "fork");
+		await waitFor(() => ready.length === 1);
+		assert.equal(snapshots[0]?.leafId, "idle-leaf");
+		assert.deepEqual(ready[0], { sourceSessionId: source.sessionId, sessionId: ready[0]!.sessionId, cwd: "/tmp/fork-transport" });
+		assert.equal(h.clients.length, 1, "Desktop will load the child runtime; ACP must not spawn/prompt it");
+		assert.equal(h.adapter.getSession(ready[0]!.sessionId), undefined);
+		assert.deepEqual(pi.promptCalls, []); assert.deepEqual(pi.steerCalls, []);
+		assert.equal(pi.aborts, 0); assert.equal(pi.pauses, 0);
+		assert.equal(saved.get(childPath)?.auto[0]?.id, response.itemId);
+		assert.deepEqual(saved.get(childPath)?.auto[0]?.images, [{ type: "image", data: "abc", mimeType: "image/png" }]);
+		assert.deepEqual(saved.get(pi.state.sessionFile!)?.fork, []);
+		const record = await new SessionMapStore(h.sessionMapPath, TEST_LOGGER).get(ready[0]!.sessionId);
+		assert.equal(record?.piSessionPath, childPath);
+		await cx.request("session/load", { sessionId: ready[0]!.sessionId, cwd: "/tmp/fork-transport", mcpServers: [], _meta: { "pix.lazyHistory": true } });
+		failNextWrite = true;
+		await assert.rejects(cx.request(PIX_TAKE_AUTO_MESSAGE_METHOD, { sessionId: ready[0]!.sessionId }), /Internal error/u);
+		assert.equal(h.adapter.getSession(ready[0]!.sessionId)!.autoUserMessages[0]?.id, response.itemId);
+		assert.equal(saved.get(childPath)?.auto[0]?.id, response.itemId, "failed dequeue keeps the child payload durable");
+		const taken = await cx.request(PIX_TAKE_AUTO_MESSAGE_METHOD, { sessionId: ready[0]!.sessionId }) as { message?: DesktopQueuedUserMessage };
+		assert.equal(taken.message?.id, response.itemId);
+		assert.equal(h.clients[1]!.promptCalls.length, 0, "taking payload is separate from ordinary Desktop prompt flow");
+	}, (app) => {
+		(app as unknown as { onNotification(method: string, parser: (value: unknown) => unknown,
+			handler: (ctx: { params: typeof ready[number] }) => void): void }).onNotification(
+			PIX_FORK_READY_METHOD, (value) => value, (ctx) => { ready.push(ctx.params); });
+	});
+	await h.adapter.dispose();
+});
+
+test("Desktop running fork uses first turn_end including tool results before agent_settled", async () => {
+	const snapshots: DesktopForkSnapshot[] = [];
+	let release!: (child: DesktopForkChild) => void;
+	const gate = new Promise<DesktopForkChild>((resolve) => { release = resolve; });
+	const h = createTestAdapter({ loadDesktopQueues: async () => ({ auto: [], deferred: [] }), saveDesktopQueues: async () => {},
+		createDesktopForkSnapshot: async (snapshot) => { snapshots.push(snapshot); return gate; } });
+	await connectAs(h.adapter, "pix-desktop", async (cx) => {
+		const source = await cx.request("session/new", { cwd: "/tmp/fork-turn-end", mcpServers: [] }) as { sessionId: string };
+		const pi = h.clients[0]!; pi.state.isStreaming = true;
+		await cx.request(PIX_FORK_MESSAGE_METHOD, { sessionId: source.sessionId, prompt: [{ type: "text", text: "parallel" }], displayText: "parallel" });
+		assert.equal(snapshots.length, 0);
+		pi.emit({ type: "turn_end", turnIndex: 0, message: { role: "assistant" }, toolResults: [],
+			pixForkLeafId: "captured-tool-result", pixForkSessionPath: pi.state.sessionFile } as PiEvent);
+		assert.equal(snapshots[0]?.leafId, "captured-tool-result", "starts synchronously at turn_end despite streaming source");
+		pi.entriesState.leafId = "later-user";
+		pi.emit({ type: "agent_settled", pixForkLeafId: "later-leaf", pixForkSessionPath: pi.state.sessionFile } as PiEvent);
+		assert.equal(snapshots.length, 1);
+		assert.equal(pi.promptCalls.length, 0); assert.equal(pi.steerCalls.length, 0); assert.equal(pi.aborts, 0); assert.equal(pi.pauses, 0);
+		await cx.request("session/close", { sessionId: source.sessionId });
+		release({ sessionPath: resolve(".pi/artifacts/desktop-fork-backend-20260723/stale-child.jsonl"), piSessionId: "stale-child" });
+	});
+	await h.adapter.dispose();
+	assert.equal((await new SessionMapStore(h.sessionMapPath, TEST_LOGGER).list()).length, 1, "stale child is not registered");
+});
+
+test("Desktop fork rows reject send-now without injection; edit/cancel return and remove their persisted payload", async () => {
+	const h = createTestAdapter({ loadDesktopQueues: async () => ({ auto: [], deferred: [] }), saveDesktopQueues: async () => {} });
+	await connectAs(h.adapter, "pix-desktop", async (cx) => {
+		const source = await cx.request("session/new", { cwd: "/tmp/fork-actions", mcpServers: [] }) as { sessionId: string };
+		const pi = h.clients[0]!; pi.state.isStreaming = true;
+		for (const action of ["edit", "cancel"] as const) {
+			await cx.request(PIX_FORK_MESSAGE_METHOD, { sessionId: source.sessionId, prompt: [{ type: "text", text: "queued" }], displayText: "queued" });
+			await assert.rejects(cx.request(PIX_QUEUE_ACTION_METHOD, { sessionId: source.sessionId, source: "fork", index: 0, text: "queued", action: "send-now" }), /send-now is not supported/u);
+			const response = await cx.request(PIX_QUEUE_ACTION_METHOD, { sessionId: source.sessionId, source: "fork", index: 0, text: "queued", action }) as { message?: DesktopQueuedUserMessage };
+			assert.equal(response.message?.promptText, action === "edit" ? "queued" : undefined);
+			const state = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: source.sessionId }) as DesktopQueueStateResponse;
+			assert.deepEqual(state.items, []);
+		}
+		assert.equal(pi.aborts, 0); assert.equal(pi.steerCalls.length, 0); assert.equal(pi.promptCalls.length, 0);
+	});
+	await h.adapter.dispose();
+});
+
+test("Desktop reopening a source waits for its retired fork restoration before loading queues", async () => {
+	const saved = new Map<string, PersistedDesktopQueues>();
+	let restored = false;
+	let sourcePath = "";
+	let consuming!: () => void;
+	const consumeStarted = new Promise<void>((done) => { consuming = done; });
+	let release!: () => void;
+	const consumeGate = new Promise<void>((done) => { release = done; });
+	let gated = false;
+	let creations = 0;
+	const h = createTestAdapter({
+		loadDesktopQueues: async (_cwd, path) => {
+			if (path === sourcePath && gated) assert.equal(restored, true, "replacement cannot read before retired source restoration");
+			return structuredClone(saved.get(path ?? "") ?? { auto: [], deferred: [], fork: [] });
+		},
+		saveDesktopQueues: async (_cwd, path, queues) => {
+			const snapshot = structuredClone(queues);
+			if (path === sourcePath && queues.fork?.length === 0 && !gated) {
+				gated = true; consuming(); await consumeGate;
+			}
+			saved.set(path ?? "", snapshot);
+			if (path === sourcePath && gated && queues.fork?.length === 1) restored = true;
+		},
+		createDesktopForkSnapshot: async () => {
+			if (++creations > 1) throw new Error("reopened queue retained");
+			return { sessionPath: resolve(".pi/artifacts/desktop-fork-backend-20260723/reopen-child.jsonl"), piSessionId: "reopen-child" };
+		},
+	});
+	try {
+		await connectAs(h.adapter, "pix-desktop", async (cx) => {
+			const source = await cx.request("session/new", { cwd: "/tmp/fork-reopen", mcpServers: [] }) as { sessionId: string };
+			const pi = h.clients[0]!;
+			sourcePath = pi.state.sessionFile!;
+			await cx.request(PIX_FORK_MESSAGE_METHOD, { sessionId: source.sessionId, prompt: [{ type: "text", text: "retain after reopen" }], displayText: "retain after reopen" });
+			await consumeStarted;
+			await cx.request("session/close", { sessionId: source.sessionId });
+			await cx.request("session/load", { sessionId: source.sessionId, cwd: "/tmp/fork-reopen", mcpServers: [], _meta: { "pix.lazyHistory": true } });
+			let hydrated = false;
+			const hydration = cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: source.sessionId }).then(() => { hydrated = true; });
+			await Promise.resolve(); await Promise.resolve();
+			assert.equal(hydrated, false, "queue hydration cannot publish an interim consumed queue");
+			release();
+			await hydration;
+			await h.adapter.getSession(source.sessionId)!.forks.settled();
+			const state = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: source.sessionId }) as DesktopQueueStateResponse;
+			assert.equal(state.items[0]?.text, "retain after reopen");
+			assert.equal(saved.get(sourcePath)?.fork?.length, 1);
+			assert.equal((await new SessionMapStore(h.sessionMapPath, TEST_LOGGER).list()).length, 1, "unpublished old child was removed");
+		});
+	} finally {
+		release();
+		await h.adapter.dispose();
+	}
+});
+
+test("Desktop failed fork reports an editable/cancelable queue error and does not retry on settlement", async () => {
+	let calls = 0;
+	const h = createTestAdapter({ loadDesktopQueues: async () => ({ auto: [], deferred: [] }), saveDesktopQueues: async () => {},
+		createDesktopForkSnapshot: async () => { calls++; throw new Error("snapshot disk full"); } });
+	await connectAs(h.adapter, "pix-desktop", async (cx) => {
+		const source = await cx.request("session/new", { cwd: "/tmp/fork-failure", mcpServers: [] }) as { sessionId: string };
+		await cx.request(PIX_FORK_MESSAGE_METHOD, { sessionId: source.sessionId, prompt: [{ type: "text", text: "retain" }], displayText: "retain" });
+		await h.adapter.getSession(source.sessionId)!.forks.settled();
+		const state = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: source.sessionId }) as DesktopQueueStateResponse;
+		assert.equal(state.items[0]?.source, "fork"); assert.equal(state.items[0]?.error, "snapshot disk full");
+		const pi = h.clients[0]!;
+		pi.emit({ type: "agent_settled", pixForkLeafId: "later", pixForkSessionPath: pi.state.sessionFile } as PiEvent);
+		assert.equal(calls, 1);
+		const edit = await cx.request(PIX_QUEUE_ACTION_METHOD, { sessionId: source.sessionId, source: "fork", index: 0, text: "retain", action: "edit" }) as { message?: DesktopQueuedUserMessage };
+		assert.equal(edit.message?.promptText, "retain");
+	});
+	await h.adapter.dispose();
+});
+
+test("Desktop source process exit invalidates a gated fork completion and never registers the child", async () => {
+	let release!: (child: DesktopForkChild) => void;
+	const gate = new Promise<DesktopForkChild>((resolve) => { release = resolve; });
+	const h = createTestAdapter({ loadDesktopQueues: async () => ({ auto: [], deferred: [] }), saveDesktopQueues: async () => {},
+		createDesktopForkSnapshot: async () => gate });
+	await connectAs(h.adapter, "pix-desktop", async (cx) => {
+		const source = await cx.request("session/new", { cwd: "/tmp/fork-exit", mcpServers: [] }) as { sessionId: string };
+		await cx.request(PIX_FORK_MESSAGE_METHOD, { sessionId: source.sessionId, prompt: [{ type: "text", text: "pending" }], displayText: "pending" });
+		await h.adapter.getSession(source.sessionId)!.forks.tryIdle();
+		h.clients[0]!.emitExit(new Error("pi process exited"));
+		release({ sessionPath: resolve(".pi/artifacts/desktop-fork-backend-20260723/exit-child.jsonl"), piSessionId: "exit-child" });
+	});
+	await h.adapter.dispose();
+	assert.equal((await new SessionMapStore(h.sessionMapPath, TEST_LOGGER).list()).length, 1);
 });
 
 test("Pix Desktop deferred queue persists and edit returns the paused message", async () => {

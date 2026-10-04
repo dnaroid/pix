@@ -40,6 +40,13 @@ test("desktop draft config is workspace-scoped and does not require a session id
 	assert.throws(() => parseDesktopDraftConfigRequest({}));
 });
 
+test("bulk project resource push is workspace-scoped without resource or artifact selection", () => {
+	assert.deepEqual(parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "push-project-resources" }), {
+		cwd: "/workspace", action: "push-project-resources",
+	});
+	assert.throws(() => parseDesktopRegistryActionRequest({ cwd: "", action: "push-project-resources" }));
+});
+
 test("desktop model routing is workspace-scoped and validates first-prompt metadata", () => {
 	assert.equal(PIX_MODEL_ROUTING_STATUS_METHOD, "pix/model/routing_status");
 	assert.deepEqual(parseDesktopModelRoutingStatusRequest({ cwd: "/workspace" }), { cwd: "/workspace" });

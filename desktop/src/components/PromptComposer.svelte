@@ -56,6 +56,7 @@
     onEnhance,
     onSubmit,
     onDefer,
+    onFork,
     onCreateTask,
     onScheduleContinuation,
     onPause = () => {},
@@ -90,6 +91,7 @@
     onEnhance?: () => void | Promise<void>;
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
+    onFork?: () => void | Promise<void>;
     onCreateTask?: () => void | Promise<void>;
     onScheduleContinuation?: () => void | Promise<void>;
     onPause?: () => void | Promise<void>;
@@ -180,6 +182,7 @@
   const hasConversationTarget = $derived(!!conversationContextKey);
   const canChooseAttachments = $derived(!editorMode && !questionMode && hasConversationTarget && ready);
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
+  const canFork = $derived(!editorMode && !!onFork && !!activeSessionId && ready && hasQueueableDraft);
   const canSubmitPrompt = $derived(
     !editorMode
       && !questionMode
@@ -319,6 +322,17 @@
     await onDefer();
   }
 
+  async function forkWithVoiceStop(): Promise<void> {
+    composerMenuOpen = false;
+    if (!canFork) return;
+    const source = activeSessionId;
+    await voiceController.stop();
+    if (source !== activeSessionId || !canFork) return;
+    await focus();
+    if (source !== activeSessionId || !canFork) return;
+    await onFork?.();
+  }
+
   async function createTaskWithVoiceStop(): Promise<void> {
     composerMenuOpen = false;
     if (!canCreateTask || !onCreateTask) return;
@@ -377,6 +391,7 @@
       { label: enhanceCommand.label, disabled: !canEnhancePrompt },
       { label: createTaskCommand.label, disabled: !canCreateTask },
       { label: deferCommand.label, disabled: !activeSessionId || !ready || !hasQueueableDraft },
+      { label: "Send to fork", disabled: !canFork },
       { label: scheduleContinuationCommand.label, disabled: !canScheduleContinuation },
     ];
   }
@@ -576,12 +591,14 @@
     canEnhance={canEnhancePrompt}
     {canCreateTask}
     canDefer={!!activeSessionId && ready && hasQueueableDraft}
+    {canFork}
     scheduleContinuationLabel={scheduleContinuationCommand.label}
     canScheduleContinuation={canScheduleContinuation}
     onOpenHistory={() => void openPromptHistory()}
     onEnhance={() => void enhanceWithVoiceStop()}
     onCreateTask={() => void createTaskWithVoiceStop()}
     onDefer={() => void deferWithVoiceStop()}
+    onFork={() => void forkWithVoiceStop()}
     onScheduleContinuation={scheduleContinuation}
     onKeydown={handleComposerMenuKeydown}
   />

@@ -350,6 +350,8 @@
     "git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot),
     "git.fix-ci": gitCi.canFixWithAi,
     "registry.refresh": registryReady && !registryLoading && !registryActionId,
+    "registry.push-project-resources": registryReady && !registryLoading && !registryActionId
+      && registrySnapshot?.configured !== false && !registrySnapshot?.projectIssue,
     "idx.review": sessionReady && !idxBusy,
   });
   const indicatorActions = createWorkspaceSidebarIndicatorActions({
@@ -373,6 +375,7 @@
       "git.push": () => onGitPush(),
       "git.commit-push": () => { void onGitStageGenerateCommitPush?.(); },
       "registry.refresh": () => onRegistryRefresh(),
+      "registry.push-project-resources": () => onRegistryAction({ action: "push-project-resources" }, "push-project-resources"),
       "idx.review": () => onRefreshKnowledge(),
     },
   });

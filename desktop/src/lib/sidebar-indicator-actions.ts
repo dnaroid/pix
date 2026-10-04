@@ -4,7 +4,7 @@ export type SidebarIndicatorActionId =
   | "project.retry" | "tasks.reload" | "tasks.show" | "tasks.running"
   | "git.refresh" | "git.ci" | "git.fix-ci" | "git.conflicts" | "git.branch"
   | "git.fetch" | "git.changes" | "git.push" | "git.incoming" | "git.commit-push"
-  | "registry.refresh" | "registry.review" | "registry.sync"
+  | "registry.refresh" | "registry.review" | "registry.sync" | "registry.push-project-resources"
   | "scripts.inspect" | "scripts.running"
   | "idx.inspect" | "idx.review" | "idx.maintenance" | "idx.running"
   | "settings.inspect";
@@ -39,6 +39,7 @@ const ACTIONS: Record<SidebarIndicatorActionId, string> = {
   "registry.refresh": "Retry Registry check",
   "registry.review": "Review resource changes…",
   "registry.sync": "Inspect project sync…",
+  "registry.push-project-resources": "Sync project changes to Registry",
   "scripts.inspect": "Inspect terminal / launch errors",
   "scripts.running": "Show running terminals",
   "idx.inspect": "Inspect IDX error",
@@ -66,7 +67,7 @@ const REASON_ACTIONS: Record<SidebarIndicatorReasonId, readonly SidebarIndicator
   "registry.attention": ["registry.review"],
   "registry.syncing": ["registry.sync"],
   "registry.pending": ["registry.sync"],
-  "registry.local": ["registry.review"],
+  "registry.local": ["registry.review", "registry.push-project-resources"],
   "scripts.error": ["scripts.inspect"],
   "scripts.failed": ["scripts.inspect"],
   "scripts.running": ["scripts.running"],

@@ -36,9 +36,11 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - File tools show the path instead of repeating a human title such as `read Read path`.
 - Reads of `SKILL.md` (direct `read` and the TUI-recognized non-mutating shell reader commands) display as `skill <directory name>` in both child rows and the collapsed group header. Lightweight replay omits `rawInput` until a result is expanded, so direct reads also classify from the tool location or read title at ingestion. Arbitrary shell programs are not classified by inspecting their effects. The skill name is cached during tool ingestion/update so collapsed headers never inspect `rawInput`; collapsed group list names always keep their native semantic tool tones regardless of liveness, while ordinary reads and shell mutations retain their normal tool name.
 - Read ranges use the TUI `path:offset+limit` form.
+- Expanded source reads use theme-aware syntax highlighting by file extension, including `.gd` GDScript (keywords, types, strings and hash comments). Legacy read titles with range suffixes also resolve their source language. Unknown languages and oversized sources retain escaped, untruncated plaintext; directory listings remain plain.
 - Shell commands collapse whitespace to one line.
 - Expanded `codemode`, shell/execution aliases, `repo_*`, `ast_grep`, `ast_apply`, `subagents`, `brainstorm`, `web_search`, and `question` rows show full raw input in an explicitly labeled Input block before Result. Fields and nested tasks/questions are readable without JSON string escaping; multiline strings remain intact. No separate input block is added for `apply_patch`, reads, web fetches, planning or session tools. Existing patch presentation remains unchanged.
 - Selected calls with input but no result can still expand. Input formatting is deferred until the individual disclosure mounts; lightweight replay continues hydrating input/result only on demand.
+- Expanded executable inputs use the shared theme-aware syntax highlighter: JavaScript for `codemode`, shell syntax for shell/execution aliases. Other tool inputs remain plain text. Input keeps soft wrapping and all supplied fields; the shared large-source safeguard falls back to escaped plaintext without truncation.
 - Expanded text input/result panels grow to at most `min(480px, 60vh)` rather than 220px. They contain scroll chaining at both boundaries, so wheel/trackpad scrolling inside a panel does not move the surrounding chat at its start/end. Outside the panels chat scrolling remains normal.
 - Each expanded tool body has its own keyboard-accessible gutter button. Clicking it closes only that tool disclosure, unmounts its body and restores focus to its summary; the enclosing activity group and sibling disclosures stay open.
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.
@@ -72,6 +74,9 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - `desktop/src/lib/tool-presentation.ts`
 - `desktop/src/lib/tool-output.ts`
 - `desktop/src/lib/tool-input.ts`
+- `desktop/src/lib/syntax-highlight.ts`
+- `desktop/src/lib/syntax-highlight.test.ts`
+- `desktop/src/lib/gdscript-highlight.ts`
 - `desktop/src/lib/tool-input.test.ts`
 - `desktop/src/components/ToolResult.test.ts`
 - `desktop/src/components/TranscriptPane.svelte`

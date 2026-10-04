@@ -84,6 +84,25 @@ Commands remain small and use existing workflows. Some actions navigate to contr
 instead of performing work immediately. Cause mappings and enabled guards must stay
 in sync with command owners; activation and lifecycle tests cover stale contexts.
 
+### Project-only bulk Registry publication (2026-10-04)
+
+The user approved a Registry icon context-menu command to sync all local edits,
+explicitly excluding Global resources. Existing per-card push and publication
+scope/provenance provide the safety boundary; installed status alone is not proof
+of Project scope. The command therefore freshly selects only Project publications
+with `local-changes` in the backend and reuses guarded pushes under the checkout
+lock. This extends [Registry publication scope and tags](../../specs/resource-registry-publication-tags.md).
+
+A frontend loop over a possibly stale catalog and reusing `sync-project` were
+rejected: the former cannot own one fresh serialized selection; the latter also
+publishes new Local-only resources and project artifacts, outside this request.
+The batch stops at its first failure rather than claiming atomicity across Git
+pushes; successful earlier publications remain and retries skip them. No conflict
+overwrite or scope promotion is added. Background resource pushes and foreground
+actions share eligibility/mutex guards, and stale completions remain workspace-
+generation guarded. Revisit if users request conflict resolution, unpublished
+resources or project artifacts in the same bulk operation.
+
 ## Revisit when
 
 New indicator causes or command-owner eligibility rules are introduced, native QA

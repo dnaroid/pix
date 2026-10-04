@@ -21,6 +21,8 @@ export const PIX_QUEUE_STATE_METHOD = "pix/session/queue_state";
 export const PIX_QUEUE_MESSAGE_METHOD = "pix/session/queue_message";
 export const PIX_DEFER_MESSAGE_METHOD = "pix/session/defer_message";
 export const PIX_QUEUE_ACTION_METHOD = "pix/session/queue_action";
+export const PIX_FORK_MESSAGE_METHOD = "pix/session/fork_message";
+export const PIX_FORK_READY_METHOD = "pix/session/fork_ready";
 export const PIX_TAKE_AUTO_MESSAGE_METHOD = "pix/session/take_auto_message";
 export const PIX_QUEUE_CONSUMED_METHOD = "pix/session/queue_consumed";
 export const PIX_REGISTRY_ACTION_METHOD = "pix/registry/action";
@@ -322,7 +324,7 @@ export interface DesktopSessionImageResponse {
 	readonly mimeType: string;
 }
 
-export type DesktopQueueSource = "sdk-steering" | "sdk-follow-up" | "auto" | "deferred";
+export type DesktopQueueSource = "sdk-steering" | "sdk-follow-up" | "auto" | "deferred" | "fork";
 export type DesktopQueueAction = "cancel" | "edit" | "send-now";
 
 export interface DesktopQueuedImage {
@@ -338,13 +340,24 @@ export interface DesktopQueuedUserMessage {
 	readonly images: readonly DesktopQueuedImage[];
 }
 
+export interface DesktopQueuedForkMessage extends DesktopQueuedUserMessage {
+	readonly error?: string;
+}
+
+export interface DesktopForkReadyNotification {
+	readonly sourceSessionId: string;
+	readonly sessionId: string;
+	readonly cwd: string;
+}
+
 export interface DesktopQueueItem {
 	readonly id: string;
 	readonly source: DesktopQueueSource;
-	readonly mode: "steering" | "follow-up";
+	readonly mode: "steering" | "follow-up" | "fork";
 	readonly index: number;
 	readonly text: string;
 	readonly message?: DesktopQueuedUserMessage;
+	readonly error?: string;
 }
 
 export interface DesktopQueueStateResponse {
@@ -359,7 +372,7 @@ export interface DesktopQueueSubmitRequest extends DesktopSessionRequest {
 }
 
 export interface DesktopQueueSubmitResponse {
-	readonly disposition: "steering" | "auto" | "deferred";
+	readonly disposition: "steering" | "auto" | "deferred" | "fork";
 	readonly itemId: string;
 }
 
@@ -384,7 +397,7 @@ export type DesktopRegistryResourceType = "skill" | "agent";
 export type DesktopRegistryProjectScope = "tasks" | "plans" | "todo" | "workspace" | "project";
 
 export type DesktopRegistryActionRequest = { readonly cwd: string } & (
-	| { readonly action: "refresh" | "configure" | "project-key" }
+	| { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" }
 	| {
 		readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
 		readonly type: DesktopRegistryResourceType;
@@ -624,7 +637,7 @@ export function parseDesktopQueueActionRequest(value: unknown): DesktopQueueActi
 	const session = parseDesktopSessionRequest(value);
 	if (
 		!isRecord(value)
-		|| !["sdk-steering", "sdk-follow-up", "auto", "deferred"].includes(String(value.source))
+		|| !["sdk-steering", "sdk-follow-up", "auto", "deferred", "fork"].includes(String(value.source))
 		|| !Number.isSafeInteger(value.index)
 		|| Number(value.index) < 0
 		|| typeof value.text !== "string"
@@ -646,7 +659,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		throw new RequestError(ERROR_INVALID_PARAMS, "registry action request requires an action");
 	}
 	const workspace = { cwd: value.cwd };
-	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key") {
+	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key" || value.action === "push-project-resources") {
 		return { ...workspace, action: value.action };
 	}
 	if (["install", "update", "push", "uninstall", "remove", "make-local", "tags", "toggle-scope"].includes(value.action)) {

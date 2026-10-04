@@ -30,10 +30,52 @@ type PromptQueueActionsOptions = {
   refreshSessions: () => void | Promise<void>;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
+  waitForAttachmentDraftSettled?: (key: string) => Promise<void>;
 };
 
 export function createPromptQueueActions(options: PromptQueueActionsOptions) {
   let actionRunning = $state(false);
+
+  async function forkCurrentDraft(): Promise<void> {
+    const requestClient = options.client();
+    const sessionId = options.activeSessionId();
+    if (!requestClient || !sessionId || actionRunning) return;
+    const draftKey = options.attachmentDraftKey();
+    const textBeforeWait = options.promptText();
+    const generationBeforeWait = options.attachmentGeneration();
+    actionRunning = true;
+    try {
+      await options.waitForAttachmentDraftSettled?.(draftKey);
+      if (requestClient !== options.client() || sessionId !== options.activeSessionId()
+        || draftKey !== options.attachmentDraftKey() || textBeforeWait !== options.promptText()
+        || generationBeforeWait !== options.attachmentGeneration()) return;
+      const text = options.promptText().trim();
+      const attachments = options.promptAttachments();
+      if (!text && attachments.length === 0) return;
+      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported());
+      options.setErrorMessage(null);
+      options.setPromptText("");
+      options.invalidateAttachmentDraft();
+      const clearedGeneration = options.attachmentGeneration();
+      try {
+        await requestClient.forkMessage(sessionId, blocks, text, fileImages);
+        if (requestClient === options.client()) void options.promptRuntime.refreshQueueState(sessionId);
+      } catch (error) {
+        if (requestClient === options.client() && sessionId === options.activeSessionId()
+          && draftKey === options.attachmentDraftKey() && clearedGeneration === options.attachmentGeneration()
+          && !options.promptText() && options.promptAttachments().length === 0) {
+          options.bumpAttachmentGeneration();
+          options.setPromptText(text);
+          options.setPromptAttachments([...attachments]);
+        }
+        throw error;
+      }
+    } catch (error) {
+      if (requestClient === options.client()) options.reportError(error);
+    } finally {
+      actionRunning = false;
+    }
+  }
 
   async function queueDraftForCurrentRun(
     text: string,
@@ -104,6 +146,8 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
   }
 
   async function actOnQueuedMessage(item: QueueItem, action: QueueAction): Promise<void> {
+    // Fork payloads must never fall through to sending in the source session.
+    if (item.source === "fork" && action === "send-now") return;
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
     if (!requestClient || !sessionId || actionRunning) return;
@@ -152,6 +196,7 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
     get actionRunning() { return actionRunning; },
     queueDraftForCurrentRun,
     deferCurrentDraft,
+    forkCurrentDraft,
     deferDraft,
     actOnQueuedMessage,
   };

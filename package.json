@@ -67,7 +67,7 @@
     "test": "npm run test:inner",
     "test:inner": "node --import tsx --test \"tests/**/*.test.ts\"",
     "eval:heads-up": "node --import tsx scripts/heads-up-eval/run.ts",
-    "test:heads-up-eval": "tsc -p scripts/heads-up-eval/tsconfig.json && node --import tsx --test tests/heads-up-eval.test.ts tests/heads-up-context.test.ts tests/heads-up-controller.test.ts tests/heads-up-extension.test.ts",
+    "test:heads-up-eval": "tsc -p scripts/heads-up-eval/tsconfig.json && node --import tsx --test tests/heads-up-eval.test.ts tests/heads-up-context.test.ts tests/heads-up-controller.test.ts tests/heads-up-extension.test.ts tests/heads-up-delegated.test.ts",
     "test:tools-suite": "npm --prefix external/pi-tools-suite test",
     "test:dcp-session-sim": "npm --prefix external/pi-tools-suite run test:dcp-session-sim",
     "test:dcp-reminder-e2e": "npm --prefix external/pi-tools-suite run test:dcp-reminder-e2e",

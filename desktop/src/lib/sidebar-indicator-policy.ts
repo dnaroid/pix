@@ -81,7 +81,8 @@ export function sidebarIndicatorReasons(inputs: SidebarIndicatorInputs): Sidebar
     registrySyncActive && registrySync?.phase === "pending"
       ? { id: "registry.pending", tone: "info", reason: "Project changes are waiting to sync" }
       : undefined,
-    !registrySyncActive && poll?.registry.localChanges
+    !registrySyncActive && (poll?.registry.localChanges || inputs.registrySnapshot?.items.some((item) =>
+      item.type !== "project" && item.local && item.status === "local-changes" && item.publicationScope === "project"))
       ? { id: "registry.local", tone: "warning", reason: "Local registry resources need sync" }
       : undefined,
   );

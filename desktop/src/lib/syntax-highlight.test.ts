@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { highlightCode, languageForFilePath, languageForReadTool } from "./syntax-highlight";
 
 describe("syntax highlighting", () => {
+  it("recognizes GDScript reads including range-bearing legacy titles", () => {
+    expect(languageForFilePath("presentation/recon/mission_result.gd")).toBe("gdscript");
+    expect(languageForReadTool("read", "read presentation/recon/mission_result.gd:25+50")).toBe("gdscript");
+    expect(languageForReadTool("read", "Ls src", "src/script.gd")).toBeUndefined();
+  });
+  it("highlights GDScript keywords, types, strings and hash comments safely", () => {
+    const code = 'func display(view: Dictionary) -> void:\n\tvar won: bool = true # <script>\n\treturn "<hello>"\n';
+    const result = highlightCode(code, "gdscript");
+    expect(result.language).toBe("gdscript");
+    expect(result.html).toContain('sh__token--keyword');
+    expect(result.html).toContain('sh__token--class');
+    expect(result.html).toContain('sh__token--comment');
+    expect(result.html).toContain('sh__token--string');
+    expect(result.html).not.toContain("<script>");
+    expect(result.html.replace(/<[^>]*>/g, "")).toBe(code.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"));
+    expect(highlightCode("x".repeat(33_000), "gdscript").language).toBe("plaintext");
+  });
   it("keeps large code as escaped, untruncated lines without token markup", () => {
     const line = 'const value = "<script>&\\\"";';
     const source = `${Array.from({ length: 4000 }, () => line).join("\n")}\n`;

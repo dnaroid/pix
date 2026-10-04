@@ -32,6 +32,14 @@ function inputs(service: SidebarIndicatorServiceState): SidebarIndicatorInputs {
 }
 
 describe("sidebar indicators", () => {
+  it("uses project resource snapshot edits for Registry attention before the local poll catches up", () => {
+    const base = inputs({ poll: poll(), unseenScriptFailureIds: [], unseenIdxFailureIds: [] });
+    const item = { id: "skill:draft", type: "skill" as const, name: "draft", status: "local-changes" as const,
+      statusLabel: "Local changes", icon: "!", local: true, remote: true, publicationScope: "project" as const, actions: [] };
+    const snapshot = { version: 1 as const, configured: true, branch: "main", checkedAt: "now", items: [item] };
+    expect(sidebarIndicators({ ...base, registrySnapshot: snapshot }).registry?.tone).toBe("warning");
+    expect(sidebarIndicators({ ...base, registrySnapshot: { ...snapshot, items: [{ ...item, publicationScope: "global" }] } }).registry).toBeUndefined();
+  });
   it("reports planned tasks without confusing completion with work remaining", () => {
     const base = inputs({ poll: poll(), unseenScriptFailureIds: [], unseenIdxFailureIds: [] });
     expect(sidebarIndicators({ ...base, hasPlannedTasks: false }).tasks).toBeUndefined();

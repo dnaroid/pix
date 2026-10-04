@@ -36,7 +36,10 @@ export interface PiImageContent {
  * Events a pi RPC process can emit: agent session events plus extension UI
  * requests (`ctx.ui.*` dialogs from extensions, delivered over stdout).
  */
-export type PiEvent = JsonAgentSessionEvent | RpcExtensionUIRequest;
+export type PiEvent = (JsonAgentSessionEvent | RpcExtensionUIRequest) & {
+	readonly pixForkLeafId?: string | null;
+	readonly pixForkSessionPath?: string;
+};
 
 export type PiEventListener = (event: PiEvent) => void;
 

@@ -8,6 +8,14 @@ const INPUT_TOOLS = new Set([
   "ast_grep", "ast_apply", "subagents", "brainstorm", "web_search", "question",
 ]);
 
+/** Only executable inputs have a known language; prose/search fields stay plain. */
+export function languageForToolInput(tool: InputSource): string | undefined {
+  const name = toolPresentationName(tool);
+  if (name === "codemode") return "javascript";
+  if (["shell", "bash", "shell_command", "exec", "execute", "run_command"].includes(name)) return "shell";
+  return undefined;
+}
+
 /** Selection stays cheap for closed rows; formatting happens only on expansion. */
 export function hasToolInput(tool: InputSource): boolean {
   const name = toolPresentationName(tool);

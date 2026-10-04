@@ -11,12 +11,18 @@ describe("queued message presentation", () => {
 
   it("keeps paused and steering status accessible without visible text badges", () => {
     expect(source).toContain('aria-label={label(item)}');
-    expect(source).toContain('{#if item.source === "auto" || item.source === "sdk-follow-up"}');
+    expect(source).toContain('{#if item.source === "auto" || item.source === "sdk-follow-up" || item.source === "fork"}');
     expect(source).toContain('<Pause');
     expect(source).toContain('<Hourglass');
     expect(source).toContain('aria-label="Send queued message immediately"');
     expect(source).toContain('aria-label="Edit queued message"');
     expect(source).toContain('aria-label="Cancel queued message"');
+  });
+
+  it("distinguishes fork items and prevents sending them into the source", () => {
+    expect(source).toContain('<GitFork');
+    expect(source).toContain('if (item.source === "fork") return "fork"');
+    expect(source).toContain('disabled={disabled || item.source === "fork"}');
   });
 
   it("distinguishes paused and waiting icons with quiet semantic color tiles", () => {

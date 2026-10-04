@@ -179,6 +179,7 @@ describe("registry background project sync", () => {
 function syncFixture(registryAction: ReturnType<typeof vi.fn>) {
   const client = { registryAction } as unknown as AcpClient;
   let workspace = "/project";
+  const reportError = vi.fn();
   const store = createRegistryStore({
     client: () => client,
     operationRunning: () => false,
@@ -188,15 +189,64 @@ function syncFixture(registryAction: ReturnType<typeof vi.fn>) {
     loadWorkspaceSettings: vi.fn(),
     loadProjectTasks: vi.fn(),
     loadProjectDocuments: vi.fn(),
-    reportError: vi.fn(),
+    reportError,
   });
   const snapshot = { version: 1, configured: true, branch: "main", checkedAt: "now", items: [] };
   const publish = (data: unknown = snapshot) => store.handleSessionState({
     sessionId: "session", channel: REGISTRY_STATE_CHANNEL, data,
   });
   publish();
-  return { store, snapshot, publish, switchWorkspace: () => { workspace = "/next"; store.reset(); publish(); } };
+  return { store, snapshot, publish, reportError, switchWorkspace: () => { workspace = "/next"; store.reset(); publish(); } };
 }
+
+describe("manual bulk project resource sync", () => {
+  it.each(["error", "projectIssue"])("serializes one workspace RPC and reports snapshot %s", async (field) => {
+    let finish!: (value: unknown) => void;
+    const registryAction = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const f = syncFixture(registryAction);
+    const pending = f.store.runAction({ action: "push-project-resources" }, "push-project-resources");
+    expect(f.store.actionId).toBe("push-project-resources");
+    await f.store.runAction({ action: "push-project-resources" }, "duplicate");
+    expect(registryAction).toHaveBeenCalledExactlyOnceWith("/project", { action: "push-project-resources" });
+    finish({ ...f.snapshot, [field]: "push failed" });
+    await pending;
+    expect(f.reportError).toHaveBeenCalledWith(new Error("push failed"));
+    expect(f.store.actionId).toBeNull();
+    f.store.reset();
+  });
+
+  it("discards a bulk sync completion after switching projects", async () => {
+    let finish!: (value: unknown) => void;
+    const registryAction = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const f = syncFixture(registryAction);
+    const pending = f.store.runAction({ action: "push-project-resources" }, "push-project-resources");
+    f.switchWorkspace();
+    finish({ ...f.snapshot, error: "old project failed" });
+    await pending;
+    expect(f.store.snapshot?.error).toBeUndefined();
+    expect(f.reportError).not.toHaveBeenCalled();
+    expect(f.store.actionId).toBeNull();
+    f.store.reset();
+  });
+
+  it("rejects manual sync while automatic resource publication is in flight", async () => {
+    vi.useFakeTimers();
+    let finish!: (value: unknown) => void;
+    const registryAction = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const f = syncFixture(registryAction);
+    f.publish({ ...f.snapshot, items: [{
+      id: "skill:draft", type: "skill", name: "draft", status: "local-changes", statusLabel: "Local changes",
+      icon: "!", local: true, remote: true, publicationScope: "project", actions: ["push"],
+    }] });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(f.store.resourceAutoPushState.phase).toBe("syncing");
+    await f.store.runAction({ action: "push-project-resources" }, "push-project-resources");
+    expect(registryAction).toHaveBeenCalledTimes(1);
+    finish(f.snapshot);
+    await vi.advanceTimersByTimeAsync(0);
+    f.store.reset();
+  });
+});
 
 describe("automatic project sync recovery", () => {
   it("coalesces dirty workspace state and Local-only project resources on snapshot ingestion", async () => {

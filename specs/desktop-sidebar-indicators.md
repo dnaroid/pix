@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop sidebar indicators
 
 <!-- markdownlint-disable MD013 -->
@@ -85,7 +90,15 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   [Git workflow safety](desktop-git-workflows.md) for freshness and partial-success behavior.
 - Tasks offer load retry, planned-task view, or opening the running task's linked
   session. Project errors offer tree reload. Registry reasons offer retry or the
-  existing resource-review/sync controls. Terminal and IDX failures/activity open
+  existing resource-review/sync controls. Local Registry changes additionally offer
+  **Sync project changes to Registry** for all installed Project-scope skills/agents
+  with `local-changes`, excluding Global publications and unsafe states. The action
+  performs a fresh backend selection without requiring a panel visit, leaves panels
+  unchanged, and is disabled during Registry loading, foreground/background actions
+  or known missing configuration/project identity. Snapshot project-resource edits
+  also expose this reason before the lightweight local poll catches up. See
+  [Registry publication scope and tags](resource-registry-publication-tags.md).
+  Terminal and IDX failures/activity open
   their output/maintenance views; settings errors open configuration controls.
 - AI, busy, unavailable and unsafe actions are disabled using current capabilities;
   activation rechecks current reasons and guards. A reason clearing removes its
@@ -144,6 +157,13 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - Initialized IDX health runs read-only `idx knowledge dirty` (5 seconds, 4 KiB). Only complete exit-0 `yes`/`no` is a verdict; incomplete/malformed/truncated results and timeouts are errors, not clean. Older CLIs without the command remain unknown. Polling never acknowledges specs.
 - Index staleness warns conservatively when a valid indexed Git revision differs from current HEAD. Matching HEAD does not prove freshness of uncommitted edits. Indicator polling never starts dry-run, indexing or embedding work.
 - Local Registry verification is metadata-first and cached per workspace/resource. Unchanged fingerprints reuse the previous hash verdict; only cache misses or metadata changes read file contents, with a bounded content-hash budget per fast poll so initial verification is amortized instead of turning the 5-second service into a filesystem scan storm.
+- Agent verification matches ACP's package hash: the Markdown definition plus
+  an optional same-named companion directory. Companion presence and all nested
+  file metadata participate in the cache fingerprint and before/after stability
+  checks; companion bytes and entries count toward the same poll budgets.
+  Companion edits/addition/removal remain dirty until synced, while a fully
+  synced package clears the local warning. Symlinked or non-directory companions
+  fail closed as indicator health errors rather than appearing clean.
 - The `tasks` fast-poll hash follows the portable Registry task-bundle hash rather
   than hashing `tasks.jsonc` alone: local markers are normalized to portable
   attachment names and referenced `.pi/task-attachments` bytes participate in
@@ -176,7 +196,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - Package-terminal and IDX registry mutexes are used only to copy/update in-memory state. Rejected child processes are killed/reaped after releasing those registries, PTY resize uses a separate per-terminal master lock, and Stop never waits indefinitely for a busy stdin writer before reaching its process-tree kill path.
 - Poll failures are represented as indicator health instead of crashing or disabling unrelated views.
 
-## Related files
+## Implementation
 
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/SidebarIndicatorDot.svelte`
@@ -186,21 +206,30 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - `desktop/src/lib/sidebar-indicator-types.ts`
 - `desktop/src/lib/sidebar-indicator-policy.ts`
 - `desktop/src/lib/sidebar-indicator-service.ts`
-- `desktop/src/lib/sidebar-indicators.test.ts`
-- `desktop/src/lib/sidebar-indicator-service.test.ts`
 - `desktop/src/app/git-ci.svelte.ts`
-- `desktop/src/app/git-ci.test.ts`
 - `desktop/src/lib/git-ci.ts`
 - `desktop/src/lib/idx.ts`
 - `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
 - `desktop/src/components/SidebarIndicatorMenu.svelte`
 - `desktop/src/components/sidebar-indicator-menu-controller.svelte.ts`
-- `desktop/src/components/sidebar-indicator-menu-controller.test.ts`
 - `desktop/src/components/workspace-sidebar-indicator-actions.ts`
-- `desktop/src/components/workspace-sidebar-indicator-actions.test.ts`
 - `desktop/src/lib/sidebar-indicator-actions.ts`
-- `desktop/src/lib/sidebar-indicator-actions.test.ts`
 - `desktop/src-tauri/src/lib.rs`
+- `desktop/src-tauri/src/sidebar_registry_resource_hash.rs`
+- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
+- `desktop/src/app/registry.svelte.ts`
+
+## Tests
+
+- `desktop/src-tauri/src/sidebar_registry_resource_hash.rs`
+- `desktop/src/lib/sidebar-indicators.test.ts`
+- `desktop/src/lib/sidebar-indicator-service.test.ts`
+- `desktop/src/app/git-ci.test.ts`
+- `desktop/src/components/sidebar-indicator-menu-controller.test.ts`
+- `desktop/src/components/workspace-sidebar-indicator-actions.test.ts`
+- `desktop/src/lib/sidebar-indicator-actions.test.ts`
+- `desktop/src/components/WorkspaceSidebar.test.ts`
+- `desktop/src/app/registry-store.test.ts`
 
 ## Verification
 
