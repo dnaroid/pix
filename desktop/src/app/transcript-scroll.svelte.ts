@@ -35,6 +35,8 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   let restorePending = false;
   let savedScrollTop = 0;
   let activatedSessionId: string | null | undefined;
+  let scrollRevision = 0;
+  const sessionPositions = new Map<string | null, { followsLatest: boolean; scrollTop: number }>();
   let lastScroll = snapshotScroll();
 
   function snapshotScroll() {
@@ -87,19 +89,30 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     if (visible) scheduleScrollToLatest();
   }
 
-  // Session tabs share one pane. Arm restoration before replacing its content,
-  // so scroll events caused by the outgoing transcript cannot stop following.
+  // Session tabs share one pane. Save the outgoing reader state before DOM
+  // replacement, never overwriting it with hidden or not-yet-restored geometry.
   function activateSession(sessionId: string | null): void {
     if (activatedSessionId === sessionId) return;
+    if (activatedSessionId !== undefined) {
+      const pane = options.pane();
+      sessionPositions.set(activatedSessionId, {
+        followsLatest,
+        scrollTop: visible && !restorePending && pane?.clientHeight ? pane.scrollTop : savedScrollTop,
+      });
+    }
     activatedSessionId = sessionId;
+    scrollRevision += 1;
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
-    followsLatest = true;
+    const position = sessionPositions.get(sessionId);
+    followsLatest = position?.followsLatest ?? true;
+    savedScrollTop = position?.scrollTop ?? 0;
     restorePending = true;
     scheduleScrollToLatest();
   }
 
   function jumpToLatest(): void {
+    scrollRevision += 1;
     followsLatest = true;
     scheduleScrollToLatest();
   }
@@ -127,7 +140,10 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     // sending a prompt. Those actions should bring the conversation back to the
     // live edge even when the user had previously scrolled up.
     followsLatest = true;
+    const sessionId = options.activeSessionId();
+    const revision = ++scrollRevision;
     await tick();
+    if (revision !== scrollRevision || sessionId !== options.activeSessionId()) return;
     const pane = options.pane();
     if (visible && pane?.clientHeight) {
       pane.scrollTop = pane.scrollHeight;
@@ -141,6 +157,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
       `[data-transcript-entry-id="${CSS.escape(entryId)}"]`,
     );
     if (!target) return;
+    scrollRevision += 1;
     followsLatest = false;
     restorePending = false;
     if (frame) {
@@ -175,6 +192,8 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   });
 
   function dispose(): void {
+    scrollRevision += 1;
+    sessionPositions.clear();
     if (!frame) return;
     cancelAnimationFrame(frame);
     frame = 0;

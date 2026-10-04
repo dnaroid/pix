@@ -62,6 +62,10 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   menu for **all current reasons**, not a generic section menu and not only the
   highest-priority reason shown in the tooltip. Without a dot there is no menu.
   Left-click behavior remains unchanged.
+- Work commands (reload/retry, Fetch, Push, AI repair/review and commit/push) do
+  not switch or expand sidebar panels. Only explicit inspection/navigation actions
+  open a view. Project-file retry also checks the root while the explorer is absent;
+  stale workspace, superseded or disposed results cannot update project health.
 - Stable reason/command IDs are independent of tooltip wording. Each cause is
   labelled in the menu; repeated reports of the same cause share one command group.
 - Dirty knowledge offers **AI review** through the existing new-session workflow;

@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop transcript scrolling
 
 <!-- markdownlint-disable MD013 -->
@@ -35,8 +40,8 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 2. When the transcript is following the latest content, appended content and transcript-size changes keep the viewport at the bottom.
    Growing the multiline composer reduces the transcript viewport without disabling follow mode: layout-driven scroll events at an unchanged or forward offset must not cancel the pending follow frame. Actual upward scrolling still stops following, including during resize; readers already scrolled up retain their position and can scroll back to the new bottom.
    Stream updates and resize notifications share an already pending animation-frame scroll rather than canceling and postponing it; continuous streaming must not starve follow-latest scrolling.
-   Selecting a different conversation tab arms latest-content restoration before the shared pane's transcript is replaced. Layout-driven scroll events during that transition must not disable follow mode; returning to a conversation restores its current bottom and continues following subsequent updates. Scroll frames owned by the previous conversation are cancelled or ignored.
-   Navigating to a specific transcript entry cancels any pending restoration frame and leaves follow mode off. Switching to an auxiliary workbench tab (Preview, Git Diff, Terminal, or LSP installer) preserves the underlying conversation's follow mode. Hidden-pane scroll/resize events must not change that mode or write zero-sized scroll geometry. Returning restores the current bottom after layout when following, including content appended while hidden; a reader who had scrolled up instead retains their saved scroll offset without enabling follow mode.
+   Each conversation remembers its latest reading offset and follow mode for the lifetime of the window. Selecting a different conversation saves the outgoing state and arms restoration before the shared pane's transcript is replaced. Returning to a scrolled-up conversation restores its latest saved offset, not its initial activation offset; returning to a following conversation restores its current bottom and continues following subsequent updates. A conversation not yet visited starts at the latest content. Hidden or pending-restoration geometry must not overwrite saved state, including rapid switches before a restoration frame. Layout-driven scroll events during that transition must not change the restored follow mode. Scroll frames and asynchronous explicit scroll completions owned by the previous conversation are cancelled or ignored. Reading offsets are not persisted across application restarts. See [per-conversation reading positions](../docs/decisions/0032-conversation-reading-position.md).
+   Navigating to a specific transcript entry cancels any pending restoration frame, invalidates an explicit latest action still awaiting rendering, and leaves follow mode off. Switching to an auxiliary workbench tab (Preview, Git Diff, Terminal, or LSP installer) preserves the underlying conversation's follow mode. Hidden-pane scroll/resize events must not change that mode or write zero-sized scroll geometry. Returning restores the current bottom after layout when following, including content appended while hidden; a reader who had scrolled up instead retains their saved scroll offset without enabling follow mode.
 3. Once the user scrolls away from the bottom, passive follow-latest scrolling stops until the user returns near the bottom. Explicit latest-content actions re-enable follow mode: using the jump-to-latest control or sending/appending a new user message scrolls the transcript all the way to the bottom after the new content is rendered.
    This includes sending a queued/deferred message with its frame's send-immediately button: append the message, restore the latest edge after rendering, then start its prompt request. If the active session or client changes while waiting for the previous run, do not append or scroll the newly active conversation.
 4. A normal `pix/session/history` request returns a bounded recent persisted-history window plus an opaque cursor when older persisted entries exist.
@@ -49,7 +54,7 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 11. The floating jump-to-latest arrow has a fully transparent background, without a border, shadow, or backdrop blur, so transcript content underneath remains readable. Hover changes the arrow color, not its background; keyboard focus retains a visible outline.
 12. Chat image attachments and project/local Markdown image previews retain natural proportions without cropping or upscaling, capped at their existing heights (20rem for chat attachments, 28rem for Markdown) and the available width. After the browser learns intrinsic dimensions, those dimensions reserve the frame through loading/error fallbacks and Markdown regeneration during streaming, including offscreen previews awaiting lazy hydration. A first image with unknown dimensions uses a compact fallback and can change height once on load; there is no arbitrary square or guaranteed reservation before dimensions are known. Composer/tool thumbnails, videos, and remote images in the Preview editor retain their existing sizing. Follow-latest behavior is unchanged.
 
-## Related files
+## Implementation
 
 Unchanged project/local Markdown image nodes are restored before lazy hydration
 during streaming, not merely dimension-reserved. Pending work follows retained
@@ -66,11 +71,17 @@ See [image retention decision](../docs/decisions/0016-streaming-image-dom-retent
 - `desktop/src/components/markdown-image-retention.ts`
 - `desktop/src/components/markdown-content-action.ts`
 - `desktop/src/lib/image-preview-layout.ts`
-- `desktop/src/components/markdown-image-layout.test.ts`
-- `desktop/src/components/transcript-image-layout.test.ts`
 - `desktop/src/lib/acp-pix-extensions.ts`
 - `acp/src/acp/session-history-file.ts`
 - `acp/src/acp/pix-acp-agent.ts`
+
+## Tests
+
+- `desktop/src/app/transcript-scroll.test.ts`
+- `desktop/src/app/prompt-queue-actions.test.ts`
+- `desktop/src/app/session-history.test.ts`
+- `desktop/src/components/markdown-image-layout.test.ts`
+- `desktop/src/components/transcript-image-layout.test.ts`
 
 ## Verification
 
@@ -86,6 +97,7 @@ See [image retention decision](../docs/decisions/0016-streaming-image-dom-retent
 - Manual desktop verification: while remaining at the bottom, append/stream new transcript content and confirm follow-latest behavior still works.
 - Manual desktop verification: grow a multiline composer while following the latest transcript, confirm the viewport remains at its new bottom; repeat while scrolled up and confirm reading position is not forced to the bottom, then scroll fully down again.
 - Manual desktop verification: switch from a following conversation to an auxiliary tab while content continues to grow, return, and confirm the latest content is visible and follow mode continues. Repeat after scrolling up and confirm the saved position is restored without forcing a jump to the bottom.
+- Manual desktop verification: scroll up in two restored conversation tabs, alternate between them, and confirm each retains its most recent reading position. Move to a new position and repeat, including rapid switches; neither tab should reset to the launch/initial activation position.
 
 ## Evidence
 

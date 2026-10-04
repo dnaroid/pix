@@ -55,6 +55,7 @@
   } from "../lib/sidebar-indicators";
   import { gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason } from "../lib/git-workflow";
   import { createWorkspaceSidebarIndicatorActions } from "./workspace-sidebar-indicator-actions";
+  import { createSidebarProjectRetry } from "./sidebar-project-retry";
   import SidebarIndicatorMenu from "./SidebarIndicatorMenu.svelte";
   import RegistryPanel from "./RegistryPanel.svelte";
   import IdxPanel from "./IdxPanel.svelte";
@@ -327,6 +328,13 @@
   });
   const indicators = $derived<SidebarIndicatorMap>(sidebarIndicators(indicatorInputs));
   const indicatorReasons = $derived(sidebarIndicatorReasons(indicatorInputs));
+  const projectRetry = createSidebarProjectRetry({
+    workspace: () => workspace,
+    visible: () => activeTab === "project" && !layoutController.collapsed,
+    invalidateTree: () => { projectTreeRefreshKey++; },
+    listRoot: () => onListProjectDirectory(""),
+    reportHealth: (error) => { projectPanelError = error; },
+  });
   const gitBusy = $derived(gitLoading || Boolean(gitActionId || gitLlmActionId) || gitWorkflow.resolveRunning);
   const idxBusy = $derived(Boolean(indicatorServiceState.poll?.idx.runningIds.length)
     || Boolean(indicatorServiceState.idxOperationHandoffPending));
@@ -349,7 +357,7 @@
     beforeOpen: () => statusMenuController.close(),
     reveal: revealIndicatorTab,
     handlers: {
-      "project.retry": () => { revealIndicatorTab("project"); projectTreeRefreshKey++; },
+      "project.retry": () => { void projectRetry.retry(); },
       "tasks.reload": () => onReload(),
       "tasks.running": () => {
         const task = tasks.find((task) => task.id === activeTaskId && task.sessionId);
@@ -423,6 +431,7 @@
     // DesktopSidebar spreads one reactive props object; background updates can
     // invalidate this effect without changing the workspace identity.
     if (!projectSettingsController.syncWorkspace()) return;
+    projectRetry.invalidate();
     observedGitRemoteTarget = "";
     projectPanelError = null;
     indicatorService?.setWorkspace(requestWorkspace);
@@ -496,6 +505,7 @@
       statusMenuController.dispose();
       taskDragController.dispose();
       indicatorMenuController.dispose();
+      projectRetry.dispose();
       indicatorService?.destroy();
       indicatorService = undefined;
     };

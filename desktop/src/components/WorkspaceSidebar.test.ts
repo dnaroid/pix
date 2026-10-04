@@ -13,6 +13,16 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain('"git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot)');
     expect(sidebarSource).toContain('"git.commit-push": () => { void onGitStageGenerateCommitPush?.(); }');
   });
+  it("does not reveal panels for work commands; inspection remains separate", () => {
+    const workActions = ["project.retry", "tasks.reload", "git.refresh", "git.fix-ci", "git.fetch", "git.push", "git.commit-push", "registry.refresh", "idx.review"];
+    const handlers = sidebarSource.slice(sidebarSource.indexOf("handlers: {"), sidebarSource.indexOf("const indicatorMenuController"));
+    for (const id of workActions) {
+      expect(handlers).toContain(`"${id}":`);
+    }
+    expect(handlers).not.toContain("revealIndicatorTab");
+    expect(sidebarSource).toContain('"project.retry": () => { void projectRetry.retry(); }');
+    expect(sidebarSource).toContain("reveal: revealIndicatorTab");
+  });
   it("uses the switcher's measured minimum in both resize clamping and CSS sizing", () => {
     expect(layoutControllerSource).toContain("let projectSwitcherMinimumWidth = $state(MIN_WIDTH)");
     expect(layoutControllerSource).toContain('if (tab === "project") return Math.max(MIN_WIDTH, projectSwitcherMinimumWidth)');

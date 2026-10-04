@@ -72,6 +72,14 @@ The command leaves panel selection/collapse unchanged; Source Control remains
 available for detailed progress/errors. Requiring a panel visit or eagerly loading
 full Git status on every sidebar poll was rejected as unnecessary coupling/work.
 
+The user then extended the no-panel-opening rule to all work commands. Reload,
+retry, Fetch, Push and AI actions leave sidebar selection/collapse unchanged;
+explicit inspection/navigation still reveals its destination. Project retry must
+therefore recheck the root independently while the explorer is absent, rather
+than merely bumping a key on an unmounted component. Mounted tree reloads keep
+their existing owner. Background retry results are workspace/generation/teardown
+guarded. This changes execution/navigation coupling, not the polling schedule.
+
 Commands remain small and use existing workflows. Some actions navigate to controls
 instead of performing work immediately. Cause mappings and enabled guards must stay
 in sync with command owners; activation and lifecycle tests cover stale contexts.

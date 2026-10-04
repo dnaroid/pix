@@ -321,6 +321,150 @@ describe("transcript scroll scheduling", () => {
     expect(controller.followsLatest).toBe(false);
   });
 
+  it("remembers the latest reading position independently for each conversation", () => {
+    const { controller, pane, runFrame, activateSession } = setup({ clampScroll: true });
+    activateSession("session-1");
+    runFrame();
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    activateSession("session-2");
+    Object.assign(pane, { scrollHeight: 1400, scrollTop: 0 });
+    controller.handleScroll(); // outgoing DOM layout must not change reader state
+    runFrame();
+    pane.scrollTop = 450;
+    controller.handleScroll();
+
+    activateSession("session-1");
+    Object.assign(pane, { scrollHeight: 900, scrollTop: 0 });
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+    pane.scrollTop = 200; // not the original position at session activation
+    controller.handleScroll();
+    activateSession("session-2");
+    Object.assign(pane, { scrollHeight: 1400, scrollTop: 0 });
+    runFrame();
+    expect(pane.scrollTop).toBe(450);
+    expect(controller.followsLatest).toBe(false);
+    activateSession("session-1");
+    Object.assign(pane, { scrollHeight: 900, scrollTop: 0 });
+    runFrame();
+    expect(pane.scrollTop).toBe(200);
+  });
+
+  it("retains reader positions through rapid switches before restoration", () => {
+    const { controller, pane, runFrame, activateSession } = setup();
+    activateSession("session-1");
+    runFrame();
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    activateSession("session-2");
+    runFrame();
+    pane.scrollTop = 150;
+    controller.handleScroll();
+    activateSession("session-1");
+    pane.scrollTop = 0;
+    activateSession("session-2");
+    activateSession("session-1");
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+  });
+
+  it("restores a previously visited live follower to its new bottom", () => {
+    const { controller, pane, runFrame, activateSession } = setup({ clampScroll: true });
+    activateSession("session-1");
+    runFrame();
+    activateSession("session-2");
+    runFrame();
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    activateSession("session-1");
+    Object.assign(pane, { scrollHeight: 1500, scrollTop: 0 });
+    controller.handleScroll();
+    runFrame();
+    expect(pane.scrollTop).toBe(1200);
+    expect(controller.followsLatest).toBe(true);
+    pane.scrollHeight = 1800;
+    controller.scheduleScrollToLatest();
+    runFrame();
+    expect(pane.scrollTop).toBe(1500);
+  });
+
+  it("preserves conversation positions when switching sessions through a hidden pane", () => {
+    const { controller, pane, runFrame, activateSession } = setup();
+    activateSession("session-1");
+    runFrame();
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    controller.setVisible(false);
+    Object.assign(pane, { clientHeight: 0, scrollHeight: 0, scrollTop: 0 });
+    activateSession("session-2");
+    controller.setVisible(true);
+    Object.assign(pane, { clientHeight: 300, scrollHeight: 900 });
+    runFrame();
+    activateSession("session-1");
+    pane.scrollTop = 0;
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+  });
+
+  it("does not complete an outgoing explicit latest action in a different session", async () => {
+    const { controller, pane, runFrame, activateSession } = setup();
+    activateSession("session-1");
+    runFrame();
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    activateSession("session-2");
+    runFrame();
+    const pending = controller.scrollToLatest();
+    activateSession("session-1");
+    pane.scrollTop = 0;
+    await pending;
+    expect(pane.scrollTop).toBe(0);
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+  });
+
+  it("ignores an old latest completion after switching away and back or disposing", async () => {
+    const { controller, pane, runFrame, activateSession } = setup();
+    vi.stubGlobal("CSS", { escape: (id: string) => id });
+    Object.assign(pane, { querySelector: () => ({ scrollIntoView: vi.fn() }) });
+    activateSession("session-1");
+    runFrame();
+    const pending = controller.scrollToLatest();
+    activateSession("session-2");
+    activateSession("session-1");
+    controller.scrollToEntry("entry-1");
+    pane.scrollTop = 100;
+    await pending;
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+
+    const disposed = controller.scrollToLatest();
+    controller.dispose();
+    await disposed;
+    expect(pane.scrollTop).toBe(100);
+  });
+
+  it("lets entry navigation supersede an explicit latest action awaiting rendering", async () => {
+    const { controller, pane, runFrame, activateSession } = setup();
+    vi.stubGlobal("CSS", { escape: (id: string) => id });
+    const target = { scrollIntoView: vi.fn() };
+    Object.assign(pane, { querySelector: () => target });
+    activateSession("session-1");
+    runFrame();
+    const pending = controller.scrollToLatest();
+    controller.scrollToEntry("entry-1");
+    pane.scrollTop = 100;
+    await pending;
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+    expect(target.scrollIntoView).toHaveBeenCalledOnce();
+  });
+
   it("lets explicit entry navigation supersede pending restoration", () => {
     const { controller, pane, callbacks, runFrame, activateSession } = setup();
     vi.stubGlobal("CSS", { escape: (id: string) => id });
@@ -338,20 +482,6 @@ describe("transcript scroll scheduling", () => {
 });
 
 describe("transcript scroll resize controller", () => {
-  it("forces explicit scroll-to-latest actions back into follow mode", async () => {
-    // @ts-expect-error Node fs import in Vitest runner
-    const fs = (await import(/* @vite-ignore */ "node:fs")).default;
-    // @ts-expect-error Node path import in Vitest runner
-    const path = (await import(/* @vite-ignore */ "node:path")).default;
-    // @ts-expect-error Node __dirname in Vitest runner
-    const sourcePath = path.resolve(__dirname, "transcript-scroll.svelte.ts");
-    const transcriptScrollSource = fs.readFileSync(sourcePath, "utf-8");
-
-    expect(transcriptScrollSource).toContain("async function scrollToLatest(): Promise<void> {");
-    expect(transcriptScrollSource).toContain("followsLatest = true;\n    await tick();");
-    expect(transcriptScrollSource).not.toContain("async function scrollToLatest(): Promise<void> {\n    if (!followsLatest) return;");
-  });
-
   it("returns to latest when a content shrink removes overflow without a scroll event", () => {
     expect(reconcileTranscriptResize(false, metrics(300, 0, 300))).toEqual({
       followsLatest: true,
