@@ -28,6 +28,214 @@ beforeEach(() => { invoke.mockReset(); vi.stubGlobal("window", { confirm: vi.fn(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Git commit transaction and lifecycle", () => {
+  it("shares the transaction status read with a concurrent panel refresh", async () => {
+    const { store, snapshot } = fixture();
+    await store.refresh();
+    let finishStatus!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finishStatus = resolve; }));
+    const generate = vi.fn(async () => "AI message");
+    const transaction = store.stageGenerateCommitPush(generate);
+    await vi.waitFor(() => expect(finishStatus).toBeTypeOf("function"));
+    const panelRefresh = store.refresh();
+    expect(invoke.mock.calls.filter(([command]) => command === "git_status")).toHaveLength(2);
+    expect(invoke.mock.calls.some(([command]) => command === "git_stage")).toBe(false);
+    finishStatus(snapshot);
+    await panelRefresh;
+    await expect(transaction).resolves.toBe(true);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(store.error).toBeNull();
+  });
+
+  it("waits for an older panel read then starts a new pre-staging checkpoint", async () => {
+    const { store, snapshot } = fixture();
+    await store.refresh();
+    let finishStatus!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finishStatus = resolve; }));
+    const panelRefresh = store.refresh();
+    // The old read captured a safe state, but incoming commits now block staging.
+    invoke.mockImplementation(async (command: string) => command === "git_status" ? { ...snapshot, behind: 1 } : undefined);
+    const generate = vi.fn(async () => "AI message");
+    const transaction = store.stageGenerateCommitPush(generate);
+    expect(invoke.mock.calls.filter(([command]) => command === "git_status")).toHaveLength(2);
+    finishStatus(snapshot);
+    await panelRefresh;
+    await expect(transaction).resolves.toBe(false);
+    expect(invoke.mock.calls.some(([command]) => command === "git_stage")).toBe(false);
+    expect(generate).not.toHaveBeenCalled();
+    expect(store.snapshot?.behind).toBe(1);
+  });
+
+  it("does not reuse a status read begun during AI generation for the commit checkpoint", async () => {
+    const { store, snapshot } = fixture();
+    await store.refresh();
+    let finishGeneration!: (value: string) => void;
+    const generate = vi.fn(() => new Promise<string>((resolve) => { finishGeneration = resolve; }));
+    const transaction = store.stageGenerateCommitPush(generate);
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+    let finishStatus!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finishStatus = resolve; }));
+    const panelRefresh = store.refresh();
+    invoke.mockImplementation(async (command: string) => command === "git_status" ? { ...snapshot, head: "changed" } : undefined);
+    finishGeneration("AI message");
+    finishStatus(snapshot);
+    await panelRefresh;
+    await expect(transaction).resolves.toBe(false);
+    expect(store.error).toMatch(/publication target changed/);
+    expect(invoke.mock.calls.some(([command]) => command === "git_commit" || command === "git_push")).toBe(false);
+  });
+
+  it("does not let an old refresh clear or replace a new lifecycle's pending read", async () => {
+    const { store, snapshot, setWorkspace } = fixture();
+    let finishOld!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finishOld = resolve; }));
+    const oldRefresh = store.refresh();
+    setWorkspace("/two");
+    setWorkspace("/one");
+    let finishNew!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finishNew = resolve; }));
+    const newRefresh = store.refresh();
+    finishOld({ ...snapshot, head: "stale" });
+    await oldRefresh;
+    expect(store.snapshot).toBeUndefined();
+    expect(store.loading).toBe(true);
+    const joined = store.refresh();
+    expect(invoke.mock.calls).toHaveLength(2);
+    finishNew(snapshot);
+    await Promise.all([newRefresh, joined]);
+    expect(store.snapshot?.head).toBe("abc");
+    expect(store.loading).toBe(false);
+  });
+
+  it("stages all, generates, commits and pushes under one lock", async () => {
+    const { store } = fixture();
+    await store.refresh();
+    const generate = vi.fn(async () => {
+      expect(store.actionId).toBe("stage-generate-commit-push");
+      await expect(store.stage("other.ts")).resolves.toBe(false);
+      await expect(store.commit("duplicate", true)).resolves.toBe(false);
+      return "AI message";
+    });
+    await expect(store.stageGenerateCommitPush(generate)).resolves.toBe(true);
+    const mutations = invoke.mock.calls.filter(([command]) => ["git_stage", "git_commit", "git_push"].includes(command));
+    expect(mutations).toEqual([
+      ["git_stage", { workspace: "/one", path: null }],
+      ["git_commit", { workspace: "/one", message: "AI message" }],
+      ["git_push", { workspace: "/one" }],
+    ]);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(store.notice).toMatch(/Committed and pushed/);
+    expect(store.actionId).toBeNull();
+  });
+
+  it("runs from a cold store without opening or refreshing the Git panel first", async () => {
+    const { store } = fixture();
+    expect(store.snapshot).toBeUndefined();
+    const generate = vi.fn(async () => "AI message");
+    await expect(store.stageGenerateCommitPush(generate)).resolves.toBe(true);
+    expect(invoke.mock.calls[0]).toEqual(["git_status", { workspace: "/one" }]);
+    expect(invoke.mock.calls.filter(([command]) => ["git_stage", "git_commit", "git_push"].includes(command)).map(([command]) => command))
+      .toEqual(["git_stage", "git_commit", "git_push"]);
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it.each(["status", "behind", "conflict", "remote", "detached", "ambiguous"])("checks cold-store %s safety before staging", async (state) => {
+    const { store, snapshot } = fixture();
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "git_status") {
+        if (state === "status") throw new Error("status unavailable");
+        return {
+          ...snapshot,
+          behind: state === "behind" ? 1 : 0,
+          detached: state === "detached",
+          upstream: state === "ambiguous" ? undefined : snapshot.upstream,
+          remotes: state === "remote" ? [] : state === "ambiguous" ? ["one", "two"] : snapshot.remotes,
+          changes: snapshot.changes.map((change) => ({ ...change, conflicted: state === "conflict" })),
+        };
+      }
+    });
+    const generate = vi.fn();
+    await expect(store.stageGenerateCommitPush(generate)).resolves.toBe(false);
+    expect(store.error).toBeTruthy();
+    expect(generate).not.toHaveBeenCalled();
+    expect(invoke.mock.calls.some(([command]) => ["git_stage", "git_commit", "git_push"].includes(command))).toBe(false);
+  });
+
+  it.each(["stage", "generation", "empty", "diff", "commit", "push"])("stops combined workflow safely on %s failure", async (failure) => {
+    const { store, snapshot } = fixture();
+    await store.refresh();
+    let diffs = 0;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "git_status") return snapshot;
+      if (command === "git_stage" && failure === "stage") throw new Error("stage failed");
+      if (command === "git_commit" && failure === "commit") throw new Error("commit failed");
+      if (command === "git_push" && failure === "push") throw new Error("push failed");
+      if (command === "git_diff") return { scope: "staged", content: failure === "diff" && ++diffs > 1 ? "+changed" : "+new", truncated: false };
+    });
+    const generate = vi.fn(async () => {
+      if (failure === "generation") throw new Error("AI failed");
+      return failure === "empty" ? " " : "message";
+    });
+    await expect(store.stageGenerateCommitPush(generate)).resolves.toBe(failure === "push");
+    expect(store.error).toBeTruthy();
+    expect(store.actionId).toBeNull();
+    expect(invoke.mock.calls.some(([command]) => command === "git_push")).toBe(failure === "push");
+    if (["stage", "generation", "empty", "diff"].includes(failure)) expect(invoke.mock.calls.some(([command]) => command === "git_commit")).toBe(false);
+    if (failure === "stage") expect(generate).not.toHaveBeenCalled();
+    if (failure === "push") expect(store.error).toMatch(/Retry Push/);
+  });
+
+  it("rejects stale AI after an A→B→A switch without releasing a new lock", async () => {
+    const { store, setWorkspace } = fixture();
+    await store.refresh();
+    let finish!: (message: string) => void;
+    const generate = vi.fn(() => new Promise<string>((resolve) => { finish = resolve; }));
+    const pending = store.stageGenerateCommitPush(generate);
+    await vi.waitFor(() => expect(generate).toHaveBeenCalled());
+    setWorkspace("/two");
+    setWorkspace("/one");
+    expect(store.beginLlmAction("new")).toBe(true);
+    finish("old message");
+    await expect(pending).resolves.toBe(false);
+    expect(store.llmActionId).toBe("new");
+    expect(invoke.mock.calls.some(([command]) => command === "git_commit" || command === "git_push")).toBe(false);
+  });
+
+  it.each(["behind", "conflict", "remote"])("does not stage for unsafe %s state", async (state) => {
+    const { store, snapshot } = fixture();
+    invoke.mockImplementation(async (command: string) => command === "git_status" ? {
+      ...snapshot,
+      behind: state === "behind" ? 1 : 0,
+      remotes: state === "remote" ? [] : snapshot.remotes,
+      changes: snapshot.changes.map((change) => ({ ...change, conflicted: state === "conflict" })),
+    } : undefined);
+    await store.refresh();
+    await expect(store.stageGenerateCommitPush(vi.fn())).resolves.toBe(false);
+    expect(invoke.mock.calls.some(([command]) => command === "git_stage")).toBe(false);
+  });
+
+  it.each(["status", "branch", "head", "upstream", "behind", "conflict"])("aborts before commit when %s changes during generation", async (state) => {
+    const { store, snapshot } = fixture();
+    await store.refresh();
+    let generated = false;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "git_status") {
+        if (generated && state === "status") throw new Error("status unavailable");
+        return generated ? {
+          ...snapshot,
+          branch: state === "branch" ? "other" : snapshot.branch,
+          head: state === "head" ? "changed-head" : snapshot.head,
+          upstream: state === "upstream" ? "origin/other" : snapshot.upstream,
+          behind: state === "behind" ? 1 : snapshot.behind,
+          changes: snapshot.changes.map((change) => ({ ...change, conflicted: state === "conflict" })),
+        } : snapshot;
+      }
+      if (command === "git_diff") return { scope: "staged", content: "+new", truncated: false };
+    });
+    await expect(store.stageGenerateCommitPush(async () => { generated = true; return "message"; })).resolves.toBe(false);
+    expect(store.error).toBeTruthy();
+    expect(invoke.mock.calls.some(([command]) => command === "git_commit" || command === "git_push")).toBe(false);
+  });
+
   it("detects an uninitialized workspace and initializes it explicitly", async () => {
     const { store, snapshot } = fixture();
     let initialized = false;

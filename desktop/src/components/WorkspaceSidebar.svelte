@@ -53,7 +53,7 @@
     type SidebarIndicatorServiceState,
     type SidebarIndicatorTab,
   } from "../lib/sidebar-indicators";
-  import { gitPushBlockedReason } from "../lib/git-workflow";
+  import { gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason } from "../lib/git-workflow";
   import { createWorkspaceSidebarIndicatorActions } from "./workspace-sidebar-indicator-actions";
   import SidebarIndicatorMenu from "./SidebarIndicatorMenu.svelte";
   import RegistryPanel from "./RegistryPanel.svelte";
@@ -173,6 +173,7 @@
     onGitSwitchBranch,
     onGitCreateBranch,
     onGitGenerateCommitMessage,
+    onGitStageGenerateCommitPush,
     onGitReview,
     onRefreshKnowledge,
   }: {
@@ -260,6 +261,7 @@
     onGitSwitchBranch: (branch: string) => void;
     onGitCreateBranch: (branch: string) => void;
     onGitGenerateCommitMessage: () => Promise<string | undefined>;
+    onGitStageGenerateCommitPush?: () => Promise<boolean>;
     onGitReview: (path: string | undefined, scope: GitDiffScope) => void;
     onRefreshKnowledge: () => void;
   } = $props();
@@ -335,6 +337,7 @@
     "git.refresh": !gitBusy,
     "git.fetch": !gitBusy && Boolean(gitSnapshot?.remotes.length),
     "git.push": !gitBusy && !gitPushBlockedReason(gitSnapshot) && !gitSnapshot?.changes.some((change) => change.conflicted),
+    "git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot),
     "git.fix-ci": gitCi.canFixWithAi,
     "registry.refresh": registryReady && !registryLoading && !registryActionId,
     "idx.review": sessionReady && !idxBusy,
@@ -358,6 +361,7 @@
       "git.changes": () => onGitOpenDiff(undefined, "all"),
       "git.conflicts": () => onGitOpenDiff(undefined, "all"),
       "git.push": () => onGitPush(),
+      "git.commit-push": () => { void onGitStageGenerateCommitPush?.(); },
       "registry.refresh": () => onRegistryRefresh(),
       "idx.review": () => onRefreshKnowledge(),
     },

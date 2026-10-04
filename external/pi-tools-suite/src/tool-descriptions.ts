@@ -169,9 +169,9 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 	{
 		name: "repo_audit", label: "Repo Audit", command: "audit",
 		description: "Task-scoped documentation relationship signals for changed paths; read-only, not proof of semantic correctness.",
-		promptSnippet: "After a material behavior change, use the knowledge-auditor sub-agent for the final task-scoped audit when that role is available; otherwise run repo_audit with only this task's changed paths. Compare relevant source documents with code/tests and fix real semantic drift.",
+		promptSnippet: "After implementation, use knowledge-auditor for the final task-scoped audit when available; otherwise run repo_audit with only this task's changed paths. Before finalizing, obtain the result and resolve task-related semantic drift, escalations and missing review coverage, or explicitly report blockers.",
 		promptGuidelines: [
-			"Keep or create the primary spec in the same task; reviewed no-impact is valid. Skip for mechanical edits. Audit may use a stale indexed snapshot; read primary sources and verify semantics.",
+			"Keep or create the primary spec for material behavior changes; mechanical edits still need review-state checks. Audit may use a stale index: read sources and verify semantics. After all final edits, the auditor (or parent fallback) runs idx knowledge dirty, acknowledges only explicit active specs reviewed against current content and every declared Implementation/Tests dependency via idx knowledge acknowledge <spec-paths...>, then rechecks dirty. Audit/index/tests alone are not acknowledgment. Report remaining yes/check errors and uncovered task-related specs; never bulk-acknowledge unrelated specs to force no.",
 			"For a new spec, use the non-overwriting template installed by idx init at .indexer-cli/spec-template.md. Declare kind: spec and the intended status in frontmatter; list project-root-relative paths under Implementation and Tests. If the template is absent, ask before running setup instead of inventing one.",
 			"Record significant choices in docs/decisions using the project's convention/template while context is available: status, context, evidence vs assumptions, decision/scope, alternatives, consequences and revisit triggers; link the spec both ways. Skip trivial edits. The parent supplies rationale and decision paths to the auditor; never invent motives from code. Supersede old decisions explicitly instead of erasing history.",
 		],
@@ -356,14 +356,14 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 			name: "Edit",
 			label: "Edit",
 			description: repoDiscovery
-				? "Replace exact text in an existing file. Use for surgical edits; use Write only for whole-file replacement. After a material behavior change, keep/create the primary spec and run task-scoped repo_audit plus semantic verification; skip for mechanical edits."
+				? "Replace exact text in an existing file. Use for surgical edits; use Write only for whole-file replacement. Keep the primary spec aligned for behavior changes; follow repo_audit finalization guidance."
 				: "Replace exact text in an existing file. Use for surgical edits; use Write only for intentional whole-file replacement.",
 		},
 		Write: {
 			name: "Write",
 			label: "Write",
 			description: repoDiscovery
-				? "Create or overwrite a file with complete contents. Use only for intentional whole-file writes. For material behavior changes, keep/create the primary spec in the same task and finish with task-scoped repo_audit plus semantic verification; skip for mechanical edits."
+				? "Create or overwrite a file with complete contents. Use only for intentional whole-file writes. Keep the primary spec aligned for behavior changes; follow repo_audit finalization guidance."
 				: "Create or overwrite a file with complete contents. Use only when replacing the whole file is intended.",
 		},
 		Bash: {
@@ -402,7 +402,7 @@ export function codexAliasToolDescriptions(options: ToolDescriptionSetOptions | 
 	applyPatch: {
 		name: "apply_patch",
 		label: "apply_patch",
-		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.${repoDiscovery ? " After a material behavior change, keep/create the primary spec in the same task and finish with task-scoped repo_audit plus semantic verification; skip for mechanical/non-behavioral edits." : ""}
+		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.${repoDiscovery ? " Keep the primary spec aligned for behavior changes; follow repo_audit finalization guidance." : ""}
 
 Begin-patch format:
 *** Begin Patch

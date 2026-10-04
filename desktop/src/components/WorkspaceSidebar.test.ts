@@ -9,6 +9,10 @@ import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?
 import navigationViewModelSource from "../app/desktop-navigation-view-model-services.ts?raw";
 
 describe("WorkspaceSidebar project sizing", () => {
+  it("uses self-refreshing eligibility for the combined Git command and does not open a panel", () => {
+    expect(sidebarSource).toContain('"git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot)');
+    expect(sidebarSource).toContain('"git.commit-push": () => { void onGitStageGenerateCommitPush?.(); }');
+  });
   it("uses the switcher's measured minimum in both resize clamping and CSS sizing", () => {
     expect(layoutControllerSource).toContain("let projectSwitcherMinimumWidth = $state(MIN_WIDTH)");
     expect(layoutControllerSource).toContain('if (tab === "project") return Math.max(MIN_WIDTH, projectSwitcherMinimumWidth)');

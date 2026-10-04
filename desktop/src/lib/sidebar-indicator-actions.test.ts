@@ -10,6 +10,13 @@ const base: SidebarIndicatorInputs = {
 };
 
 describe("sidebar indicator reason actions", () => {
+  it("adds combined staging, AI commit and push only to dirty Git, with a capability guard", () => {
+    const reasons = [{ id: "git.dirty" as const, tone: "info" as const, reason: "Changes" }];
+    const actions = sidebarIndicatorActionGroups(reasons, { "git.commit-push": false })[0]!.actions;
+    expect(actions.map((action) => action.id)).toEqual(["git.changes", "git.commit-push"]);
+    expect(actions[1]).toMatchObject({ label: "Stage all, AI commit & push", disabled: true });
+    expect(sidebarIndicatorActionGroups([{ id: "git.ahead", tone: "info", reason: "Ahead" }])[0]!.actions.map((action) => action.id)).toEqual(["git.push"]);
+  });
   it("has no menu in a healthy state and never infers review from counters", () => {
     expect(sidebarIndicatorReasons(base)).toEqual({});
     expect(sidebarIndicatorActionGroups()).toEqual([]);

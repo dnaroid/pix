@@ -26,6 +26,7 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "question", defaultEnabled: true, description: "Registers the native clean-Pi questionnaire tool; Pix skips its runtime UI because Pix owns question rendering.", cleanPiOnly: true },
 	{ name: "todo", defaultEnabled: true, description: "Adds session todo planning with hierarchy, blockers, persistence, import/export, and plan commands." },
 	{ name: "model-tools", defaultEnabled: true, description: "Registers model-specific aliases and gated variants for common file, shell, search, and patch tools." },
+	{ name: "codemode", defaultEnabled: true, description: "Enables SDK QuickJS scripts alongside direct tools. Changes apply after extension reload or session restart." },
 	{ name: "usage", defaultEnabled: true, description: "Adds read-only quota and usage reporting for supported model providers." },
 	{ name: "web-search", defaultEnabled: true, description: "Adds web_search and web_fetch with local/cloud Ollama and Tavily fallback plus credential management." },
 	// Observe-only Context Gateway currently runs after result enrichers. P01-R

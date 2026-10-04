@@ -3,7 +3,7 @@ import type { SidebarIndicatorReason, SidebarIndicatorReasonId } from "./sidebar
 export type SidebarIndicatorActionId =
   | "project.retry" | "tasks.reload" | "tasks.show" | "tasks.running"
   | "git.refresh" | "git.ci" | "git.fix-ci" | "git.conflicts" | "git.branch"
-  | "git.fetch" | "git.changes" | "git.push" | "git.incoming"
+  | "git.fetch" | "git.changes" | "git.push" | "git.incoming" | "git.commit-push"
   | "registry.refresh" | "registry.review" | "registry.sync"
   | "scripts.inspect" | "scripts.running"
   | "idx.inspect" | "idx.review" | "idx.maintenance" | "idx.running"
@@ -33,6 +33,7 @@ const ACTIONS: Record<SidebarIndicatorActionId, string> = {
   "git.branch": "Choose or create a branch…",
   "git.fetch": "Fetch upstream",
   "git.changes": "Review working tree changes",
+  "git.commit-push": "Stage all, AI commit & push",
   "git.push": "Push commits",
   "git.incoming": "Review incoming changes…",
   "registry.refresh": "Retry Registry check",
@@ -57,7 +58,7 @@ const REASON_ACTIONS: Record<SidebarIndicatorReasonId, readonly SidebarIndicator
   "git.conflicts": ["git.conflicts"],
   "git.detached": ["git.branch"],
   "git.remote": ["git.fetch"],
-  "git.dirty": ["git.changes"],
+  "git.dirty": ["git.changes", "git.commit-push"],
   "git.ahead": ["git.push"],
   "git.behind": ["git.incoming"],
   "registry.error": ["registry.refresh", "registry.sync"],

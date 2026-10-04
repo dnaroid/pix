@@ -20,6 +20,7 @@ import {
 } from "./lib.js";
 import { activityFromRpcEvent } from "./core/activity.js";
 import { buildAgentCompletionNotification } from "./core/notifications.js";
+import { CompletionDelivery } from "./completion-delivery.js";
 import { buildUltraworkPrompt, isUltraworkEnvEnabled, registerCommands } from "./commands.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt } from "./core/agent-strategy.js";
 import { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
@@ -143,6 +144,7 @@ export default function (pi: ExtensionAPI) {
 	let currentSessionStateContext: ExtensionContext | undefined;
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
 	let shuttingDown = false;
+	const completionDelivery = new CompletionDelivery(liveAgents, refreshSubagentOverlay);
 
 	function publishSubagentCatalogState(ctx: unknown): void {
 		const state = createSubagentCatalogState(ctx);
@@ -184,6 +186,7 @@ export default function (pi: ExtensionAPI) {
 				// Disk receipts may describe an intermediate attempt. Only the
 				// final callback can settle launches still owned by this instance.
 				if (liveAgent.awaitingCompletion) continue;
+				if (completionDelivery.isReserved(liveAgent)) continue;
 				const state = states.get(agentId);
 				if (!state) {
 					removeLiveAgent(runDir, agentId);
@@ -235,7 +238,7 @@ export default function (pi: ExtensionAPI) {
 		refreshSubagentOverlay();
 	}
 
-	registerSubagentsTool(pi, liveAgents, handleAgentCompletion, refreshSubagentOverlay, handleAgentRpcEvent);
+	registerSubagentsTool(pi, liveAgents, handleAgentCompletion, refreshSubagentOverlay, handleAgentRpcEvent, completionDelivery);
 	registerCommands(pi);
 
 	pi.on("session_start", async (_event, ctx) => {

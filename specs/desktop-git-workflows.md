@@ -38,6 +38,26 @@ CI refresh is independent from local `git status`. A new workspace/HEAD/upstream
 
 ## Preparation and commit semantics
 
+- The dirty Git sidebar-dot menu also offers **Stage all, AI commit & push**.
+  This explicit command always stages all working-tree changes (including
+  previously unstaged files), generates a message using the workspace assistant,
+  then commits and pushes without an intermediate composer step. It does not open
+  the Git panel and keeps one mutation lock throughout. Opening Source Control is
+  not a prerequisite: an unloaded full status does not disable this self-refreshing
+  command. It is
+  disabled while Git is busy, the assistant is unavailable, or publication is
+  known to be unsafe. Unknown status is checked by the transaction before any
+  staging; failure or unsafe fresh status aborts without mutating the index.
+  Fresh status is required before staging and again before committing;
+  stale workspace/assistant results, changed staged content, changed branch/HEAD
+  or publication target, conflicts and behind-upstream state stop the chain.
+  Concurrent panel/background refreshes share one in-flight status read rather
+  than superseding the transaction's read. Each mutation checkpoint waits out any
+  earlier read and starts a new read, so sharing cannot reuse a pre-mutation snapshot.
+  A staging/generation/commit failure never proceeds to push. A failed push keeps
+  the local commit and presents Retry Push, never silently generating another
+  commit. Existing composer Generate and manual Commit staging behavior is unchanged.
+
 - Generate message describes only the staged diff. With no staged files its label becomes **Stage all & generate**, explicitly adding all changed/untracked files before generation. Failure to stage stops the sequence. Existing partial staging is never silently expanded by Generate message or Commit.
 - Desktop Git reads disable Git's optional index locking so status/diff refreshes do not contend with Pix-owned stage/unstage mutations. Stage/unstage retries brief `.git/index.lock` contention before failing. A persistent lock is never deleted automatically; the UI reports a concise recovery message telling the user to finish the other Git operation or remove the stale lock only when no Git process is running.
 - Code review targets staged changes when staging is nonempty, otherwise all changes. The scope is visible beside the commit-message label. Review all is also available independently. Reviewing never stages, commits or pushes.

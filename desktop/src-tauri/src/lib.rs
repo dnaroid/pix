@@ -43,6 +43,7 @@ mod release_smoke;
 mod startup_theme;
 mod window_geometry;
 mod window_restore;
+mod window_tiling;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -10066,6 +10067,7 @@ pub fn run() {
         .setup(|app| {
             desktop_notification::setup(app).map_err(std::io::Error::other)?;
             let restored_windows = window_restore::setup(app)?;
+            window_tiling::setup(app)?;
             app.manage(AttachmentPathState::new(app.handle()));
             #[cfg(feature = "bundled-runtime")]
             release_smoke::start_if_requested(app).map_err(std::io::Error::other)?;

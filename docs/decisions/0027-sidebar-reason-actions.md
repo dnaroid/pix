@@ -44,6 +44,34 @@ Background polling remains read-only; opening a menu never acknowledges knowledg
 
 ## Consequences
 
+### Dirty Git combined command (2026-10-04)
+
+The user explicitly requested and confirmed a one-click equivalent of
+**Stage all & generate → Commit & push** in the dirty Git dot menu. It therefore
+stages every change, rather than preserving the composer Generate convention
+of keeping an existing partial staging selection. The menu label states both
+the all-files scope and AI use. The Git store owns one serialized transaction;
+the assistant supplies only message generation. Existing manual composer paths
+remain unchanged. Failures stop subsequent steps; failed publication preserves
+the local commit for Retry Push. This extends the existing command-owner and
+eligibility decision, not an automatic polling side effect.
+
+An alternative requiring a second composer click was rejected for this command
+because it would not satisfy the confirmed one-click request. Revisit if the
+product adds explicit per-file scope selection to sidebar actions.
+
+#### Panel-independent execution (2026-10-04)
+
+The user reported that eligibility depended on opening Source Control first and
+requested that executing the command not open the panel. The full Git store is
+lazy; the sidebar's dirty reason already comes from its independent health poll.
+Treat an unloaded full snapshot as pending validation for this self-refreshing
+command only, retain known safety/busy/AI guards, and require a successful fresh
+status checkpoint before staging. Manual Push still requires a loaded snapshot.
+The command leaves panel selection/collapse unchanged; Source Control remains
+available for detailed progress/errors. Requiring a panel visit or eagerly loading
+full Git status on every sidebar poll was rejected as unnecessary coupling/work.
+
 Commands remain small and use existing workflows. Some actions navigate to controls
 instead of performing work immediately. Cause mappings and enabled guards must stay
 in sync with command owners; activation and lifecycle tests cover stale contexts.

@@ -68,7 +68,8 @@ without treating generated answers or audit candidates as semantic proof.
 - After a material change, `repo_audit` receives task-scoped changed paths.
   Compare affected documents against final source and tests and fix actual
   semantic drift. Audit candidates are not proof of drift, and a reviewed
-  no-impact decision is valid. Mechanical/non-behavioral changes skip this step.
+  no-impact decision is valid. Mechanical changes still need review-state
+  checks; they do not require inventing a new behavioral contract.
 - Async-subagents ships a built-in `knowledge-auditor` role for the final
   post-implementation knowledge pass. Its `requiresIndexedProject: true` gate
   makes it visible only when the project root contains `.indexer-cli/`;
@@ -82,6 +83,15 @@ without treating generated answers or audit candidates as semantic proof.
   The parent retains decisions and handles escalations. If the role is disabled
   or unavailable, the existing parent-owned `repo_audit` workflow remains the
   fallback.
+- Finalization requires obtaining the audit result, not merely spawning the
+  auditor. After all final edits, close task-related drift, escalations and
+  uncovered spec dependencies, or explicitly report blockers. The auditor or
+  parent fallback checks `idx knowledge dirty`, acknowledges only explicit
+  active specs reviewed against current content and every declared
+  Implementation/Tests dependency with `idx knowledge acknowledge`, then
+  rechecks dirty. Audit, indexing and passing tests alone do not acknowledge
+  review. Later dependency edits require re-review. Report remaining dirty
+  state/check errors; unrelated specs must not be acknowledged to force `no`.
 
 ## Decision history
 

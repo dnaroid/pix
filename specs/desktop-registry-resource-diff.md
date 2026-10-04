@@ -25,7 +25,8 @@ copy as the new side, regardless of which side changed since the last sync.
 It lists changed files with a readable, per-file text diff, including added
 and removed files. For an agent this includes `agents/<name>.md` and every
 file beneath the optional `agents/<name>/` companion directory; for a skill
-it includes the skill tree. Binary or oversized changed files remain visible
+it includes the skill tree. `.DS_Store` metadata entries are omitted from tree
+comparisons. Binary or oversized changed files remain visible
 with a notice rather than disappearing or dumping their contents. A successful
 comparison never pushes, pulls, installs or overwrites resources.
 
@@ -36,8 +37,10 @@ the backend resolves only that resource's known local and registry paths.
 Traversal rejects links and unsupported filesystem entries rather than
 following them. The registry cache checkout stays byte-faithful on every
 platform: the cache repository pins `core.autocrlf=false` so platform git
-configuration cannot smudge line endings into the old-side text. Content and
-response sizes are bounded. Missing copies,
+configuration cannot smudge line endings into the old-side text. Diff text has
+per-file and aggregate byte and render-line budgets; exceeding them produces
+notices instead of text. These budgets do not cap the number of file entries or
+the total serialized size of paths and notices. Missing copies,
 unavailable registry data and read errors surface as visible errors instead
 of a misleading empty diff. Loading/failed/empty states are distinct, and
 late responses from a closed view, previous selection or previous workspace

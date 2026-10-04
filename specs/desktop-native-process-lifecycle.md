@@ -7,6 +7,9 @@ status: active
 
 ## Behavior
 
+This contract applies to supported macOS Desktop. Retained Windows/Linux native
+code is not a supported product or a compatibility requirement.
+
 The native host reserves an ACP slot for an existing window before resolving or
 spawning the backend. Repeated starts for the same window return the same live
 generation; starts for different windows do not serialize on runtime resolution
@@ -26,12 +29,9 @@ Shutdown closes stdin and uses bounded grace before force-stop.
 Output is emitted in bounded batches. ACP diagnostics remain separate from
 protocol stdout.
 
-The backend starts in its own process group on Unix. On Unix, cleanup signals
+The backend starts in its own process group on macOS. Cleanup signals
 the process group before reaping an exited leader to prevent process-group ID
-reuse, including natural exits. On Windows, the backend starts suspended, is
-assigned to a kill-on-close Job Object before its initial thread resumes, and
-the job remains owned through leader exit. Natural exit and force-stop terminate
-job descendants even if the leader has already exited. A force-stop
+reuse, including natural exits. A force-stop
 targets backend descendants;
 normal stop first closes stdin for graceful nested-process disposal. Spawn and
 stdio failure paths reap the child. A spawned PTY child is owned by a startup
@@ -70,12 +70,14 @@ joined, preventing inherited output handles from keeping the command alive.
 
 The Activity Bar's remote-Git freshness probe is a smaller transient class.
 `workspace_git_remote_update_probe` runs `git ls-remote` on the blocking pool
-only for the configured upstream ref, with stdin/prompts disabled, 64 KiB
-stdout/stderr bounds and a 5-second hard deadline. It uses the shared native
-owned-child isolation (Unix process group / Windows kill-on-close Job Object)
+only for the configured upstream ref, with stdin/prompts disabled. Each Git
+subprocess, including the preceding local configuration/ref queries, has 64 KiB
+bounds on each output stream and its own 5-second hard deadline; this is not a
+5-second deadline for the entire multi-command probe. It uses the shared native
+owned-child process-group isolation
 but is not registered as a long-lived per-window process: frontend
 workspace/generation guards discard stale completions, while the native
-deadline bounds any orphaned request. When the Git leader exits, descendants
+deadlines bound each orphaned subprocess. When the Git leader exits, descendants
 are terminated before the leader is reaped and pipe readers are joined, so an
 `ssh` or credential helper cannot keep the request alive. The probe never
 fetches objects or mutates Git refs, the index, or the working tree.
@@ -86,11 +88,7 @@ fetches objects or mutates Git refs, the index, or the working tree.
   closure alone; forced process termination closes the pipe after grace.
 - An individual ACP line may exceed the byte budget; the queue admits that
   line alone rather than corrupting the protocol.
-- On Windows, job creation, attachment, and initial-thread resume must succeed
-  before startup returns; failures kill/reap the suspended direct child and close
-  the job. Job assignment may fail if the OS forbids breakaway from an enclosing
-  restrictive job; startup fails closed instead of running an unowned process.
-  Unix uses SIGKILL on the isolated group.
+- Forced cleanup uses SIGKILL on the isolated process group.
 - Per-window slots are removed on destruction; cancelled reservations are not
   retained as tombstones for arbitrary labels.
 
@@ -127,7 +125,8 @@ fetches objects or mutates Git refs, the index, or the working tree.
 
 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib` and
 `cargo check --manifest-path desktop/src-tauri/Cargo.toml` must succeed.
-On a non-Windows host with the GNU Windows Rust target installed,
+Optional retained-code check (not a Desktop delivery gate): on a non-Windows
+host with the GNU Windows Rust target installed,
 `cargo check --manifest-path desktop/src-tauri/native-job-crosscheck/Cargo.toml
 --target x86_64-pc-windows-gnu --tests` typechecks the platform module and
 its Windows-only tests without requiring a full Tauri cross-toolchain; this

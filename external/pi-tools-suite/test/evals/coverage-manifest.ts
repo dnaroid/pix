@@ -4,6 +4,7 @@ export type EvalCoverageEntry = {
 };
 
 export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
+	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.test.ts"] },
 	brainstorm: { deterministic: ["test/brainstorm/config.test.ts", "test/brainstorm/workflow.test.ts", "test/brainstorm/continuation.test.ts", "test/brainstorm/audit.test.ts", "test/brainstorm/extension.test.ts", "test/brainstorm/subagents.test.ts", "test/brainstorm/research-extension.test.ts"] },
 	"coding-discipline": { deterministic: ["test/coding-discipline.test.ts"], live: ["quality.two-hypotheses-before-fix", "quality.behavior-over-structural-check", "quality.async-stale-state"] },
 	"ast-grep": { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },
@@ -36,6 +37,7 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 };
 
 export const TOOL_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
+	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.test.ts"] },
 	brainstorm: { deterministic: ["test/brainstorm/config.test.ts", "test/brainstorm/workflow.test.ts", "test/brainstorm/continuation.test.ts", "test/brainstorm/audit.test.ts", "test/brainstorm/extension.test.ts", "test/brainstorm/subagents.test.ts", "test/brainstorm/research-extension.test.ts"] },
 	lookup: { deterministic: ["test/coding-discipline.test.ts"] },
 	ast_grep: { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },

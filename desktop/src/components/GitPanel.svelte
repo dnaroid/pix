@@ -46,7 +46,16 @@
   const updateBlocked = $derived(gitUpdateBlockedReason(snapshot));
   const diverged = $derived(Boolean(snapshot && snapshot.ahead > 0 && snapshot.behind > 0));
   const tool = "inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-40";
-  const progressLabel = $derived(actionId === "update" ? "Updating project…" : actionId === "fetch" ? "Fetching remotes…" : "Updating repository…");
+  const progressLabel = $derived.by(() => {
+    switch (actionId) {
+      case "stage-generate-commit-push": return "Staging all & generating commit message…";
+      case "commit": return "Committing…";
+      case "push": return "Pushing…";
+      case "update": return "Updating project…";
+      case "fetch": return "Fetching remotes…";
+      default: return "Updating repository…";
+    }
+  });
   const reviewStatus = $derived(gitReviewStatus(workflow.review?.text));
   const findings = $derived(gitReviewHasFindings(workflow.review?.text));
   const reviewLoading = $derived(llmActionId?.startsWith("review:") === true);
@@ -124,7 +133,7 @@
   <div class="min-h-0 flex-1 overflow-y-auto">
     {#if error}<div class="border-b border-tool-error/25 bg-tool-error/5 px-3 py-2 text-xs leading-4 text-tool-error break-words" role="alert">{error}</div>{/if}
     {#if workflow.notice && !error}<div class="border-b border-sidebar-border px-3 py-2 text-xs leading-4 text-tool-success" role="status">{workflow.notice}</div>{/if}
-    {#if actionId && actionId !== "push" && actionId !== "commit"}<p class="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground" role="status"><RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{progressLabel}</p>{/if}
+    {#if actionId}<p class="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground" role="status"><RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{progressLabel}</p>{/if}
     {#if snapshot}
       {#if diverged}<p class="border-b border-tool-warning/20 bg-tool-warning/5 px-3 py-2 text-xs leading-4 text-tool-warning">Branch has diverged: {snapshot.ahead} outgoing, {snapshot.behind} incoming. Update only fast-forwards; merge or rebase in a terminal before pushing.</p>
       {:else if snapshot.behind > 0}<p class="border-b border-tool-info/20 bg-tool-info/5 px-3 py-2 text-xs leading-4 text-tool-info">{snapshot.behind} incoming commit(s). Use Update project to fast-forward; local changes are carried over.</p>{/if}

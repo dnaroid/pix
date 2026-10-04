@@ -190,6 +190,15 @@ limits.
 
 ## Disabling modules
 
+`codemode` is enabled by default: SDK QuickJS scripts are available alongside
+ordinary tools. Disable the suite contribution with
+`"modules": { "codemode": false }`, or use **Settings → Tools Suite → General →
+Modules → codemode** in Pix Desktop. Reload extensions or restart the session
+after changing module switches. Restricted child tool selections are not widened.
+An existing CLI codemode definition is reused (including its own mode setting);
+disabling the suite module does not disable codemode independently enabled by
+the host or another extension. See [the contract](../../specs/suite-codemode.md).
+
 Disable suite modules without editing `src/index.ts` via config or environment variables. On startup, `~/.config/pi/pi-tools-suite.jsonc` is created if it is missing with a commented `disabledModules` template. Config is loaded from that file, then `$PI_CONFIG_DIR/pi-tools-suite.jsonc`, then the nearest project `.pi/pi-tools-suite.jsonc`; later layers win.
 
 ```jsonc

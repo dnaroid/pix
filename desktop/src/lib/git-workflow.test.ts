@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { gitReviewHasFindings, type GitSnapshot } from "./git";
-import { gitPushBlockedReason, gitReviewStatus, gitUpdateBlockedReason, gitUpdateNotice, sameGitDiff } from "./git-workflow";
+import { gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason, gitReviewStatus, gitUpdateBlockedReason, gitUpdateNotice, sameGitDiff } from "./git-workflow";
 
 const snapshot: GitSnapshot = { branch: "main", detached: false, head: "abc", upstream: "origin/main", ahead: 1, behind: 0, changes: [], branches: [], remotes: ["origin"] };
 
 describe("Git workflow decisions", () => {
+  it("allows the self-refreshing combined command before the panel loads status, but preserves known safety guards", () => {
+    expect(gitStageGenerateCommitPushBlockedReason(undefined)).toBeNull();
+    expect(gitStageGenerateCommitPushBlockedReason(snapshot)).toBeNull();
+    expect(gitPushBlockedReason(undefined)).toMatch(/not available/);
+    for (const unsafe of [
+      { ...snapshot, detached: true },
+      { ...snapshot, behind: 1 },
+      { ...snapshot, remotes: [] },
+      { ...snapshot, upstream: undefined, remotes: ["one", "two"] },
+      { ...snapshot, changes: [{ path: "a", indexStatus: "U", worktreeStatus: "U", staged: false, unstaged: true, untracked: false, conflicted: true }] },
+    ]) expect(gitStageGenerateCommitPushBlockedReason(unsafe)).toBeTruthy();
+  });
   it("allows publishing with origin or a single remote, but never guesses among other remotes", () => {
     expect(gitPushBlockedReason(snapshot)).toBeNull();
     expect(gitPushBlockedReason({ ...snapshot, upstream: undefined })).toBeNull();

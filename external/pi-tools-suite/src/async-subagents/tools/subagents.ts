@@ -15,6 +15,7 @@ import { registerSpawnTool } from "./spawn.js";
 import { registerStatusTool } from "./status.js";
 import { registerStopTool } from "./stop.js";
 import { registerWaitTool } from "./wait.js";
+import type { CompletionDelivery } from "../completion-delivery.js";
 
 const AgentTaskSchema = Type.Object({
 	id: Type.Optional(Type.String({ description: "Short identifier for this agent (used as directory name). If omitted, assigns agent-1, agent-2, etc." })),
@@ -74,13 +75,14 @@ export function registerSubagentsTool(
 	handleAgentCompletion: AgentCompletionHandler,
 	onLiveAgentsChange?: () => void,
 	onAgentRpcEvent?: (runDir: string, agentId: string, event: RpcEventRecord) => void,
+	completionDelivery?: CompletionDelivery,
 ): void {
 	const toolDescriptions = asyncSubagentToolDescriptions(hasAvailableIndexedProjectRoot());
 	const collector = new ToolCollector();
-	registerSpawnTool(collector as any, liveAgents, handleAgentCompletion, onLiveAgentsChange, onAgentRpcEvent);
+	registerSpawnTool(collector as any, liveAgents, handleAgentCompletion, onLiveAgentsChange, onAgentRpcEvent, completionDelivery);
 	registerStatusTool(collector as any);
 	registerStopTool(collector as any, liveAgents, onLiveAgentsChange);
-	registerWaitTool(collector as any);
+	registerWaitTool(collector as any, liveAgents, completionDelivery);
 	registerResultTool(collector as any);
 	registerCleanupTool(collector as any);
 

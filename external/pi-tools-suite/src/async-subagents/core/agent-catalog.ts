@@ -22,7 +22,7 @@ export function buildSubagentCatalogPrompt(config: SubagentConfig, parentModelRe
 		? `Project-local agent definitions replace same-named built-ins completely. Active project replacements of built-ins: ${activeProjectReplacements.join(", ")}.`
 		: undefined;
 	const knowledgeFinalizationGuidance = effectiveConfig.types["knowledge-auditor"]
-		? "At the end of an implementation task, delegate the final task-scoped repository-knowledge audit to `knowledge-auditor`; give it a concise behavior/result summary and the exact project-relative paths changed by this task. It fixes only small confirmed documentation drift and escalates substantial or ambiguous drift back to the parent."
+		? "After all implementation edits, delegate the final task-scoped repository-knowledge audit to `knowledge-auditor` with the behavior/result and exact project-relative changed paths. Before finalizing, obtain its result and close task-related escalations/unreviewed specs or report blockers, including remaining knowledge dirty state. Later edits require re-review; spawning alone is not completion."
 		: undefined;
 
 	return [

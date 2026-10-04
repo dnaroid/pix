@@ -82,6 +82,34 @@ function fixture() {
 beforeEach(() => invoke.mockReset());
 
 describe("Git assistant freshness", () => {
+  it("combined action generates a message from staged changes without a conversation", async () => {
+    const { assist, git, client } = fixture();
+    const diff: GitDiff = { scope: "staged", content: "+staged", truncated: false };
+    vi.spyOn(git, "stageGenerateCommitPush").mockImplementation(async (generate) => {
+      expect(await generate(diff)).toBe(findings);
+      return true;
+    });
+    await expect(assist.stageGenerateCommitPush()).resolves.toBe(true);
+    expect(client.gitAssist).toHaveBeenCalledWith("/one", "commit-message", "+staged");
+    expect(client.newSession).not.toHaveBeenCalled();
+  });
+
+  it("combined action rejects stale assistant output after a workspace round trip", async () => {
+    const { assist, git, client, changeWorkspace } = fixture();
+    const response = deferred<string>();
+    client.gitAssist.mockReturnValueOnce(response.promise);
+    vi.spyOn(git, "stageGenerateCommitPush").mockImplementation(async (generate) => {
+      expect(await generate({ scope: "staged", content: "+staged", truncated: false })).toBeUndefined();
+      return false;
+    });
+    const pending = assist.stageGenerateCommitPush();
+    await vi.waitFor(() => expect(client.gitAssist).toHaveBeenCalled());
+    changeWorkspace("/two");
+    changeWorkspace("/one");
+    response.resolve("obsolete");
+    await expect(pending).resolves.toBe(false);
+  });
+
   it("reviews a fresh diff rather than the cached editor snapshot", async () => {
     const { git, assist, client } = fixture();
     git.showDiff({ scope: "all", content: "+outdated editor", truncated: false });

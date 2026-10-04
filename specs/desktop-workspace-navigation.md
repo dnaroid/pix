@@ -20,6 +20,8 @@ Active implemented contract.
 Make Pix Desktop workspace navigation behave like an IDE navigator: the Activity
 Bar and Project Explorer are keyboard-first composite controls with stable focus,
 while project selection/open state remains separate from transient focus.
+Desktop product support is macOS only; retained Windows/Linux branches do not
+establish compatibility requirements.
 
 ## Project Explorer behavior
 
@@ -102,11 +104,9 @@ while project selection/open state remains separate from transient focus.
   viewport with an 8 px inset using rendered dimensions. It repositions on
   content changes, scrolls internally if needed and dismisses on window resize.
 - The same context menu reveals the targeted file or folder in the OS file manager,
-  or opens the project folder for the root context menu. The label is **Reveal in
-  Finder** on macOS, **Show in File Explorer** on Windows, and **Show in File
-  Manager** on Linux. macOS/Windows select the targeted entry; on Linux files
-  open their containing folder and folders open themselves because a portable
-  selection mechanism is unavailable. The native command validates the target
+  or opens the project folder for the root context menu. On supported macOS
+  Desktop the label is **Reveal in Finder**, and Finder selects the targeted
+  entry. The native command validates the target
   against the workspace and rejects symlink targets or escaped paths.
 - `F2` renames the focused entry, `Delete` requests deletion, and the platform
   primary Copy/Paste shortcuts operate on the Project Explorer entry clipboard
@@ -192,7 +192,11 @@ while project selection/open state remains separate from transient focus.
 
 ## Activity Bar behavior
 
-- The workspace rail is one vertical toolbar with a roving Tab stop.
+- The workspace rail is one vertical toolbar with a single Tab entry anchored to
+  the active destination, including when the panel is collapsed. Arrow/Home/End
+  navigation moves DOM focus but does not move that Tab entry; returning with Tab
+  enters at the active destination rather than the last arrow-focused button.
+  This is not a focus-following roving-tabindex implementation.
 - The rail is a compact 40 px column with 40×40 view buttons. Density changes
   must preserve visible focus and the single-composite keyboard model.
 - ArrowUp/ArrowDown and Home/End move focus without activating a destination.
@@ -215,6 +219,8 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/lib/project-explorer-native-menu.ts`
 - `desktop/src/components/project-explorer-drag-controller.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
+- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/lib/project-tree.ts`
 - `desktop/src/lib/project-git-decorations.ts`
@@ -269,8 +275,9 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src/components/WorkspaceSidebar.test.ts` covers Activity Bar composite
   wiring.
 - Native project-search tests cover path/content hits, case-insensitive ASCII
-  matching, ignored dependency directories, binary-file skipping, and empty
-  queries; Project Explorer source tests pin the search command, shortcut,
+  matching, ignored dependency directories, and empty queries. The binary-file
+  fixture is not paired with an explicit binary-skipping assertion; that coverage
+  remains a gap. Project Explorer source tests pin the search command, shortcut,
   bounded result UI, and matched-line Preview navigation.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`

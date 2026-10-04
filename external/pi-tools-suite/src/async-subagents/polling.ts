@@ -58,6 +58,7 @@ export async function pollRunWithUpdates(
 		failFast?: boolean;
 		signal?: AbortSignal;
 		onUpdate?: (partialResult: TextToolUpdate) => void;
+		settledState?: (state: RunState) => RunState;
 	},
 ): Promise<RunState> {
 	const start = Date.now();
@@ -73,6 +74,7 @@ export async function pollRunWithUpdates(
 		// recurring route that keeps retrying that proof.
 		reconcileOwnedRuns(runDir, agentIds);
 		state = getRunState(runDir, agentIds);
+		state = options.settledState?.(state) ?? state;
 		emitRunUpdate(options.onUpdate, {
 			runDir,
 			agents: state.agents,

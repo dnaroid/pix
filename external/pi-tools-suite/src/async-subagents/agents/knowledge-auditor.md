@@ -100,7 +100,8 @@ use that initialized project (also from nested directories); do not pass
    candidates alone do not prove full review coverage. For `file::Symbol`, the
    receipt covers the whole file; directory declarations cover recursive file
    membership/content. If that coverage is beyond the supplied task scope,
-   leave the spec unacknowledged and report the remaining review to the parent.
+   leave the spec unacknowledged and report the spec path and uncovered
+   dependencies as an ESCALATE requiring parent review or an explicit blocker.
    Do not infer semantic correctness from `dirty`, indexing, passing tests, or
    `idx audit` alone. Specs with unresolved drift, ambiguity, missing evidence
    or check errors must remain unacknowledged.

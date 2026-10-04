@@ -771,7 +771,10 @@ describe.serial("todo extension lifecycle", () => {
 			expect(completed.content[0].text).toContain("Before completing the final todo");
 			expect(completed.content[0].text).toContain("subagentType='knowledge-auditor'");
 			expect(completed.content[0].text).toContain("exact project-relative paths changed by this task");
-			expect(completed.content[0].text).toContain("escalate substantial or ambiguous drift");
+			expect(completed.content[0].text).toContain("Obtain its result");
+			expect(completed.content[0].text).toContain("escalations/unreviewed specs");
+			expect(completed.content[0].text).toContain("remaining knowledge dirty state");
+			expect(completed.content[0].text).toContain("Spawning alone is not completion");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

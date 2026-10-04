@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # async-subagents (as-is spec)
 
 <!-- markdownlint-disable MD013 MD022 MD031 MD032 MD040 -->
@@ -161,11 +166,28 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ### Parent completion delivery
 
-- Every tracked child's terminal status (`done`, `failed`, or `stopped`) sends
+- Decision: [0031 — Single-channel subagent completion delivery](../docs/decisions/0031-subagent-completion-delivery.md).
+- A tracked child's terminal status (`done`, `failed`, or `stopped`) sends
   an `async-subagents-agent-completion` custom message with result retrieval
   instructions via `triggerTurn: true` and `deliverAs: "followUp"`. An idle
   parent starts a new turn; a busy parent receives a queued follow-up rather
-  than an interruption. `[confirmed by code, index.ts/core/notifications.ts]`
+  than an interruption, unless the completion is consumed by an active
+  `wait` or `spawn` watch as described below. `[confirmed by code,
+  index.ts/core/notifications.ts/completion-delivery.ts]`
+- `wait` reserves only its selected tracked agents in the originating session;
+  `spawn` reserves its newly scheduled agents before launch. During that call,
+  reconciliation defers their follow-ups. A successful final tool response
+  consumes only terminal agents actually present in its final snapshot.
+  Reservation release and acknowledgement are synchronous, before reconciliation.
+  A timeout/fail-fast response may consume a subset; remaining children retain
+  automatic notification. A completion arriving after a nonterminal snapshot
+  is not consumed. Abort or error releases reservations without acknowledgement.
+- Reservations are scoped to live launch objects, not just agent IDs, and
+  overlapping calls release only their own reservations. Polling does not report
+  an in-process intermediate disk receipt as terminal while its final
+  retry/fallback callback is pending. Already queued follow-ups are not retracted
+  by a later explicit wait. Arbitration is in-memory for the current extension
+  instance, not a durable cross-restart delivery ledger.
 - Completion callbacks and the two-second disk watcher share reconciliation:
   removing the tracked child before delivery prevents duplicate notifications.
   In-process launches wait for their final retry/fallback callback rather than
@@ -176,7 +198,10 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   entries untouched during cleanup.
 - Deterministic entrypoint tests cover idle-parent delivery, terminal statuses,
   duplicate refreshes, session isolation and shutdown suppression in
-  `external/pi-tools-suite/test/async-subagents/tools.test.ts`.
+  `external/pi-tools-suite/test/async-subagents/tools.test.ts`. Arbitration,
+  watched spawn/wait callbacks, filtered waits, timeout-boundary races, abort,
+  error and fail-fast are covered in
+  `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`.
 
 ### Concurrency (`core/concurrency.ts`)
 - `createSemaphore(limit)`: `limit ≤ 0` = unlimited. `acquire(signal?)` queues when full, rejects on abort. `[confirmed by code]`
@@ -1051,8 +1076,13 @@ runtime is unchanged.
 - On respawn (same runDir/agentId) unlinks prior exit_code/finished_at/result.*/events.jsonl/stderr.log/session links/timeout+stop+retry metadata. `[confirmed by code, spawn.ts ~38-51]`
 - Sets `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION`, `PI_TERMINAL_BELL_DISABLED`, `PI_TOOLS_SUITE_DISABLED_MODULES` in child env. `[confirmed by code]`
 
-## Related files
+## Implementation
 
+- `external/pi-tools-suite/src/async-subagents/completion-delivery.ts`
+- `external/pi-tools-suite/src/async-subagents/index.ts`
+- `external/pi-tools-suite/src/async-subagents/polling.ts`
+- `external/pi-tools-suite/src/async-subagents/tools/wait.ts`
+- `external/pi-tools-suite/src/async-subagents/tools/subagents.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
 - `external/pi-tools-suite/src/async-subagents/core/owned-launch/`
 - `external/pi-tools-suite/src/async-subagents/core/owned-launch-integration.ts`
@@ -1078,8 +1108,10 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/commands.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
 
-## Existing tests
+## Tests
 
+- `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`:
+  tool-result/follow-up arbitration and reservation lifecycle regressions.
 - `external/pi-tools-suite/test/async-subagents/owned-launch/`: launcher
   transport/parser units, real pipe/socket backpressure regression, and opt-in
   native launchd crash/recovery tests.
@@ -1099,7 +1131,7 @@ runtime is unchanged.
   automatic role routing, parent-model/project gates, unknown-role failures,
   and confirmation that `browser-qa` has no built-in alias.
 - `external/pi-tools-suite/test/async-subagents/model-pools.test.ts` and
-  `model-pool-contract.test.ts`: role candidate ordering, parent-provider policy,
+  `external/pi-tools-suite/test/async-subagents/model-pool-contract.test.ts`: role candidate ordering, parent-provider policy,
   runtime availability, and session fallback behavior.
 - `external/pi-tools-suite/test/async-subagents/ui.test.ts`: task normalization,
   live-state tracking/rendering, polling, and slash-command UI.

@@ -64,6 +64,10 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
   description shown on row hover, matching the bundled-agent checklist pattern.
   Unknown configured names remain preserved and are reported below the checklist;
   the full raw forms remain available through the JSONC editor launched from `Advanced`.
+- The module checklist includes default-on `codemode` for SDK QuickJS scripts
+  alongside ordinary tools. Its `modules.codemode` override takes effect after
+  extension reload/session restart, not immediately on save; see
+  [Suite codemode](suite-codemode.md) for host and restricted-selection behavior.
 - DCP defaults in Desktop are not read from the starter `pi-tools-suite.jsonc`
   template. For any omitted `dcp.*` key, Desktop resolves the same built-in
   runtime default object used by TUI `loadConfig()`; debug-log size/backup

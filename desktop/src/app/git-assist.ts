@@ -123,6 +123,19 @@ export function createGitAssist(options: GitAssistOptions) {
     }
   }
 
+  async function stageGenerateCommitPush(): Promise<boolean> {
+    const client = options.client();
+    const workspace = options.workspace();
+    const generation = options.git.generation;
+    const current = () => client === options.client() && workspace === options.workspace() && generation === options.git.generation;
+    if (!client || !workspace || !options.gitAssistantReady()) return false;
+    return options.git.stageGenerateCommitPush(async (diff) => {
+      if (!current() || !options.gitAssistantReady()) return undefined;
+      const message = await client.gitAssist(workspace, "commit-message", gitDiffForLlm(diff));
+      return current() ? message : undefined;
+    });
+  }
+
   async function generateCommitMessage(): Promise<string | undefined> {
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
@@ -357,5 +370,5 @@ export function createGitAssist(options: GitAssistOptions) {
     }
   }
 
-  return { reviewDiff, generateCommitMessage, resolveReviewInNewSession, copyReviewResolutionPrompt, canFixCi, fixCiInNewSession };
+  return { reviewDiff, generateCommitMessage, stageGenerateCommitPush, resolveReviewInNewSession, copyReviewResolutionPrompt, canFixCi, fixCiInNewSession };
 }

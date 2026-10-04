@@ -14,6 +14,9 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Secret firewall is deliberately opt-in for now. Flip this to true to enable
   // high-confidence outbound redaction plus session-history hygiene.
   "modules": {
+    // SDK QuickJS scripts alongside ordinary tools. Reload extensions or restart
+    // the session after changing module switches.
+    "codemode": true,
     "credential-firewall": false,
     // Safe non-store cleanup: removes only SDK truncation metadata text proven
     // to duplicate the already-visible result. Set false to disable it.

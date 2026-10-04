@@ -97,7 +97,7 @@ describe("previously uncovered extension contracts", () => {
 });
 
 function allModelFacingToolNames(): string[] {
-	const names = new Set<string>();
+	const names = new Set<string>(["codemode"]);
 	const add = (items: Array<{ name: string }>) => items.forEach((item) => names.add(item.name));
 	add(Object.values(astGrepToolDescriptions(1_000, "1MB")));
 	add(Object.values(asyncSubagentToolDescriptions(false)));

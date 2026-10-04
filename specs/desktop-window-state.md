@@ -31,6 +31,9 @@ is still available at its saved desktop coordinates.
 - Synchronizing window geometry between machines.
 - Adding user-facing window-layout settings.
 
+One-shot [window tiling](desktop-window-tiling.md) is a separate command, not a
+persistent layout setting. Its resulting normal geometry is persisted here.
+
 ## Behavior
 
 - On first launch, the window uses the dimensions and placement from `tauri.conf.json` and the operating system.

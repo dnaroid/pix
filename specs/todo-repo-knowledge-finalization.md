@@ -23,6 +23,9 @@ Keep repo-knowledge maintenance as a low-noise completion safeguard instead of a
   or `in_progress`), append one compact reminder to delegate the final
   task-scoped knowledge pass to `knowledge-auditor`, with a concise
   behavior/result summary and the exact project-relative task-changed paths.
+  The reminder requires obtaining the result and resolving task-related
+  escalations/unreviewed specs or reporting blockers and remaining dirty state;
+  spawning alone is not completion.
 - Support both `update` and `batch_update` completion mutations.
 - Keep the reminder advisory at the todo layer; the auditor itself decides
   whether the audit is no-impact, safely repairable, or needs escalation.

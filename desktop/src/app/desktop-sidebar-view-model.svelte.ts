@@ -178,6 +178,7 @@ export function createDesktopSidebarViewModel(options: {
     onGitSwitchBranch: options.git.switchBranch,
     onGitCreateBranch: options.git.createBranch,
     onGitGenerateCommitMessage: options.gitAssist.generateCommitMessage,
+    onGitStageGenerateCommitPush: options.gitAssist.stageGenerateCommitPush,
     onGitReview: (path, scope) => void options.gitAssist.reviewDiff(path, scope),
     onRefreshKnowledge: () => void options.projectActions.refreshKnowledgeBase(),
   }));

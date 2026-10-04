@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { GitDiff, GitDiffScope, GitSnapshot } from "../lib/git";
-import { sameGitDiff, gitPushBlockedReason, gitUpdateNotice, type GitUpdateResult, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
+import { sameGitDiff, gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason, gitUpdateNotice, type GitUpdateResult, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 
 type GitWorkspaceStoreOptions = {
@@ -37,11 +37,13 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let workbenchAnchorId = $state<WorkbenchTabId | null>(null);
   let workbenchOpenedOrder = $state(0);
   let loadGeneration = 0;
+  let pendingRefresh: Promise<void> | null = null;
 
   function reset(): void {
     generation += 1;
     detailsGeneration += 1;
     loadGeneration += 1;
+    pendingRefresh = null;
     snapshot = undefined;
     options.onSnapshotChange?.(undefined);
     uninitialized = false;
@@ -57,9 +59,28 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     closeDiff();
   }
 
-  async function refresh(): Promise<void> {
+  function refresh(): Promise<void> {
+    if (pendingRefresh) return pendingRefresh;
     const workspace = options.workspace();
-    if (!workspace) return;
+    if (!workspace) return Promise.resolve();
+    const request = loadStatus(workspace).finally(() => {
+      if (pendingRefresh === request) pendingRefresh = null;
+    });
+    pendingRefresh = request;
+    return request;
+  }
+
+  // A mutation checkpoint must not reuse a read started before that checkpoint.
+  // Panel/background readers can share the new read without superseding it.
+  async function refreshFresh(): Promise<void> {
+    const workspace = options.workspace();
+    const requestGeneration = generation;
+    await pendingRefresh;
+    if (generation !== requestGeneration || options.workspace() !== workspace) return;
+    await refresh();
+  }
+
+  async function loadStatus(workspace: string): Promise<void> {
     const requestGeneration = ++loadGeneration;
     loading = true;
     error = null;
@@ -127,7 +148,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
         closeDiff();
         await options.reloadProject(workspace);
       }
-      await refresh();
+      await refreshFresh();
       if (!current()) return false;
       notice = typeof mutationOptions.success === "function"
         ? mutationOptions.success(result)
@@ -139,7 +160,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
         const detail = reason instanceof Error ? reason.message : String(reason);
         // Failed pull/stash apply can still have changed refs or produced conflicts.
         invalidateReview();
-        await refresh();
+        await refreshFresh();
         if (current()) error = detail;
       }
       return false;
@@ -157,23 +178,68 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   }
 
   async function commit(message: string, pushAfterCommit = false): Promise<boolean> {
+    return commitTransaction(message, pushAfterCommit);
+  }
+
+  function stageGenerateCommitPush(generate: (diff: GitDiff) => Promise<string | undefined>): Promise<boolean> {
+    return commitTransaction("", true, generate);
+  }
+
+  async function commitTransaction(message: string, pushAfterCommit: boolean, generate?: (diff: GitDiff) => Promise<string | undefined>): Promise<boolean> {
     const workspace = options.workspace();
     const requestGeneration = generation;
     const current = () => options.workspace() === workspace && generation === requestGeneration;
-    if (!workspace || !message.trim() || actionId || llmActionId || resolveRunning) return false;
+    if (!workspace || (!generate && !message.trim()) || actionId || llmActionId || resolveRunning) return false;
     if (snapshot?.changes.some((change) => change.conflicted)) {
       error = "Resolve merge conflicts before committing";
       return false;
     }
-    if (pushAfterCommit && gitPushBlockedReason(snapshot)) {
-      error = gitPushBlockedReason(snapshot);
+    const pushBlocked = generate ? gitStageGenerateCommitPushBlockedReason(snapshot) : gitPushBlockedReason(snapshot);
+    if (pushAfterCommit && pushBlocked) {
+      error = pushBlocked;
       return false;
     }
     let committed = false;
-    actionId = "commit";
+    actionId = generate ? "stage-generate-commit-push" : "commit";
     error = null;
     notice = null;
     try {
+      if (generate) {
+        // One mutation lock spans staging, AI and commit, including awaited gaps.
+        await refreshFresh();
+        if (!current()) return false;
+        if (loading || error || !snapshot) throw new Error(error ?? "A fresh Git status is required before staging.");
+        const blocked = gitPushBlockedReason(snapshot);
+        if (blocked || snapshot.changes.some((change) => change.conflicted)) {
+          throw new Error(blocked ?? "Resolve merge conflicts before committing");
+        }
+        const preparedSnapshot = snapshot;
+        await invoke("git_stage", { workspace, path: null });
+        if (!current()) return false;
+        invalidateReview();
+        const diff = await requestDiff(undefined, "staged");
+        if (!current()) return false;
+        if (!diff?.content.trim()) throw new Error("There are no staged changes to describe.");
+        const generated = await generate(diff);
+        if (!current()) return false;
+        if (!generated?.trim()) throw new Error("Commit message generation did not produce a message. Nothing was committed.");
+        await refreshFresh();
+        if (!current()) return false;
+        if (loading || error || !snapshot) throw new Error(error ?? "A fresh Git status is required before committing.");
+        if (snapshot.branch !== preparedSnapshot.branch || snapshot.head !== preparedSnapshot.head || snapshot.upstream !== preparedSnapshot.upstream
+          || snapshot.remotes.join("\n") !== preparedSnapshot.remotes.join("\n")) {
+          throw new Error("Git branch or publication target changed during generation. Nothing was committed; try again.");
+        }
+        const pushBlocked = gitPushBlockedReason(snapshot);
+        if (pushBlocked || snapshot.changes.some((change) => change.conflicted)) {
+          throw new Error(pushBlocked ?? "Resolve merge conflicts before committing");
+        }
+        const finalDiff = await requestDiff(undefined, "staged");
+        if (!current()) return false;
+        if (!finalDiff || !sameGitDiff(diff, finalDiff)) throw new Error("Staged changes changed during generation. Nothing was committed; try again.");
+        message = generated;
+        actionId = "commit";
+      }
       await invoke("git_commit", { workspace, message });
       committed = true;
       if (!current()) return true;
@@ -191,7 +257,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     } finally {
       if (current()) {
         const mutationError = error;
-        await refresh();
+        await refreshFresh();
         if (current()) {
           if (mutationError) error = mutationError;
           actionId = null;
@@ -363,6 +429,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     stage,
     unstage,
     commit,
+    stageGenerateCommitPush,
     push,
     initialize,
     switchBranch,

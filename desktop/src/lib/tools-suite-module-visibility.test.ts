@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSettingsSource } from "./settings.js";
+import { PI_TOOLS_SUITE_MODULE_CATALOG } from "../../../external/pi-tools-suite/src/module-catalog.js";
 import {
   toolsSuiteModuleStates,
   toolsSuiteUnknownModuleNames,
@@ -12,6 +13,17 @@ const catalog = [
 ] as const;
 
 describe("tools-suite module visibility", () => {
+  it("exposes default-on codemode and preserves JSONC when toggled off and on", () => {
+    const source = '{\n  // keep this comment\n  "modules": { "future-module": false }\n}\n';
+    const root = parseSettingsSource(source).value;
+    expect(toolsSuiteModuleStates(root, PI_TOOLS_SUITE_MODULE_CATALOG).find((entry) => entry.name === "codemode")?.enabled).toBe(true);
+    const off = updateToolsSuiteModuleSource(source, root, "codemode", false);
+    expect(off).toContain("// keep this comment");
+    expect(parseSettingsSource(off).value.modules).toEqual({ "future-module": false, codemode: false });
+    expect(toolsSuiteModuleStates(parseSettingsSource(off).value, PI_TOOLS_SUITE_MODULE_CATALOG).find((entry) => entry.name === "codemode")?.enabled).toBe(false);
+    const on = updateToolsSuiteModuleSource(off, parseSettingsSource(off).value, "codemode", true);
+    expect(parseSettingsSource(on).value.modules).toEqual({ "future-module": false, codemode: true });
+  });
   it("replays legacy/current config precedence over module defaults", () => {
     const root = parseSettingsSource(`{
       "disabledModules": ["normal"],

@@ -6,9 +6,15 @@ import { INLINE_RENDERING } from "../constants.js";
 import { formatAgentStatus } from "../format.js";
 import { pollRunWithUpdates } from "../polling.js";
 import { emptyToolSlot } from "../ui.js";
-import type { SubagentRunRenderDetails } from "../types.js";
+import type { LiveAgent, SubagentRunRenderDetails } from "../types.js";
+import type { RunState } from "../lib.js";
+import type { CompletionDelivery } from "../completion-delivery.js";
 
-export function registerWaitTool(pi: ExtensionAPI): void {
+export function registerWaitTool(
+	pi: ExtensionAPI,
+	liveAgents?: Map<string, Map<string, LiveAgent>>,
+	completionDelivery?: CompletionDelivery,
+): void {
 	pi.registerTool({
 		...ASYNC_SUBAGENT_TOOL_DESCRIPTIONS.waitAction,
 		...INLINE_RENDERING,
@@ -28,31 +34,40 @@ export function registerWaitTool(pi: ExtensionAPI): void {
 
 			const agentIds = params.agentIds?.length ? params.agentIds : undefined;
 			const timeout = params.timeout ?? 300;
-			const state = await pollRunWithUpdates(runDir, agentIds, {
-				mode: "wait",
-				timeoutSeconds: timeout,
-				intervalSeconds: params.interval ?? 3,
-				failFast: params.failFast ?? false,
-				signal: signal ?? undefined,
-				onUpdate,
-			});
+			const reservation = completionDelivery?.begin(ctx.sessionManager?.getSessionFile?.(),
+				[...(liveAgents?.get(runDir)?.values() ?? [])].filter((agent) => !agentIds || agentIds.includes(agent.agentId)));
+			let deliveredState: RunState | undefined;
+			try {
+				const state = await pollRunWithUpdates(runDir, agentIds, {
+					mode: "wait",
+					timeoutSeconds: timeout,
+					intervalSeconds: params.interval ?? 3,
+					failFast: params.failFast ?? false,
+					signal: signal ?? undefined,
+					onUpdate,
+					settledState: completionDelivery ? (state) => completionDelivery.settledState(state) : undefined,
+				});
 
-			const launched = state.agents.filter((a) => a.status !== "planned");
-			const done = launched.filter((a) => a.status === "done").length;
-			const failed = launched.filter((a) => a.status === "failed").length;
-			const stopped = launched.filter((a) => a.status === "stopped").length;
-			const stillRunning = launched.filter((a) => a.status === "running").length;
+				const launched = state.agents.filter((a) => a.status !== "planned");
+				const done = launched.filter((a) => a.status === "done").length;
+				const failed = launched.filter((a) => a.status === "failed").length;
+				const stopped = launched.filter((a) => a.status === "stopped").length;
+				const stillRunning = launched.filter((a) => a.status === "running").length;
 
-			const lines = [
-				`Wait complete: ${done} done, ${failed} failed, ${stopped} stopped, ${stillRunning} still running`,
-				"",
-				...state.agents.map((a) => `${formatAgentStatus(a.status)} ${a.id}${a.exitCode !== undefined ? ` (exit ${a.exitCode})` : ""}`),
-			];
+				const lines = [
+					`Wait complete: ${done} done, ${failed} failed, ${stopped} stopped, ${stillRunning} still running`,
+					"",
+					...state.agents.map((a) => `${formatAgentStatus(a.status)} ${a.id}${a.exitCode !== undefined ? ` (exit ${a.exitCode})` : ""}`),
+				];
 
-			return {
-				content: [{ type: "text", text: lines.join("\n") }],
-				details: { runDir, agents: state.agents, mode: "wait" } satisfies SubagentRunRenderDetails,
-			};
+				deliveredState = state;
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: { runDir, agents: state.agents, mode: "wait" } satisfies SubagentRunRenderDetails,
+				};
+			} finally {
+				reservation?.finish(deliveredState, signal);
+			}
 		},
 
 		renderCall() {

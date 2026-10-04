@@ -143,6 +143,24 @@ describe("tool descriptions", () => {
 		}
 	});
 
+	test("knowledge finalization covers receipts and fallback without mechanical bypass or prompt bloat", () => {
+		const audit = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_audit")!;
+		const text = [audit.promptSnippet, ...audit.promptGuidelines].join("\n");
+		expect(text).toContain("obtain the result");
+		expect(text).toContain("missing review coverage");
+		expect(text).toContain("mechanical edits still need review-state checks");
+		expect(text).toContain("auditor (or parent fallback)");
+		expect(text).toContain("every declared Implementation/Tests dependency");
+		expect(text).toContain("idx knowledge acknowledge <spec-paths...>");
+		expect(text).toContain("then rechecks dirty");
+		expect(text).toContain("never bulk-acknowledge unrelated specs");
+		expect(text.length).toBeLessThan(2000);
+		for (const tool of [CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Edit, CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Write, codexAliasToolDescriptions(true).applyPatch]) {
+			expect(tool.description).toContain("repo_audit finalization guidance");
+			expect(tool.description).not.toContain("skip for mechanical");
+		}
+	});
+
 	test("subagents descriptions and parent catalog agree on parent-first role selection", () => {
 		for (const repoAware of [true, false]) {
 			const tool = asyncSubagentToolDescriptions(repoAware).subagents;

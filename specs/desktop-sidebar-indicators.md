@@ -71,6 +71,14 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   branch controls for detached HEAD, Fetch for upstream updates, Push for outgoing
   commits, and incoming-change controls for behind-upstream state. Commands reuse
   existing Git owners and eligibility guards; unsafe Push is disabled.
+  Dirty working-tree changes additionally offer **Stage all, AI commit & push**:
+  explicitly stage every change, generate the message, commit and push under one
+  Git mutation lock. The command leaves the current panel/collapsed state unchanged
+  and is available before Source Control has ever been opened. Unavailable AI,
+  busy Git or known unsafe publication disable it; an unloaded full Git snapshot
+  is checked by the transaction's fresh preflight, not a reason to disable the menu.
+  Progress and failure details remain available in Source Control on request. See
+  [Git workflow safety](desktop-git-workflows.md) for freshness and partial-success behavior.
 - Tasks offer load retry, planned-task view, or opening the running task's linked
   session. Project errors offer tree reload. Registry reasons offer retry or the
   existing resource-review/sync controls. Terminal and IDX failures/activity open

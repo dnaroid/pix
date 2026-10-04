@@ -37,7 +37,7 @@ const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
 const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
 const REPO_KNOWLEDGE_FINALIZATION_REMINDER =
-	"📚 Before completing the final todo: delegate the final task-scoped knowledge pass to subagentType='knowledge-auditor'. Give it a concise behavior/result summary and the exact project-relative paths changed by this task. It must run idx audit, fix only small confirmed documentation drift, and escalate substantial or ambiguous drift.";
+	"📚 Before completing the final todo: delegate the final knowledge pass to subagentType='knowledge-auditor' with the behavior/result and exact project-relative paths changed by this task. Obtain its result; resolve task-related escalations/unreviewed specs or report blockers and remaining knowledge dirty state. Spawning alone is not completion.";
 
 function completesTodo(info: { action: string; params: TaskMutationParams }): boolean {
 	if (info.action === "update") return info.params.status === "completed";

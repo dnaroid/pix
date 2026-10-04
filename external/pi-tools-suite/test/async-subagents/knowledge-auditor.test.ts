@@ -47,6 +47,9 @@ describe("built-in knowledge-auditor role", () => {
 		expect(decisionGuidance).toContain("Never invent motives from code");
 		expect(decisionGuidance).toContain("Do not create/accept/supersede decisions yourself");
 		expect(decisionGuidance).toContain("Trivial edits do not need a decision record");
+		expect(decisionGuidance).toContain("uncovered dependencies as an ESCALATE");
+		expect(decisionGuidance).toContain("every declared Implementation/ Tests dependency");
+		expect(decisionGuidance).toContain("never all specs merely to clear");
 		expect(generatePrompt({
 			id: "audit",
 			task: "Audit the final knowledge drift",
@@ -70,7 +73,11 @@ describe("built-in knowledge-auditor role", () => {
 		fs.mkdirSync(path.join(cwd, ".indexer-cli"));
 
 		expect(filterSubagentConfigForContext(config, { cwd }).types["knowledge-auditor"]).toBeDefined();
-		expect(buildSubagentCatalogPrompt(config, undefined, cwd)).toContain("- knowledge-auditor:");
+		const catalog = buildSubagentCatalogPrompt(config, undefined, cwd)!;
+		expect(catalog).toContain("- knowledge-auditor:");
+		expect(catalog).toContain("Before finalizing, obtain its result");
+		expect(catalog).toContain("Later edits require re-review");
+		expect(catalog).toContain("spawning alone is not completion");
 		const routed = await routeSubagentTasks([
 			{ id: "audit", task: "Run the final knowledge audit", subagentType: "knowledge-auditor" },
 		], config, { cwd });
