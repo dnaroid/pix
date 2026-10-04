@@ -84,7 +84,7 @@ export function formatContent(op: Op, state: TaskState): string {
 			const t = state.tasks.find((x) => x.id === op.taskId);
 			// Defensive — `op.taskId` always resolves on success path.
 			if (!t) return `${formatReplacePrefix(op.replacedCount)}Created #${op.taskId}`;
-			return `${formatReplacePrefix(op.replacedCount)}Created #${t.id}: ${t.subject} (pending)`;
+			return `${formatReplacePrefix(op.replacedCount)}Created #${t.id}: ${t.subject} (${t.status})`;
 		}
 		case "update": {
 			const transition = op.fromStatus !== op.toStatus ? ` (${op.fromStatus} → ${op.toStatus})` : "";

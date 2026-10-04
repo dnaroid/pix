@@ -6,6 +6,7 @@ import type { createDesktopPromptServices } from "./desktop-prompt-services";
 import type { createDesktopSessionServices } from "./desktop-session-services";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
+import type { HeadsUpStore } from "./heads-up.svelte";
 import { createSessionCoordinator } from "./session-coordinator";
 
 type ActiveSessionState = ReturnType<typeof createActiveSessionState>;
@@ -31,6 +32,7 @@ type DesktopSessionOrchestrationOptions = {
   promptServices: PromptServices;
   lspOnboarding: LspOnboardingStore;
   quotaWait: QuotaWaitStore;
+  headsUp: HeadsUpStore;
   reportError: (error: unknown) => void;
 };
 
@@ -65,6 +67,7 @@ export function createDesktopSessionOrchestration(options: DesktopSessionOrchest
     dcp,
     updates: options.promptServices.updates,
     quotaWait: options.quotaWait,
+    headsUp: options.headsUp,
   });
 
   return { dcp, coordinator };

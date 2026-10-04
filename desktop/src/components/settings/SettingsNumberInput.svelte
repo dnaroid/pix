@@ -6,6 +6,7 @@
     max,
     step = "any",
     placeholder = "",
+    ariaLabel,
   }: {
     value: number | undefined;
     onChange: (value: number | undefined) => void;
@@ -13,12 +14,14 @@
     max?: number;
     step?: number | "any";
     placeholder?: string;
+    ariaLabel?: string;
   } = $props();
 </script>
 
 <input
   class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none placeholder:text-muted-foreground/65 focus-visible:ring-2 focus-visible:ring-ring/30"
   type="number"
+  aria-label={ariaLabel}
   value={value ?? ""}
   {min}
   {max}

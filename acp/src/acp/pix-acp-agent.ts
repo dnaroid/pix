@@ -370,7 +370,7 @@ interface AgentSessionState {
 	/** Runtime extension slash command names (without slash), lower-cased. */
 	runtimeExtensionCommands: Set<string>;
 	/** An extension slash command is executing outside the run lifecycle. */
-	extensionCommandRunning: boolean;
+	extensionCommandRunning: number;
 	/** `/wait state` was already requested once for this runtime. */
 	quotaWaitStateRequested: boolean;
 }
@@ -410,6 +410,7 @@ export interface PixAcpAgentOptions {
 	readonly toolsSuiteExtensionPath?: string;
 	/** Bundled quota-wait extension providing scheduled continuation. */
 	readonly quotaWaitExtensionPath?: string;
+	readonly headsUpExtensionPath?: string;
 	/** Agent resource directory override for hermetic draft-catalog tests. */
 	readonly agentDir?: string;
 	readonly logger: Logger;
@@ -1803,6 +1804,7 @@ export class PixAcpAgent {
 			toolsSuiteExtensionPath,
 			this.options.quotaWaitExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
+			this.options.headsUpExtensionPath,
 		);
 		const hostEnv = !startupOverride && this.clientName === "pix-desktop" ? await this.brainstormHost.environment(acpSessionId) : {};
 		const pi = this.options.createPiClient({ ...startup, env: { ...startup.env, ...hostEnv } });
@@ -1839,7 +1841,7 @@ export class PixAcpAgent {
 			headerUsage: undefined,
 			modelUsagePushGeneration: 0,
 			runtimeExtensionCommands: new Set(),
-			extensionCommandRunning: false,
+			extensionCommandRunning: 0,
 			quotaWaitStateRequested: false,
 		};
 		// Register routing before start so session_start extension state emitted
@@ -2316,10 +2318,10 @@ export class PixAcpAgent {
 		}
 	}
 
-	/** Only the bundled wait controls are safe out-of-band commands. */
+	/** Only known bundled control commands may bypass the parent run lifecycle. */
 	private runtimeExtensionCommandMatches(session: AgentSessionState, text: string): boolean {
 		const name = /^\/(\S+)/.exec(text.trim())?.[1]?.toLowerCase();
-		return (name === "wait" || name === "quota-wait") && session.runtimeExtensionCommands.has(name);
+		return (name === "wait" || name === "quota-wait" || name === "heads-up") && session.runtimeExtensionCommands.has(name);
 	}
 
 	/**
@@ -2330,13 +2332,13 @@ export class PixAcpAgent {
 	 * reaches the transcript through the `notify` UI bridge.
 	 */
 	private async runExtensionSlashCommand(session: AgentSessionState, text: string): Promise<PromptResponse> {
-		session.extensionCommandRunning = true;
+		session.extensionCommandRunning++;
 		try {
 			await session.pi.prompt(text);
 		} catch (error) {
 			throw new RequestError(ERROR_SERVER, `extension command failed: ${stringifyUnknown(error)}`);
 		} finally {
-			session.extensionCommandRunning = false;
+			session.extensionCommandRunning--;
 		}
 		return { stopReason: "end_turn" };
 	}
@@ -3580,6 +3582,7 @@ function piClientOptions(
 	toolsSuiteExtensionPath?: string,
 	quotaWaitExtensionPath?: string,
 	ignoreContextFiles = false,
+	headsUpExtensionPath?: string,
 ): PiRpcClientOptions {
 	const args = [
 		...(questionExtensionPath ? ["--extension", questionExtensionPath] : []),
@@ -3587,6 +3590,7 @@ function piClientOptions(
 		...(workspaceUndoExtensionPath ? ["--extension", workspaceUndoExtensionPath] : []),
 		...(toolsSuiteExtensionPath ? ["--extension", toolsSuiteExtensionPath] : []),
 		...(quotaWaitExtensionPath ? ["--extension", quotaWaitExtensionPath] : []),
+		...(headsUpExtensionPath ? ["--extension", headsUpExtensionPath] : []),
 		...(ignoreContextFiles ? ["--no-context-files"] : []),
 	];
 	const base = {

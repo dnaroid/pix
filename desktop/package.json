@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:git-workflow": "node scripts/git-workflow-smoke.mjs",
     "test:context-menu": "node scripts/context-menu-smoke.mjs",
+    "test:observer": "node scripts/observer-smoke.mjs",
     "test:tool-selection": "node scripts/tool-selection-smoke.mjs",
     "test:transcript-activity": "node scripts/transcript-activity-smoke.mjs"
   },

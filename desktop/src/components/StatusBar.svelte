@@ -10,6 +10,8 @@
   import type { SessionTodoSnapshot } from "../lib/session-todos";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
+  import ObserverStatus from "./ObserverStatus.svelte";
+  import type { HeadsUpSnapshot } from "../lib/heads-up";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
   import SessionBrainstormStatus from "./SessionBrainstormStatus.svelte";
   import type { SessionBrainstormSnapshot } from "../lib/session-brainstorm";
@@ -22,6 +24,7 @@
     changingConfig,
     promptRunning,
     quotaWaitIndicator = null,
+    observer = null,
     canConfigure,
     modelThinkingOpen,
     runtimeStatus,
@@ -51,6 +54,17 @@
     changingConfig: string | null;
     promptRunning: boolean;
     quotaWaitIndicator?: { label: string; onReopen: () => void } | null;
+    observer?: {
+      sessionId: string | null;
+      runtimeReady: boolean;
+      snapshot?: HeadsUpSnapshot;
+      pendingToggle: boolean;
+      pendingCheck: boolean;
+      onToggle: () => void;
+      onCheck: () => void;
+      onRequestSnapshot: () => void;
+      onOpenSettings: () => void;
+    } | null;
     canConfigure: boolean;
     modelThinkingOpen: boolean;
     runtimeStatus?: RuntimeStatus;
@@ -148,6 +162,9 @@
         <Hourglass class="h-3 w-3 shrink-0" aria-hidden="true" />
         <span class="max-w-[240px] truncate font-mono tabular-nums">{quotaWaitIndicator.label}</span>
       </button>
+    {/if}
+    {#if observer}
+      <ObserverStatus {...observer} />
     {/if}
     <RuntimeStatusBarItems
       status={runtimeStatus}

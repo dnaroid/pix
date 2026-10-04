@@ -80,7 +80,6 @@
     <History class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
     <span>{historyLabel}</span>
   </button>
-  <div class="mx-1 my-1 h-px bg-border" aria-hidden="true"></div>
   <button
     class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
     type="button"

@@ -5,6 +5,7 @@ import {
   buildWorkbenchInspectorProps,
 } from "./desktop-workbench-prop-builders";
 import { createQuotaWaitStore } from "./quota-wait.svelte";
+import { createHeadsUpStore } from "./heads-up.svelte";
 
 function conversationOptions(sessionId: string | null, quotaWait = createQuotaWaitStore({
   client: () => null,
@@ -19,6 +20,7 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
     operationRunning: () => false,
     sessionHistoryLoading: () => false,
     promptText: () => "",
+    setPromptText: vi.fn(),
     promptAttachments: () => [],
     statusReady: () => true,
     activeSessionRuntimeReady: () => true,
@@ -52,6 +54,7 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
     questionImages: {},
     lspOnboarding: { activeSuggestion: () => undefined },
     quotaWait,
+    headsUp: createHeadsUpStore({ client: () => null, runtimeReady: () => true, reportError: () => {} }),
   } as any;
 }
 
@@ -98,6 +101,36 @@ describe("workbench composer props", () => {
   it("omits schedule continuation without an active session", () => {
     const props = buildWorkbenchConversationProps(conversationOptions(null));
     expect(props.composer.onScheduleContinuation).toBeUndefined();
+  });
+
+  it("observer discussion checks live session, dialog and mutation ownership rather than captured props", () => {
+    const options = conversationOptions("session-1");
+    const now = Date.now();
+    options.headsUp.handleSessionState({ sessionId: "session-1", channel: "heads-up", data: {
+      version: 1, instanceId: "runtime-1", revision: 1, enabled: true, model: "provider/model", phase: "idle",
+      checks: 1, inputTokens: 1, outputTokens: 1,
+      notice: { id: "notice-1", title: "Config changed", consequence: "Old format fails", evidence: [{ id: "entry-1", text: "Old schema was removed" }], createdAt: now, expiresAt: now + 30_000 },
+    } });
+    try {
+      const props = buildWorkbenchConversationProps(options);
+      expect(props.composer.headsUp).toBeTruthy();
+      expect("headsUpControl" in props.composer).toBe(false);
+      options.activeSessionId = () => "session-2";
+      props.composer.headsUp?.onDiscuss();
+      expect(options.setPromptText).not.toHaveBeenCalled();
+      options.activeSessionId = () => "session-1";
+      options.pendingElicitation = () => ({ kind: "confirmation" });
+      props.composer.headsUp?.onDiscuss();
+      expect(options.setPromptText).not.toHaveBeenCalled();
+      options.pendingElicitation = () => null;
+      options.sessionMutationRunning = () => true;
+      props.composer.headsUp?.onDiscuss();
+      expect(options.setPromptText).not.toHaveBeenCalled();
+      options.sessionMutationRunning = () => false;
+      props.composer.headsUp?.onDiscuss();
+      expect(options.setPromptText).toHaveBeenCalledWith(expect.stringContaining("Please check this observer note"));
+      expect(options.promptSubmit.submit).not.toHaveBeenCalled();
+    } finally { options.headsUp.reset(); }
   });
 });
 

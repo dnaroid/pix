@@ -26,6 +26,7 @@ import type { createSessionTabController } from "./session-tab-controller";
 import type { createTranscriptAttachmentController } from "./transcript-attachments";
 import type { createTranscriptScrollController } from "./transcript-scroll.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
+import type { HeadsUpStore } from "./heads-up.svelte";
 import type { createWorkspaceController } from "./workspace-controller";
 
 export type DesktopWorkbenchSurfaceViewProps = Omit<
@@ -56,6 +57,7 @@ export type WorkbenchConversationBuilderOptions = {
   operationRunning: () => boolean;
   sessionHistoryLoading: () => boolean;
   promptText: () => string;
+  setPromptText: (text: string) => void;
   promptAttachments: () => DesktopWorkbenchSurfaceViewProps["composer"]["attachments"];
   statusReady: () => boolean;
   activeSessionRuntimeReady: () => boolean;
@@ -84,6 +86,7 @@ export type WorkbenchConversationBuilderOptions = {
   questionImages: ReturnType<typeof createQuestionImageController>;
   lspOnboarding: LspOnboardingStore;
   quotaWait: QuotaWaitStore;
+  headsUp: HeadsUpStore;
 };
 
 export type WorkbenchEditorBuilderOptions = {
@@ -191,6 +194,32 @@ export function buildWorkbenchConversationProps(
       onAction: (item, action) => void options.promptQueue.actOnQueuedMessage(item, action),
     },
     composer: {
+      headsUp: (() => {
+        const observerNotice = options.headsUp.notice(sessionId);
+        const observerSnapshot = options.headsUp.state(sessionId);
+        if (!observerNotice || !observerSnapshot) return null;
+        const feedbackCommands = ["known", "irrelevant", "dismiss"].map((action) => `/heads-up ${action} ${observerNotice.id}`);
+        return {
+          notice: observerNotice,
+          snapshot: observerSnapshot,
+          pending: feedbackCommands.some((command) => options.headsUp.isPending(sessionId, command)),
+          onFeedback: (feedback: "known" | "irrelevant" | "dismiss") => {
+            void options.headsUp.sendFeedback(sessionId!, feedback, observerNotice.id);
+          },
+          onDiscuss: () => {
+            options.headsUp.discuss(
+              sessionId!,
+              observerNotice,
+              () => options.activeSessionId() === sessionId && options.pendingElicitation() === null
+                && !options.brainstormLink?.()?.owned && !options.operationRunning()
+                && !options.sessionMutationRunning() && options.activeSessionRuntimeReady(),
+              options.promptText,
+              options.promptAttachments,
+              options.setPromptText,
+            );
+          },
+        };
+      })(),
       activity: composerActivity(transcript, {
         sessionId,
         running: options.promptRunning(),

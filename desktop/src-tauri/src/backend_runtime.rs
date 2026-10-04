@@ -15,11 +15,12 @@ pub struct BackendRuntime {
     bundled_root: Option<PathBuf>,
 }
 
-const EXTENSIONS: [(&str, &str); 4] = [
+const EXTENSIONS: [(&str, &str); 5] = [
     ("PIX_ACP_QUESTION_EXTENSION", "question"),
     ("PIX_ACP_SESSION_TITLE_EXTENSION", "session-title"),
     ("PIX_ACP_WORKSPACE_UNDO_EXTENSION", "workspace-undo"),
     ("PIX_ACP_QUOTA_WAIT_EXTENSION", "quota-wait"),
+    ("PIX_ACP_HEADS_UP_EXTENSION", "heads-up"),
 ];
 
 impl BackendRuntime {
@@ -260,7 +261,11 @@ mod tests {
             command.get_args().next().unwrap(),
             fixture.0.join("app/acp/dist/main.js")
         );
-        assert_eq!(runtime.extensions.len(), 5);
+        assert_eq!(runtime.extensions.len(), EXTENSIONS.len() + 1);
+        assert!(runtime.extensions.iter().any(|(key, path)| {
+            *key == "PIX_ACP_HEADS_UP_EXTENSION"
+                && path.ends_with("dist/bundled-extensions/heads-up/index.js")
+        }));
         for (_, path) in runtime.extensions {
             assert!(path.starts_with(&fixture.0));
         }

@@ -8,12 +8,25 @@ import {
 	SESSION_RECOVERY_TOOL_DESCRIPTIONS,
 	TODO_TOOL_DESCRIPTION,
 	asyncSubagentToolDescriptions,
+	astGrepToolDescriptions,
 	codexAliasToolDescriptions,
 } from "../src/tool-descriptions.js";
 import { COMPRESS_RANGE_DESCRIPTION } from "../src/dcp/prompts.js";
 import { buildSubagentCatalogPrompt, SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../src/async-subagents/core/agent-catalog.js";
+import { agentStrategyPrompt, SUBAGENT_DELEGATION_GUIDANCE } from "../src/async-subagents/core/agent-strategy.js";
 
 describe("tool descriptions", () => {
+	test("text and path lookups have available-tool fallbacks without weakening AST-first routing", () => {
+		const tool = astGrepToolDescriptions(2000, "50KB").astGrep;
+		for (const text of [tool.description, tool.promptSnippet, tool.promptGuidelines.join("\n")]) {
+			expect(text).toContain("Grep/grep");
+			expect(text).toContain("Glob/find");
+			expect(text).toContain("shell with rg");
+			expect(text).toContain("shell with rg --files");
+		}
+		expect(tool.description).toContain("ast_grep must be the FIRST tool call");
+		expect(tool.promptGuidelines.join("\n")).toContain("Never call unavailable tools");
+	});
 	test("shell aliases share a compact pre-delivery test-output contract", () => {
 		const prompts = [
 			CODEX_ALIAS_TOOL_DESCRIPTIONS.shellCommand.description,
@@ -74,7 +87,7 @@ describe("tool descriptions", () => {
 		expect(tool.promptSnippet).toContain("keep hybrid unless lexical matches mislead");
 		expect(tool.promptSnippet).toContain("offset/limit, not whole files");
 		const guidance = tool.promptGuidelines.join("\n");
-		expect(guidance).toContain("Grep for exact identifiers");
+		expect(guidance).toContain("Exact identifiers: available Grep/grep or shell with rg");
 		expect(guidance).toContain("--path-prefix/--dedupe-file");
 		expect(guidance).toContain("--include-content only for a narrow follow-up");
 		expect(guidance).toContain("--max-files 1");
@@ -165,7 +178,7 @@ describe("tool descriptions", () => {
 		for (const repoAware of [true, false]) {
 			const tool = asyncSubagentToolDescriptions(repoAware).subagents;
 			expect(tool.description).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
-			expect(tool.promptSnippet).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
+			expect(tool.promptSnippet).toContain("Choose a role from the effective catalog");
 			const text = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
 			expect(text).not.toContain("Usually omit subagentType");
 			expect(text).not.toContain("omit subagentType unless user-named/deterministic");
@@ -175,6 +188,19 @@ describe("tool descriptions", () => {
 		const catalog = buildSubagentCatalogPrompt({ types: { review: { description: "Review code." } } });
 		expect(catalog).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
 		expect(catalog).toContain("- review: Review code.");
+	});
+
+	test("the assembled guidance emits the full delegation policy only once, even without a strategy", () => {
+		for (const env of [{}, { PI_AGENT_STRATEGY: "off" }]) {
+			const tool = asyncSubagentToolDescriptions(true).subagents;
+			const assembled = [tool.description, tool.promptSnippet, ...tool.promptGuidelines,
+				agentStrategyPrompt({ env }), buildSubagentCatalogPrompt({ types: { research: {} } }),
+			].join("\n");
+			expect(assembled.split(SUBAGENT_DELEGATION_GUIDANCE)).toHaveLength(2);
+			expect(assembled).toContain("When frontier-review is present in the current role catalog");
+			expect(assembled).toContain("before checking prerequisites");
+			expect(assembled).toContain("knowledge-auditor");
+		}
 	});
 
 	test("apply_patch prompt documents begin-patch and unified diff support", () => {
@@ -221,6 +247,9 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("list and reconcile all visible todos, including deferred ones");
 		expect(promptText).toContain("Do not finish with stale/duplicate deferred todos");
 		expect(promptText).toContain("exactly one in_progress");
+		expect(promptText).toContain("return the blocked task to pending with a recorded blocker");
+		expect(promptText).toContain("mark only the new current task in_progress");
+		expect(promptText).not.toContain("If partial, tests fail, or blocked, keep the task in_progress");
 		expect(promptText).toContain("Never use `clear`, `delete`");
 	});
 
@@ -273,7 +302,7 @@ describe("tool descriptions", () => {
 
 		expect(promptText).toContain("repo_* tools are unavailable");
 		expect(promptText).toContain("incident-triage hypotheses");
-		expect(promptText).toContain("delegate bounded research tracks");
+		expect(promptText).toContain("delegate scoped research");
 		expect(promptText).toContain("call action='spawn' as the first discovery step");
 	});
 });

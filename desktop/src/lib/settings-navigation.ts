@@ -3,7 +3,7 @@ import type { SettingsConfigKind } from "./settings";
 export const SETTINGS_GROUPS = {
   desktop: { label: "Desktop", sections: [
     { id: "general", label: "General" }, { id: "models", label: "Models" },
-    { id: "assistant", label: "Assistant" }, { id: "voice", label: "Voice" },
+    { id: "assistant", label: "Assistant" }, { id: "observer", label: "Observer" }, { id: "voice", label: "Voice" },
     { id: "editor", label: "Editor" }, { id: "source-control", label: "Git" },
     { id: "advanced", label: "Advanced" },
   ] },

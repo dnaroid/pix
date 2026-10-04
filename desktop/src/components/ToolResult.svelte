@@ -12,6 +12,7 @@
   import type { Attachment } from "../lib/attachments";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ToolItem } from "../lib/transcript";
+  import { toolInputText } from "../lib/tool-input";
   import DiffView from "./DiffView.svelte";
   import MarkdownText from "./MarkdownText.svelte";
 
@@ -34,12 +35,23 @@
   } = $props();
 
   let language = $derived(languageForReadTool(tool.kind, tool.title, tool.path));
+  let inputText = $derived(toolInputText(tool));
   let renderAsMarkdown = $derived(language === "markdown");
   let highlighted = $derived(language && !renderAsMarkdown ? highlightCode(tool.content, language) : undefined);
   let shellDiff = $derived(isShellDiffTool(tool.kind, tool.title) && tool.content ? unifiedDiffModel(tool.content) : undefined);
   let mutationDiffs = $derived(mutationDiffPresentations(tool));
   let mutationLines = $derived(isMutationTool(tool) ? mutationOutputLines(tool.content) : undefined);
 </script>
+
+{#if inputText !== undefined}
+  <section aria-label="Tool input">
+    <div class="tool-section-label">Input</div>
+    <pre class="tool-result tool-input">{inputText}</pre>
+  </section>
+  {#if tool.content || shellDiff || mutationDiffs.length > 0}
+    <div class="tool-section-label">Result</div>
+  {/if}
+{/if}
 
 {#each mutationDiffs as diff}
   <DiffView model={diff.model} label={diff.label} />
@@ -61,9 +73,10 @@
 
 <style>
   .tool-result {
-    max-height: 220px;
+    max-height: min(480px, 60vh);
     margin-top: 0.25rem;
     overflow: auto;
+    overscroll-behavior: contain;
     border: 1px solid var(--code-border);
     border-radius: var(--radius-lg);
     background: var(--code);
@@ -73,6 +86,13 @@
     font-size: 12px;
     line-height: 1.35;
     white-space: pre-wrap;
+  }
+
+  .tool-section-label {
+    margin-top: 0.5rem;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-weight: 600;
   }
 
   .highlighted-code {

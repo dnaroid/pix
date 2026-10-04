@@ -95,7 +95,8 @@ describe("WorkspaceSidebar project sizing", () => {
   it("passes the live ACP model catalog through the sidebar into Settings", () => {
     expect(navigationViewModelSource).toContain("configOptions: options.displayedConfigOptions");
     expect(sidebarViewModelSource).toContain("settingsConfigOptions: options.configOptions()");
-    expect(sidebarSource).toContain("<SettingsPanel configOptions={settingsConfigOptions}");
+    expect(sidebarSource).toMatch(/<SettingsPanel\b[^>]*configOptions=\{settingsConfigOptions\}/);
+    expect(sidebarSource).toContain("bind:this={settingsPanel}");
   });
 
   it("routes externally observed registry changes through the local-state observer", () => {

@@ -19,3 +19,7 @@ export function isTransitionValid(from: TaskStatus, to: TaskStatus): boolean {
 	if (from === to) return true;
 	return VALID_TRANSITIONS[from].has(to);
 }
+
+export function isTaskStatus(value: unknown): value is TaskStatus {
+	return typeof value === "string" && Object.prototype.hasOwnProperty.call(VALID_TRANSITIONS, value);
+}

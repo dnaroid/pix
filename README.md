@@ -224,6 +224,7 @@ behavior.
 | [Troubleshooting](docs/troubleshooting.md) | fonts, clipboard, voice, providers, IDX and Desktop launch issues |
 | [Extension authors](docs/extensions.md) | renderer SDK entry points and extension UI contract |
 | [Development](docs/development.md) | source checkout, tests/builds and project layout |
+| [Heads up evaluation](docs/heads-up-eval.md) | synthetic observer cases, opt-in live runs, metrics and manual review |
 | [Release guide](docs/release.md) | maintainer packaging, native release verification and publishing |
 
 ## Development

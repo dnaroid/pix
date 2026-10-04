@@ -18,16 +18,22 @@ function renderProgress(completedTodos: number, totalTodos: number, sessionActiv
   }).body;
 }
 
-describe("status HUD todo mini-track", () => {
-  it.each([[2, 4, 50], [10, 40, 25], [0, 40, 0]])(
-    "renders %i/%i as %i percent in one continuous track",
+describe("status HUD todo progress ring", () => {
+  it.each([[1, 5, 20], [2, 4, 50], [10, 40, 25], [0, 40, 0]])(
+    "renders %i/%i as %i percent in a ring beside the centered count",
     (completed, total, percentage) => {
       const html = renderProgress(completed, total);
       expect(html).toContain(`${completed}/${total}`);
-      expect(html).toContain(`width: ${percentage}%`);
+      expect(html).toContain(`stroke-dashoffset="${100 - percentage}"`);
       expect(html.match(/data-session-todo-progress/g)).toHaveLength(1);
-      expect(html).toContain("h-1 overflow-hidden rounded-full bg-muted-foreground/25");
-      expect(html).toContain("block h-full rounded-full bg-tool-info");
+      expect(html).toContain('pathLength="100"');
+      expect(html).toContain('stroke-dasharray="100"');
+      expect(html).toContain("text-muted-foreground/25");
+      expect(html).toContain("text-tool-info");
+      expect(html).toContain("flex h-7 items-center justify-center gap-1");
+      expect(html).not.toContain("flex-col");
+      expect(html).not.toContain("lucide-list-todo");
+      expect(html).not.toContain("style=\"width:");
     },
   );
 

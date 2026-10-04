@@ -1,5 +1,5 @@
 import type { Task, TaskAction, TaskMutationParams, TaskStatus, TodoThinkingLevel } from "../tool/types.js";
-import { isTransitionValid } from "./invariants.js";
+import { isTaskStatus, isTransitionValid } from "./invariants.js";
 import type { TaskState } from "./state.js";
 import { detectCycle } from "./task-graph.js";
 
@@ -157,6 +157,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 	switch (action) {
 		case "create": {
 			if (!params.subject?.trim()) return errorResult(state, "subject required for create");
+			if (params.status !== undefined && !isTaskStatus(params.status)) return errorResult(state, "invalid task status");
 			const replacedCount = params.replace === true ? state.tasks.length : 0;
 			const baseState = params.replace === true ? { tasks: [], nextId: 1 } : state;
 			if (params.parentId !== undefined && params.parentId !== null) {
@@ -167,7 +168,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 				const err = validateLiveReference(baseState, "blockedBy", dep);
 				if (err) return errorResult(state, err);
 			}
-			const newTask: Task = { id: baseState.nextId, subject: params.subject.trim(), status: "pending" };
+			const newTask: Task = { id: baseState.nextId, subject: params.subject.trim(), status: params.status ?? "pending" };
 			if (params.description) newTask.description = params.description;
 			if (params.activeForm) newTask.activeForm = params.activeForm;
 			if (params.thinking) newTask.thinking = params.thinking;

@@ -21,7 +21,7 @@ for (const path of ["bin/pix.mjs", "dist/main.js",
   assert.ok(existsSync(join(app, path)), `Missing payload file: ${path}`);
 }
 assert.equal(existsSync(join(app, "acp")), manifest.variant === "desktop", "Only Desktop includes ACP");
-for (const name of ["question", "session-title", "workspace-undo"]) {
+for (const name of ["question", "session-title", "workspace-undo", "heads-up"]) {
   const path = join(app, `dist/bundled-extensions/${name}/index.js`);
   assert.equal(typeof (await import(pathToFileURL(path).href)).default, "function");
   process.env[`PIX_ACP_${name.replaceAll("-", "_").toUpperCase()}_EXTENSION`] = path;

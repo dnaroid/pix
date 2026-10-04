@@ -56,7 +56,10 @@ without treating generated answers or audit candidates as semantic proof.
   AST outline. Search behavior with at most 3 results and no inline content in
   the first pass. For a known symbol use file-scoped explain; for dependencies
   use one direction and depth 1. Read exact returned ranges directly; only
-  expand for a named gap. Exact path/identifier lookup uses direct file tools.
+  expand for a named gap. Exact identifier/text lookup uses available `Grep`/`grep`,
+  otherwise shell `rg`; path-only discovery uses available `Glob`/`find`, otherwise
+  shell `rg --files`. Read known paths directly; never require an unavailable tool.
+  These text-only fallbacks do not weaken AST-first routing for structural queries.
 - Before a material behavior change, find the governing document with context or
   search. Keep its behavior/scenarios/constraints/interfaces aligned in
   the same task; create a focused spec only if needed. New specs use the

@@ -24,6 +24,7 @@ import type { createTranscriptAttachmentController } from "./transcript-attachme
 import type { createTranscriptScrollController } from "./transcript-scroll.svelte";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
+import type { HeadsUpStore } from "./heads-up.svelte";
 
 type ErrorState = ReturnType<typeof createErrorState>;
 type SessionOrchestration = ReturnType<typeof createDesktopSessionOrchestration>;
@@ -40,6 +41,7 @@ export type DesktopViewModelServicesOptions = {
   dragActive: () => boolean;
   activeWorkbenchTabId: () => WorkbenchTabId | null;
   promptText: () => string;
+  setPromptText: (text: string) => void;
   promptAttachments: () => Attachment[];
   changingConfig: () => string | null;
   displayedConfigOptions: () => SessionConfigOption[];
@@ -65,4 +67,6 @@ export type DesktopViewModelServicesOptions = {
   orchestration: SessionOrchestration;
   lspOnboarding: LspOnboardingStore;
   quotaWait: QuotaWaitStore;
+  headsUp: HeadsUpStore;
+  openObserverSettings: () => void;
 };

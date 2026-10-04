@@ -57,6 +57,11 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   changes requirements, the affected worker is stopped or rescoped before it
   continues editing. `[confirmed by code, core/agent-strategy.ts and
   tool-descriptions.ts]`
+- Spawn's optional `watchSeconds` defaults to `0`: after validation, routing and
+  scheduling, it returns without waiting for child completion. Positive watch
+  windows remain opt-in and capped at 300 seconds, for a true dependency with no
+  independent parent work. This does not change the separate `wait` timeout,
+  concurrency queue, cancellation, retries or completion notifications.
 - Delegated coding uses `implement` (Luna, then Sol for availability/quota),
   `implement-core` (Sol only for complex core changes or ambiguous bugs), and
   `mechanical` (GLM-5.3 only for small prescribed behavior-preserving edits with

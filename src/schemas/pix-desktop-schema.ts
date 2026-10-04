@@ -8,6 +8,7 @@
  * Keep this schema limited to settings that Desktop or its ACP backend consumes.
  */
 import { Type, Static } from "typebox";
+import { DEFAULT_HEADS_UP_CONFIG, DEFAULT_HEADS_UP_MODEL } from "../bundled-extensions/heads-up/config.js";
 
 const ThinkingLevel = Type.Union(
 	["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((value) => Type.Literal(value)),
@@ -81,6 +82,22 @@ const SessionTitleConfig = Type.Object(
 	{ description: "Automatic Desktop session-title generation." },
 );
 
+const HeadsUpConfig = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean({ default: false, description: "Enable the passive observer in new Desktop sessions. Existing sessions are unchanged until reloaded." })),
+		model: Type.Optional(Type.String({ default: DEFAULT_HEADS_UP_MODEL, minLength: 3, maxLength: 256, pattern: "^[^\\s/]+/[^\\s]+$", description: "Provider/model identifier used by the passive observer. No automatic fallback." })),
+		minTurns: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.minTurns, minimum: 1, maximum: 100, description: "Completed turns between automatic observer checks." })),
+		minIntervalMs: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.minIntervalMs, minimum: 0, maximum: 86400000, description: "Minimum interval between observer checks in milliseconds." })),
+		maxChecksPerHour: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.maxChecksPerHour, minimum: 1, maximum: 100, description: "Maximum observer checks per hour." })),
+		maxInputChars: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.maxInputChars, minimum: 2000, maximum: 50000, description: "Maximum context characters in one observer check." })),
+		maxInputCharsPerHour: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.maxInputCharsPerHour, minimum: 2000, maximum: 1000000, description: "Maximum observer input characters per hour." })),
+		maxTokens: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.maxTokens, minimum: 256, maximum: 2000, description: "Maximum output tokens requested for an observer check." })),
+		timeoutMs: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.timeoutMs, minimum: 1000, maximum: 120000, description: "Observer request timeout in milliseconds." })),
+		noticeTtlMs: Type.Optional(Type.Integer({ default: DEFAULT_HEADS_UP_CONFIG.noticeTtlMs, minimum: 30000, maximum: 3600000, description: "How long an observer notice remains visible in milliseconds." })),
+	},
+	{ description: "Desktop-only passive observer settings. Project values override user values when the project is trusted." },
+);
+
 const DictationConfig = Type.Object(
 	{
 		apiKey: Type.Optional(Type.String({
@@ -138,6 +155,7 @@ export const PixDesktopConfigSchema = Type.Object(
 		autocomplete: Type.Optional(AutocompleteConfig),
 		sessionTitle: Type.Optional(SessionTitleConfig),
 		dictation: Type.Optional(DictationConfig),
+		headsUp: Type.Optional(HeadsUpConfig),
 		desktop: Type.Optional(DesktopAppConfig),
 	},
 	{

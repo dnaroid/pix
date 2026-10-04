@@ -948,12 +948,32 @@ setInterval(() => {}, 1000);
 		expect(() => process.kill(unrelated.pid!, 0)).not.toThrow();
 	});
 
+	test("allows explicit bounded prompt diagnostics for TUI launches", () => {
+		for (const value of ["0", "1"]) {
+			const { project, agentDir, uiWorkspace } = createProject();
+			writeProjectFile(project, "diagnostic.mjs", `
+process.stdout.write("DEBUG_PROMPT=" + process.env.PI_DEBUG_PROMPT);
+setInterval(() => {}, 1000);
+`);
+			writeFlow(uiWorkspace, "diagnostic.jsonc", {
+				target: { command: { argv: [nodeExecutable, "diagnostic.mjs"], env: { PI_DEBUG_PROMPT: value } } },
+				steps: [{ action: "waitForText", text: `DEBUG_PROMPT=${value}` }, { action: "assertText", text: `DEBUG_PROMPT=${value}` }],
+			});
+			const result = invoke(project, agentDir, ["run", "--flow", "diagnostic.jsonc", "--run-id", "diagnostic", "--runner-timeout-ms", "5000"]);
+			expect(result.status).toBe(0);
+			expect(result.payload.status).toBe("PASSED");
+		}
+	});
+
 	test("rejects shell, generic utility, inline-code, and untrusted environment launch primitives", () => {
 		for (const [name, command] of [
 			["shell", { argv: ["sh", "-c", "echo pwned"] }],
 			["utility", { argv: ["/bin/cat", "/etc/passwd"] }],
 			["inline", { argv: ["node", "-e", "console.log('pwned')"] }],
 			["env", { argv: [nodeExecutable, "fixture.mjs"], env: { SECRET: "read-me" } }],
+			["debug-value", { argv: [nodeExecutable, "fixture.mjs"], env: { PI_DEBUG_PROMPT: "2" } }],
+			["debug-other", { argv: [nodeExecutable, "fixture.mjs"], env: { PI_DEBUG_OTHER: "1" } }],
+			["node-options", { argv: [nodeExecutable, "fixture.mjs"], env: { NODE_OPTIONS: "--require=untrusted" } }],
 		] as const) {
 			const { project, agentDir, uiWorkspace } = createProject();
 			writeProjectFile(project, "fixture.mjs", "setInterval(() => {}, 1000);\n");
@@ -961,7 +981,7 @@ setInterval(() => {}, 1000);
 			const result = invoke(project, agentDir, ["run", "--flow", `${name}.jsonc`, "--run-id", name, "--runner-timeout-ms", "2000"]);
 			expect(result.status).toBe(1);
 			expect(result.payload.status).toBe("FAILED");
-			expect(result.payload.reason).toMatch(/shell|project|inline|environment|env key|scripting/i);
+			expect(result.payload.reason).toMatch(/shell|project|inline|environment|env key|scripting|PI_DEBUG_PROMPT must be 0 or 1/i);
 		}
 	});
 

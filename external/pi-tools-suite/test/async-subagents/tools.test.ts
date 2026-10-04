@@ -391,12 +391,12 @@ process.stdin.on("data", (data) => {
 		const handler = beforeStartHandlers[0]!;
 		const glmResult = await handler({ systemPrompt: "base" }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(glmResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(glmResult.systemPrompt).toContain("shortest parent pass");
+		expect(glmResult.systemPrompt).toContain("Delegation triggers and mandatory gates are defined in the subagents tool description");
 		expect(glmResult.systemPrompt).toContain("wait only when a child result blocks the next decision");
 
 		const gptResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.5" } });
 		expect(gptResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(gptResult.systemPrompt).toContain("Task size, isolation, lower cost, or worker availability alone do not justify delegation");
+		expect(gptResult.systemPrompt).toContain("Give each worker a scoped task");
 
 		const lunaResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-luna" } });
 		expect(lunaResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
@@ -404,7 +404,7 @@ process.stdin.on("data", (data) => {
 
 		const solResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-sol" } });
 		expect(solResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(solResult.systemPrompt).toContain("Keep planning, product/UX decisions, integration and the final answer in the parent");
+		expect(solResult.systemPrompt).toContain("Read compact results first and verify selectively");
 
 		const customPromptResult = await handler({ systemPrompt: "base", systemPromptOptions: { customPrompt: "SYSTEM.md" } }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('<agent_strategy');
@@ -1225,7 +1225,7 @@ setTimeout(() => {}, 1000);
 		expect(compactText).not.toContain("--- Stderr ---");
 	});
 
-	test.serial("queues excess agents without blocking spawn when maxConcurrent is reached", async () => {
+	for (const watchSeconds of [undefined, 0]) test.serial(`queues excess agents without blocking spawn with watchSeconds=${watchSeconds}`, async () => {
 		const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
 		const pi = new FakePi();
 		const liveAgents = new Map<string, Map<string, any>>();
@@ -1257,7 +1257,7 @@ setTimeout(() => {}, 2000);
 				{ id: "agent-2", task: "Second queued task", subagentType: "research" },
 			],
 			slug: "queued-spawn",
-			watchSeconds: 0,
+			...(watchSeconds === undefined ? {} : { watchSeconds }),
 		}, undefined, undefined, { cwd });
 		const elapsedMs = Date.now() - startedAt;
 

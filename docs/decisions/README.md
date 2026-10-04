@@ -76,4 +76,7 @@ errors, not invent or approve decisions.
 - [0028 — Native Project Explorer context menu](0028-native-explorer-context-menu.md)
 - [0028 — Scoped file-operation reservations](0028-scoped-file-operation-reservations.md)
 
+- [0033 — Assistant prompt hygiene](0033-assistant-prompt-hygiene.md)
+- [0034 — Bounded, opt-in Heads up observer](0034-heads-up-observer.md)
+
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

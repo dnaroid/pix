@@ -3,10 +3,12 @@
     value,
     onChange,
     disabled = false,
+    ariaLabel,
   }: {
     value: boolean;
     onChange: (value: boolean) => void;
     disabled?: boolean;
+    ariaLabel?: string;
   } = $props();
 </script>
 
@@ -14,6 +16,7 @@
   class="inline-flex h-7 min-w-20 items-center gap-2 rounded-md border border-input bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
   type="button"
   role="switch"
+  aria-label={ariaLabel}
   aria-checked={value}
   {disabled}
   onclick={() => onChange(!value)}

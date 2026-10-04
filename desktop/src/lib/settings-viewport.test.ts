@@ -17,9 +17,9 @@ function harness() {
     observe() {}
     disconnect = disconnect;
   });
-  const notifications = { hidden: false, dataset: { settingsField: "System notifications Send native notifications" } };
-  const ignoreContext = { hidden: false, dataset: { settingsField: "Ignore context files Do not discover AGENTS.md" } };
-  const voice = { hidden: false, dataset: { settingsField: "API key Speech service authentication" }, value: "secret-needle" };
+  const notifications = { closest: () => null, hidden: false, dataset: { settingsField: "System notifications Send native notifications" } };
+  const ignoreContext = { closest: () => null, hidden: false, dataset: { settingsField: "Ignore context files Do not discover AGENTS.md" } };
+  const voice = { closest: () => null, hidden: false, dataset: { settingsField: "API key Speech service authentication" }, value: "secret-needle" };
   function section(id: string, title: string, rows: unknown[], top: number) {
     return { hidden: false, dataset: { settingsSection: id, settingsTitle: title }, querySelectorAll: () => rows, getBoundingClientRect: () => ({ top }) };
   }

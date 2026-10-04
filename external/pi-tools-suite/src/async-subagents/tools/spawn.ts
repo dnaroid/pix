@@ -226,7 +226,7 @@ export function registerSpawnTool(
 			thinking: Type.Optional(Type.String({ description: "Thinking level for sub-agents (off, minimal, low, medium, high, xhigh, max)" })),
 			extraArgs: Type.Optional(Type.Array(Type.String(), { description: "Additional pi CLI args for sub-agents" })),
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Wall-clock timeout in seconds for every spawned agent in this call. Task-level timeoutSeconds overrides this." })),
-			watchSeconds: Type.Optional(Type.Number({ description: "Live update watch window after spawning (default/max 300s; 0 returns immediately)", default: DEFAULT_SPAWN_WATCH_SECONDS })),
+			watchSeconds: Type.Optional(Type.Number({ description: "Optional live watch window after spawning (default 0: return after scheduling; max 300s). Use a positive window only when no independent parent work remains.", default: DEFAULT_SPAWN_WATCH_SECONDS })),
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {

@@ -10,7 +10,7 @@ const RECORDING_FILE = "terminal-recording.cast";
 const MAX_ARG_LENGTH = 4096;
 const CLEANUP_GRACE_MS = 1_000;
 const PTY_PRESENTATION = "pty";
-const SAFE_ENV = new Set(["CI", "NO_COLOR", "FORCE_COLOR", "LANG", "LC_ALL", "TERM", "TZ"]);
+const SAFE_ENV = new Set(["CI", "NO_COLOR", "FORCE_COLOR", "LANG", "LC_ALL", "TERM", "TZ", "PI_DEBUG_PROMPT"]);
 const BLOCKED_EXECUTABLES = new Set([
 	"sh", "bash", "zsh", "fish", "dash", "ksh", "cmd", "cmd.exe", "powershell", "powershell.exe",
 	"pwsh", "pwsh.exe", "osascript", "wscript", "wscript.exe", "cscript", "cscript.exe",
@@ -454,6 +454,9 @@ function validateEnv(value) {
 	for (const [key, raw] of Object.entries(value)) {
 		if (!SAFE_ENV.has(key) && !key.startsWith("PI_UI_QA_")) throw new Error(`target.command.env key is not allowed: ${key}`);
 		result[key] = requireString(raw, `target.command.env.${key}`, MAX_ARG_LENGTH);
+		if (key === "PI_DEBUG_PROMPT" && !["0", "1"].includes(result[key])) {
+			throw new Error("target.command.env.PI_DEBUG_PROMPT must be 0 or 1");
+		}
 	}
 	return result;
 }

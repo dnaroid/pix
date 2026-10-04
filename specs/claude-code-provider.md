@@ -24,12 +24,14 @@ load only the suite-relative standalone module entrypoint, not the whole suite
 and not a user/project npm package. Existing owned-launch, tool-guard and
 provider-web-search policies continue to apply.
 
-Before enabling the new suite, `scripts/migrate-claude-provider.mjs` changes
+Before enabling the suite, `scripts/migrate-claude-provider.mjs` changes
 only legacy provider package declarations to `extensions: []` and removes
 explicit legacy extension paths. It preserves package files, model selections,
 unrelated settings and other resource filters. It is idempotent and supports
-`--check`, `--agent-dir`, and explicit `--project-settings`. Personal suite sync
-refuses unmigrated personal settings. No npm uninstall is performed. Restart
+`--check`, `--agent-dir`, and explicit `--project-settings`. Sync to the default
+personal suite location refuses unmigrated personal or current-project settings
+(`.pi/settings.json` in the sync command's working directory), including in
+`--check` mode. No npm uninstall is performed. Restart
 all hosts after migration/sync; an already running session keeps its loaded code.
 
 Provider availability and picker visibility are separate. If the doctor command

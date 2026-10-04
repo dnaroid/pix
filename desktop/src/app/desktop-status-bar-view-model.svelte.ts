@@ -5,6 +5,7 @@ import type { createSessionCoordinator } from "./session-coordinator";
 import type { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
+import type { HeadsUpStore } from "./heads-up.svelte";
 import { shouldShowStatusBarSkeletons, type StatusBarConnectionStatus } from "./status-bar-skeleton";
 import {
   quotaWaitStatusLabel,
@@ -36,6 +37,8 @@ export function createDesktopStatusBarViewModel(options: {
   sessionCoordinator: ReturnType<typeof createSessionCoordinator>;
   inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
   quotaWait: QuotaWaitStore;
+  headsUp: HeadsUpStore;
+  openObserverSettings: () => void;
 }) {
   const props = $derived.by<StatusBarProps>(() => {
     const sessionId = options.activeSessionId();
@@ -63,6 +66,10 @@ export function createDesktopStatusBarViewModel(options: {
     const sessionActivity = options.sessionActivity();
     const waitState = options.quotaWait.indicator(sessionId);
     const nowMs = options.quotaWait.nowMs;
+    const observerSnapshot = draft ? undefined : options.headsUp.state(sessionId);
+    const observerOwnerCurrent = () => options.activeSessionId() === sessionId
+      && !options.draftSessionTabActive() && options.activeSessionRuntimeReady() && options.status() === "ready"
+      && (!observerSnapshot || options.headsUp.state(sessionId)?.instanceId === observerSnapshot.instanceId);
 
     return {
       showSkeletons,
@@ -73,6 +80,21 @@ export function createDesktopStatusBarViewModel(options: {
         label: quotaWaitStatusLabel(waitState, nowMs),
         onReopen: () => options.quotaWait.reopen(sessionId),
       } : null,
+      observer: {
+        sessionId: draft ? null : sessionId,
+        runtimeReady: !draft && runtimeReady && connectionStatus === "ready",
+        snapshot: observerSnapshot,
+        pendingToggle: !draft && (options.headsUp.isPending(sessionId, "/heads-up on") || options.headsUp.isPending(sessionId, "/heads-up off")),
+        pendingCheck: !draft && options.headsUp.isPending(sessionId, "/heads-up check"),
+        onToggle: () => {
+          if (!observerOwnerCurrent()) return;
+          const snapshot = !draft ? options.headsUp.state(sessionId) : undefined;
+          if (sessionId && snapshot) void options.headsUp.sendControl(sessionId, snapshot.enabled ? "off" : "on");
+        },
+        onCheck: () => { if (sessionId && observerOwnerCurrent()) void options.headsUp.sendControl(sessionId, "check"); },
+        onRequestSnapshot: () => { if (sessionId && observerOwnerCurrent()) void options.headsUp.requestSnapshot(sessionId); },
+        onOpenSettings: options.openObserverSettings,
+      },
       canConfigure: options.canUseSession()
         && !historyLoading
         && (draft ? options.draftConfigAvailable() : runtimeReady),

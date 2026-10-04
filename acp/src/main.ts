@@ -27,6 +27,7 @@ async function main(): Promise<void> {
 		...(config.workspaceUndoExtensionPath ? { workspaceUndoExtensionPath: config.workspaceUndoExtensionPath } : {}),
 		...(config.toolsSuiteExtensionPath ? { toolsSuiteExtensionPath: config.toolsSuiteExtensionPath } : {}),
 		...(config.quotaWaitExtensionPath ? { quotaWaitExtensionPath: config.quotaWaitExtensionPath } : {}),
+		...(config.headsUpExtensionPath ? { headsUpExtensionPath: config.headsUpExtensionPath } : {}),
 	});
 
 	const stream = ndJsonStream(

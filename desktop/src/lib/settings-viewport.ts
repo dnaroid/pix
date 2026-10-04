@@ -30,6 +30,11 @@ export function settingsViewport(node: HTMLElement, initial: ViewportOptions) {
       let matches = 0;
       for (const row of section.querySelectorAll<HTMLElement>("[data-settings-field]")) {
         row.hidden = !settingsSearchMatches(options.query, `${section.dataset.settingsTitle} ${row.dataset.settingsField}`);
+        // Advanced groups keep fields mounted, so search can reveal a matching setting.
+        if (!row.hidden && options.query.trim()) {
+          const details = row.closest("details");
+          if (details) details.open = true;
+        }
         if (!row.hidden) matches++;
       }
       section.hidden = matches === 0;

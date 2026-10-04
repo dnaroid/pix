@@ -6,6 +6,7 @@ test("TUI launches preserve OS user identity without forwarding ambient credenti
 		PATH: "/usr/bin", HOME: "/Users/tester", USER: "tester", LOGNAME: "tester",
 		TMPDIR: "/tmp/tester", ANTHROPIC_API_KEY: "must-not-leak",
 		CLAUDE_CODE_OAUTH_TOKEN: "must-not-leak", NODE_OPTIONS: "--require=untrusted",
+		PI_DEBUG_PROMPT: "1",
 		UNRELATED: "must-not-leak",
 	};
 	expect(launchEnvironment({}, inherited)).toEqual({

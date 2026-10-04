@@ -175,6 +175,32 @@ in `pix.jsonc`.
 
 See [Pix Desktop](desktop.md).
 
+### Desktop Observer defaults
+
+**Settings → Desktop → Observer** edits the `headsUp` object in the Desktop
+profile. For example:
+
+```jsonc
+{
+  "headsUp": {
+    "enabled": false,
+    "model": "openai-codex/gpt-6-luna",
+    "minTurns": 6,
+    "minIntervalMs": 60000,
+    "maxChecksPerHour": 12
+  }
+}
+```
+
+Additional fields are `maxInputChars`, `maxInputCharsPerHour`, `maxTokens`,
+`timeoutMs` and `noticeTtlMs`. The settings UI shows time in seconds and saves
+milliseconds. Model refs and numeric bounds are validated; fields can reset to
+defaults. These settings apply to new or reloaded Desktop runtimes. The
+statusbar popup's switch changes only its current session and does not save
+configuration. A trusted project `.pi/pix-desktop.jsonc` can override defaults.
+Desktop does not inherit `heads-up.jsonc`; that remains the TUI observer config.
+Enabling an observer sends bounded conversation excerpts to its chosen provider.
+
 ## pi-tools-suite configuration
 
 The bundled suite loads:

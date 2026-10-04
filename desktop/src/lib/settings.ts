@@ -28,6 +28,9 @@ export interface SettingsSchema {
   readonly required?: readonly string[];
   readonly minimum?: number;
   readonly maximum?: number;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly pattern?: string;
   readonly additionalProperties?: boolean | SettingsSchema;
   readonly not?: SettingsSchema;
 }
@@ -265,6 +268,11 @@ function validateSettingsValue(
   }
   if (schema.type === "string" && typeof value !== "string") return [`${location} must be a string`];
   if (schema.type === "boolean" && typeof value !== "boolean") return [`${location} must be a boolean`];
+  if (typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength) return [`${location} is too short`];
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) return [`${location} is too long`];
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) return [`${location} has an invalid format`];
+  }
   if ((schema.type === "number" || schema.type === "integer") && (typeof value !== "number" || !Number.isFinite(value))) {
     return [`${location} must be a number`];
   }

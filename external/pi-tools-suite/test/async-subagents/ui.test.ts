@@ -321,6 +321,8 @@ describe.serial("rendering", () => {
 describe.serial("polling", () => {
 	test.serial("clamps watch seconds", async () => {
 		const { clampWatchSeconds } = await import("../../src/async-subagents/polling.js");
+		expect(clampWatchSeconds(undefined)).toBe(0);
+		expect(clampWatchSeconds(Number.NaN)).toBe(0);
 		expect(clampWatchSeconds(undefined, 12)).toBe(12);
 		expect(clampWatchSeconds(-1)).toBe(0);
 		expect(clampWatchSeconds(999)).toBe(300);

@@ -300,6 +300,81 @@
       },
       "description": "Desktop voice dictation configuration. DEEPGRAM_API_KEY remains an environment fallback."
     },
+    "headsUp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the passive observer in new Desktop sessions. Existing sessions are unchanged until reloaded."
+        },
+        "model": {
+          "type": "string",
+          "default": "openai-codex/gpt-6-luna",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[^\\s/]+/[^\\s]+$",
+          "description": "Provider/model identifier used by the passive observer. No automatic fallback."
+        },
+        "minTurns": {
+          "type": "integer",
+          "default": 6,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Completed turns between automatic observer checks."
+        },
+        "minIntervalMs": {
+          "type": "integer",
+          "default": 60000,
+          "minimum": 0,
+          "maximum": 86400000,
+          "description": "Minimum interval between observer checks in milliseconds."
+        },
+        "maxChecksPerHour": {
+          "type": "integer",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum observer checks per hour."
+        },
+        "maxInputChars": {
+          "type": "integer",
+          "default": 16000,
+          "minimum": 2000,
+          "maximum": 50000,
+          "description": "Maximum context characters in one observer check."
+        },
+        "maxInputCharsPerHour": {
+          "type": "integer",
+          "default": 192000,
+          "minimum": 2000,
+          "maximum": 1000000,
+          "description": "Maximum observer input characters per hour."
+        },
+        "maxTokens": {
+          "type": "integer",
+          "default": 900,
+          "minimum": 256,
+          "maximum": 2000,
+          "description": "Maximum output tokens requested for an observer check."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "default": 20000,
+          "minimum": 1000,
+          "maximum": 120000,
+          "description": "Observer request timeout in milliseconds."
+        },
+        "noticeTtlMs": {
+          "type": "integer",
+          "default": 300000,
+          "minimum": 30000,
+          "maximum": 3600000,
+          "description": "How long an observer notice remains visible in milliseconds."
+        }
+      },
+      "description": "Desktop-only passive observer settings. Project values override user values when the project is trusted."
+    },
     "desktop": {
       "type": "object",
       "properties": {

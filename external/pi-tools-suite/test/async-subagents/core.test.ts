@@ -423,12 +423,11 @@ describe.serial("core utils and prompt generation", () => {
 		for (const modelRef of ["zai/glm-5-turbo", "openai/gpt-5.4", "openai-codex/gpt-6-luna", "openai-codex/gpt-6-sol"]) {
 			const prompt = agentStrategyPrompt({ modelRef, env: {} })!;
 			expect(prompt).toContain('name="cost-aware-orchestrator"');
-			expect(prompt).toContain("shortest parent pass");
-			expect(prompt).toContain("Write code in the parent by default");
-			expect(prompt).toContain("Task size, isolation, lower cost, or worker availability alone do not justify delegation");
-			expect(prompt).toContain("cause, desired behavior and acceptance criteria are settled");
+			expect(prompt).toContain("Delegation triggers and mandatory gates are defined in the subagents tool description");
+			expect(prompt).toContain("Give each worker a scoped task");
+			expect(prompt).not.toContain("Write code in the parent by default");
 			expect(prompt).toContain("wait only when a child result blocks the next decision");
-			expect(prompt).toContain("Reserve oracle");
+			expect(prompt).toContain("decide in the parent whether an oracle is justified");
 			expect(prompt).not.toContain("escalate deep");
 		}
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.5", customPrompt: true, env: {} })).toBeUndefined();

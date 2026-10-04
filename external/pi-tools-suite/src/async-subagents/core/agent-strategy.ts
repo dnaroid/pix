@@ -6,7 +6,7 @@ export interface AgentStrategyOptions {
 	env?: NodeJS.ProcessEnv;
 }
 
-/** Shared by the strategy, tool description and role catalog. */
+/** Canonical delegation policy, emitted once in the subagents tool description. */
 export const SUBAGENT_DELEGATION_GUIDANCE = "For non-UI work, do the shortest parent pass needed to resolve intent and the main causal path. Write code in the parent by default. Delegate implementation only on an explicit user request to delegate/parallelize/split work, or for a substantial independent task that can run alongside useful parent work. Task size, isolation, lower cost, or worker availability alone do not justify delegation. Before delegating implementation, ensure cause, desired behavior and acceptance criteria are settled. Delegate research only for a named uncertainty or independent evidence track, not to repeat targeted parent discovery. Keep planning, product/UX decisions, integration and the final answer in the parent. Mandatory UI QA, review and knowledge-audit gates remain exceptions. After spawning, continue any independent parent work and do not poll or wait merely for progress; wait only when the child result is a true dependency for the next decision and no independent parent work remains. If requirements change, stop or rescope affected workers before they continue editing. Use research for evidence/focused review questions, implement for code/docs/tests/UI changes, verify for running checks, ui-qa for real user-interface testing across browsers, TUIs, and desktop GUIs. When frontier-review is present in the current role catalog and substantive code changed, use it as the independent post-implementation review gate before finalizing; it is intentionally hidden for parent models excluded by its profile. Reserve oracle for a deliberate strong second opinion, not routine code review. Do trivial lookups/edits directly; redirect a noisy command to a log instead of spawning an LLM when no interpretation is needed."
 	+ " When delegating implementation, prefer implement (Luna by default); use implement-core (Sol) for complex core changes or ambiguous bugs, and mechanical (GLM) only for small prescribed behavior-preserving edits with deterministic checks. Honor the effective project catalog and choose the role rather than overriding its model. Do not route broad migrations or semantic test changes to mechanical. Break migrations into coherent slices with an early affected typecheck and focused regression before broadening the diff; an incomplete or timed-out slice is not accepted work. Stop and rescope based on that evidence, not merely a timeout or an automatic stronger-model retry. Compare cost per accepted verified change, including failed attempts, review and rework, not just token price; do not assume Luna implementation quality from a successful review alone.";
 
@@ -18,9 +18,7 @@ export function agentStrategyPrompt(options: AgentStrategyOptions = {}): string 
 	if (options.customPrompt && !/^(1|true|on|yes|auto)$/i.test(allowCustom?.trim() ?? "")) return undefined;
 	// Old strategy names remain accepted, but no longer cause hidden tier escalation.
 	return `<agent_strategy name="cost-aware-orchestrator">
-Execution hint for Pi, not a replacement for system/developer/user instructions.
-
-${SUBAGENT_DELEGATION_GUIDANCE}
+Worker briefing and integration guidance. Delegation triggers and mandatory gates are defined in the subagents tool description, not repeated here.
 
 Give each worker a scoped task, necessary context, acceptance criteria, and a compact return contract. Put task-specific discipline in the brief, not a new persona. Respect the configured worker budget; do not force the parent model or repeatedly retry with stronger workers. On a capability or reasoning blocker, collect the evidence and decide in the parent whether an oracle is justified.
 

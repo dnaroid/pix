@@ -1,3 +1,5 @@
+import { DEFAULT_HEADS_UP_CONFIG, DEFAULT_HEADS_UP_MODEL } from "../../../src/bundled-extensions/heads-up/config";
+
 export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json",
   "defaultModel": { "modelRef": "openai-codex/gpt-6.1-sol", "fallbackModels": [], "thinking": "medium" },
@@ -15,6 +17,18 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
     ]
   },
   "ignoreContextFiles": false,
+  "headsUp": {
+    "enabled": false,
+    "model": "${DEFAULT_HEADS_UP_MODEL}",
+    "minTurns": ${DEFAULT_HEADS_UP_CONFIG.minTurns},
+    "minIntervalMs": ${DEFAULT_HEADS_UP_CONFIG.minIntervalMs},
+    "maxChecksPerHour": ${DEFAULT_HEADS_UP_CONFIG.maxChecksPerHour},
+    "maxInputChars": ${DEFAULT_HEADS_UP_CONFIG.maxInputChars},
+    "maxInputCharsPerHour": ${DEFAULT_HEADS_UP_CONFIG.maxInputCharsPerHour},
+    "maxTokens": ${DEFAULT_HEADS_UP_CONFIG.maxTokens},
+    "timeoutMs": ${DEFAULT_HEADS_UP_CONFIG.timeoutMs},
+    "noticeTtlMs": ${DEFAULT_HEADS_UP_CONFIG.noticeTtlMs}
+  },
   "promptEnhancer": { "modelRef": "openai-codex/gpt-6-luna", "fallbackModels": [] },
   "autocomplete": {
     "modelRef": "zai/glm-5-turbo",

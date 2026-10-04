@@ -4,6 +4,7 @@ import type { Api, AssistantMessage, ImageContent, Model, ProviderHeaders, TextC
 import { Type } from "typebox";
 
 import { loadPiToolsSuiteConfig } from "../config.js";
+import { stripUpstreamPiDocs } from "../prompt-sanitizer.js";
 import { ignoreStaleExtensionContextError } from "../context-usage.js";
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../model-completion.js";
 
@@ -126,20 +127,6 @@ const LEGACY_SILENT_PROMPT_BLOCK_PATTERN = new RegExp(
 
 const DISCIPLINE_PROMPT_BLOCK_PATTERN = new RegExp(
 	`${escapeRegExp(DISCIPLINE_PROMPT_MARKER_START)}[\\s\\S]*?${escapeRegExp(DISCIPLINE_PROMPT_MARKER_END)}\\s*`,
-	"g",
-);
-
-/**
- * Strips pi's built-in "Pi documentation" reference block from the system prompt.
- * That block (≈10 lines listing docs/examples paths and "when asked about X" routing)
- * is useless dead weight for non-pi work and dilutes attention to the trailing
- * <available_skills> section and wastes attention that should stay on the task and
- * the extension-provided agent contract.
- * Anchored on the fixed header/footer strings from buildSystemPrompt() so it only
- * ever matches pi's own block regardless of resolved doc/example paths.
- */
-const PI_DOCS_BLOCK_PATTERN = new RegExp(
-	`\\n+Pi documentation \\(read only when the user asks about pi itself[\\s\\S]*?tui\\.md for TUI API details\\)\\n+`,
 	"g",
 );
 
@@ -278,10 +265,9 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 }
 
 export function prependCodingDisciplinePrompt(systemPrompt: string, options: DisciplinePromptOptions = {}): string {
-	const deduped = systemPrompt
+	const deduped = stripUpstreamPiDocs(systemPrompt)
 		.replace(LEGACY_SILENT_PROMPT_BLOCK_PATTERN, "")
 		.replace(DISCIPLINE_PROMPT_BLOCK_PATTERN, "")
-		.replace(PI_DOCS_BLOCK_PATTERN, "\n\n")
 		.trimStart();
 	const prompt = buildCodingDisciplinePrompt(options);
 	return deduped ? `${prompt}\n\n${deduped}` : prompt;

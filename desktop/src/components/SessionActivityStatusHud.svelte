@@ -4,7 +4,6 @@
   import Circle from "@lucide/svelte/icons/circle";
   import CirclePause from "@lucide/svelte/icons/circle-pause";
   import Clock3 from "@lucide/svelte/icons/clock-3";
-  import ListTodo from "@lucide/svelte/icons/list-todo";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import UserRound from "@lucide/svelte/icons/user-round";
   import { agentIcon } from "../lib/agent-icons";
@@ -230,7 +229,7 @@
       <div class="group relative">
         <button
           class={[
-            "flex h-7 flex-col items-stretch justify-center gap-1 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+            "flex h-7 items-center justify-center gap-1 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             activityToneClass(),
           ]}
           type="button"
@@ -241,20 +240,27 @@
           onfocus={scrollTodoTooltipToCurrent}
           onclick={onOpenSessionActivity}
         >
-          <span class="flex items-center gap-1">
-            <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{summary.completedTodos}/{summary.totalTodos}</span>
-          </span>
-          <span
-            class="-mt-0.5 h-1 overflow-hidden rounded-full bg-muted-foreground/25"
+          <svg
+            class="h-3.5 w-3.5 shrink-0 -rotate-90"
+            viewBox="0 0 16 16"
+            fill="none"
             aria-hidden="true"
             data-session-todo-progress
           >
-            <span
-              class="block h-full rounded-full bg-tool-info"
-              style:width={`${(summary.completedTodos / summary.totalTodos) * 100}%`}
-            ></span>
-          </span>
+            <circle class="text-muted-foreground/25" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" />
+            <circle
+              class="text-tool-info"
+              cx="8"
+              cy="8"
+              r="6"
+              stroke="currentColor"
+              stroke-width="2"
+              pathLength="100"
+              stroke-dasharray="100"
+              stroke-dashoffset={100 - (summary.completedTodos / summary.totalTodos) * 100}
+            />
+          </svg>
+          <span>{summary.completedTodos}/{summary.totalTodos}</span>
         </button>
 
         {#if currentTodo}

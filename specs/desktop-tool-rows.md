@@ -37,6 +37,10 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Reads of `SKILL.md` (direct `read` and the TUI-recognized non-mutating shell reader commands) display as `skill <directory name>` in both child rows and the collapsed group header. Lightweight replay omits `rawInput` until a result is expanded, so direct reads also classify from the tool location or read title at ingestion. Arbitrary shell programs are not classified by inspecting their effects. The skill name is cached during tool ingestion/update so collapsed headers never inspect `rawInput`; collapsed group list names always keep their native semantic tool tones regardless of liveness, while ordinary reads and shell mutations retain their normal tool name.
 - Read ranges use the TUI `path:offset+limit` form.
 - Shell commands collapse whitespace to one line.
+- Expanded `codemode`, shell/execution aliases, `repo_*`, `ast_grep`, `ast_apply`, `subagents`, `brainstorm`, `web_search`, and `question` rows show full raw input in an explicitly labeled Input block before Result. Fields and nested tasks/questions are readable without JSON string escaping; multiline strings remain intact. No separate input block is added for `apply_patch`, reads, web fetches, planning or session tools. Existing patch presentation remains unchanged.
+- Selected calls with input but no result can still expand. Input formatting is deferred until the individual disclosure mounts; lightweight replay continues hydrating input/result only on demand.
+- Expanded text input/result panels grow to at most `min(480px, 60vh)` rather than 220px. They contain scroll chaining at both boundaries, so wheel/trackpad scrolling inside a panel does not move the surrounding chat at its start/end. Outside the panels chat scrolling remains normal.
+- Each expanded tool body has its own keyboard-accessible gutter button. Clicking it closes only that tool disclosure, unmounts its body and restores focus to its summary; the enclosing activity group and sibling disclosures stay open.
 - Search, repository, question, todo, subagent, and unknown tool inputs use compact TUI-style summaries.
 - `repo_context` rows put their query first and show their path prefix before limits; their discovery role is search. `repo_audit` shows every task-changed path before options and uses inspect. Historical `repo_ask` and `repo_knowledge` calls retain their legacy argument presentation for replay compatibility.
 - Tool names use operation roles (`inspect`, `search`, `mutation`, `execute`, `interact`, `context`, `agent`, `skill`, `compress`, `neutral`) rather than outcome roles such as success or warning: reads/audits are teal inspection, discovery/search is blue or indigo, execution is amber, mutation is magenta, interaction is blue, delegation is violet, skill reads are lime/olive, compression is copper, and other session/planning/orchestration is subdued slate. Skill and compression labels retain their distinct tones in collapsed activity headers as well as child rows. Each role has readable light and dark theme tokens. Completed, failed, and diagnostic icons use separate success/error/warning tokens, never the operation hue.
@@ -67,6 +71,9 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - `desktop/src/lib/transcript-types.ts`
 - `desktop/src/lib/tool-presentation.ts`
 - `desktop/src/lib/tool-output.ts`
+- `desktop/src/lib/tool-input.ts`
+- `desktop/src/lib/tool-input.test.ts`
+- `desktop/src/components/ToolResult.test.ts`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/TranscriptActivityGroup.svelte`
 - `desktop/src/app/session-history.svelte.ts`

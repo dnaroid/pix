@@ -58,6 +58,13 @@ percentages with spend attributable to one conversation.
 
 ## UI behavior
 
+The experimental [Heads up observer](heads-up-observer.md) also records finalized
+side-inference usage in the originating session, using the `heads-up` usage kind.
+A dismissed or stale finding does not erase the request's usage. Provider
+failures that return no usage cannot be reconstructed. Its model rows participate
+in the same provider/model breakdown; its own status additionally reports check
+and token counters without estimating subscription quota.
+
 - In both Pix TUI and Desktop, clicking `Usage` opens session usage instead of
   forcing a provider quota refresh.
 - The session detail remains intentionally compact and does not split parent-agent

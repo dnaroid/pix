@@ -41,11 +41,11 @@ export function astGrepToolDescriptions(maxLines: number, maxBytesLabel: string)
 		astGrep: {
 			name: "ast_grep",
 			label: "ast-grep",
-			description: `Read-only AST structural search/scan. MANDATORY ROUTING: for structural, syntax-aware, AST, language-aware, or code-shape matching, ast_grep must be the FIRST tool call. Never preflight with Glob, Grep, Read, or shell even when files are unknown; omit paths to scan the current project. Use for sgconfig/rule scans, JSON matches, and rewrite previews. Use Grep for exact literals/regex, Glob only for filename/path-only requests, and ast_apply for mutations. Output truncates at ${maxLines} lines or ${maxBytesLabel} with full output saved to a temp file.`,
-			promptSnippet: "MANDATORY: structural/syntax-aware/AST/code-shape matching => call ast_grep FIRST. Do not call Glob, Grep, Read, or shell before it; unknown files are not a reason to pre-search because ast_grep scans the project by default. Exact literal/regex only => Grep; filename/path only => Glob. Use ast_apply for mutations.",
+			description: `Read-only AST structural search/scan. MANDATORY ROUTING: for structural, syntax-aware, AST, language-aware, or code-shape matching, ast_grep must be the FIRST tool call. Never preflight with Glob, Grep, Read, or shell even when files are unknown; omit paths to scan the current project. Use for sgconfig/rule scans, JSON matches, and rewrite previews. For text-only search use available Grep/grep, otherwise shell with rg; for paths use available Glob/find, otherwise shell with rg --files. Use ast_apply for mutations. Output truncates at ${maxLines} lines or ${maxBytesLabel} with full output saved to a temp file.`,
+			promptSnippet: "MANDATORY: structural/syntax-aware/AST/code-shape matching => call ast_grep FIRST, without preliminary file discovery. Text-only search: available Grep/grep or shell with rg; paths only: available Glob/find or shell with rg --files. Use ast_apply for mutations.",
 			promptGuidelines: [
 				"The first tool for syntax relationships or code-shape matching must be ast_grep, even when the file or language is unknown. Do not make a preliminary Glob/Grep/Read/shell call; start at the current project and narrow within ast_grep when needed.",
-				"Use Grep/Read directly for exact literal or regex lookups and Glob only for filename/path-only discovery; those text-only tasks must not trigger ast_grep.",
+				"For exact literal/regex lookups use available Grep/grep or shell with rg; for filename/path-only discovery use available Glob/find or shell with rg --files. Read known paths directly. Never call unavailable tools or route text-only searches through ast_grep.",
 				"ast_grep is read-only: use rewrite to preview only; use ast_apply for mutations or command=scan fixes.",
 			],
 		},
@@ -84,19 +84,12 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"Results are compact with artifact links. Agents run isolated pi processes with extensions disabled to prevent recursive spawning; spawn/task timeoutSeconds can shorten the default 30m watchdog, project concurrency queues excess agents, and retry backoff/fallback models/Antigravity account rotation are config-driven.",
 			].join(" "),
 			promptSnippet:
-				"For every real UI QA, UI bug reproduction, or user-facing fix-verification request across browser, terminal/TUI, or desktop GUI, immediately spawn subagentType='ui-qa' even for a single track and before inspecting files or checking prerequisites. The ui-qa sub-agent must discover the actual target/control path and report missing prerequisites; do not preflight, perform, or substitute requested UI QA in the parent agent. " +
-				"Give ui-qa a concise acceptance brief: the known target URL/app/command, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
-				"For other work, resolve intent and cause first; write code in the parent by default. Delegate implementation only on explicit user request or for a substantial independent task alongside useful parent work. " +
-				SUBAGENT_TYPE_SELECTION_GUIDANCE + " When knowledge-auditor appears in the effective catalog, delegate the final task-scoped repository-knowledge pass to it after implementation, with the concise final behavior/result and exact task-changed project-relative paths; the parent handles escalations. After spawn, continue independent parent work; do not call status/wait merely for progress, and wait only when the child result blocks the next decision. " +
-				(repoDiscovery
-					? "For general repo discovery, start with repo_context; use repo_search for focused code lookup. Delegate independent tracks/hypotheses/review axes even when repo_* tools exist. Read result only after completion when findings are needed."
-					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, delegate bounded research tracks for broad discovery rather than flooding parent context. Read result only after completion when findings are needed."),
+				"Delegation policy: see this tool's description. Real UI QA immediately uses ui-qa before preflight; preserve evidence links and credential boundaries. Choose a role from the effective catalog. Spawn returns after scheduling by default; continue independent work. Obtain the final knowledge-auditor result when available.",
 			promptGuidelines: [
 				"Treat every real UI QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"ui-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, UI automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-UI checks.",
 				"Keep the ui-qa task payload at the user-visible acceptance level: known target URL/app/command, actions to perform, expected observable outcome, and requested evidence. Do not turn it into a repository investigation plan, name internal files or commands, dictate setup, or invent a mock/synthetic target. Leave unknown prerequisites to the QA sub-agent.",
 				"When ui-qa browser testing reports missing credentials, relay its explicit request and generated `.pi/qa_auth.jsonc` template path; never inspect, populate, or edit that credential file in the parent.",
 				"After ui-qa completes a test, preserve its clickable screenshot, terminal capture, video, trace, and other evidence links in the final user-facing response whenever those artifacts exist.",
-				SUBAGENT_DELEGATION_GUIDANCE,
 				"When `knowledge-auditor` is present in the effective role catalog, use it as the final repository-knowledge handoff: supply the concise final behavior/result and exact task-changed project-relative paths; accept small documentation repairs from the child and keep substantial/ambiguous decisions in the parent.",
 				repoDiscovery
 					? "For general discovery, start with repo_context; use repo_search for focused code lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
@@ -214,7 +207,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		description: "Indexed hybrid search across documents and code when the owner is unknown. First pass: at most 3 results, no --include-content.",
 		promptSnippet: "Search behavior, not synonyms; keep hybrid unless lexical matches mislead. Read best returned ranges with offset/limit, not whole files.",
 		promptGuidelines: [
-			"Use --path-prefix/--dedupe-file when appropriate. Expand only for a named gap; use Grep for exact identifiers.",
+			"Scope with --path-prefix/--dedupe-file. Exact identifiers: available Grep/grep or shell with rg.",
 			"--include-content only for a narrow follow-up needing inline code, with --max-files 1; otherwise use read.",
 			"After finding the causal code, stop broad search; inspect callers, persistence or tests only for a named gap.",
 		],
@@ -257,7 +250,7 @@ export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 		"When create or batch_create already sets the intended status, do not issue a redundant update with the same status; continue the work instead.",
 		"Resync before continuing when user/new findings change scope, requirements, safety, feasibility, approach, dependencies, or order. Before creating tasks, review pending/deferred todos; when work resumes, reactivate and reuse an equivalent deferred todo instead of duplicating it.",
 		"Update todos when starting, finishing, blocking, splitting, abandoning, or materially changing a step; before planned work mark exactly one in_progress with activeForm and complete it only after verification.",
-		"If partial, tests fail, or blocked, keep the task in_progress and add/update a blocker. Never use `clear`, `delete`, or batch deletion to hide unfinished/stale/forgotten todos; delete only on explicit request or creation mistake.",
+		"Keep partial/failed/blocked work in_progress while actively resolving it. Before switching to independent work, return the blocked task to pending with a recorded blocker and mark only the new current task in_progress; do not mark blocked work completed. Use deferred for genuinely out-of-scope work or waiting on user input. Never use `clear`, `delete`, or batch deletion to hide unfinished/stale/forgotten todos; delete only on explicit request or creation mistake.",
 		"Before a final response, list and reconcile all visible todos, including deferred ones: complete any whose outcome was achieved elsewhere, and leave deferred only genuinely unfinished or intentionally out of scope, mentioning each in the response. Do not finish with stale/duplicate deferred todos or a just-finished item in_progress.",
 		"Keep subjects short; use parentId/blockers for hierarchy/dependencies. For large explicit plans use batch_create/batch_update but keep exactly one visible in_progress unless asked otherwise; use batch_create replace:true only for superseding plans.",
 		"list hides tombstones unless includeDeleted:true; use status/blockedOnly only when needed; export/import for handoff, import replace:true only when explicitly overwriting; when all visible todos complete, state clears automatically.",

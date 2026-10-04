@@ -202,7 +202,7 @@ function getUnfinishedTodoNudge(): { signature: string; message: string } | unde
 			"Continue working on them now. Pick exactly one pending/in_progress item, mark it in_progress if needed, make concrete progress, and update or complete todos immediately as work changes.",
 			"If the user added/removed/canceled requirements or changed goal/scope/approach, or if discovered facts make the current plan stale/incomplete/impossible, synchronize todos first: update still-relevant items, defer/delete obsolete ones, add new tasks, and adjust blockers/order.",
 			"If progress is waiting on user-supplied data, clarification, or a decision, defer the affected plan/todos before your final response instead of leaving them pending/in_progress, so auto-nudge stops until the user replies.",
-			"For non-user blockers, leave the current item in_progress and create/update a blocker task instead of stopping.",
+			"For non-user blockers, keep the item in_progress while actively resolving it. To switch to independent work, return the blocked item to pending with its blocker recorded and mark only the new current item in_progress.",
 			"",
 			...lines,
 		].join("\n"),
@@ -375,16 +375,15 @@ export default function (pi: ExtensionAPI) {
 			const normalized = normalizeTodoThinkingLevelForModel(currentModel, params.thinking);
 			if (normalized !== params.thinking) nextParams = { ...nextParams, thinking: normalized };
 		}
-		if (nextParams.id === undefined) return nextParams;
-		if (!current) return nextParams;
-		const nextStatus = nextParams.status ?? current.status;
-		if (nextStatus === "in_progress" && nextParams.thinking === undefined && current.thinking !== undefined) {
+		if (nextParams.id !== undefined && !current) return nextParams;
+		const nextStatus = nextParams.status ?? current?.status ?? "pending";
+		if (nextStatus === "in_progress" && nextParams.thinking === undefined && current?.thinking !== undefined) {
 			const normalized = normalizeTodoThinkingLevelForModel(currentModel, current.thinking);
 			if (normalized !== current.thinking) nextParams = { ...nextParams, thinking: normalized };
 		}
-		const nextThinking = nextParams.thinking ?? current.thinking;
+		const nextThinking = nextParams.thinking ?? current?.thinking;
 		const shouldCapturePreviousThinking =
-			nextStatus === "in_progress" && nextThinking !== undefined && (current.status !== "in_progress" || nextParams.thinking !== undefined);
+			nextStatus === "in_progress" && nextThinking !== undefined && (current?.status !== "in_progress" || nextParams.thinking !== undefined);
 		if (!shouldCapturePreviousThinking) return nextParams;
 		const baselineThinking = getTodoThinkingBaseline(state, ctx) ?? getCurrentThinkingLevel();
 		if (!baselineThinking) return nextParams;

@@ -49,6 +49,8 @@ export function createDesktopShellViewModelServices(
     sessionCoordinator: options.orchestration.coordinator,
     inspectorPreference: options.sessions.inspectorPreference,
     quotaWait: options.quotaWait,
+    headsUp: options.headsUp,
+    openObserverSettings: options.openObserverSettings,
   });
 
   return { overlays, statusBar };

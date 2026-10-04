@@ -18,6 +18,9 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
 
 ## Contract
 
+Prompt policy composition and deduplication are governed by
+[assistant prompt composition](assistant-prompt-composition.md).
+
 1. Parent prompts and both task schemas share one selection guideline: set a
    clearly matching role, prefer a matching project specialist, and preserve a
    user-requested role. Omission is allowed for uncertainty or a user request for
@@ -64,6 +67,9 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
    appropriate only when the child result is a true dependency for the next
    decision and no independent parent work remains. If requirements change, the
    affected worker is stopped or rescoped before it continues editing.
+   `watchSeconds` defaults to zero (return after scheduling); a positive watch
+   window, capped at 300 seconds, is an explicit dependency wait rather than the
+   default. The separate `wait` action retains its own timeout.
 10. When `knowledge-auditor` is present in the effective catalog, the parent
     delegates the final task-scoped repository-knowledge pass to it with a
     concise behavior/result summary and the exact project-relative task-changed

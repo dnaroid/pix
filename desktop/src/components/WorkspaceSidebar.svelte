@@ -85,6 +85,7 @@
 
   type SidebarTab = SidebarIndicatorTab;
   type PackageScriptsPanelHandle = { refresh: () => void };
+  type SettingsPanelHandle = { openSection: (id: string) => Promise<void> };
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
     tasks: "Tasks",
     project: "Project",
@@ -271,6 +272,7 @@
 
   let sidebarElement = $state<HTMLElement | null>(null);
   let packageScriptsPanel = $state<PackageScriptsPanelHandle | null>(null);
+  let settingsPanel = $state<SettingsPanelHandle | null>(null);
   let projectSwitcher = $state<{ close: () => void } | null>(null);
   let activeTab = $state<SidebarTab>("tasks");
   const layoutController = createWorkspaceSidebarLayoutController({ activeTab: () => activeTab });
@@ -565,6 +567,16 @@
     const taskCard = [...(sidebarElement?.querySelectorAll<HTMLElement>("[data-task-card]") ?? [])]
       .find((card) => card.dataset.taskId === taskId);
     taskCard?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Focus a named settings chapter from Desktop chrome without global DOM queries. */
+  export async function openSettingsSection(id: string): Promise<void> {
+    statusMenuController.close();
+    setActiveTab("settings");
+    if (layoutController.collapsed) layoutController.setCollapsed(false);
+    await tick();
+    if (activeTab !== "settings" || layoutController.collapsed) return;
+    await settingsPanel?.openSection(id);
   }
 
   /** Close the project picker when another top-level interaction takes focus. */
@@ -880,7 +892,7 @@
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">
-          <SettingsPanel configOptions={settingsConfigOptions} {onOpenUserConfig} onIndicatorChange={(error) => settingsPanelError = error} />
+          <SettingsPanel bind:this={settingsPanel} configOptions={settingsConfigOptions} {onOpenUserConfig} onIndicatorChange={(error) => settingsPanelError = error} />
         </div>
       {/if}
     </div>

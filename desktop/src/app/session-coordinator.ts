@@ -13,6 +13,7 @@ import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createSessionUpdateBatcher } from "./session-update-batcher";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
+import type { HeadsUpStore } from "./heads-up.svelte";
 
 type DcpCompression = ReturnType<typeof createDcpCompression>;
 type GitWorkspace = ReturnType<typeof createGitWorkspaceStore>;
@@ -42,6 +43,7 @@ type SessionCoordinatorOptions = {
   dcp: DcpCompression;
   updates: SessionUpdates;
   quotaWait: QuotaWaitStore;
+  headsUp?: HeadsUpStore;
 };
 
 export function createSessionCoordinator(options: SessionCoordinatorOptions) {
@@ -63,6 +65,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     options.lspOnboarding.reset();
     options.dcp.reset();
     options.quotaWait.reset();
+    options.headsUp?.reset();
     options.state.resetContent();
     options.setOperationRunning(false);
   }
@@ -73,6 +76,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
   }
 
   function handleState(notification: SessionStateNotification): void {
+    if (options.headsUp?.handleSessionState(notification)) return;
     if (options.quotaWait.handleSessionState(notification)) return;
     if (options.runtime.handleSessionState(notification)) return;
     const agentControlState = agentControlStateFromSessionState(notification);
@@ -120,6 +124,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     options.runtime.forget(sessionId);
     options.dcp.clear(sessionId);
     options.quotaWait.clearSession(sessionId);
+    options.headsUp?.clearSession(sessionId);
   }
 
   return {

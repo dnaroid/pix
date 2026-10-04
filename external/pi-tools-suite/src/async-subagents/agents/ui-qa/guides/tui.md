@@ -48,6 +48,10 @@ Use only the documented bounded environment fields and project-local launch
 paths. Do not edit product source/tests/settings or signal/mutate target state
 behind the UI merely to make the flow pass.
 
+For requested prompt logging, `target.command.env` accepts `PI_DEBUG_PROMPT`
+with string value `0` or `1` only. It is opt-in, not inherited. Keep diagnostic
+dumps private in task evidence storage; they may contain project context.
+
 ## Oracles, evidence, cleanup
 
 Deterministic terminal text/cursor/process assertions are the pass/fail oracle

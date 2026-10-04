@@ -822,6 +822,7 @@ test("Desktop sessions explicitly load all bundled extensions", async (t) => {
 		agentDir,
 		questionExtensionPath: "/opt/pix/question/index.js",
 		sessionTitleExtensionPath: "/opt/pix/session-title/index.js",
+		headsUpExtensionPath: "/opt/pix/heads-up/index.js",
 		workspaceUndoExtensionPath: "/opt/pix/workspace-undo/index.js",
 		toolsSuiteExtensionPath: "/opt/pix/pi-tools-suite/index.ts",
 		loadDefaultModel: () => ({
@@ -851,6 +852,8 @@ test("Desktop sessions explicitly load all bundled extensions", async (t) => {
 			"/opt/pix/workspace-undo/index.js",
 			"--extension",
 			"/opt/pix/pi-tools-suite/index.ts",
+			"--extension",
+			"/opt/pix/heads-up/index.js",
 			"--thinking",
 			"high",
 		],
@@ -1443,6 +1446,41 @@ test("wait commands preserve paused state and do not replace an active run", asy
 		await pending;
 	});
 	assert.ok(options[0]?.args?.includes("/test/quota-wait.js"));
+});
+
+test("heads-up commands stay out-of-band while parent is idle, paused or running", async () => {
+	const pi = new FakePiClient();
+	pi.commands.push({ name: "heads-up", source: "extension", sourceInfo: {}, description: "Passive observer" });
+	pi.promptHandledWithoutRun = true;
+	const options: PiRpcClientOptions[] = [];
+	const { adapter } = createTestAdapter({ headsUpExtensionPath: "/test/heads-up.js",
+		createPiClient: (opts) => { options.push(opts); return pi; } });
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/observer-control").start();
+		const runtime = adapter.getSession(session.sessionId)!;
+		await waitFor(() => runtime.runtimeExtensionCommands.has("heads-up"));
+		await session.prompt("/heads-up on");
+		assert.equal(runtime.activeRun, undefined);
+		runtime.agentControlState = "paused";
+		await session.prompt("/heads-up check");
+		assert.equal(runtime.agentControlState, "paused");
+		await session.prompt("/heads-up snapshot");
+		assert.equal(runtime.agentControlState, "paused");
+		assert.equal(runtime.activeRun, undefined);
+		pi.promptHandledWithoutRun = false;
+		const pending = session.prompt("work");
+		await waitFor(() => pi.promptCalls.some((call) => call.message === "work"));
+		pi.emit({ type: "agent_start" });
+		const run = runtime.activeRun;
+		assert.ok(run);
+		await session.prompt("/heads-up off");
+		assert.equal(runtime.activeRun, run);
+		await session.prompt("/heads-up snapshot");
+		assert.equal(runtime.activeRun, run);
+		pi.emit({ type: "agent_settled" });
+		await pending;
+	});
+	assert.ok(options[0]?.args?.includes("/test/heads-up.js"));
 });
 
 const preparedDcpMapFixture = { revision: 1, sessionEpoch: 0, generatedAt: 100,

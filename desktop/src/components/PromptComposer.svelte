@@ -21,6 +21,7 @@
     PROJECT_TREE_DROP_EVENT,
   } from "../lib/project-tree";
   import AttachmentGrid from "./AttachmentGrid.svelte";
+  import HeadsUpCard from "./HeadsUpCard.svelte";
   import PromptComposerActionsMenu from "./PromptComposerActionsMenu.svelte";
   import PromptComposerActivityRow from "./PromptComposerActivityRow.svelte";
   import PromptComposerControls from "./PromptComposerControls.svelte";
@@ -64,6 +65,7 @@
     onPasteAttachments,
     onRemoveAttachment,
     onOpenAttachment,
+    headsUp,
   }: {
     promptText?: string;
     attachments: readonly Attachment[];
@@ -97,6 +99,7 @@
     onPasteAttachments: (files: readonly File[]) => void | Promise<void>;
     onRemoveAttachment: (id: string) => void;
     onOpenAttachment: (attachment: Attachment) => void;
+    headsUp?: import("svelte").ComponentProps<typeof HeadsUpCard> | null;
   } = $props();
 
   const historyCommand = desktopCommandDefinition("session.history");
@@ -586,6 +589,10 @@
 
 {#if !editorMode}
   {@render queuedMessages?.()}
+{/if}
+
+{#if !editorMode && !questionMode && headsUp}
+  {#key headsUp.notice.id}<HeadsUpCard {...headsUp} />{/key}
 {/if}
 
 <form

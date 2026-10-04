@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { createWindowRunActivitySync } from "./app/window-run-activity";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
@@ -46,6 +46,7 @@
   import { createDesktopWatchRestart } from "./app/desktop-watch-restart.svelte";
   import { createLspOnboardingStore } from "./app/lsp-onboarding.svelte";
   import { createQuotaWaitStore } from "./app/quota-wait.svelte";
+  import { createHeadsUpStore } from "./app/heads-up.svelte";
   import { createWorkbenchTerminalState } from "./app/workbench-terminal.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
@@ -79,6 +80,7 @@
   } | null>(null);
   let workspaceSidebar = $state<{
     openTasksPanel: (taskId?: string) => Promise<void>;
+    openSettingsSection: (id: string) => Promise<void>;
     closeProjectSwitcher: () => void;
   } | null>(null);
   let localMessageId = 0;
@@ -141,6 +143,12 @@
     reportError,
   });
   const sessionActivity = sessionServices.activity;
+  const headsUp = createHeadsUpStore({
+    client: () => client,
+    runtimeReady: (sessionId) => sessionServices.runtime.isReady(sessionId),
+    commandAvailable: (sessionId) => sessionServices.metadata.slashCommandsBySession.get(sessionId)?.some((command) => command.name === "heads-up") ?? false,
+    reportError,
+  });
 
   const sessionInspectorPreference = sessionServices.inspectorPreference;
   const sessionInspectorOpen = $derived(sessionInspectorPreference.open);
@@ -635,6 +643,7 @@
     promptServices,
     lspOnboarding,
     quotaWait,
+    headsUp,
     reportError,
   });
   const sessionCoordinator = sessionOrchestration.coordinator;
@@ -682,6 +691,7 @@
     dragActive: () => dragActive,
     activeWorkbenchTabId: () => activeWorkbenchTabId,
     promptText: () => promptText,
+    setPromptText: (text) => promptText = text,
     promptAttachments: () => promptAttachments,
     changingConfig: () => changingConfig,
     displayedConfigOptions: () => displayedConfigOptions,
@@ -706,6 +716,8 @@
     orchestration: sessionOrchestration,
     lspOnboarding,
     quotaWait,
+    headsUp,
+    openObserverSettings: () => void workspaceSidebar?.openSettingsSection("desktop-observer"),
   });
   const titlebarViewModel = viewModels.titlebar;
   const sidebarViewModel = viewModels.sidebar;
@@ -715,6 +727,7 @@
 
   onMount(() => installDesktopContextMenu({ reportError, workspace: () => workspace }));
   onMount(desktopLifecycle.start);
+  onDestroy(headsUp.reset);
   onMount(nativeNotifications.start);
   onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
   onMount(desktopWatchRestart.start);

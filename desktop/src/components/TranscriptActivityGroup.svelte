@@ -6,6 +6,7 @@
   import type { Attachment } from "../lib/attachments";
   import { isUserBashTool, toolPresentation } from "../lib/tool-presentation";
   import { toolLspAttention } from "../lib/tool-output";
+  import { hasToolInput } from "../lib/tool-input";
   import {
     activityGroupDuration,
     activityGroupPresentationLabels,
@@ -48,6 +49,15 @@
     // Only the requested body is hydrated, never the entire activity group.
     // The session-history controller owns generation-aware request deduplication.
     if (details.open && entry.type === "tool" && entry.deferredResult) onLoadToolResult(entry.toolCallId);
+  }
+
+  function collapseTool(event: MouseEvent, id: string): void {
+    const details = (event.currentTarget as HTMLButtonElement).closest("details");
+    expandedEntries.delete(id);
+    if (details) {
+      details.open = false;
+      details.querySelector("summary")?.focus();
+    }
   }
 </script>
 
@@ -98,7 +108,7 @@
           {@const presentation = toolPresentation(tool)}
           {@const toolAttention = toolLspAttention(tool)}
           <section data-activity-entry-id={tool.id}>
-            {#if tool.deferredResult || tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
+            {#if tool.deferredResult || tool.content || tool.diffs.length > 0 || tool.attachments.length > 0 || hasToolInput(tool)}
               <details class="group/result" open={expandedEntries.has(tool.id)} ontoggle={(event) => toggleEntry(event, tool)}>
                 <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                   <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
@@ -109,15 +119,23 @@
                   </span>
                 </summary>
                 {#if expandedEntries.has(tool.id)}
+                  <div class="relative ml-[7px] pl-2.5">
+                    <button
+                      type="button"
+                      aria-label={`Collapse ${presentation.name} tool`}
+                      class="group/tool-gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+                      onclick={(event) => collapseTool(event, tool.id)}
+                    ><span class="h-full w-px bg-code-border transition-colors group-hover/tool-gutter:bg-foreground/50 group-focus-visible/tool-gutter:bg-foreground/50" aria-hidden="true"></span></button>
                   {#if tool.resultLoading}
                     <div class="py-0.5 pl-8 text-xs leading-tight text-muted-foreground" role="status">Loading tool result…</div>
                   {:else if tool.resultError}
                     <div class="py-0.5 pl-8 text-xs leading-tight text-destructive" role="status">{tool.resultError}</div>
                   {/if}
                   <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-                  {#if !tool.resultLoading && (tool.content || tool.diffs.length > 0)}
+                  {#if hasToolInput(tool) || (!tool.resultLoading && (tool.content || tool.diffs.length > 0))}
                     <ToolResult {tool} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
                   {/if}
+                  </div>
                 {/if}
               </details>
             {:else}

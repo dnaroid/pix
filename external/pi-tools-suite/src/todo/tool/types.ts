@@ -102,7 +102,7 @@ export const TodoParamsSchema = Type.Object({
 	),
 	status: Type.Optional(
 		StringEnum(["pending", "in_progress", "deferred", "completed", "deleted"] as const, {
-			description: "Target status (update) or list filter (list)",
+			description: "Initial status (create/batch_create item; default pending), target status (update), or list filter (list)",
 		}),
 	),
 	thinking: Type.Optional(

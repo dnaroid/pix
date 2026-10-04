@@ -17,11 +17,12 @@
   import SettingsModelSelect from "./SettingsModelSelect.svelte";
   import SettingsModelVisibility from "./SettingsModelVisibility.svelte";
   import SettingsNumberInput from "./SettingsNumberInput.svelte";
+  import SettingsObserver from "./SettingsObserver.svelte";
   import SettingsSelect from "./SettingsSelect.svelte";
   import SettingsSwitch from "./SettingsSwitch.svelte";
   import SettingsTextInput from "./SettingsTextInput.svelte";
 
-  export type DesktopSettingsSection = "general" | "models" | "assistant" | "voice" | "editor" | "source-control";
+  export type DesktopSettingsSection = "general" | "models" | "assistant" | "observer" | "voice" | "editor" | "source-control";
 
   const THINKING_OPTIONS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
     .map((value) => ({ value, label: value === "xhigh" ? "Extra high" : value[0]!.toUpperCase() + value.slice(1) }));
@@ -417,6 +418,8 @@
       <SettingsModelList value={list(["sessionTitle", "fallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["sessionTitle", "fallbackModels"], value)} />
     </SettingsFieldRow>
   </div>
+{:else if section === "observer"}
+  <SettingsObserver {source} {schema} {models} onChange={onChange} />
 {:else if section === "voice"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Voice</h2>

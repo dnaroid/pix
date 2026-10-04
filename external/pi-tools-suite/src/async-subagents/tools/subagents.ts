@@ -99,7 +99,7 @@ export function registerSubagentsTool(
 			thinking: Type.Optional(Type.String({ description: "spawn: thinking level for sub-agents (off, minimal, low, medium, high, xhigh, max)" })),
 			extraArgs: Type.Optional(Type.Array(Type.String(), { description: "spawn: additional pi CLI args for sub-agents" })),
 			timeoutSeconds: Type.Optional(Type.Number({ description: "spawn: wall-clock timeout in seconds for every spawned agent in this call; task timeoutSeconds overrides this." })),
-			watchSeconds: Type.Optional(Type.Number({ description: "spawn: live update watch window (default/max 300s; 0 detaches immediately)", default: DEFAULT_SPAWN_WATCH_SECONDS })),
+			watchSeconds: Type.Optional(Type.Number({ description: "spawn: optional live watch window (default 0: return after scheduling; max 300s). Use a positive window only when no independent parent work remains.", default: DEFAULT_SPAWN_WATCH_SECONDS })),
 
 			// status/wait/stop/result options
 			agentIds: Type.Optional(Type.Array(Type.String(), { description: "status/wait/stop: filter to these agent IDs" })),

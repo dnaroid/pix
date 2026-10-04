@@ -4,6 +4,8 @@
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { SettingsConfigKind } from "../lib/settings";
   import { settingsViewport } from "../lib/settings-viewport";
+  import { tick } from "svelte";
+  import { SETTINGS_GROUPS } from "../lib/settings-navigation";
   import SettingsConfigEditor from "./settings/SettingsConfigEditor.svelte";
   import SettingsSectionNav from "./settings/SettingsSectionNav.svelte";
 
@@ -18,6 +20,7 @@
   let viewport: HTMLDivElement;
   let searchInput: HTMLInputElement;
   let errors = $state<Partial<Record<SettingsConfigKind, string | null>>>({});
+  let requestedSection: string | null = null;
 
   function reportError(kind: SettingsConfigKind, error: string | null) {
     errors = { ...errors, [kind]: error };
@@ -26,14 +29,32 @@
   function updateNavigation(next: string[], current: string) {
     if (visible.join("|") !== next.join("|")) visible = next;
     if (active !== current) active = current;
+    // The target may be mounted only after asynchronous config loading completes.
+    if (requestedSection && next.includes(requestedSection) && navigate(requestedSection, true)) requestedSection = null;
   }
-  function navigate(id: string) {
+  function navigate(id: string, focus = false): boolean {
     const section = viewport.querySelector<HTMLElement>(`[data-settings-section="${id}"]`);
-    if (!section) return;
+    if (!section || section.hidden) return false;
     const header = section.closest("[data-settings-config]")?.querySelector("header");
     const offset = header?.getBoundingClientRect().height ?? 0;
     viewport.scrollTo({ top: viewport.scrollTop + section.getBoundingClientRect().top - viewport.getBoundingClientRect().top - offset });
     active = id;
+    if (focus) {
+      const heading = section.querySelector<HTMLElement>("h2") ?? section;
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    }
+    return true;
+  }
+
+  /** Used by scoped Desktop chrome deep links; no document-wide settings lookup. */
+  export async function openSection(id: string): Promise<void> {
+    const valid = Object.entries(SETTINGS_GROUPS).some(([kind, group]) => group.sections.some((section) => `${kind}-${section.id}` === id));
+    if (!valid) return;
+    requestedSection = id;
+    query = "";
+    await tick();
+    if (requestedSection === id && navigate(id, true)) requestedSection = null;
   }
 </script>
 

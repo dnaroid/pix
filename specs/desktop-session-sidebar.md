@@ -71,6 +71,11 @@ Add live views of the active session's execution Plan and Subagents to Pix Deskt
 - The inspector is a connected workbench pane with compact rows and separators rather than nested cards. At normal widths it is a resizable auxiliary region with sensible bounds, pointer and keyboard resizing, and best-effort persisted width so repeated desktop work retains spatial memory. Below the narrow-window breakpoint it overlays the right edge of the workspace instead of shrinking the transcript further; its restored width remains constrained by the available window width.
 - Desktop updates the derived activity summary only for the session whose Todo/Subagent snapshot changed. A live activity event does not rescan every retained session plan/run merely to refresh the tab strip or status HUD.
 
+The status HUD Plan control vertically centers its `completed/total` count next
+to a compact circular progress ring in place of the todo icon. The ring fills
+clockwise from the top according to the completed fraction; no linear progress
+track is rendered. Visibility, tooltip and inspector-opening behavior are unchanged.
+
 ## Related files
 
 - `external/pi-tools-suite/src/lib/rpc-session-state.ts`

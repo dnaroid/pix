@@ -311,6 +311,42 @@ describe.serial("todo tool", () => {
 		expect(getTodos()).toMatchObject([{ id: 1, subject: "Valid", status: "pending" }]);
 	});
 
+	test.serial("honors initial statuses and reports the committed state without redundant activation", async () => {
+		const { registerTodoTool, getTodos } = await loadTodoModule();
+		const pi = new FakePi();
+		registerTodoTool(pi as any);
+		const tool = pi.tools.get("todo");
+		const created = await tool.execute("call", { action: "create", subject: "Working", status: "in_progress", activeForm: "working" }, undefined, undefined, {});
+		expect(created.content[0].text).toContain("Working (in_progress)");
+		expect(created.content[0].text).not.toContain("none is in_progress");
+		const batch = await tool.execute("call", { action: "batch_create", replace: true, items: [
+			{ subject: "Working", status: "in_progress", activeForm: "working" },
+			{ subject: "Later", status: "deferred" },
+			{ subject: "Default" },
+		] }, undefined, undefined, {});
+		expect(batch.content[0].text).not.toContain("none is in_progress");
+		expect(getTodos().map((task: any) => task.status)).toEqual(["in_progress", "deferred", "pending"]);
+		const snapshot = getTodos();
+		await expectToolError(tool.execute("call", { action: "batch_create", replace: true, items: [
+			{ subject: "Valid", status: "in_progress" }, { subject: "Bad", status: "bogus" },
+		] }, undefined, undefined, {}), "item 2: invalid task status");
+		expect(getTodos()).toEqual(snapshot);
+	});
+
+	test.serial("switches blocked work to pending while independent work becomes active", async () => {
+		const { registerTodoTool, getTodos } = await loadTodoModule();
+		const pi = new FakePi();
+		registerTodoTool(pi as any);
+		const tool = pi.tools.get("todo");
+		await tool.execute("call", { action: "batch_create", items: [
+			{ subject: "Blocked work", status: "in_progress" }, { subject: "Resolve dependency" },
+		] }, undefined, undefined, {});
+		await tool.execute("call", { action: "batch_update", items: [
+			{ id: 1, status: "pending", addBlockedBy: [2] }, { id: 2, status: "in_progress" },
+		] }, undefined, undefined, {});
+		expect(getTodos()).toMatchObject([{ id: 1, status: "pending", blockedBy: [2] }, { id: 2, status: "in_progress" }]);
+	});
+
 	test.serial("automatically clears todo state when all visible tasks are completed", async () => {
 		const { registerTodoTool, getTodos } = await loadTodoModule();
 		const pi = new FakePi();
@@ -840,6 +876,33 @@ describe.serial("todo extension lifecycle", () => {
 			await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
 			expect(pi.thinkingLevel).toBe("off");
 			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	for (const action of ["create", "batch_create"] as const) test.serial(`captures and restores thinking for initially active ${action}`, async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		pi.thinkingLevel = "medium";
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-initial-thinking-")), hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: { xhigh: null, max: null } },
+			sessionManager: { getBranch: () => [] }, isIdle: () => true, hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+			const item = { subject: "Investigate", status: "in_progress", thinking: "high" };
+			await tool.execute("create", action === "create" ? { action, ...item } : { action, items: [item] }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("high");
+			await tool.execute("complete", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("medium");
 		} finally {
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
 			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;

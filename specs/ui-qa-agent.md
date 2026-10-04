@@ -186,6 +186,12 @@ supplies `PI_UI_QA=1`. Both TUI presentations preserve inherited `USER` and
 credential-store entries. Absent identity variables remain absent; arbitrary
 ambient variables, API keys and OAuth tokens are not forwarded. This does not
 expand the flow-authored environment override allowlist.
+For explicitly requested prompt diagnostics, TUI flows may set
+`target.command.env.PI_DEBUG_PROMPT` to the string `0` or `1`. It is not
+inherited from the runner environment; other `PI_*` overrides remain rejected
+unless separately allowed. This flag enables existing application logging, not
+a general environment or shell escape. Prompt dumps can contain project context
+and must remain in the task's private evidence storage.
 TUI targets may use their ordinary explicit project and
 session arguments to open deterministic state inside the real PTY before
 assertions. Because PTY input and application rendering are asynchronous, TUI

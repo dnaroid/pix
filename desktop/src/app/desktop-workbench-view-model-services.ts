@@ -43,6 +43,7 @@ export function createDesktopWorkbenchViewModelServices(
       operationRunning: options.operationRunning,
       sessionHistoryLoading: () => options.sessions.history.loading,
       promptText: options.promptText,
+      setPromptText: (text) => options.setPromptText(text),
       promptAttachments: options.promptAttachments,
       statusReady: () => options.status() === "ready",
       activeSessionRuntimeReady: () => options.state.runtimeReady,
@@ -71,6 +72,7 @@ export function createDesktopWorkbenchViewModelServices(
       questionImages: options.interactions.questionImages,
       lspOnboarding: options.lspOnboarding,
       quotaWait: options.quotaWait,
+      headsUp: options.headsUp,
     },
     editor: {
       workspace: options.workspace,

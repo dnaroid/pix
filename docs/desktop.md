@@ -106,6 +106,27 @@ in `pix.jsonc`.
 
 See [Configuration and accounts](configuration.md) for provider and voice setup.
 
+## Observer (experimental)
+
+The **Observer** item in the statusbar shows whether the passive Heads up
+observer is off, waiting, checking, holding a finding, or unable to check. Click
+it for the **current-session switch**, **Check now**, model, last check result
+and duration, token counters, and rolling limits. Opening this popup does not
+call a model. Checking does consume the selected provider's tokens/quota.
+
+The popup's **Observer settings** action opens **Settings → Desktop → Observer**.
+Choose the observer model independently of the main agent, set enablement for
+new sessions and cadence, and expand advanced budgets/timing for input/output
+limits, timeout and notice lifetime. Save applies defaults to new or reloaded
+sessions; it does not change the active session's switch. Trusted project
+configuration can override the user defaults. TUI settings are independent.
+
+Findings still appear above the composer with evidence and feedback. **Insert
+question** only fills an empty draft; it does not send it or change code. A
+waiting observer may need more completed agent turns, not only elapsed time.
+See the [feature contract](../specs/heads-up-observer.md) and the
+[reproducible evaluator](heads-up-eval.md) for limitations and checks.
+
 ## Updates
 
 Packaged production Desktop builds use Tauri Updater. On startup Pix checks the
