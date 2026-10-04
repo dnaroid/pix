@@ -8,7 +8,7 @@ status: active
 ## Behavior
 
 In the Desktop Registry catalog, a reusable skill or agent whose local project
-copy and global Git registry copy both exist and whose status indicates a
+copy and visible copy in the configured Git registry both exist and whose status indicates a
 possible difference has a **Diff** action.
 It is available for local edits, remote updates, divergence and untracked
 local copies, including a resource whose recorded provenance points to another
@@ -17,6 +17,9 @@ not offer a two-sided comparison. Project-sync artifacts are outside this
 view.
 
 Opening Diff reads the current copies on demand without syncing either side.
+The registry side is the visible Global or current-project publication in the
+currently configured registry, not a fallback to a previously recorded registry.
+Same-named Global/Project publications are rejected as a collision.
 The comparison labels the registry copy as the old side and the project-local
 copy as the new side, regardless of which side changed since the last sync.
 It lists changed files with a readable, per-file text diff, including added
@@ -45,6 +48,8 @@ must not replace the current view.
 - `acp/src/registry/service.ts`
 - `acp/src/registry/diff-service.ts`
 - `acp/src/registry/diff.ts`
+- `acp/src/registry/publication-location.ts`
+- `acp/src/registry/git.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 - `desktop/src/lib/registry.ts`
@@ -53,6 +58,7 @@ must not replace the current view.
 - `desktop/src/app/registry.svelte.ts`
 - `desktop/src/components/RegistryPanel.svelte`
 - `desktop/src/components/RegistryCatalog.svelte`
+- `desktop/src/components/RegistryItemActions.svelte`
 - `desktop/src/components/RegistryDiffPanel.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
