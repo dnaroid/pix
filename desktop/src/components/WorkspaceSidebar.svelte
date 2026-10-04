@@ -48,10 +48,14 @@
   import {
     SidebarIndicatorService,
     sidebarIndicators,
+    sidebarIndicatorReasons,
     type SidebarIndicatorMap,
     type SidebarIndicatorServiceState,
     type SidebarIndicatorTab,
   } from "../lib/sidebar-indicators";
+  import { gitPushBlockedReason } from "../lib/git-workflow";
+  import { createWorkspaceSidebarIndicatorActions } from "./workspace-sidebar-indicator-actions";
+  import SidebarIndicatorMenu from "./SidebarIndicatorMenu.svelte";
   import RegistryPanel from "./RegistryPanel.svelte";
   import IdxPanel from "./IdxPanel.svelte";
   import GitPanel from "./GitPanel.svelte";
@@ -307,7 +311,7 @@
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
-  const indicators = $derived<SidebarIndicatorMap>(sidebarIndicators({
+  const indicatorInputs = $derived({
     service: indicatorServiceState,
     projectPanelError,
     taskStorageError: storageError,
@@ -318,7 +322,55 @@
     gitCiSnapshot: gitCi.snapshot,
     registryBackgroundSync,
     settingsPanelError,
-  }));
+  });
+  const indicators = $derived<SidebarIndicatorMap>(sidebarIndicators(indicatorInputs));
+  const indicatorReasons = $derived(sidebarIndicatorReasons(indicatorInputs));
+  const gitBusy = $derived(gitLoading || Boolean(gitActionId || gitLlmActionId) || gitWorkflow.resolveRunning);
+  const idxBusy = $derived(Boolean(indicatorServiceState.poll?.idx.runningIds.length)
+    || Boolean(indicatorServiceState.idxOperationHandoffPending));
+  const indicatorActionEnabled = $derived({
+    "project.retry": Boolean(workspace),
+    "tasks.reload": !loading && !saving,
+    "tasks.running": tasks.some((task) => task.id === activeTaskId && Boolean(task.sessionId)),
+    "git.refresh": !gitBusy,
+    "git.fetch": !gitBusy && Boolean(gitSnapshot?.remotes.length),
+    "git.push": !gitBusy && !gitPushBlockedReason(gitSnapshot) && !gitSnapshot?.changes.some((change) => change.conflicted),
+    "git.fix-ci": gitCi.canFixWithAi,
+    "registry.refresh": registryReady && !registryLoading && !registryActionId,
+    "idx.review": sessionReady && !idxBusy,
+  });
+  const indicatorActions = createWorkspaceSidebarIndicatorActions({
+    workspace: () => workspace,
+    reasons: () => indicatorReasons,
+    enabled: () => indicatorActionEnabled,
+    beforeOpen: () => statusMenuController.close(),
+    reveal: revealIndicatorTab,
+    handlers: {
+      "project.retry": () => { revealIndicatorTab("project"); projectTreeRefreshKey++; },
+      "tasks.reload": () => onReload(),
+      "tasks.running": () => {
+        const task = tasks.find((task) => task.id === activeTaskId && task.sessionId);
+        if (task) onOpenSession(task);
+      },
+      "git.refresh": () => { if (onGitStatusRefresh) void onGitStatusRefresh(); else onGitRefresh(); },
+      "git.fix-ci": () => { void gitCi.onFixWithAi(); },
+      "git.fetch": () => { void gitWorkflow.onRepositoryAction("fetch"); },
+      "git.changes": () => onGitOpenDiff(undefined, "all"),
+      "git.conflicts": () => onGitOpenDiff(undefined, "all"),
+      "git.push": () => onGitPush(),
+      "registry.refresh": () => onRegistryRefresh(),
+      "idx.review": () => onRefreshKnowledge(),
+    },
+  });
+  const indicatorMenuController = indicatorActions.menu;
+  const indicatorMenuGroups = $derived(indicatorActions.groups());
+  $effect(() => indicatorActions.reconcile());
+
+  /** Menu navigation reveals the owning view; it never toggles it closed. */
+  function revealIndicatorTab(tab: SidebarTab): void {
+    if (activeTab !== tab || layoutController.collapsed) selectTab(tab);
+  }
+
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(taskDragController.taskId ? tasks.find((task) => task.id === taskDragController.taskId) : undefined);
   const visiblePlanChoices = $derived.by(() => {
@@ -439,6 +491,7 @@
       cleanupLayout();
       statusMenuController.dispose();
       taskDragController.dispose();
+      indicatorMenuController.dispose();
       indicatorService?.destroy();
       indicatorService = undefined;
     };
@@ -458,6 +511,7 @@
   }
 
   function selectTab(tab: SidebarTab): void {
+    indicatorMenuController.close();
     statusMenuController.close();
     revealedTaskId = null;
     planSelectorOpen = false;
@@ -572,6 +626,8 @@
 
 </script>
 
+<svelte:window onpointerdown={indicatorMenuController.outside} onblur={() => indicatorMenuController.close()} onresize={() => indicatorMenuController.close()} />
+
 <aside
   bind:this={sidebarElement}
   class="relative flex min-h-0 shrink-0 bg-sidebar text-sidebar-foreground"
@@ -586,7 +642,9 @@
     {activeTab}
     collapsed={layoutController.collapsed}
     onSelect={selectTab}
+    onIndicatorContext={indicatorActions.open}
   />
+  <SidebarIndicatorMenu controller={indicatorMenuController} groups={indicatorMenuGroups} onAction={indicatorActions.run} />
 
   {#if !layoutController.collapsed}
     <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
@@ -802,6 +860,7 @@
               {sessionReady}
               {onRefreshKnowledge}
               onOverviewChange={(sourceWorkspace, next) => indicatorService?.setIdxOverview(sourceWorkspace, next)}
+              onOperationRunningChange={(sourceWorkspace, running) => indicatorService?.setIdxOperationRunning(sourceWorkspace, running)}
             />
           {/key}
         </div>

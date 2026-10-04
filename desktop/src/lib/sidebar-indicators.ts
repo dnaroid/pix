@@ -6,6 +6,9 @@ export type {
   SidebarIndicatorServiceState,
   SidebarIndicatorTab,
   SidebarIndicatorTone,
+  SidebarIndicatorReason,
+  SidebarIndicatorReasonId,
+  SidebarIndicatorReasonMap,
   WorkspaceSidebarIndicatorPoll,
 } from "./sidebar-indicator-types";
 
@@ -13,6 +16,7 @@ export {
   mergeStableRegistryIndicatorPoll,
   runtimeOutputNeedsRefresh,
   sidebarIndicators,
+  sidebarIndicatorReasons,
   strongestIndicator,
 } from "./sidebar-indicator-policy";
 

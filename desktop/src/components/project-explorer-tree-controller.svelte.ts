@@ -171,8 +171,11 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   async function focusRow(index: number): Promise<void> {
     const row = rows()[index];
     if (!row) return;
+    const requestGeneration = generation;
+    const requestWorkspace = options.workspace();
     state.focusedPath = row.entry.path;
     await tick();
+    if (requestGeneration !== generation || options.workspace() !== requestWorkspace || state.focusedPath !== row.entry.path) return;
     const item = options.root()?.querySelector<HTMLButtonElement>(
       `[data-project-tree-path="${CSS.escape(row.entry.path)}"]`,
     );

@@ -38,6 +38,7 @@
     sessionReady,
     onRefreshKnowledge,
     onOverviewChange,
+    onOperationRunningChange,
   }: {
     workspace: string;
     onValidateProjectFile: (path: string) => Promise<boolean>;
@@ -45,6 +46,7 @@
     sessionReady: boolean;
     onRefreshKnowledge: () => void;
     onOverviewChange?: (workspace: string, overview: IdxOverview | undefined) => void;
+    onOperationRunningChange?: (workspace: string, running: boolean) => void;
   } = $props();
 
   type PanelTab = "overview" | "knowledge" | "query";
@@ -68,6 +70,10 @@
   const installingIdx = $derived(runtime.installingIdx);
   const error = $derived(runtime.error);
   const runningOperation = $derived(runtime.runningOperation);
+  $effect(() => {
+    const sourceWorkspace = workspace;
+    onOperationRunningChange?.(sourceWorkspace, Boolean(runningOperation));
+  });
   const visibleOperation = $derived(runtime.visibleOperation);
   const indexReady = $derived(runtime.indexReady);
 
@@ -283,7 +289,7 @@
           <textarea id="idx-audit-paths" class="h-24 w-full resize-none rounded-md border border-input bg-panel-strong p-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70" placeholder="src/feature.ts, specs/feature.md" value={auditState.pathsInput} oninput={(event) => auditController.setPathsInput(event.currentTarget.value)} spellcheck="false"></textarea>
           <div class="flex flex-wrap items-center gap-1.5">
             <button class="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!indexReady || !auditController.pathsValid || auditState.running || Boolean(runningOperation)} onclick={() => void runAudit()}>{#if auditState.running}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Audit paths</button>
-            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>Update in new session</button>
+            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Start a new AI session to review documentation and acknowledge only verified specs" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>AI review</button>
           </div>
         </div>
         {#if auditState.running && !auditOutput}

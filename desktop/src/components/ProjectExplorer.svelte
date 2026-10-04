@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { invoke, isTauri } from "@tauri-apps/api/core";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
   import {
     canPasteProjectEntry,
@@ -28,6 +28,7 @@
   import X from "@lucide/svelte/icons/x";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import type { MenuNavigationItem } from "../lib/keyboard-navigation";
+  import { projectExplorerMenuActions, type ProjectExplorerMenuAction } from "../lib/project-explorer-native-menu";
   import type { GitSnapshot } from "../lib/git";
   import { projectGitDecorations } from "../lib/project-git-decorations";
   import { createProjectGitRefresh } from "../lib/project-git-refresh";
@@ -43,6 +44,7 @@
   import { createProjectExplorerDragController } from "./project-explorer-drag-controller.svelte";
   import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
+  import { createProjectExplorerOperations, type ProjectOperation, type ProjectOperationClaim } from "./project-explorer-operations.svelte";
 
   let {
     workspace,
@@ -69,7 +71,7 @@
   let treeRoot = $state<HTMLDivElement | null>(null);
   let nameDialogElement = $state<HTMLDialogElement | null>(null);
   let nameInputElement = $state<HTMLInputElement | null>(null);
-  let operationBusy = $state(false);
+  const operations = createProjectExplorerOperations();
   let operationError = $state<string | null>(null);
   let canIgnoreEntry = $state(false);
   let searchInputElement = $state<HTMLInputElement | null>(null);
@@ -124,7 +126,19 @@
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const revealLabel = isMacOS ? "Reveal in Finder" : /Windows/.test(navigator.userAgent)
     ? "Show in File Explorer" : "Show in File Manager";
-  const menuController = createProjectExplorerMenuController({ items: menuNavigationItems });
+  const nativeMenus = isTauri();
+  const menuController = createProjectExplorerMenuController({
+    items: menuNavigationItems,
+    native: nativeMenus ? {
+      items: nativeMenuActions,
+      prepare: async (entry) => {
+        await Promise.all([refreshEntryClipboard(entry), ignoreEligibility.request(workspace, entry.path)]);
+      },
+      reportError: (error) => { operationError = errorMessage(error); },
+    } : undefined,
+    onClose: () => { clipboardReader.invalidate(); ignoreEligibility.invalidate(); },
+  });
+  onMount(menuController.installNativeCancellation);
   const menuState = menuController.state;
   const ignoreEligibility = createProjectGitIgnoreEligibility(
     (workspace, path) => invoke<boolean>("git_can_ignore", { workspace, path }),
@@ -132,7 +146,9 @@
   );
 
   $effect(() => {
-    // A fresh snapshot may change tracked/ignored eligibility while the menu is open.
+    // OS menus snapshot eligibility before popup, rather than changing while open.
+    if (nativeMenus) return;
+    // A fresh snapshot may change tracked/ignored eligibility while the DOM menu is open.
     gitSnapshot;
     void ignoreEligibility.request(workspace, menuState.entry?.path ?? "");
     return ignoreEligibility.invalidate;
@@ -140,6 +156,7 @@
 
   onDestroy(() => {
     operationGeneration += 1;
+    operations.invalidate();
     clipboardReader.invalidate();
     ignoreEligibility.invalidate();
     gitRefresh.dispose();
@@ -157,7 +174,7 @@
     if (currentWorkspace === observedOperationWorkspace) return;
     observedOperationWorkspace = currentWorkspace;
     operationGeneration += 1;
-    operationBusy = false;
+    operations.invalidate();
     operationError = null;
     searchGeneration += 1;
     searchQuery = "";
@@ -308,13 +325,32 @@
   }
 
   function canPasteInto(entry: ProjectTreeEntry): boolean {
-    return !operationBusy && canPasteProjectEntry(entryClipboard, workspace, destinationDirectory(entry));
+    return operations.canStart([{ path: destinationDirectory(entry), kind: "tree" }])
+      && canPasteProjectEntry(entryClipboard, workspace, destinationDirectory(entry));
   }
 
-  function refreshEntryClipboard(entry: ProjectTreeEntry): void {
+  function canDuplicate(entry: ProjectTreeEntry): boolean {
+    return operations.canStart(copyClaims(entry.path, parentDirectory(entry.path)));
+  }
+
+  function copyClaims(source: string, destination: string): ProjectOperationClaim[] {
+    // The backend chooses the collision-free output name; protect all possible
+    // outputs until it returns, including partially copied entries seen by polling.
+    return [{ path: source, kind: "tree" }, { path: destination, kind: "tree" }];
+  }
+
+  function canMutate(entry: ProjectTreeEntry): boolean {
+    return operations.canStart([{ path: entry.path, kind: "tree" }]);
+  }
+
+  function canCreateIn(entry: ProjectTreeEntry): boolean {
+    return operations.canStart([{ path: destinationDirectory(entry), kind: "directory" }]);
+  }
+
+  function refreshEntryClipboard(entry: ProjectTreeEntry): Promise<void> {
     const requestWorkspace = workspace;
     entryClipboard = null;
-    void clipboardReader.refresh((value) => {
+    return clipboardReader.refresh((value) => {
       if (workspace === requestWorkspace && menuState.entry?.path === entry.path) entryClipboard = value;
     });
   }
@@ -325,34 +361,57 @@
     items.push({ label: entry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}` });
     items.push({ label: revealLabel });
     if (entry.kind === "directory") {
-      items.push({ label: "New File…" }, { label: "New Folder…" });
+      items.push({ label: "New File…", disabled: !canCreateIn(entry) }, { label: "New Folder…", disabled: !canCreateIn(entry) });
     }
     if (entry.path) items.push({ label: "Copy" });
     items.push({ label: "Paste", disabled: !canPasteInto(entry) });
     if (entry.path) {
       items.push(
-        { label: "Duplicate" },
-        { label: "Rename…" },
+        { label: "Duplicate", disabled: !canDuplicate(entry) },
+        { label: "Rename…", disabled: !canMutate(entry) },
         { label: "Copy Relative Path" },
         { label: "Copy Absolute Path" },
       );
-      if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: operationBusy });
-      items.push({ label: "Delete" });
+      if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: !canIgnore(entry) });
+      items.push({ label: "Delete", disabled: !canMutate(entry) });
     }
     return items;
+  }
+
+  function nativeMenuActions(entry: ProjectTreeEntry): ProjectExplorerMenuAction[] {
+    const commands: Record<string, () => void | Promise<void>> = {
+      "Toggle Folder": () => runMenuOpen(entry),
+      "Open": () => runMenuOpen(entry),
+      "New File…": () => openNameDialog("new-file", entry),
+      "New Folder…": () => openNameDialog("new-directory", entry),
+      "Copy": () => copyEntry(entry),
+      "Paste": () => pasteEntry(entry),
+      "Duplicate": () => duplicateEntry(entry),
+      "Rename…": () => openNameDialog("rename", entry),
+      "Copy Relative Path": () => copyPath(entry),
+      "Copy Absolute Path": () => copyPath(entry, true),
+      "Add to .gitignore": () => ignoreEntry(entry),
+      "Delete": () => deleteEntry(entry),
+      [revealLabel]: () => revealEntry(entry),
+      [entry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}`]: () => {
+        menuController.close();
+        onOpenExternal(entry.path);
+      },
+    };
+    return projectExplorerMenuActions(menuNavigationItems(entry), commands, revealLabel, !entry.path);
   }
 
   function openEntryContextMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
     treeState.focusedPath = entry.path;
     menuController.openContextMenu(event, entry);
-    refreshEntryClipboard(entry);
+    if (!nativeMenus) void refreshEntryClipboard(entry);
   }
 
   function openRootContextMenu(event: MouseEvent): void {
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest("[data-project-tree-path]")) return;
     menuController.openContextMenu(event, rootContextEntry);
-    refreshEntryClipboard(rootContextEntry);
+    if (!nativeMenus) void refreshEntryClipboard(rootContextEntry);
   }
 
   function primaryShortcut(event: KeyboardEvent, key: string): boolean {
@@ -393,17 +452,22 @@
     operationError = null;
   }
 
-  function beginOperation(): number {
-    const operation = ++operationGeneration;
-    operationBusy = true;
-    return operation;
+  function canIgnore(entry: ProjectTreeEntry): boolean {
+    return operations.canStart(ignoreClaims(entry));
   }
 
-  function finishOperation(operation: number): void {
-    if (operation === operationGeneration) {
-      operationBusy = false;
-      void gitRefresh.request();
+  function ignoreClaims(entry: ProjectTreeEntry): ProjectOperationClaim[] {
+    const claims: ProjectOperationClaim[] = [{ path: entry.path, kind: "directory" }];
+    let parent = entry.kind === "directory" ? entry.path : parentDirectory(entry.path);
+    while (true) {
+      claims.push({ path: parent ? `${parent}/.gitignore` : ".gitignore", kind: "tree" });
+      if (!parent) return claims;
+      parent = parentDirectory(parent);
     }
+  }
+
+  function finishOperation(operation: ProjectOperation): void {
+    if (operations.finish(operation)) void gitRefresh.request();
   }
 
   function errorMessage(error: unknown): string {
@@ -411,26 +475,27 @@
   }
 
   async function copyEntry(entry: ProjectTreeEntry): Promise<void> {
-    if (!entry.path || operationBusy) return;
+    if (!entry.path) return;
     menuController.close(true);
     clipboardReader.invalidate();
     const requestWorkspace = workspace;
-    const operation = beginOperation();
+    const operation = operations.begin(`Copy reference: ${entry.name}`, []);
+    if (!operation) return;
     const text = encodeProjectEntryClipboard(requestWorkspace, entry);
     try {
       await writeText(text);
-      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       entryClipboard = decodeProjectEntryClipboard(text);
       clearOperationError();
     } catch (error) {
-      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
       finishOperation(operation);
     }
   }
 
   async function copyPath(entry: ProjectTreeEntry, absolute = false): Promise<void> {
-    if (!entry.path || operationBusy) return;
+    if (!entry.path) return;
     const requestWorkspace = workspace;
     const generation = operationGeneration;
     const path = absolute ? projectTreeAbsolutePath(requestWorkspace, entry.path) : entry.path;
@@ -456,21 +521,22 @@
   }
 
   async function ignoreEntry(entry: ProjectTreeEntry): Promise<void> {
-    if (!entry.path || !canIgnoreEntry || operationBusy) return;
+    if (!entry.path || !canIgnoreEntry) return;
     menuController.close(true);
     const requestWorkspace = workspace;
-    const operation = beginOperation();
+    const operation = operations.begin(`Ignore: ${entry.name}`, ignoreClaims(entry));
+    if (!operation) return;
     try {
       await invoke("git_ignore_entry", { workspace: requestWorkspace, path: entry.path });
-      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       // A newly created .gitignore must appear without disturbing expansion/focus.
       await treeController.refreshDirectory("");
-      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       const parent = parentDirectory(entry.path);
       if (parent) await treeController.refreshDirectory(parent);
-      if (operation === operationGeneration && workspace === requestWorkspace) clearOperationError();
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
     } catch (error) {
-      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
       // The shared Git snapshot recolors the target, ancestors and .gitignore.
       finishOperation(operation);
@@ -478,88 +544,99 @@
   }
 
   async function pasteEntry(entry: ProjectTreeEntry): Promise<void> {
-    if (operationBusy) return;
     menuController.close();
     const requestWorkspace = workspace;
     const destination = destinationDirectory(entry);
-    const operation = beginOperation();
+    const generation = operationGeneration;
+    let operation: ProjectOperation | null = null;
     try {
       // Read again at activation: another app/instance may have replaced the clipboard.
       const copied = decodeProjectEntryClipboard(await readText());
-      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      if (generation !== operationGeneration || workspace !== requestWorkspace) return;
       entryClipboard = copied;
       if (!canPasteProjectEntry(copied, requestWorkspace, destination) || !copied) return;
+      const claims: ProjectOperationClaim[] = [{ path: destination, kind: "tree" }];
+      if (copied.workspace === requestWorkspace) claims.push({ path: copied.path, kind: "tree" });
+      operation = operations.begin(`Paste: ${copied.path}`, claims);
+      if (!operation) return;
       const created = await invoke<ProjectTreeEntry>("copy_project_entry", {
         workspace: requestWorkspace,
         sourceWorkspace: copied.workspace,
         path: copied.path,
         destination: destination || null,
       });
-      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       treeController.ensureDirectoryExpanded(destination);
       await treeController.refreshDirectory(destination);
-      if (operation !== operationGeneration || workspace !== requestWorkspace) return;
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       await treeController.focusPath(created.path);
-      if (operation === operationGeneration && workspace === requestWorkspace) clearOperationError();
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
     } catch (error) {
-      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+      if (generation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
-      finishOperation(operation);
+      if (operation) finishOperation(operation);
     }
   }
 
   async function duplicateEntry(entry: ProjectTreeEntry): Promise<void> {
-    if (!entry.path || operationBusy) return;
+    if (!entry.path) return;
     menuController.close();
     const requestWorkspace = workspace;
     const destination = parentDirectory(entry.path);
-    const operation = beginOperation();
+    const operation = operations.begin(`Duplicate: ${entry.name}`, copyClaims(entry.path, destination));
+    if (!operation) return;
     try {
       const created = await invoke<ProjectTreeEntry>("copy_project_entry", {
         workspace: requestWorkspace,
         path: entry.path,
         destination: destination || null,
       });
-      if (workspace !== requestWorkspace) return;
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       await treeController.refreshDirectory(destination);
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       await treeController.focusPath(created.path);
-      clearOperationError();
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
     } catch (error) {
-      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
       finishOperation(operation);
     }
   }
 
   async function deleteEntry(entry: ProjectTreeEntry): Promise<void> {
-    if (!entry.path || operationBusy) return;
+    if (!entry.path || !canMutate(entry)) return;
     menuController.close();
     const kind = entry.kind === "directory" ? "folder" : "file";
     if (!window.confirm(`Delete ${kind} “${entry.name}”?\n\nThis cannot be undone.`)) return;
     const requestWorkspace = workspace;
     const parent = parentDirectory(entry.path);
     const fallback = treeController.focusFallbackAfterRemoval(entry.path);
-    const operation = beginOperation();
+    const operation = operations.begin(`Delete: ${entry.name}`, [{ path: entry.path, kind: "tree" }]);
+    if (!operation) return;
     try {
       await invoke("delete_project_entry", { workspace: requestWorkspace, path: entry.path });
-      if (workspace !== requestWorkspace) return;
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
+      const restoreFocus = treeState.focusedPath === entry.path || treeState.focusedPath?.startsWith(`${entry.path}/`);
       treeController.removePath(entry.path);
       await treeController.refreshDirectory(parent);
+      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       const focusTarget = fallback ?? treeController.rows[0]?.entry.path;
-      if (focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget);
-      clearOperationError();
+      if (restoreFocus && treeState.focusedPath === null && focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget);
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
     } catch (error) {
-      if (operation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
       finishOperation(operation);
     }
   }
 
   function openNameDialog(mode: "rename" | "new-file" | "new-directory", entry: ProjectTreeEntry): void {
-    if (operationBusy) return;
+    if (mode === "rename" ? !canMutate(entry) : !canCreateIn(entry)) return;
     menuController.close();
     nameDialog = { mode, entry, value: mode === "rename" ? entry.name : "", error: null };
+    const dialog = nameDialog;
     void tick().then(() => {
+      if (nameDialog !== dialog) return;
       nameDialogElement?.showModal();
       nameInputElement?.focus();
       if (mode === "rename") nameInputElement?.select();
@@ -567,22 +644,32 @@
   }
 
   function closeNameDialog(): void {
-    if (operationBusy) return;
     nameDialogElement?.close();
     nameDialog = null;
   }
 
   async function submitNameDialog(): Promise<void> {
     const dialog = nameDialog;
-    if (!dialog || operationBusy) return;
+    if (!dialog) return;
     const name = dialog.value.trim();
     if (!name) {
       dialog.error = "Enter a file or folder name.";
       return;
     }
     const requestWorkspace = workspace;
-    const operation = beginOperation();
+    const parent = dialog.mode === "rename" ? parentDirectory(dialog.entry.path) : destinationDirectory(dialog.entry);
+    const target = parent ? `${parent}/${name}` : name;
+    const claims: ProjectOperationClaim[] = dialog.mode === "rename"
+      ? [{ path: dialog.entry.path, kind: "tree" }, { path: target, kind: "tree" }]
+      : [{ path: parent, kind: "directory" }, { path: target, kind: "tree" }];
+    const operation = operations.begin(`${dialog.mode === "rename" ? "Rename" : "Create"}: ${name}`, claims);
+    if (!operation) {
+      dialog.error = "Another operation is using this path.";
+      return;
+    }
     dialog.error = null;
+    // The decision is resolved. Do not hold the workbench modal while I/O runs.
+    closeNameDialog();
     try {
       if (dialog.mode === "rename") {
         const oldPath = dialog.entry.path;
@@ -592,10 +679,12 @@
           path: oldPath,
           name,
         });
-        if (workspace !== requestWorkspace) return;
+        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
         treeController.remapPath(oldPath, renamed.path);
         await treeController.refreshDirectory(parentDirectory(renamed.path));
+        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
         await treeController.focusPath(renamed.path);
+        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
         if (selectedBefore && sameOrDescendantPath(selectedBefore, oldPath) && treeState.selectedPath) {
           onOpenFile(treeState.selectedPath);
         }
@@ -607,19 +696,17 @@
           name,
           kind: dialog.mode === "new-file" ? "file" : "directory",
         });
-        if (workspace !== requestWorkspace) return;
+        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
         treeController.ensureDirectoryExpanded(parent);
         await treeController.refreshDirectory(parent);
+        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
         await treeController.focusPath(created.path);
+        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
         if (created.kind === "file") treeController.openFile(created.path);
       }
-      clearOperationError();
-      nameDialogElement?.close();
-      nameDialog = null;
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
     } catch (error) {
-      if (operation === operationGeneration && workspace === requestWorkspace && nameDialog) {
-        nameDialog.error = errorMessage(error);
-      }
+      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
       finishOperation(operation);
     }
@@ -846,6 +933,13 @@
   </div>
   {/if}
 
+  {#if operations.active.length}
+    <div class="mx-2 mb-2 flex items-center gap-1.5 text-xs text-muted-foreground" role="status" title={operations.active.map((operation) => operation.label).join("\n")}>
+      <RotateCw class="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+      <span class="truncate">{operations.active.length === 1 ? operations.active[0]?.label : `${operations.active.length} file operations running…`}</span>
+    </div>
+  {/if}
+
   {#if operationError}
     <div class="mx-2 mb-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">
       {operationError}
@@ -857,7 +951,8 @@
     {@const pasteEnabled = canPasteInto(menuEntry)}
     <div
       bind:this={menuState.menuElement}
-      class="fixed z-[100] max-h-[calc(100vh-1rem)] w-56 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+      use:menuController.observeMenu
+      class="fixed z-[100] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
       style={`left: ${menuState.position.left}px; top: ${menuState.position.top}px;`}
       role="menu"
       tabindex="-1"
@@ -883,10 +978,10 @@
 
       {#if menuEntry.kind === "directory"}
         <div class="my-1 h-px bg-border" role="separator"></div>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => openNameDialog("new-file", menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canCreateIn(menuEntry)} onclick={() => openNameDialog("new-file", menuEntry)}>
           <FilePlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>New File…</span>
         </button>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => openNameDialog("new-directory", menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canCreateIn(menuEntry)} onclick={() => openNameDialog("new-directory", menuEntry)}>
           <FolderPlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>New Folder…</span>
         </button>
       {/if}
@@ -903,10 +998,10 @@
         <span class="ml-auto font-mono text-xs text-muted-foreground">{isMacOS ? "⌘V" : "Ctrl+V"}</span>
       </button>
       {#if menuEntry.path}
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void duplicateEntry(menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canDuplicate(menuEntry)} onclick={() => void duplicateEntry(menuEntry)}>
           <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Duplicate</span>
         </button>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => openNameDialog("rename", menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canMutate(menuEntry)} onclick={() => openNameDialog("rename", menuEntry)}>
           <Pencil class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Rename…</span>
           <span class="ml-auto font-mono text-xs text-muted-foreground">F2</span>
         </button>
@@ -917,12 +1012,12 @@
           <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Absolute Path</span>
         </button>
         {#if canIgnoreEntry}
-          <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={operationBusy} onclick={() => void ignoreEntry(menuEntry)}>
+          <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canIgnore(menuEntry)} onclick={() => void ignoreEntry(menuEntry)}>
             <FileText class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Add to .gitignore</span>
           </button>
         {/if}
         <div class="my-1 h-px bg-border" role="separator"></div>
-        <button class="project-file-menu-item text-destructive hover:bg-destructive/10" type="button" role="menuitem" tabindex="-1" onclick={() => void deleteEntry(menuEntry)}>
+        <button class="project-file-menu-item text-destructive hover:bg-destructive/10" type="button" role="menuitem" tabindex="-1" disabled={!canMutate(menuEntry)} onclick={() => void deleteEntry(menuEntry)}>
           <Trash2 class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Delete</span>
           <span class="ml-auto font-mono text-xs opacity-65">Delete</span>
         </button>
@@ -950,11 +1045,7 @@
   <dialog
     bind:this={nameDialogElement}
     class="w-full max-w-md rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-md backdrop:bg-background/70"
-    oncancel={(event) => {
-      if (operationBusy) event.preventDefault();
-      else nameDialog = null;
-    }}
-    onclose={() => { if (!operationBusy) nameDialog = null; }}
+    oncancel={() => { nameDialog = null; }}
   >
     <form class="p-4" onsubmit={(event) => { event.preventDefault(); void submitNameDialog(); }}>
       <h2 class="text-sm font-semibold">
@@ -973,15 +1064,14 @@
         class="mt-1 h-8 w-full rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none"
         autocomplete="off"
         spellcheck="false"
-        disabled={operationBusy}
       />
       {#if nameDialog.error}
         <p class="mt-2 text-xs leading-4 text-tool-error">{nameDialog.error}</p>
       {/if}
       <div class="mt-4 flex justify-end gap-2">
-        <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" type="button" disabled={operationBusy} onclick={closeNameDialog}>Cancel</button>
-        <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50" type="submit" disabled={operationBusy || !nameDialog.value.trim()}>
-          {operationBusy ? "Working…" : nameDialog.mode === "rename" ? "Rename" : "Create"}
+        <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" type="button" onclick={closeNameDialog}>Cancel</button>
+        <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50" type="submit" disabled={!nameDialog.value.trim()}>
+          {nameDialog.mode === "rename" ? "Rename" : "Create"}
         </button>
       </div>
     </form>

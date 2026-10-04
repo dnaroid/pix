@@ -11,9 +11,12 @@ import { materializeComposerTaskAttachments } from "./attachment-io";
 
 const KNOWLEDGE_REFRESH_PROMPT = [
   "Update the project knowledge documentation to match the current repository.",
+  "Check idx knowledge dirty before reviewing. A dirty result indicates missing or changed review receipts, not proof that documentation is outdated; review the monitored active specs against their declared implementation and tests, including specs that need no edits.",
   "Use idx context for general behavior/task discovery and idx search for focused code/document lookup. Read the primary sources and verify the actual behavior rather than treating retrieval rankings as proof.",
   "Review each affected primary spec against code and tests; update an existing spec if behavior changed. Only when no current spec covers the behavior, create a focused new spec using .indexer-cli/spec-template.md (ask before setup if the template is missing).",
   "After material changes, run idx audit <changed-paths...> with only the paths changed for this task. Review its document relationships against final code and tests, resolve real semantic drift, and report any remaining gaps; audit candidates alone are not proof of drift.",
+  "Only after actually comparing a spec with its current implementation and tests and resolving any confirmed drift, run idx knowledge acknowledge <spec-paths...> with the explicit project-relative paths of those reviewed specs. Acknowledge unchanged specs too when the review confirms they are accurate. Never acknowledge unreviewed specs, specs with unresolved drift, or specs whose required sources could not be checked merely to clear the dirty indicator. Indexing and audit do not replace this review or acknowledgment.",
+  "Finally, run idx knowledge dirty again and report the observed result, the reviewed and acknowledged spec paths, and any remaining review gaps or command failures. Do not claim the knowledge base is clean unless the command succeeds and returns no; if review is incomplete or the command is unsupported, report that limitation rather than forcing a clean state.",
   "Do not add or preserve legacy compatibility unless current product requirements explicitly demand it. Treat legacy behavior found in active code/specs as a mismatch to investigate, not as automatically supported behavior.",
 ].join("\n\n");
 

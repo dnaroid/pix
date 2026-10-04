@@ -4,6 +4,19 @@ import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?r
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
+  it("uses OS file menus in Desktop and retains DOM navigation only for browser preview", () => {
+    expect(explorerSource).toContain("const nativeMenus = isTauri()");
+    expect(explorerSource).toContain("native: nativeMenus ?");
+    expect(explorerSource).toContain("await Promise.all([refreshEntryClipboard(entry), ignoreEligibility.request(workspace, entry.path)])");
+    expect(explorerSource).toContain("if (!nativeMenus) void refreshEntryClipboard(entry)");
+    expect(explorerSource).toContain("if (nativeMenus) return");
+  });
+  it("measures the menu and bounds its scroll surface to the viewport", () => {
+    expect(explorerSource).toContain("use:menuController.observeMenu");
+    expect(explorerSource).toContain("max-h-[calc(100vh-1rem)]");
+    expect(explorerSource).toContain("max-w-[calc(100vw-1rem)] overflow-y-auto");
+    expect(menuControllerSource).not.toContain("MENU_HEIGHT");
+  });
   it("polls only visible directory listings through the mounted explorer lifecycle", () => {
     expect(explorerSource).toContain("onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose)");
     expect(treeControllerSource).toContain("async function refreshVisibleDirectories(): Promise<void>");
@@ -29,10 +42,10 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain('invoke<boolean>("git_can_ignore"');
     expect(explorerSource).toContain('return ignoreEligibility.invalidate');
     expect(explorerSource).toContain('ignoreEligibility.request(workspace, menuState.entry?.path ?? "")');
-    expect(explorerSource).toContain('if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: operationBusy })');
+    expect(explorerSource).toContain('if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: !canIgnore(entry) })');
     expect(explorerSource).toContain('{#if canIgnoreEntry}');
     expect(explorerSource).toContain('invoke("git_ignore_entry"');
-    expect(explorerSource).toContain('operation !== operationGeneration || workspace !== requestWorkspace');
+    expect(explorerSource).toContain('!operations.isCurrent(operation) || workspace !== requestWorkspace');
     expect(explorerSource).toContain('void gitRefresh.request()');
   });
   it("uses shared Git snapshots for accessible decorations without changing tab stops", () => {
@@ -53,7 +66,7 @@ describe("ProjectExplorer keyboard tree", () => {
   });
 
   it("does not paint restored focus as a second hovered row after deletion", () => {
-    expect(explorerSource).toContain("if (focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget)");
+    expect(explorerSource).toContain("if (restoreFocus && treeState.focusedPath === null && focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget)");
     expect(explorerSource).toContain("onfocus={() => treeState.focusedPath = entry.path}");
     expect(explorerSource).toContain("hover:bg-panel-hover");
     expect(explorerSource).not.toContain("focus-within:bg-panel-hover");
@@ -115,6 +128,16 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("window.confirm");
     expect(explorerSource).toContain("operationGeneration");
     expect(explorerSource).toContain("finishOperation(operation)");
+  });
+
+  it("uses scoped reservations rather than globally disabling file actions during I/O", () => {
+    expect(explorerSource).not.toContain("operationBusy");
+    expect(explorerSource).toContain("createProjectExplorerOperations()");
+    expect(explorerSource).toContain('operations.begin(`Delete: ${entry.name}`, [{ path: entry.path, kind: "tree" }])');
+    expect(explorerSource).toContain('disabled={!canMutate(menuEntry)}');
+    expect(explorerSource).toContain('role="status"');
+    const submit = explorerSource.slice(explorerSource.indexOf("async function submitNameDialog"));
+    expect(submit.indexOf("closeNameDialog();")).toBeLessThan(submit.indexOf('invoke<ProjectTreeEntry>("rename_project_entry"'));
   });
 
   it("uses shared clipboard references and rechecks at paste activation", () => {

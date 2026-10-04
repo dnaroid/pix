@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop workspace keyboard navigation
 
 <!-- markdownlint-disable MD013 -->
@@ -82,6 +87,20 @@ while project selection/open state remains separate from transient focus.
   Both path commands apply to files and folders below the workspace root and copy
   plain filesystem text without quoting or URI escaping. Absolute paths include
   the active workspace root; relative paths retain the existing project-relative form.
+- In the Tauri Desktop host, Project Explorer uses an OS-native context menu.
+  On supported macOS Desktop it may extend beyond the application window; the
+  OS owns placement, screen-edge clamping and keyboard traversal. Pointer menus
+  use the click position and keyboard menus anchor below the focused row. The
+  invoking row keeps focus. Clipboard and Git-ignore eligibility are awaited
+  before popup and captured for that opening; background Git refreshes do not
+  change an already-presented native menu. Paste still rereads at activation.
+  Replacement, workspace change and disposal invalidate callbacks and release
+  native resources; intervening interactions cancel pending preparation/IPC.
+  Popup promise resolution is not treated as a portable dismissal signal.
+  See [decision 0028](../docs/decisions/0028-native-explorer-context-menu.md).
+- The standalone browser preview retains the DOM menu, bounded inside its
+  viewport with an 8 px inset using rendered dimensions. It repositions on
+  content changes, scrolls internally if needed and dismisses on window resize.
 - The same context menu reveals the targeted file or folder in the OS file manager,
   or opens the project folder for the root context menu. The label is **Reveal in
   Finder** on macOS, **Show in File Explorer** on Windows, and **Show in File
@@ -123,6 +142,22 @@ while project selection/open state remains separate from transient focus.
   selected/expanded state beneath the removed path from both memory and the
   sparse persisted preference.
 - Delete is destructive and requires confirmation before the filesystem mutation.
+- Pending file I/O does not globally disable Files commands. Deletion/rename
+  reserve the affected subtrees; creation keeps its parent directory alive and
+  reserves the new path, allowing independent sibling mutations. Copy/paste and
+  duplicate conservatively reserve the destination subtree because the backend
+  chooses the output name (including partially visible copies). Copying into the
+  workspace root therefore excludes other mutations in that root while it runs;
+  navigation, opening files and clipboard-reference/path commands remain usable.
+  Ignore operations protect the target and possible ancestor `.gitignore` files.
+  Conflict checks apply both to menu availability and action activation.
+  Files shows active operation labels/counts without a modal progress window.
+  Create/rename dialogs close after submission, before filesystem I/O; failures
+  appear in the Files error surface. Each operation owns its completion token;
+  finishing one cannot unlock or invalidate another, and workspace replacement
+  or panel teardown invalidates all old completions. Late deletion completion
+  does not restore tree focus after the user has moved to another row.
+  See [decision 0028](../docs/decisions/0028-scoped-file-operation-reservations.md).
 - File/folder context menus expose **Add to .gitignore** only after a local Git
   check confirms an exact workspace-root repository and a target not already
   matching ignore rules, including tracked files and folders with tracked
@@ -171,10 +206,13 @@ while project selection/open state remains separate from transient focus.
 - Focus movement does not alter indicator state or acknowledge a destination;
   acknowledgement remains tied to the view actually becoming visible.
 
-## Related files
+## Implementation
 
 - `desktop/src/components/ProjectExplorer.svelte`
 - `desktop/src/components/project-explorer-tree-controller.svelte.ts`
+- `desktop/src/components/project-explorer-operations.svelte.ts`
+- `desktop/src/components/project-explorer-menu-controller.svelte.ts`
+- `desktop/src/lib/project-explorer-native-menu.ts`
 - `desktop/src/components/project-explorer-drag-controller.svelte.ts`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/lib/keyboard-navigation.ts`
@@ -190,7 +228,7 @@ while project selection/open state remains separate from transient focus.
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/src/git_ignore.rs`
 
-## Verification
+## Tests
 
 - `desktop/src/lib/project-files-refresh.test.ts` covers foreground-only polling,
   focus/visibility resumption, serialized reads, failure retries and teardown during
@@ -205,6 +243,17 @@ while project selection/open state remains separate from transient focus.
   expansion persistence, malformed state rejection, and storage bounds.
 - `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the
   keyboard external-editor route.
+- `desktop/src/components/project-explorer-operations.test.ts` covers independent
+  mutations during deferred deletion, ancestor/destination conflicts, partially
+  copied output protection, out-of-order completion and workspace/teardown invalidation.
+- `desktop/src/components/project-explorer-tree-controller.test.ts` covers deferred
+  row focus after workspace replacement, teardown and changed focus intent.
+- `desktop/src/components/project-explorer-menu-controller.test.ts` covers
+  measured browser-menu bounds, content growth, keyboard anchoring, stale focus
+  work, observer teardown and native host routing/cancellation.
+- `desktop/src/lib/project-explorer-native-menu.test.ts` covers shared command
+  policy, awaited eligibility, OS coordinates, serialized registration, stale
+  callbacks, error reporting and idempotent resource release.
 - `desktop/src/lib/project-entry-clipboard.test.ts` covers shared references,
   format/path validation, cross-project eligibility, text replacement, failures,
   out-of-order reads and teardown. Native project-entry/copy tests cover recursive

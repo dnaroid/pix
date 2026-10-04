@@ -54,6 +54,45 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - Indicator tone/reason and `aria-pressed` selection remain independent from the
   temporary keyboard-focus position.
 
+## Indicator quick actions
+
+Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027-sidebar-reason-actions.md).
+
+- Right-click on an Activity Bar icon with a dot opens a component-owned context
+  menu for **all current reasons**, not a generic section menu and not only the
+  highest-priority reason shown in the tooltip. Without a dot there is no menu.
+  Left-click behavior remains unchanged.
+- Stable reason/command IDs are independent of tooltip wording. Each cause is
+  labelled in the menu; repeated reports of the same cause share one command group.
+- Dirty knowledge offers **AI review** through the existing new-session workflow;
+  a stale index instead offers index maintenance. Neither command acknowledges
+  knowledge or starts indexing automatically.
+- Git offers status retry, failed-CI inspection/AI repair, conflict/change review,
+  branch controls for detached HEAD, Fetch for upstream updates, Push for outgoing
+  commits, and incoming-change controls for behind-upstream state. Commands reuse
+  existing Git owners and eligibility guards; unsafe Push is disabled.
+- Tasks offer load retry, planned-task view, or opening the running task's linked
+  session. Project errors offer tree reload. Registry reasons offer retry or the
+  existing resource-review/sync controls. Terminal and IDX failures/activity open
+  their output/maintenance views; settings errors open configuration controls.
+- AI, busy, unavailable and unsafe actions are disabled using current capabilities;
+  activation rechecks current reasons and guards. A reason clearing removes its
+  commands; no remaining reasons, workspace switch, blur, resize or teardown closes
+  the menu. Partial reason removal or command eligibility changes also dismiss the
+  popup and return focus to its trigger, avoiding focus stranded on removed or
+  disabled commands. Git eligibility includes active resolution startup; IDX AI
+  review is disabled during locally observed or backend-reported maintenance.
+  Local maintenance observations hand off to the sidebar service: panel teardown
+  cannot clear busy state. A successful poll started after that observation
+  transfers ownership to the backend snapshot; stale or failed polls cannot
+  release the guard, and workspace changes discard the old workspace's handoff.
+  Navigation reveals the owning view without collapsing an already-open
+  panel. Actions that perform work reuse existing callbacks, not polling side effects.
+- Shift+F10 / ContextMenu opens the same menu from the focused icon. Initial focus,
+  ArrowUp/Down, Home/End and printable typeahead skip disabled items; Enter/Space
+  activate the focused command. Escape restores icon focus, Tab dismisses and
+  continues focus traversal, and outside pointer input dismisses the menu.
+
 ## Signals by activity view
 
 - **Project** — error only when the workspace/project tree cannot be read. A populated project is not attention by itself.
@@ -142,6 +181,13 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - `desktop/src/lib/git-ci.ts`
 - `desktop/src/lib/idx.ts`
 - `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
+- `desktop/src/components/SidebarIndicatorMenu.svelte`
+- `desktop/src/components/sidebar-indicator-menu-controller.svelte.ts`
+- `desktop/src/components/sidebar-indicator-menu-controller.test.ts`
+- `desktop/src/components/workspace-sidebar-indicator-actions.ts`
+- `desktop/src/components/workspace-sidebar-indicator-actions.test.ts`
+- `desktop/src/lib/sidebar-indicator-actions.ts`
+- `desktop/src/lib/sidebar-indicator-actions.test.ts`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification
@@ -149,6 +195,8 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 - TypeScript tests cover severity precedence, Git dirty/conflict semantics, remote-upstream attention before fetch, local Registry sync attention, unstable Registry-sample retention, runtime failure precedence, output-event throttling, and healthy/error Project/Settings states.
 - Rust tests cover the lightweight dirty-Git indicator, rename-record parsing, a real bare-remote advance detected by `ls-remote` without mutating local tracking refs, local Registry tracked/local-only detection and hash compatibility, and JSONC/schema-invalid user-config health.
 - Deterministic tests cover planned-task/CI/explicit IDX policy, workspace-stale responses, coalescing, late subscription teardown, sparse focus cadence and mounted IDX reuse. Rust tests cover Registry cache churn, explicit knowledge verdicts, conservative revision mismatch and inherited-pipe descendant cleanup.
+- Quick-action tests cover all reason mappings, simultaneous reasons, no healthy-state menu, capability disabling, focus navigation/typeahead/dismissal and late-open cancellation.
+- Activation tests reject workspace-stale, cleared-reason and newly disabled commands; review invokes the existing callback, while inspection uses reveal, not toggle.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, `npm --prefix desktop run build:web`, and the Desktop Tauri Rust unit tests.
 
 ## Evidence

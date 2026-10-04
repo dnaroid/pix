@@ -20,6 +20,24 @@ export interface SidebarIndicator {
   readonly animated?: boolean;
 }
 
+/** Stable identity, independent of tooltip copy, for reason-specific commands. */
+export type SidebarIndicatorReasonId =
+  | "project.error"
+  | "tasks.error" | "tasks.running" | "tasks.planned"
+  | "git.error" | "git.ci-failed" | "git.conflicts" | "git.detached"
+  | "git.remote" | "git.dirty" | "git.ahead" | "git.behind"
+  | "registry.error" | "registry.issue" | "registry.attention"
+  | "registry.syncing" | "registry.pending" | "registry.local"
+  | "scripts.error" | "scripts.failed" | "scripts.running"
+  | "idx.error" | "idx.failed" | "idx.unavailable" | "idx.dirty" | "idx.stale" | "idx.running"
+  | "settings.error";
+
+export interface SidebarIndicatorReason extends SidebarIndicator {
+  readonly id: SidebarIndicatorReasonId;
+}
+
+export type SidebarIndicatorReasonMap = Readonly<Partial<Record<SidebarIndicatorTab, readonly SidebarIndicatorReason[]>>>;
+
 export interface RuntimeIndicatorPoll {
   readonly runningIds: readonly string[];
   readonly failedIds: readonly string[];
@@ -59,6 +77,7 @@ export interface SidebarGitRemoteUpdateProbe {
 }
 
 export interface SidebarIndicatorServiceState {
+  readonly idxOperationHandoffPending?: boolean;
   readonly poll?: WorkspaceSidebarIndicatorPoll;
   readonly gitRemote?: SidebarGitRemoteUpdateProbe;
   readonly idxOverview?: IdxOverview;

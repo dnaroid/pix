@@ -6,16 +6,23 @@ import {
   type MenuNavigationItem,
 } from "../lib/keyboard-navigation";
 import type { ProjectTreeEntry } from "../lib/project-tree";
+import { createProjectExplorerNativeMenu, type ProjectExplorerMenuAction } from "../lib/project-explorer-native-menu";
 
 interface ProjectExplorerMenuControllerOptions {
   readonly items: (entry: ProjectTreeEntry) => readonly MenuNavigationItem[];
+  readonly native?: {
+    items: (entry: ProjectTreeEntry) => readonly ProjectExplorerMenuAction[];
+    prepare: (entry: ProjectTreeEntry) => Promise<void>;
+    reportError: (error: unknown) => void;
+  };
+  readonly onClose?: () => void;
 }
 
 const MENU_WIDTH = 224;
-const MENU_HEIGHT = 320;
 const MENU_MARGIN = 8;
 
 export function createProjectExplorerMenuController(options: ProjectExplorerMenuControllerOptions) {
+  const native = options.native ? createProjectExplorerNativeMenu(options.native) : null;
   const state = $state({
     entry: null as ProjectTreeEntry | null,
     position: null as { left: number; top: number } | null,
@@ -24,8 +31,44 @@ export function createProjectExplorerMenuController(options: ProjectExplorerMenu
   let trigger: HTMLElement | null = null;
   let typeaheadQuery = "";
   let typeaheadTimer: number | null = null;
+  let anchor: { left: number; top: number } | null = null;
+  let generation = 0;
+  let menuObserver: ResizeObserver | null = null;
+
+  function positionMenu(element: HTMLDivElement): void {
+    if (!state.entry || !anchor) return;
+    const { width, height } = element.getBoundingClientRect();
+    state.position = {
+      left: Math.min(Math.max(anchor.left, MENU_MARGIN), Math.max(MENU_MARGIN, window.innerWidth - width - MENU_MARGIN)),
+      top: Math.min(Math.max(anchor.top, MENU_MARGIN), Math.max(MENU_MARGIN, window.innerHeight - height - MENU_MARGIN)),
+    };
+  }
+
+  // Observe rendered dimensions: directory commands and late Git eligibility
+  // can change the height while this same menu element remains mounted.
+  function observeMenu(element: HTMLDivElement): { destroy: () => void } {
+    menuObserver?.disconnect();
+    let active = true;
+    const observer = new ResizeObserver(() => {
+      if (active) positionMenu(element);
+    });
+    menuObserver = observer;
+    observer.observe(element);
+    positionMenu(element);
+    return {
+      destroy() {
+        active = false;
+        observer.disconnect();
+        if (menuObserver === observer) menuObserver = null;
+      },
+    };
+  }
 
   function close(restoreFocus = false): void {
+    native?.close();
+    options.onClose?.();
+    generation++;
+    anchor = null;
     state.entry = null;
     state.position = null;
     if (restoreFocus) trigger?.focus({ preventScroll: true });
@@ -41,8 +84,10 @@ export function createProjectExplorerMenuController(options: ProjectExplorerMenu
   }
 
   function focusFirstItem(): void {
+    const request = generation;
     void tick().then(() => {
-      if (!state.entry) return;
+      if (!state.entry || request !== generation) return;
+      if (state.menuElement) positionMenu(state.menuElement);
       const index = menuFocusIndex(options.items(state.entry), -1, "ArrowDown");
       if (index !== null) focusItem(index);
     });
@@ -58,12 +103,19 @@ export function createProjectExplorerMenuController(options: ProjectExplorerMenu
     const anchorX = keyboard ? (rect?.left ?? MENU_MARGIN) + 12 : event.clientX;
     const anchorY = keyboard ? rect?.bottom ?? MENU_MARGIN : event.clientY;
     const maxLeft = Math.max(MENU_MARGIN, window.innerWidth - MENU_WIDTH - MENU_MARGIN);
-    const maxTop = Math.max(MENU_MARGIN, window.innerHeight - MENU_HEIGHT - MENU_MARGIN);
+    if (native) current?.focus({ preventScroll: true });
+    close();
+    anchor = { left: anchorX, top: anchorY };
     trigger = current ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     state.entry = entry;
+    if (native) {
+      const request = generation;
+      void native.show(entry, { x: anchorX, y: anchorY }, () => request === generation && (!current || current.isConnected));
+      return;
+    }
     state.position = {
       left: Math.min(Math.max(anchorX, MENU_MARGIN), maxLeft),
-      top: Math.min(Math.max(anchorY, MENU_MARGIN), maxTop),
+      top: MENU_MARGIN,
     };
     focusFirstItem();
   }
@@ -128,12 +180,17 @@ export function createProjectExplorerMenuController(options: ProjectExplorerMenu
   }
 
   function dispose(): void {
+    native?.dispose();
+    close();
+    menuObserver?.disconnect();
+    menuObserver = null;
     if (typeaheadTimer !== null) window.clearTimeout(typeaheadTimer);
     typeaheadTimer = null;
   }
 
   return {
     state,
+    observeMenu,
     openContextMenu,
     handleMenuKeydown,
     handleWindowPointerDown,
@@ -141,5 +198,15 @@ export function createProjectExplorerMenuController(options: ProjectExplorerMenu
     handleWindowResize,
     close,
     dispose,
+    installNativeCancellation() {
+      if (!native) return () => {};
+      // Capture runs before a row opens a new keyboard/pointer menu.
+      const events = ["pointerdown", "keydown", "input", "focusin", "blur", "scroll", "resize"] as const;
+      // Native popup focus/keyboard events must not invalidate its callbacks.
+      // Only cancel IPC/preparation that has not presented a menu yet.
+      const cancel = () => { if (!native.hasActiveMenu()) close(); };
+      for (const event of events) window.addEventListener(event, cancel, true);
+      return () => { for (const event of events) window.removeEventListener(event, cancel, true); };
+    },
   };
 }

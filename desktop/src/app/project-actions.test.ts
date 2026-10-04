@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import { createProjectActions } from "./project-actions.svelte";
 
-describe("IDX update in new session", () => {
+describe("IDX AI knowledge review in new session", () => {
   it("submits task-scoped CLI v2 discovery and audit guidance in the new session", async () => {
     const client = {
       newSession: vi.fn().mockResolvedValue({ sessionId: "session-1" }),
@@ -56,6 +56,13 @@ describe("IDX update in new session", () => {
     expect(prompt).toContain("idx audit <changed-paths...>");
     expect(prompt).toContain(".indexer-cli/spec-template.md");
     expect(prompt).toContain("Review each affected primary spec against code and tests");
+    expect(prompt).toContain("Check idx knowledge dirty before reviewing");
+    expect(prompt).toContain("idx knowledge acknowledge <spec-paths...>");
+    expect(prompt).toContain("Acknowledge unchanged specs too");
+    expect(prompt).toContain("Never acknowledge unreviewed specs, specs with unresolved drift");
+    expect(prompt).toContain("Finally, run idx knowledge dirty again");
+    expect(prompt).toContain("unless the command succeeds and returns no");
+    expect(prompt).toContain("if review is incomplete or the command is unsupported, report that limitation");
     expect(prompt).not.toMatch(/wiki|knowledge status|unverified\s*=|needs review\s*=|whole worktree/i);
     expect(runPrompt).toHaveBeenCalledWith(client, "session-1", [{ type: "text", text: prompt }], [], "message-1");
   });

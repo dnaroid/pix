@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop right-click context menus
 
 ## Type / lifecycle
@@ -74,7 +79,11 @@ macOS/Windows use Tauri predefined editing roles, not draft-value replacement,
 synthetic clipboard events or a separate undo stack. This preserves the normal
 WebView paste path, including composer attachment handlers and terminal paste.
 The native menu owns OS rendering, placement/clamping and keyboard traversal.
-The DOM menu-navigation helpers remain the contract for component-owned menus.
+Project Explorer also uses a component-owned native command menu in the Desktop
+host, retaining DOM navigation only for standalone browser preview. Its file
+commands and clipboard policy are specified in
+[workspace navigation](desktop-workspace-navigation.md). Other DOM component
+menus retain the shared menu-navigation helpers.
 Context Menu / Shift+F10 routes through the same event dispatch as right-click;
 other editing and system shortcuts are not intercepted.
 
@@ -115,10 +124,22 @@ app-wide. Native registration is serialized so a late obsolete IPC creation
 cannot overwrite newer callbacks. Callbacks are invalidated on replacement or
 disposal, and link actions capture their URL rather than reading a later target.
 
-## Verification
+## Implementation
+
+- `desktop/src/lib/desktop-context-menu.ts`
+- `desktop/src/lib/desktop-context-target.ts`
+- `desktop/src/lib/native-context-menu.ts`
+- `desktop/src/lib/image-context-actions.ts`
+- `desktop/src/lib/project-explorer-native-menu.ts`
+- `desktop/src/components/ProjectExplorer.svelte`
+- `desktop/src/components/project-explorer-menu-controller.svelte.ts`
+
+## Tests
 
 - `desktop/src/lib/native-context-menu.test.ts`: command policies, password and
   read-only safety, link actions, failures, inactive callbacks and Linux dispatch.
+- `desktop/src/lib/project-explorer-native-menu.test.ts`: file-menu preparation,
+  OS coordinates, serialized registration, stale callbacks and resource teardown.
 - `desktop/src/lib/image-context-actions.test.ts`: image pixel copying, approved
   local/remote opening, conversion bounds and stale copy/cache completions.
 - `desktop/src/lib/desktop-context-menu.test.ts`: suppression, focus/coordinates,

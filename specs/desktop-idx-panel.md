@@ -20,7 +20,7 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - Named index maintenance (initialize, incremental/full update, dry run, doctor), bounded streamed output, cancellation and managed installation.
 - Typed search of code (`idx search --domain code`) and documents (`idx search --domain document`), context packs, and typed index inspections.
 - Knowledge tab: explicit changed project-relative paths entered one per line or comma-separated; read-only `idx audit <paths...>` scoped to those paths.
-- Optional **Update in new session** for agent-led review and updates; no metadata mutations from the panel.
+- Optional **AI review** for agent-led review and updates in a new session; no metadata mutations from the panel.
 - IDX output file references become source-preview links only after project-file validation, preserving line ranges.
 
 ## Behavior
@@ -31,7 +31,7 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - Code search offers hybrid/semantic/lexical/symbol ranking modes, max files, optional path prefix/content. Document search uses the knowledge query kind on the Tauri wire with `limit` and optional path prefix; the backend maps it to `search --domain document --max-files`. Neither document nor context queries send legacy `includeSecondary`.
 - Context offers bounded budget and spec/code/test result counts. Advanced inspections are restricted to architecture, structure, ast, explain, deps with typed targets and limits; AST file targets must be safe project-relative paths.
 - The Knowledge tab requires at least one explicit project-relative changed path before running `idx_audit`. Blank, absolute and traversing paths are rejected in the UI, with backend validation authoritative. The request contract is `{ workspace, paths: string[] }` returning `IdxCommandResult`; audit output is shown through `IdxOutput`, which validates candidate links before activation. In-flight results are invalidated on workspace change or path-list edits; stale errors/results cannot overwrite the current workspace.
-- **Update in new session** starts a fresh Desktop session for project knowledge review. It is not an IDX wiki command.
+- **AI review** starts a fresh Desktop session for project knowledge review. Its prompt checks `idx knowledge dirty` before and after review, compares monitored active specs with their declared implementation/tests, and explicitly runs `idx knowledge acknowledge <spec-paths...>` only for genuinely reviewed specs with no unresolved drift (including accurate unchanged specs). Unreviewed specs, unresolved drift, unavailable sources, unsupported commands and other failures must be reported, not hidden by acknowledgment. A clean result may be claimed only after a successful final dirty check returns `no`; indexing/audit alone do not establish review. The panel itself does not acknowledge specs. It is not an IDX wiki command.
 
 ## Contracts and limits
 
@@ -48,6 +48,8 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - `desktop/src/components/IdxOutput.svelte`
 - `desktop/src/lib/idx.ts`
 - `desktop/src/lib/idx.test.ts`
+- `desktop/src/app/project-actions.svelte.ts`
+- `desktop/src/app/project-actions.test.ts`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification

@@ -125,6 +125,17 @@ export class SidebarIndicatorService {
     this.publish();
   }
 
+  setIdxOperationRunning(workspace: string, running: boolean): void {
+    if (this.destroyed || workspace !== this.workspace) return;
+    if (!running && !this.state.idxOperationHandoffPending) return;
+    // Panel teardown must not release this guard. Only a successful poll started
+    // after the local observation can hand busy ownership to the backend snapshot.
+    this.fastGeneration += 1;
+    if (running) this.state = { ...this.state, idxOperationHandoffPending: true };
+    this.publish();
+    void this.refreshFast();
+  }
+
   refreshNow(): void {
     void this.refreshFast();
     this.refreshGitRemoteIfDue();
@@ -206,7 +217,12 @@ export class SidebarIndicatorService {
       });
       if (this.destroyed || workspace !== this.workspace || generation !== this.fastGeneration) return;
       const poll = mergeStableRegistryIndicatorPoll(this.state.poll, nextPoll);
-      this.state = { ...this.state, poll };
+      this.state = {
+        ...this.state,
+        poll,
+        // A section-level failure resolves the outer poll but cannot attest idle.
+        idxOperationHandoffPending: poll.idx.error ? this.state.idxOperationHandoffPending : false,
+      };
       this.reconcileFailureAcknowledgements();
       this.acknowledgeVisibleFailures();
       this.publishRuntimeState();

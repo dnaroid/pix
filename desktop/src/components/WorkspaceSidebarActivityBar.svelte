@@ -30,11 +30,13 @@
     activeTab,
     collapsed,
     onSelect,
+    onIndicatorContext,
   }: {
     indicators: SidebarIndicatorMap;
     activeTab: SidebarTab;
     collapsed: boolean;
     onSelect: (tab: SidebarTab) => void;
+    onIndicatorContext: (event: MouseEvent, tab: SidebarTab) => void;
   } = $props();
 
   let activityBar = $state<HTMLElement | null>(null);
@@ -54,6 +56,12 @@
   }
 
   function handleKeydown(event: KeyboardEvent, tab: SidebarTab): void {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      event.stopPropagation();
+      onIndicatorContext(new MouseEvent("contextmenu", { cancelable: true }), tab);
+      return;
+    }
     const currentIndex = SIDEBAR_TABS.indexOf(tab);
     const nextIndex = linearFocusIndex(currentIndex, event.key, SIDEBAR_TABS.length, "vertical", true);
     if (nextIndex === null) return;
@@ -79,6 +87,8 @@
     aria-controls="workspace-project-panel"
     aria-pressed={activeTab === "project" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "project")}
+    oncontextmenu={(event) => onIndicatorContext(event, "project")}
+    aria-haspopup={indicators.project ? "menu" : undefined}
     onclick={() => onSelect("project")}
   >
     <Folder class="h-5 w-5" aria-hidden="true" />
@@ -94,6 +104,8 @@
     aria-controls="workspace-tasks-panel"
     aria-pressed={activeTab === "tasks" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "tasks")}
+    oncontextmenu={(event) => onIndicatorContext(event, "tasks")}
+    aria-haspopup={indicators.tasks ? "menu" : undefined}
     onclick={() => onSelect("tasks")}
   >
     <ListTodo class="h-5 w-5" aria-hidden="true" />
@@ -109,6 +121,8 @@
     aria-controls="workspace-git-panel"
     aria-pressed={activeTab === "git" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "git")}
+    oncontextmenu={(event) => onIndicatorContext(event, "git")}
+    aria-haspopup={indicators.git ? "menu" : undefined}
     onclick={() => onSelect("git")}
   >
     <GitBranch class="h-5 w-5" aria-hidden="true" />
@@ -124,6 +138,8 @@
     aria-controls="workspace-registry-panel"
     aria-pressed={activeTab === "registry" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "registry")}
+    oncontextmenu={(event) => onIndicatorContext(event, "registry")}
+    aria-haspopup={indicators.registry ? "menu" : undefined}
     onclick={() => onSelect("registry")}
   >
     <Database class="h-5 w-5" aria-hidden="true" />
@@ -139,6 +155,8 @@
     aria-controls="workspace-scripts-panel"
     aria-pressed={activeTab === "scripts" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "scripts")}
+    oncontextmenu={(event) => onIndicatorContext(event, "scripts")}
+    aria-haspopup={indicators.scripts ? "menu" : undefined}
     onclick={() => onSelect("scripts")}
   ><SquareTerminal class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.scripts} /></button>
   <button
@@ -151,6 +169,8 @@
     aria-controls="workspace-idx-panel"
     aria-pressed={activeTab === "idx" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "idx")}
+    oncontextmenu={(event) => onIndicatorContext(event, "idx")}
+    aria-haspopup={indicators.idx ? "menu" : undefined}
     onclick={() => onSelect("idx")}
   >
     <ScanSearch class="h-5 w-5" aria-hidden="true" />
@@ -166,6 +186,8 @@
     aria-controls="workspace-settings-panel"
     aria-pressed={activeTab === "settings" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "settings")}
+    oncontextmenu={(event) => onIndicatorContext(event, "settings")}
+    aria-haspopup={indicators.settings ? "menu" : undefined}
     onclick={() => onSelect("settings")}
   ><Settings class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.settings} /></button>
 </div>

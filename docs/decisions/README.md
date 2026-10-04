@@ -72,5 +72,8 @@ errors, not invent or approve decisions.
 - [0025 — Sparse read-only sidebar health](0025-sidebar-health-polling.md)
 - [0026 — Cross-instance Project Explorer clipboard](0026-cross-instance-file-clipboard.md)
 - [0026 — Pause-ready adopted continuations](0026-pause-ready-adopted-continuations.md)
+- [0027 — Cause-specific sidebar quick actions](0027-sidebar-reason-actions.md)
+- [0028 — Native Project Explorer context menu](0028-native-explorer-context-menu.md)
+- [0028 — Scoped file-operation reservations](0028-scoped-file-operation-reservations.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

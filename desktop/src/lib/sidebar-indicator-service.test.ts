@@ -46,6 +46,62 @@ afterEach(() => {
 });
 
 describe("sidebar polling lifecycle", () => {
+  it("hands local IDX busy ownership to a fresh poll even after panel teardown", async () => {
+    const old = deferred<WorkspaceSidebarIndicatorPoll>();
+    const fresh = deferred<WorkspaceSidebarIndicatorPoll>();
+    let count = 0;
+    invoke.mockImplementation((command: string) => command === "workspace_sidebar_indicator_poll"
+      ? (++count === 1 ? old.promise : count === 2 ? fresh.promise : Promise.resolve(poll))
+      : Promise.resolve(command === "idx_overview" ? overview : { hasUpdates: false }));
+    const updates = vi.fn<(state: SidebarIndicatorServiceState) => void>();
+    const value = service(updates);
+    value.start("/one");
+    value.setIdxOperationRunning("/one", true);
+    expect(updates.mock.lastCall?.[0].idxOperationHandoffPending).toBe(true);
+    // No completion notification is sent when the owning panel unmounts.
+    old.resolve(poll);
+    await flush();
+    expect(updates.mock.lastCall?.[0].idxOperationHandoffPending).toBe(true);
+    fresh.resolve({ ...poll, idx: { runningIds: ["maintenance"], failedIds: [] } });
+    await flush();
+    expect(updates.mock.lastCall?.[0].idxOperationHandoffPending).toBe(false);
+    expect(updates.mock.lastCall?.[0].poll?.idx.runningIds).toEqual(["maintenance"]);
+    value.invalidateFast();
+    await flush();
+    expect(updates.mock.lastCall?.[0].poll?.idx.runningIds).toEqual([]);
+  });
+
+  it("retains IDX handoff on polling failure and rejects old-workspace notifications", async () => {
+    const updates = vi.fn<(state: SidebarIndicatorServiceState) => void>();
+    const value = service(updates);
+    value.start("/one"); await flush();
+    invoke.mockRejectedValue(new Error("offline"));
+    value.setIdxOperationRunning("/one", true);
+    await flush();
+    expect(updates.mock.lastCall?.[0].idxOperationHandoffPending).toBe(true);
+    value.setWorkspace("/two");
+    value.setIdxOperationRunning("/one", true);
+    await flush();
+    expect(updates.mock.lastCall?.[0].idxOperationHandoffPending).not.toBe(true);
+  });
+
+  it("keeps IDX handoff through a resolved section error until an authoritative poll", async () => {
+    const updates = vi.fn<(state: SidebarIndicatorServiceState) => void>();
+    const value = service(updates);
+    value.start("/one"); await flush();
+    invoke.mockImplementation((command: string) => Promise.resolve(command === "workspace_sidebar_indicator_poll"
+      ? { ...poll, idx: { runningIds: [], failedIds: [], error: "operation state unavailable" } }
+      : command === "idx_overview" ? overview : { hasUpdates: false }));
+    value.setIdxOperationRunning("/one", true);
+    await flush();
+    expect(updates.mock.lastCall?.[0].idxOperationHandoffPending).toBe(true);
+    expect(updates.mock.lastCall?.[0].poll?.idx.error).toBe("operation state unavailable");
+    invoke.mockImplementation((command: string) => Promise.resolve(command === "workspace_sidebar_indicator_poll"
+      ? poll : command === "idx_overview" ? overview : { hasUpdates: false }));
+    value.invalidateFast(); await flush();
+    expect(updates.mock.lastCall?.[0].idxOperationHandoffPending).toBe(false);
+  });
+
   it("coalesces a slow fast poll and rejects stale workspace results", async () => {
     const first = deferred<WorkspaceSidebarIndicatorPoll>();
     let count = 0;
