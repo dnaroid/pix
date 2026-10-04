@@ -35,10 +35,9 @@ jobs:
         if: runner.os != 'Windows'
       - name: Install Bun on Windows
         if: runner.os == 'Windows'
-        # Keep this version in sync with what setup-bun resolves on the other
-        # matrix legs: bun 1.3.14 on Windows mis-loaded @earendil-works/pi-tui
-        # classes in the tools-suite renderer tests (instances missing their
-        # prototype methods), which 1.4.x handles correctly.
+        # Align the Windows runtime with the other matrix legs (setup-bun
+        # installs the latest release there) so the suite does not depend on
+        # platform-specific bun behavior differences.
         run: npm install -g bun@1.4.2
       - run: bun --version
       - run: npm ci --ignore-scripts
@@ -54,6 +53,50 @@ jobs:
           cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
           cargo check --manifest-path desktop/src-tauri/Cargo.toml
           cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib backend_runtime
+      - name: Windows bun module diagnostic (temporary)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd external/pi-tools-suite
+          cat > win-diag-probe.mjs <<'EOF'
+          const tui = await import("@earendil-works/pi-tui");
+          const t = new tui.Text("x", 0, 0);
+          console.log("[probe] resolve:", Bun.resolveSync("@earendil-works/pi-tui", process.cwd()));
+          console.log("[probe] direct new Text proto:", Object.getPrototypeOf(t)?.constructor?.name, "setText:", typeof t.setText);
+          const { readRenderers } = await import("@earendil-works/pi-coding-agent/dist/core/tools/renderers/read.js");
+          const theme = { fg: (_c, s) => s, bold: (s) => s };
+          try {
+            const comp = readRenderers.renderResult(
+              { content: "hello world" },
+              { expanded: true, isPartial: false },
+              theme,
+              { args: { path: "x.txt" }, cwd: ".", showImages: false, isError: false, lastComponent: undefined },
+            );
+            console.log("[probe] renderResult ok proto:", Object.getPrototypeOf(comp)?.constructor?.name, "render:", typeof comp.render);
+          } catch (e) {
+            console.log("[probe] renderResult THREW:", String(e));
+          }
+          EOF
+          bun win-diag-probe.mjs || true
+          cat > win-diag-test.test.ts <<'EOF'
+          import { test } from "bun:test";
+          test("diag", async () => {
+            const tui = await import("@earendil-works/pi-tui");
+            const t = new tui.Text("x", 0, 0);
+            console.log("[btest] direct new Text proto:", Object.getPrototypeOf(t)?.constructor?.name, "setText:", typeof t.setText);
+            const { readRenderers } = await import("@earendil-works/pi-coding-agent/dist/core/tools/renderers/read.js");
+            const theme = { fg: (_c, s) => s, bold: (s) => s };
+            const comp = readRenderers.renderResult(
+              { content: "hello world" },
+              { expanded: true, isPartial: false },
+              theme,
+              { args: { path: "x.txt" }, cwd: ".", showImages: false, isError: false, lastComponent: undefined },
+            );
+            console.log("[btest] renderResult ok proto:", Object.getPrototypeOf(comp)?.constructor?.name);
+          });
+          EOF
+          bun test win-diag-test.test.ts || true
+          rm -f win-diag-probe.mjs win-diag-test.test.ts
       - run: npm run test:tools-suite
       - name: Install Chromium for browser QA E2E
         if: matrix.os == 'ubuntu-latest'
