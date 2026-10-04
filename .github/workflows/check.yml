@@ -35,7 +35,11 @@ jobs:
         if: runner.os != 'Windows'
       - name: Install Bun on Windows
         if: runner.os == 'Windows'
-        run: npm install -g bun@1.3.14
+        # Keep this version in sync with what setup-bun resolves on the other
+        # matrix legs: bun 1.3.14 on Windows mis-loaded @earendil-works/pi-tui
+        # classes in the tools-suite renderer tests (instances missing their
+        # prototype methods), which 1.4.x handles correctly.
+        run: npm install -g bun@1.4.2
       - run: bun --version
       - run: npm ci --ignore-scripts
       - run: npm run check
