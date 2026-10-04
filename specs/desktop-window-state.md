@@ -34,6 +34,10 @@ is still available at its saved desktop coordinates.
 ## Behavior
 
 - On first launch, the window uses the dimensions and placement from `tauri.conf.json` and the operating system.
+- The minimum native window size is 860 × 380 logical points. The height keeps
+  all seven 40 px Activity Bar buttons, its 12 px vertical padding, the 36 px
+  titlebar and 28 px status bar visible, with 24 px spare vertical space.
+  Default dimensions remain 1240 × 820; restored geometry respects this minimum.
 - On macOS, clicking a control in an inactive window activates the window and delivers that same click to the webview (`acceptFirstMouse: true`), without requiring a second click. The shared configuration applies to default, restored, and newly opened project windows.
 - On subsequent launches, recreate each saved window with its original stable
   label and workspace URL; do not add an extra main window when only project

@@ -97,7 +97,7 @@ mod tests {
             width: 1240.0,
             height: 820.0,
             min_width: Some(860.0),
-            min_height: Some(620.0),
+            min_height: Some(380.0),
             ..Default::default()
         }
     }
@@ -207,6 +207,6 @@ mod tests {
             }),
             &[],
         );
-        assert_eq!((config.width, config.height), (860.0, 620.0));
+        assert_eq!((config.width, config.height), (860.0, 380.0));
     }
 }
