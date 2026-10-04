@@ -1,9 +1,20 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { spawn as spawnChild } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createPiAiMock } from "../support/pi-ai-mock.js";
+
+// Snapshot the real modules before mocking: bun's top-level mock.module swaps
+// the live export slots for every later-loaded file in the same `bun test`
+// process (load order differs across platforms), so restore the real exports
+// in afterAll to keep unrelated suites (e.g. SDK renderer tests) unpoisoned.
+import * as realTui from "@earendil-works/pi-tui";
+import * as realPiAi from "@earendil-works/pi-ai";
+import * as realPiAiCompat from "@earendil-works/pi-ai/compat";
+const realTuiExports: Record<string, unknown> = { ...realTui };
+const realPiAiExports: Record<string, unknown> = { ...realPiAi };
+const realPiAiCompatExports: Record<string, unknown> = { ...realPiAiCompat };
 
 const typeMock = {
 	Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
@@ -45,6 +56,12 @@ const routerCompleteMock = mock(async () => ({
 const piAiMock = createPiAiMock({ Type: typeMock, complete: routerCompleteMock });
 mock.module("@earendil-works/pi-ai", () => piAiMock);
 mock.module("@earendil-works/pi-ai/compat", () => piAiMock);
+
+afterAll(() => {
+	mock.module("@earendil-works/pi-tui", () => realTuiExports as typeof realTui);
+	mock.module("@earendil-works/pi-ai", () => realPiAiExports as typeof realPiAi);
+	mock.module("@earendil-works/pi-ai/compat", () => realPiAiCompatExports as typeof realPiAiCompat);
+});
 
 const tempDirs: string[] = [];
 let originalArgv1 = process.argv[1];

@@ -1,8 +1,15 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentState } from "../../src/async-subagents/lib.js";
+
+// Snapshot the real module before mocking: bun's top-level mock.module swaps the
+// live export slots for every later-loaded file in the same `bun test` process
+// (order differs across platforms), so we must restore the real exports in
+// afterAll to keep unrelated suites (e.g. SDK renderer tests) unpoisoned.
+import * as realTui from "@earendil-works/pi-tui";
+const realTuiExports: Record<string, unknown> = { ...realTui };
 
 mock.module("@earendil-works/pi-tui", () => ({
 	Container: class Container {
@@ -21,6 +28,10 @@ mock.module("@earendil-works/pi-tui", () => ({
 		return visible.slice(0, width - ellipsis.length) + ellipsis;
 	},
 }));
+
+afterAll(() => {
+	mock.module("@earendil-works/pi-tui", () => realTuiExports as typeof realTui);
+});
 
 const tempDirs: string[] = [];
 const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
