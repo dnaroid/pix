@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # dcp: dynamic context pruning (as-is spec)
 
 > Risk classes: **data / cross-cutting / provider-context mutation**. DCP is
@@ -179,6 +184,27 @@ Effective pressure is the maximum of fresh repository projection and usable
 provider-native usage, so a stale low provider sample cannot hide newly appended
 content. Capacity reserves provider output space before applying policy
 thresholds; hard-capacity pressure is distinct from the routine soft threshold.
+
+SDK context usage is not always provider-native: after an append-only
+`context_edit` (including omission of a failed retry), the SDK can invalidate its
+last usage sample and estimate the **uncompressed** session projection instead.
+DCP recognizes that fallback only with a complete active-branch proof (no usable
+assistant usage after the latest edit/compaction) **and** exact agreement with
+the SDK's raw estimate. It then estimates the actual DCP projection with the same
+SDK heuristic, retaining resolved system instructions, sections and tool schemas.
+This estimate also accounts for new context-hook messages. A usable post-edit
+sample, unknown/mismatched scalar, or unavailable usage is not reclassified.
+The fresh repository projection remains a floor; actual oversized projections
+and genuine measured usage still enforce capacity. The already-rebased estimate
+is not eligible for an additional routine post-compression usage adjustment.
+No persisted history, SDK dependency or percentage display is patched.
+See [decision 0041](../docs/decisions/0041-dcp-sdk-fallback-provenance.md).
+
+Implementation: `external/pi-tools-suite/src/dcp/context-usage.ts` and
+`external/pi-tools-suite/src/dcp/index.ts`.
+Tests: `external/pi-tools-suite/test/dcp-context-usage.test.ts` and
+`tests/dcp-usage-fallback.integration.test.ts` (installed SDK retry, normal/lazy
+resume, retained blocks and genuine capacity violations).
 
 Routine reminders additionally account for an intentional compression performed
 after the latest measured provider response. Runtime-only calibration binds the
@@ -439,6 +465,16 @@ undo configuration.
   underlying session manager.
 - `autoCompress.enabled` remains opt-in.
 - No live provider quality/cache canary is claimed by this implementation pass.
+
+## Implementation
+
+- `external/pi-tools-suite/src/dcp/index.ts`
+- `external/pi-tools-suite/src/dcp/context-usage.ts`
+
+## Tests
+
+- `external/pi-tools-suite/test/dcp-context-usage.test.ts`
+- `tests/dcp-usage-fallback.integration.test.ts`
 
 ## Related files
 

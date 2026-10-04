@@ -25,6 +25,44 @@ test("serialized bound includes escapes and omitted data, and reset removes dele
 	assert.doesNotMatch(context.toInput(2000).body, /current requirements/);
 });
 
+test("codemode failure and shell retest are retained in chronological order, not newest first", () => {
+	const context = new HeadsUpContext();
+	context.addMessage({ role: "user", content: "Refine HUD; verify the same six files" }, "u");
+	context.addMessage({ role: "toolResult", toolName: "codemode", content: "Script completed\nOutput:\n5 failed | 77 passed (82)" }, "failed");
+	context.addMessage({ role: "assistant", content: "Fixed h-7 expectation to h-6 and retained accessible quota label" }, "fix");
+	context.addMessage({ role: "toolResult", toolName: "shell", content: "TEST_RESULT: passed\ncommand: six HUD files\n82 passed\nexit: 0" }, "passed");
+	context.addMessage({ role: "toolResult", toolName: "shell", content: "npm --prefix desktop run check: 0 errors, 0 warnings" }, "check");
+	const input = context.toInput(16000);
+	assert.deepEqual(input.records.map((record) => record.id), ["u", "failed", "fix", "passed", "check"]);
+	assert.match(input.records[1]!.text, /Tool codemode \(result\).*Script completed/s);
+	assert.match(input.records[3]!.text, /Tool shell \(result\).*82 passed/s);
+});
+
+test("budget clipping cannot skip a large fresh retest and backfill an old small failure", () => {
+	const context = new HeadsUpContext();
+	context.add({ id: "u", kind: "user", text: "Verify HUD" });
+	context.add({ id: "failed", kind: "tool", text: "5 failed, 77 passed" });
+	context.addMessage({ role: "toolResult", toolName: "shell", content: `82 passed\n${"log ".repeat(1500)}` }, "retest");
+	context.add({ id: "check", kind: "tool", text: "Typecheck passed" });
+	const input = context.toInput(2000);
+	assert.deepEqual(input.records.map((record) => record.id), ["u", "check"]);
+	assert.equal(JSON.parse(input.body).omitted, 2);
+	assert.ok(input.body.length <= 2000);
+	const full = context.toInput(16000);
+	assert.equal(full.records.find((record) => record.id === "retest")?.clipped, true);
+});
+
+test("review payload is inside the same serialized input budget", () => {
+	const context = new HeadsUpContext();
+	context.add({ id: "u", kind: "user", text: "Verify compatibility" });
+	context.add({ id: "t", kind: "tool", text: "Compatibility still fails" });
+	const review = [{ id: "old", title: "T".repeat(160), consequence: "C".repeat(500) }];
+	const input = context.toInput(2000, ["old notice ".repeat(200)], review);
+	assert.ok(input.body.length <= 2000);
+	assert.deepEqual(JSON.parse(input.body).activeNotices, review);
+	assert.deepEqual(input.records.map((entry) => entry.id), ["u", "t"]);
+});
+
 test("no hidden reasoning or images; tool requests include bounded arguments and failures stay labelled", () => {
 	const records = recordsFromMessage({ role: "assistant", content: [
 		{ type: "thinking", thinking: "PRIVATE THINKING" },
@@ -43,11 +81,14 @@ test("common credentials, private keys, ANSI and invisible control characters ar
 });
 
 test("response parser rejects fabricated references, duplicate IDs, extra keys, empty and overlong text", () => {
-	const good = { kind: "heads_up", title: "Changed API", consequence: "Old clients fail.", evidenceIds: ["t"] };
+	const good = { kind: "heads_up", notices: [{ id: null, title: "Changed API", consequence: "Old clients fail.", evidenceIds: ["t"] }] };
 	const records = [{ id: "t", kind: "tool" as const, text: "removed API" }];
 	const parse = (value: unknown, stopReason = "stop") => parseHeadsUpResponse({ content: [{ type: "text", text: JSON.stringify(value) }], stopReason } as AssistantMessage, records, 1, 30000);
 	assert.equal(parse(good).kind, "notice"); assert.equal(parse({ kind: "none" }).kind, "none");
-	for (const value of [null, [], { ...good, evidenceIds: ["invented"] }, { ...good, evidenceIds: ["t", "t"] }, { ...good, title: "" }, { ...good, title: "x".repeat(161) }, { ...good, action: "run shell" }, { kind: "none", extra: true }]) assert.equal(parse(value).kind, "invalid");
+	for (const change of [{ evidenceIds: ["invented"] }, { evidenceIds: ["t", "t"] }, { title: "" }, { title: "x".repeat(161) }, { action: "run shell" }, { id: "invented-card" }]) {
+		assert.equal(parse({ ...good, notices: [{ ...good.notices[0], ...change }] }).kind, "invalid");
+	}
+	for (const value of [null, [], { ...good, extra: true }, { kind: "none", extra: true }, { ...good, notices: [] }, { ...good, notices: Array(4).fill(good.notices[0]) }]) assert.equal(parse(value).kind, "invalid");
 	assert.equal(parse(good, "length").kind, "invalid");
 });
 

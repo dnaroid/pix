@@ -107,6 +107,19 @@ describe("session workbench model", () => {
     expect(tab?.title).toContain("Plan 0/1");
   });
 
+  it("carries the actual preview path, not the display name, into tab context metadata", () => {
+    for (const preview of [
+      { kind: "file" as const, file: { path: "src/main.ts" } },
+      { kind: "attachment" as const, attachment: { name: "clip.mov", path: "/tmp/my clip.mov" } },
+    ]) {
+      const tabs = buildDesktopWorkbenchTabs({
+        sessionTabs: [], preview, previewDirty: false, previewAnchorId: null, previewOpenedOrder: 1,
+        gitReviewLoading: false, gitResolveRunning: false, gitAnchorId: null, gitOpenedOrder: 0,
+      });
+      expect(tabs[0]).toMatchObject({ kind: "preview", filePath: preview.kind === "file" ? "src/main.ts" : "/tmp/my clip.mov" });
+    }
+  });
+
   it("inserts a dedicated LSP installer beside the owning conversation and locks close while busy", () => {
     const [session] = build([{ sessionId: "session-1", cwd: "/tmp/project", title: "Session" }]);
     const tabs = buildDesktopWorkbenchTabs({

@@ -33,6 +33,64 @@ describe("Heads up session mirror", () => {
     vi.advanceTimersByTime(30000); expect(h.store.notice("s1")).toBeUndefined(); expect(vi.getTimerCount()).toBe(0);
     h.push(snapshot({ revision: 2 })); expect(h.store.notice("s1")).toBeUndefined(); h.store.reset();
   });
+  it("immediately removes unconfirmed claims and actions, then accepts a fresh retained identity", async () => {
+    const h = setup(); h.push(); const original = h.store.notice("s1")!;
+    h.push(snapshot({ revision: 2, notice: null, notices: [], awaitingReview: true }));
+    expect(h.store.notice("s1")).toBeUndefined();
+    expect(h.store.state("s1")?.notice).toBeNull();
+    expect(h.store.state("s1")?.awaitingReview).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    await h.store.sendFeedback("s1", "dismiss", original.id);
+    expect(h.store.discuss("s1", original, () => true, () => "", () => [], () => {})).toBe(false);
+    expect(h.prompt).not.toHaveBeenCalled();
+    h.push(snapshot()); expect(h.store.notice("s1")).toBeUndefined();
+    h.push(snapshot({ revision: 3, notice: original, notices: [original], awaitingReview: false }));
+    expect(h.store.notice("s1")).toEqual(original);
+    vi.advanceTimersByTime(30000); expect(h.store.notice("s1")).toBeUndefined();
+    h.store.reset();
+  });
+  it("keeps selection across snapshots, chooses the next surviving card, and expires cards independently", () => {
+    const h = setup();
+    const a = snapshot().notice!;
+    const b = { ...a, id: "note-b", title: "B", expiresAt: 11000 };
+    const c = { ...a, id: "note-c", title: "C", expiresAt: 21000 };
+    h.push(snapshot({ notice: a, notices: [a, b, c] }));
+    h.store.selectNotice("s1", "note-a", 1);
+    expect(h.store.notice("s1")?.id).toBe("note-b");
+    h.push(snapshot({ revision: 2, notice: a, notices: [a, b, c] }));
+    expect(h.store.notice("s1")?.id).toBe("note-b");
+    vi.advanceTimersByTime(10000);
+    expect(h.store.notice("s1")?.id).toBe("note-c");
+    h.push(snapshot({ revision: 3, notice: a, notices: [a, c] }));
+    expect(h.store.notice("s1")?.id).toBe("note-c");
+    h.store.reset();
+  });
+  it("selects the next surviving stack member if the selected card is removed", () => {
+    const h = setup();
+    const a = snapshot().notice!;
+    const b = { ...a, id: "note-b" };
+    const c = { ...a, id: "note-c" };
+    h.push(snapshot({ notices: [a, b, c] }));
+    h.store.selectNotice("s1", "note-a", 1);
+    h.push(snapshot({ revision: 2, notice: a, notices: [a, c] }));
+    expect(h.store.notice("s1")?.id).toBe("note-c");
+    h.store.reset();
+  });
+  it("removal of the last selected card falls back to the last survivor, not the first", () => {
+    const h = setup(); const a = snapshot().notice!;
+    const b = { ...a, id: "note-b" }; const c = { ...a, id: "note-c" };
+    h.push(snapshot({ notices: [a, b, c] })); h.store.selectNotice("s1", a.id, -1);
+    h.push(snapshot({ revision: 2, notices: [a, b] }));
+    expect(h.store.notice("s1")?.id).toBe(b.id); h.store.reset();
+  });
+  it("an already expired selected push falls back to an actionable live card and accurate status", async () => {
+    const h = setup(); const a = snapshot().notice!; const b = { ...a, id: "note-b", expiresAt: 61_000 };
+    vi.setSystemTime(32_000); h.push(snapshot({ notices: [a, b] }));
+    expect(h.store.notice("s1")?.id).toBe(b.id); expect(h.store.state("s1")?.notice?.id).toBe(b.id);
+    await h.store.sendFeedback("s1", "dismiss", b.id);
+    expect(h.prompt).toHaveBeenCalledWith("s1", [{ type: "text", text: `/heads-up dismiss ${b.id}` }]);
+    h.store.reset();
+  });
   it("sends scoped feedback IDs but never clears a newer notice from a late reply", async () => {
     const h = setup(); const wait = deferred(); h.prompt.mockImplementationOnce(() => wait.promise); h.push();
     const command = h.store.sendFeedback("s1", "dismiss", "note-a");
@@ -62,5 +120,30 @@ describe("Heads up session mirror", () => {
   });
   it("rejects stale feedback before making a command", async () => {
     const h = setup(); h.push(); await h.store.sendFeedback("s1", "known", "other-note"); expect(h.prompt).not.toHaveBeenCalled(); h.store.reset();
+  });
+  it("rejects callbacks from a retired runtime even when its notice ID is reused", async () => {
+    const h = setup(); h.push(snapshot({ notices: [snapshot().notice!] }));
+    const original = h.store.notice("s1")!;
+    h.push(snapshot({ instanceId: "runtime-b", revision: 1, notices: [original] }));
+    await h.store.sendFeedback("s1", "dismiss", original.id, "runtime-a");
+    let text = "";
+    expect(h.store.discuss("s1", original, () => true, () => text, () => [], (value) => { text = value; }, "runtime-a")).toBe(false);
+    expect(h.prompt).not.toHaveBeenCalled();
+    expect(text).toBe(""); h.store.reset();
+  });
+  it("rejects actions captured for a card after another card becomes selected", async () => {
+    const h = setup();
+    const a = snapshot().notice!;
+    const b = { ...a, id: "note-b", title: "B" };
+    h.push(snapshot({ notices: [a, b] }));
+    h.store.selectNotice("s1", a.id, 1);
+    h.store.selectNotice("s1", a.id, 1);
+    expect(h.store.notice("s1")?.id).toBe(b.id);
+    await h.store.sendFeedback("s1", "dismiss", a.id, "runtime-a");
+    let text = "";
+    expect(h.store.discuss("s1", a, () => true, () => text, () => [], (value) => { text = value; }, "runtime-a")).toBe(false);
+    expect(h.prompt).not.toHaveBeenCalled();
+    expect(h.store.discuss("s1", b, () => true, () => text, () => [], (value) => { text = value; }, "runtime-a")).toBe(true);
+    h.store.reset();
   });
 });

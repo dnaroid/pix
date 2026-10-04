@@ -62,13 +62,38 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   backend-approved attachment path and the OS default application, not the text
   editor. Data images are cached as PNG before opening; remote images open their
   HTTP(S) URL. Copy Image writes PNG pixels, not a path or link. Conversion is
-  bounded to 16 megapixels and errors (including unloaded or cross-origin images)
+  bounded to 16 megapixels. Asset-backed local images are read through the backend's approved
+  attachment reader (25 MB limit) and decoded as data images before PNG conversion,
+  avoiding WebKit's asset-URL canvas security error without weakening CORS.
+  Already embedded data images retain their pixels without re-reading the original file.
+  Errors (including unloaded or unsupported cross-origin remote images)
   use the application error reporter. Stale conversion/cache completions cannot
-  write the clipboard or open an app after replacement/disposal.
+  write the clipboard or open an app after replacement/disposal. Image copy also
+  rejects stale completions when the same element's source or local path changes;
+  temporary decode images are released on success, failure, and cancellation.
 - Image menus also offer Copy Absolute Path and Copy Relative Path (relative to
   the active project root, with `../` for files outside it). These copy captured
   plain filesystem paths without URI escaping. Images without a local file path
   disable both commands; without an active project, relative-path copy is disabled.
+- Local images additionally offer **Reveal in Finder**; remote/data-only images
+  disable it. Attachment thumbnails expose their approved local path just like
+  images inside Preview.
+- The Preview tab header, its read-only content/blank space, and file/video
+  attachments offer **Copy File**, **Open in External App**, and **Reveal in
+  Finder**. These use the captured local file, not the tab's display title or an
+  asset URL. Relative project paths resolve against the current workspace;
+  missing local paths disable all three actions. Input/editing menus retain
+  precedence; selected text and source-line copy remain available alongside file
+  commands. Clicking an image still copies PNG pixels through **Copy Image**;
+  clicking the tab header copies the underlying file.
+- Embedded Markdown media uses its resolved attachment path, not the surrounding
+  document's path. Pending/unavailable media blocks that enclosing-file fallback
+  and disables local file actions until resolution succeeds.
+- On macOS, Copy File places a native file URL on the pasteboard for Finder and
+  other applications, not plain path text or Project Explorer's private
+  cross-instance clipboard payload. Open uses the OS default application, not
+  the configured text editor. No implicit save/export of an unsaved draft occurs.
+  See [decision 0042](../docs/decisions/0042-preview-file-context-actions.md).
 - xterm keeps its native clipboard event path; terminal menus offer Copy and,
   while the terminal accepts input, Paste. They do not offer document Select All
   or text-editor Undo. `TerminalView` exposes its read-only state explicitly.
@@ -94,7 +119,10 @@ evaluate arbitrary JavaScript. The Linux branch needs a native Linux smoke pass;
 macOS compilation and browser tests do not prove Wayland/native Linux behavior.
 
 Copy Link Address and Copy Image use the official native clipboard plugin with
-write-text and write-image permissions. Project Explorer additionally uses
+write-text and write-image permissions. The Tauri dependency enables `image-png`
+so the encoded PNG bytes sent by Copy Image decode into the native RGBA image;
+without that feature, the clipboard plugin rejects them as raw bytes.
+Project Explorer additionally uses
 read-text for action-triggered cross-instance file Copy/Paste, as specified in
 [workspace navigation](desktop-workspace-navigation.md); generic context menus
 do not read the clipboard. No clipboard polling, read-image or clearing permission
@@ -130,18 +158,42 @@ disposal, and link actions capture their URL rather than reading a later target.
 - `desktop/src/lib/desktop-context-target.ts`
 - `desktop/src/lib/native-context-menu.ts`
 - `desktop/src/lib/image-context-actions.ts`
+- `desktop/src/components/PreviewPane.svelte`
+- `desktop/src/components/AttachmentGrid.svelte`
+- `desktop/src/components/markdown-content-action.ts`
+- `desktop/src/components/WorkbenchTabs.svelte`
+- `desktop/src/lib/workbench-tabs.ts`
+- `desktop/src/app/workbench-model.ts`
+- `desktop/src-tauri/src/preview_file_action.rs`
+- `desktop/src-tauri/src/lib.rs`: Preview file action command registration and
+  approved, size-bounded `read_attachment_base64` for local image copying.
+- `desktop/src-tauri/Cargo.toml`: native pasteboard API flags and PNG decoding.
 - `desktop/src/lib/project-explorer-native-menu.ts`
 - `desktop/src/components/ProjectExplorer.svelte`
 - `desktop/src/components/project-explorer-menu-controller.svelte.ts`
 
 ## Tests
 
+- `desktop/src-tauri/tests/image_clipboard.rs`: actual Tauri clipboard payload
+  decoding from PNG bytes to RGBA and invalid-byte rejection, without modifying
+  the system clipboard. Run with `cargo test --manifest-path
+  desktop/src-tauri/Cargo.toml --test image_clipboard` on macOS.
 - `desktop/src/lib/native-context-menu.test.ts`: command policies, password and
   read-only safety, link actions, failures, inactive callbacks and Linux dispatch.
 - `desktop/src/lib/project-explorer-native-menu.test.ts`: file-menu preparation,
   OS coordinates, serialized registration, stale callbacks and resource teardown.
 - `desktop/src/lib/image-context-actions.test.ts`: image pixel copying, approved
-  local/remote opening, conversion bounds and stale copy/cache completions.
+  local-byte re-decoding, embedded data preservation, local/remote opening,
+  conversion bounds, stale read/decode/copy/cache completions and decode cleanup.
+- `desktop/src/lib/desktop-context-target.test.ts`: trusted local path resolution
+  and source references.
+- `desktop/src/app/workbench-model.test.ts`: Preview tab file metadata.
+- `desktop/src-tauri/src/preview_file_action.rs`: closed action policy and local
+  existing-file validation tests.
+- `desktop/scripts/context-menu-smoke.mjs`: real DOM media/tab routing and
+  keyboard invocation, preserving editable-field precedence, origin-tainted
+  canvas reproduction, approved-byte PNG conversion and video file-copy dispatch
+  (native IPC stubbed).
 - `desktop/src/lib/desktop-context-menu.test.ts`: suppression, focus/coordinates,
   generation races, resource replacement, unmount and failure handling.
 - `npm --prefix desktop run test:context-menu`: real Chromium DOM selection,

@@ -42,6 +42,10 @@ describe("Observer status presentation and protocol", () => {
     expect(observerStatus({ ...state, notice: { id: "n", title: "Old", consequence: "Old", evidence: [], createdAt: 0, expiresAt: 1 } }, true, "s", 2).kind).toBe("waiting");
   });
   it("accepts older snapshots and rejects malformed or contradictory details", () => {
+    const waiting = observerStatus({ ...snapshot(), awaitingReview: true }, true, "s", 0);
+    expect(waiting.kind).toBe("waiting");
+    expect(waiting.detail).toContain("Previous findings are hidden");
+    expect(waiting.detail).toContain("Existing limits still apply");
     const current = snapshot();
     expect(parseHeadsUpSnapshot(current)).toEqual(current);
     const { details, ...legacy } = current;
@@ -58,7 +62,7 @@ describe("Observer status presentation and protocol", () => {
         const box = observerPopoverPosition({ left: right - 30, right, top: 500 }, width, 528);
         expect(box.left).toBeGreaterThanOrEqual(8);
         expect(box.left + box.width).toBeLessThanOrEqual(width - 8);
-        expect(box.bottom).toBe(34);
+        expect(box.bottom).toBe(28);
       }
     }
   });

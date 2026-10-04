@@ -83,7 +83,7 @@ function setup(options: { mode?: string; hasUI?: boolean; finding?: boolean; pen
 			streamSimple: (_model: unknown, context: Context, requestOptions: SimpleStreamOptions) => ({ result: async () => {
 				requests.push({ context, options: requestOptions });
 				if (options.pending) return new Promise<AssistantMessage>((resolve) => { resolveRequest = resolve; });
-				return response(JSON.stringify(options.finding ? { kind: "heads_up", title: "Old configs will fail", consequence: "The new loader rejects the existing format.", evidenceIds: [userId, assistantId] } : { kind: "none" }));
+				return response(JSON.stringify(options.finding ? { kind: "heads_up", notices: [{ id: null, title: "Old configs will fail", consequence: "The new loader rejects the existing format.", evidenceIds: [userId, assistantId] }] } : { kind: "none" }));
 			} }),
 		},
 	} as unknown as ExtensionContext;
@@ -102,11 +102,44 @@ function setup(options: { mode?: string; hasUI?: boolean; finding?: boolean; pen
 	return {
 		ctx, manager, userId, assistantId, requests, snapshots, widgets, runAbort, bus,
 		get draft() { return draft; }, setDraft: (value: typeof draft) => { draft = value; },
-		resolve: () => resolveRequest?.(response('{"kind":"none"}')),
+		resolve: (value = '{"kind":"none"}') => resolveRequest?.(response(value)),
 		emit: (name: string, event: unknown = {}) => handlers.get(name)?.(event, ctx),
 		command: (args: string) => command(args, ctx),
 	};
 }
+
+test("TUI stack commands navigate one card without inference and discuss/feedback target selection", async (t) => {
+	const h = setup({ pending: true }); t.after(() => h.emit("session_shutdown"));
+	await h.emit("session_start"); await h.command("on"); await h.command("check"); await flush();
+	h.resolve(JSON.stringify({ kind: "heads_up", notices: ["Compatibility", "Billing", "Isolation"].map((title) => ({ id: null, title, consequence: `${title} conflict`, evidenceIds: [h.assistantId] })) }));
+	await flush(); assert.equal(h.snapshots.at(-1)?.notices?.length, 3);
+	assert.match(JSON.stringify(h.widgets.at(-1)), /1 \/ 3/);
+	await h.command("next"); assert.equal(h.snapshots.at(-1)?.notice?.title, "Billing");
+	assert.match(JSON.stringify(h.widgets.at(-1)), /2 \/ 3/);
+	await h.command("discuss"); assert.match(h.draft.text, /Billing conflict/);
+	await h.command("dismiss"); assert.equal(h.snapshots.at(-1)?.notices?.length, 2);
+	assert.equal(h.snapshots.at(-1)?.notice?.title, "Isolation");
+	await h.command("prev"); assert.equal(h.snapshots.at(-1)?.notice?.title, "Compatibility");
+	assert.equal(h.requests.length, 1);
+});
+
+test("message completion hides claims before persistence, but assistant progress does not", async (t) => {
+	const h = setup({ finding: true }); t.after(() => h.emit("session_shutdown"));
+	await h.emit("session_start"); await h.command("on"); await h.command("check"); await flush();
+	assert.ok(h.snapshots.at(-1)?.notice);
+	h.emit("message_end", { message: response("Still working") });
+	assert.ok(h.snapshots.at(-1)?.notice);
+	const entries = h.manager.getEntries().length;
+	h.emit("message_end", { message: { role: "toolResult", toolCallId: "retest", toolName: "shell", isError: false, content: [{ type: "text", text: "All tests pass" }], timestamp: 3 } });
+	assert.equal(h.manager.getEntries().length, entries, "event invalidation does not depend on persistence");
+	assert.equal(h.snapshots.at(-1)?.notice, null);
+	assert.deepEqual(h.snapshots.at(-1)?.notices, []);
+	assert.equal(h.snapshots.at(-1)?.awaitingReview, true);
+	assert.match(JSON.stringify(h.widgets.at(-1)), /Awaiting fresh review/);
+	assert.doesNotMatch(JSON.stringify(h.widgets.at(-1)), /Old configs will fail/);
+	await h.command("discuss"); assert.equal(h.draft.text, "");
+	assert.equal(h.requests.length, 1, "hiding does not spend a request");
+});
 
 test("Desktop on/off survives reopening the session file without enabling other sessions or TUI", async (t) => {
 	const previous = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
@@ -165,13 +198,38 @@ test("extension defaults off; check and stop commands never await the model or w
 	assert.equal(h.manager.getEntries().filter((entry) => entry.type === "usage" && entry.kind === "heads-up").length, 1);
 });
 
-test("automatic turn hook returns immediately and uses completed agent turns", async (t) => {
+test("automatic checks wait for final settlement, including failed HUD run, repair and successful retest", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const h = setup({ pending: true }); t.after(() => h.emit("session_shutdown"));
-	await h.emit("session_start"); await h.command("on");
-	const projection = h.manager.buildSessionProjection();
-	const returned = h.emit("turn_end", { outcome: "completed", context: { contextEntries: projection.entries }, message: response("working"), messageEntryId: h.assistantId, toolResults: [], toolResultEntryIds: [] });
-	assert.equal(returned, undefined); await flush(); assert.equal(h.requests.length, 1);
+	await h.emit("session_start"); await h.command("on"); h.emit("agent_start");
+	for (const [toolName, text] of [["codemode", "Script failed: 5 failed | 77 passed (82)"], ["apply_patch", "Fixed h-7/h-6 and accessible quota-label expectations"], ["shell", "Same six files: 82 passed (82)"], ["shell", "Typecheck: 0 errors, 0 warnings"]]) {
+		const message = response("working"); const messageEntryId = h.manager.appendMessage(message);
+		const result = { role: "toolResult" as const, toolCallId: toolName!, toolName: toolName!, isError: false, content: [{ type: "text" as const, text: text! }], timestamp: 2 };
+		const resultId = h.manager.appendMessage(result);
+		const returned = h.emit("turn_end", { outcome: "completed", context: { contextEntries: h.manager.buildSessionProjection().entries }, message, messageEntryId, toolResults: [result], toolResultEntryIds: [resultId] });
+		assert.equal(returned, undefined); t.mock.timers.tick(0); await flush(); assert.equal(h.requests.length, 0);
+	}
+	h.emit("agent_before_settle", { outcome: "completed", continue: true });
+	t.mock.timers.tick(0); await flush(); assert.equal(h.requests.length, 0, "boundary continuations must finish first");
+	h.emit("agent_before_settle", { outcome: "completed", continue: false });
+	assert.equal(h.emit("agent_settled"), undefined);
+	t.mock.timers.tick(0); await flush(); assert.equal(h.requests.length, 1);
+	const input = JSON.stringify(h.requests[0]!.context.messages);
+	assert.match(input, /82 passed/); assert.match(input, /0 errors, 0 warnings/);
+	assert.ok(input.indexOf("5 failed") < input.indexOf("82 passed"));
 	h.resolve(); await flush();
+	assert.equal(h.snapshots.at(-1)?.notice, null);
+});
+
+test("aborted and failed settlement never starts an automatic observer check", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	for (const outcome of ["aborted", "error"]) {
+		const h = setup(); await h.emit("session_start"); await h.command("on"); h.emit("agent_start");
+		h.emit("turn_end", { outcome: "completed", context: { contextEntries: h.manager.buildSessionProjection().entries }, message: response("working"), messageEntryId: h.assistantId, toolResults: [], toolResultEntryIds: [] });
+		h.emit("agent_before_settle", { outcome }); h.emit("agent_settled");
+		t.mock.timers.tick(0); await flush(); assert.equal(h.requests.length, 0);
+		h.emit("session_shutdown");
+	}
 });
 
 test("user stop aborts observer; new input clears current finding", async (t) => {
@@ -187,6 +245,28 @@ test("projected context edits are respected before inference and do not expose r
 	await h.command("check"); await flush();
 	const request = JSON.stringify(h.requests[0]?.context);
 	assert.match(request, /compatibility change was reverted/); assert.doesNotMatch(request, /Changed loader to reject/);
+});
+
+test("persisted shell retest before turn_end prevents delivery of the earlier codemode failure", async (t) => {
+	const h = setup({ pending: true }); t.after(() => h.emit("session_shutdown"));
+	const failedId = h.manager.appendMessage({ role: "toolResult", toolCallId: "nested-run", toolName: "codemode", isError: false,
+		content: [{ type: "text", text: "Script completed\nOutput:\n5 failed | 77 passed (82)\nold h-7 expectations" }], timestamp: 2 });
+	await h.emit("session_start"); await h.command("on"); await h.command("check"); await flush();
+	h.manager.appendMessage(response("Fixed h-7 to h-6 and quota aria-label expectation"));
+	const retestId = h.manager.appendMessage({ role: "toolResult", toolCallId: "rerun", toolName: "shell", isError: false,
+		content: [{ type: "text", text: "TEST_RESULT: passed\nSame six files: 82 passed\nexit: 0" }], timestamp: 3 });
+	// Real SDK persists each message before turn_end; no completed-turn hook yet.
+	h.resolve(JSON.stringify({ kind: "heads_up", notices: [{ id: null, title: "HUD tests failed", consequence: "5/82 failed; no rerun exists", evidenceIds: [failedId] }] }));
+	await flush(); assert.equal(h.snapshots.at(-1)?.notice, null);
+	assert.equal(h.snapshots.at(-1)?.reason, "evidence changed; awaiting fresh check");
+	await h.command("check"); await flush(); assert.equal(h.requests.length, 2);
+	const request = h.requests[1]!.context.messages[0]!.content;
+	assert.ok(Array.isArray(request));
+	const input = JSON.parse((request[0] as { text: string }).text);
+	assert.ok(input.records.findIndex((record: { id: string }) => record.id === failedId) < input.records.findIndex((record: { id: string }) => record.id === retestId));
+	assert.match(JSON.stringify(input), /82 passed/);
+	h.resolve(); await flush(); assert.equal(h.snapshots.at(-1)?.notice, null);
+	assert.equal(h.manager.getEntries().filter((entry) => entry.type === "usage" && entry.kind === "heads-up").length, 2);
 });
 
 test("headless, print and standalone RPC do not activate even with explicit command", async () => {

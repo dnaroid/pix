@@ -19,6 +19,30 @@ function renderProgress(completedTodos: number, totalTodos: number, sessionActiv
 }
 
 describe("status HUD todo progress ring", () => {
+  it.each([
+    [true, true, false, 2],
+    [true, false, false, 1],
+    [false, true, false, 1],
+    [false, false, false, 0],
+    [true, true, true, 0],
+  ])("renders separators only between visible groups (agents=%s plan=%s inspector=%s)", (agents, plan, inspector, count) => {
+    const html = render(SessionActivityStatusHud, { props: {
+      summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: agents ? 1 : 0, completedTodos: 0, totalTodos: plan ? 2 : 0, openTodos: plan ? 2 : 0 },
+      subagentSnapshot: agents ? { version: 1, count: 1, checkedAt: 1, runs: [{ runDir: "/run", agents: [{ id: "worker", status: "running" }] }] } : undefined,
+      todoSnapshot: undefined,
+      promptRunning: false,
+      sessionNeedsInput: false,
+      sessionActivityOpen: inspector,
+      leadingSeparator: true,
+      onOpenSessionActivity: () => {},
+    } }).body;
+    expect(html.match(/data-status-separator=/g) ?? []).toHaveLength(count);
+    if (count) expect(html).toContain("h-3 w-px shrink-0 bg-border");
+  });
+
+  it("omits the leading separator when Observer is absent", () => {
+    expect(renderProgress(0, 2)).not.toContain("data-status-separator");
+  });
   it.each([[1, 5, 20], [2, 4, 50], [10, 40, 25], [0, 40, 0]])(
     "renders %i/%i as %i percent in a ring beside the centered count",
     (completed, total, percentage) => {
@@ -30,7 +54,7 @@ describe("status HUD todo progress ring", () => {
       expect(html).toContain('stroke-dasharray="100"');
       expect(html).toContain("text-muted-foreground/25");
       expect(html).toContain("text-tool-info");
-      expect(html).toContain("flex h-7 items-center justify-center gap-1");
+      expect(html).toContain("flex h-6 items-center justify-center gap-1");
       expect(html).not.toContain("flex-col");
       expect(html).not.toContain("lucide-list-todo");
       expect(html).not.toContain("style=\"width:");

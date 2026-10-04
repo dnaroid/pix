@@ -2,9 +2,10 @@
   import Brain from "@lucide/svelte/icons/brain";
   import type { BrainstormStatus, SessionBrainstormSnapshot } from "../lib/session-brainstorm";
 
-  let { snapshot, open = false, onOpen }: {
+  let { snapshot, open = false, trailingSeparator = false, onOpen }: {
     snapshot?: SessionBrainstormSnapshot;
     open?: boolean;
+    trailingSeparator?: boolean;
     onOpen: () => void;
   } = $props();
 
@@ -42,8 +43,9 @@
     <div
       id={tooltipId}
       role="tooltip"
-      class="absolute right-0 bottom-full z-40 hidden max-h-[60vh] w-80 max-w-[calc(100vw-16px)] overflow-auto rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
+      class="absolute right-0 bottom-full z-40 hidden w-80 max-w-[calc(100vw-16px)] group-hover:block group-focus-within:block"
     >
+      <div class="max-h-[60vh] overflow-auto rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md">
       {#each runs as run (run.runId)}
         <section class="space-y-1 py-1" aria-label={run.topic}>
           <div class="break-words font-medium">{run.topic}</div>
@@ -56,6 +58,10 @@
           {/each}
         </section>
       {/each}
+      </div>
     </div>
   </div>
+  {#if trailingSeparator}
+    <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="brainstorm-next"></span>
+  {/if}
 {/if}

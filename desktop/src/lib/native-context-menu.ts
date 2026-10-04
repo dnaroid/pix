@@ -79,6 +79,8 @@ export function nativeContextMenuItems(
     items.push(
       { id: "desktop.image.open", text: "Open Image in External App", action: run(() => openContextImage(image, isActive)) },
       { id: "desktop.image.copy", text: "Copy Image", action: run(() => copyContextImage(image, isActive)) },
+      { id: "desktop.image.reveal", text: "Reveal in Finder", enabled: Boolean(context.imagePath),
+        action: run(() => context.imagePath ? invoke("preview_file_action", { path: context.imagePath, action: "reveal" }) : Promise.resolve()) },
       { item: "Separator" },
       { id: "desktop.image.absolute", text: "Copy Absolute Path", enabled: Boolean(context.imagePath),
         action: run(() => context.imagePath ? writeText(context.imagePath) : Promise.resolve()) },
@@ -127,6 +129,14 @@ export function nativeContextMenuItems(
       { id: "desktop.link.open", text: "Open Link", action: run(() => openUrl(url)) },
       { id: "desktop.link.copy", text: "Copy Link Address", action: run(() => writeText(url)) },
     );
+  }
+  if (context.kind === "file" || context.filePath) {
+    if (items.length) separator();
+    for (const [action, text] of [["copy", "Copy File"], ["open", "Open in External App"], ["reveal", "Reveal in Finder"]] as const) {
+      const path = context.filePath;
+      items.push({ id: `desktop.file.${action}`, text, enabled: Boolean(path),
+        action: run(() => path ? invoke("preview_file_action", { path, action }) : Promise.resolve()) });
+    }
   }
   return items;
 }

@@ -108,11 +108,11 @@ See [Configuration and accounts](configuration.md) for provider and voice setup.
 
 ## Observer (experimental)
 
-The **eye** in the statusbar is grey when Observer is off and primary-colored
-when enabled, except a static amber eye while blocked by an Observer budget limit.
+The **binoculars** on the right of the statusbar are grey when Observer is off and primary-colored
+when enabled, except static amber binoculars while blocked by an Observer budget limit.
 The tooltip and popup say «Достигнут лимит проверок» and show the earliest known
 quota release time (not a promised check or full reset). Once the runtime clears
-the limit, the eye returns to primary. It pulses only while checking (unless reduced motion is enabled).
+the limit, the binoculars return to primary. They pulse only while checking (unless reduced motion is enabled).
 Click it for the **current-session switch**, **Check now**, current state/reason,
 last check result and duration, and actual usage counters. The switch is saved
 with this session and restored after restart; other sessions are unaffected.

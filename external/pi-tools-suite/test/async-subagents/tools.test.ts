@@ -453,7 +453,7 @@ Check the project conventions before approving changes.
 		expect([...pi.commands.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 	});
 
-	test.serial("session shutdown kills running sub-agent processes before deleting run state", async () => {
+	test.serial("session shutdown kills running sub-agent processes but preserves run state", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		const { createRunDir, recordSubagentRun } = await import("../../src/async-subagents/lib.js");
 		const cwd = tempDir();
@@ -474,7 +474,7 @@ Check the project conventions before approving changes.
 			await waitForChildExit(child);
 
 			expect(isProcessAlive(child.pid)).toBe(false);
-			expect(fs.existsSync(runDir)).toBe(false);
+			expect(fs.existsSync(runDir)).toBe(true);
 		} finally {
 			if (child.pid && isProcessAlive(child.pid)) child.kill("SIGKILL");
 		}
@@ -506,7 +506,7 @@ Check the project conventions before approving changes.
 			await waitForChildExit(ownedChild);
 
 			expect(isProcessAlive(ownedChild.pid)).toBe(false);
-			expect(fs.existsSync(ownedRunDir)).toBe(false);
+			expect(fs.existsSync(ownedRunDir)).toBe(true);
 			expect(isProcessAlive(siblingChild.pid)).toBe(true);
 			expect(fs.existsSync(siblingRunDir)).toBe(true);
 		} finally {
@@ -669,9 +669,9 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(path.join(result.details.runDir, "agent-1", "result.md"), "utf-8")).toBe("entrypoint ok");
 	});
 
-	test.serial("removes project sub-agent files when the main session closes", async () => {
+	test.serial("preserves reports, media and registry resolution after the main session closes", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const { recordSubagentRun, getSubagentRegistryPath } = await import("../../src/async-subagents/lib.js");
+		const { recordSubagentRun, getSubagentRegistryPath, resolveSubagentRunDir } = await import("../../src/async-subagents/lib.js");
 		const pi = new FakePi();
 		registerExtension(pi as any);
 		const cwd = tempDir();
@@ -681,15 +681,32 @@ setTimeout(() => {}, 1000);
 		const incompleteRun = path.join(runRoot, "2026-01-02-incomplete");
 		createAgent(completedRun, "done", { exit_code: "0", "result.md": "ok", parent_session: parentSession });
 		createAgent(incompleteRun, "planned", { parent_session: parentSession });
+		const screenshot = path.join(completedRun, "done", "browser-qa", "screenshot.png");
+		const video = path.join(completedRun, "done", "browser-qa", "video.webm");
+		const attachment = path.join(runRoot, "attachments", "recent", "image.png");
+		for (const file of [screenshot, video, attachment]) writeFile(file, `evidence:${file}`);
 		recordSubagentRun(cwd, completedRun, ["done"]);
 		recordSubagentRun(cwd, incompleteRun, ["planned"]);
+		const registryBefore = fs.readFileSync(getSubagentRegistryPath(cwd), "utf-8");
 
 		await pi.events.get("session_shutdown")![0]({ reason: "quit" }, { cwd, sessionManager: { getSessionFile: () => parentSession } });
 
-		expect(fs.existsSync(completedRun)).toBe(false);
-		expect(fs.existsSync(incompleteRun)).toBe(false);
-		expect(fs.existsSync(getSubagentRegistryPath(cwd))).toBe(false);
-		expect(fs.existsSync(runRoot)).toBe(false);
+		expect(fs.readFileSync(path.join(completedRun, "done", "result.md"), "utf-8")).toBe("ok");
+		for (const file of [screenshot, video, attachment]) {
+			expect(fs.readFileSync(file, "utf-8")).toBe(`evidence:${file}`);
+		}
+		expect(fs.existsSync(incompleteRun)).toBe(true);
+		expect(fs.readFileSync(getSubagentRegistryPath(cwd), "utf-8")).toBe(registryBefore);
+		expect(resolveSubagentRunDir(cwd)).toBe(incompleteRun);
+
+		// A fresh extension can resolve the completed agent without the old live map.
+		const reopenedPi = new FakePi();
+		registerExtension(reopenedPi as any);
+		const result = await reopenedPi.tools.get("subagents").execute("read-after-close", {
+			action: "result", agentId: "done",
+		}, undefined, undefined, { cwd });
+		expect(result.isError).not.toBe(true);
+		expect(JSON.stringify(result)).toContain(completedRun);
 	});
 
 	test.serial("keeps project sub-agent files across reload and fork shutdowns", async () => {

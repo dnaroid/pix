@@ -6,6 +6,7 @@ import type {
   HeadsUpPhase,
   HeadsUpSnapshot,
 } from "../../../src/bundled-extensions/heads-up/contract";
+import { MAX_HEADS_UP_NOTICES } from "../../../src/bundled-extensions/heads-up/contract";
 import { HEADS_UP_CONFIG_LIMITS } from "../../../src/bundled-extensions/heads-up/config";
 
 export type { HeadsUpDetails, HeadsUpEvidence, HeadsUpLastCheck, HeadsUpNotice, HeadsUpPhase, HeadsUpSnapshot };
@@ -125,7 +126,7 @@ function parseNotice(value: unknown): HeadsUpNotice | null | undefined {
 export function parseHeadsUpSnapshot(value: unknown): HeadsUpSnapshot | undefined {
   if (!record(value) || !keysAre(value,
     ["version", "instanceId", "revision", "enabled", "model", "phase", "checks", "inputTokens", "outputTokens", "notice"],
-    ["reason", "details"],
+    ["reason", "details", "notices", "awaitingReview"],
   )) return undefined;
   if (value.version !== 1 || !identifier(value.instanceId)
     || !nonNegativeInteger(value.revision) || typeof value.enabled !== "boolean"
@@ -133,9 +134,23 @@ export function parseHeadsUpSnapshot(value: unknown): HeadsUpSnapshot | undefine
     || !nonNegativeInteger(value.checks) || !nonNegativeInteger(value.inputTokens)
     || !nonNegativeInteger(value.outputTokens) || ("reason" in value && !boundedString(value.reason, 512))) return undefined;
   const notice = parseNotice(value.notice);
+  if ("awaitingReview" in value && typeof value.awaitingReview !== "boolean") return undefined;
   const details = "details" in value ? parseDetails(value.details) : undefined;
   if (notice === undefined || ("details" in value && !details)) return undefined;
-  if ((!value.enabled && notice !== null) || (!value.enabled && value.phase !== "off")) return undefined;
+  let notices: HeadsUpNotice[] | undefined;
+  if ("notices" in value) {
+    if (!Array.isArray(value.notices) || value.notices.length > MAX_HEADS_UP_NOTICES) return undefined;
+    notices = [];
+    for (const item of value.notices) {
+      const parsed = parseNotice(item);
+      if (!parsed) return undefined;
+      notices.push(parsed);
+    }
+    if (new Set(notices.map((item) => item.id)).size !== notices.length
+      || (notices.length === 0 ? notice !== null : notice === null || !notices.some((item) => item.id === notice.id && JSON.stringify(item) === JSON.stringify(notice)))) return undefined;
+  }
+  if ((!value.enabled && (notice !== null || (notices?.length ?? 0) > 0)) || (!value.enabled && value.phase !== "off")) return undefined;
+  if (value.awaitingReview === true && (!value.enabled || value.phase === "off" || notice !== null || (notices?.length ?? 0) > 0)) return undefined;
   return {
     version: 1,
     instanceId: value.instanceId,
@@ -147,6 +162,8 @@ export function parseHeadsUpSnapshot(value: unknown): HeadsUpSnapshot | undefine
     inputTokens: value.inputTokens,
     outputTokens: value.outputTokens,
     notice,
+    ...(notices ? { notices } : {}),
+    ...(typeof value.awaitingReview === "boolean" ? { awaitingReview: value.awaitingReview } : {}),
     ...(details ? { details } : {}),
     ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
   };

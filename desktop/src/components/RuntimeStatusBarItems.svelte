@@ -31,8 +31,11 @@
     providerUsageUrl,
   } from "../lib/session-usage";
   import { openExternalHref } from "../lib/external-links";
+  import { createHoverDismissal } from "../lib/hover-dismissal";
   import { modelDisplayToneClass, modelProviderBrand, modelRefTone } from "../lib/model-display";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
+  import QuotaResetCalendar from "./QuotaResetCalendar.svelte";
+  import ResetCreditsSection from "./ResetCreditsSection.svelte";
 
   let {
     status,
@@ -67,6 +70,7 @@
   let now = $state(Date.now());
   let usageLinkFailed = $state(false);
   let usageLinkRequest = 0;
+  const hoverDismissal = createHoverDismissal();
   const WEEKLY_DAY_SEGMENTS = 7;
   const contextPercent = $derived(status?.context?.percent);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
@@ -75,43 +79,70 @@
   // Quota usage wins while the provider quota is the freshest observation;
   // an API-key header snapshot pushed after a mid-session auth switch (or a
   // quota left over from a previous model) must not stay hidden behind it.
-  const modelUsage = $derived(displayModelUsage(status));
+  const modelUsage = $derived(displayModelUsage(status, now));
   const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
   const usageWindowItems = $derived(usageWindows());
 
   onMount(() => {
     const timer = window.setInterval(() => now = Date.now(), 60_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      hoverDismissal.dispose();
+    };
   });
 
   function closeOutside(event: PointerEvent): void {
     if ((!contextOpen && !usageOpen) || root?.contains(event.target as Node)) return;
+    hoverDismissal.cancel();
     contextOpen = false;
     usageOpen = false;
   }
 
   function handleKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape" && (contextOpen || usageOpen)) {
+      hoverDismissal.cancel();
       contextOpen = false;
       usageOpen = false;
       event.stopPropagation();
     }
   }
 
-  function toggleContext(): void {
-    const opening = !contextOpen;
-    contextOpen = opening;
-    if (opening) usageOpen = false;
+  function openContext(): void {
+    hoverDismissal.cancel();
+    contextOpen = true;
+    usageOpen = false;
   }
 
-  function toggleUsage(): void {
+  function openUsage(): void {
+    hoverDismissal.cancel();
+    if (usageOpen) return;
     usageLinkRequest += 1;
-    const opening = !usageOpen;
-    usageOpen = opening;
-    if (opening) {
-      usageLinkFailed = false;
-      contextOpen = false;
-      onOpenSessionUsage();
+    usageOpen = true;
+    usageLinkFailed = false;
+    contextOpen = false;
+    onOpenSessionUsage();
+  }
+
+  function leaveDetails(event: PointerEvent | FocusEvent, panel: "context" | "usage"): void {
+    const region = event.currentTarget as HTMLElement;
+    if (event.relatedTarget instanceof Node && region.contains(event.relatedTarget)) return;
+    // Keep interactive details reachable by either pointer or keyboard.
+    if (event.type === "pointerleave" && region.contains(document.activeElement)) return;
+    if (event.type === "focusout" && region.matches(":hover")) return;
+    function dismiss(): void {
+      if (panel === "context") contextOpen = false;
+      else usageOpen = false;
+    }
+    if (event.type === "pointerleave") {
+      // A diagonal path can briefly leave the narrow trigger before reaching
+      // the wider popup. Recheck ownership in case focus arrived meanwhile.
+      hoverDismissal.schedule(
+        () => region.matches(":hover") || region.contains(document.activeElement),
+        dismiss,
+      );
+    } else {
+      hoverDismissal.cancel();
+      dismiss();
     }
   }
 
@@ -263,7 +294,12 @@
     data-runtime-status
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
-      <div class="relative min-w-0" data-runtime-context>
+      <div class="relative min-w-0" data-runtime-context role="group" aria-label="Context"
+        onpointerenter={openContext}
+        onpointerleave={(event) => leaveDetails(event, "context")}
+        onfocusin={openContext}
+        onfocusout={(event) => leaveDetails(event, "context")}
+      >
         <button
           class="flex h-6 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [&>span]:shrink-0"
           type="button"
@@ -271,7 +307,7 @@
           aria-haspopup="dialog"
           aria-expanded={contextOpen}
           aria-controls="runtime-context-popover"
-          onclick={toggleContext}
+          onclick={openContext}
         >
           <span class="font-sans text-xs text-muted-foreground">ctx</span>
           <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
@@ -284,13 +320,15 @@
         {#if contextOpen}
           <div
             id="runtime-context-popover"
-            class="absolute bottom-[calc(100%+0.375rem)] left-0 z-50 w-max max-w-[min(360px,calc(100vw-16px))] rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md"
+            class="absolute bottom-full left-0 z-50 w-max max-w-[min(360px,calc(100vw-16px))]"
             role="dialog"
             aria-label="Context usage details"
           >
-            <div class="font-mono text-xs text-muted-foreground">{contextTitle()}</div>
-            <div class="mt-2">{@render contextScale("expanded")}</div>
-            {@render contextScaleLegend()}
+            <div class="rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md">
+              <div class="font-mono text-xs text-muted-foreground">{contextTitle()}</div>
+              <div class="mt-2">{@render contextScale("expanded")}</div>
+              {@render contextScaleLegend()}
+            </div>
           </div>
         {/if}
       </div>
@@ -308,16 +346,20 @@
     {/if}
 
     {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage}
-      <div class="relative ml-auto min-w-0 shrink-0 max-w-full">
+      <div class="relative ml-auto min-w-0 shrink-0 max-w-full" role="group" aria-label="Usage"
+        onpointerenter={openUsage}
+        onpointerleave={(event) => leaveDetails(event, "usage")}
+        onfocusin={openUsage}
+        onfocusout={(event) => leaveDetails(event, "usage")}
+      >
         <button
           class="flex h-6 min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [&>span]:shrink-0"
           type="button"
-          title="Session usage and cost"
           aria-label="Session usage and cost"
           aria-haspopup="dialog"
           aria-expanded={usageOpen}
           aria-controls="runtime-usage-popover"
-          onclick={toggleUsage}
+          onclick={openUsage}
         >
           <span class="font-sans text-xs text-muted-foreground @max-[380px]/runtime-status:hidden">Usage</span>
           {#if usageAccountLabel}
@@ -326,7 +368,7 @@
           {#if modelUsage?.stale}
             <span
               class="flex items-center gap-0.5 text-muted-foreground"
-              title="Cached quota from the last successful refresh; each window stays visible only until its own reset"
+              aria-label="Cached quota from the last successful refresh; each window stays visible only until its own reset"
             >
               <Hourglass class="h-2.5 w-2.5" aria-hidden="true" />
               <span>stale</span>
@@ -335,7 +377,7 @@
           {#each usageWindowItems as { key, label, window } (key)}
               {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
-              <span class="flex items-center gap-1" title={limitTitle(label, window)}>
+              <span class="flex items-center gap-1" aria-label={limitTitle(label, window)}>
                 {#if label === "R"}
                   <span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
                 {/if}
@@ -369,116 +411,123 @@
         {#if usageOpen}
           <div
             id="runtime-usage-popover"
-            class="absolute right-0 bottom-[calc(100%+0.375rem)] z-50 w-[min(360px,calc(100vw-16px))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
+            class="absolute right-0 bottom-full z-50 w-[min(360px,calc(100vw-16px))]"
             role="dialog"
             aria-label="Session usage and cost"
           >
-            <header class="border-b border-border px-3 py-2">
-              <div class="text-xs font-medium text-foreground">Session usage</div>
-              <div class="mt-0.5 font-mono text-xs text-muted-foreground">
-                {#if sessionUsage}
-                  {formatSessionUsageCost(sessionUsage.totals.cost)} · {formatSessionUsageTokens(sessionUsage.totals.totalTokens)} tokens
-                {:else if loadingSessionUsage}
-                  Loading recorded usage…
-                {:else if sessionUsageFailed}
-                  Could not load recorded usage.
-                {:else if sessionUsageAvailable}
-                  Loading recorded usage…
-                {:else}
-                  Session runtime is still loading.
+            <div class="overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
+              <header class="border-b border-border px-3 py-2">
+                <div class="text-xs font-medium text-foreground">Session usage</div>
+                <div class="mt-0.5 font-mono text-xs text-muted-foreground">
+                  {#if sessionUsage}
+                    {formatSessionUsageCost(sessionUsage.totals.cost)} · {formatSessionUsageTokens(sessionUsage.totals.totalTokens)} tokens
+                  {:else if loadingSessionUsage}
+                    Loading recorded usage…
+                  {:else if sessionUsageFailed}
+                    Could not load recorded usage.
+                  {:else if sessionUsageAvailable}
+                    Loading recorded usage…
+                  {:else}
+                    Session runtime is still loading.
+                  {/if}
+                </div>
+              </header>
+              <div class="max-h-[min(640px,calc(100vh-120px))] overflow-y-auto px-3 py-2.5 text-xs">
+                {#if modelUsage?.weekly}
+                  <QuotaResetCalendar window={modelUsage.weekly} {now} stale={modelUsage.stale === true} />
+                {/if}
+                {#if modelUsage?.resetCredits?.length || modelUsage?.resetCreditsAvailableCount}
+                  <ResetCreditsSection credits={modelUsage.resetCredits ?? []} availableCount={modelUsage.resetCreditsAvailableCount} {now} />
+                {/if}
+                {#if loadingSessionUsage && !sessionUsage}
+                  <div class="flex items-center gap-1.5 text-muted-foreground" aria-live="polite">
+                    <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+                    <span>Loading session usage…</span>
+                  </div>
+                {:else if sessionUsageFailed && !sessionUsage}
+                  <div class="flex items-center justify-between gap-3 text-muted-foreground" aria-live="polite">
+                    <span>The session usage request failed.</span>
+                    <button
+                      class="shrink-0 rounded-md px-2 py-1 text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                      type="button"
+                      onclick={onOpenSessionUsage}
+                    >Retry</button>
+                  </div>
+                {:else if sessionUsage}
+                  <section class="space-y-2.5">
+                    {#if sessionUsage.providers.length === 0 && !sessionUsageHasValue(sessionUsage.unattributed)}
+                      <p class="text-muted-foreground">No billable usage has been recorded for this session yet.</p>
+                    {:else}
+                      {#each sessionUsage.providers as provider (provider.provider)}
+                        {@const usageUrl = providerUsageUrl(provider.provider)}
+                        <div>
+                          <div class="mb-1 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                            {#if modelProviderBrand(provider.provider)}
+                              <ModelProviderIcon provider={provider.provider} />
+                            {/if}
+                            <span class="min-w-0 truncate">{provider.provider}</span>
+                            {#if usageUrl}
+                              <button
+                                type="button"
+                                class="grid h-5 w-5 shrink-0 place-items-center rounded-sm hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                aria-label={`Open ${provider.provider} usage limits in browser`}
+                                onclick={() => void openProviderUsage(usageUrl)}
+                              ><ExternalLink class="h-3 w-3" aria-hidden="true" /></button>
+                            {/if}
+                          </div>
+                          <div class="space-y-1">
+                            {#each provider.models as model (`${provider.provider}/${model.model}`)}
+                              <div class="flex min-w-0 items-center justify-between gap-3 font-mono tabular-nums">
+                                <span
+                                  class={["min-w-0 truncate font-medium", modelDisplayToneClass(modelRefTone(`${provider.provider}/${model.model}`))]}
+                                  aria-label={`${provider.provider}/${model.model}`}
+                                >{model.model}</span>
+                                <span class="shrink-0 text-foreground" aria-label={model.totals.costEstimated ? "Estimated at original model API rates, not subscription charges" : undefined}>{formatSessionUsageTokens(model.totals.totalTokens)} · {formatSessionUsageCost(model.totals.cost)}</span>
+                              </div>
+                            {/each}
+                          </div>
+                        </div>
+                      {/each}
+                      {#if sessionUsageHasValue(sessionUsage.unattributed)}
+                        <div class="flex items-center justify-between gap-3 border-t border-border pt-2 text-muted-foreground">
+                          <span>Unattributed</span>
+                          <span class="font-mono tabular-nums">{formatSessionUsageTokens(sessionUsage.unattributed.totalTokens)} · {formatSessionUsageCost(sessionUsage.unattributed.cost)}</span>
+                        </div>
+                      {/if}
+                    {/if}
+                  </section>
                 {/if}
               </div>
-            </header>
-            <div class="max-h-[min(460px,60vh)] overflow-y-auto px-3 py-2.5 text-xs">
-              {#if loadingSessionUsage && !sessionUsage}
-                <div class="flex items-center gap-1.5 text-muted-foreground" aria-live="polite">
-                  <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
-                  <span>Loading session usage…</span>
-                </div>
-              {:else if sessionUsageFailed && !sessionUsage}
-                <div class="flex items-center justify-between gap-3 text-muted-foreground" aria-live="polite">
-                  <span>The session usage request failed.</span>
-                  <button
-                    class="shrink-0 rounded-md px-2 py-1 text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-                    type="button"
-                    onclick={onOpenSessionUsage}
-                  >Retry</button>
-                </div>
-              {:else if sessionUsage}
-                <section class="space-y-2.5">
-                  {#if sessionUsage.providers.length === 0 && !sessionUsageHasValue(sessionUsage.unattributed)}
-                    <p class="text-muted-foreground">No billable usage has been recorded for this session yet.</p>
-                  {:else}
-                    {#each sessionUsage.providers as provider (provider.provider)}
-                      {@const usageUrl = providerUsageUrl(provider.provider)}
-                      <div>
-                        <div class="mb-1 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                          {#if modelProviderBrand(provider.provider)}
-                            <ModelProviderIcon provider={provider.provider} />
-                          {/if}
-                          <span class="min-w-0 truncate">{provider.provider}</span>
-                          {#if usageUrl}
-                            <button
-                              type="button"
-                              class="grid h-5 w-5 shrink-0 place-items-center rounded-sm hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                              title="Open provider usage limits in browser"
-                              aria-label={`Open ${provider.provider} usage limits in browser`}
-                              onclick={() => void openProviderUsage(usageUrl)}
-                            ><ExternalLink class="h-3 w-3" aria-hidden="true" /></button>
-                          {/if}
-                        </div>
-                        <div class="space-y-1">
-                          {#each provider.models as model (`${provider.provider}/${model.model}`)}
-                            <div class="flex min-w-0 items-center justify-between gap-3 font-mono tabular-nums">
-                              <span
-                                class={["min-w-0 truncate font-medium", modelDisplayToneClass(modelRefTone(`${provider.provider}/${model.model}`))]}
-                                title={`${provider.provider}/${model.model}`}
-                              >{model.model}</span>
-                              <span class="shrink-0 text-foreground" title={model.totals.costEstimated ? "Estimated at original model API rates, not subscription charges" : undefined}>{formatSessionUsageTokens(model.totals.totalTokens)} · {formatSessionUsageCost(model.totals.cost)}</span>
-                            </div>
-                          {/each}
-                        </div>
-                      </div>
-                    {/each}
-                    {#if sessionUsageHasValue(sessionUsage.unattributed)}
-                      <div class="flex items-center justify-between gap-3 border-t border-border pt-2 text-muted-foreground">
-                        <span>Unattributed</span>
-                        <span class="font-mono tabular-nums">{formatSessionUsageTokens(sessionUsage.unattributed.totalTokens)} · {formatSessionUsageCost(sessionUsage.unattributed.cost)}</span>
-                      </div>
-                    {/if}
+              {#if usageLinkFailed}
+                <p class="px-3 pb-2 text-xs text-destructive" role="alert">Could not open provider usage page. Try again.</p>
+              {/if}
+              {#if claudeCodeRoute && sessionUsageAvailable}
+                <div class="border-t border-border px-3 py-2 text-xs">
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="text-muted-foreground">Claude Code limits</span>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={claudeLimitsRefreshing}
+                      onclick={onRefreshClaudeLimits}
+                      aria-label="Refresh Claude Code limits"
+                    >
+                      {#if claudeLimitsRefreshing}
+                        <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+                      {:else}
+                        <RefreshCw class="h-3 w-3" aria-hidden="true" />
+                      {/if}
+                      {claudeLimitsRefreshing ? "Refreshing…" : "Refresh limits"}
+                    </button>
+                  </div>
+                  {#if claudeLimitsFailed}
+                    <p class="mt-1 text-tool-warning" role="status">Could not refresh Claude Code limits. Retry or check your Claude Code login.</p>
+                  {:else if claudeLimitsRefreshing}
+                    <p class="mt-1 text-muted-foreground" role="status">Checking Claude Code login and limits…</p>
                   {/if}
-                </section>
+                </div>
               {/if}
             </div>
-            {#if usageLinkFailed}
-              <p class="px-3 pb-2 text-xs text-destructive" role="alert">Could not open provider usage page. Try again.</p>
-            {/if}
-            {#if claudeCodeRoute && sessionUsageAvailable}
-              <div class="border-t border-border px-3 py-2 text-xs">
-                <div class="flex items-center justify-between gap-3">
-                  <span class="text-muted-foreground">Claude Code limits</span>
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={claudeLimitsRefreshing}
-                    onclick={onRefreshClaudeLimits}
-                    aria-label="Refresh Claude Code limits"
-                  >
-                    {#if claudeLimitsRefreshing}
-                      <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
-                    {:else}
-                      <RefreshCw class="h-3 w-3" aria-hidden="true" />
-                    {/if}
-                    {claudeLimitsRefreshing ? "Refreshing…" : "Refresh limits"}
-                  </button>
-                </div>
-                {#if claudeLimitsFailed}
-                  <p class="mt-1 text-tool-warning" role="status">Could not refresh Claude Code limits. Retry or check your Claude Code login.</p>
-                {:else if claudeLimitsRefreshing}
-                  <p class="mt-1 text-muted-foreground" role="status">Checking Claude Code login and limits…</p>
-                {/if}
-              </div>
-            {/if}
           </div>
         {/if}
       </div>

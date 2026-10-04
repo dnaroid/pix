@@ -3,6 +3,7 @@ import type {
   ContextUsageStatus,
   ModelUsageLimitWindow,
   ModelUsageRefresh,
+  ModelUsageResetCredit,
   ModelUsageStatus,
   QueuedImage,
   QueuedUserMessage,
@@ -137,6 +138,12 @@ export function parseModelUsageStatus(value: unknown): ModelUsageStatus {
   const hourly = value.hourly === undefined ? undefined : parseModelUsageLimitWindow(value.hourly);
   const weekly = value.weekly === undefined ? undefined : parseModelUsageLimitWindow(value.weekly);
   const rateWindows = parseModelUsageRateWindows(value.rateWindows);
+  const resetCredits = parseModelUsageResetCredits(value.resetCredits);
+  if (value.resetCreditsAvailableCount !== undefined && (
+    !isFiniteNumber(value.resetCreditsAvailableCount)
+    || !Number.isSafeInteger(value.resetCreditsAvailableCount)
+    || value.resetCreditsAvailableCount < 0
+  )) throw new Error("invalid Pix model usage reset credit count");
   if (value.stale !== undefined && value.stale !== true) {
     throw new Error("invalid Pix model usage stale marker");
   }
@@ -148,6 +155,8 @@ export function parseModelUsageStatus(value: unknown): ModelUsageStatus {
     ...(hourly ? { hourly } : {}),
     ...(weekly ? { weekly } : {}),
     ...(rateWindows ? { rateWindows } : {}),
+    ...(resetCredits ? { resetCredits } : {}),
+    ...(value.resetCreditsAvailableCount === undefined ? {} : { resetCreditsAvailableCount: Number(value.resetCreditsAvailableCount) }),
     ...(value.stale === true ? { stale: true } : {}),
   };
 }
@@ -194,6 +203,26 @@ function parseModelUsageRateWindows(value: unknown): ModelUsageLimitWindow[] | u
   const windows = value.map((window) => parseModelUsageLimitWindow(window));
   if (windows.length === 0) return undefined;
   return windows;
+}
+
+function parseModelUsageResetCredits(value: unknown): ModelUsageResetCredit[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("invalid Pix model usage reset credits");
+  const credits = value.map((credit): ModelUsageResetCredit => {
+    if (
+      !isRecord(credit)
+      || typeof credit.title !== "string"
+      || credit.title.trim() === ""
+      || (credit.expiresAt !== undefined && (
+        !isFiniteNumber(credit.expiresAt) || credit.expiresAt <= 0 || !Number.isFinite(new Date(credit.expiresAt).getTime())
+      ))
+    ) throw new Error("invalid Pix model usage reset credit");
+    return {
+      title: credit.title,
+      ...(credit.expiresAt === undefined ? {} : { expiresAt: Number(credit.expiresAt) }),
+    };
+  });
+  return credits.length > 0 ? credits : undefined;
 }
 
 function parseModelUsageLimitWindow(value: unknown): ModelUsageLimitWindow {

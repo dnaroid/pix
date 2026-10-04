@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { previewSourceReference, relativeImagePath } from "./desktop-context-target";
+import { contextFilePath, previewSourceReference, relativeImagePath } from "./desktop-context-target";
 import previewSource from "../components/PreviewPane.svelte?raw";
+
+describe("trusted preview file paths", () => {
+  it("resolves project previews and preserves absolute paths, spaces and unicode", () => {
+    expect(contextFilePath("src/my file.ts", "/project/")).toBe("/project/src/my file.ts");
+    expect(contextFilePath("/tmp/ролик.mov", "")).toBe("/tmp/ролик.mov");
+  });
+  it("never guesses local paths from remote or escaping references", () => {
+    for (const path of [undefined, "", "../outside", "https://example.com/a", "file:///tmp/a", "a\0b", "~/file"]) {
+      expect(contextFilePath(path, "/project")).toBeUndefined();
+    }
+    expect(contextFilePath("src/a.ts", "")).toBeUndefined();
+  });
+});
 
 describe("workspace-relative image paths", () => {
   it("preserves spaces and handles outside-workspace paths without prefix confusion", () => {

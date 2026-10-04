@@ -16,23 +16,36 @@ fn plan(areas: &[Geometry], count: usize, minimum: (f64, f64)) -> Vec<Geometry> 
         if n == 0 {
             continue;
         }
-        // Prefer the fewest empty cells, then fewer rows. Four windows get 2x2
-        // when it fits; narrow displays can instead use a vertical grid.
-        let (cols, rows) = (1..=columns)
-            .flat_map(|cols| (1..=rows).map(move |rows| (cols, rows)))
-            .filter(|(cols, rows)| cols * rows >= n)
-            .min_by_key(|(cols, rows)| (cols * rows - n, *rows))
-            .unwrap();
+        // Prefer a roughly square layout (two columns for three windows),
+        // constrained by native minimum sizes and the display's capacity.
+        let cols = (1..=columns)
+            .find(|cols| cols * cols >= n)
+            .unwrap_or(columns)
+            .max(n.div_ceil(rows));
         let width = area.width / cols as f64;
-        let height = area.height / rows as f64;
-        for index in 0..n {
-            slots.push(Geometry {
-                x: area.x + (index % cols) as f64 * width,
-                y: area.y + area.height - (index / cols + 1) as f64 * height,
-                width,
-                height,
-            });
+        let mut display_slots = Vec::with_capacity(n);
+        for col in 0..cols {
+            // Put fewer, taller windows on the left. Each column independently
+            // fills the work area's height, so partial grids leave no holes.
+            let column_rows = n / cols + usize::from(col >= cols - n % cols);
+            let height = area.height / column_rows as f64;
+            for row in 0..column_rows {
+                display_slots.push((
+                    row as f64 / column_rows as f64,
+                    Geometry {
+                        x: area.x + col as f64 * width,
+                        y: area.y + area.height - (row + 1) as f64 * height,
+                        width,
+                        height,
+                    },
+                ));
+            }
         }
+        // Preserve visual row-major order, including unequal-height columns.
+        display_slots.sort_by(|(a_top, a), (b_top, b)| {
+            a_top.total_cmp(b_top).then_with(|| a.x.total_cmp(&b.x))
+        });
+        slots.extend(display_slots.into_iter().map(|(_, slot)| slot));
         if slots.len() == count {
             break;
         }
@@ -222,6 +235,49 @@ mod tests {
     }
 
     #[test]
+    fn three_windows_use_tall_left_and_stacked_right_tiles() {
+        for width in [1800.0, 2700.0] {
+            let half = width / 2.0;
+            assert_eq!(
+                plan(&[area(-900.0, 25.0, width, 1200.0)], 3, MIN),
+                vec![
+                    area(-900.0, 25.0, half, 1200.0),
+                    area(-900.0 + half, 625.0, half, 600.0),
+                    area(-900.0 + half, 25.0, half, 600.0),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn partial_last_display_is_filled_and_repeated_layout_is_stable() {
+        let screens = [
+            area(0.0, 0.0, 1800.0, 800.0),
+            area(-2700.0, -1200.0, 2700.0, 1200.0),
+        ];
+        let slots = plan(&screens, 7, MIN);
+        assert_eq!(slots, plan(&screens, 7, MIN));
+        assert_eq!(slots.len(), 7);
+        assert_eq!(slots[4], area(-2700.0, -1200.0, 1350.0, 1200.0));
+        assert_eq!(slots[5], area(-1350.0, -600.0, 1350.0, 600.0));
+        assert_eq!(slots[6], area(-1350.0, -1200.0, 1350.0, 600.0));
+    }
+
+    #[test]
+    fn narrow_and_short_displays_use_full_height_or_width_strips() {
+        let vertical = plan(&[area(0.0, 0.0, 1000.0, 1200.0)], 3, MIN);
+        assert_eq!(vertical.len(), 3);
+        assert!(vertical
+            .iter()
+            .all(|slot| slot.width == 1000.0 && slot.height == 400.0));
+        let horizontal = plan(&[area(0.0, 0.0, 2700.0, 400.0)], 3, MIN);
+        assert_eq!(horizontal.len(), 3);
+        assert!(horizontal
+            .iter()
+            .all(|slot| slot.width == 900.0 && slot.height == 400.0));
+    }
+
+    #[test]
     fn nine_windows_require_enough_logical_space_and_are_row_major() {
         let slots = plan(&[area(0.0, 0.0, 2700.0, 1200.0)], 9, MIN);
         assert_eq!(slots.len(), 9);
@@ -239,12 +295,22 @@ mod tests {
     }
 
     #[test]
-    fn allocated_tiles_never_overlap_or_go_below_minimum() {
-        for width in [859.0, 860.0, 1720.0, 2580.0, 4000.0] {
-            for height in [379.0, 380.0, 760.0, 1140.0, 2000.0] {
+    fn allocated_tiles_fill_work_area_without_overlap_or_undersizing() {
+        for width in [859.0, 860.0, 1720.0, 2580.0, 4000.0, 4001.5] {
+            for height in [379.0, 380.0, 760.0, 1140.0, 2000.0, 2001.5] {
                 for count in 0..15 {
                     let screen = area(-2000.0, 30.0, width, height);
                     let slots = plan(&[screen], count, MIN);
+                    let capacity = ((width / MIN.0).floor().min(3.0)
+                        * (height / MIN.1).floor().min(3.0))
+                        as usize;
+                    assert_eq!(slots.len(), count.min(capacity));
+                    if !slots.is_empty() {
+                        let covered: f64 = slots.iter().map(|slot| slot.width * slot.height).sum();
+                        assert!((covered - width * height).abs() < 0.001);
+                        assert_eq!(slots[0].x, screen.x);
+                        assert!((slots[0].y + slots[0].height - screen.y - height).abs() < 0.001);
+                    }
                     for (i, slot) in slots.iter().enumerate() {
                         assert!(slot.width >= MIN.0 && slot.height >= MIN.1);
                         assert!(slot.x >= screen.x && slot.y >= screen.y);

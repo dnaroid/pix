@@ -151,6 +151,12 @@ export interface ModelUsageLimitWindow {
   readonly label?: string;
 }
 
+export interface ModelUsageResetCredit {
+  readonly title: string;
+  /** Unix milliseconds. Missing only when the provider omitted/invalidated the expiry. */
+  readonly expiresAt?: number;
+}
+
 export interface ModelUsageStatus {
   readonly modelKey: string;
   readonly provider: "openai" | "zhipu" | "google-antigravity" | "anthropic";
@@ -158,6 +164,9 @@ export interface ModelUsageStatus {
   readonly accountEmail?: string;
   readonly hourly?: ModelUsageLimitWindow;
   readonly weekly?: ModelUsageLimitWindow;
+  /** Available account-level Codex reset credits; independent from quota-window resets. */
+  readonly resetCredits?: readonly ModelUsageResetCredit[];
+  readonly resetCreditsAvailableCount?: number;
   /** Provider response-header rate-limit windows (Anthropic RPM/TPM). */
   readonly rateWindows?: readonly ModelUsageLimitWindow[];
   /**

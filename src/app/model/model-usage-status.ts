@@ -9,6 +9,7 @@ import { readClaudeCodeUsageToken } from "./claude-code-usage-auth.js";
 import type { SessionModel } from "../types.js";
 
 const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const OPENAI_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
 const ZAI_QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
@@ -75,6 +76,12 @@ export type ModelUsageLimitWindow = {
 	readonly label?: string;
 };
 
+export type ModelUsageResetCredit = {
+	readonly title: string;
+	/** Exact local-displayable expiry instant in Unix milliseconds, when supplied by the backend. */
+	readonly expiresAt?: number;
+};
+
 export type ModelUsageStatus = {
 	readonly modelKey: string;
 	readonly provider: "openai" | "zhipu" | "google-antigravity" | "anthropic";
@@ -82,6 +89,10 @@ export type ModelUsageStatus = {
 	readonly accountEmail?: string;
 	readonly weekly?: ModelUsageLimitWindow;
 	readonly hourly?: ModelUsageLimitWindow;
+	/** Available account-level Codex reset credits, separate from ordinary quota-window resets. */
+	readonly resetCredits?: readonly ModelUsageResetCredit[];
+	/** Backend total; detail rows may be capped or unavailable. */
+	readonly resetCreditsAvailableCount?: number;
 	/** Provider response-header window: the single most limiting Anthropic API-key bucket (RPM/TPM/ITPM/OTPM). */
 	readonly rateWindows?: readonly ModelUsageLimitWindow[];
 	/**
@@ -201,9 +212,23 @@ export type AnthropicUsageResponse = {
 };
 
 export type OpenAIUsageResponse = {
+	rate_limit_reset_credits?: { available_count: number } | null;
 	plan_type: string;
 	rate_limit: OpenAIRateLimit | null;
 	additional_rate_limits?: OpenAIAdditionalRateLimit[];
+};
+
+/** Fields consumed from the backend details response (not the app-server seconds-based API). */
+type OpenAIResetCredit = {
+	id?: string;
+	status?: string;
+	expires_at?: string | null;
+	title?: string | null;
+};
+
+export type OpenAIResetCreditsResponse = {
+	credits?: OpenAIResetCredit[];
+	available_count?: number;
 };
 
 type JwtPayload = {
@@ -487,14 +512,16 @@ export function openAIUsageStatusFromResponse(
 	data: OpenAIUsageResponse,
 	modelKey: string,
 	now = Date.now(),
+	resetCredits: readonly ModelUsageResetCredit[] = [],
+	resetCreditsAvailableCount?: number,
 ): ModelUsageStatus | undefined {
 	const rateLimit = selectOpenAIRateLimitForModel(data, modelKey);
-	if (!rateLimit) return undefined;
-
-	const windows = [rateLimit.primary_window, rateLimit.secondary_window].filter(isRateLimitWindow);
+	const windows = rateLimit
+		? [rateLimit.primary_window, rateLimit.secondary_window].filter(isRateLimitWindow)
+		: [];
 	const weekly = selectWeeklyWindow(windows);
 	const hourly = selectHourlyWindow(windows);
-	if (!weekly && !hourly) return undefined;
+	if (!weekly && !hourly && resetCredits.length === 0 && !resetCreditsAvailableCount) return undefined;
 
 	return {
 		modelKey,
@@ -502,17 +529,75 @@ export function openAIUsageStatusFromResponse(
 		updatedAt: now,
 		...(weekly ? { weekly: modelUsageWindow(weekly, now) } : {}),
 		...(hourly ? { hourly: modelUsageWindow(hourly, now) } : {}),
+		...(resetCredits.length > 0 ? { resetCredits } : {}),
+		...(resetCreditsAvailableCount === undefined ? {} : { resetCreditsAvailableCount }),
 	};
 }
 
+export function openAIResetCreditsFromResponse(
+	data: unknown,
+	now = Date.now(),
+): ModelUsageResetCredit[] {
+	if (!data || typeof data !== "object" || !("credits" in data) || !Array.isArray(data.credits)) return [];
+	const seenIds = new Set<string>();
+	return data.credits
+		.filter((credit) => credit && typeof credit === "object" && credit.status === "available")
+		.filter((credit) => {
+			if (typeof credit.id !== "string" || !credit.id) return true;
+			if (seenIds.has(credit.id)) return false;
+			seenIds.add(credit.id);
+			return true;
+		})
+		.map((credit): ModelUsageResetCredit => {
+			const title = typeof credit.title === "string" && credit.title.trim() ? credit.title.trim() : "Reset credit";
+			// Backend dates are RFC3339 instants, never local/ambiguous dates or
+			// app-server Unix seconds. Do not let Date.parse guess another format.
+			const expiresAt = typeof credit.expires_at === "string"
+				&& /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/iu.test(credit.expires_at)
+				? Date.parse(credit.expires_at) : Number.NaN;
+			// Date.parse normalizes e.g. February 30 instead of rejecting it.
+			const validDate = Number.isFinite(expiresAt)
+				&& new Date(`${credit.expires_at.slice(0, 10)}T00:00:00Z`).toISOString().slice(0, 10) === credit.expires_at.slice(0, 10);
+			return {
+				title,
+				...(validDate ? { expiresAt } : {}),
+			};
+		})
+		.filter((credit) => credit.expiresAt === undefined || credit.expiresAt > now)
+		.sort((a, b) => (a.expiresAt ?? Number.POSITIVE_INFINITY) - (b.expiresAt ?? Number.POSITIVE_INFINITY));
+}
+
+function openAIResetCreditsCount(data: unknown): number | undefined {
+	if (!data || typeof data !== "object" || !("available_count" in data)) return undefined;
+	const count = data.available_count;
+	return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : undefined;
+}
+
 async function queryOpenAIModelUsage(modelKey: string): Promise<ModelUsageStatus | undefined> {
-	let authData = await readOpenAIAuth();
+	// A Codex model uses Pi's credential, never a different application's login.
+	let authData = modelKey.toLowerCase().startsWith("openai-codex/")
+		? (await readPiAuth())["openai-codex"]
+		: await readOpenAIAuth();
 	if (!authData || authData.type !== "oauth" || !authData.access) return undefined;
 	if (isExpired(authData)) authData = await refreshOpenAICodexAuth();
 	if (!authData.access) throw new Error("OpenAI Codex OAuth refresh returned no access token");
 
-	const usage = await fetchOpenAIUsage(authData.access);
-	return openAIUsageStatusFromResponse(usage, modelKey);
+	const now = Date.now();
+	const [usage, resetDetails] = await Promise.all([
+		fetchOpenAIUsage(authData.access),
+		// Reset credits are supplementary UI data. A transient 404/429/5xx or
+		// schema rollout must never hide the ordinary quota snapshot.
+		fetchOpenAIResetCredits(authData.access)
+			.catch(() => undefined),
+	]);
+	const allCredits = openAIResetCreditsFromResponse(resetDetails, Number.NEGATIVE_INFINITY);
+	const liveCredits = allCredits.filter((credit) => credit.expiresAt === undefined || credit.expiresAt > now);
+	const count = openAIResetCreditsCount(resetDetails) ?? openAIResetCreditsCount(usage.rate_limit_reset_credits);
+	// Details can be capped. Preserve the server total, subtracting only known
+	// expirations; never manufacture expiry rows for undisclosed credits.
+	const availableCount = count === undefined ? undefined : Math.max(0, count - (allCredits.length - liveCredits.length));
+	const resetCredits = availableCount === undefined ? liveCredits : liveCredits.slice(0, availableCount);
+	return openAIUsageStatusFromResponse(usage, modelKey, now, resetCredits, availableCount);
 }
 
 async function queryOpenAIAccountUsage(now: number): Promise<AccountUsageReport["openai"] | undefined> {
@@ -1560,7 +1645,7 @@ function parseResetTime(value: string | undefined, now: number): number {
 	return Number.isFinite(resetAt) && resetAt > now ? resetAt : now;
 }
 
-async function fetchOpenAIUsage(accessToken: string): Promise<OpenAIUsageResponse> {
+function openAIRequestHeaders(accessToken: string): Record<string, string> {
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${accessToken}`,
 		"User-Agent": "pi-ui-extend/0.1.0",
@@ -1568,14 +1653,37 @@ async function fetchOpenAIUsage(accessToken: string): Promise<OpenAIUsageRespons
 
 	const accountId = getAccountIdFromJwt(accessToken);
 	if (accountId) headers["ChatGPT-Account-Id"] = accountId;
+	return headers;
+}
 
-	const response = await fetchWithTimeout(OPENAI_USAGE_URL, { headers });
+async function fetchOpenAIUsage(accessToken: string): Promise<OpenAIUsageResponse> {
+	const response = await fetchWithTimeout(OPENAI_USAGE_URL, { headers: openAIRequestHeaders(accessToken) });
 	if (!response.ok) {
 		const errorText = await response.text();
 		throw new Error(`OpenAI usage request failed (${response.status}): ${errorText}`);
 	}
 
 	return response.json() as Promise<OpenAIUsageResponse>;
+}
+
+async function fetchOpenAIResetCredits(accessToken: string): Promise<unknown> {
+	const controller = new AbortController();
+	// Bound body consumption too: a stalled optional response must not hold
+	// the ordinary quota refresh open indefinitely.
+	const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+	try {
+		const response = await fetch(OPENAI_RESET_CREDITS_URL, {
+			headers: openAIRequestHeaders(accessToken),
+			signal: controller.signal,
+		});
+		if (!response.ok) {
+			controller.abort();
+			throw new Error(`OpenAI reset credits request failed (${response.status})`);
+		}
+		return await response.json();
+	} finally {
+		clearTimeout(timeout);
+	}
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {

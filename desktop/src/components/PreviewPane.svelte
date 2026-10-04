@@ -169,6 +169,7 @@
 <section
   class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
   aria-label={`Preview ${title}`}
+  data-context-file-path={file?.path ?? attachment?.path ?? ""}
 >
     <header class="flex min-h-9 min-w-0 items-center gap-2 border-b border-border bg-chrome px-3">
       <div class="flex shrink-0 items-center gap-0.5" aria-label="Preview history">
@@ -387,6 +388,7 @@
         <!-- svelte-ignore a11y_media_has_caption User-selected videos do not necessarily include a captions track. -->
           <video
             class="max-h-full max-w-full"
+            data-context-file-path={attachment.path ?? ""}
             src={source}
             controls
           ></video>

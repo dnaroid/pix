@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { HeadsUpNotice } from "./contract.js";
+import { MAX_HEADS_UP_NOTICES, type HeadsUpNotice } from "./contract.js";
 import { cleanObserverText, type ContextRecord } from "./context.js";
 
-export type ParsedHeadsUp = { kind: "none" } | { kind: "invalid" } | { kind: "notice"; notice: HeadsUpNotice };
+export type ParsedHeadsUp = { kind: "none" } | { kind: "invalid" } | { kind: "notice"; notices: HeadsUpNotice[] };
 
-export function parseHeadsUpResponse(message: AssistantMessage, records: readonly ContextRecord[], now: number, ttlMs: number): ParsedHeadsUp {
+export function parseHeadsUpResponse(message: AssistantMessage, records: readonly ContextRecord[], now: number, ttlMs: number, active: readonly HeadsUpNotice[] = []): ParsedHeadsUp {
 	if (message.stopReason !== "stop" || message.content.some((part) => part.type === "toolCall")) return { kind: "invalid" };
 	let text = "";
 	for (const part of message.content) {
@@ -18,17 +18,34 @@ export function parseHeadsUpResponse(message: AssistantMessage, records: readonl
 	const object = value as Record<string, unknown>;
 	const keys = Object.keys(object);
 	if (object.kind === "none") return { kind: keys.length === 1 ? "none" : "invalid" };
-	if (object.kind !== "heads_up" || keys.length !== 4 || keys.some((key) => !["kind", "title", "consequence", "evidenceIds"].includes(key))) return { kind: "invalid" };
-	if (typeof object.title !== "string" || object.title.length > 160 || typeof object.consequence !== "string" || object.consequence.length > 500) return { kind: "invalid" };
+	if (object.kind !== "heads_up" || keys.length !== 2 || !Array.isArray(object.notices) || object.notices.length < 1 || object.notices.length > MAX_HEADS_UP_NOTICES) return { kind: "invalid" };
+	const notices: HeadsUpNotice[] = [];
+	const activeIds = new Set(active.map((card) => card.id));
+	const retainedIds = new Set<string>();
+	for (const value of object.notices) {
+		if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "invalid" };
+		const item = value as Record<string, unknown>;
+		if (Object.keys(item).length !== 4 || Object.keys(item).some((key) => !["id", "title", "consequence", "evidenceIds"].includes(key))) return { kind: "invalid" };
+		if (item.id !== null && (typeof item.id !== "string" || !activeIds.has(item.id) || retainedIds.has(item.id))) return { kind: "invalid" };
+		if (typeof item.id === "string") retainedIds.add(item.id);
+		const notice = parseNotice(item, records, now, ttlMs);
+		if (!notice) return { kind: "invalid" };
+		notices.push(notice);
+	}
+	return { kind: "notice", notices };
+}
+
+function parseNotice(object: Record<string, unknown>, records: readonly ContextRecord[], now: number, ttlMs: number): HeadsUpNotice | undefined {
+	if (typeof object.title !== "string" || object.title.length > 160 || typeof object.consequence !== "string" || object.consequence.length > 500) return undefined;
 	const title = cleanObserverText(object.title, 160).replace(/\s+/g, " ");
 	const consequence = cleanObserverText(object.consequence, 500).replace(/\s+/g, " ");
-	if (!title || !consequence || !Array.isArray(object.evidenceIds) || object.evidenceIds.length < 1 || object.evidenceIds.length > 4) return { kind: "invalid" };
+	if (!title || !consequence || !Array.isArray(object.evidenceIds) || object.evidenceIds.length < 1 || object.evidenceIds.length > 4) return undefined;
 	const byId = new Map(records.map((record) => [record.id, record]));
 	const ids = object.evidenceIds;
-	if (ids.some((id) => typeof id !== "string" || !byId.has(id)) || new Set(ids).size !== ids.length) return { kind: "invalid" };
-	return { kind: "notice", notice: {
-		id: randomUUID(), title, consequence,
+	if (ids.some((id) => typeof id !== "string" || !byId.has(id)) || new Set(ids).size !== ids.length) return undefined;
+	return {
+		id: typeof object.id === "string" ? object.id : randomUUID(), title, consequence,
 		evidence: (ids as string[]).map((id) => ({ id, text: cleanObserverText(byId.get(id)!.text, 1500) })),
 		createdAt: now, expiresAt: now + ttlMs,
-	} };
+	};
 }

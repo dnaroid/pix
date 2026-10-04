@@ -65,8 +65,15 @@ failures that return no usage cannot be reconstructed. Its model rows participat
 in the same provider/model breakdown; its own status additionally reports check
 and token counters without estimating subscription quota.
 
-- In both Pix TUI and Desktop, clicking `Usage` opens session usage instead of
-  forcing a provider quota refresh.
+- In Pix TUI, clicking `Usage` opens session usage. Desktop opens it on pointer
+  hover or keyboard focus, without requiring a click. Neither forces a provider
+  quota refresh. See [status-bar hover details](../docs/decisions/0037-status-bar-hover-details.md).
+  Desktop keeps the panel open while pointer or focus remains in its trigger/panel
+  region. Pointer departure has a 200ms grace period, cancelled on reentry or
+  focus/activation, with pointer/focus ownership rechecked at expiry. Focus leaving
+  an unhovered region, Escape and outside pointer interaction dismiss immediately.
+  Clicking an already-open trigger does not toggle it
+  closed or duplicate the spend request.
 - The session detail remains intentionally compact and does not split parent-agent
   and sub-agent consumption into separate presentation rows; both are one session.
   Desktop keeps recorded cost in its on-demand detail popover, but does not show a
@@ -109,13 +116,18 @@ and token counters without estimating subscription quota.
 - Current provider quota APIs do not provide a reliable mapping from recorded
   per-model token/cost usage to account quota percentage points, nor do they
   identify which concurrent session consumed those points.
-- The session-spend popup therefore shows **no account quota block and no quota
-  percentages**. It also shows no synthetic provider/session-share percentage.
+- The recorded-spend breakdown shows no quota percentages and no synthetic
+  provider/session-share percentage. Desktop's shared Usage surface additionally
+  shows a separately labelled **Account quota · Weekly** reset calendar when
+  the active provider supplies a weekly window. This is account-wide telemetry,
+  never session-attributed usage. See [quota reset calendar](desktop-quota-calendar.md)
+  and [decision 0039](../docs/decisions/0039-quota-reset-calendar.md), which supersede
+  the former no-account-quota-block rule for this explicitly separated section.
   Session-attributed values are recorded token totals and recorded/estimated
   model costs, not an allocation of subscription quota or payment.
 - Existing hourly/weekly account quota polling and status-bar indicators remain
   independent runtime chrome; opening the session-spend popup never refreshes
-  them and the popup does not repeat them.
+  them. The weekly calendar uses the existing runtime snapshot, not a new request.
 
 ## Lifecycle and concurrency
 

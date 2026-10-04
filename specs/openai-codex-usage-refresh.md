@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # OpenAI Codex usage-token refresh
 
 > Risk class: **authentication / persistence**. The quota indicator shares the
@@ -18,12 +23,16 @@ expires, without consuming a rotated refresh token behind pi core's back.
 
 ## Behavior
 
-- A valid access token is used directly for the ChatGPT usage request.
+- A Codex model-usage query reads Pi's `openai-codex` credential, never another
+  application's OpenCode login. Missing Pi auth must not display another
+  account's quota or credits. A valid access token is used directly.
 - An expired pi `openai-codex` OAuth credential is refreshed through
   `ModelRuntime.create({ authPath }).getAuth("openai-codex")` from
   `@earendil-works/pi-coding-agent`. That API delegates to pi-owned
   `AuthStorage`; Pix does not instantiate or refresh a separate store.
-- The refreshed credential is then used for the usage request.
+- The refreshed credential is then used for both usage and supplementary
+  reset-credit requests. Their account header is derived from that same access
+  token, not a pre-refresh account ID.
 - If refresh fails, the model-usage query rejects instead of returning
   `undefined`; `ModelUsageController` therefore retains its previous status.
 - Missing or non-OAuth credentials still produce no status.
@@ -45,6 +54,10 @@ still stored by pi core and break subsequent model requests.
   `~/.pi/agent/auth.json` (or the test override path) via pi core.
 - The quota request remains
   `https://chatgpt.com/backend-api/wham/usage`.
+- The same refresh also reads
+  `https://chatgpt.com/backend-api/wham/rate-limit-reset-credits` best-effort;
+  see [Desktop quota resets](desktop-quota-calendar.md) and
+  [decision 0039](../docs/decisions/0039-quota-reset-calendar.md).
 
 ## Verification
 
@@ -54,16 +67,22 @@ still stored by pi core and break subsequent model requests.
   “keep previous value” path remains active.
 - Run `npm run check` and `npm run test:tools-suite`.
 
-## Related files
+## Implementation
 
 - `src/app/model/model-usage-status.ts` — host-side implementation.
   `refreshOpenAICodexAuth` delegates to pi core via
   `ModelRuntime.create({ authPath }).getAuth("openai-codex")`, which owns the
   file-backed `AuthStorage` refresh and rotation lock. `[confirmed by code]`
-- Not to be confused with the suite-side usage fetcher
-  `external/pi-tools-suite/src/usage/lib/openai.ts`, which intentionally does
-  **not** refresh: on expiry it returns an error asking the user to refresh
-  via the OpenCode flow. `[confirmed by code]`
+
+## Tests
+
 - `tests/model-usage-status.test.ts` — refresh/rotation and usage-request
   regression coverage.
 - `tests/model-usage-controller.test.ts` — controller retention/refresh behavior.
+
+## Related code
+
+Not to be confused with the suite-side usage fetcher
+`external/pi-tools-suite/src/usage/lib/openai.ts`, which intentionally does
+**not** refresh: on expiry it returns an error asking the user to refresh
+via the OpenCode flow. `[confirmed by code]`

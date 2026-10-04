@@ -258,6 +258,16 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   writers cannot create that state because replacement is atomic. `[confirmed by code]`
 
 ### Cleanup (`core/cleanup.ts`) / Stop (`core/stop.ts`, `core/process.ts`)
+- Normal session shutdown stops that session's subagents but preserves run
+  directories, reports, QA screenshots/videos, bridged image attachments and
+  registry pointers. A newly opened session can still resolve retained results
+  by agent ID. Sibling-session agents are not stopped; reload/fork continue to
+  skip shutdown stopping. Process cancellation/ownership safeguards are unchanged.
+  Shutdown itself never authorizes evidence deletion. Explicit `subagents cleanup`
+  and Desktop's existing 72-hour background TTL/manual Clean policy remain
+  separate deletion mechanisms; this is not indefinite retention.
+  `[confirmed by index.ts and tools.test.ts]`
+  Decision: [0043 — Preserve subagent evidence on session shutdown](../docs/decisions/0043-subagent-evidence-retention.md).
 - `findCleanupCandidates(runRoot, days=7, keep=20)`: only dirs where **all** agents have `exit_code` files, older than `days` by mtime, skipping the newest `keep`. `[confirmed by code]`
 - `deleteRunDirs` = `fs.rmSync(dir,{recursive:true,force:true})`. Cleanup tool refuses paths outside the canonical `.pi/subagents/` prefix and defaults to **dry-run** (needs `delete=true`). `[confirmed by code, tools/cleanup.ts]`
 - `stopAgents`: planned/retrying → writes `stop_requested`/`stop_signal`, removes retry files, writes result.md, `exit_code="stopped"`; running → signals the owned process group when `process_group` metadata exists, otherwise `terminateProcess(pid, signal)`. POSIX `process.kill`; Windows `taskkill /pid <pid> /T /F`. `validateStopSignal` allows only SIGTERM/SIGINT/SIGKILL. ESRCH handled gracefully. `[confirmed by code]`

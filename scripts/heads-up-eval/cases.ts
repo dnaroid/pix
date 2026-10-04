@@ -7,7 +7,7 @@ export interface NoticeExpectation {
 	evidenceGroups: string[][];
 	/** OR within a group, AND across groups; a transparent lexical proxy, not a semantic judge. */
 	concepts: string[][];
-	reference: { kind: "heads_up"; title: string; consequence: string; evidenceIds: string[] };
+	reference: { kind: "heads_up"; notices: { id: null; title: string; consequence: string; evidenceIds: string[] }[] };
 }
 export interface EvalCase {
 	id: string;
@@ -27,7 +27,7 @@ function tool(id: string, text: string, isError = false): EvalEntry {
 }
 function notice(title: string, consequence: string, evidenceIds: string[], concepts: string[][]): NoticeExpectation {
 	return { kind: "heads_up", evidenceGroups: evidenceIds.map((id) => [id]), concepts,
-		reference: { kind: "heads_up", title, consequence, evidenceIds } };
+		reference: { kind: "heads_up", notices: [{ id: null, title, consequence, evidenceIds }] } };
 }
 
 const api = [

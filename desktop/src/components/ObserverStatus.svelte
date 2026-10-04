@@ -1,8 +1,7 @@
 <script lang="ts">
-  import Eye from "@lucide/svelte/icons/eye";
+  import Binoculars from "@lucide/svelte/icons/binoculars";
   import SettingsSwitch from "./settings/SettingsSwitch.svelte";
   import X from "@lucide/svelte/icons/x";
-  import { tick } from "svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import { observerDuration, observerPopoverPosition, observerResultLabel, observerStatus, observerTime } from "../lib/observer-status";
 
@@ -60,21 +59,26 @@
   function reposition(): void {
     if (open && trigger) position = observerPopoverPosition(trigger.getBoundingClientRect(), window.innerWidth, window.innerHeight);
   }
-  async function togglePopup(): Promise<void> {
-    if (open) { closePopup(); return; }
+  function openPopup(): void {
+    if (open) return;
     now = Date.now();
     owner = { sessionId, ...(snapshot ? { instanceId: snapshot.instanceId } : {}) };
     open = true;
     reposition();
     if (sessionId && runtimeReady) onRequestSnapshot();
-    const requestedFor = sessionId;
-    await tick();
-    if (open && requestedFor === sessionId) popup?.focus();
   }
   function closePopup(restoreFocus = true): void {
     if (!open) return;
+    // Restore while still open so focusin cannot reopen a dismissed panel.
+    if (restoreFocus && popup?.contains(document.activeElement)) trigger?.focus();
     open = false;
-    if (restoreFocus) void tick().then(() => { if (!open) trigger?.focus(); });
+  }
+  function leavePopup(event: PointerEvent | FocusEvent): void {
+    const region = event.currentTarget as HTMLElement;
+    if (event.relatedTarget instanceof Node && region.contains(event.relatedTarget)) return;
+    if (event.type === "pointerleave" && region.contains(document.activeElement)) return;
+    if (event.type === "focusout" && region.matches(":hover")) return;
+    closePopup(false);
   }
   function outside(event: PointerEvent): void {
     if (!open || !(event.target instanceof Node)) return;
@@ -84,7 +88,7 @@
     if (!open) return;
     if (event.key === "Escape") {
       event.preventDefault(); event.stopPropagation(); closePopup();
-    } else if (event.key === "Tab" && popup) {
+    } else if (event.key === "Tab" && popup && popup.contains(document.activeElement)) {
       const items = [...popup.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]')];
       const first = items[0]; const last = items.at(-1);
       if (event.shiftKey && (document.activeElement === first || document.activeElement === popup)) {
@@ -99,20 +103,23 @@
 
 <svelte:window onpointerdown={outside} onresize={reposition} />
 
-<div class="shrink-0" data-observer-status>
-  <button bind:this={trigger} type="button" aria-label={status.label} title={`${status.label} · ${status.detail}`}
-    aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onclick={() => void togglePopup()}
+<div class="shrink-0" data-observer-status role="group" aria-label="Observer"
+  onpointerenter={openPopup} onpointerleave={leavePopup}
+  onfocusin={openPopup} onfocusout={leavePopup}>
+  <button bind:this={trigger} type="button" aria-label={`${status.label} · ${status.detail}`}
+    aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onclick={openPopup} onkeydown={keydown}
     class={["grid h-6 w-6 place-items-center rounded-sm transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring",
       iconColor]}>
-    <Eye class={["h-3.5 w-3.5", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
+    <Binoculars class={["h-4 w-4", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
   </button>
 
   {#if open}
     <dialog bind:this={popup} id={popupId} open tabindex="-1" aria-label="Observer status" onkeydown={keydown}
-      style={`left:${position.left}px;bottom:${position.bottom}px;width:${position.width}px;max-height:${position.maxHeight}px`}
-      class="fixed z-50 m-0 overflow-y-auto rounded-md border border-border bg-popover p-0 text-left text-popover-foreground shadow-lg focus:outline-none">
+      style={`left:${position.left}px;bottom:${position.bottom}px;width:${position.width}px`}
+      class="fixed z-50 m-0 overflow-visible border-0 bg-transparent p-0 text-left text-popover-foreground focus:outline-none">
+      <div class="overflow-y-auto rounded-md border border-border bg-popover shadow-lg" style:max-height={`${position.maxHeight}px`}>
       <div class="flex items-start gap-2 border-b border-border px-3 py-2.5">
-        <Eye class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <Binoculars class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div class="min-w-0 flex-1"><h2 class="text-sm font-medium">{status.label}</h2><p class="mt-0.5 text-xs leading-4 text-muted-foreground">{status.detail}</p></div>
         <button type="button" class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" aria-label="Close Observer status" onclick={() => closePopup()}><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>
@@ -137,6 +144,7 @@
       <div class="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
         <button type="button" class="h-7 rounded-sm px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onclick={settings}>Observer settings</button>
         <button type="button" class="h-7 rounded-sm bg-primary px-2 text-xs text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" disabled={!canCheck} onclick={onCheck}>{pendingCheck || snapshot?.phase === "checking" ? "Checking…" : "Check now"}</button>
+      </div>
       </div>
     </dialog>
   {/if}

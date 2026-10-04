@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop unified workbench tabs
 
 <!-- markdownlint-disable MD013 -->
@@ -26,6 +31,10 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - Conversation, Preview, and Git Diff remain mounted while merely hidden by another workbench tab so composer/transcript state, Preview edit draft/history/scroll, media state, and Git review output do not reset on ordinary tab switching.
 - Switching to a different conversation selects that session's workbench tab but does not discard workspace-scoped Preview or Git Diff tabs. Their state remains available until explicitly closed or the workspace lifecycle invalidates it.
 - Preview shows a dirty indicator while its editable project-text draft differs from the loaded file. Any existing UTF-8 project file that is small enough to open in Preview can enter edit mode; home-file and absolute local-file previews remain read-only. Closing dirty Preview asks before discard; cancellation keeps the tab/state intact. Workspace changes and project-reloading Git mutations keep the existing dirty-preview confirmation.
+- Right-clicking the Preview tab header offers Copy File, Open in External App,
+  and Reveal in Finder for the current entry's underlying local file, including
+  while the tab is inactive. See [context menus](desktop-context-menus.md) for
+  file clipboard semantics and content/media routing.
 - File reads and attachment preparation share Preview load ownership. Closing, navigating, opening an immediate preview, or invalidating the workspace prevents an older load from replacing/reopening the current Preview or reporting an obsolete error.
 - Project-text saves capture their workspace and originating Preview entry. Ordinary files use the workspace-confined existing-file writer, while TODO/plan Markdown keeps its specialized project-document writer and Registry sync semantics. Writes to the same workspace/path are serialized; a late save cannot replace a reopened entry with the same path, unlock another edit's save, or close a newer edit. Text typed while saving remains an editable dirty draft rather than being replaced by the saved snapshot.
 - A Preview file surface exposes `Find in file` and intercepts `Ctrl+F` / `Cmd+F` only while the Preview tab is active. The find widget searches the current rendered text in read-only Preview or the live draft while editing, uses literal ASCII-case-insensitive matching, reports the current/total match count, and navigates forward with Enter or backward with Shift+Enter. Read-only matches use non-destructive CSS highlights with the active hit distinguished; editing uses textarea selection/scrolling. Clearing the query, closing find, opening a different Preview history entry, or unmounting Preview immediately removes every search-created CSS highlight, fallback DOM selection, and textarea selection without clearing a newer manual user selection.
@@ -48,7 +57,7 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - Opening multiple independent Preview tabs; Preview keeps one history-bearing work surface.
 - Converting bounded settings, elicitation, or model-selection flows into workbench tabs.
 
-## Related files
+## Implementation
 
 - `desktop/src/app/workbench-model.ts`
 - `desktop/src/app/workbench-controller.ts`
@@ -72,10 +81,13 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/lib/preview-history.ts`
 - `desktop/src/lib/file-search.ts`
 - `desktop/src/lib/desktop-commands.ts`
+
+## Related specs
+
 - `specs/desktop-session-tabs.md`
 - `specs/desktop-session-parity.md`
 
-## Verification
+## Tests
 
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed insertion, session-id separation, close fallback, and stale-active normalization.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist, shrink-wrapped non-growing tablist/action layout, tab preferred-width/flex-basis consistency, semantic session-status icon set, and kind-specific close dispatch.

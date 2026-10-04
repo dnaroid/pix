@@ -202,9 +202,11 @@ export function buildWorkbenchConversationProps(
         return {
           notice: observerNotice,
           snapshot: observerSnapshot,
+          notices: options.headsUp.notices(sessionId),
+          onNavigate: (direction: -1 | 1) => options.headsUp.selectNotice(sessionId!, observerNotice.id, direction, observerSnapshot.instanceId),
           pending: feedbackCommands.some((command) => options.headsUp.isPending(sessionId, command)),
           onFeedback: (feedback: "known" | "irrelevant" | "dismiss") => {
-            void options.headsUp.sendFeedback(sessionId!, feedback, observerNotice.id);
+            void options.headsUp.sendFeedback(sessionId!, feedback, observerNotice.id, observerSnapshot.instanceId);
           },
           onDiscuss: () => {
             options.headsUp.discuss(
@@ -216,6 +218,7 @@ export function buildWorkbenchConversationProps(
               options.promptText,
               options.promptAttachments,
               options.setPromptText,
+              observerSnapshot.instanceId,
             );
           },
         };

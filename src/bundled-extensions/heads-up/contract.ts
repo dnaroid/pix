@@ -3,6 +3,7 @@ import type { HeadsUpConfig } from "./config.js";
 /** Serializable observer state. No model requests or host dependencies belong here. */
 export const HEADS_UP_CHANNEL = "heads-up";
 export const HEADS_UP_COMMAND = "heads-up";
+export const MAX_HEADS_UP_NOTICES = 3;
 
 export interface HeadsUpEvidence {
 	readonly id: string;
@@ -56,6 +57,10 @@ export interface HeadsUpSnapshot {
 	readonly inputTokens: number;
 	readonly outputTokens: number;
 	readonly notice: HeadsUpNotice | null;
+	/** Active bounded stack; absent only on older runtimes. notice is the selected card. */
+	readonly notices?: readonly HeadsUpNotice[];
+	/** Prior cards are retained privately, not actionable until a fresh assessment. */
+	readonly awaitingReview?: boolean;
 	/** Optional for compatibility with already-running older observer runtimes. */
 	readonly details?: HeadsUpDetails;
 	/** Short controlled status, never raw provider errors or transcript content. */

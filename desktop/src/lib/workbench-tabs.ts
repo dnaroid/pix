@@ -25,6 +25,7 @@ export interface WorkbenchSessionTab extends WorkbenchTabBase {
 export interface WorkbenchPreviewTab extends WorkbenchTabBase {
   readonly kind: "preview";
   readonly dirty: boolean;
+  readonly filePath?: string;
 }
 
 export interface WorkbenchDiffTab extends WorkbenchTabBase {

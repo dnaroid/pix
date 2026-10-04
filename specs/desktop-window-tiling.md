@@ -14,12 +14,17 @@ status: active
 - Fill the active window's display first, then remaining displays in macOS screen
   enumeration order. Each display is filled before using the next one.
 - Use native logical-point work areas (excluding the menu bar and Dock).
-  Each grid has at most three columns and three rows: 2×1, 2×2 and 3×3 when
-  space/window count permits, with vertical or rectangular grids for other cases.
+  Each layout has at most three columns and three windows per column: 2×1,
+  2×2 and 3×3 when space/window count permits, with strips for narrow/short screens.
 - Capacity is bounded by the configured 860×380 logical-point content minimum,
   including any native frame overhead. For the windows assigned to one display,
-  choose the grid with the fewest empty cells, then the fewest rows. Tiles use
-  the entire work area, left-to-right and top-to-bottom.
+  prefer ceil(sqrt(window count)) columns, clamped to feasible column counts.
+  Distribute windows as evenly as possible among equal-width columns, with
+  fewer/taller windows on the left. Each column independently fills the entire
+  height: no empty cells remain, including on the last used display.
+  Three windows therefore use a full-height left half and two stacked right
+  tiles when two columns and two rows fit. Assign windows by tile top edge
+  (top-to-bottom), then left-to-right; the active window gets the top-left tile.
 - Restore minimized and unzoom maximized windows only when assigned a tile.
   Fullscreen windows remain untouched in their own Spaces and do not consume tiles.
 - When all displays are full, excess windows keep their geometry and state.
@@ -39,6 +44,8 @@ status: active
   may still constrain placement; physical mixed-DPI/multi-display acceptance
   requires connected hardware.
 - Rationale: [0029 — Current-display-first window tiling](../docs/decisions/0029-window-tiling.md).
+- Gap-free layouts: [0040 — Gap-free window tiling](../docs/decisions/0040-gap-free-window-tiling.md)
+  supersedes the uniform-grid selection in 0029, not its display/state policies.
 
 ## Implementation
 
@@ -54,7 +61,9 @@ status: active
 
 - `cargo test --manifest-path desktop/src-tauri/Cargo.toml window_tiling::tests --lib`
 - `cargo check --manifest-path desktop/src-tauri/Cargo.toml`
-- In native Pix, arrange two/four/nine windows on sufficiently large displays;
+- In native Pix, arrange two/three/four/five/seven/nine windows on sufficiently large displays;
   verify the menu label, first-window focus and row-major non-overlapping frames.
+  Verify that all used work areas are covered, including unequal-height columns
+  for partial grids and the last used display.
   On smaller displays verify minimum sizes and overflow to second/third displays
   or unchanged excess windows. Verify minimized/maximized/fullscreen behavior.

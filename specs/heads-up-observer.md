@@ -10,7 +10,7 @@ Rationale and alternatives: [0034 — Bounded, opt-in Heads up observer](../docs
 ## Behavior
 
 Pix offers an optional passive observer of a coding conversation. It looks for
-one concrete, consequential, probably unnoticed contradiction or tradeoff in
+up to three independent concrete, consequential, probably unnoticed contradictions or tradeoffs in
 the current task. It is not a code reviewer or an enforcement mechanism: it
 cannot inspect files independently and must not claim facts absent from its
 input. The normal result is no notice.
@@ -65,17 +65,64 @@ usage entries are durable. There is no cross-session knowledge profile.
 ## Context and cadence
 
 Automatic checks need at least six new completed agent turns and sixty seconds
-since the last check (or initial runtime creation). They run from `turn_end`
-without returning its inference promise. An open notice suppresses further
-automatic checks. A manual check can bypass cadence, not enablement,
-concurrency, availability or budgets.
+since the last check (or initial runtime creation). `turn_end` accumulates cadence
+and evidence, but does not launch inference. A successful final `agent_settled`
+opens the automatic opportunity, after repairs, retries and queued continuations.
+The outcome comes from the final `agent_before_settle`; abort/error settlement
+does not launch a check. Pending automatic work waits while the parent runs.
+No inference promise is returned to the parent hook. A manual check can run
+immediately, even during the parent run, bypassing cadence but not enablement,
+concurrency, availability or budgets. Todo boundaries are not observer triggers.
 
 A newly accepted delegated completion is another coalesced automatic opportunity:
 it does not require six more primary turns or wake the parent. A single timer
-waits for the same minimum interval, physical request lock and open-notice expiry
-or dismissal. Arrivals during a request remain pending for a later check. All
+waits for the same minimum interval and physical request lock. An idle parent
+needs no synthetic settlement; a running parent must settle successfully first.
+Arrivals during a request remain pending for a later check. All
 availability, input and rolling-hour limits still apply; a refused opportunity
 does not poll until a budget becomes available. Invalidation cancels the timer.
+
+An open stack does not suppress discovery. Successful settlement after new completed turns, or a delegated
+completion while idle, can queue a review without another six-turn threshold.
+Changed bounded evidence (user/tool/delegated records or cited assistant
+text), or a retained stack suspended by a new parent run, permits automatic review;
+ordinary assistant progress alone does not create an opportunity.
+The same request/input/hour/output limits apply. One request both reviews all active
+cards and discovers new independent findings, returning the complete supported set
+of at most three, not a delta. Existing IDs, titles and consequences are untrusted
+`activeNotices` within the payload budget. Descriptors may be explicitly clipped
+to reserve evidence space at small limits; identities are not silently dropped.
+Supported unresolved cards retain ID, creation time and expiry; omitted cards are
+removed and `none` clears the set. A successful unrelated check does not imply
+resolution. Retained cards keep their relative order before new discoveries;
+the prompt prioritizes supported active cards over filling slots. Exact normalized
+topic duplicates are merged (including a new candidate matching an active card),
+and previously closed topics remain subject to bounded deduplication. Semantic
+independence/deduplication still relies on the model, not a deterministic classifier.
+Invalid/error/unavailable/budget-refused assessments preserve retained identities under
+the original per-card TTLs, but never restore unconfirmed cards to visibility.
+No extra request is made per card and no periodic
+polling is added. Manual Check now reviews and discovers even without new evidence.
+
+### Strict visible freshness
+
+Starting a parent run or completing a meaningful user/tool/delegated evidence
+event immediately hides the entire previous stack, without a projection rebuild
+or inference. User/tool `message_end` invalidation occurs even before persistence;
+ordinary assistant progress does not trigger it. Projection comparisons additionally
+detect changed or removed cited evidence at turn/check boundaries. Hidden cards
+remain private review candidates, not claims that a problem still exists or has
+been resolved. Their original identities and expiry times are retained.
+
+Only a successful assessment against current evidence with the parent settled
+can restore supported cards. Manual checks may start while the parent runs, but
+cannot publish claims while it is running; changed evidence or a new run across
+the request invalidates its result. A bounded fresh opportunity waits for settlement.
+Missing/clipped evidence is not confirmation that a retained problem persists.
+Errors, malformed responses, unavailable context/model and budget refusals leave
+unconfirmed cards hidden. They do not schedule retries or polling. The existing
+interval, hourly and input/output limits still apply. This is evidence freshness,
+not a guarantee of model correctness or independently inspected repository state.
 
 Default limits are twelve checks per rolling hour, a 16,000-character serialized
 observation payload, 192,000 payload characters per rolling hour, 900 output
@@ -93,6 +140,13 @@ user requirements are separately tagged from assistant claims. Only bounded
 text and bounded tool arguments/results are included, with real source-entry
 IDs. Thinking, image bytes and full logs are excluded. Omission/clipping is
 explicit. No full-history scan occurs per render or per streamed token.
+Selected records are serialized in projection order. Apart from pinned user
+instructions, work records form a contiguous recent suffix: a record that does
+not fit ends selection, rather than allowing an older small failure to replace
+a larger fresh retest. Shell and codemode results use the same bounded text path;
+nested codemode evidence is its returned aggregate text, not independently
+invented child tool records. Prefix clipping still applies to long individual
+records; omitted text is never proof that no correction/retest exists.
 
 ### Delegated work (first increment)
 
@@ -138,29 +192,43 @@ provenance, not the correctness of a model inference.
 
 ## Presentation and feedback
 
-At most one short notice appears above the composer. TUI uses a keyed widget;
+At most three notices are active, with only one short card visible above the
+composer. Multiple cards show a position counter and previous/next navigation.
+Navigation is local and free: TUI uses `/heads-up prev` and `/heads-up next`;
+Desktop uses accessible buttons. Selection remains stable by ID through updates;
+removing/expiring the selected card selects its next surviving neighbor (or the
+last survivor). TUI uses a keyed widget;
 Desktop consumes the structured `heads-up` session-state channel. Desktop
 validates bounded payloads, rejects stale revisions of the current instance, and
-rejects snapshots from the 32 most recently retired instances per session. This
+rejects snapshots from the 32 most recently retired instances per session.
+Snapshot version 1 adds optional `notices` and `awaitingReview`; older singleton snapshots remain
+readable. New arrays contain at most three unique validated cards; `notice` is
+the selected member or null for an empty array. `awaitingReview: true` requires an
+enabled observer and an empty visible stack (`notice: null`); no retained claim
+text is published. TUI shows a neutral “Awaiting fresh review” widget; Desktop
+removes the card and exposes the wait reason in Observer status. Desktop selection is runtime/session
+scoped, survives same-owner updates, and resets on replacement. Each card expires
+independently even when hidden. Feedback and discussion target the displayed ID;
+Desktop rejects callbacks captured from a replaced instance. This
 bounded in-memory retirement history is not an arbitrary-history replay guard:
 an instance evicted from it is no longer rejected solely by its instance ID.
 Feedback actions include already-known, irrelevant and dismiss, keyed by notice
-ID so a stale button cannot clear a newer notice. Recent shown/feedback topics
+ID, removing only that card so a stale button cannot clear a newer notice. Recent shown/feedback topics
 are included in subsequent checks; exact normalized duplicates are suppressed.
 
 `/heads-up explain` expands existing evidence in TUI. Desktop has an evidence
 expander and feedback actions; expansion never makes another model request.
 Desktop management lives in a persistent statusbar Observer item, not in the
-composer actions menu. The trigger contains only an eye: grey when off/unready,
+composer actions menu. The trigger contains only 16px binoculars: grey when off/unready,
 primary when enabled (including waiting and error states), except a static amber
-eye while budget-limited. Limited status takes precedence over an existing finding
+binoculars while budget-limited. Limited status takes precedence over an existing finding
 in the trigger/popup; the finding card remains separate. The limit label is
-«Достигнут лимит проверок»; tooltip and popup include the earliest known reservation
+«Достигнут лимит проверок»; accessible label and popup include the earliest known reservation
 expiry (or explicitly unknown), not a promised check time or full reset. Input
 budget exhaustion is distinguished in the detail. A runtime update clearing the
-limit restores primary; wall-clock expiry alone does not claim recovery. The same eye
+limit restores primary; wall-clock expiry alone does not claim recovery. The same binoculars
 pulses only during a real checking phase, respecting reduced motion; no spinner,
-visible status label or notice badge is shown. Accessible label/tooltip and popup
+visible status label or notice badge is shown. Accessible label and popup
 distinguish off, waiting, checking, finding, unavailable/error and limited states. A draft
 or unready runtime still allows opening settings, but not session controls.
 Cards expire after five minutes by default, including while the main agent is
@@ -170,13 +238,18 @@ The statusbar popup contains the standard SettingsSwitch for the current session
 explicit Check now and an Observer settings deep link. It shows dynamic state and
 wait/error reasons, last check time/result/duration, new completed turns, actual
 rolling/total checks, used input characters and recorded input/cache/output tokens.
+It opens on pointer hover or keyboard focus without stealing focus; clicks are
+idempotent. Pointer or focus within the trigger/popup keeps it open, and leaving
+both dismisses it. The popup lower edge touches the trigger's top, matching Plan
+without a visual gap or intervening dead pointer region.
+The trigger has no browser-native tooltip. See [status-bar hover details](../docs/decisions/0037-status-bar-hover-details.md).
 Configured model, cadence, interval and budget ceilings stay in Settings, not the
 popup. Earliest reservation expiry is shown only while limited. Never-run,
 no finding, finding, suppressed duplicate, malformed reply, error, timeout and
 cancellation are distinct results. Older snapshots without optional `details`
 remain readable; missing details are unavailable, not claimed successful checks.
 Eligibility time is not a promised launch time: automatic work still requires
-a completed agent turn or a pending delegated completion opportunity, and the
+a successful final settlement or a pending evidence opportunity while idle, and the
 remaining gates must pass. The earliest reservation expiry is not a full reset.
 
 Opening the popup may issue `/heads-up snapshot`, a quiet out-of-band state
@@ -203,9 +276,22 @@ or auto-fix exists in this experiment.
 
 Each controller owns one runtime/session. New genuine user input, stop/error,
 disable, model changes, compaction, branching or shutdown invalidates pending
-results. Normal subsequent tool turns do not invalidate a result solely because
-the main agent progressed. Session replacement cannot publish a late result to
-the new session. Teardown clears timers and abort listeners.
+results. Before publishing a finding or applying an existing-card review, the
+observer refreshes the projection and compares bounded evidence with that used
+for inference. New/edited/removed evidence discards the completion and coalesces
+a fresh assessment under the same interval/budgets; unrelated success does not
+automatically declare an old failure resolved. Any finding/review, including manual,
+waits for a fresh assessment if the parent has resumed. An evidence-event revision
+also rejects changes observed before their message is persisted. Ordinary uncited assistant
+progress does not invalidate a result. Generation remains a lifecycle/request
+guard and revision remains UI snapshot ordering, not evidence freshness.
+Dismissed/expired cards cannot be resurrected by a late assessment: any membership
+change discards that assessment atomically rather than overwriting survivors or
+resurrecting a closed card. Navigation alone does not invalidate inference. Session replacement
+cannot publish a late result to the new session. Teardown clears timers and abort
+listeners. Previously displayed assertions are hidden immediately on invalidating
+evidence or parent start; reassessment waits for settlement and can remain
+limited/unavailable until the retained cards expire.
 
 Timeout actively aborts inference. If a provider ignores cancellation, the UI
 stops waiting but the physical in-flight lock remains until the request settles;
@@ -229,6 +315,7 @@ observer. This feature does not inherit into ordinary async-subagent workers.
 - `src/bundled-extensions/heads-up/index.ts`
 - `src/bundled-extensions/heads-up/desktop-preference.ts`
 - `src/bundled-extensions/heads-up/controller.ts`
+- `src/bundled-extensions/heads-up/notices.ts`
 - `src/bundled-extensions/heads-up/config.ts`
 - `src/bundled-extensions/heads-up/context.ts`
 - `src/bundled-extensions/heads-up/delegated.ts`
@@ -243,6 +330,7 @@ observer. This feature does not inherit into ordinary async-subagent workers.
 - `src/bundled-extensions/heads-up/contract.ts`
 - `src/app/runtime.ts`
 - `desktop/src/app/heads-up.svelte.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
 - `desktop/src/components/HeadsUpCard.svelte`
 - `desktop/src/lib/heads-up.ts`
 - `desktop/src/lib/observer-status.ts`
@@ -273,12 +361,15 @@ observer. This feature does not inherit into ordinary async-subagent workers.
 ## Tests
 
 - `tests/heads-up-controller.test.ts`
+- `tests/heads-up-notices.test.ts`
 - `tests/heads-up-context.test.ts`
 - `tests/heads-up-extension.test.ts`
 - `tests/heads-up-delegated.test.ts`
 - `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`
 - `tests/bundled-question-extension.test.ts`
 - `desktop/src/app/heads-up.svelte.test.ts`
+- `desktop/src/app/heads-up-reactivity.test.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
 - `desktop/src/lib/heads-up.test.ts`
 - `desktop/src/components/HeadsUpCard.test.ts`
 - `desktop/src/components/ObserverStatus.test.ts`

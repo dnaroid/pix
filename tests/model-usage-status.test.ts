@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -14,6 +14,7 @@ import {
 	modelUsageRemainingPercent,
 	markModelUsageStale,
 	liveStaleModelUsage,
+	openAIResetCreditsFromResponse,
 	openAIUsageStatusFromResponse,
 	queryAccountUsageReport,
 	queryModelUsageStatus,
@@ -21,6 +22,7 @@ import {
 	type AccountUsageReport,
 	zhipuUsageStatusFromResponse,
 	type ModelUsageDescriptor,
+	type OpenAIResetCreditsResponse,
 	type OpenAIUsageResponse,
 } from "../src/app/model/model-usage-status.js";
 import { APP_ICONS } from "../src/app/icons.js";
@@ -438,6 +440,240 @@ describe("model usage status", () => {
 		assert.equal(status?.hourly?.remainingPercent, 70);
 	});
 
+	it("keeps only available live Codex reset credits, sorts by expiry, and supports credits without quota windows", () => {
+		const now = Date.UTC(2026, 9, 4, 20, 0, 0);
+		const soon = now + 10 * 60 * 60 * 1000;
+		const later = now + 20 * 24 * 60 * 60 * 1000;
+		const response: OpenAIResetCreditsResponse = {
+			available_count: 3,
+			credits: [
+				{ status: "available", title: " Later reset ", expires_at: new Date(later).toISOString() },
+				{ status: "available", title: "Full reset", expires_at: new Date(soon).toISOString() },
+				{ status: "available", title: null, expires_at: null },
+				{ status: "used", title: "Used reset", expires_at: new Date(later).toISOString() },
+				{ status: "available", title: "Expired reset", expires_at: new Date(now - 1).toISOString() },
+			],
+		};
+
+		const credits = openAIResetCreditsFromResponse(response, now);
+		assert.deepEqual(credits, [
+			{ title: "Full reset", expiresAt: soon },
+			{ title: "Later reset", expiresAt: later },
+			{ title: "Reset credit" },
+		]);
+		const status = openAIUsageStatusFromResponse(
+			{ plan_type: "plus", rate_limit: null },
+			"openai-codex/gpt-5.5",
+			now,
+			credits,
+		);
+		assert.deepEqual(status?.resetCredits, credits);
+		assert.equal(status?.weekly, undefined);
+		assert.equal(status?.hourly, undefined);
+	});
+
+	it("loads reset-credit details with the OpenAI quota snapshot and treats credit endpoint failures as supplementary", async () => {
+		const oldFetch = globalThis.fetch;
+		const access = testJwt({ "https://api.openai.com/auth": { chatgpt_account_id: "account-live" } });
+		const expiry = Date.now() + 6 * 60 * 60 * 1000;
+		let creditRequests = 0;
+		let failCredits = false;
+		globalThis.fetch = (async (
+			input: Parameters<typeof fetch>[0],
+			init?: Parameters<typeof fetch>[1],
+		) => {
+			const url = String(input);
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("Authorization"), `Bearer ${access}`);
+			assert.equal(headers.get("ChatGPT-Account-Id"), "account-live");
+			if (url === "https://chatgpt.com/backend-api/wham/usage") {
+				return Response.json({
+					plan_type: "plus",
+					rate_limit: {
+						limit_reached: false,
+						primary_window: { used_percent: 26, limit_window_seconds: 7 * 24 * 60 * 60, reset_after_seconds: 5 * 24 * 60 * 60 },
+						secondary_window: null,
+					},
+				});
+			}
+			if (url === "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits") {
+				creditRequests += 1;
+				if (failCredits) return new Response("busy", { status: 429 });
+				return Response.json({
+					available_count: 1,
+					credits: [{ status: "available", title: "Full reset", expires_at: new Date(expiry).toISOString() }],
+				});
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		}) as typeof fetch;
+
+		try {
+			await withPiAuthAsync({
+				"openai-codex": { type: "oauth", access, refresh: "unused", expires: Date.now() + 60 * 60 * 1000 },
+			}, async () => {
+				const descriptor = modelUsageDescriptor({ provider: "openai-codex", id: "gpt-5.5" } as SessionModel);
+				if (!descriptor) throw new Error("Expected OpenAI usage descriptor");
+				const withCredits = await queryModelUsageStatus(descriptor);
+				assert.equal(withCredits?.weekly?.remainingPercent, 74);
+				assert.deepEqual(withCredits?.resetCredits, [{ title: "Full reset", expiresAt: expiry }]);
+
+				failCredits = true;
+				const withoutCredits = await queryModelUsageStatus(descriptor);
+				assert.equal(withoutCredits?.weekly?.remainingPercent, 74);
+				assert.equal(withoutCredits?.resetCredits, undefined);
+			});
+			assert.equal(creditRequests, 2);
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
+	});
+
+	it("does not invent expiry dates or expose non-available reset-credit statuses", () => {
+		const now = Date.UTC(2026, 9, 4);
+		assert.deepEqual(openAIResetCreditsFromResponse({ credits: [
+			{ status: "available", title: " ", expires_at: "not a date", future_field: true },
+			{ status: "available", title: 42, expires_at: {} },
+			{ status: "available", title: "Expires now", expires_at: new Date(now).toISOString() },
+			...["redeeming", "redeemed", "used", "expired", "revoked", "future-status", undefined].map((status) => ({ status, title: "Hidden" })),
+			null,
+		] }, now), [{ title: "Reset credit" }, { title: "Reset credit" }]);
+		assert.deepEqual(openAIResetCreditsFromResponse({ available_count: 3, credits: [] }, now), []);
+	});
+
+	it("deduplicates opaque credit IDs without collapsing distinct credits with matching titles and expiries", () => {
+		const credit = { id: "one", status: "available", title: "Full reset", expires_at: "2026-10-05T06:19:37+02:00" };
+		const now = Date.UTC(2026, 9, 4);
+		assert.deepEqual(openAIResetCreditsFromResponse({ credits: [credit, credit, { ...credit, id: "two" }] }, now), [
+			{ title: "Full reset", expiresAt: 1791173977000 }, { title: "Full reset", expiresAt: 1791173977000 },
+		]);
+	});
+
+	it("accepts RFC3339 offsets but never guesses local timestamps or numeric app-server seconds", () => {
+		const now = Date.UTC(2026, 9, 4);
+		const dates = ["2026-10-05T06:19:37+02:00", "2026-10-22T22:32:35+02:00", "2026-10-29T19:59:44+01:00"];
+		assert.deepEqual(openAIResetCreditsFromResponse({ credits: dates.map((expires_at) => ({ status: "available", expires_at })) }, now)
+			.map((credit) => credit.expiresAt), [1791173977000, 1792701155000, 1793300384000]);
+		for (const expires_at of [1791173977, "1791173977", "2026-10-05T06:19:37", "10/05/2026", "2027-02-30T06:00:00Z", "2026-10-05T24:00:00Z"]) {
+			assert.equal(openAIResetCreditsFromResponse({ credits: [{ status: "available", expires_at }] }, now)[0]?.expiresAt, undefined);
+		}
+	});
+
+	it("retains the authoritative total for capped details and summary-only failures without quota windows", async () => {
+		const oldFetch = globalThis.fetch;
+		let details: unknown = { available_count: 3, credits: [{ id: "one", status: "available", title: "Full reset" }] };
+		let failed = false;
+		globalThis.fetch = (async (input) => String(input).endsWith("/usage")
+			? Response.json({ rate_limit_reset_credits: { available_count: 5 } })
+			: failed ? new Response("unavailable", { status: 503 }) : Response.json(details)) as typeof fetch;
+		try {
+			await withPiAuthAsync({ "openai-codex": { type: "oauth", access: "fixture", expires: Date.now() + 60_000 } }, async () => {
+				const query = () => queryModelUsageStatus({ kind: "openai", modelKey: "openai-codex/test" });
+				const capped = await query();
+				assert.equal(capped?.resetCreditsAvailableCount, 3);
+				assert.equal(capped?.resetCredits?.length, 1);
+				failed = true;
+				const fallback = await query();
+				assert.equal(fallback?.resetCreditsAvailableCount, 5);
+				assert.equal(fallback?.resetCredits, undefined);
+				failed = false;
+				details = { available_count: 0, credits: [{ status: "available", title: "Full reset" }] };
+				assert.equal(await query(), undefined, "zero details total must win over older usage summary");
+				details = { available_count: 3, credits: [{ status: "available", expires_at: new Date(Date.now() - 1).toISOString() }] };
+				assert.equal((await query())?.resetCreditsAvailableCount, 2);
+				details = { available_count: "garbage", credits: [] };
+				assert.equal((await query())?.resetCreditsAvailableCount, 5);
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
+	});
+
+	it("keeps ordinary quota available when reset-credit JSON has an unexpected shape", async () => {
+		const oldFetch = globalThis.fetch;
+		let payload: unknown;
+		globalThis.fetch = (async (input) => String(input).endsWith("/usage")
+			? Response.json({ rate_limit: { primary_window: { used_percent: 26, limit_window_seconds: 604800, reset_after_seconds: 3600 } } })
+			: Response.json(payload)) as typeof fetch;
+		try {
+			await withPiAuthAsync({ "openai-codex": { type: "oauth", access: "fixture", expires: Date.now() + 60_000 } }, async () => {
+				for (payload of [null, [], { credits: {} }, { credits: [null, { status: "available", title: 42 }] }]) {
+					const status = await queryModelUsageStatus({ kind: "openai", modelKey: "openai-codex/gpt-5.5" });
+					assert.equal(status?.weekly?.remainingPercent, 74);
+				}
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
+	});
+
+	it("uses the Pi Codex account for credits even when OpenCode is logged into another account", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pix-codex-account-"));
+		const previousHome = process.env.HOME;
+		const oldFetch = globalThis.fetch;
+		const access = testJwt({ "https://api.openai.com/auth": { chatgpt_account_id: "pi-account" } });
+		const requests: string[] = [];
+		mkdirSync(join(home, ".local/share/opencode"), { recursive: true });
+		writeFileSync(join(home, ".local/share/opencode/auth.json"), JSON.stringify({
+			openai: { type: "oauth", access: "other-account", expires: Date.now() + 60_000 },
+		}));
+		process.env.HOME = home;
+		globalThis.fetch = (async (input, init) => {
+			requests.push(String(input));
+			assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${access}`);
+			assert.equal(new Headers(init?.headers).get("ChatGPT-Account-Id"), "pi-account");
+			return Response.json(String(input).endsWith("/usage") ? {} : { credits: [{ status: "available", title: "Full reset" }] });
+		}) as typeof fetch;
+		try {
+			await withPiAuthAsync({ "openai-codex": { type: "oauth", access, expires: Date.now() + 60_000 } }, async () => {
+				assert.equal((await queryModelUsageStatus({ kind: "openai", modelKey: "openai-codex/gpt-5.5" }))?.resetCredits?.length, 1);
+			});
+			assert.equal(requests.length, 2);
+			await withPiAuthAsync({}, async () => {
+				assert.equal(await queryModelUsageStatus({ kind: "openai", modelKey: "openai-codex/gpt-5.5" }), undefined);
+			});
+			assert.equal(requests.length, 2, "missing Pi auth must not fall back to a different application's account");
+		} finally {
+			globalThis.fetch = oldFetch;
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	it("bounds the supplementary reset-credit response body, not just its headers", async (t) => {
+		t.mock.timers.enable({ apis: ["setTimeout"] });
+		const oldFetch = globalThis.fetch;
+		let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+		let started!: () => void;
+		const creditStarted = new Promise<void>((resolve) => { started = resolve; });
+		globalThis.fetch = (async (input, init) => {
+			if (String(input).endsWith("/usage")) {
+				return Response.json({ rate_limit: { primary_window: { used_percent: 26, limit_window_seconds: 604800, reset_after_seconds: 3600 } } });
+			}
+			const stream = new ReadableStream<Uint8Array>({ start(controller) { body = controller; } });
+			init?.signal?.addEventListener("abort", () => body?.error(new Error("aborted")), { once: true });
+			started();
+			return new Response(stream);
+		}) as typeof fetch;
+		try {
+			await withPiAuthAsync({ "openai-codex": { type: "oauth", access: "fixture", expires: Date.now() + 60_000 } }, async () => {
+				let settled = false;
+				const pending = queryModelUsageStatus({ kind: "openai", modelKey: "openai-codex/gpt-5.5" })
+					.then((status) => { settled = true; return status; });
+				await creditStarted;
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				t.mock.timers.tick(10_000);
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				assert.equal(settled, true, "stalled credit body must not indefinitely block ordinary quota");
+				assert.equal((await pending)?.weekly?.remainingPercent, 74);
+			});
+		} finally {
+			body?.error(new Error("test cleanup"));
+			globalThis.fetch = oldFetch;
+			t.mock.timers.reset();
+		}
+	});
+
 	it("refreshes expired OpenAI Codex OAuth and persists the rotated credential", async () => {
 		const oldFetch = globalThis.fetch;
 		const refreshedAccess = testJwt({
@@ -446,6 +682,7 @@ describe("model usage status", () => {
 		});
 		let tokenRequests = 0;
 		let usageRequests = 0;
+		let creditRequests = 0;
 
 		globalThis.fetch = (async (
 			input: Parameters<typeof fetch>[0],
@@ -479,6 +716,12 @@ describe("model usage status", () => {
 					},
 				});
 			}
+			if (url === "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits") {
+				creditRequests += 1;
+				assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${refreshedAccess}`);
+				assert.equal(new Headers(init?.headers).get("ChatGPT-Account-Id"), "account-refreshed");
+				return Response.json({ credits: [{ status: "available", title: "Full reset" }] });
+			}
 			throw new Error(`Unexpected fetch: ${url}`);
 		}) as typeof fetch;
 
@@ -501,6 +744,8 @@ describe("model usage status", () => {
 				assert.equal(status?.weekly?.remainingPercent, 100);
 				assert.equal(tokenRequests, 1);
 				assert.equal(usageRequests, 1);
+				assert.equal(creditRequests, 1);
+				assert.equal(status?.resetCredits?.length, 1);
 				assert.equal(persisted["openai-codex"]?.access, refreshedAccess);
 				assert.equal(persisted["openai-codex"]?.refresh, "refresh-rotated");
 				assert.equal(persisted["openai-codex"]?.accountId, "account-refreshed");

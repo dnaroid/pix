@@ -7,11 +7,17 @@ const run: BrainstormRun = {
   runId: "run1", runDir: ".pi/brainstorms/run1", topic: "Choose a name", status: "running", round: 3,
   participants: [{ slot: 1, sessionId: "p1", name: "Luna", model: "openai-codex/gpt-6-luna", status: "running", round: 3 }],
 };
-const html = (runs?: BrainstormRun[]) => render(SessionBrainstormStatus, {
-  props: { snapshot: runs && { version: 1, checkedAt: 1, runs } as SessionBrainstormSnapshot, onOpen: () => {} },
+const html = (runs?: BrainstormRun[], trailingSeparator = false) => render(SessionBrainstormStatus, {
+  props: { snapshot: runs && { version: 1, checkedAt: 1, runs } as SessionBrainstormSnapshot, trailingSeparator, onOpen: () => {} },
 }).body;
 
 describe("council status indicator", () => {
+  it("adds a one-pixel separator only when council and a following group exist", () => {
+    expect(html([run], true)).toContain('data-status-separator="brainstorm-next"');
+    expect(html([run], true)).toContain("h-3 w-px shrink-0 bg-border");
+    expect(html([run])).not.toContain("data-status-separator");
+    expect(html([], true)).not.toContain("data-status-separator");
+  });
   it("hides when there is no council", () => {
     expect(html()).not.toContain("data-brainstorm-status");
     expect(html([])).not.toContain("data-brainstorm-status");

@@ -1,7 +1,7 @@
 import { normalizeExternalHref } from "./markdown-links";
 import { isWorkspaceProjectFilePath } from "./project-files";
 
-export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image";
+export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image" | "file";
 
 export interface DesktopContextTarget {
   kind: DesktopContextKind;
@@ -11,12 +11,21 @@ export interface DesktopContextTarget {
   image?: HTMLImageElement;
   imagePath?: string;
   imageRelativePath?: string;
+  filePath?: string;
   sourceReference?: string;
   hasSelection: boolean;
   readOnly: boolean;
 }
 
 const TEXT_INPUT_TYPES = new Set(["text", "search", "email", "url", "tel", "number", "password"]);
+
+/** Only trusted component metadata supplies local paths; never decode asset URLs. */
+export function contextFilePath(path: string | undefined, workspace: string): string | undefined {
+  if (!path || path.includes("\0")) return undefined;
+  if (path.startsWith("/")) return path;
+  if (!workspace.startsWith("/") || !isWorkspaceProjectFilePath(path) || /^[a-z][a-z\d+.-]*:/iu.test(path)) return undefined;
+  return `${workspace.replace(/\/$/u, "")}/${path}`;
+}
 
 export function contextElement(target: EventTarget | null): HTMLElement | null {
   const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
@@ -70,7 +79,7 @@ export function previewSourceReference(element: HTMLElement, workspace: string):
 
 export function desktopContextTarget(target: EventTarget | null, workspace = ""): DesktopContextTarget | null {
   const element = contextElement(target);
-  if (!element || element.closest("[inert]")) return null;
+  if (!element || element.closest("[inert], :disabled")) return null;
 
   // xterm prepares its helper textarea during its own contextmenu handler.
   // Keep native Copy/Paste events so terminal selection and bracketed paste survive.
@@ -102,7 +111,7 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
 
   const image = element.closest("img");
   if (image instanceof HTMLImageElement && image.getAttribute("src")) {
-    const imagePath = image.dataset.imagePath;
+    const imagePath = contextFilePath(image.dataset.imagePath, workspace);
     return {
       kind: "image", element: image, image, imagePath,
       imageRelativePath: imagePath ? relativeImagePath(imagePath, workspace) : undefined,
@@ -110,15 +119,18 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
     };
   }
 
+  const fileSurface = element.closest<HTMLElement>("[data-context-file-path]");
+  const filePath = contextFilePath(fileSurface?.dataset.contextFilePath, workspace);
+
   const href = element.closest("a[href]")?.getAttribute("href");
   const linkUrl = href ? normalizeExternalHref(href) : undefined;
   const hasSelection = hasContextSelection(element);
   const sourceReference = previewSourceReference(element, workspace);
-  if (linkUrl || hasSelection || sourceReference) {
-    let kind: DesktopContextKind = "readonly";
+  if (linkUrl || hasSelection || sourceReference || fileSurface) {
+    let kind: DesktopContextKind = fileSurface ? "file" : "readonly";
     if (linkUrl) kind = "link";
     if (hasSelection) kind = "selection";
-    return { kind, element, editor: null, linkUrl, sourceReference, hasSelection, readOnly: true };
+    return { kind, element, editor: null, linkUrl, sourceReference, filePath, hasSelection, readOnly: true };
   }
   return null;
 }

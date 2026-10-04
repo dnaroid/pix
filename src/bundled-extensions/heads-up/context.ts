@@ -86,8 +86,17 @@ export class HeadsUpContext {
 	}
 
 	/** Exact serialized payload bound, including JSON escaping and feedback. */
-	toInput(maxChars: number, previous: readonly string[] = []): { records: ContextRecord[]; body: string } {
+	toInput(maxChars: number, previous: readonly string[] = [], activeNotices?: readonly { id: string; title: string; consequence: string }[]): { records: ContextRecord[]; body: string } {
 		const chosen = new Map<string, ContextRecord>();
+		// Keep every review identity, but reserve room for actual evidence even at
+		// the minimum input limit. Clipping prior analysis is explicit, not resolution.
+		let active = activeNotices;
+		for (let limit = 250; active && JSON.stringify(active).length > maxChars / 2 && limit >= 15; limit = Math.floor(limit / 2)) {
+			active = activeNotices!.map(({ id, title, consequence }) => ({ id,
+				title: cleanObserverText(title, Math.min(160, limit)), consequence: cleanObserverText(consequence, limit),
+				...(title.length > Math.min(160, limit) || consequence.length > limit ? { clipped: true } : {}),
+			}));
+		}
 		// Feedback must not crowd all evidence out when a small context limit is configured.
 		const past: string[] = [];
 		for (const text of previous.slice(-16).toReversed()) {
@@ -95,17 +104,32 @@ export class HeadsUpContext {
 			if (JSON.stringify([candidate, ...past]).length > maxChars / 4) break;
 			past.unshift(candidate);
 		}
-		const serialize = () => JSON.stringify({ records: [...chosen.values()], omitted: this.omitted + this.records.filter((entry) => !chosen.has(entry.id)).length, previousNotices: past });
+		const ordered = () => {
+			const records = this.records.filter((entry) => chosen.has(entry.id));
+			if (this.firstUser && chosen.has(this.firstUser.id) && !records.some((entry) => entry.id === this.firstUser!.id)) records.unshift(this.firstUser);
+			return records;
+		};
+		const serialize = () => JSON.stringify({ records: ordered(), omitted: this.omitted + this.records.filter((entry) => !chosen.has(entry.id)).length, previousNotices: past, activeNotices: active });
 		const add = (record: ContextRecord) => {
-			if (chosen.has(record.id)) return;
+			if (chosen.has(record.id)) return true;
 			chosen.set(record.id, record);
-			if (serialize().length > maxChars) chosen.delete(record.id);
+			if (serialize().length <= maxChars) return true;
+			chosen.delete(record.id); return false;
 		};
 		// Latest instructions get priority; the original request survives long tool sequences.
 		for (const record of this.records.filter((entry) => entry.kind === "user").slice(-3).reverse()) add(record);
 		if (this.firstUser) add(this.firstUser);
-		for (const record of this.records.toReversed()) add(record);
-		return { records: [...chosen.values()], body: serialize() };
+		// Retain a contiguous recent work suffix. Never skip a large fresh result
+		// and backfill its place with a smaller, potentially superseded failure.
+		for (const record of this.records.toReversed()) {
+			if (record.kind !== "user" && !add(record)) break;
+		}
+		return { records: ordered(), body: serialize() };
 	}
 	snapshot(): readonly ContextRecord[] { return this.records.slice(); }
+	/** Progress text alone does not stale a finding; new evidence needs a fresh assessment. */
+	evidenceChanged(since: readonly ContextRecord[], citedIds: readonly string[]): boolean {
+		const relevant = (records: readonly ContextRecord[]) => records.filter((entry) => entry.kind !== "assistant" || citedIds.includes(entry.id));
+		return JSON.stringify(relevant(since)) !== JSON.stringify(relevant(this.records));
+	}
 }

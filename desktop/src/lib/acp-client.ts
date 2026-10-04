@@ -63,6 +63,7 @@ export type {
   LazySessionImage,
   ModelUsageLimitWindow,
   ModelUsageRefresh,
+  ModelUsageResetCredit,
   ModelUsageStatus,
   PromptFileImage,
   QueuedImage,

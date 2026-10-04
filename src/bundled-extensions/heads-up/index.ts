@@ -21,6 +21,7 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 	let expanded = false;
 	let awaitingUserRecord = false;
 	let uiBlocked = false;
+	let settledSuccessfully = false;
 	let removeAbort: (() => void) | undefined;
 	let initializing: Promise<void> | undefined;
 	const delegated = new DelegatedEvidence();
@@ -34,11 +35,14 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 		// Once on explicit activation / branch replacement, not per streamed chunk.
 		const entries = ctx.sessionManager.buildSessionProjection().entries;
 		target.context.reset();
-		const first = entries.find((entry) => entry.messages.some((message) => message.role === "user"));
-		if (first) for (const message of first.messages) if (message.role === "user") target.context.addMessage(message, first.sourceEntry.id);
-		const users = entries.filter((entry) => entry.messages.some((message) => message.role === "user")).slice(-3);
-		for (const entry of entries.slice(-64)) for (const message of entry.messages) target.context.addMessage(message, entry.sourceEntry.id);
-		for (const entry of users) for (const message of entry.messages) if (message.role === "user") target.context.addMessage(message, entry.sourceEntry.id);
+		const users = entries.filter((entry) => entry.messages.some((message) => message.role === "user"));
+		const pinned = new Set([users[0], ...users.slice(-3)]);
+		// Preserve projection order, including recent instructions between results.
+		for (const [index, entry] of entries.entries()) {
+			for (const message of entry.messages) {
+				if (index >= entries.length - 64 || (pinned.has(entry) && message.role === "user")) target.context.addMessage(message, entry.sourceEntry.id);
+			}
+		}
 		for (const record of delegated.records(new Set(entries.map((entry) => entry.sourceEntry.id)))) target.context.add(record);
 	}
 	async function initialize(ctx: ExtensionContext): Promise<void> {
@@ -46,7 +50,7 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 		removeDelegated?.(); removeDelegated = undefined; delegated.clear();
 		removeAbort?.(); removeAbort = undefined;
 		controller?.dispose(); controller = undefined; owner = ctx;
-		expanded = false; awaitingUserRecord = false; uiBlocked = false;
+		expanded = false; awaitingUserRecord = false; uiBlocked = false; settledSuccessfully = false;
 		if (!observerRuntimeAllowed(ctx)) return;
 		const settings = await settingsLoader(ctx.cwd, ctx.isProjectTrusted());
 		if (ticket !== epoch) return;
@@ -99,15 +103,26 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 		if (event.source !== "extension") { awaitingUserRecord = true; invalidate("new user request"); }
 	});
 	pi.on("agent_start", (_event, ctx) => {
+		settledSuccessfully = false; controller?.noteAgentStart();
 		removeAbort?.(); removeAbort = undefined;
 		const signal = ctx.signal;
 		if (!signal) return;
-		const abort = () => invalidate("agent stopped");
+		const abort = () => { settledSuccessfully = false; invalidate("agent stopped"); };
 		signal.addEventListener("abort", abort, { once: true });
 		removeAbort = () => signal.removeEventListener("abort", abort);
 	});
-	pi.on("agent_before_settle", (event) => { if (event.outcome !== "completed") invalidate("agent stopped or failed"); });
-	pi.on("agent_settled", () => { removeAbort?.(); removeAbort = undefined; });
+	pi.on("agent_before_settle", (event) => {
+		settledSuccessfully = event.outcome === "completed";
+		if (!settledSuccessfully) invalidate("agent stopped or failed");
+	});
+	pi.on("message_end", (event) => {
+		// Runs before persistence: only invalidate here, never rebuild the projection.
+		if (event.message.role === "toolResult" || event.message.role === "user") controller?.noteEvidenceChanged();
+	});
+	pi.on("agent_settled", () => {
+		removeAbort?.(); removeAbort = undefined;
+		controller?.noteAgentSettled(settledSuccessfully);
+	});
 	pi.on("turn_end", (event) => {
 		const current = controller;
 		if (!current?.isEnabled) return;
@@ -120,8 +135,8 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 			}
 		}
 		current.noteTurn(event.message, event.messageEntryId, event.toolResults, event.toolResultEntryIds);
-		// Do not return/await this promise: the primary turn must remain unblocked.
-		void current.check().catch(() => {});
+		// Accumulate cadence only. Final settlement owns the automatic opportunity,
+		// after retries, repairs, queued continuations and their tool results.
 	});
 	pi.on("model_select", () => invalidate("main model changed"));
 	pi.on("session_before_switch", () => invalidate("session switching", true));
@@ -135,7 +150,7 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 	pi.on("ui_prompt_end", () => { uiBlocked = false; });
 
 	pi.registerCommand("heads-up", {
-		description: "Passive observer: on | off | check | status | snapshot | model provider/id | explain | discuss | dismiss | known | irrelevant",
+		description: "Passive observer: on | off | check | status | snapshot | model provider/id | prev | next | explain | discuss | dismiss | known | irrelevant",
 		handler: async (args, ctx) => {
 			const commandEpoch = epoch;
 			await initializing;
@@ -152,6 +167,7 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 				if (current.setModel(value)) delegated.clear();
 				else ctx.ui.notify("Use /heads-up model provider/model-id", "info");
 			}
+			else if (action === "prev" || action === "next") { expanded = false; current.selectNotice(action === "prev" ? -1 : 1); }
 			else if (["dismiss", "known", "irrelevant"].includes(action)) {
 				const id = value ?? current.currentNotice?.id;
 				if (id) current.feedbackNotice(id, action as "dismiss" | "known" | "irrelevant");
@@ -164,7 +180,7 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 					ctx.ui.notify("Use an empty composer with no attachments to insert a note; Desktop has an Insert question button.", "info"); return;
 				}
 				ui.setEditorText(headsUpDiscussionDraft(notice));
-			} else if (action !== "status") { ctx.ui.notify("Use /heads-up on, off, check, status, snapshot, model, explain, discuss, dismiss, known or irrelevant.", "info"); return; }
+			} else if (action !== "status") { ctx.ui.notify("Use /heads-up on, off, check, status, snapshot, model, prev, next, explain, discuss, dismiss, known or irrelevant.", "info"); return; }
 			if (action === "status" || action === "check" || action === "on" || action === "model") {
 				const state = current.snapshot();
 				ctx.ui.notify(`Heads up: ${state.phase} · ${state.model}\n${state.checks} checks · ${state.inputTokens} input/cache tokens · ${state.outputTokens} output tokens${state.reason ? `\n${state.reason}` : ""}`, "info");

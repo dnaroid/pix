@@ -78,7 +78,7 @@ export function buildSessionWorkbenchTabs(options: {
 
 type PreviewLike =
   | { kind: "file"; file: { path: string } }
-  | { kind: "attachment"; attachment: { name: string } };
+  | { kind: "attachment"; attachment: { name: string; path?: string } };
 
 type GitDiffLike = {
   path?: string | null;
@@ -119,6 +119,7 @@ export function buildDesktopWorkbenchTabs(options: {
       title: previewTitle,
       panelId: "workbench-panel-preview",
       kind: "preview",
+      filePath: options.preview.kind === "file" ? options.preview.file.path : options.preview.attachment.path,
       closable: true,
       dirty: options.previewDirty,
     };

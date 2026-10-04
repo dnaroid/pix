@@ -8,7 +8,7 @@ import { HeadsUpController, type HeadsUpControllerOptions, type HeadsUpRequest }
 import type { HeadsUpSnapshot } from "../src/bundled-extensions/heads-up/contract.js";
 
 const model = { provider: "openai-codex", id: "gpt-6-luna" } as Model<Api>;
-const finding = { kind: "heads_up", title: "Old clients break", consequence: "The new loader rejects their settings.", evidenceIds: ["u", "t"] };
+const finding = { kind: "heads_up", notices: [{ id: null, title: "Old clients break", consequence: "The new loader rejects their settings.", evidenceIds: ["u", "t"] }] };
 function response(value: unknown = { kind: "none" }): AssistantMessage {
 	return {
 		role: "assistant", api: "openai-responses", provider: model.provider, model: model.id, stopReason: "stop", timestamp: 0,
@@ -70,6 +70,7 @@ test("status records none, notice, duplicate, invalid, and error outcomes with d
 	const outcomes: Array<{ reply?: AssistantMessage; reject?: boolean; result: string }> = [
 		{ reply: response(), result: "none" },
 		{ reply: response(finding), result: "notice" },
+		{ reply: response(finding), result: "notice" }, // Existing-card review, not a duplicate delivery.
 		{ reply: response(finding), result: "duplicate" },
 		{ reply: response({ kind: "none", extra: true }), result: "invalid" },
 		{ reject: true, result: "error" },
@@ -83,6 +84,7 @@ test("status records none, notice, duplicate, invalid, and error outcomes with d
 	} });
 	h.controller.setEnabled(true);
 	for (const outcome of outcomes) {
+		if (outcome.result === "duplicate") h.controller.feedbackNotice(h.controller.currentNotice!.id, "dismiss");
 		await h.controller.check(true);
 		const last = h.controller.snapshot().details?.lastCheck;
 		assert.equal(last?.result, outcome.result);

@@ -30,7 +30,10 @@ for the active orchestrator or its participant. Hover or keyboard focus shows th
 topic, council state, and each participant's model, name, state and round. Clicking
 opens the session inspector's council panel. When several runs exist, the compact
 indicator prioritizes the latest nonterminal run, falling back to the latest run;
-the tooltip lists all runs. Terminal runs remain visible while their snapshot is
+the custom hover surface lists all runs and its lower edge touches the trigger's
+top, matching Plan without a visual gap so moving into it does not close it.
+No browser-native tooltip is used. See [status-bar hover details](../docs/decisions/0037-status-bar-hover-details.md).
+Terminal runs remain visible while their snapshot is
 available; this indicator does not introduce host-crash recovery or new persistence.
 
 The suite calls a scoped authenticated loopback ACP bridge, not nested subagents,

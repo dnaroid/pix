@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # DCP reliability mechanisms (as-is spec)
 
 > Risk classes: **data persistence / concurrency / cross-cutting**. Safety and
@@ -61,6 +66,16 @@ Active implemented contract.
 ## Budgeted auto-compression
 
 `src/dcp/auto-compress-budget.ts`
+
+- A retry `context_edit` must not turn the SDK's raw-history fallback estimate
+  into a false provider-native capacity floor. Canonical full-branch provenance
+  plus exact SDK scalar agreement authorizes rebasing to the actual DCP
+  projection, including resolved system/tool overhead; unknown or genuine native
+  floors remain conservative. The resolver is per context pass, not persisted
+  diagnostic/recovery authority, and uses the existing full-reader owner guard.
+  See [pressure policy](./dcp.md#pressure-and-autonomous-policy),
+  `src/dcp/context-usage.ts`, `test/dcp-context-usage.test.ts`, and repository-root
+  `tests/dcp-usage-fallback.integration.test.ts`.
 
 - `createBudgetedAutoCompressionBlock` never treats a source-size estimate as
   a net-savings estimate: it tries the economical prefix first, then the
@@ -296,6 +311,16 @@ The defect registries in those documents use inconsistent F-numbering between
 themselves, so per-defect closure is recorded there, not here. Current
 guarantees are exactly the ones verified above; the originals are preserved in
 git history.
+
+## Implementation
+
+- `external/pi-tools-suite/src/dcp/index.ts`
+- `external/pi-tools-suite/src/dcp/context-usage.ts`
+
+## Tests
+
+- `external/pi-tools-suite/test/dcp-context-usage.test.ts`
+- `tests/dcp-usage-fallback.integration.test.ts`
 
 ## Related files
 

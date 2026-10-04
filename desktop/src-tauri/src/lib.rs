@@ -33,11 +33,13 @@ mod desktop_notification;
 mod git_ci;
 mod git_ignore;
 mod git_operations;
+mod inactive_hover;
 mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
 mod native_process;
 mod preview_file;
+mod preview_file_action;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
 mod sidebar_registry_resource_hash;
@@ -10131,6 +10133,7 @@ pub fn run() {
             persist_task_attachment,
             open_attachment,
             open_local_file,
+            preview_file_action::preview_file_action,
             preview_file::read_preview_file,
             preview_file::open_preview_file_in_editor,
             read_project_file,

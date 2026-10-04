@@ -2,16 +2,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-	deleteRunDirs,
 	filterSubagentConfigForContext,
 	getRunState,
-	getRunRoot,
-	getSubagentRegistryPath,
 	isBlindModelRef,
 	loadSubagentConfig,
 	listSubagentSessionRecords,
-	loadSubagentRegistry,
-	removeSubagentRunsFromRegistry,
 	stopAgents,
 	type AgentCompletionHandler,
 	type RpcEventRecord,
@@ -26,7 +21,6 @@ import { agentStrategyPrompt, appendAgentStrategyPrompt } from "./core/agent-str
 import { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
 import {
 	bridgeImageAttachments,
-	removeImageAttachmentBridgeState,
 	type BridgedImageAttachment,
 	type BridgeImageAttachmentsResult,
 } from "./core/attachment-bridge.js";
@@ -38,7 +32,7 @@ import type { LiveAgent, SubagentsLiveStateEvent } from "./types.js";
 import type { AgentState } from "./core/types.js";
 import { publishRpcSessionState } from "../lib/rpc-session-state.js";
 import { clearSubagentsNativeWidget, updateSubagentsNativeWidget } from "./native-tui.js";
-import { ownedArtifactsPresentSync, ownedDeletableSync } from "./core/owned-retirement.js";
+import { ownedArtifactsPresentSync } from "./core/owned-retirement.js";
 
 function isTerminalAgentStatus(status: AgentState["status"]): boolean {
 	return status === "done" || status === "failed" || status === "stopped";
@@ -53,11 +47,6 @@ const COMPLETION_WATCH_INTERVAL_MS = 2_000;
 interface ShutdownTarget {
 	runDir: string;
 	agentIds?: string[];
-}
-
-interface ShutdownPlan {
-	targets: ShutdownTarget[];
-	runDirsToDelete: string[];
 }
 
 interface SubagentCatalogStateEvent {
@@ -335,7 +324,7 @@ export default function (pi: ExtensionAPI) {
 			if (event?.reason === "reload" || event?.reason === "fork") return;
 			try {
 				const shutdownSessionFile = sessionFileFromContext(ctx) ?? currentSessionFile;
-				await cleanupProjectSubagentState(ctx.cwd, liveAgents, { parentSession: shutdownSessionFile });
+				await stopProjectSubagents(ctx.cwd, liveAgents, { parentSession: shutdownSessionFile });
 				liveAgents.clear();
 				refreshSubagentOverlay();
 			} catch {
@@ -486,43 +475,39 @@ function selectedToolsInclude(event: unknown, toolName: string): boolean {
 	return !Array.isArray(selectedTools) || selectedTools.includes(toolName);
 }
 
-async function cleanupProjectSubagentState(
+async function stopProjectSubagents(
 	cwd: string,
 	liveAgents: Map<string, Map<string, LiveAgent>>,
 	options: { parentSession?: string } = {},
 ): Promise<void> {
-	const shutdownPlan = collectShutdownPlan(cwd, liveAgents, options.parentSession);
-	const signaled = signalShutdownTargets(shutdownPlan.targets, "SIGTERM");
+	const targets = collectShutdownTargets(cwd, liveAgents, options.parentSession);
+	const signaled = signalShutdownTargets(targets, "SIGTERM");
 	if (signaled > 0) await sleep(SESSION_SHUTDOWN_KILL_GRACE_MS);
-	signalShutdownTargets(shutdownPlan.targets, "SIGKILL");
+	signalShutdownTargets(targets, "SIGKILL");
 
-	for (const target of shutdownPlan.targets) stopRunBestEffort(target.runDir, target.agentIds, "SIGKILL");
-	const deletable = shutdownPlan.runDirsToDelete.filter((dir) => !hasPendingOwnedRun(dir));
-	deleteRunDirs(deletable);
-	removeSubagentRunsFromRegistry(cwd, deletable);
-	removeEmptySubagentState(cwd);
+	for (const target of targets) stopRunBestEffort(target.runDir, target.agentIds, "SIGKILL");
+	// Session lifetime is not evidence lifetime. Keep reports, attachments and
+	// registry pointers for later reads; explicit/TTL cleanup owns deletion.
 }
 
 
-function collectShutdownPlan(
+function collectShutdownTargets(
 	cwd: string,
 	liveAgents: Map<string, Map<string, LiveAgent>>,
 	parentSession: string | undefined,
-): ShutdownPlan {
-	if (!parentSession) return collectLiveShutdownPlan(liveAgents);
+): ShutdownTarget[] {
+	if (!parentSession) return [...liveAgents.entries()].map(([runDir, liveRun]) => ({
+		runDir,
+		agentIds: [...liveRun.keys()],
+	}));
 
 	const targets = new Map<string, Set<string>>();
-	const runDirsToDelete = new Set<string>();
 	const recordsByRun = groupRecordsByRun(listSubagentSessionRecords(cwd));
 
 	for (const [runDir, records] of recordsByRun) {
 		const matchingRecords = records.filter((record) => recordMatchesSession(record, parentSession));
 		if (matchingRecords.length === 0) continue;
 		mergeTargetIds(targets, runDir, matchingRecords.map((record) => record.agentId));
-		const liveRun = liveAgents.get(runDir);
-		if (records.every((record) => recordMatchesSession(record, parentSession)) && liveRunMatchesSession(liveRun, parentSession)) {
-			runDirsToDelete.add(runDir);
-		}
 	}
 
 	for (const [runDir, liveRun] of liveAgents) {
@@ -531,24 +516,9 @@ function collectShutdownPlan(
 			.map((agent) => agent.agentId);
 		if (matchingIds.length === 0) continue;
 		mergeTargetIds(targets, runDir, matchingIds);
-		const records = recordsByRun.get(runDir) ?? [];
-		if (records.every((record) => recordMatchesSession(record, parentSession)) && liveRunMatchesSession(liveRun, parentSession)) {
-			runDirsToDelete.add(runDir);
-		}
 	}
 
-	return {
-		targets: targetMapToTargets(targets),
-		runDirsToDelete: [...runDirsToDelete],
-	};
-}
-
-function collectLiveShutdownPlan(liveAgents: Map<string, Map<string, LiveAgent>>): ShutdownPlan {
-	const targets = [...liveAgents.entries()].map(([runDir, liveRun]) => ({
-		runDir,
-		agentIds: [...liveRun.keys()],
-	}));
-	return { targets, runDirsToDelete: targets.map((target) => target.runDir) };
+	return targetMapToTargets(targets);
 }
 
 function groupRecordsByRun(records: SubagentSessionRecord[]): Map<string, SubagentSessionRecord[]> {
@@ -567,10 +537,6 @@ function recordMatchesSession(record: SubagentSessionRecord, sessionFile: string
 
 function liveAgentMatchesSession(agent: LiveAgent, sessionFile: string): boolean {
 	return Boolean(agent.parentSession && pathsEqual(agent.parentSession, sessionFile));
-}
-
-function liveRunMatchesSession(liveRun: Map<string, LiveAgent> | undefined, sessionFile: string): boolean {
-	return !liveRun || [...liveRun.values()].every((agent) => liveAgentMatchesSession(agent, sessionFile));
 }
 
 function mergeTargetIds(targets: Map<string, Set<string>>, runDir: string, agentIds: string[]): void {
@@ -609,14 +575,6 @@ function signalShutdownTargets(targets: ShutdownTarget[], signal: StopSignal): n
 	return signaled;
 }
 
-function hasPendingOwnedRun(runDir: string): boolean {
-	try {
-		return fs.readdirSync(runDir, { withFileTypes: true }).some((entry) => entry.isDirectory() &&
-			ownedArtifactsPresentSync(path.join(runDir, entry.name)) &&
-			!ownedDeletableSync(path.join(runDir, entry.name)));
-	} catch { return true; }
-}
-
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -626,18 +584,5 @@ function stopRunBestEffort(runDir: string, agentIds: string[] | undefined, signa
 		stopAgents(runDir, agentIds, { signal });
 	} catch {
 		// Keep cleanup best-effort even if a process is already gone or cannot be signaled.
-	}
-}
-
-function removeEmptySubagentState(cwd: string): void {
-	removeImageAttachmentBridgeState(cwd);
-	const registry = loadSubagentRegistry(cwd);
-	if (Object.keys(registry.runs).length === 0 && Object.keys(registry.agents).length === 0) {
-		fs.rmSync(getSubagentRegistryPath(cwd), { force: true });
-	}
-	try {
-		fs.rmdirSync(getRunRoot(cwd));
-	} catch {
-		// Leave non-empty or concurrently used state intact.
 	}
 }

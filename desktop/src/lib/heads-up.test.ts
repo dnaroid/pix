@@ -8,4 +8,30 @@ describe("Heads up state validation", () => {
     expect(parseHeadsUpSnapshot(state)).toEqual(state);
     for (const value of [{ ...state, version: 2 }, { ...state, phase: "doing-stuff" }, { ...state, revision: -1 }, { ...state, reason: "x".repeat(513) }, { ...state, enabled: false }, { ...state, notice: { ...note, title: "x".repeat(161) } }, { ...state, notice: { ...note, evidence: [] } }, { ...state, notice: { ...note, evidence: [note.evidence[0], note.evidence[0]] } }, { ...state, notice: { ...note, id: "x\noff" } }, Object.assign(Object.create({ polluted: true }), state)]) expect(parseHeadsUpSnapshot(value)).toBeUndefined();
   });
+  it("validates bounded stack membership, payload consistency, IDs and disabled state", () => {
+    const second = { ...note, id: "note-2", title: "Second" };
+    const stacked = { ...state, notice: note, notices: [note, second] };
+    expect(parseHeadsUpSnapshot(stacked)?.notices).toHaveLength(2);
+    for (const invalid of [
+      { ...stacked, notices: [note, second, { ...note, id: "note-3" }, { ...note, id: "note-4" }] },
+      { ...stacked, notices: [note, note] },
+      { ...stacked, notices: [second] },
+      { ...stacked, notice: null },
+      { ...stacked, notices: [] },
+      { ...stacked, enabled: false },
+      { ...stacked, notices: [null] },
+    ]) expect(parseHeadsUpSnapshot(invalid)).toBeUndefined();
+    expect(parseHeadsUpSnapshot({ ...state, notice: null, notices: [] })?.notices).toEqual([]);
+    expect(parseHeadsUpSnapshot(state)?.notices).toBeUndefined();
+  });
+  it("accepts neutral awaiting-review snapshots without exposing retained claims", () => {
+    const waiting = { ...state, notice: null, notices: [], awaitingReview: true };
+    expect(parseHeadsUpSnapshot(waiting)).toEqual(waiting);
+    expect(parseHeadsUpSnapshot({ ...state, awaitingReview: false })?.notice).toEqual(note);
+    for (const invalid of [
+      { ...waiting, notice: note }, { ...waiting, notices: [note] },
+      { ...waiting, enabled: false }, { ...waiting, phase: "off" },
+      { ...waiting, awaitingReview: "true" },
+    ]) expect(parseHeadsUpSnapshot(invalid)).toBeUndefined();
+  });
 });

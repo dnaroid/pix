@@ -53,7 +53,7 @@ try {
   const trigger = page.locator("[data-observer-status] > button");
   assert.equal((await trigger.innerText()).trim(), "");
   assert.match(await trigger.getAttribute("class"), /text-muted-foreground/);
-  assert.equal(await trigger.locator("svg.lucide-eye").count(), 1);
+  assert.equal(await trigger.locator("svg.lucide-binoculars").count(), 1);
   await trigger.click();
   const popup = page.getByRole("dialog", { name: "Observer status" });
   await popup.waitFor();
@@ -72,7 +72,7 @@ try {
   await page.screenshot({ path: join(output, "popup-enabled.png") });
   await popup.getByRole("button", { name: "Check now", exact: true }).click();
   await page.waitForFunction(() => window.observerSmoke.snapshot().phase === "checking");
-  assert.equal(await trigger.locator("svg.lucide-eye.animate-pulse").count(), 1);
+  assert.equal(await trigger.locator("svg.lucide-binoculars.animate-pulse").count(), 1);
   await page.emulateMedia({ reducedMotion: "reduce" });
   assert.equal(await trigger.locator("svg").evaluate((element) => getComputedStyle(element).animationName), "none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -86,7 +86,7 @@ try {
   assert.match(await popup.innerText(), /Cancelled/);
   assert.equal(await page.getByRole("textbox", { name: "Main draft" }).inputValue(), "Keep this draft");
   checks.push("open is read-only; toggle/check are explicit; Off remains available during checking; draft preserved");
-  checks.push("eye only; grey off/primary enabled; pulse only while checking with reduced-motion support; standard button switch; no static settings in popup");
+  checks.push("binoculars only; grey off/primary enabled; pulse only while checking with reduced-motion support; standard button switch; no static settings in popup");
 
   await popup.focus();
   await page.keyboard.press("Shift+Tab");

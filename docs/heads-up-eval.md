@@ -108,6 +108,14 @@ or Russian substrings. This is a **lexical proxy**, not proof that the explanati
 is correct. Real IDs alone are not proof either. A correct paraphrase can fail the
 proxy; conversely, a misleading warning containing the right words can pass.
 
+The production reply now contains a bounded `notices` array (up to three) and can
+review existing cards while discovering others. This corpus still has exactly one
+expected problem per positive case: multiple cards are `wrong_notice` requiring
+human review, even if the first matches its rubric. Negative cases treat any card
+as a false positive. Runtime deterministic tests cover stack revalidation and
+selection separately; the historical live results above predate this prompt/schema
+and do not establish the new stack's model quality.
+
 Report outcomes are `tp`, `tn`, `fp`, `fn`, `wrong_notice`, `invalid`, `error`,
 `timeout`, `cancelled` and `not_run`. `wrong_notice` means rubric mismatch,
 not an

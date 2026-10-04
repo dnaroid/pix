@@ -129,6 +129,7 @@
           type="button"
           title={attachment.kind === "file" ? `Open ${attachment.name}` : `Preview ${attachment.name}`}
           aria-label={attachment.kind === "file" ? `Open ${attachment.name}` : `Preview ${attachment.name}`}
+          data-context-file-path={attachment.path ?? ""}
           onclick={() => onOpen(attachment)}
         >
           {#if attachment.kind === "image" && previewUrl(attachment) && !failedPreviews.has(attachment.id)}
@@ -137,6 +138,7 @@
                 ? "block h-auto max-h-80 w-auto max-w-full object-contain"
                 : "h-full w-full object-cover"}
               src={previewUrl(attachment)}
+              data-image-path={attachment.path}
               alt=""
               onload={(event) => rememberDimensions(attachment, event)}
               onerror={() => markPreviewFailed(attachment.id)}

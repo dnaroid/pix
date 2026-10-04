@@ -53,16 +53,24 @@ test("always-none cannot pass the eval and undefined precision is not reported a
 });
 
 test("always-warning gets false positives; a wrong topic with real IDs is not a positive hit", () => {
-	const results = HEADS_UP_CASES.map((item) => result(item, message({ kind: "heads_up", title: "Add more tests", consequence: "It might be useful.", evidenceIds: [buildCaseInput(item).records[0]!.id] })));
+	const results = HEADS_UP_CASES.map((item) => result(item, message({ kind: "heads_up", notices: [{ id: null, title: "Add more tests", consequence: "It might be useful.", evidenceIds: [buildCaseInput(item).records[0]!.id] }] })));
 	const summary = summarize(results);
 	assert.equal(summary.counts.wrong_notice, 8); assert.equal(summary.counts.fp, 13);
 	assert.equal(summary.precisionProxy, 0); assert.equal(summary.falsePositiveRate, 1);
 });
 
+test("a correct first card cannot hide extra warnings outside the single-problem eval rubric", () => {
+	const positive = HEADS_UP_CASES[0]!;
+	if (positive.expected.kind !== "heads_up") throw new Error("Expected positive case");
+	const notices = positive.expected.reference.notices;
+	const scored = assess(positive, message({ kind: "heads_up", notices: [...notices, { ...notices[0], title: "Unrelated warning" }] }));
+	assert.equal(scored.outcome, "wrong_notice"); assert.match(scored.issues.join(" "), /additional notices/);
+});
+
 test("invalid JSON, truncation and invented evidence are failures, never correct silence", () => {
 	const negative = HEADS_UP_CASES.find((item) => item.expected.kind === "none")!;
 	for (const response of [message("not JSON"), message({ kind: "none", extra: true }), message({ kind: "none" }, { stopReason: "length" }),
-		message({ kind: "heads_up", title: "A", consequence: "B", evidenceIds: ["unknown"] })]) {
+		message({ kind: "heads_up", notices: [{ id: null, title: "A", consequence: "B", evidenceIds: ["unknown"] }] })]) {
 		assert.equal(assess(negative, response).outcome, "invalid");
 		assert.equal(summarize([result(negative, response)]).correctSilenceRate, 0);
 	}
@@ -72,7 +80,7 @@ test("required evidence and consequence anchors are separate and transparent che
 	const positive = HEADS_UP_CASES[0]!;
 	assert.equal(positive.expected.kind, "heads_up");
 	if (positive.expected.kind !== "heads_up") return;
-	const wrong = assess(positive, message({ ...positive.expected.reference, evidenceIds: ["e01"] }));
+	const wrong = assess(positive, message({ ...positive.expected.reference, notices: [{ ...positive.expected.reference.notices[0], evidenceIds: ["e01"] }] }));
 	assert.equal(wrong.outcome, "wrong_notice");
 	assert.match(wrong.issues[0]!, /missing supporting evidence/);
 	const bad = structuredClone(positive); bad.id = "bad-case"; bad.expected = { ...positive.expected, evidenceGroups: [["not-sent"]] };
@@ -101,7 +109,7 @@ test("TypeError and equivalent exception wording count as a config failure ancho
 		"Старый конфиг с port вызывает TypeError вместо загрузки.",
 		"Legacy port config raises an exception instead of loading.",
 		"Старый конфиг с port вызывает исключение.",
-	]) assert.equal(assess(item, message({ kind: "heads_up", title: "Config compatibility", consequence, evidenceIds: ["e03"] })).outcome, "tp");
+	]) assert.equal(assess(item, message({ kind: "heads_up", notices: [{ id: null, title: "Config compatibility", consequence, evidenceIds: ["e03"] }] })).outcome, "tp");
 });
 
 test("case/model selection, repeats and total-call ceiling fail closed before inference", () => {

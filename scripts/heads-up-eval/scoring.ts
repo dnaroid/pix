@@ -50,9 +50,13 @@ export function assess(testCase: EvalCase, message: AssistantMessage): Pick<Case
 	if (parsed.kind === "invalid") return { ...base, outcome: "invalid", issues: ["production parser rejected the response"] };
 	if (parsed.kind === "none") return { ...base, outcome: testCase.expected.kind === "none" ? "tn" : "fn", issues: [] };
 	if (testCase.expected.kind === "none") return { ...base, outcome: "fp", issues: [testCase.rationale] };
-	const cited = new Set(parsed.notice.evidence.map((entry) => entry.id));
-	const text = normalize(`${parsed.notice.title} ${parsed.notice.consequence}`);
+	const notice = parsed.notices[0]!;
+	const cited = new Set(notice.evidence.map((entry) => entry.id));
+	const text = normalize(`${notice.title} ${notice.consequence}`);
 	const issues: string[] = [];
+	// The current corpus specifies one supported problem per positive case. Extra
+	// warnings must not hide behind a correct first card and earn a false pass.
+	if (parsed.notices.length !== 1) issues.push("additional notices outside the single-problem rubric; human review required");
 	for (const group of testCase.expected.evidenceGroups) {
 		if (!group.some((id) => cited.has(id))) issues.push(`missing supporting evidence: ${group.join(" or ")}`);
 	}

@@ -129,6 +129,11 @@ export interface DesktopModelUsageLimitWindow {
 	readonly label?: string;
 }
 
+export interface DesktopModelUsageResetCredit {
+	readonly title: string;
+	readonly expiresAt?: number;
+}
+
 export interface DesktopModelUsageStatus {
 	readonly modelKey: string;
 	readonly provider: "openai" | "zhipu" | "google-antigravity" | "anthropic";
@@ -136,6 +141,9 @@ export interface DesktopModelUsageStatus {
 	readonly accountEmail?: string;
 	readonly weekly?: DesktopModelUsageLimitWindow;
 	readonly hourly?: DesktopModelUsageLimitWindow;
+	/** Available account-level Codex reset credits; independent from quota-window resets. */
+	readonly resetCredits?: readonly DesktopModelUsageResetCredit[];
+	readonly resetCreditsAvailableCount?: number;
 	/** Provider response-header windows (Anthropic RPM/TPM or OAuth unified quota). */
 	readonly rateWindows?: readonly DesktopModelUsageLimitWindow[];
 	/**

@@ -64,6 +64,7 @@ import {
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { safeGetContextUsage } from "../context-usage.js"
+import { createDcpContextUsageResolver } from "./context-usage.js"
 import { FreshToolResultTracker } from "./fresh-tool-results.js"
 import { CompressionRegretTracker } from "./regret-signals.js"
 import { RoutinePressureTracker } from "./routine-pressure.js"
@@ -547,12 +548,16 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		) => {
 			if (state.sessionEpoch !== contextEpoch) throw new DcpJournalError("DCP projection belongs to a stale owner")
 			lastProviderReadyProjectionEpoch = providerReady ? state.sessionEpoch : undefined
-			const observedUsage = safeGetContextUsage(ctx)
+			const resolvedUsage = resolveContextUsage(safeGetContextUsage(ctx), messages)
+			const observedUsage = resolvedUsage.usage
 			diagnosticSnapshot = dcpRequestSnapshot(effectiveConfig, state, ctx.model,
 				observedUsage, contextMessages, messages, reason)
 			const routine = routinePressureTracker.estimate(pressureOwner,
-				normalizeDcpContextUsage(observedUsage)?.tokens,
-				contextMessages, rawContextTokens, diagnosticSnapshot.projectedTokens, state.compressionBlocks)
+				resolvedUsage.source === "sdk-fallback-rebased" ? null : observedUsage?.tokens,
+				contextMessages, rawContextTokens,
+				resolvedUsage.source === "sdk-fallback-rebased"
+					? Math.max(diagnosticSnapshot.projectedTokens, observedUsage?.tokens ?? 0) : diagnosticSnapshot.projectedTokens,
+				state.compressionBlocks)
 			diagnosticSnapshot.routineProjectedTokens = routine.projectedTokens
 			diagnosticSnapshot.routineUsageAdjustmentTokens = routine.adjustmentTokens
 			if (diagnosticSnapshot.pressure === "routine" && routine.projectedTokens <= (diagnosticSnapshot.routineTokens ?? 0)) {
@@ -613,6 +618,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		lastProviderReadyProjectionEpoch = undefined
 		const fullBranch = await readDcpJournalBranch(ctx)
 		if (state.sessionEpoch !== contextEpoch) throw new DcpJournalError("DCP context owner changed during history read")
+		const resolveContextUsage = createDcpContextUsageResolver(fullBranch)
 		annotateMessagesWithBranchEntryIds(contextMessages, fullBranch)
 		const rehydration = rehydrateToolRecordsFromMessages(contextMessages, state)
 		if (rehydration.recordsUpdated > 0) {
@@ -636,7 +642,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		// creation. The bounded emergency safety path remains separate, matching
 		// the manual-mode prompt.
 		const ctxModel = (ctx as any).model
-		const observedUsage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+		const resolvedUsage = resolveContextUsage(safeGetContextUsage(ctx), prunedMessages)
+		const observedUsage = resolvedUsage.usage
 		// Model capacity is authoritative even while SDK usage still describes
 		// the preceding model. Keep its token count only as a conservative floor.
 		const modelWindow = Number.isFinite(ctxModel?.contextWindow) && ctxModel.contextWindow > 0 ? ctxModel.contextWindow : undefined
@@ -706,8 +713,11 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			const hardEmergencyReached = nativePressure.hardEmergencyReached || budget.hardPressure
 			const contextLimitReached = nativePressure.contextLimitReached || budget.pressured
 			const emergencyPressureReached = nativePressure.emergencyPressureReached || budget.pressured
-			const routinePressure = routinePressureTracker.estimate(pressureOwner, nativeUsage?.tokens,
-				contextMessages, rawContextTokens, repoProjectedTokens, state.compressionBlocks)
+			const routinePressure = routinePressureTracker.estimate(pressureOwner,
+				resolvedUsage.source === "sdk-fallback-rebased" ? null : nativeUsage?.tokens,
+				contextMessages, rawContextTokens,
+				resolvedUsage.source === "sdk-fallback-rebased" ? Math.max(repoProjectedTokens, nativeUsage?.tokens ?? 0) : repoProjectedTokens,
+				state.compressionBlocks)
 			// Correct only routine policy. Capacity, strong pressure and emergency
 			// recovery retain the unadjusted conservative provider-native floor.
 			const policyTokens = emergencyPressureReached ? budget.projectedBeforeTokens : routinePressure.projectedTokens

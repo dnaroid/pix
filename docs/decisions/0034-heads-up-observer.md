@@ -197,3 +197,146 @@ correction, and lifecycle invalidation can drop late reports. This does not clos
 the verified-diff/test-evidence gap. Revisit when child mutation/test provenance
 exists or representative sessions show omissions/false positives; do not infer
 production readiness from synthetic eval scores alone.
+
+## Settled checks and evidence-driven card review — 2026-10-04
+
+Status: accepted. This supersedes the original `turn_end` launch policy and
+open-notice suppression of all automatic requests, not the single-card,
+opt-in, bounded-inference decision. Contract: [Heads up observer](../../specs/heads-up-observer.md).
+
+Context: the user reported a HUD test failure warning after a successful rerun,
+then explicitly chose successful final agent settlement over intermediate turns
+or todo boundaries. The user also approved rechecking an open card when new
+evidence arrives after work completes, rather than periodic polling or a stack.
+
+Evidence: in session `01a10822-1e93-779e-866f-13f50013a78b`, the failed codemode
+result `0eb25993` was persisted at 18:55:01.651Z; Observer usage `64c7906f` at
+18:55:06.939Z; test-expectation fixes `565271fd` at 18:55:19.024Z; the successful
+shell rerun `0a8f9e7e` (82/82, six files) at 18:56:01.178Z; successful typecheck
+`4edced57` at 18:56:15.826Z. The user's later inserted notice `2050c618` cited the
+failed result. No Observer usage lies between that completed check and the
+inserted notice. The runtime accounts usage after the provider completes, before
+publishing. This supports an early assessment left visible across repairs, not
+a completion delayed until after the retest. Exact inference snapshots and UI
+delivery timestamps were not persisted, so those cannot be reconstructed.
+
+Code evidence: ordinary results did not invalidate inference; `generation`
+guarded lifecycle ownership and `revision` ordered UI snapshots. Open cards
+blocked automatic reassessment. Context selection also serialized work backwards
+and could skip a large newer record while backfilling an older small failure.
+Those are independently reproducible risks, not proven causes of this incident.
+Codemode and shell share the tool-result reducer; nested codemode calls arrive
+as bounded aggregate text. There is no demonstrated shell-specific filtering bug.
+
+Decision and scope:
+- Accumulate completed turns, launch only after successful final settlement
+  (after queued continuations), or accepted delegated evidence while idle.
+  Failed/aborted settlement is not a trigger. Manual checks remain immediate.
+- Refresh projected evidence before publishing a finding or applying a review.
+  Changed bounded user/tool/delegated evidence, edited cited assistant text, or
+  an active parent during automatic inference causes a coalesced fresh check,
+  not delivery of the old verdict. Preserve lifecycle tokens and physical lock.
+- Review the existing card on settled changed evidence, within the same
+  interval/input/hour limits. The model reassesses that problem, not a new topic:
+  still supported means keep the card identity and original TTL; `none` removes
+  it. Unrelated successful checks do not imply resolution. No new evidence means
+  no automatic paid review. Closed cards cannot be resurrected by late results.
+- Serialize selected records chronologically and keep a contiguous recent work
+  suffix under the total budget, plus pinned instructions. Do not fill a gap left
+  by a large fresh result with smaller old failure evidence.
+
+Alternatives: periodic polling spends on unchanged context and can observe
+intermediate repairs; todo completion is optional and does not prove testing is
+finished; a prompt-only change cannot enforce delivery freshness or restore
+omitted records; blanket invalidation on every event starves useful findings;
+command-name/exit-code heuristics cannot reliably match arbitrary nested tools.
+A multi-card stack changes selection/UX and retains more stale claims, so remains
+out of scope.
+
+Consequences and limits: warnings arrive later and brief problems fixed within
+one run are normally never shown. Changed evidence may defer an unrelated valid
+finding, but reassessment can retain it; cost remains bounded. A visible card can
+remain during work, a failed/refused review or until TTL. Model inference is still
+fallible; prefix clipping and bounded history can omit relevant evidence, and
+long records can reduce useful retained context. Deterministic tests establish
+scheduling, freshness, payload and ownership behavior, not model accuracy.
+Revisit on measured missed warnings, review cost/starvation, or availability of
+authoritative per-check identity/provenance; do not add polling or command
+matching based solely on this incident.
+
+## Bounded active stack — 2026-10-04
+
+Status: accepted. Supersedes the single-card/discovery suppression portions above,
+not settlement, freshness, opt-in or inference budgets. Contract:
+[Heads up observer](../../specs/heads-up-observer.md).
+
+Context and evidence: after the freshness fix the user explicitly requested the
+proposed stack because one open card could hide other independent problems.
+The approved proposal is up to three active findings, one visible card with
+counter/navigation, and one combined review/discovery request under the existing
+budgets. No claim is made about another product's undocumented stacking behavior.
+
+Decision: return a complete supported set of up to three cards. Retained cards
+use their existing IDs and preserve age/expiry; resolved/unsupported cards are
+omitted. New cards use null IDs at the model boundary and receive runtime IDs.
+Strict validation rejects the entire malformed/truncated/unknown-ID response;
+it must not partly remove old cards. Exact topic duplicates merge; semantic
+independence and relevance remain model judgments. Keep surviving cards in their
+prior order, then append discoveries. Navigation changes selection only, never
+requests inference or extends TTL. Desktop selection is local and scoped to its
+runtime/session; TUI prev/next updates the selected snapshot member. Old Desktop
+singleton snapshots remain readable via optional `notices` compatibility.
+
+Concurrency: one physical inference lock/reservation serves the whole stack.
+Changed evidence still rejects completion; membership changes (dismiss/expiry)
+during assessment reject it atomically, preventing resurrection. Selection changes
+do not cancel useful assessments. Independent expiries share one earliest-expiry
+timer. Runtime replacement/lifecycle invalidation clears the stack.
+
+Alternatives: retaining a singleton misses simultaneous problems; separate review
+and discovery calls multiply spend; an unbounded queue retains more stale claims;
+showing all cards at once crowds the composer. A full-set reply is simpler to
+validate atomically than separate add/update/remove operations.
+
+Consequences/assumptions: three is a bounded UX choice, not a measured optimum.
+The unchanged output budget demands concise replies; truncation fails closed.
+Descriptors can be clipped within small input budgets, explicitly labelled, while
+preserving all active IDs. The deterministic suite covers limits, lifecycle,
+selection, ownership and schema, not model accuracy. The current live-eval corpus
+still expects one problem per positive fixture, so extra cards require human review
+and cannot earn a proxy pass. Revisit after measured missed independent findings,
+semantic duplicates, truncation rates or review cost; no increased budgets or
+periodic polling is approved by this change.
+
+## Strict visible freshness follow-up — 2026-10-04
+
+Status: accepted. Supersedes retaining visible assertions across new work and
+failed/refused reassessment, not the bounded-stack or inference-budget decisions.
+Contract: [strict visible freshness](../../specs/heads-up-observer.md#strict-visible-freshness).
+
+Context: after the stale HUD warning and bounded-stack work, the user requested
+currently supported cards rather than temporary problems that may already have
+been fixed, and approved hiding unconfirmed cards without increasing limits.
+Evidence: rejecting stale inference responses alone left previously displayed
+cards visible during later repairs, errors and quota refusals. The SDK can emit
+message completion before persistence, so projection-only comparisons leave a
+delivery race. Assumption: conservative visibility is preferable to presenting
+an old assessment as current; this does not establish model accuracy.
+
+Decision: hide the complete visible stack synchronously on parent start or
+user/tool/delegated evidence completion. Keep bounded private candidates with
+original IDs and TTLs. Publish only neutral awaiting-review state, and restore
+only cards supported by a successful current assessment after settlement.
+An evidence-event revision complements projection comparison and lifecycle tokens.
+Manual checks remain immediate but cannot publish claims while the parent runs.
+Errors, unavailable context, malformed responses and limits never restore hidden
+claims. Existing budgets, request ownership/accounting, expiry and no-polling
+policy remain unchanged; neither hiding nor a refusal queues repeated retries.
+
+Alternatives: TTL-only retention keeps known-stale assertions visible; optimistic
+retention until review repeats the reported failure; polling or higher budgets
+adds cost without guaranteeing truth; clearing all identity loses stable review
+and expiry semantics. Consequences: cards can remain absent while review is
+blocked, and clipping can prevent reconfirmation. Hidden does not mean resolved.
+Revisit if measured missed findings or excessive conservative hiding outweigh
+stale-warning risk, or authoritative fresh repository evidence becomes available.

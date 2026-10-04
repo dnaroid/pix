@@ -155,16 +155,12 @@
         class="flex h-6 min-w-0 items-center gap-1.5 rounded-sm bg-transparent px-1.5 text-primary transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         type="button"
         aria-label={quotaWaitIndicator.label}
-        title={`${quotaWaitIndicator.label} · click to reopen`}
         data-quota-wait-indicator
         onclick={() => quotaWaitIndicator.onReopen()}
       >
         <Hourglass class="h-3 w-3 shrink-0" aria-hidden="true" />
         <span class="max-w-[240px] truncate font-mono tabular-nums">{quotaWaitIndicator.label}</span>
       </button>
-    {/if}
-    {#if observer}
-      <ObserverStatus {...observer} />
     {/if}
     <RuntimeStatusBarItems
       status={runtimeStatus}
@@ -215,8 +211,18 @@
     {/each}
   </div>
 
-  <SessionBrainstormStatus snapshot={sessionBrainstormSnapshot} open={sessionActivityOpen} onOpen={onOpenSessionActivity} />
+  <div class="flex shrink-0 items-center gap-0.5" data-status-right>
+  <SessionBrainstormStatus
+    snapshot={sessionBrainstormSnapshot}
+    open={sessionActivityOpen}
+    trailingSeparator={!!observer || (!sessionActivityOpen && (sessionActivity.activeSubagents > 0 || (sessionActivity.openTodos > 0 && sessionActivity.totalTodos > 0)))}
+    onOpen={onOpenSessionActivity}
+  />
+  {#if observer}
+    <ObserverStatus {...observer} />
+  {/if}
   <SessionActivityStatusHud
+    leadingSeparator={!!observer}
     summary={sessionActivity}
     subagentSnapshot={sessionSubagentSnapshot}
     todoSnapshot={sessionTodoSnapshot}
@@ -227,4 +233,5 @@
     {onClearTodos}
     {onOpenSessionActivity}
   />
+  </div>
 </footer>

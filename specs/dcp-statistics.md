@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # DCP statistics and lifecycle observability
 
 ## Type
@@ -25,6 +30,12 @@ The report separates these quantities:
   history counts. It is dated and is
   not presented as live provider-measured token usage. A changed model makes an
   old snapshot stale; an epoch boundary invalidates it until another request.
+  SDK usage itself may temporarily count raw history after a retry context edit;
+  the last prepared request uses the corroborated fallback rebasing described in
+  [DCP pressure policy](./dcp.md#pressure-and-autonomous-policy), retaining system
+  overhead without applying routine calibration twice. That correction does not
+  overwrite the SDK status reading; a later measured response replaces its raw
+  fallback naturally.
 - Active/retired/total journal blocks, active summary estimates and distinct
   pruned result bodies. Block count is not called an operation count. The
   input/projection reduction covers message estimates, not the system prompt,
@@ -228,6 +239,18 @@ result append and then exercises `session_start(startup) -> before_agent_start
 compression/IDs, retained late result, excluded side-branch/raw compressed text,
 no forced UI hydration and an append-only archive. It is a deterministic
 runtime-lifecycle test, not a live Desktop/TUI GUI or remote-model test.
+
+## Implementation
+
+- `external/pi-tools-suite/src/dcp/statistics.js`
+- `external/pi-tools-suite/src/dcp/index.ts`
+- `external/pi-tools-suite/src/dcp/context-usage.ts`
+
+## Tests
+
+- `tests/dcp-stats.test.ts`
+- `external/pi-tools-suite/test/dcp-context-usage.test.ts`
+- `tests/dcp-usage-fallback.integration.test.ts`
 
 ## Verification
 

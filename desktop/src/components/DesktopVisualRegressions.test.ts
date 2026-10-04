@@ -387,7 +387,7 @@ describe("desktop visual regressions", () => {
 
   it("keeps project identity and Git branch out of Desktop status chrome", () => {
     const context = runtimeStatusSource.indexOf("data-runtime-context");
-    const usage = runtimeStatusSource.indexOf('title="Session usage and cost"');
+    const usage = runtimeStatusSource.indexOf('aria-label="Session usage and cost"');
     expect(context).toBeGreaterThanOrEqual(0);
     expect(usage).toBeGreaterThan(context);
     expect(runtimeStatusSource).not.toContain("data-runtime-workspace");
@@ -416,7 +416,8 @@ describe("desktop visual regressions", () => {
   });
 
   it("opens recorded session spend from Usage instead of refreshing account quota", () => {
-    expect(runtimeStatusSource).toContain('title="Session usage and cost"');
+    expect(runtimeStatusSource).toContain('aria-label="Session usage and cost"');
+    expect(runtimeStatusSource).not.toContain('title="Session usage and cost"');
     expect(runtimeStatusSource).toContain('aria-label="Session usage and cost"');
     expect(runtimeStatusSource).toContain("onOpenSessionUsage()");
     expect(runtimeStatusSource).toContain("provider.models as model");
@@ -455,7 +456,26 @@ describe("desktop visual regressions", () => {
     expect(sessionInspectorSource).not.toContain("DcpContextPanel");
   });
 
-  it("opens the compact context details on click instead of hover or the DCP statistics popover", () => {
+  it("opens context and usage details on hover or focus without toggling them on click", () => {
+    for (const panel of ["Context", "Usage"]) {
+      expect(runtimeStatusSource).toContain(`onpointerenter={open${panel}}`);
+      expect(runtimeStatusSource).toContain(`onfocusin={open${panel}}`);
+      expect(runtimeStatusSource).toContain(`onclick={open${panel}}`);
+    }
+    expect(runtimeStatusSource).not.toContain("toggleContext");
+    expect(runtimeStatusSource).not.toContain("toggleUsage");
+    expect(runtimeStatusSource).toContain("if (usageOpen) return;");
+    expect(runtimeStatusSource).toContain('onpointerleave={(event) => leaveDetails(event, "context")}');
+    expect(runtimeStatusSource).toContain('onfocusout={(event) => leaveDetails(event, "usage")}');
+    expect(runtimeStatusSource).toContain("region.contains(event.relatedTarget)");
+    expect(runtimeStatusSource).toContain("region.contains(document.activeElement)");
+    expect(runtimeStatusSource).toContain('region.matches(":hover")');
+    // Panels touch their triggers, matching Plan's lower edge without a dead gap.
+    expect(runtimeStatusSource.match(/bottom-full/g)).toHaveLength(2);
+    expect(runtimeStatusSource).not.toContain("pb-1.5");
+    expect(runtimeStatusSource).not.toContain("bottom-[calc(100%+0.375rem)]");
+    expect(runtimeStatusSource).toContain('event.key === "Escape"');
+    expect(runtimeStatusSource).toContain('onpointerdown={closeOutside}');
     expect(runtimeStatusSource).toContain('{#snippet contextScale(size: "compact" | "expanded")}');
     expect(runtimeStatusSource).toContain('data-context-scale={size}');
     expect(runtimeStatusSource).toContain('class={["h-full min-w-0", contextCellClass(segment.kind)]}');
@@ -520,7 +540,7 @@ describe("desktop visual regressions", () => {
   it("shows the single rate-limit window label beside the percentage without hover", () => {
     // The collapsed API-key rate window (RPM/ITPM/OTPM/TPM) keeps a visible
     // label even as the only indicator; OAuth H/W labels stay as they were.
-    expect(runtimeStatusSource).toContain("displayModelUsage(status)");
+    expect(runtimeStatusSource).toContain("displayModelUsage(status, now)");
     expect(runtimeStatusSource).toContain("limitingRateWindow(modelUsage)");
     expect(runtimeStatusSource).toContain('{#if label === "R"}');
     expect(runtimeStatusSource).toContain('<span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>');

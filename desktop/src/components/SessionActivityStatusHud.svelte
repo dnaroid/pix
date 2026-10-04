@@ -31,6 +31,7 @@
 
   let {
     summary,
+    leadingSeparator = false,
     subagentSnapshot,
     todoSnapshot,
     promptRunning,
@@ -41,6 +42,7 @@
     onOpenSessionActivity,
   }: {
     summary: SessionActivitySummary;
+    leadingSeparator?: boolean;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
     todoSnapshot: SessionTodoSnapshot | undefined;
     promptRunning: boolean;
@@ -135,6 +137,9 @@
     aria-label={"Session activity. " + activityLabel}
     data-session-activity-summary
   >
+    {#if leadingSeparator}
+      <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="observer-activity"></span>
+    {/if}
     {#each compactIndicators as indicator, index (indicator.runDir + "\0" + indicator.agent.id)}
       {@const tooltipId = "session-subagent-status-tooltip-" + index}
       {@const AgentIcon = agentIcon(indicator.preview?.icon)}
@@ -182,7 +187,7 @@
                   {formatSessionSubagentElapsed(indicator.agent.startedAt, subagentSnapshot?.checkedAt ?? Date.now())}
                 </span>
               </div>
-              <div class="mt-0.5 truncate font-mono text-xs text-foreground" title={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
+              <div class="mt-0.5 truncate font-mono text-xs text-foreground" aria-label={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
                 {indicator.agent.id}
               </div>
               <div
@@ -226,10 +231,13 @@
     {/if}
 
     {#if hasTodoProgress}
+      {#if indicators.length > 0}
+        <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="agents-plan"></span>
+      {/if}
       <div class="group relative">
         <button
           class={[
-            "flex h-7 items-center justify-center gap-1 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+            "flex h-6 items-center justify-center gap-1 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             activityToneClass(),
           ]}
           type="button"
@@ -276,7 +284,6 @@
               <button
                 class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-panel-hover hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
                 type="button"
-                title="Clear session plan"
                 aria-label="Clear session plan"
                 disabled={!canClearTodos || clearingTodos || todoRows.length === 0}
                 onclick={() => { void clearTodos(); }}
@@ -305,7 +312,7 @@
                     data-session-todo-current={isCurrent ? "true" : undefined}
                   >
                     <div class="flex min-w-0 items-start gap-1.5">
-                      <span class={["mt-px shrink-0", todoStatusTone(task.status)]} title={todoStatusLabel(task.status)}>
+                      <span class={["mt-px shrink-0", todoStatusTone(task.status)]} aria-label={todoStatusLabel(task.status)}>
                         {#if task.status === "completed"}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
                         {:else if task.status === "in_progress"}<Clock3 class="h-3.5 w-3.5" aria-hidden="true" />
                         {:else if task.status === "deferred"}<CirclePause class="h-3.5 w-3.5" aria-hidden="true" />

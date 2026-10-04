@@ -50,6 +50,13 @@ try {
         <a id="local" href="file:///tmp/example.txt">Local file</a>
         <a href="https://example.com/linked"><img id="linked-image" src="data:image/png;base64,AA=="></a>
         <img id="preview-image" src="data:image/png;base64,AA==" data-image-path="/project/chart.png">
+        <button id="preview-tab" data-context-file-path="src/main.ts"><span id="preview-tab-label">main.ts</span></button>
+        <section id="preview-surface" data-context-file-path="src/main.ts">
+          <div id="preview-blank">Blank preview space</div>
+          <textarea id="preview-editor">Editable preview</textarea>
+        </section>
+        <button data-context-file-path="/tmp/my video.mov"><video id="preview-video" src="data:video/mp4;base64,AA=="></video></button>
+        <button id="missing-path" data-context-file-path="">Unavailable file</button>
       </section>`;
     const records = [];
     const errors = [];
@@ -61,10 +68,11 @@ try {
     });
     document.querySelector("#message").addEventListener("contextmenu", (event) => controller.openContextMenu(event, "m1"));
     const dispose = installDesktopContextMenu({
+      workspace: () => "/project",
       reportError: (error) => errors.push(String(error)),
       createMenu: async (context) => ({
         popup: async (position) => records.push({
-          kind: context.kind, linkUrl: context.linkUrl, position,
+          kind: context.kind, linkUrl: context.linkUrl, filePath: context.filePath, position,
           focus: document.activeElement?.id, selected: document.getSelection()?.toString(),
         }),
         close: async () => {},
@@ -131,6 +139,53 @@ try {
     assert.equal(result.records.at(-1).linkUrl, undefined, "image actions override a surrounding link");
   }
 
+  for (const [id, path] of [["preview-tab-label", "/project/src/main.ts"], ["preview-blank", "/project/src/main.ts"], ["preview-video", "/tmp/my video.mov"], ["missing-path", undefined]]) {
+    result = await click(id);
+    assert.equal(result.records.at(-1).kind, "file");
+    assert.equal(result.records.at(-1).filePath, path);
+  }
+  result = await click("preview-editor");
+  assert.equal(result.records.at(-1).kind, "editable", "file context must not replace text editing");
+
+  // Hydrate real Markdown video markup: context actions must target the media,
+  // not inherit the surrounding document's path, even while resolution waits.
+  // Keep media loading pending: this regression tests routing, not video decoding.
+  await page.route("**/__context-video__", () => {});
+  await page.evaluate(async () => {
+    const { createMarkdownContentAction } = await import("/src/components/markdown-content-action.ts");
+    const node = document.createElement("div");
+    node.innerHTML = '<span id="embedded-video" class="markdown-media" data-project-media="video" data-project-file="clips/movie.mov"><span class="markdown-media-frame"></span></span>';
+    document.querySelector("#preview-surface").append(node);
+    node.scrollIntoView();
+    let resolve;
+    const pending = new Promise(done => { resolve = done; });
+    const previousInternals = window.__TAURI_INTERNALS__;
+    window.__TAURI_INTERNALS__ = { ...previousInternals, convertFileSrc: () => `${location.origin}/__context-video__` };
+    const action = createMarkdownContentAction({
+      externalLinkIconTemplate: () => undefined,
+      onValidateProjectFile: () => undefined, onValidateLocalFile: () => undefined,
+      onResolveProjectMedia: () => () => pending, onResolveLocalMedia: () => undefined,
+    })(node, node.innerHTML);
+    window.finishEmbeddedVideo = () => resolve({ id: "video", name: "movie.mov", kind: "video", path: "/project/clips/movie.mov" });
+    window.disposeEmbeddedVideo = () => { action.destroy(); node.remove(); window.__TAURI_INTERNALS__ = previousInternals; };
+  });
+  await page.waitForFunction(() => document.querySelector("#embedded-video").dataset.mediaState === "loading");
+  result = await click("embedded-video");
+  assert.equal(result.records.at(-1).kind, "file");
+  assert.equal(result.records.at(-1).filePath, undefined, "unresolved media must not act on the enclosing Markdown file");
+  await page.evaluate(() => window.finishEmbeddedVideo());
+  await page.waitForFunction(() => document.querySelector("#embedded-video video"));
+  await page.evaluate(() => { document.querySelector("#embedded-video video").id = "hydrated-video"; });
+  result = await click("hydrated-video");
+  assert.equal(result.records.at(-1).filePath, "/project/clips/movie.mov");
+  await page.evaluate(() => window.disposeEmbeddedVideo());
+
+  await page.locator("#preview-tab").focus();
+  const beforeFileKeyboard = result.records.length;
+  await page.keyboard.press("Shift+F10");
+  await page.waitForFunction((before) => window.contextSmoke.records.length > before, beforeFileKeyboard);
+  assert.equal(await page.evaluate(() => window.contextSmoke.records.at(-1).filePath), "/project/src/main.ts");
+
   await page.locator("#draft").focus();
   const beforeKeyboard = result.records.length;
   await page.keyboard.press("Shift+F10");
@@ -183,6 +238,63 @@ try {
   await page.waitForFunction(() => window.spellingSmoke.popups === 1);
   assert.equal(await page.evaluate(() => window.spellingSmoke.prevented), true, "synthetic keyboard requests keep their application fallback");
   await page.evaluate(() => window.spellingSmoke.dispose());
+
+  // Exercise real origin-tainted canvas failure and real SVG->PNG conversion.
+  // Only approved file reads and final native clipboard delivery are stubbed.
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><path fill="red" d="M0 0h2v2H0z"/></svg>';
+  await page.route("https://copy-image.invalid/chart.svg", (route) => route.fulfill({
+    contentType: "image/svg+xml", body: svg,
+  }));
+  const copyResult = await page.evaluate(async (svgSource) => {
+    const { copyContextImage } = await import("/src/lib/image-context-actions.ts");
+    const { nativeContextMenuItems } = await import("/src/lib/native-context-menu.ts");
+    const { desktopContextTarget } = await import("/src/lib/desktop-context-target.ts");
+    const img = document.createElement("img");
+    img.src = "https://copy-image.invalid/chart.svg";
+    img.dataset.imagePath = "/project/chart.svg";
+    document.body.append(img);
+    const previous = window.__TAURI_INTERNALS__;
+    const calls = [];
+    window.__TAURI_INTERNALS__ = { ...previous, invoke: async (command, args) => {
+      calls.push({ command, args });
+      if (command === "read_attachment_base64") return btoa(svgSource);
+      if (command === "plugin:clipboard-manager|write_image" || command === "preview_file_action") return;
+      throw new Error(`Unexpected IPC: ${command}`);
+    } };
+    try {
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 2;
+      canvas.getContext("2d").drawImage(img, 0, 0);
+      let originalError;
+      try { canvas.toDataURL(); } catch (error) { originalError = error.name; }
+      await copyContextImage(img, () => true);
+      const encoded = calls.find(({ command }) => command === "plugin:clipboard-manager|write_image")?.args.image;
+      const png = await createImageBitmap(new Blob([encoded], { type: "image/png" }));
+      const clean = document.createElement("canvas");
+      clean.width = clean.height = 2;
+      clean.getContext("2d").drawImage(png, 0, 0);
+      const pixel = Array.from(clean.getContext("2d").getImageData(0, 0, 1, 1).data);
+      png.close();
+      const videoTarget = desktopContextTarget(document.querySelector("#preview-video"), "/project");
+      const errors = [];
+      const menu = nativeContextMenuItems(videoTarget, false, (error) => errors.push(String(error)), () => true);
+      menu.find((item) => item.id === "desktop.file.copy").action();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return { originalError, pixel, errors, calls: calls.map(({ command, args }) => ({
+        command, path: args?.path, action: args?.action,
+      })) };
+    } finally {
+      img.remove();
+      window.__TAURI_INTERNALS__ = previous;
+    }
+  }, svg);
+  assert.equal(copyResult.originalError, "SecurityError", "fixture must reproduce origin-tainted canvas failure");
+  assert.deepEqual(copyResult.pixel, [255, 0, 0, 255], "copy must deliver decoded PNG pixels, not a path");
+  assert.deepEqual(copyResult.errors, []);
+  assert.deepEqual(copyResult.calls.map(({ command }) => command), ["read_attachment_base64", "plugin:clipboard-manager|write_image", "preview_file_action"]);
+  assert.equal(copyResult.calls[0].path, "/project/chart.svg");
+  assert.deepEqual(copyResult.calls[2], { command: "preview_file_action", path: "/tmp/my video.mov", action: "copy" });
   console.log("PASS: real-DOM context routing, selection/focus, native-input scopes, message-menu precedence, safe links, Shift+F10 and teardown (Chromium; native IPC stubbed)");
 } finally {
   await browser?.close();

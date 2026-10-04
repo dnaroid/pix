@@ -12,7 +12,7 @@ pub(crate) fn build(
 ) -> tauri::Result<WebviewWindow> {
     let visible = config.visible;
     let revealed = AtomicBool::new(false);
-    WebviewWindowBuilder::from_config(manager, config)?
+    let window = WebviewWindowBuilder::from_config(manager, config)?
         .visible(false)
         .on_page_load(move |window, payload| {
             if claim_initial_reveal(payload.event(), visible, &revealed) {
@@ -22,7 +22,11 @@ pub(crate) fn build(
                 }
             }
         })
-        .build()
+        .build()?;
+    if let Err(error) = crate::inactive_hover::install(&window) {
+        eprintln!("failed to install focus-on-hover tracking: {error}");
+    }
+    Ok(window)
 }
 
 fn claim_initial_reveal(event: PageLoadEvent, visible: bool, revealed: &AtomicBool) -> bool {

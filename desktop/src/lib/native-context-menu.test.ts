@@ -50,7 +50,7 @@ describe("native desktop context menu commands", () => {
   it("prioritizes image commands over the surrounding link and selection", async () => {
     const image = {} as HTMLImageElement;
     const commands = items({ kind: "image", image, linkUrl: "https://example.com/" });
-    expect(commands.map((item) => "text" in item && item.text)).toEqual(["Open Image in External App", "Copy Image", false, "Copy Absolute Path", "Copy Relative Path"]);
+    expect(commands.map((item) => "text" in item && item.text)).toEqual(["Open Image in External App", "Copy Image", "Reveal in Finder", false, "Copy Absolute Path", "Copy Relative Path"]);
     for (const command of commands) if ("action" in command) command.action?.("ignored");
     await Promise.resolve();
     expect(openContextImage).toHaveBeenCalledWith(image, expect.any(Function));
@@ -62,6 +62,46 @@ describe("native desktop context menu commands", () => {
     for (const command of commands) if ("action" in command) command.action?.("ignored");
     expect(openContextImage).not.toHaveBeenCalled();
     expect(copyContextImage).not.toHaveBeenCalled();
+  });
+  it("copies actual files, opens externally and reveals captured local paths", async () => {
+    const commands = items({ kind: "file", hasSelection: false, filePath: "/project/my video.mov" });
+    expect(commands.map((item) => "text" in item && item.text)).toEqual(["Copy File", "Open in External App", "Reveal in Finder"]);
+    for (const command of commands) if ("action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    expect(vi.mocked(invoke).mock.calls).toEqual(["copy", "open", "reveal"].map(action => ["preview_file_action", { path: "/project/my video.mov", action }]));
+    expect(writeText).not.toHaveBeenCalled();
+  });
+  it("disables file actions without a local path and never runs stale or detached actions", () => {
+    const unavailable = items({ kind: "file", hasSelection: false });
+    expect(unavailable).toHaveLength(3);
+    expect(unavailable.every(item => "enabled" in item && item.enabled === false)).toBe(true);
+    for (const commands of [unavailable,
+      items({ kind: "file", filePath: "/tmp/a" }, false, () => false),
+      items({ kind: "file", filePath: "/tmp/a", element: { isConnected: false } as HTMLElement }),
+    ]) for (const command of commands) if ("action" in command) command.action?.("ignored");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+  it("preserves selection and source-reference copy alongside file commands", () => {
+    expect(labels({ kind: "selection", filePath: "/project/a.ts", sourceReference: "a.ts:2" })).toEqual([
+      "Copy", "Separator", "Copy Relative Path with Line Number", "Separator", "Copy File", "Open in External App", "Reveal in Finder",
+    ]);
+  });
+  it("reveals local images but disables reveal for remote/data images", async () => {
+    for (const imagePath of [undefined, "/project/image.png"]) {
+      const command = items({ kind: "image", image: {} as HTMLImageElement, imagePath })
+        .find(item => "id" in item && item.id === "desktop.image.reveal");
+      expect(command && "enabled" in command && command.enabled).toBe(Boolean(imagePath));
+      if (command && "action" in command) command.action?.("ignored");
+    }
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_file_action", { path: "/project/image.png", action: "reveal" });
+  });
+  it("reports file action failures", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("missing file"));
+    const command = items({ kind: "file", hasSelection: false, filePath: "/tmp/gone" })[0];
+    if (command && "action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "missing file" }));
   });
   it("copies captured absolute and project-relative image paths", async () => {
     const commands = items({ kind: "image", image: {} as HTMLImageElement, imagePath: "/project/assets/chart.png", imageRelativePath: "assets/chart.png" });

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { render } from "svelte/server";
+import ResetCreditsSection from "../components/ResetCreditsSection.svelte";
 import type { ClaudeQuotaRefreshStatus, RuntimeStatus, SessionUsageStatus } from "../lib/acp-client";
+import { parseModelUsageStatus } from "../lib/acp-response-parsers";
 import { displayModelUsage } from "../lib/runtime-status";
 import { createSessionRuntimeStatus } from "./session-runtime-status.svelte";
 
@@ -40,6 +43,42 @@ function usageStatus(cost: number): SessionUsageStatus {
 }
 
 describe("runtime status lifecycle", () => {
+  it("carries credits-only ACP snapshots through selection/rendering and rejects disposed refreshes", async () => {
+    const { store, requests } = setup();
+    const now = Date.UTC(2026, 9, 4);
+    const modelUsage = parseModelUsageStatus({
+      modelKey: "openai-codex/test", provider: "openai", updatedAt: now,
+      resetCreditsAvailableCount: 3, resetCredits: [{ title: "Full reset", expiresAt: now + 60_000 }],
+    });
+    const initial = store.refreshStatus("a", true);
+    requests[0]!.resolve({ ...status(10), modelUsageRefresh: "ready", modelUsage });
+    await initial;
+    const snapshot = store.refreshStatus("a");
+    requests[1]!.resolve(status(20));
+    await snapshot;
+    const selected = displayModelUsage(store.statuses.get("a"), now);
+    expect(selected).toEqual(modelUsage);
+    expect(selected?.weekly).toBeUndefined();
+    expect(render(ResetCreditsSection, { props: {
+      credits: selected!.resetCredits!, availableCount: selected!.resetCreditsAvailableCount, now,
+    } }).body).toContain("3 available");
+
+    const failed = store.refreshStatus("a", true);
+    requests[2]!.resolve({ ...status(20), modelUsageRefresh: "failed" });
+    await failed;
+    expect(displayModelUsage(store.statuses.get("a"), now)).toEqual(modelUsage);
+
+    const consumed = store.refreshStatus("a", true);
+    requests[3]!.resolve({ ...status(20), modelUsageRefresh: "unavailable" });
+    await consumed;
+    expect(displayModelUsage(store.statuses.get("a"), now)).toBeUndefined();
+
+    const stale = store.refreshStatus("a", true);
+    store.forget("a");
+    requests[4]!.resolve({ ...status(20), modelUsageRefresh: "ready", modelUsage });
+    await stale;
+    expect(store.statuses.has("a")).toBe(false);
+  });
   it("manual Claude limits are single-flight and win over older automatic quota while snapshots continue", async () => {
     const { store, requests, limits, quotaFlags } = setup();
     const old = store.refreshStatus("a", true);

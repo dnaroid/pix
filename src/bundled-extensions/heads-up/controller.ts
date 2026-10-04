@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { Api, AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
 import type { HeadsUpCheckResult, HeadsUpFeedback, HeadsUpLastCheck, HeadsUpNotice, HeadsUpPhase, HeadsUpSnapshot } from "./contract.js";
 import { DEFAULT_HEADS_UP_MODEL, normalizeHeadsUpConfig, type HeadsUpConfig } from "./config.js";
-import { HeadsUpContext, type MessageLike } from "./context.js";
+import { HeadsUpContext, type ContextRecord, type MessageLike } from "./context.js";
 import { parseHeadsUpResponse } from "./parser.js";
 import { validObserverUsage } from "./usage.js";
+import { HeadsUpNotices } from "./notices.js";
 
 export interface HeadsUpRequest {
 	readonly model: Model<Api>; readonly input: string; readonly signal: AbortSignal;
@@ -19,7 +20,7 @@ export interface HeadsUpControllerOptions {
 	readonly findModel: (ref: string) => Model<Api> | undefined;
 	readonly allowed?: () => boolean;
 	readonly canAccountUsage: () => boolean;
-	/** Refresh projected entries only when a check will run, not on every UI/event update. */
+	/** Refresh before inference and before publishing a finding, never per streamed chunk. */
 	readonly prepareContext?: () => void;
 	/** Bound to the originating session manager, not a mutable active-session getter. */
 	readonly accountUsage: (message: AssistantMessage) => void;
@@ -29,9 +30,6 @@ export interface HeadsUpControllerOptions {
 function after(ms: number, callback: () => void): () => void {
 	const timer = setTimeout(callback, ms); timer.unref?.();
 	return () => clearTimeout(timer);
-}
-function noteKey(notice: HeadsUpNotice): string {
-	return `${notice.title} ${notice.consequence}`.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 /** One controller per runtime/session. Cancellation releases UI, NOT the physical request lock. */
@@ -47,13 +45,17 @@ export class HeadsUpController {
 	private modelRef = DEFAULT_HEADS_UP_MODEL;
 	private phase: HeadsUpPhase = "off";
 	private reason: string | undefined;
-	private notice: HeadsUpNotice | null = null;
+	private readonly notices = new HeadsUpNotices();
 	private revision = 0;
 	private generation = 0;
 	private active: AbortController | undefined;
 	private stopExpiry: (() => void) | undefined;
-	private stopDelegated: (() => void) | undefined;
-	private delegatedPending = false;
+	private stopEvidence: (() => void) | undefined;
+	private evidencePending = false;
+	private parentRunning = false;
+	private evidenceRevision = 0;
+	private noticesFresh = true;
+	private noticeEvidence: readonly ContextRecord[] = [];
 	private checks = 0;
 	private inputTokens = 0;
 	private outputTokens = 0;
@@ -64,8 +66,6 @@ export class HeadsUpController {
 	private lastCheckToken: number | undefined;
 	private turns = 0;
 	private checkedTurns = 0;
-	private previous: string[] = [];
-	private seen = new Set<string>();
 
 	constructor(private readonly options: HeadsUpControllerOptions) {
 		this.now = options.now ?? Date.now; this.after = options.after ?? after;
@@ -75,15 +75,18 @@ export class HeadsUpController {
 	}
 	get isEnabled(): boolean { return this.enabled; }
 	get model(): string { return this.modelRef; }
-	get currentNotice(): HeadsUpNotice | null { this.expire(); return this.notice; }
+	get currentNotice(): HeadsUpNotice | null { this.expire(); return this.noticesFresh ? this.notices.current : null; }
 	snapshot(): HeadsUpSnapshot {
 		const now = this.now();
 		const reservations = this.currentReservations(now);
+		const retained = this.notices.all.filter((card) => card.expiresAt > now);
+		const notices = this.noticesFresh ? retained : [];
 		return {
 			version: 1, instanceId: this.instanceId, revision: this.revision,
 			enabled: this.enabled, model: this.modelRef, phase: this.phase,
 			checks: this.checks, inputTokens: this.inputTokens, outputTokens: this.outputTokens,
-			notice: this.notice && this.notice.expiresAt > now ? this.notice : null,
+			notice: notices.find((card) => card.id === this.notices.current?.id) ?? notices[0] ?? null, notices,
+			awaitingReview: !this.noticesFresh && retained.length > 0,
 			details: {
 				config: { ...this.config }, newTurns: Math.max(0, this.turns - this.checkedTurns),
 				intervalEligibleAt: this.lastCheckAt + this.config.minIntervalMs,
@@ -115,8 +118,17 @@ export class HeadsUpController {
 		this.revision++;
 		try { this.options.publish?.(this.snapshot()); } catch { /* Optional UI never breaks inference. */ }
 	}
-	private clearNotice(): void { this.stopExpiry?.(); this.stopExpiry = undefined; this.notice = null; }
-	private expire(): void { if (this.notice && this.notice.expiresAt <= this.now()) { this.clearNotice(); this.publish(); this.scheduleDelegated(); } }
+	private clearNotice(): void { this.stopExpiry?.(); this.stopExpiry = undefined; this.notices.clear(); this.noticeEvidence = []; this.noticesFresh = true; }
+	private scheduleExpiry(): void {
+		this.stopExpiry?.(); this.stopExpiry = undefined;
+		if (!this.notices.all.length) return;
+		const expiresAt = Math.min(...this.notices.all.map((card) => card.expiresAt));
+		this.stopExpiry = this.after(Math.max(0, expiresAt - this.now()), () => { this.stopExpiry = undefined; this.expire(); });
+	}
+	private expire(): void {
+		if (!this.notices.expire(this.now())) return;
+		this.scheduleExpiry(); this.publish(); this.scheduleEvidence();
+	}
 	private completeLastCheck(token: number, result: HeadsUpCheckResult): boolean {
 		if (this.lastCheckToken !== token || !this.lastCheck || this.lastCheck.finishedAt !== null) return false;
 		const finishedAt = this.now();
@@ -126,7 +138,7 @@ export class HeadsUpController {
 		return true;
 	}
 	private invalidate(): void {
-		this.stopDelegated?.(); this.stopDelegated = undefined; this.delegatedPending = false;
+		this.stopEvidence?.(); this.stopEvidence = undefined; this.evidencePending = false;
 		const active = this.active;
 		const token = this.lastCheckToken;
 		this.generation++;
@@ -149,20 +161,50 @@ export class HeadsUpController {
 		this.phase = this.enabled ? "idle" : "off"; this.reason = undefined; this.publish(); return true;
 	}
 	noteUserRequest(): void { this.invalidateForLifecycle("new user request"); }
+	noteAgentStart(): void {
+		this.parentRunning = true;
+		this.stopEvidence?.(); this.stopEvidence = undefined;
+		this.evidenceRevision++;
+		if (this.notices.all.length) this.evidencePending = true;
+		this.suspendNotices();
+	}
+	/** Hide claims synchronously, without reading the projection or spending inference. */
+	private suspendNotices(): void {
+		if (!this.notices.all.length) return;
+		if (!this.noticesFresh) return;
+		this.noticesFresh = false;
+		this.publish();
+	}
+	/** Message completion may precede persistence; the revision closes that race. */
+	noteEvidenceChanged(): void {
+		if (this.disposed || !this.enabled) return;
+		this.evidenceRevision++;
+		if (this.notices.all.length) this.evidencePending = true;
+		this.suspendNotices();
+	}
+	noteAgentSettled(completed: boolean): void {
+		this.parentRunning = false;
+		if (!completed) { this.invalidateForLifecycle("agent stopped or failed"); return; }
+		const newTurns = this.turns - this.checkedTurns;
+		if (newTurns >= this.config.minTurns || (this.notices.all.length && newTurns > 0)) this.evidencePending = true;
+		this.scheduleEvidence();
+	}
 	/** A coalesced evidence opportunity, not a fabricated primary turn or a forced check. */
 	noteDelegatedCompletion(): void {
 		if (this.disposed || !this.enabled) return;
-		this.delegatedPending = true; this.scheduleDelegated();
+		this.noteEvidenceChanged();
+		this.evidencePending = true; this.scheduleEvidence();
 	}
-	private scheduleDelegated(): void {
-		if (!this.delegatedPending || this.stopDelegated || this.active || this.notice || this.disposed || !this.enabled) return;
-		this.stopDelegated = this.after(Math.max(0, this.lastCheckAt + this.config.minIntervalMs - this.now()), () => {
-			this.stopDelegated = undefined; void this.check().catch(() => {});
+	private scheduleEvidence(): void {
+		if (!this.evidencePending || this.stopEvidence || this.active || this.parentRunning || this.disposed || !this.enabled) return;
+		this.stopEvidence = this.after(Math.max(0, this.lastCheckAt + this.config.minIntervalMs - this.now()), () => {
+			this.stopEvidence = undefined; void this.check().catch(() => {});
 		});
 	}
 	noteTurn(message: MessageLike, id: string, results: readonly MessageLike[], resultIds: readonly string[]): void {
 		if (this.disposed) return;
 		this.turns++; this.context.addTurn(message, id, results, resultIds);
+		this.suspendChangedNotices();
 		// Let status consumers observe completed-turn cadence without waiting for inference.
 		if (this.enabled) this.publish();
 	}
@@ -176,21 +218,33 @@ export class HeadsUpController {
 		if (this.phase !== phase || this.reason !== reason) { this.phase = phase; this.reason = reason; this.publish(); }
 		return false;
 	}
+	private suspendChangedNotices(): void {
+		if (this.notices.all.length && this.context.evidenceChanged(this.noticeEvidence, this.notices.all.flatMap((card) => card.evidence.map((entry) => entry.id)))) this.suspendNotices();
+	}
 	async check(explicit = false): Promise<boolean> {
 		this.expire();
+		this.suspendChangedNotices();
 		if (this.disposed || !this.enabled) return false;
 		if (!(this.options.allowed?.() ?? true)) { this.setEnabled(false); return false; }
+		if (!explicit && this.parentRunning) return false;
 		if (this.active) return this.refuse(this.active.signal.aborted ? "cooldown" : "checking", "waiting for the current request to finish");
-		if (!explicit && (this.notice || (!this.delegatedPending && this.turns - this.checkedTurns < this.config.minTurns) || this.now() - this.lastCheckAt < this.config.minIntervalMs)) return false;
+		if (!explicit && ((!this.evidencePending && (this.notices.all.length || this.turns - this.checkedTurns < this.config.minTurns)) || this.now() - this.lastCheckAt < this.config.minIntervalMs)) return false;
 		// Consume once even when limited/unavailable: no timer polling or budget bypass.
-		this.delegatedPending = false; this.stopDelegated?.(); this.stopDelegated = undefined;
+		this.evidencePending = false; this.stopEvidence?.(); this.stopEvidence = undefined;
 		this.reservations = this.currentReservations();
 		if (this.reservations.length >= this.config.maxChecksPerHour) return this.refuse("limited", "hourly check limit reached");
 		if (this.accountingFailed || !this.options.canAccountUsage()) return this.refuse("unavailable", "usage accounting unavailable");
 		const model = this.options.findModel(this.modelRef);
 		if (!model) return this.refuse("unavailable", "configured model unavailable; no fallback used");
-		try { this.options.prepareContext?.(); } catch { return this.refuse("unavailable", "session context unavailable"); }
-		const input = this.context.toInput(this.config.maxInputChars, this.previous);
+		try { this.options.prepareContext?.(); } catch { this.suspendNotices(); return this.refuse("unavailable", "session context unavailable"); }
+		this.suspendChangedNotices();
+		const reviewing = this.notices.all;
+		const stackVersion = this.notices.version;
+		if (!explicit && this.noticesFresh && reviewing.length && !this.context.evidenceChanged(this.noticeEvidence, reviewing.flatMap((card) => card.evidence.map((entry) => entry.id)))) return false;
+		const activeNotices = reviewing.map(({ id, title, consequence }) => ({ id, title, consequence }));
+		const input = this.context.toInput(this.config.maxInputChars, this.notices.previous, activeNotices);
+		const evidence = this.context.snapshot();
+		const evidenceRevision = this.evidenceRevision;
 		if (!input.records.some((entry) => entry.kind === "user") || !input.records.some((entry) => entry.kind !== "user")) return this.refuse("cooldown", "not enough user and work context");
 		if (input.body.length > this.config.maxInputChars || this.reservations.reduce((sum, entry) => sum + entry.chars, 0) + input.body.length > this.config.maxInputCharsPerHour) return this.refuse("limited", "hourly input limit reached");
 		const token = ++this.generation;
@@ -206,7 +260,7 @@ export class HeadsUpController {
 		const transport = Promise.resolve().then(() => this.options.request({ model, input: input.body, signal: abort.signal, maxTokens: this.config.maxTokens, timeoutMs: this.config.timeoutMs }));
 		const observed = transport.then((message) => { this.recordUsage(message); return message; }).finally(() => {
 			if (this.active === abort) this.active = undefined;
-			this.scheduleDelegated();
+			this.scheduleEvidence();
 		});
 		let timedOut = false;
 		const cancelTimeout = this.after(this.config.timeoutMs, () => {
@@ -229,19 +283,39 @@ export class HeadsUpController {
 				this.phase = "error"; this.reason = "usage could not be recorded";
 				this.completeLastCheck(token, "error"); return false;
 			}
-			const result = parseHeadsUpResponse(message, input.records, this.now(), this.config.noticeTtlMs);
+			const result = parseHeadsUpResponse(message, input.records, this.now(), this.config.noticeTtlMs, reviewing);
 			if (result.kind === "invalid") {
 				this.phase = "error"; this.reason = "invalid or incomplete observer reply";
 				this.completeLastCheck(token, "invalid"); return false;
 			}
+			this.expire();
+			if (this.notices.version !== stackVersion) {
+				this.phase = "cooldown"; this.reason = "reviewed notice closed";
+				this.completeLastCheck(token, "cancelled"); return false;
+			}
+			if (result.kind === "notice" || reviewing.length) {
+				// A valid source ID only proves provenance, not that the observation is
+				// still current. Read persisted results even before the next turn_end.
+				try { this.options.prepareContext?.(); } catch {
+					this.suspendNotices();
+					this.phase = "unavailable"; this.reason = "session context unavailable";
+					this.completeLastCheck(token, "cancelled"); return false;
+				}
+				const citedIds = [...reviewing, ...(result.kind === "notice" ? result.notices : [])].flatMap((card) => card.evidence.map((entry) => entry.id));
+				if (this.parentRunning || evidenceRevision !== this.evidenceRevision || this.context.evidenceChanged(evidence, citedIds)) {
+					this.suspendNotices();
+					this.evidencePending = true;
+					this.phase = "cooldown";
+					this.reason = this.parentRunning ? "agent running; awaiting fresh check" : "evidence changed; awaiting fresh check";
+					this.completeLastCheck(token, "cancelled"); return false;
+				}
+			}
 			this.phase = "cooldown"; this.reason = "no actionable note";
-			if (result.kind === "notice" && !this.seen.has(noteKey(result.notice))) {
-				this.clearNotice(); this.notice = result.notice; this.reason = undefined;
-				this.seen.add(noteKey(result.notice));
-				while (this.seen.size > 32) this.seen.delete(this.seen.values().next().value!);
-				this.remember(`Shown: ${result.notice.title}. ${result.notice.consequence}`);
-				this.stopExpiry = this.after(this.config.noticeTtlMs, () => { this.stopExpiry = undefined; this.expire(); });
-				this.completeLastCheck(token, "notice"); return true;
+			this.notices.apply(result.kind === "notice" ? result.notices : []);
+			this.noticesFresh = true;
+			this.noticeEvidence = evidence; this.scheduleExpiry();
+			if (this.notices.all.length) {
+				this.reason = undefined; this.completeLastCheck(token, "notice"); return true;
 			}
 			this.completeLastCheck(token, result.kind === "notice" ? "duplicate" : "none"); return false;
 		} catch {
@@ -253,7 +327,7 @@ export class HeadsUpController {
 			return false;
 		} finally {
 			cancelTimeout(); abort.signal.removeEventListener("abort", onAbort);
-			this.scheduleDelegated();
+			this.scheduleEvidence();
 		}
 	}
 	private recordUsage(message: AssistantMessage): void {
@@ -263,14 +337,16 @@ export class HeadsUpController {
 		try { this.options.accountUsage(message); } catch { this.accountingFailed = true; }
 		this.publish(); // Suppressed on disposed runtime, but usage above still belongs to that runtime.
 	}
-	private remember(text: string): void { this.previous = [...this.previous, text].slice(-16); }
 	feedbackNotice(id: string, feedback: HeadsUpFeedback): boolean {
-		const notice = this.currentNotice;
-		if (!notice || notice.id !== id) return false;
-		this.remember(`${feedback}: ${notice.title}. ${notice.consequence}`);
-		this.clearNotice(); this.publish(); this.scheduleDelegated(); return true;
+		this.expire();
+		if (!this.notices.feedback(id, feedback)) return false;
+		this.scheduleExpiry(); this.publish(); this.scheduleEvidence(); return true;
 	}
-	explain(id?: string): HeadsUpNotice | null { const notice = this.currentNotice; return !id || notice?.id === id ? notice : null; }
+	selectNotice(direction: -1 | 1): boolean {
+		this.expire(); if (!this.noticesFresh || !this.notices.select(direction)) return false;
+		this.publish(); return true;
+	}
+	explain(id?: string): HeadsUpNotice | null { this.expire(); return this.noticesFresh ? (id ? this.notices.all.find((card) => card.id === id) ?? null : this.notices.current) : null; }
 	dispose(): void {
 		if (this.disposed) return;
 		this.invalidate(); this.enabled = false; this.phase = "off"; this.reason = undefined; this.publish(); this.disposed = true;

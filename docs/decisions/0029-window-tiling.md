@@ -6,7 +6,9 @@
 - Owner / approval evidence: user approved current-screen-first overflow and an
   application-menu entry in the task conversation, then requested implementation.
 - Governing spec: [Desktop window tiling](../../specs/desktop-window-tiling.md)
-- Replaces / replaced by: none
+- Replaces / replaced by: uniform-grid selection superseded by
+  [0040 — Gap-free window tiling](0040-gap-free-window-tiling.md);
+  display ordering, minimums and native state handling remain accepted.
 
 ## Context
 

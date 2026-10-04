@@ -132,6 +132,28 @@ describe("workbench composer props", () => {
       expect(options.promptSubmit.submit).not.toHaveBeenCalled();
     } finally { options.headsUp.reset(); }
   });
+  it("routes feedback, discussion and navigation to the selected notice and runtime", async () => {
+    const options = conversationOptions("session-1");
+    const now = Date.now();
+    const a = { id: "notice-a", title: "A", consequence: "A", evidence: [{ id: "entry-a", text: "A" }], createdAt: now, expiresAt: now + 30_000 };
+    const b = { ...a, id: "notice-b", title: "B" };
+    options.headsUp.handleSessionState({ sessionId: "session-1", channel: "heads-up", data: {
+      version: 1, instanceId: "runtime-a", revision: 1, enabled: true, model: "provider/model", phase: "idle", checks: 1, inputTokens: 1, outputTokens: 1,
+      notice: a, notices: [a, b],
+    } });
+    const props = buildWorkbenchConversationProps(options).composer.headsUp!;
+    expect(props.notices).toHaveLength(2);
+    props.onNavigate?.(1);
+    expect(options.headsUp.notice("session-1")?.id).toBe("notice-b");
+    options.headsUp.handleSessionState({ sessionId: "session-1", channel: "heads-up", data: {
+      version: 1, instanceId: "runtime-b", revision: 1, enabled: true, model: "provider/model", phase: "idle", checks: 1, inputTokens: 1, outputTokens: 1,
+      notice: a, notices: [a, b],
+    } });
+    expect(options.headsUp.notice("session-1")?.id).toBe("notice-a");
+    props.onNavigate?.(1);
+    expect(options.headsUp.notice("session-1")?.id).toBe("notice-a");
+    options.headsUp.reset();
+  });
 });
 
 describe("workbench inspector props", () => {

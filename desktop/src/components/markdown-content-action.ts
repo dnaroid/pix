@@ -147,6 +147,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       // Restore every known frame before paint, even when it is offscreen and
       // lazy hydration is deferred. Otherwise streamed HTML collapses it.
       for (const preview of previews) {
+        // Unresolved media must not inherit the enclosing Markdown file's menu.
+        preview.dataset.contextFilePath ??= "";
         const path = preview.dataset.projectFile ?? preview.dataset.localFile;
         const scope = preview.dataset.projectFile ? "project" : "local";
         const kind = preview.dataset.projectMedia ?? preview.dataset.localMedia;
@@ -206,6 +208,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           showMediaError(frame, preview);
           return;
         }
+        preview.dataset.contextFilePath = attachment.path;
 
         let media: HTMLImageElement | HTMLVideoElement;
         if (kind === "image") {

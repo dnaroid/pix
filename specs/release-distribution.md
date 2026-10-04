@@ -490,12 +490,14 @@ PowerShell command itself rather than through inherited environment variables.
 - `scripts/release/`: preparation, Node downloads, signing, installers, smoke and publication.
 - `.github/workflows/check.yml`: PR/master correctness matrix.
 - `.github/workflows/publish.yml`: release contract, native matrix and stable Release publication.
-- `desktop/src-tauri/src/backend_runtime.rs`, `release_smoke.rs`, `lib.rs` and release config: resource-backed host.
-- `src/app/cli/release-update.ts`, `portable-update.ts`,
-  `portable-update-helper.ts`, `update.ts`, TUI command actions and ACP update
+- `desktop/src-tauri/src/backend_runtime.rs`, `desktop/src-tauri/src/release_smoke.rs`,
+  `desktop/src-tauri/src/lib.rs` and release config: resource-backed host.
+- `src/app/cli/release-update.ts`, `src/app/cli/portable-update.ts`,
+  `src/app/cli/portable-update-helper.ts`, `src/app/cli/update.ts`, TUI command actions and ACP update
   report: distribution-aware checks and safe portable replacement.
-- `desktop/src/app/desktop-updater.svelte.ts`, `DesktopUpdateBanner.svelte`, the
+- `desktop/src/app/desktop-updater.svelte.ts`, `desktop/src/components/DesktopUpdateBanner.svelte`, the
   Tauri updater/process plugins and release config: signed native GUI updates.
 - `scripts/release/test/packaging.test.mjs`, `tests/release-update.test.ts`, Rust module tests: deterministic guards.
-- `scripts/release/{prune,dedupe,payload-files,size-budget}.mjs` and
+- `scripts/release/prune.mjs`, `scripts/release/dedupe.mjs`,
+  `scripts/release/payload-files.mjs`, `scripts/release/size-budget.mjs` and
   `scripts/release/test/optimization.test.mjs`: bounded runtime inventory and size regressions.

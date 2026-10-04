@@ -30,6 +30,7 @@ export function observerStatus(snapshot: HeadsUpSnapshot | undefined, runtimeRea
 }
 
 export function observerWaitingReason(snapshot: HeadsUpSnapshot, now: number): string {
+  if (snapshot.awaitingReview) return "Previous findings are hidden until a fresh review after the agent finishes. Existing limits still apply.";
   if (snapshot.reason === "waiting for the current request to finish") return "The cancelled request is still closing. No second request will be started.";
   const details = snapshot.details;
   if (!details) return snapshot.reason ?? "Waiting for new work. This runtime does not report detailed progress.";
@@ -57,8 +58,8 @@ export function observerPopoverPosition(anchor: { left: number; right: number; t
   return {
     width: popupWidth,
     left: Math.max(8, Math.min(anchor.right - popupWidth, width - popupWidth - 8)),
-    bottom: Math.max(8, height - anchor.top + 6),
-    maxHeight: Math.max(0, anchor.top - 14),
+    bottom: Math.max(8, height - anchor.top),
+    maxHeight: Math.max(0, anchor.top - 8),
   };
 }
 
