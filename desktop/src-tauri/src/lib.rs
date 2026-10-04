@@ -2977,7 +2977,8 @@ fn copy_project_path(source: &Path, target: &Path) -> Result<(), String> {
         for entry in fs::read_dir(source)
             .map_err(|error| format!("failed to read {}: {error}", source.display()))?
         {
-            let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+            let entry =
+                entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
             copy_project_path(&entry.path(), &target.join(entry.file_name()))?;
         }
         fs::set_permissions(target, metadata.permissions()).map_err(|error| {
@@ -4524,8 +4525,12 @@ fn sidebar_registry_indicator_state_inner(
     // only loses cached work; it does not change the current sample verdict.
     if let Ok(mut cache) = state.registry_cache.lock() {
         if let Some(workspace) = cache.get_mut(root) {
-            workspace.entries.retain(|key, _| provenance.resources.contains_key(key)
-                || key.strip_prefix("project:").is_some_and(|artifact| provenance.project_resources.contains_key(artifact)));
+            workspace.entries.retain(|key, _| {
+                provenance.resources.contains_key(key)
+                    || key
+                        .strip_prefix("project:")
+                        .is_some_and(|artifact| provenance.project_resources.contains_key(artifact))
+            });
         }
     }
     let mut hash_budget = MAX_SIDEBAR_REGISTRY_HASH_BYTES;
@@ -4899,7 +4904,9 @@ fn sidebar_registry_cached_path_changed(
             cache.clear();
         }
         let workspace = cache.entry(root.to_path_buf()).or_default();
-        if workspace.entries.len() >= MAX_SIDEBAR_REGISTRY_ENTRIES && !workspace.entries.contains_key(cache_key) {
+        if workspace.entries.len() >= MAX_SIDEBAR_REGISTRY_ENTRIES
+            && !workspace.entries.contains_key(cache_key)
+        {
             workspace.entries.clear();
         }
         workspace.entries.insert(
@@ -5272,7 +5279,8 @@ fn sidebar_git_remote_update_probe_from(
         });
     }
 
-    let branch_output = sidebar_git_bounded_output(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let branch_output =
+        sidebar_git_bounded_output(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
     if !branch_output.status.success() {
         return Ok(SidebarGitRemoteUpdateProbe {
             has_updates: false,
@@ -5950,7 +5958,9 @@ fn run_idx_command(
         match native_process::exited_before_reap(&child) {
             Ok(true) => {
                 force_kill_idx_process(process_id, &mut child);
-                break child.wait().map_err(|error| format!("failed to reap idx: {error}"))?;
+                break child
+                    .wait()
+                    .map_err(|error| format!("failed to reap idx: {error}"))?;
             }
             Ok(false) => {}
             Err(error) => {
@@ -5965,7 +5975,10 @@ fn run_idx_command(
             }
         }
         #[cfg(not(unix))]
-        if let Some(status) = child.try_wait().map_err(|error| format!("failed to observe idx: {error}"))? {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("failed to observe idx: {error}"))?
+        {
             force_kill_idx_process(process_id, &mut child);
             break status;
         }
@@ -6124,16 +6137,28 @@ fn idx_overview_from(
         4096,
     ) {
         Ok(result) => parse_idx_knowledge_dirty(&result, &mut errors),
-        Err(error) => { errors.push(error); None }
+        Err(error) => {
+            errors.push(error);
+            None
+        }
     };
     // Revision mismatch is a conservative signal, not a claim that a matching
     // HEAD proves file freshness. No dry-run, filesystem scan or indexing here.
-    let index_stale = index_status.as_ref()
+    let index_stale = index_status
+        .as_ref()
         .and_then(|status| status.fields.get("gitRef"))
         .filter(|sha| valid_idx_git_revision(sha))
-        .and_then(|indexed| sidebar_git_bounded_output(&root, &["rev-parse", "--verify", "HEAD"]).ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| idx_index_revision_stale(indexed, String::from_utf8_lossy(&output.stdout).trim())));
+        .and_then(|indexed| {
+            sidebar_git_bounded_output(&root, &["rev-parse", "--verify", "HEAD"])
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| {
+                    idx_index_revision_stale(
+                        indexed,
+                        String::from_utf8_lossy(&output.stdout).trim(),
+                    )
+                })
+        });
     Ok(IdxOverview {
         available: true,
         executable: Some(launcher.display_path().to_string_lossy().into_owned()),
@@ -6156,8 +6181,10 @@ fn valid_idx_git_revision(value: &str) -> bool {
 
 fn idx_index_revision_stale(indexed: &str, head: &str) -> Option<bool> {
     // A matching revision says nothing about uncommitted edits.
-    (valid_idx_git_revision(indexed) && valid_idx_git_revision(head) && !indexed.eq_ignore_ascii_case(head))
-        .then_some(true)
+    (valid_idx_git_revision(indexed)
+        && valid_idx_git_revision(head)
+        && !indexed.eq_ignore_ascii_case(head))
+    .then_some(true)
 }
 
 fn parse_idx_knowledge_dirty(result: &IdxCommandResult, errors: &mut Vec<String>) -> Option<bool> {
@@ -6170,10 +6197,15 @@ fn parse_idx_knowledge_dirty(result: &IdxCommandResult, errors: &mut Vec<String>
     }
     let text = idx_result_text(result).to_ascii_lowercase();
     // Older CLIs are supported: missing capability is unknown, never clean.
-    if result.exit_code != Some(0) && (text.contains("unknown command") || text.contains("unrecognized command")) {
+    if result.exit_code != Some(0)
+        && (text.contains("unknown command") || text.contains("unrecognized command"))
+    {
         return None;
     }
-    errors.push(non_empty_idx_error("idx knowledge dirty check incomplete", result));
+    errors.push(non_empty_idx_error(
+        "idx knowledge dirty check incomplete",
+        result,
+    ));
     None
 }
 
@@ -10754,13 +10786,21 @@ mod tests {
         assert_eq!(idx_index_revision_stale(&indexed, &indexed), None);
         assert_eq!(idx_index_revision_stale("(none)", &head), None);
         assert_eq!(idx_index_revision_stale(&indexed, "malformed"), None);
-        assert_eq!(idx_index_revision_stale(&"a".repeat(64), &"b".repeat(64)), Some(true));
+        assert_eq!(
+            idx_index_revision_stale(&"a".repeat(64), &"b".repeat(64)),
+            Some(true)
+        );
     }
 
     #[test]
     fn idx_knowledge_dirty_requires_complete_explicit_verdict() {
         let mut errors = Vec::new();
-        let mut result = IdxCommandResult { stdout: "yes\n".to_owned(), stderr: String::new(), exit_code: Some(0), truncated: false };
+        let mut result = IdxCommandResult {
+            stdout: "yes\n".to_owned(),
+            stderr: String::new(),
+            exit_code: Some(0),
+            truncated: false,
+        };
         assert_eq!(parse_idx_knowledge_dirty(&result, &mut errors), Some(true));
         result.stdout = "no\n".to_owned();
         assert_eq!(parse_idx_knowledge_dirty(&result, &mut errors), Some(false));
@@ -10785,10 +10825,21 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let workspace = temporary_workspace("idx-inherited-pipes");
         let executable = workspace.join("fake-idx");
-        fs::write(&executable, "#!/bin/sh\nsleep 30 &\nprintf 'yes\\n'\nexit 0\n").unwrap();
+        fs::write(
+            &executable,
+            "#!/bin/sh\nsleep 30 &\nprintf 'yes\\n'\nexit 0\n",
+        )
+        .unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         let started = Instant::now();
-        let result = run_idx_command(&IdxLauncher::System(executable), &workspace, &[], Duration::from_secs(1), 1024).unwrap();
+        let result = run_idx_command(
+            &IdxLauncher::System(executable),
+            &workspace,
+            &[],
+            Duration::from_secs(1),
+            1024,
+        )
+        .unwrap();
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(result.stdout.trim(), "yes");
         assert!(started.elapsed() < Duration::from_secs(3));
@@ -11325,19 +11376,50 @@ mod tests {
         fs::write(source.join("docs/nested/a.txt"), "contents").unwrap();
         fs::create_dir_all(destination.join("target/docs")).unwrap();
         fs::write(destination.join("target/docs/keep.txt"), "existing").unwrap();
-        let copied = copy_project_entry_between(&source, Path::new("docs"), &destination, Some(Path::new("target"))).unwrap();
+        let copied = copy_project_entry_between(
+            &source,
+            Path::new("docs"),
+            &destination,
+            Some(Path::new("target")),
+        )
+        .unwrap();
         assert_eq!(copied.path, "target/docs copy");
-        assert_eq!(fs::read_to_string(destination.join("target/docs copy/nested/a.txt")).unwrap(), "contents");
-        assert_eq!(fs::read_to_string(destination.join("target/docs/keep.txt")).unwrap(), "existing");
+        assert_eq!(
+            fs::read_to_string(destination.join("target/docs copy/nested/a.txt")).unwrap(),
+            "contents"
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("target/docs/keep.txt")).unwrap(),
+            "existing"
+        );
         assert!(source.join("docs/nested/a.txt").is_file());
-        let file = copy_project_entry_between(&source, Path::new("docs/nested/a.txt"), &destination, None).unwrap();
+        let file =
+            copy_project_entry_between(&source, Path::new("docs/nested/a.txt"), &destination, None)
+                .unwrap();
         assert_eq!(file.path, "a.txt");
-        let again = copy_project_entry_between(&source, Path::new("docs/nested/a.txt"), &destination, None).unwrap();
+        let again =
+            copy_project_entry_between(&source, Path::new("docs/nested/a.txt"), &destination, None)
+                .unwrap();
         assert_eq!(again.path, "a copy.txt");
-        assert!(copy_project_entry_between(&source, Path::new("../escape"), &destination, None).is_err());
-        assert!(copy_project_entry_between(&source, Path::new("docs"), &destination, Some(Path::new("../escape"))).is_err());
+        assert!(
+            copy_project_entry_between(&source, Path::new("../escape"), &destination, None)
+                .is_err()
+        );
+        assert!(copy_project_entry_between(
+            &source,
+            Path::new("docs"),
+            &destination,
+            Some(Path::new("../escape"))
+        )
+        .is_err());
         // Different workspace roots can still point into the source tree.
-        assert!(copy_project_entry_between(&source, Path::new("docs"), &source.join("docs/nested"), None).is_err());
+        assert!(copy_project_entry_between(
+            &source,
+            Path::new("docs"),
+            &source.join("docs/nested"),
+            None
+        )
+        .is_err());
         fs::remove_dir_all(source).unwrap();
         fs::remove_dir_all(destination).unwrap();
     }
@@ -11347,12 +11429,23 @@ mod tests {
         let workspace = temporary_workspace("copy-exclusive-targets");
         fs::write(workspace.join("source.txt"), "source").unwrap();
         fs::write(workspace.join("existing.txt"), "keep").unwrap();
-        assert!(copy_project_path(&workspace.join("source.txt"), &workspace.join("existing.txt")).is_err());
-        assert_eq!(fs::read_to_string(workspace.join("existing.txt")).unwrap(), "keep");
+        assert!(copy_project_path(
+            &workspace.join("source.txt"),
+            &workspace.join("existing.txt")
+        )
+        .is_err());
+        assert_eq!(
+            fs::read_to_string(workspace.join("existing.txt")).unwrap(),
+            "keep"
+        );
         fs::create_dir(workspace.join("source-dir")).unwrap();
         fs::create_dir(workspace.join("existing-dir")).unwrap();
         fs::write(workspace.join("existing-dir/keep.txt"), "keep").unwrap();
-        assert!(copy_project_path(&workspace.join("source-dir"), &workspace.join("existing-dir")).is_err());
+        assert!(copy_project_path(
+            &workspace.join("source-dir"),
+            &workspace.join("existing-dir")
+        )
+        .is_err());
         assert!(workspace.join("existing-dir/keep.txt").is_file());
         fs::remove_dir_all(workspace).unwrap();
     }
@@ -11708,7 +11801,17 @@ mod tests {
             )).unwrap();
             let result = sidebar_registry_indicator_state(&state, &workspace, &home);
             assert!(result.stable && result.error.is_none());
-            assert_eq!(state.registry_cache.lock().unwrap().get(&workspace).unwrap().entries.len(), 1);
+            assert_eq!(
+                state
+                    .registry_cache
+                    .lock()
+                    .unwrap()
+                    .get(&workspace)
+                    .unwrap()
+                    .entries
+                    .len(),
+                1
+            );
             fs::remove_dir_all(skill).unwrap();
         }
         fs::remove_dir_all(workspace).unwrap();
